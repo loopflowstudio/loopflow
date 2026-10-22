@@ -209,9 +209,13 @@ The build generates the canonical schema reference from the registered SQL using
 the bundled SQLite library, then embeds its schema values in the binary. Canonical
 and development validation share the existing per-process cache keyed by exact
 ordered migration SQL; the generated reference seeds its canonical entry. Drafts
-and historical prefixes construct their reference on first use. Each validation still reads the
-actual database schema, including constraints, indexes, triggers and foreign keys.
-The cache contains no database validity results or open SQLite connections.
+and historical prefixes construct their reference on first use. Each validation
+compares the actual database schema, including constraints, indexes, triggers and
+foreign keys. The process reads that schema once per file and SQLite schema cookie
+(`PRAGMA schema_version`, bumped by every committed DDL change from any process);
+in-memory databases and reads inside a write transaction always read afresh.
+Neither cache holds a validity result, an open SQLite connection or the ledger:
+applied versions, checksums and reader floors are read on every open.
 
 | State | Message |
 | --- | --- |

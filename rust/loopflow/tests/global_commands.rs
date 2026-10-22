@@ -232,8 +232,8 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
     std::os::unix::fs::symlink("/bin/ps", no_tools.path().join("ps")).unwrap();
     for args in [
         vec!["list"],
-        vec!["flow", "show", "pursue"],
-        vec!["help", "flow", "pursue"],
+        vec!["graph", "show", "pursue"],
+        vec!["help", "graph", "pursue"],
         vec!["account", "--cached"],
         vec!["account", "--cached", "--details"],
         vec!["account", "route"],
@@ -474,7 +474,7 @@ fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
     let home = tempfile::tempdir().unwrap();
     for operation in [
         "state", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files",
-        "flow-log", "read", "text", "key",
+        "graph-log", "read", "text", "key",
     ] {
         let output = command(
             home.path(),
@@ -493,7 +493,7 @@ fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
             "text" => vec!["--pane", "absent", "literal"],
             "key" => vec!["--pane", "absent", "enter"],
             "read" => vec!["--pane", "absent", "--region", "screen"],
-            "files" | "flow-log" => vec!["--pane", "absent"],
+            "files" | "graph-log" => vec!["--pane", "absent"],
             "move" => vec![
                 "--pane",
                 "absent",
@@ -1116,7 +1116,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
         &repo.head_sha(),
     );
     // A captured Workflow wins over the Project's feature selection.
-    let graph = serde_json::json!({"name": "captured", "nodes": [{"name":"review", "skill":"demo", "description":null}], "edges":[{"from":"review", "to":"end", "flow":null}]});
+    let graph = serde_json::json!({"name": "captured", "nodes": [{"name":"review", "skill":"demo", "description":null}], "edges":[{"from":"review", "to":"end", "graph":null}]});
     let path = home.path().join(".lf/loopflow.db");
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute(
@@ -1124,7 +1124,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
         rusqlite::params![registered.task.id.as_str(), graph.to_string()],
     )
     .unwrap();
-    support::record_flow(
+    support::record_graph(
         &home.path().join(".lf"),
         repo.path(),
         "prior",
@@ -1158,7 +1158,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
     }
     assert_eq!(
         explicit["action"],
-        serde_json::json!({"kind":"edge", "workflow":"captured", "take_up":false, "from":"review", "to":"end", "flow":null})
+        serde_json::json!({"kind":"edge", "workflow":"captured", "take_up":false, "from":"review", "to":"end", "graph":null})
     );
     assert_eq!(
         explicit["resolution"]["execution_machine"]["source"],
@@ -1188,7 +1188,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
             .unwrap(),
     );
     assert!(
-        text.contains("Workflow captured: review → end; run no Flow"),
+        text.contains("Workflow captured: review → end; run no Graph"),
         "{text}"
     );
     assert!(text.contains("Nothing was executed"));
@@ -1274,7 +1274,7 @@ fn connection_session(home: &Path, cwd: &Path) -> loopflow::session::LfSession {
                 caller_artifact_key: None,
                 task_id: None,
                 wave_id: None,
-                flow_lf_process_id: None,
+                graph_lf_process_id: None,
                 work_source: None,
                 bound_at: None,
                 id: "connection-proof".into(),
@@ -1898,13 +1898,13 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
     );
     let path = home.path().join(".lf/loopflow.db");
     let db = rusqlite::Connection::open(&path).unwrap();
-    let graph = serde_json::json!({"name":"captured", "nodes":[{"name":"review","skill":"demo","description":null}], "edges":[{"from":"review","to":"end","flow":null}]});
+    let graph = serde_json::json!({"name":"captured", "nodes":[{"name":"review","skill":"demo","description":null}], "edges":[{"from":"review","to":"end","graph":null}]});
     db.execute(
         "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
         rusqlite::params![registered.task.id.as_str(), graph.to_string()],
     )
     .unwrap();
-    let process = support::record_flow(
+    let process = support::record_graph(
         &home.path().join(".lf"),
         repo.path(),
         "prior",
@@ -2962,7 +2962,7 @@ fn task_checkout_explain_reuses_explicit_and_inferred_work_without_effects() {
         fs::read_to_string(repo.path().join("draft.txt")).unwrap(),
         "unfinished draft"
     );
-    // Execution consumes the same inferred target, without launching a Flow.
+    // Execution consumes the same inferred target, without launching a Graph.
     for args in [
         vec!["task", "checkout", "--json"],
         vec!["--task", "INF-123", "task", "checkout", "--json"],
@@ -3153,14 +3153,14 @@ fn checkout_snapshot(root: &Path) -> std::collections::BTreeMap<std::path::PathB
 fn scoped_first_task_run_prepares_with_its_own_options() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
-    fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
+    fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
     fs::write(
-        repo.path().join(".lf/flows/first-start.yaml"),
+        repo.path().join(".lf/graphs/first-start.yaml"),
         "- cmd: list\n",
     )
     .unwrap();
     repo.stage_all();
-    repo.commit("Fixture Flow");
+    repo.commit("Fixture Graph");
     repo.push();
     let created: serde_json::Value = serde_json::from_str(&success(
         command(

@@ -38,7 +38,7 @@ extension WorkSectionHeading where Trailing == EmptyView {
     }
 }
 
-/// Tone shared by plan chips, Session state, status dots, and Flow nodes.
+/// Tone shared by plan chips, Session state, status dots, and Graph nodes.
 enum WorkTone {
     case running, done, available, warning, failure, stopped, neutral
 
@@ -66,7 +66,7 @@ enum WorkTone {
 }
 
 extension TaskExecutionState {
-    /// Shared by Flow status, plan chips and navigation dots. Quiet states have no chip.
+    /// Shared by Graph status, plan chips and navigation dots. Quiet states have no chip.
     var presentation: (label: String?, tone: WorkTone) {
         switch self {
         case .running, .starting: ("Running", .running)
@@ -102,7 +102,7 @@ struct WorkChip: View {
 
 extension View {
     /// A framed surface one ladder step above the canvas, with a hairline and
-    /// no shadow: the only framed surfaces are Flow, Sessions, and plans.
+    /// no shadow: the only framed surfaces are Graph, Sessions, and plans.
     func workPanel(padding: CGFloat = 0) -> some View {
         modifier(WorkPanel(padding: padding))
     }

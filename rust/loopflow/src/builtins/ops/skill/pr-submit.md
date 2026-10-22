@@ -26,4 +26,4 @@ Repair a reported conflict in this checkout using the existing sync operation,
 then retry. Preserve actual errors and uncertain external effects.
 
 Return the PR and any unresolved blocker. Stop at the manual-merge handoff;
-do not enable auto-merge, merge, or advance a Task's Flow on the reviewer's behalf.
+do not enable auto-merge, merge, or advance a Task's Graph on the reviewer's behalf.

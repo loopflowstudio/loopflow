@@ -17,10 +17,10 @@ pub enum TaskRunAction {
         take_up: bool,
         from: String,
         to: String,
-        flow: Option<String>,
+        graph: Option<String>,
     },
-    Flow {
-        flow: String,
+    Graph {
+        graph: String,
     },
 }
 
@@ -41,15 +41,18 @@ impl TaskRunExplanation {
                 take_up,
                 from,
                 to,
-                flow,
+                graph,
             }) => format!(
                 "{}Workflow {workflow}: {from} → {to}; {}",
                 if *take_up { "take up " } else { "" },
-                flow.as_ref()
-                    .map(|flow| format!("run {flow}"))
-                    .unwrap_or_else(|| "run no Flow".into()),
+                graph
+                    .as_ref()
+                    .map(|graph| format!("run {graph}"))
+                    .unwrap_or_else(|| "run no Graph".into()),
             ),
-            Some(TaskRunAction::Flow { flow }) => format!("run {flow} without moving the Workflow"),
+            Some(TaskRunAction::Graph { graph }) => {
+                format!("run {graph} without moving the Workflow")
+            }
             None => "unavailable".into(),
         };
         let mut lines = vec![
@@ -136,7 +139,7 @@ async fn read_task_run(
             checkout.display()
         );
     }
-    let choice = match select_task_run(store, &task, checkout, options.flow.as_deref()) {
+    let choice = match select_task_run(store, &task, checkout, options.graph.as_deref()) {
         Ok(choice) => choice,
         Err(error) => {
             report.impediments.push(error.to_string());
@@ -144,15 +147,15 @@ async fn read_task_run(
         }
     };
     report.action = Some(match choice {
-        TaskRunSelection::Flow(flow) => TaskRunAction::Flow { flow },
+        TaskRunSelection::Graph(graph) => TaskRunAction::Graph { graph },
         TaskRunSelection::Edge {
             workflow,
             index,
             take_up,
         } => {
             let edge = &workflow.definition.edges[index as usize];
-            if let Some(flow) = &edge.flow {
-                if let Err(error) = super::load_task_flow(checkout, flow) {
+            if let Some(graph) = &edge.graph {
+                if let Err(error) = super::load_task_graph(checkout, graph) {
                     report.impediments.push(error.to_string());
                 }
             } else {
@@ -163,7 +166,7 @@ async fn read_task_run(
                 take_up,
                 from: edge.from.clone(),
                 to: edge.to.clone(),
-                flow: edge.flow.clone(),
+                graph: edge.graph.clone(),
             }
         }
     });

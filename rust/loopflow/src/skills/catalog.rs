@@ -1,4 +1,4 @@
-//! One source selection for execution, help, Flow capture and personal export.
+//! One source selection for execution, help, Graph capture and personal export.
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,8 +10,8 @@ use serde_yaml_ng::Value;
 use crate::builtins;
 use crate::definition::name::resolve_name;
 use crate::error::LoadError;
-use crate::flow::split_frontmatter;
-use crate::flow::Skill;
+use crate::graph::split_frontmatter;
+use crate::graph::Skill;
 
 static RETIRED_INTERACTIVE_WARNING: AtomicBool = AtomicBool::new(false);
 
@@ -24,7 +24,7 @@ pub enum SkillDialect {
     Codex,
 }
 
-/// File provenance and declarations retained with a resolved Flow skill.
+/// File provenance and declarations retained with a resolved Graph skill.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillOrigin {
     pub path: PathBuf,

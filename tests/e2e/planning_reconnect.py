@@ -1,4 +1,4 @@
-"""Watcher and Flow-boundary recovery against a disposable Linear HTTPS peer."""
+"""Watcher and Graph-boundary recovery against a disposable Linear HTTPS peer."""
 
 import copy
 import hashlib
@@ -270,8 +270,8 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
     local_id = db.execute("SELECT id FROM tasks WHERE issue_identifier='INF-124'").fetchone()[0]
     prs = db.execute("SELECT id,task_id,branch,base_commit FROM task_prs").fetchall()
     watch = None
-    flow = None
-    flow_log = None
+    graph = None
+    graph_log = None
     try:
         with server.lock:
             server.state["offline"] = True
@@ -279,7 +279,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             watch = Watch(fixture, env)
             watch.scope(str(repo))  # No Task or Wave selected.
         else:
-            # Flow admission requires a managed login, even with a contained provider.
+            # Graph admission requires a managed login, even with a contained provider.
             profile = root / "accounts/claude/reconnect"
             profile.mkdir(parents=True)
             credential = json.dumps(
@@ -304,25 +304,25 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
                 ),
             )
             db.commit()
-            (repo / ".lf/flows").mkdir(exist_ok=True)
+            (repo / ".lf/graphs").mkdir(exist_ok=True)
             (repo / ".lf/skills").mkdir(exist_ok=True)
-            (repo / ".lf/flows/reconnect.yaml").write_text("- reconnect-proof\n- cmd: context\n")
+            (repo / ".lf/graphs/reconnect.yaml").write_text("- reconnect-proof\n- cmd: context\n")
             (repo / ".lf/skills/reconnect-proof.md").write_text(
                 "---\nagent: claude\n---\nWait for the fixture.\n"
             )
-            flow_log = (root / "flow.log").open("w+")
-            flow = subprocess.Popen(
-                [fixture["lf"], "-b", "--task", "INF-123", "flow", "reconnect"],
+            graph_log = (root / "graph.log").open("w+")
+            graph = subprocess.Popen(
+                [fixture["lf"], "-b", "--task", "INF-123", "graph", "reconnect"],
                 cwd=repo,
                 env=env,
-                stdout=flow_log,
-                stderr=flow_log,
+                stdout=graph_log,
+                stderr=graph_log,
             )
             _await(
-                lambda: (root / "provider-started").exists() or flow.poll() is not None,
-                "Flow never launched its provider",
+                lambda: (root / "provider-started").exists() or graph.poll() is not None,
+                "Graph never launched its provider",
             )
-            assert flow.poll() is None, (root / "flow.log").read_text()
+            assert graph.poll() is None, (root / "graph.log").read_text()
         run("task", "edit", "INF-123", "--title", "Pending local title")
         run("task", "workflow", "move", "INF-124", "end", "--reason", "Saved offline")
         saved = json.loads(run("task", "comment", "INF-124", "Saved offline", "--json"))
@@ -377,8 +377,8 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
                 == (1,)
             )
 
-        if flow:
-            # Agents have no Linear timer. End this turn, then let the next Flow
+        if graph:
+            # Agents have no Linear timer. End this turn, then let the next Graph
             # step resolve the lost write replies using their retained identities.
             with server.lock:
                 requests = server.state["requests"]
@@ -388,8 +388,8 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
                 assert server.state["requests"] == requests, "idle agent polled Linear"
             assert not caught_up()
             (root / "provider-stop").touch()
-            assert flow.wait(timeout=30) == 0, (root / "flow.log").read_text()
-            assert caught_up(), "Flow boundaries did not acquire and settle pending planning"
+            assert graph.wait(timeout=30) == 0, (root / "graph.log").read_text()
+            assert caught_up(), "Graph boundaries did not acquire and settle pending planning"
         else:
             # The watcher's idle cadence can reach 240 seconds; acquisition and
             # uncertain-write settlement may need separate checks.
@@ -477,19 +477,19 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
                 seconds=300,
             )
         else:
-            assert db.execute("SELECT count(*) FROM flow_process_steps").fetchone()[0] == 2
+            assert db.execute("SELECT count(*) FROM graph_process_steps").fetchone()[0] == 2
     finally:
         (root / "provider-stop").touch()
         if watch:
             watch.close()
-        if flow and flow.poll() is None:
+        if graph and graph.poll() is None:
             try:
-                flow.wait(timeout=20)
+                graph.wait(timeout=20)
             except subprocess.TimeoutExpired:
-                flow.kill()
-                flow.wait()
-        if flow_log:
-            flow_log.close()
+                graph.kill()
+                graph.wait()
+        if graph_log:
+            graph_log.close()
         db.close()
 
 

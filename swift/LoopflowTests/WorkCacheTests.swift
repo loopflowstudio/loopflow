@@ -65,7 +65,7 @@ struct WorkCacheTests {
         let first = WorkModel(query: source.query, repoPath: Self.repo, cache: saving)
         await first.refresh()
         let liveTask = try #require(first.task(id: "issue-now")?.task)
-        let live = try #require(liveTask.latestFlowProcess)
+        let live = try #require(liveTask.latestGraphProcess)
         #expect(liveTask.execution?.state == .running)
         #expect(first.sessions.value?.first?.state == .active)
         #expect(first.task(id: "issue-now")?.task.condition.reason != WorkCache.savedReason)
@@ -74,7 +74,7 @@ struct WorkCacheTests {
         let returning = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("offline") },
                                     repoPath: Self.repo, cache: WorkCache(directory: directory))
         let task = try #require(returning.task(id: "issue-now")?.task)
-        let latest = try #require(task.latestFlowProcess)
+        let latest = try #require(task.latestGraphProcess)
         #expect(task.execution?.state == .unknown)
         #expect(latest.current == live.current)
         #expect(task.runControl.unavailable == WorkCache.savedReason)
@@ -117,7 +117,7 @@ struct WorkCacheTests {
         await returning.refresh()
         #expect(returning.workStatus == .current)
         guard let execution = returning.task(id: "issue-now")?.task.execution else {
-            Issue.record("fresh Flow has no latest record"); return
+            Issue.record("fresh Graph has no latest record"); return
         }
         #expect(execution.state == .running)
     }

@@ -9,8 +9,8 @@ This is the governing document of the loopflow codebase. Contributors and agents
 - Wave = durable objective, responsibility, memory, cadence, budget, chat, and metric instruments
 - Chapter = shared name of every Wave's In Progress Linear Project; no Chapter table
 - Project = one Wave's Linear plan: status, Tasks, KRs and targets
-- A Task's work is every Session, Flow and Process in its checkout, plus explicit binds; no Flow is selected over another
-- Workflow = a Task's nodes (a person, in its conversation) joined by edges (Flows), with its stored position; `lf task run` chooses an edge, `lf task workflow move` sets a node
+- A Task's work is every Session, Graph and Process in its checkout, plus explicit binds; no Graph is selected over another
+- Workflow = a Task's nodes (a person, in its conversation) joined by edges (Graphs), with its stored position; `lf task run` chooses an edge, `lf task workflow move` sets a node
 - Task completion, Workflow position and Process liveness are independent; reaching `end` requests completion, and a failed request retries without replaying the edge
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Unreviewed backlog stays in its Project until explicit disposition; uncertain evidence never auto-closes work
@@ -235,37 +235,37 @@ boundaries. A Chapter is the shared name of each Wave's one In Progress Linear
 Project. Linear Project status owns current/planned/completed history; there is
 no Chapter table or plan packet. Project owns Tasks, KRs and targets. Wave owns the optional default Workflow; repository `workflow:` is the final default.
 
-A Task's work includes every Session, Flow and Process associated with
+A Task's work includes every Session, Graph and Process associated with
 its checkout, plus explicit binds. Rust owns this shared association for status,
 Desktop navigation, recovery and completion. Membership grants no process or
-Flow authority and never rewrites historical usage. Every Flow naming the Task
-is equally its work; a stopped Flow is history its caller inspects, never a
+Graph authority and never rewrites historical usage. Every Graph naming the Task
+is equally its work; a stopped Graph is history its caller inspects, never a
 position to resume. A Task with no Workflow takes up its Wave's default, then repository `workflow:`
 on its first `lf task run`; one that named its own keeps it.
-WorkflowDefinition and FlowDefinition occupy separate `.lf/workflows/` and
-`.lf/flows/` namespaces. `lf wave workflow` owns definition discovery,
+WorkflowDefinition and GraphDefinition occupy separate `.lf/workflows/` and
+`.lf/graphs/` namespaces. `lf wave workflow` owns definition discovery,
 customization and Wave selection. `lf task workflow show` reads the captured
 instance; `restart` moves it to `start` without reloading or executing anything.
-`lf flow` handles autonomous definitions and `--processes` inspects execution.
-Task projections expose Workflow selection, latest FlowProcessDetail, execution
+`lf graph` handles autonomous definitions and `--processes` inspects execution.
+Task projections expose Workflow selection, latest GraphProcessDetail, execution
 evidence and TaskRunControl separately; latest never grants primary authority.
 A Workflow is the Task's outer shape: the workflow definition it took up,
 whose nodes are where a person takes part in the Task conversation and whose
-edges each run one Flow, plus the Task's stored position on it. The graph is
-fixed when taken up. `lf task run` chooses an edge, starts its Flow as a child
-`lf flow`, again when a Flow process fails, and writes the arrival when one
-succeeds; a stopped Flow leaves the Task on its edge;
+edges each run one Graph, plus the Task's stored position on it. The graph is
+fixed when taken up. `lf task run` chooses an edge, starts its Graph as a child
+`lf graph`, again when a Graph process fails, and writes the arrival when one
+succeeds; a stopped Graph leaves the Task on its edge;
 `lf task workflow move` sets a node. `lf task move --wave/--no-wave` changes membership without transferring execution. Each Workflow move is appended to the Task's history. It
 executes nothing, and no command approves or completes a node.
-Taskless execution uses the same Flow runner. A Flow is one lf process and the step
-Processes it starts; its id is the Flow process ID. The Flow process holds the cursor and
-return counts in memory and writes FlowProcess, append-only: the Flow's name and
+Taskless execution uses the same Graph runner. A Graph is one lf process and the step
+Processes it starts; its id is the Graph process ID. The Graph process holds the cursor and
+return counts in memory and writes GraphProcess, append-only: the Graph's name and
 compiled graph at launch, then each step's Process, node and iteration counts.
-Every Flow process gets one; none is primary for a Task. A step is the plain command
+Every Graph process gets one; none is primary for a Task. A step is the plain command
 (`lf -b skill <name> [message]` or the operation's own) and neither reads nor
 writes it. Running, finished and results are read from Processes, never stored
-twice. FlowComposition describes resolved composition, which expands the graph; loop passes are node/iteration
-positions on step rows, not child Flows.
+twice. GraphComposition describes resolved composition, which expands the graph; loop passes are node/iteration
+positions on step rows, not child Graphs.
 
 Repository rotation converges on an explicit target through fresh provider facts
 and stable Project identities. Partial status changes remain retryable; unrelated
@@ -289,7 +289,7 @@ an OS process and has no separate table. Available is the one attention
 state, judged in Rust from owned provider streams and validated terminal reports. A step's result
 is how its process exited; a deciding or routing step also answers through the
 Session turn its Process captured. Agent outcomes and retries belong in Session
-history; mechanical results are step Process exits. A Session reaches its Flow
+history; mechanical results are step Process exits. A Session reaches its Graph
 through the step Process that captured its input. Do not replace Run with another
 generic attempt object.
 
@@ -298,7 +298,7 @@ including to done/landed Tasks. Prospective attribution preserves earlier usage 
 owns that single choice. Actual work
 reservation claims an unowned Task in the ownership log; logging an inspection Process does not. Every
 denormalization is removed or validated on writes. Causal ancestry grants neither
-process control nor Flow settlement. Attachment claims and provider identity
+process control nor Graph settlement. Attachment claims and provider identity
 are separate: a fresh claim token fences every attachment and release, including
 A → B → A, while an unchanged provider survives handoff. Passive display acquires no claim.
 
@@ -338,7 +338,7 @@ Keep information in one place. Version numbers, configuration, documentation—e
 
 Put imports at the top of the file. Declare dependencies in `pyproject.toml` and assume they're available.
 
-Prefer explicit imports over magic. Don't inject names into module namespaces to save one import line—it breaks linters, IDE autocomplete, and confuses readers. If a module needs `Flow`, it should `from loopflow.lf.flows import Flow`. Standard Python beats clever patterns that fight tooling.
+Prefer explicit imports over magic. Don't inject names into module namespaces to save one import line—it breaks linters, IDE autocomplete, and confuses readers. If a module needs `Graph`, it should `from loopflow.lf.graphs import Graph`. Standard Python beats clever patterns that fight tooling.
 
 Keep one implementation. Avoid `v2_`, `_old`, `_new`, `_backup` prefixes and suffixes—look up old versions in git. If you're tempted to keep both old and new code around, delete the old version and commit. You can always get it back from git if needed.
 
@@ -492,7 +492,7 @@ Aim for a mix:
 Required checks run headless, without a display session, permission dialog or
 person. Use app builds and view/interaction tests for Desktop. An unavailable
 check goes to capable gate/CI or gets a headless equivalent; it never blocks
-an earlier Flow step. Actual build/test failures still need repair. Keep scratch
+an earlier Graph step. Actual build/test failures still need repair. Keep scratch
 check results to one line with command, result and any deferred owner.
 Do not rerun broader checks because another lifecycle phase began.
 

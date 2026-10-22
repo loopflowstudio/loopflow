@@ -132,11 +132,9 @@ fn launch(home: &Path, repo: &Path, bin: &Path, measurements: &Path, args: &[&st
         }
     }
     assert!(endings > 0, "missing completed performance receipt");
-    // Most rows are repeated schema verification (about 14 sqlite_master scans
-    // per launch), so the count grows with every table; see the follow-up Task.
-    // Each store open also reads the whole schema_migrations ledger, so every
-    // release batch adds about 37 rows here.
-    assert!(rows < 27_000, "launch read {rows} SQLite rows");
+    // Each store open still reads the whole schema_migrations ledger, so every
+    // release batch adds rows here; the schema itself is read once per process.
+    assert!(rows < 18_000, "launch read {rows} SQLite rows");
     assert!(
         statements < 2_000,
         "launch executed {statements} statements"

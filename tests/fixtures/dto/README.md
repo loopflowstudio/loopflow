@@ -14,12 +14,12 @@ optional Task snapshot (`execution.execution`).
 This CLI-only contract is tested in Rust. The Mac app receives its derived
 condition, reason, and actions through the existing Wave Task row.
 
-`session.json` pins `lf connect --prepare --json`: one unresolved Task FlowStep
+`session.json` pins `lf connect --prepare --json`: one unresolved Task GraphStep
 session, its explicit readiness state, and its exact Machine-local attach route.
 
-`session_memberships.json` pins each Session's required `flow_membership`:
-the current Flow step, an earlier step, an independent conversation, a Session that
-predates recorded membership (unknown, never independent), and a remote Flow
+`session_memberships.json` pins each Session's required `graph_membership`:
+the current Graph step, an earlier step, an independent conversation, a Session that
+predates recorded membership (unknown, never independent), and a remote Graph
 Session whose canonical name lives on its Machine (`title_source: unavailable`).
 
 `task_condition_states.json` pins the Rust-owned Task condition fold for clean
@@ -36,14 +36,14 @@ the Work observation stream; it does not poll `lf ps`.
 shape used by `lf usage --json` and Wave detail. Captured event sequences
 and native thread/turn references retain distinct outcomes. Optional counters,
 missing capture/start membership, stream finality and evidence gaps stay explicit.
-The optional `task_pr_id` retains the PR captured by the managed Flow;
+The optional `task_pr_id` retains the PR captured by the managed Graph;
 `first_provider_attempt_at` differs from capture/import observation time.
 
 `work_activity_snapshot.json` pins `lf history --json`: durable Work creation,
 Session capture/provider history, PR and Steer facts retain their original
 identities. Rust and Swift round-trip this shared history.
 
-`task_execution_stalled.json` retains stalled Session evidence. `flow_process_progress.json` retains ordinary execution graphs and loop coordinates; run legality lives on the Task projection.
+`task_execution_stalled.json` retains stalled Session evidence. `graph_process_progress.json` retains ordinary execution graphs and loop coordinates; run legality lives on the Task projection.
 
 `task_files.json` pins `lf diff --files`, `lf diff`, `lf file` and `lf save` JSON:
 exact comparison bases,
@@ -53,7 +53,7 @@ Rust round-trips the same fixture Swift decodes.
 
 `task_checkout.json` pins the prepared Task receipt, including owning Machine and
 resolved checkout. Rust round-trips the full Task snapshot; Swift reads the
-workspace identity used before the next roadmap refresh. Flow graph fixtures
+workspace identity used before the next roadmap refresh. Compiled graph fixtures
 include the derived interaction stages and route references alongside steps.
 
 `ask_session.json` keeps the caller capture separate from the Ask conversation.
@@ -77,7 +77,7 @@ registration. Optional window `view` contains the same shared selection plan,
 including hidden/suppressed occurrences. Window receipts own Task/Session outcomes. Fixture shape is not native
 readiness proof.
 
-`task_run_explanations.json` covers edge take-up, no-Flow completion, ad-hoc Flow
+`task_run_explanations.json` covers edge take-up, no-Graph completion, ad-hoc Graph
 selection and unavailable execution evidence. Explanation never claims ownership.
 
 `session_connect_explanations.json` preserves connection intent, preparation versus

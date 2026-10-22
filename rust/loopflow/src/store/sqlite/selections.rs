@@ -1769,7 +1769,7 @@ mod tests {
         restored.hide(&hidden, false).unwrap();
         assert_eq!(restored.order, arrangement.order);
         let conn = store.conn.lock().unwrap();
-        for table in ["agent_sessions", "processes", "flow_processes"] {
+        for table in ["agent_sessions", "processes", "graph_processes"] {
             assert_eq!(
                 conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row
                     .get::<_, i64>(0))

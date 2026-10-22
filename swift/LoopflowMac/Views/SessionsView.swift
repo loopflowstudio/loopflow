@@ -100,7 +100,7 @@ extension PaneContent {
         switch self {
         case .shell: selectedShell?.terminal
         case .session(let id, let location, _): location.map { .session(id, machineId: $0.machineId) }
-        case .empty, .files, .flowLog: nil
+        case .empty, .files, .graphLog: nil
         }
     }
 }
@@ -491,7 +491,7 @@ final class SessionsWorkspaceRegistry {
         case .shell:
             result = try workspace.newShell()
             resultTab = result?.content.selectedShell?.id
-        case .files(let task), .flowLog(let task):
+        case .files(let task), .graphLog(let task):
             let shell = target.tab.flatMap { store.shell($0) }
             let location = target.tab == nil ? pane.content.location : shell?.location
             let execution = target.tab == nil ? pane.executionLocation : shell?.execution
@@ -505,7 +505,7 @@ final class SessionsWorkspaceRegistry {
             let content: PaneContent = if case .files = request.action {
                 .files(taskId: projection.task.id, location: identity, execution: execution)
             } else {
-                .flowLog(taskId: projection.task.id, location: identity, execution: execution)
+                .graphLog(taskId: projection.task.id, location: identity, execution: execution)
             }
             if case .files = request.action { workspace.selectFilesPage() }
             result = store.show(content, beside: target.pane, focus: false)
@@ -1139,8 +1139,8 @@ struct SessionsContentView: View {
             switch navigation.palette {
             case .workflow(let name):
                 WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == name }, model: model)
-            case .flow(let name):
-                FlowCatalogInspector(entry: model.flowCatalog.value?.first { $0.name == name }, navigation: navigation, model: model)
+            case .graph(let name):
+                GraphCatalogInspector(entry: model.graphCatalog.value?.first { $0.name == name }, navigation: navigation, model: model)
             case .search:
                 WorkPalette(model: model, activate: navigate)
             case .sidebarSearch:
@@ -1326,7 +1326,7 @@ struct SessionsContentView: View {
         case .repository, .dashboard, .openRepository, .wave, .task:
             model.jump(to: destination, source: "palette")
             return
-        case .flow(let name): navigation.palette = .flow(name)
+        case .graph(let name): navigation.palette = .graph(name)
         case .workflow(let name): navigation.palette = .workflow(name)
         case .rename(let id):
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
@@ -1335,10 +1335,10 @@ struct SessionsContentView: View {
         case .bind(let id):
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             model.beginSessionBinding(record)
-        case .flowLog(let id):
+        case .graphLog(let id):
             model.select(.task(id: id))
             navigation.content = .terminals
-            multiplexer.show(.flowLog(taskId: id, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation))
+            multiplexer.show(.graphLog(taskId: id, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation))
         }
         model.remember(destination)
     }
@@ -1373,7 +1373,7 @@ struct SessionsContentView: View {
 
     /// An independent conversation with Task context in the Task's checkout.
     /// Resolving the checkout prepares Task Work only; it never starts a
-    /// Flow or replaces another Session.
+    /// Graph or replaces another Session.
     private func newTaskSession(_ taskId: String) async throws {
         guard let found = model.task(id: taskId) else { return }
         let origin = navigation
@@ -1406,7 +1406,7 @@ struct SessionsContentView: View {
             return store.sessions.filter { store.localTerminal(for: $0.record) == terminal }
         case .session(let id, _, _):
             return store.sessions.filter { $0.id == id }
-        case .empty, .flowLog, .files:
+        case .empty, .graphLog, .files:
             return []
         }
     }
@@ -1575,7 +1575,7 @@ extension SessionsWorkspace {
         defer { isRestoringIntent = false }
         let before = portableLayout()
         let hadLocalTools = multiplexer.layout.allPanes.count > 1 || multiplexer.layout.allPanes.contains {
-            switch $0.content { case .shell, .files, .flowLog: true; case .empty, .session: false }
+            switch $0.content { case .shell, .files, .graphLog: true; case .empty, .session: false }
         }
         let preserveCurrent = persistenceLoaded || persistenceError != nil || hadLocalTools
         persistenceError = nil

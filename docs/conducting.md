@@ -80,8 +80,8 @@ symlink aliases. Explicit repo/Wave Sessions remain separate. `--orphan` only
 filters inventory; it cannot opt a new Session out of Task membership.
 
 Use Session identity to return to a conversation and its native history. A
-successful provider turn, the command's outcome and the Flow's progress can
-differ: the agent's process can finish after the `lf` process that started it dies, and a finished Flow
+successful provider turn, the command's outcome and the Graph's progress can
+differ: the agent's process can finish after the `lf` process that started it dies, and a finished Graph
 leaves its Task at a workflow node, available for you to review there.
 
 `lf history show` retains exact Session/input selectors; `lf replay` resolves captured requests.
@@ -140,10 +140,10 @@ prove the agent followed the steer. See [The Agent API](agent-api.md#steer).
 
 Headless work that lacks required input explains its failure and stops. Read
 its existing status and logs; discuss unresolved judgment in the ongoing Wave
-chat. Review happens in the Task conversation; Flows hold autonomous steps only.
+chat. Review happens in the Task conversation; Graphs hold autonomous steps only.
 Use `lf --task <task> : "<prompt>"` when another agent perspective is needed.
 
-A Flow whose process died stays as history. Nothing resumes it. Read
+A Graph whose process died stays as history. Nothing resumes it. Read
 `lf task status <task>`, then launch fresh work with `lf task run <task>`.
 
 ## Inspect and resume

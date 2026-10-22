@@ -10,7 +10,7 @@ Build software with other people and their coding agents. Each task has one
 owner, its own working copy and one pull request, so several people's agents can
 work in one project without colliding. The plan is shared through Linear or a shared
 Git ref; a comment on a Linear task reaches its agents before their next step;
-and each task's workflow stops for a person where judgment counts. Skills, Flows
+and each task's workflow stops for a person where judgment counts. Skills, Graphs
 and workflows are files in the project, reviewed like code. Conversations stay on
 your computer; only the plan travels.
 
@@ -27,13 +27,13 @@ lf session connect SESSION
 lf task run INF-123
 ```
 
-A Skill supplies instructions; a Flow composes skills and mechanical operations.
+A Skill supplies instructions; a Graph composes skills and mechanical operations.
 A Task owns one change, its checkout and PRs. A Wave keeps the objective
 and memory; its current Project holds the plan; the Wave owns its default Workflow.
 
 Process records an actual lf command process. LfSession keeps the conversation,
-including headless work. A running Flow is one lf process and the step processes
-it starts. A conversation can outlive its command. A Flow whose
+including headless work. A running Graph is one lf process and the step processes
+it starts. A conversation can outlive its command. A Graph whose
 command stopped stays as history; fresh work is launched explicitly.
 
 Read the [contract and cutover status](architecture-reference.md#cutover-status)
@@ -71,10 +71,10 @@ lf audit: focus on auth                # pass arguments
 lf : "fix the typo in README"          # or skip the file entirely
 ```
 
-A flow chains skills with commits between them:
+A graph chains skills with commits between them:
 
 ```yaml
-# .lf/flows/ship-api.yaml
+# .lf/graphs/ship-api.yaml
 - implement
 - compress
 - gate
@@ -85,9 +85,9 @@ lf ship-api
 ```
 
 Built-ins cover the common ground: `debug`, `design`, `implement`, `compress`,
-`gate`, `qa`, the `code` flow, and more. Repo skills in `.lf/skills/` override
+`gate`, `qa`, the `code` graph, and more. Repo skills in `.lf/skills/` override
 and extend them. [Authoring](authoring.md) starts with a working skill and then
-adds flow and goal structure only where it earns its place.
+adds graph and goal structure only where it earns its place.
 
 ## Context
 
@@ -112,7 +112,7 @@ Do not take the first N commits and call that the history.
 .lf/                      # Repo config and extensions
   config.yaml             # Model, context defaults
   skills/                 # Skill prompts
-  flows/                  # Flow definitions
+  graphs/                  # Graph definitions
   wave/                   # Wave goals and memory (persists)
 scratch/                  # working notes; default delivery clears added files
 ~/.lf/                    # Global config, skills, and the local store

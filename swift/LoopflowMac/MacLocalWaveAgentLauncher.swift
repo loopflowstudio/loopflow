@@ -11,12 +11,12 @@ struct LocalLfError: LocalizedError {
 
 enum LocalWaveAgentLauncher {
     /// Run a filed Task on its workflow. `lf task run` owns Workflow selection,
-    /// worktree placement and Flow selection; the app does not reproduce them.
+    /// worktree placement and Graph selection; the app does not reproduce them.
     static func runTask(repoPath: String, issue: String) throws {
         try startLf(taskRunArguments(issue: issue), cwd: WaveOrigin.resolve(repoPath))
     }
 
-    /// Ensure Task Work and its checkout without running a Flow; returns
+    /// Ensure Task Work and its checkout without running a Graph; returns
     /// the authoritative worktree.
     static func checkoutTask(repoPath: String, issue: String) async throws -> WorkspaceIdentity {
         let stdout = try await runCheckedOutput(taskCheckoutCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)

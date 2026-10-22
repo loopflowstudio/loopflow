@@ -176,7 +176,7 @@ public final class MultiplexerStore {
         }
 
         switch focusedPane.content {
-        case .shell, .flowLog, .files:
+        case .shell, .graphLog, .files:
             _insert(.session(id: sessionId, location: location), beside: focusedPaneId)
             return
         case .empty, .session:
@@ -239,7 +239,7 @@ public final class MultiplexerStore {
         closedState = nil
     }
 
-    /// Reveal a Task's Flow process log or files beside existing terminals,
+    /// Reveal a Task's Graph process log or files beside existing terminals,
     /// never replacing them. Explicit targets do not follow later focus.
     @discardableResult
     public func show(_ content: PaneContent, beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
@@ -248,7 +248,7 @@ public final class MultiplexerStore {
             switch (pane.content, content) {
             case (.files, .files): return true
             case (.shell, .shell): return true
-            case (.flowLog(let current, _, _), .flowLog(let requested, _, _)):
+            case (.graphLog(let current, _, _), .graphLog(let requested, _, _)):
                 return current == requested
             default: return pane.content == content
             }
@@ -319,7 +319,7 @@ public final class MultiplexerStore {
                             lfProcessID: tab.lfProcessID)
                     }, selected: selected)
                 case .files: intent = files ?? .files(location: location, tabs: [], selected: nil)
-                case .flowLog: intent = .log(location: location)
+                case .graphLog: intent = .log(location: location)
                 }
                 return .pane(id: pane.id, content: intent)
             }
@@ -348,7 +348,7 @@ public final class MultiplexerStore {
                         self.shell(tab.id) ?? ShellTab(id: tab.id, location: location(tab.location), command: nil, lfProcessID: tab.lfProcessID)
                     }, selected: selected)
                 case .files(let place, _, _): content = .files(taskId: saved.work.id, location: location(place))
-                case .log(let place): content = .flowLog(taskId: saved.work.id, location: location(place))
+                case .log(let place): content = .graphLog(taskId: saved.work.id, location: location(place))
                 }
                 if let retained = layout.pane(for: id), retained.content == content { return .leaf(retained) }
                 return .leaf(PaneState(id: id, content: content))

@@ -342,8 +342,8 @@ struct WorkModelTests {
         #expect(model.workActivity.value?.items.first?.subject == "W2-144")
     }
 
-    @Test("Session refresh reads Task FlowSteps")
-    func sessionRefreshReadsTaskFlowSteps() async throws {
+    @Test("Session refresh reads Task GraphSteps")
+    func sessionRefreshReadsTaskGraphSteps() async throws {
         let fixtures = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -538,7 +538,7 @@ struct WorkModelStreamTests {
             .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/task_work.json")
         let work = try String(contentsOf: workURL, encoding: .utf8)
         await feed.send(try fixture.frame("task", sequence: 2, answers: scope.id,
-            body: "{\"task\":\"\(found.task.task.identifier)\",\"work\":\(work),\"comments\":{\"identifier\":\"\(found.task.task.identifier)\",\"comments\":[],\"conflicts\":{},\"pending_sync\":[],\"refresh_error\":null},\"flow_processes\":[]}"))
+            body: "{\"task\":\"\(found.task.task.identifier)\",\"work\":\(work),\"comments\":{\"identifier\":\"\(found.task.task.identifier)\",\"comments\":[],\"conflicts\":{},\"pending_sync\":[],\"refresh_error\":null},\"graph_processes\":[]}"))
         try await eventually { model.taskWork[found.task.id].value?.workflow != nil }
         let workflow = model.taskWork[found.task.id].value?.workflow
         await feed.send(WorkFrame(sequence: 3, answers: scope.id, home: "/home", copy: nil, revisions: nil,
@@ -775,7 +775,7 @@ struct WorkModelStreamTests {
         func heartbeat(_ sequence: Int, planning: Int, sessions: Int) throws -> WorkFrame {
             try WorkFrame.decode(line: Data("""
             {"sequence":\(sequence),"answers":null,"home":"/home","copy":null,"unavailable":null,
-             "revisions":{"planning":\(planning),"sessions":\(sessions),"flows":0,"processes":0,"usage":0},
+             "revisions":{"planning":\(planning),"sessions":\(sessions),"graphs":0,"processes":0,"usage":0},
              "part":"heartbeat","body":{"projections":{}}}
             """.utf8))
         }
@@ -796,7 +796,7 @@ struct WorkModelStreamTests {
         #expect(await catalog.reads == baseline + 1)
         await model.rereadDefinitions()
         #expect(await catalog.reads == baseline + 2)
-        #expect(model.flowCatalog.isLoading, "An unopened catalogue stays unread on editor return")
+        #expect(model.graphCatalog.isLoading, "An unopened catalogue stays unread on editor return")
         await catalog.fail()
         await feed.send(try heartbeat(7, planning: 3, sessions: 2))
         try await eventually { model.workflowCatalog.errorMessage == "catalog unavailable" }

@@ -16,7 +16,7 @@ use crate::store::sqlite::SqliteStore;
 
 #[test]
 #[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
-fn running_provider_uses_updated_install_for_commands_hooks_and_flow() {
+fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
     assert!(Path::new("/.dockerenv").is_file());
     let account = installation::account_home().unwrap();
     assert_eq!(account, Path::new("/home/lf-task-proof"));
@@ -79,8 +79,11 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_flow() {
     assert_eq!(super::resolve_lf_binary().unwrap(), gate);
     let repo = loopflow_test_support::TestRepo::new();
     // The step is an execution command, so it re-enters through the gate.
-    repo.create_file(".lf/flows/entry-proof.yaml", "- cmd: flow inner --batch\n");
-    repo.create_file(".lf/flows/inner.yaml", "- cmd: sync --plan\n");
+    repo.create_file(
+        ".lf/graphs/entry-proof.yaml",
+        "- cmd: graph inner --batch\n",
+    );
+    repo.create_file(".lf/graphs/inner.yaml", "- cmd: sync --plan\n");
     let delivery = crate::context_block::ContextDelivery {
         repository: None,
         repo: repo.path().to_path_buf(),
@@ -106,7 +109,7 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_flow() {
         .stderr(Stdio::piped());
     crate::harness::configure_vendor_std_env(&mut command).unwrap();
     command.args(["-ec", &format!(
-        "if lf session list --all --json; then exit 93; else test \"$?\" -eq 42; fi\nprintf 'retry-ready\\n'\nread ready\nlf session list --all --json\n{hook} --delivery {}\n\"$LF_BIN\" flow entry-proof --batch\n",
+        "if lf session list --all --json; then exit 93; else test \"$?\" -eq 42; fi\nprintf 'retry-ready\\n'\nread ready\nlf session list --all --json\n{hook} --delivery {}\n\"$LF_BIN\" graph entry-proof --batch\n",
         super::shell_escape(&delivery_path.to_string_lossy()),
     )]);
     let mut provider = command.spawn().unwrap();
@@ -194,7 +197,7 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_flow() {
     assert_eq!(pending.items[0].steer.id, steer.id);
     let connection = Connection::open(&database).unwrap();
     let child_command: String = connection.query_row(
-        "SELECT p.command FROM flow_process_steps s JOIN processes p ON p.id=s.lf_process_id WHERE p.exit_code=0",
+        "SELECT p.command FROM graph_process_steps s JOIN processes p ON p.id=s.lf_process_id WHERE p.exit_code=0",
         [], |row| row.get(0),
     ).unwrap();
     assert!(
@@ -203,16 +206,16 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_flow() {
     );
     let steps: i64 = connection
         .query_row(
-            "SELECT count(*) FROM flow_process_steps s JOIN processes p ON p.id=s.lf_process_id WHERE p.exit_code=0",
+            "SELECT count(*) FROM graph_process_steps s JOIN processes p ON p.id=s.lf_process_id WHERE p.exit_code=0",
             [],
             |row| row.get(0),
         )
         .unwrap();
     assert_eq!(steps, 2);
-    // The gate's exec keeps the Flow's handoff: the step runs inside its owner.
+    // The gate's exec keeps the Graph's handoff: the step runs inside its owner.
     let redelegated: i64 = connection
         .query_row(
-            r#"SELECT count(*) FROM flow_process_steps s JOIN processes c ON c.parent_lf_process_id=s.lf_process_id WHERE c.command LIKE '%"__transport-serve"%'"#,
+            r#"SELECT count(*) FROM graph_process_steps s JOIN processes c ON c.parent_lf_process_id=s.lf_process_id WHERE c.command LIKE '%"__transport-serve"%'"#,
             [],
             |row| row.get(0),
         )

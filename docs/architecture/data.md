@@ -3,11 +3,11 @@
 ```bash
 lf session list --interactive false --json
 lf session history SESSION --json
-lf flow show FLOW_PROCESS --processes --json
+lf graph show GRAPH_PROCESS --processes --json
 lf ps --json
 ```
 
-A conversation, a Flow and an operating-system process answer different
+A conversation, a Graph and an operating-system process answer different
 questions. SQLite owns their identities and history references; large payloads
 and provider-native state keep their own storage formats. This page specifies
 those ownership boundaries. [Cutover status](../architecture-reference.md#cutover-status)
@@ -30,15 +30,15 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 
 | Fact | Owner |
 | --- | --- |
-| Authored goals, memory, Skills, Flows and code | Repository files and Git |
+| Authored goals, memory, Skills, Graphs and code | Repository files and Git |
 | Shared planning | Linear Initiatives, Projects and Issues |
 | Commits, PR heads, checks and merge | Git and GitHub |
 | Actual lf command process, causal parent and observed command outcome | `processes` |
 | The provider's OS process, its served Session, original parent and current attachment | AgentProcess rows in `processes` |
 | Agent conversation, title, feedback and native identity | `agent_sessions` |
 | Native starts, outcomes, retries and usage | LfSession history, correlated to native turn and driving Process |
-| A Flow's identity, state and step results | Its Flow process and child step processes in `processes` |
-| A Flow's name, launched graph and each step's node | FlowProcess: `flow_processes` and `flow_process_steps`, appended by the Flow process |
+| A Graph's identity, state and step results | Its Graph process and child step processes in `processes` |
+| A Graph's name, launched graph and each step's node | GraphProcess: `graph_processes` and `graph_process_steps`, appended by the Graph process |
 | A Task's Workflow: its graph, position and moves | `task_workflows`, one row per Task updated in place, and append-only `task_workflow_moves`; written by `lf task run` and `lf task workflow move` |
 | A Task's state: not ready, ready, active, done | Read from its `task_workflows` position; never stored. `tasks.abandoned_at` is the one mark beside it |
 | Large captured prompts, transcripts and output | Immutable or append-only payloads referenced by their owning records |
@@ -56,7 +56,7 @@ retains exact current tables, source paths and subprocess edges in one place.
 ## Conversation and process history
 
 Process records one actual lf process, including agent-issued nested commands.
-Each executed Flow step has its own child lf Process. Multiple provider turns may
+Each executed Graph step has its own child lf Process. Multiple provider turns may
 belong to that Process; their results remain distinct in LfSession history.
 A provider may succeed before its command fails later.
 
@@ -73,18 +73,18 @@ first delta's position, a Turn keeps its last cumulative diff, and the raw
 notification behind each increment stays in the file. Complete items, usage,
 input and outcomes are kept in both.
 
-A Flow is one lf process and the step processes it starts, and its ID is the
-Flow process's. The Flow process keeps the cursor in memory and appends FlowProcess: the
-Flow's name and compiled graph at launch, then each step's Process, node and
+A Graph is one lf process and the step processes it starts, and its ID is the
+Graph process's. The Graph process keeps the cursor in memory and appends GraphProcess: the
+Graph's name and compiled graph at launch, then each step's Process, node and
 iteration counts. Nothing updates those rows, and no step reads or writes them.
-A Session reaches its Flow through the step row of the Process that captured its
-input. Every Flow naming a Task, or run in its checkout, is equally that Task's
-work. Taskless execution uses the same Flow runner. A step's result is how its
+A Session reaches its Graph through the step row of the Process that captured its
+input. Every Graph naming a Task, or run in its checkout, is equally that Task's
+work. Taskless execution uses the same Graph runner. A step's result is how its
 process exited; a deciding or routing step also answers through the Session turn
 its Process captured. No generic attempt lifecycle sits between these owners.
 
-A retry appends Session history. A killed Flow process leaves its Processes as history;
-nothing resumes it, and its caller launches fresh work. A past Flow whose YAML
+A retry appends Session history. A killed Graph process leaves its Processes as history;
+nothing resumes it, and its caller launches fresh work. A past Graph whose YAML
 changed is drawn from the sequence its step processes recorded. Cursor movement
 alone never proves an external operation happened once.
 
@@ -117,13 +117,13 @@ private writes back to the installation.
 Typed ancestry belongs to LfSession and Process. Tasks require repository identity
 and have optional Project membership, which determines their optional Wave.
 Constructors derive ancestors and reject contradictions in the transaction.
-Flow members share their owner's nullable Task. Historical work events retain
+Graph members share their owner's nullable Task. Historical work events retain
 their recorded attribution independently of current assignment or attachment.
 
 Bind assigns an unbound conversation once, including to a done or landed Task.
 Same-target assignment is idempotent; reassignment and clearing are unavailable.
 The exact target is explicit and the transaction rejects competing assignment,
-attachment replacement or incompatible Flow membership. Prospective usage attribution
+attachment replacement or incompatible Graph membership. Prospective usage attribution
 and its limits are in the
 [contract](../architecture-reference.md#attribution-binding-and-ownership).
 

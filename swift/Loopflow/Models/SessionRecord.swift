@@ -31,20 +31,20 @@ public enum SessionTitleSource: String, Codable, Sendable, Hashable {
     case unavailable
 }
 
-/// Whether a Session is an occurrence of a Flow. Rust owns
-/// this from the Flow position or the Session's recorded capture; Swift never
+/// Whether a Session is an occurrence of a Graph. Rust owns
+/// this from the Graph position or the Session's recorded capture; Swift never
 /// infers it from Task, checkout, provider, or skill.
-public enum SessionFlowMembership: Codable, Sendable, Hashable {
-    case step(flow: String, flowLfProcessId: String, step: String, node: UInt32?, iterations: [[UInt32]]?,
-              occurrence: SessionFlowOccurrence)
+public enum SessionGraphMembership: Codable, Sendable, Hashable {
+    case step(graph: String, graphLfProcessId: String, step: String, node: UInt32?, iterations: [[UInt32]]?,
+              occurrence: SessionGraphOccurrence)
     case independent
     case unknown(reason: String)
 
     private enum Kind: String, Codable { case step, independent, unknown }
 
     enum CodingKeys: String, CodingKey {
-        case kind, flow, step, iterations, occurrence, reason
-        case flowLfProcessId = "flow_lf_process_id"
+        case kind, graph, step, iterations, occurrence, reason
+        case graphLfProcessId = "graph_lf_process_id"
         case node
     }
 
@@ -53,12 +53,12 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
         switch try container.decode(Kind.self, forKey: .kind) {
         case .step:
             self = .step(
-                flow: try container.decode(String.self, forKey: .flow),
-                flowLfProcessId: StructuredIdentity.uuid(try container.decode(String.self, forKey: .flowLfProcessId)),
+                graph: try container.decode(String.self, forKey: .graph),
+                graphLfProcessId: StructuredIdentity.uuid(try container.decode(String.self, forKey: .graphLfProcessId)),
                 step: try container.decode(String.self, forKey: .step),
                 node: try container.decodeIfPresent(UInt32.self, forKey: .node),
                 iterations: try container.decodeIfPresent([[UInt32]].self, forKey: .iterations),
-                occurrence: try container.decode(SessionFlowOccurrence.self, forKey: .occurrence)
+                occurrence: try container.decode(SessionGraphOccurrence.self, forKey: .occurrence)
             )
         case .independent:
             self = .independent
@@ -70,10 +70,10 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .step(flow, flowLfProcessId, step, node, iterations, occurrence):
+        case let .step(graph, graphLfProcessId, step, node, iterations, occurrence):
             try container.encode(Kind.step, forKey: .kind)
-            try container.encode(flow, forKey: .flow)
-            try container.encode(flowLfProcessId, forKey: .flowLfProcessId)
+            try container.encode(graph, forKey: .graph)
+            try container.encode(graphLfProcessId, forKey: .graphLfProcessId)
             try container.encode(step, forKey: .step)
             try container.encode(node, forKey: .node)
             try container.encode(iterations, forKey: .iterations)
@@ -89,11 +89,11 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
     /// Short human label: "pursue / implement · pass 3", "Independent".
     public var label: String {
         switch self {
-        case let .step(flow, _, step, _, iterations, occurrence):
-            let base = "\(flow) / \(step)"
+        case let .step(graph, _, step, _, iterations, occurrence):
+            let base = "\(graph) / \(step)"
             let label: String
             if let iterations {
-                label = flowIterationLabel(iterations).map { "\(base) · \($0)" } ?? base
+                label = graphIterationLabel(iterations).map { "\(base) · \($0)" } ?? base
             } else {
                 label = "\(base) · pass unavailable"
             }
@@ -106,13 +106,13 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
         case .independent:
             return "Independent"
         case .unknown:
-            return "Flow membership unknown"
+            return "Graph membership unknown"
         }
     }
 }
 
-/// Where a Flow occurrence sits relative to its Flow's current position.
-public enum SessionFlowOccurrence: String, Codable, Sendable, Hashable {
+/// Where a Graph occurrence sits relative to its Graph's current position.
+public enum SessionGraphOccurrence: String, Codable, Sendable, Hashable {
     /// Known membership without a recorded selected occurrence.
     case unknown
     /// The invocation's current position.
@@ -160,7 +160,7 @@ extension SessionWorkspace {
 }
 
 /// One resumable Session and the exact command that opens it.
-/// Rust owns completion, FlowStep decisions, and provider-client liveness.
+/// Rust owns completion, GraphStep decisions, and provider-client liveness.
 public struct SessionPreview: Codable, Hashable, Sendable {
     public let providerThread: String
     public let providerTurn: String
@@ -195,7 +195,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let actions: [SessionAction]
     public let title: String
     public let titleSource: SessionTitleSource
-    public let flowMembership: SessionFlowMembership
+    public let graphMembership: SessionGraphMembership
     public let detail: String
     /// Provider harness recorded on the Session's capture manifest; nil when the
     /// capture is on another Machine or its manifest is unreadable.
@@ -231,7 +231,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         case taskIds = "task_ids"
         case actions
         case titleSource = "title_source"
-        case flowMembership = "flow_membership"
+        case graphMembership = "graph_membership"
         case workPath = "work_path"
         case readySummary = "ready_summary"
         case openArgv = "open_argv"
@@ -278,7 +278,7 @@ extension SessionRecord {
         actions = try values.decode([SessionAction].self, forKey: .actions)
         title = try values.decode(String.self, forKey: .title)
         titleSource = try values.decode(SessionTitleSource.self, forKey: .titleSource)
-        flowMembership = try values.decode(SessionFlowMembership.self, forKey: .flowMembership)
+        graphMembership = try values.decode(SessionGraphMembership.self, forKey: .graphMembership)
         detail = try values.decode(String.self, forKey: .detail)
         provider = try values.decodeIfPresent(String.self, forKey: .provider)
         cwd = try values.decode(String.self, forKey: .cwd)

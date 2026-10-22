@@ -30,11 +30,11 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | Variable | Set by | Read by | Policy |
 |---|---|---|---|
 | `LF_CONTEXT_DELIVERY` | Native provider launch | Context and planning hooks | Private saved launch sources, separate from stable hook declarations. Scrubbed for independent launches and Codex app-server processes; headless Codex callbacks use their native thread binding. |
-| `LF_CAPTURE_KEY` | Session capture and native resume | Capture lookup, provider callbacks, Task comments | Selects subordinate captured history in the resolved Machine. SQLite must record its owning Session; a present manifest must agree. It grants neither Task nor Flow authority. |
+| `LF_CAPTURE_KEY` | Session capture and native resume | Capture lookup, provider callbacks, Task comments | Selects subordinate captured history in the resolved Machine. SQLite must record its owning Session; a present manifest must agree. It grants neither Task nor Graph authority. |
 | `LF_TRACE_ID`, `LF_PROCESS_ID` | Journal, agent and session launch | Journal, git operations | Joins a child's events to its caller's trace. |
 | `LF_AGENT_CALLER` | Session capture and native resume | Journal, once, then resolved process context | Carries Session identity, AgentProcess identity and origin Process for nested command ancestry and checkpoint composition. |
 | `LF_AS` | `--as` | Run and Task commands | Declares the Work a command contributes to; resolved against the registry. |
-| `LF_FLOW_ID` | Flow process, for each agent step | The step's agent and skills | Names the Flow a step serves: its Flow process's id. Steps of one Flow share notes under it; `lf` reads nothing from it. |
+| `LF_GRAPH_ID` | Graph process, for each agent step | The step's agent and skills | Names the Graph a step serves: its Graph process's id. Steps of one Graph share notes under it; `lf` reads nothing from it. |
 | `LF_WAVE_ID` | Wave and Task launches | Wave resolution | Default Wave for a child command. |
 | `LF_HUMAN_SESSION`, `LF_PREPARED_CAPTURE` | Conversation launch | `ops::human_session`, removed on use | Identify the prepared conversation a new terminal opens. |
 | `LF_GIT_OPERATION_ID` | `ops::git_operation` | Nested lf commands inside an owned git operation | Lets recovery continue its own operation; checked against the worktree's record. |
@@ -44,7 +44,7 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LF_TERMINAL_ID`, `LF_TERMINAL_TTY` | Desktop's terminal | Session capture | Attach a Session to the terminal showing it. |
 | `LF_USER_NAME` | lf launch paths | `config::participant_name` | The participant's display name. Presentation only. |
 | `LOOPFLOW_DIRECTIVE_FILE` | Shell integration, agent launch with a relay | `lf` commands that ask the parent shell to act | Removed for agents unless a scoped relay is supplied. |
-| `LOOPFLOW_FLOW_NAME` | Flow process | Skill prose | Names the running Flow for the agent. |
+| `LOOPFLOW_GRAPH_NAME` | Graph process | Skill prose | Names the running Graph for the agent. |
 
 ## Account selection and credentials
 
@@ -53,7 +53,7 @@ never in environment variables. Detached Session shells scrub transient credenti
 
 | Variable | Policy |
 |---|---|
-| `LF_AGENT_OVERRIDE` | Explicit `-a` selection for this invocation and all children, ahead of Task/Flow/skill defaults. Forwarded to remote commands; cleared for independent Session shells. Contains no credential. |
+| `LF_AGENT_OVERRIDE` | Explicit `-a` selection for this invocation and all children, ahead of Task/Graph/skill defaults. Forwarded to remote commands; cleared for independent Session shells. Contains no credential. |
 | `LF_ACCOUNT_SELECTION` | Account preference/restriction for this invocation and its children; contains no credential. |
 | `LF_TASK_SOURCE` | One SSH invocation's saved Task ID, identifier, optional provider issue ID, branch and required commit. Contains no planning payload, local paths or execution authority. |
 | `LF_DISCORD_TOKEN` | Chat bridge token; removed before any provider child. |

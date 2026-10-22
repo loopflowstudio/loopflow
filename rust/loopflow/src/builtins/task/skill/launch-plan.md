@@ -10,10 +10,10 @@ Do not create a manifest, receipt, marker, or new planning state.
 ## Taskless work
 
 When no Task is associated and the request does not ask for managed work, keep
-selected implementation in this checkout. Follow the caller's Flow or continue
+selected implementation in this checkout. Follow the caller's Graph or continue
 implementation directly; retain independent later ideas in the design. Report
 that decision and finish this step. Do not look up a Wave or create Tasks merely
-because a Flow, such as `incident`, includes this skill.
+because a Graph, such as `incident`, includes this skill.
 
 For existing or explicitly requested managed work, read `lf help skill work` and
 continue below.
@@ -26,12 +26,12 @@ state. Consult Wave chapter state only when the seed identifies it.
 Choose what is worth implementing before allocating work. Incident findings may
 justify prevention, more investigation, or no further work. Preserve unresolved
 evidence and distinguish proposals from accepted scope. Reuse existing Tasks for
-the same outcome; do not create a prevention project merely to fill a Flow step.
+the same outcome; do not create a prevention project merely to fill a Graph step.
 When no useful change remains, record that decision and finish.
 
 A standalone invocation need not already have a Task. Use the existing-design
 handoff below for selected work, retaining unresolved ownership or direction
-as an explicit next decision. Never launch a competing Flow into active work.
+as an explicit next decision. Never launch a competing Graph into active work.
 
 ## Decide what stays here
 
@@ -54,7 +54,7 @@ For each remaining independently shippable outcome, choose one of two actions:
   ```
   Stdin files the Task description; `--directive` on `task run` supplies
   direction, not that durable brief. Use `--stack-on <current-task>` when it
-  must build on this Task's branch. `task run` returns when its Flow ends; run
+  must build on this Task's branch. `task run` returns when its Graph ends; run
   it with your own background tool to keep planning.
 - If it depends on decisions this core has not settled, leave it in the design
   as a named follow-up. Create it after this PR settles; do not invent durable
@@ -100,22 +100,22 @@ when unambiguous. State the relationship, such as builds on, supersedes, or veri
 Use known URLs and preserve cited decisions and evidence somewhere that survives shipping.
 In operational lists, put the ID first: `[Task ID or PR number · Title](known URL)`.
 
-For already designed work, select a Flow that continues that design. The
-user's explicit Flow selection governs; otherwise use the Wave chapter recommendation.
+For already designed work, select a Graph that continues that design. The
+user's explicit Graph selection governs; otherwise use the Wave chapter recommendation.
 Keep the design and its evidence available in each execution context before
 launch; use staged preparation below when artifacts must cross contexts.
 
-For an approved design, `--flow pursue` enters implement → compress → refresh
+For an approved design, `--graph pursue` enters implement → compress → refresh
 → loop-or-next → concept-review → loop-or-next. Refresh runs sync → realign.
 Either decider's Iterate returns to implementation; the second's Advance
 publishes and ends the pursuit. The `code` workflow starts with that
 pursuit; `feature` drafts the design first; both land an accepted PR through
 `ship`. Design review and the demo are workflow nodes in the Task
-conversation, never Flow steps. A Task on a workflow takes only an edge
+conversation, never Graph steps. A Task on a workflow takes only an edge
 leaving its current node: bare `lf task run <issue>` takes the only one or
-names the choices, `lf task run <issue> <flow>` picks one, and naming a
-workflow takes it up from its start. `lf --task <issue> flow <flow>` runs any
-Flow without moving the Task.
+names the choices, `lf task run <issue> <graph>` picks one, and naming a
+workflow takes it up from its start. `lf --task <issue> graph <graph>` runs any
+Graph without moving the Task.
 Preserve intent, constraints, and done-when
 proof in durable records so the Task remains useful after cleanup of added scratch files.
 
@@ -124,7 +124,7 @@ path, Tasks launched, and follow-ups intentionally deferred.
 
 ## Existing-design handoff
 
-When the user asks to file a Task and run a Flow from an existing design,
+When the user asks to file a Task and run a Graph from an existing design,
 keep the design separate. Reuse the Task if it is the same work; otherwise file
 a short user-problem brief under the selected Wave, with a design reference,
 its maturity, and open questions. Do not invent ownership.
@@ -140,7 +140,7 @@ Inspect the current context first: a design already in the Task worktree needs
 no transfer. For a separate source, copy the actual documents and supporting
 files before launch, preserve relative references, and check their contents in
 the destination. A path alone does not supply context. Preparation launches no
-Flow. Do not overwrite newer destination work.
+Graph. Do not overwrite newer destination work.
 
 The destination becomes the working design; retain source provenance without
 maintaining competing active copies. Markdown under its recursive `scratch/`
@@ -148,10 +148,10 @@ tree enters each step's context; other assets remain on disk. Preserve material
 needed after scratch cleanup in durable documentation or existing records.
 Do not pipe the design into Task creation: stdin becomes the Task description.
 
-Use the Flow the user selected and inspect its contents when explaining where it
+Use the Graph the user selected and inspect its contents when explaining where it
 begins; otherwise use the Wave chapter recommendation. Continue the design already
 present without treating its draft choices as approved. Report the Task link,
-destination design path, selected Flow, and observed launch result. Verify
+destination design path, selected Graph, and observed launch result. Verify
 supplied context separately from the launch.
 
 If implementation already exists in the source checkout, preserve it and its

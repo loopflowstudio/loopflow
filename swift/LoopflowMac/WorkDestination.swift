@@ -10,11 +10,11 @@ enum WorkDestination: Hashable {
     case openRepository(String)
     case wave(String)
     case task(String)
-    case flow(String)
+    case graph(String)
     case workflow(String)
     case rename(String)
     case bind(String)
-    case flowLog(String)
+    case graphLog(String)
 }
 
 /// A Task destination already resolved to this Machine's repository locator.

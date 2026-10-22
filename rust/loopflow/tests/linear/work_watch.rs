@@ -451,7 +451,7 @@ fn joined_planning_stays_on_one_commit_while_another_writer_changes_wave_names()
 }
 
 #[test]
-fn a_flow_graph_write_does_not_requery_work_history() {
+fn a_compiled_graph_write_does_not_requery_work_history() {
     let home = Machine::new();
     for index in 0..15 {
         home.raw().execute("INSERT INTO processes(id,trace_id,started_at,completed_at,outcome) VALUES(?1,'trace',1,2,'succeeded')", [format!("history-proof-{index}")]).unwrap();
@@ -467,7 +467,7 @@ fn a_flow_graph_write_does_not_requery_work_history() {
     for index in 0..15 {
         home.raw()
             .execute(
-                "INSERT INTO flow_processes(lf_process_id,flow,graph) VALUES(?1,'example','{}')",
+                "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'example','{}')",
                 [format!("history-proof-{index}")],
             )
             .unwrap();
@@ -771,7 +771,7 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
         .unwrap();
     let first = watch.session(|record| !record.is_null());
     assert_eq!(first["title"], "Conversation");
-    assert_eq!(first["flow_membership"]["kind"], "unknown");
+    assert_eq!(first["graph_membership"]["kind"], "unknown");
     assert_eq!(first["availability"], serde_json::Value::Null);
 
     let conn = home.raw();
@@ -794,7 +794,7 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
     write("UPDATE agent_sessions SET provider='claude',model='opus' WHERE id='conversation'");
     watch.session(|record| record["detail"] == "claude:opus" && record["provider"] == "claude");
 
-    // Flow membership is an `observed` event, like a transcript line.
+    // Graph membership is an `observed` event, like a transcript line.
     event(
         "observed",
         &format!("{INPUT}:manifest.json"),
@@ -802,7 +802,7 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
         serde_json::json!({"source": "manifest.json", "input_id": INPUT, "evidence":
             {"schema_version": 1, "artifact_key": INPUT, "flow": {"kind": "independent"}}}),
     );
-    watch.session(|record| record["flow_membership"]["kind"] == "independent");
+    watch.session(|record| record["graph_membership"]["kind"] == "independent");
 
     // A question the stream reported is Waiting; its answer ends that.
     write(

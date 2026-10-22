@@ -1,4 +1,4 @@
-//! One real Task/Flow population, with provider side effects isolated in fixtures.
+//! One real Task/Graph population, with provider side effects isolated in fixtures.
 use crate::test_linear_input::SeedLinearSqlite;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -147,20 +147,20 @@ fn contract(population: &Value) -> Value {
             .iter()
             .map(|entry| json!([entry["kind"], entry["from"], entry["to"], entry["edge"]]))
             .collect();
-        let flows: Vec<_> = capture["task_frame"]["body"]["flow_processes"].as_array().unwrap().iter()
-            .map(|flow| json!({"state":flow["entry"]["state"], "steps":flow["steps"].as_array().unwrap().iter()
+        let graphs: Vec<_> = capture["task_frame"]["body"]["graph_processes"].as_array().unwrap().iter()
+            .map(|graph| json!({"state":graph["entry"]["state"], "steps":graph["steps"].as_array().unwrap().iter()
                 .map(|step| step["outcome"].clone()).collect::<Vec<_>>()})).collect();
         phases.insert(phase.into(), json!({
             "status": execution["status"], "pr": capture["row"]["pr"]["phase"],
             "position": [workflow["position"]["kind"],workflow["position"]["node"],workflow["position"]["running"]],
-            "history": history, "flows": flows,
+            "history": history, "graphs": graphs,
         }));
     }
     Value::Object(phases)
 }
 
 #[test]
-fn ordinary_task_comments_and_completion_preserve_live_flow_and_arrival() {
+fn ordinary_task_comments_and_completion_preserve_live_graph_and_arrival() {
     let _lock = crate::journal::test_env_lock();
     let path = std::env::var_os("PATH").unwrap();
     let mut keys: Vec<_> = std::env::vars_os()
@@ -197,7 +197,7 @@ fi
     std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
     for (path, contents) in [
         (
-            ".lf/flows/delivery.yaml",
+            ".lf/graphs/delivery.yaml",
             "- cmd: __telemetry-scorecard\n- cmd: task complete FIX-1\n",
         ),
         (
@@ -235,13 +235,13 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
             synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
             snapshot: serde_json::from_value(json!({"projects": [planning.project], "items": [planning.item]})).unwrap(),
         }).unwrap();
-        let log_path = home.path().join("flow.log");
+        let log_path = home.path().join("graph.log");
         let log = fs::File::create(&log_path).unwrap();
-        let mut flow = Running { release: Some(home.path().join("release")), child: command(&binary, repo.path(), home.path(), &["-b", "task", "run", "FIX-1", "delivery"])
+        let mut graph = Running { release: Some(home.path().join("release")), child: command(&binary, repo.path(), home.path(), &["-b", "task", "run", "FIX-1", "delivery"])
             .stdout(log.try_clone().unwrap()).stderr(log).spawn().unwrap() };
         let deadline = Instant::now() + Duration::from_secs(30);
         while !home.path().join("ready").exists() {
-            assert!(flow.child.try_wait().unwrap().is_none() && Instant::now() < deadline, "{}", fs::read_to_string(&log_path).unwrap());
+            assert!(graph.child.try_wait().unwrap().is_none() && Instant::now() < deadline, "{}", fs::read_to_string(&log_path).unwrap());
             std::thread::sleep(Duration::from_millis(20));
         }
         // Authoritative simulated GitHub observation precedes any filing.
@@ -260,17 +260,17 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         let completed = capture(&binary, repo.path(), home.path());
         assert_eq!(completed["status"]["execution"]["status"], "done");
         assert_eq!(completed["status"]["execution"]["work"]["workflow"], merged["status"]["execution"]["work"]["workflow"]);
-        assert!(flow.child.try_wait().unwrap().is_none());
+        assert!(graph.child.try_wait().unwrap().is_none());
         assert!(repo.path().exists());
         fs::write(home.path().join("release"), "").unwrap();
-        assert!(flow.child.wait().unwrap().success(), "{}", fs::read_to_string(&log_path).unwrap());
+        assert!(graph.child.wait().unwrap().success(), "{}", fs::read_to_string(&log_path).unwrap());
         let arrived = capture(&binary, repo.path(), home.path());
         assert_eq!(arrived["status"]["execution"]["work"]["workflow"]["position"], json!({"kind":"node", "node":"end"}));
         let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         let completions: i64 = db.query_row("SELECT count(*) FROM task_events WHERE json_extract(kind_json,'$.kind')='completed'", [], |row| row.get(0)).unwrap();
         assert_eq!(completions, 1);
-        let flows: i64 = db.query_row("SELECT count(*) FROM flow_processes f JOIN processes p ON p.id=f.lf_process_id WHERE p.outcome='succeeded'", [], |row| row.get(0)).unwrap();
-        assert_eq!(flows, 1);
+        let graphs: i64 = db.query_row("SELECT count(*) FROM graph_processes g JOIN processes p ON p.id=g.lf_process_id WHERE p.outcome='succeeded'", [], |row| row.get(0)).unwrap();
+        assert_eq!(graphs, 1);
         assert!(child.worktree.is_none());
         assert!(child.linear_id.is_none());
         assert_ne!(store.sqlite.task_state(&child.id).unwrap(), crate::durable::TaskState::Done);
@@ -365,7 +365,7 @@ fn fixture(
     .unwrap();
     repo.create_file(
         ".lf/workflows/delivery.yaml",
-        "edges:\n  - {from: start, to: end, flow: delivery}\n",
+        "edges:\n  - {from: start, to: end, graph: delivery}\n",
     );
     let now = time::OffsetDateTime::now_utc();
     let wave = Wave::new(

@@ -1,7 +1,7 @@
 //! Durable state for one Task.
 //!
 //! A Task owns one durable checkout, an optional PR, and Workflow progression.
-//! Sessions, Flows and Processes record work against that state.
+//! Sessions, Graphs and Processes record work against that state.
 
 pub mod comment;
 
@@ -514,7 +514,7 @@ pub struct Task {
     pub branch: String,
     pub base_commit: String,
     pub parent_pr_id: Option<TaskPrId>,
-    /// Explicit choice for every Flow step; None uses the step/config defaults.
+    /// Explicit choice for every Graph step; None uses the step/config defaults.
     pub agent: Option<String>,
     /// Set when abandonment is *requested*, not when it is applied. No launch
     /// path may start a Run for Task Work carrying this.
@@ -619,10 +619,10 @@ pub enum TaskEventKind {
         lf_process_ids: Vec<crate::id::LfProcessId>,
         reason: String,
     },
-    FlowFinished {
+    GraphFinished {
         #[serde(deserialize_with = "crate::id::deserialize_uuid")]
         invocation_id: String,
-        flow: String,
+        graph: String,
         summary: String,
     },
     /// Historical authored direction; the immutable publication owns its text.
@@ -675,7 +675,7 @@ impl TaskEventKind {
                 | Self::Started
                 | Self::Progress { .. }
                 | Self::HistoricalUncertaintyAccepted { .. }
-                | Self::FlowFinished { .. }
+                | Self::GraphFinished { .. }
                 | Self::Steer { .. }
                 | Self::Interrupt
         )

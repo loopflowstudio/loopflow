@@ -12,7 +12,7 @@ card and the copy around them are one template, drawn by hand. `main.py` fills
 in the download link and install command from `content.yaml`, which also holds
 every other page's copy; `static/style.css` controls layout. `navigation` at the
 top of the file is the one bar on the homepage and studio pages, including its
-Company menu. Flows navigation on docs pages goes to `/docs/authoring#flows`.
+Company menu. Graphs navigation on docs pages goes to `/docs/authoring#graphs`.
 
 The `studio` block holds the company page at `/studio` and the `/etude`,
 `/fantasia` and `/about` pages. An effort

@@ -57,7 +57,7 @@
     "sessions": [],
     "processes": [],
     "workflow": null,
-    "flow_processes": []
+    "graph_processes": []
   },
   "pr": null,
   "branch": "jack/workspace",

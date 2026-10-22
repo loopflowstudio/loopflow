@@ -1,23 +1,23 @@
 # Using lf
 
 `lf` launches coding agents, keeps their Sessions, and runs saved Skills and
-Flows. Use as much of it as the request needs. A Flow is an authored sequence
+Graphs. Use as much of it as the request needs. A Graph is an authored sequence
 of steps; it runs with or without a Task.
 
 Work in the supplied checkout. Read its agent guide and existing work, preserve
 other contributions, and carry out the request here. Do not launch another
 agent or create a worktree merely to do the work already assigned to this one.
-Follow a supplied Flow's steps and boundaries; finishing it selects no next work,
-but steps a stopped Flow never reached remain yours.
+Follow a supplied Graph's steps and boundaries; finishing it selects no next work,
+but steps a stopped Graph never reached remain yours.
 
 Use the requested tools and repository conventions. Read
-`lf help <command-or-skill>` for instructions on Sessions, Skills, Flows,
+`lf help <command-or-skill>` for instructions on Sessions, Skills, Graphs,
 worktrees and PRs.
 
 When continuing an existing Task or when the request calls for Tasks, Waves,
 or Projects, read `lf help skill work` unless that guidance was preloaded. It is also
 available as `lf skill work`. Work association supplies context; the request
-or selected Skill/Flow determines what to do. Stay within that chosen scope.
+or selected Skill/Graph determines what to do. Stay within that chosen scope.
 
 Name the Session for the work in two or three specific words. Read `session_id`
 from `LF_AGENT_CALLER` and use `lf session rename <id> "<name>" --suggest` when

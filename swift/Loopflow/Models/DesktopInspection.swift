@@ -169,7 +169,7 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
             case .shell: content = "shell"; subject = nil
             case .session(let id, _, _): content = "session"; subject = id
             case .files(let id, _, _): content = "files"; subject = id
-            case .flowLog(let id, _, _): content = "flow_log"; subject = id
+            case .graphLog(let id, _, _): content = "graph_log"; subject = id
             }
         case .split(let splitAxis, let first, let second, let splitRatio):
             tabs = []; selectedTab = nil
@@ -242,13 +242,13 @@ public enum DesktopPaneAction: Codable, Sendable, Equatable {
     case hide, restore, focus, shell
     case text(surface: String, text: String)
     case key(surface: String, key: DesktopKey)
-    case files(task: String), flowLog(task: String)
+    case files(task: String), graphLog(task: String)
     case move(destination: DesktopPaneTarget, axis: SplitAxis)
     case resize(toward: DesktopPaneTarget, ratio: Double)
     case zoom(enabled: Bool)
 
     enum CodingKeys: String, CodingKey { case kind, axis, destination, toward, ratio, enabled, task, surface, text, key }
-    private enum Kind: String, Codable { case hide, restore, focus, move, resize, zoom, shell, files, text, key; case flowLog = "flow_log" }
+    private enum Kind: String, Codable { case hide, restore, focus, move, resize, zoom, shell, files, text, key; case graphLog = "graph_log" }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -262,7 +262,7 @@ public enum DesktopPaneAction: Codable, Sendable, Equatable {
         case .focus: self = .focus
         case .shell: self = .shell
         case .files: self = .files(task: try values.decode(String.self, forKey: .task))
-        case .flowLog: self = .flowLog(task: try values.decode(String.self, forKey: .task))
+        case .graphLog: self = .graphLog(task: try values.decode(String.self, forKey: .task))
         case .move: self = .move(destination: try values.decode(DesktopPaneTarget.self, forKey: .destination),
                                 axis: try values.decode(SplitAxis.self, forKey: .axis))
         case .resize: self = .resize(toward: try values.decode(DesktopPaneTarget.self, forKey: .toward),
@@ -290,8 +290,8 @@ public enum DesktopPaneAction: Codable, Sendable, Equatable {
         case .files(let task):
             kind = .files
             try values.encode(task, forKey: .task)
-        case .flowLog(let task):
-            kind = .flowLog
+        case .graphLog(let task):
+            kind = .graphLog
             try values.encode(task, forKey: .task)
         case .move(let destination, let axis):
             kind = .move

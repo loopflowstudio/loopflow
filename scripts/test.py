@@ -473,7 +473,7 @@ def _e2e_commands(_changed: list[str]) -> list[Command]:
 # Required Desktop checks build the app and inspect production views headless.
 # These extra integration tests launch the app and need a permissioned display
 # session. They run only with --ui-host; capability failure is diagnostic, never
-# a requirement for a headless Task Flow.
+# a requirement for a headless Task Graph.
 
 # Markers in xcodebuild output that mean the test *runner* failed to bootstrap
 # (a capability gap) rather than a test assertion failing (a real red).

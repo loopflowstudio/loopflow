@@ -149,30 +149,30 @@ impl Store {
 }
 
 impl Store {
-    pub async fn flow_inventory(
+    pub async fn graph_inventory(
         &self,
-        filter: &crate::durable::FlowProcessFilter,
+        filter: &crate::durable::GraphProcessFilter,
         after: Option<&str>,
         limit: std::num::NonZeroU32,
-    ) -> StoreResult<crate::durable::FlowProcessPage> {
+    ) -> StoreResult<crate::durable::GraphProcessPage> {
         let filter = filter.clone();
         let after = after.map(str::to_owned);
         run_sqlite(&self.sqlite, move |store| {
-            store.flow_inventory(&filter, after.as_deref(), limit)
+            store.graph_inventory(&filter, after.as_deref(), limit)
         })
         .await
     }
 
-    /// One Flow by Flow process id or unique prefix, drawn from its Processes.
-    pub async fn flow_detail(
+    /// One Graph by Graph process id or unique prefix, drawn from its Processes.
+    pub async fn graph_detail(
         &self,
         selector: &str,
-    ) -> StoreResult<Option<crate::durable::FlowProcessDetail>> {
+    ) -> StoreResult<Option<crate::durable::GraphProcessDetail>> {
         let selector = selector.to_string();
         run_sqlite(&self.sqlite, move |store| {
             Ok(store
-                .flow_process(&selector)?
-                .map(|(flow, entry)| flow.detail(entry)))
+                .graph_process(&selector)?
+                .map(|(graph, entry)| graph.detail(entry)))
         })
         .await
     }

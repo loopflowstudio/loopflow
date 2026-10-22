@@ -24,9 +24,9 @@ struct MultiplexerLayoutTests {
                 (.session(id: "session", location: captured, execution: owner), captured),
                 (.shell(location: captured, execution: owner), captured),
                 (.files(taskId: "task", location: captured, execution: owner), expected),
-                (.flowLog(taskId: "task", location: captured, execution: owner), expected),
+                (.graphLog(taskId: "task", location: captured, execution: owner), expected),
                 (.files(taskId: "task", location: captured), captured),
-                (.flowLog(taskId: "task", location: captured), captured),
+                (.graphLog(taskId: "task", location: captured), captured),
             ]
             for (content, location) in contents {
                 #expect(content.location == location)

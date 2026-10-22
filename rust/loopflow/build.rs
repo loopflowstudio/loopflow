@@ -25,7 +25,7 @@ mod migration_catalog;
 #[path = "src/store/migration_schema.rs"]
 mod migration_schema;
 
-/// Category directories whose skill/flow names are registered flat (no prefix).
+/// Category directories whose skill/graph names are registered flat (no prefix).
 /// Everything else is a namespaced category: public names carry a `<cat>-` prefix.
 /// Core categories share one flat namespace and must not collide with each other.
 /// Within a filename, `_` encodes a namespace separator (`wave_clarify.md`
@@ -55,7 +55,7 @@ fn main() {
     emit_schema_references(&manifest_dir, &out_dir);
     let builtins_dir = manifest_dir.join("src/builtins");
 
-    for (kind, extension) in [("skill", "md"), ("flow", "yaml")] {
+    for (kind, extension) in [("skill", "md"), ("graph", "yaml")] {
         generate_builtins(&builtins_dir, &out_dir, kind, extension);
     }
 
@@ -83,7 +83,7 @@ fn emit_schema_references(manifest_dir: &Path, out_dir: &Path) {
     }
     let schema =
         migration_schema::product_schema(&connection).expect("project canonical schema reference");
-    let json = serde_json::to_vec(&schema).expect("serialize canonical schema reference");
+    let json = serde_json::to_vec(&*schema).expect("serialize canonical schema reference");
     fs::write(out_dir.join("canonical_schema.json"), json)
         .expect("write canonical schema reference");
 
@@ -96,7 +96,7 @@ fn emit_schema_references(manifest_dir: &Path, out_dir: &Path) {
     let schema = (!drafts.is_empty()).then(|| {
         migration_schema::product_schema(&connection).expect("project draft schema reference")
     });
-    let json = serde_json::to_vec(&schema).expect("serialize draft schema reference");
+    let json = serde_json::to_vec(&schema.as_deref()).expect("serialize draft schema reference");
     fs::write(out_dir.join("draft_schema.json"), json).expect("write draft schema reference");
 }
 

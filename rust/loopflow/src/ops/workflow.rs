@@ -1,11 +1,11 @@
 //! A Task's Workflow: the workflow definition it took up, fixed from then
 //! on, and where the Task stands on it. Position is live state a person or a
 //! conversation moves: at a node, or on an edge with the Task run carrying
-//! it. `lf task run` chooses an edge, starts the edge's Flow, again when a
-//! Flow process fails, and writes the arrival when one succeeds; `lf task move`
+//! it. `lf task run` chooses an edge, starts the edge's Graph, again when a
+//! Graph process fails, and writes the arrival when one succeeds; `lf task move`
 //! sets a node outright. Every
 //! change is appended to the Task's history. Nothing here launches or
-//! controls a Flow.
+//! controls a Graph.
 
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +30,7 @@ pub enum WorkflowPosition {
     /// The Task waits on a person at this node, or stands at `start` or `end`.
     Node { node: String },
     /// The Task is on this edge. `lf_process_id` is the `lf task run` carrying it;
-    /// each Flow process it starts is that Process's child. `running` is read from
+    /// each Graph process it starts is that Process's child. `running` is read from
     /// that Process: an edge whose Task run has ended has stopped and holds the
     /// Task until it is chosen again or the Task is moved.
     Edge {
@@ -46,9 +46,9 @@ pub enum WorkflowPosition {
 pub enum WorkflowMoveKind {
     /// The Task took up this definition at `start`.
     TookUp,
-    /// An edge leaving `from` was chosen; an edge with a Flow then carries the Task.
+    /// An edge leaving `from` was chosen; an edge with a Graph then carries the Task.
     Chose,
-    /// The edge's Flow succeeded and its process put the Task at `to`.
+    /// The edge's Graph succeeded and its process put the Task at `to`.
     Arrived,
     /// The Task was put at `to` without running anything.
     Set,
@@ -78,7 +78,7 @@ impl WorkflowMoveKind {
 pub enum WorkflowActor {
     Person,
     Conversation,
-    /// An edge's Flow ending.
+    /// An edge's Graph ending.
     Edge,
 }
 
@@ -148,9 +148,9 @@ impl Workflow {
         let edges: Vec<String> = self
             .definition
             .outgoing(self.node())
-            .map(|(_, edge)| match &edge.flow {
-                Some(flow) => format!("{flow} (to {})", edge.to),
-                None => format!("{} (runs no Flow)", edge.to),
+            .map(|(_, edge)| match &edge.graph {
+                Some(graph) => format!("{graph} (to {})", edge.to),
+                None => format!("{} (runs no Graph)", edge.to),
             })
             .collect();
         if edges.is_empty() {
@@ -184,10 +184,10 @@ impl Workflow {
         let summary = self.summary();
         let mut lines = match &self.position {
             WorkflowPosition::Edge { running: true, .. } => {
-                return format!("{summary}. A person takes part again when that Flow finishes.");
+                return format!("{summary}. A person takes part again when that Graph finishes.");
             }
             WorkflowPosition::Edge { .. } => vec![format!(
-                "{summary}. Read `lf flow list --for-task {issue}` before choosing: run it again, take another edge leaving {}, or move the Task.",
+                "{summary}. Read `lf graph list --for-task {issue}` before choosing: run it again, take another edge leaving {}, or move the Task.",
                 self.node()
             )],
             WorkflowPosition::Node { node } => vec![match self.definition.node(node) {
@@ -203,7 +203,7 @@ impl Workflow {
         }
         for index in &self.outgoing {
             let edge = &self.definition.edges[*index as usize];
-            let runs = match edge.flow {
+            let runs = match edge.graph {
                 Some(_) => "",
                 None => " and runs nothing",
             };
@@ -244,7 +244,7 @@ mod tests {
         assert!(guidance.contains("`lf -b task run INF-1 ship` moves the Task to end"));
         assert!(guidance.contains("`lf task workflow move INF-1 <node>`"));
 
-        // On a running edge there is nothing to choose, only that the Flow runs.
+        // On a running edge there is nothing to choose, only that the Graph runs.
         let on_edge = |running| {
             at(WorkflowPosition::Edge {
                 edge: 2,
@@ -265,7 +265,7 @@ mod tests {
             guidance.contains("stopped on pursue (design → demo)"),
             "{guidance}"
         );
-        assert!(guidance.contains("`lf flow list --for-task INF-1`"));
+        assert!(guidance.contains("`lf graph list --for-task INF-1`"));
         assert!(guidance.contains("`lf -b task run INF-1 pursue`"));
         assert!(guidance.contains("`lf -b task run INF-1 task-design`"));
     }

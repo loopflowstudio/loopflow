@@ -1,5 +1,10 @@
 //! The product schema projection used by build-time and live validation.
 
+use std::collections::HashMap;
+use std::os::unix::fs::MetadataExt;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ProductSchemaObject {
     pub(super) object_type: String,
@@ -21,12 +26,86 @@ pub(super) struct ForeignKeyDefinition {
     pub(super) match_clause: String,
 }
 
+/// One committed schema of one database file: the file's identity plus
+/// SQLite's schema cookie at the time of the read.
+#[derive(Debug, PartialEq, Eq)]
+struct SchemaCookie {
+    dev: u64,
+    ino: u64,
+    schema_version: i64,
+}
+
+/// The last committed schema this process read from one database file.
+#[derive(Debug)]
+struct LiveSchema {
+    cookie: SchemaCookie,
+    schema: Arc<[ProductSchemaObject]>,
+}
+
 /// Every product table, view, index, and trigger with defining SQL and
 /// explicit foreign-key metadata. `schema_migrations` is bookkeeping rather
 /// than product schema, so no migration declares it.
+///
+/// SQLite bumps `PRAGMA schema_version` on every committed DDL change from any
+/// connection or process, so one file read twice at one cookie holds the same
+/// objects; the second read is served from memory. In-memory databases and
+/// reads inside a write transaction (uncommitted DDL) always read afresh.
 pub(crate) fn product_schema(
     conn: &rusqlite::Connection,
-) -> rusqlite::Result<Vec<ProductSchemaObject>> {
+) -> rusqlite::Result<Arc<[ProductSchemaObject]>> {
+    static LIVE_SCHEMAS: OnceLock<Mutex<HashMap<PathBuf, LiveSchema>>> = OnceLock::new();
+    let Some((path, cookie)) = _committed_cookie(conn)? else {
+        return Ok(_read_product_schema(conn)?.into());
+    };
+    let live_schemas = LIVE_SCHEMAS.get_or_init(Mutex::default);
+    if let Some(live) = live_schemas
+        .lock()
+        .expect("live schema cache poisoned")
+        .get(&path)
+        .filter(|live| live.cookie == cookie)
+    {
+        return Ok(Arc::clone(&live.schema));
+    }
+    let schema: Arc<[ProductSchemaObject]> = _read_product_schema(conn)?.into();
+    live_schemas
+        .lock()
+        .expect("live schema cache poisoned")
+        .insert(
+            path,
+            LiveSchema {
+                cookie,
+                schema: Arc::clone(&schema),
+            },
+        );
+    Ok(schema)
+}
+
+/// `None` when the schema is not a committed file state: in-memory databases
+/// and reads inside a write transaction.
+fn _committed_cookie(
+    conn: &rusqlite::Connection,
+) -> rusqlite::Result<Option<(PathBuf, SchemaCookie)>> {
+    let Some(path) = conn.path().filter(|path| !path.is_empty()) else {
+        return Ok(None);
+    };
+    if conn.transaction_state(None::<&str>)? == rusqlite::TransactionState::Write {
+        return Ok(None);
+    }
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return Ok(None);
+    };
+    // Read the cookie before `sqlite_master`: a DDL commit between the two reads
+    // then stores a newer schema under an older cookie the file never returns to.
+    let schema_version = conn.pragma_query_value(None, "schema_version", |row| row.get(0))?;
+    let cookie = SchemaCookie {
+        dev: metadata.dev(),
+        ino: metadata.ino(),
+        schema_version,
+    };
+    Ok(Some((PathBuf::from(path), cookie)))
+}
+
+fn _read_product_schema(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<ProductSchemaObject>> {
     let mut statement = conn.prepare(
         "SELECT type, name, tbl_name, COALESCE(sql, '')
          FROM sqlite_master

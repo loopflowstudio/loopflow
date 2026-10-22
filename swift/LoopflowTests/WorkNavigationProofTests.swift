@@ -140,15 +140,15 @@ struct WorkNavigationProofTests {
         }))
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-        let flowData = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/flow_process_progress.json"))
-        let flows = try #require(JSONSerialization.jsonObject(with: flowData) as? [[String: Any]])
-        let latest = flows[0]
+        let graphData = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/graph_process_progress.json"))
+        let graphs = try #require(JSONSerialization.jsonObject(with: graphData) as? [[String: Any]])
+        let latest = graphs[0]
         var plan = try #require(JSONSerialization.jsonObject(with: placingTaskWorktrees(in: Data(contentsOf:
             root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")), at: repo)) as? [String: Any])
         var tasks = try #require(plan["tasks"] as? [String: Any])
         var items = try #require(tasks["items"] as? [[String: Any]])
         let taskIndex = try #require(items.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-review" })
-        items[taskIndex]["latest_flow_process"] = latest
+        items[taskIndex]["latest_graph_process"] = latest
         items[taskIndex]["execution"] = ["state": "running", "reason": "Running", "step": NSNull(), "captured": NSNull()]
         tasks["items"] = items; plan["tasks"] = tasks
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self)
@@ -189,7 +189,7 @@ struct WorkNavigationProofTests {
         #expect(window.firstResponder === terminals[0])
         #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").button().labelView().text().string()
             == "Show the all-wave roadmap and launch or attach")
-        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership").text().string() == "Independent")
+        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "session-graph-membership").text().string() == "Independent")
 
         try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review").button().tap()
         try await settle(window)
@@ -396,13 +396,13 @@ struct WorkNavigationProofTests {
             #expect(_terminalText(surface).components(separatedBy: reply).count == 3)
         }
         // A historical invocation must not jump into an identically keyed node
-        // of the current Flow. The real chip leaves this Session selected.
-        try await named.membership(.step(flow: "feature", flowLfProcessId: "prior-invocation",
+        // of the current Graph. The real chip leaves this Session selected.
+        try await named.membership(.step(graph: "feature", graphLfProcessId: "prior-invocation",
                                         step: "loop-or-next", node: 5, iterations: [[1, 1]],
                                         occurrence: .past), for: "first")
         await model.refresh()
         try await settle(window)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-graph-membership").button().tap()
         try await settle(window)
         #expect(model.navigation.selectedSessionId == "first")
         #expect(model.navigation.content == .terminals)
@@ -435,7 +435,7 @@ struct WorkNavigationProofTests {
             records.append([
                 "id": "row-\(index)", "run_id": "row-\(index)", "interactive": true, "work": NSNull(),
                 "title": "Conversation \(index)", "detail": "Local shell", "cwd": path,
-                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [shell],
+                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [shell],
                 "open_argv": ["must-not-launch"],
             ])
         }
@@ -587,12 +587,12 @@ struct WorkNavigationProofTests {
         [{"id":"navigation-split", "run_id": "navigation-split", "interactive": true,
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
           "title":"Navigation proof","detail":"Local cat PTY","cwd":"/tmp",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": ["ts_review00000000000000000000000000"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": ["ts_review00000000000000000000000000"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         let otherRecords = """
         [{"id":"context-session", "run_id": "context-session", "interactive": true,"work":null,
           "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","connect","context-session"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","connect","context-session"]}]
         """
         let query = RegistryQuery { args, cwd in
             switch args.first {
@@ -841,9 +841,9 @@ private actor NamedSessionSource {
         return String(decoding: try JSONSerialization.data(withJSONObject: records[index]), as: UTF8.self)
     }
 
-    func membership(_ value: SessionFlowMembership, for id: String) throws {
+    func membership(_ value: SessionGraphMembership, for id: String) throws {
         let index = try #require(records.firstIndex { $0["id"] as? String == id })
-        records[index]["flow_membership"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value))
+        records[index]["graph_membership"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value))
     }
 
     func rename(_ args: [String]) async throws -> String {

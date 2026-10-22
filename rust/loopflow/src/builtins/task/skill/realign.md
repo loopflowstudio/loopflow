@@ -42,10 +42,10 @@ Bring the plan and the implementation into agreement with what the work has taug
    When a change needs a product decision, show the exact choice and leave it
    unresolved. Do not silently promote a proposal into an accepted decision.
 
-   Maintain `.lf/wave/` only as part of a selected Loopflow Flow that calls for it.
+   Maintain `.lf/wave/` only as part of a selected Loopflow Graph that calls for it.
    Standalone reconciliation and Work association alone leave it read-only;
    record proposed Wave changes in scratch instead. The memory curation below
-   applies only inside that Flow procedure.
+   applies only inside that Graph procedure.
 
    Before curating the selected Wave's memory, inspect `.lf/wave/<address>/` with
    ordinary filesystem tools for immediate child directories containing
@@ -70,7 +70,7 @@ Bring the plan and the implementation into agreement with what the work has taug
    repairs with the smallest relevant check. Keep blockers, contrary evidence,
    and deferred checks visible where they affect the next action. If a check cannot
    run headless, leave it to gate/CI or replace it with a headless check; do not
-   block the Flow on it. Human judgment belongs to demo/review.
+   block the Graph on it. Human judgment belongs to demo/review.
 
 Keep named, dated decisions, draft/accepted status and remaining work in the
 plan. Record one check-result line. Omit session instructions and ambient Machine
@@ -92,7 +92,7 @@ the caller.
 
 Run `lf context` to read memory and scratch size targets, their configuration
 sources, and current usage. Read complete sources before curating them.
-Within the selected Flow's memory procedure, curate Wave memory gradually. When it exceeds either limit, retire the largest
+Within the selected Graph's memory procedure, curate Wave memory gradually. When it exceeds either limit, retire the largest
 stale sections to git history first and bring it just under both limits. Stop
 once it fits; do not rewrite the whole memory toward a smaller target or shrink
 an in-budget memory merely for size. Continue correcting stale guidance and

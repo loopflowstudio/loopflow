@@ -177,7 +177,7 @@
       "tab": null
     },
     "action": {
-      "kind": "flow_log",
+      "kind": "graph_log",
       "task": "task-fixture"
     }
   },

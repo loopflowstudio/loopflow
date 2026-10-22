@@ -324,6 +324,29 @@ a person does. Its two directions (passive listing, readable copied history)
 are built. Recorded for Jack, not blocking the interactive demo: `--rent`
 under `-b` (Q7), logins left on a deleted pod (Q8).
 
+## Concept review (2026-10-22, headless)
+
+The model still maps one-to-one; one lifecycle gap. A rented Machine can end
+while it owns an uncompleted Task: `lf machine end`, the soft deadline, or its
+guardian (refresh then marks the rental `ended`). Drain alone never does this,
+because it waits for completion. Today nothing changes the Task's ownership, so
+the next `lf task run X` forwards to a deleted pod and fails on SSH. The only
+recovery is a manual `lf machine use`, which nothing points to. A deleted Machine
+cannot own work.
+
+Direction for implement, settled by the brief's allocation record (Task owned on
+a Machine) and the repository's Flexibility rule: when a rental reaches `ended`
+on any path, the pass hands each Task the Machine still owns back to the Machine
+running the pass. The pass uses an ordinary `Handoff`, so the log keeps "Jack on
+code-1" as history, and the person's claim survives. The pass says so:
+"LOO-570 back on <this machine>". Then `lf task run X` runs here, and
+`--rent code` rents again. The branch is safe because unpushed work already
+refuses the end unless `--force`, which names what it discards. Test: end a
+rental that owns an open Task, then check the owner is local and the ownership
+history still names code-1.
+
+No open product choice was added. Q7, Q8 and Q9 stand as recorded.
+
 ## Status and remaining work
 
 Built 2026-10-21 (implement, compress, copy-up implement, compress, post-review implement): the draft
@@ -349,6 +372,8 @@ copy re-exports from an hour before the rental's start and upserts).
 
 Remaining:
 
+0. Hand back Tasks still owned by a rented Machine when its rental ends
+   (concept review 2026-10-22).
 1. `lf session list --json` still omits copies (DTO unchanged by choice).
 2. **Live probe (~$0.10) and demo**, with the demo step: both spend money. The
    quote path was verified live (cpu3c×8 at $0.24/h; stock image pinned).

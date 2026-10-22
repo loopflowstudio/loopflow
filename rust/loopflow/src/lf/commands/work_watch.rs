@@ -1220,11 +1220,9 @@ mod tests {
         let WorkContent::Task(Some(reading)) = reader.project(Part::Task).unwrap() else {
             panic!("the independent Task reading must remain available");
         };
-        let workflow = reading.work.workflow.unwrap();
-        assert_eq!(workflow.definition.name, "feature");
-        assert!(
-            matches!(workflow.position, crate::ops::workflow::WorkflowPosition::Node { ref node } if node == "demo")
-        );
+        // The released row stood at a node; graphs replaced that definition, so
+        // the next run takes one up again and the Task reads with none.
+        assert!(reading.work.workflow.is_none());
         assert_eq!(
             crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap(),
             frontier

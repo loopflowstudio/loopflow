@@ -513,12 +513,9 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
     fixture
         .repo
         .create_file(".lf/skills/inspect-parser.md", "Inspect the parser.");
-    fixture
-        .repo
-        .create_file(".lf/flows/proof.yaml", "- inspect-parser\n");
     fixture.repo.create_file(
-        ".lf/workflows/proof.yaml",
-        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: end}\n",
+        ".lf/flows/proof.yaml",
+        "- inspect-parser\n- interactive: {name: demo, id: review}\n",
     );
     fixture.repo.stage_all();
     fixture.repo.commit("Native lifecycle fixture");
@@ -1818,13 +1815,7 @@ fn declared_agent_can_start_another_tasks_flow() {
     std::fs::create_dir_all(y.join(".lf/flows")).unwrap();
     std::fs::write(
         y.join(".lf/flows/switch-proof.yaml"),
-        "- cmd: sync --plan\n",
-    )
-    .unwrap();
-    std::fs::create_dir_all(y.join(".lf/workflows")).unwrap();
-    std::fs::write(
-        y.join(".lf/workflows/switch-proof.yaml"),
-        "nodes:\n  demo: demo\nedges:\n  - { from: start, to: demo, flow: switch-proof }\n  - { from: demo, to: end }\n",
+        "- cmd: sync --plan\n- interactive: demo\n",
     )
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
@@ -1838,7 +1829,7 @@ fn declared_agent_can_start_another_tasks_flow() {
         .select_wave_workflow(
             target.task.wave_id.as_ref().unwrap(),
             "switch-proof",
-            &std::fs::read_to_string(y.join(".lf/workflows/switch-proof.yaml")).unwrap(),
+            &std::fs::read_to_string(y.join(".lf/flows/switch-proof.yaml")).unwrap(),
         )
         .unwrap();
     let bin = fixture.home.path().join("bin");

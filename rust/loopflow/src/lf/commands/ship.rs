@@ -1,25 +1,28 @@
-//! `lf ship`: run a shipped Task's remaining Workflow in the foreground until
-//! it reaches `end`. At each node a headless stand-in runs the node's skill for
-//! the person who would be there; each edge runs as `lf task run` would run it.
-//! The caller backgrounds this process; reconcile restarts it if it dies.
+//! `lf ship`: run a shipped Task's remaining graph in the foreground until it
+//! reaches `end`. At each stage a headless stand-in runs the stage's skill for
+//! the person who would be there and decides the route; each edge runs as
+//! `lf task run` would run it. The caller backgrounds this process; reconcile
+//! restarts it if it dies.
 
 use std::path::Path;
 
 use anyhow::Result;
 
+use crate::flow::output::FlowOutput;
+use crate::flow::runner::SkillOutcome;
+use crate::flow::transitions::{FlowDecision, FlowVerdict};
 use crate::lf::Cli;
 use crate::ops::task::ship::{ship_begin, ship_next, stand_in_message, ShipStart, ShipStep};
 use crate::ops::task::TaskProcessOptions;
-use crate::workflow::END;
 
 pub fn run(
     cli: &Cli,
     repo: &Path,
     issue: &str,
-    flow: Option<&str>,
+    graph: Option<&str>,
     reason: Option<&str>,
 ) -> Result<()> {
-    let task = match ship_begin(issue, reason)? {
+    let task = match ship_begin(issue, graph, reason)? {
         ShipStart::Begun(task) => task,
         ShipStart::AlreadyShipping { issue, process } => {
             println!("{issue} is already shipping (process {process})");
@@ -36,51 +39,78 @@ pub fn run(
     };
     let issue = task.identifier.clone();
     let worktree = task.worktree()?.to_path_buf();
-    if let Some(flow) = flow {
-        super::flow::run_for_task(cli, task.id.as_str(), flow, &worktree, None)?;
-        let note = format!("shipped with {flow}");
-        println!(
-            "{}",
-            crate::ops::task::workflow_set(&issue, END, Some(&note))?
-        );
-        return Ok(());
-    }
     loop {
-        let edge = match ship_next(&issue)? {
+        let (edge, note) = match ship_next(&issue)? {
             ShipStep::Paused => return paused(&issue),
             ShipStep::Finished => {
                 println!("{issue} reached its end");
                 return Ok(());
             }
-            ShipStep::Edge(edge) => edge,
-            ShipStep::StandIn { stage, skill, edge } => {
+            ShipStep::Edge(edge) => (edge, None),
+            ShipStep::StandIn {
+                stage,
+                skill,
+                advance,
+                repeat,
+            } => {
                 eprintln!("{issue}: standing in at {stage} with {skill}");
-                let message = stand_in_message(&stage);
-                super::flow::run_for_task(
+                let output = repeat.as_ref().map(|_| FlowOutput::Decision);
+                let mut message = stand_in_message(&stage, repeat.is_some());
+                if let Some(output) = &output {
+                    message.push_str(&output.instructions());
+                }
+                let outcome = super::flow::run_task_skill(
                     cli,
                     task.id.as_str(),
-                    &skill,
                     &worktree,
-                    Some(&message),
+                    &skill,
+                    &message,
+                    output.as_ref(),
                 )?;
                 if ship_next(&issue)? == ShipStep::Paused {
                     return paused(&issue);
                 }
-                edge
+                let (edge, note) = match (outcome, repeat) {
+                    (
+                        Some(SkillOutcome::Decided(FlowVerdict {
+                            decision: FlowDecision::Iterate,
+                            summary,
+                        })),
+                        Some(repeat),
+                    ) => (repeat, format!("{stage} (stand-in) → repeat: {summary}")),
+                    (
+                        Some(SkillOutcome::Decided(FlowVerdict {
+                            decision: FlowDecision::Blocked,
+                            summary,
+                        })),
+                        Some(repeat),
+                    ) => (repeat, format!("{stage} (stand-in) → repeat, blocked: {summary}")),
+                    (
+                        Some(SkillOutcome::Decided(FlowVerdict {
+                            decision: FlowDecision::Advance,
+                            summary,
+                        })),
+                        _,
+                    ) => (advance, format!("{stage} (stand-in) → advance: {summary}")),
+                    (_, _) => (advance, format!("{stage} (stand-in) → advance")),
+                };
+                eprintln!("{issue}: {note}");
+                (edge, Some(note))
             }
         };
-        let (task, flow) = crate::ops::task::task_place(
+        let (task, runs) = crate::ops::task::task_place(
             repo,
             &issue,
             TaskProcessOptions {
                 wave: cli.wave.clone(),
                 agent: cli.agent.clone(),
                 flow: Some(edge),
+                reason: note,
                 ..TaskProcessOptions::default()
             },
         )?;
-        if let Some(flow) = flow {
-            super::flow::run_for_task(cli, task.id.as_str(), &flow, &worktree, None)?;
+        if let Some(edge) = runs {
+            super::flow::run_task_edge_for(cli, task.id.as_str(), &edge, &worktree)?;
             crate::ops::task::workflow_arrive(&task)?;
         }
     }

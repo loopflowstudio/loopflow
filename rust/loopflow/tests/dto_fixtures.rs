@@ -815,11 +815,15 @@ fn task_run_explanations_preserve_actions_and_missing_evidence() {
     ));
     assert!(matches!(
         &reports[1].action,
-        Some(TaskRunAction::Edge { flow: None, .. })
+        Some(TaskRunAction::Edge { runs: false, .. })
     ));
     assert!(matches!(
         &reports[2].action,
-        Some(TaskRunAction::Flow { .. })
+        Some(TaskRunAction::Edge {
+            take_up: false,
+            runs: true,
+            ..
+        })
     ));
     assert!(reports[3].action.is_none());
     assert_eq!(

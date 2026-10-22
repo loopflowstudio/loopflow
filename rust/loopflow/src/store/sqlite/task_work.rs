@@ -9,7 +9,7 @@ use crate::ops::workflow::{
 use crate::process::LfProcess;
 use crate::store::StoreResult;
 use crate::task_work::{TaskSession, TaskWork};
-use crate::workflow::{WorkflowDefinition, END, START};
+use crate::workflow::{CapturedGraph, Route, WorkflowDefinition, END, START};
 
 use super::SqliteStore;
 
@@ -126,9 +126,16 @@ pub(super) fn flows_of_task(
     )
 }
 
-/// The Task's workflow row: its definition, the node it waits at or left,
-/// and the edge it is on with the Process carrying it.
-type WorkflowRow = (WorkflowDefinition, String, Option<(u32, LfProcess)>);
+/// The Task's workflow row: the graph it took up and its projection, the
+/// stage it waits at or left, and the edge it is on with the Process carrying it.
+struct WorkflowRow {
+    graph: CapturedGraph,
+    definition: WorkflowDefinition,
+    routes: Vec<Route>,
+    node: String,
+    edge: Option<(u32, LfProcess)>,
+}
+
 
 fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<WorkflowRow>> {
     use rusqlite::OptionalExtension;
@@ -160,7 +167,20 @@ fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Optio
         )),
         None => None,
     };
-    Ok(Some((serde_json::from_str(&graph)?, node, edge)))
+    let graph: CapturedGraph = serde_json::from_str(&graph)?;
+    let (definition, routes) = graph.project().map_err(|error| {
+        crate::store::StoreError::InvalidData(format!(
+            "captured graph {} cannot be routed: {error}",
+            graph.name
+        ))
+    })?;
+    Ok(Some(WorkflowRow {
+        graph,
+        definition,
+        routes,
+        node,
+        edge,
+    }))
 }
 
 fn workflow_moves(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec<WorkflowMove>> {
@@ -257,7 +277,7 @@ fn choose_edge_in(
         WorkflowPosition::Node { .. } => None,
         WorkflowPosition::Edge { lf_process_id, .. } => Some(lf_process_id.as_str()),
     };
-    let carried = chosen.flow.is_some();
+    let carried = workflow.edge_runs(edge);
     let left = tx.execute(
         "UPDATE task_workflows SET node=?2,edge=?3,lf_process_id=?4,updated_at=?5
          WHERE task_id=?1 AND node=?6 AND lf_process_id IS ?7",
@@ -288,7 +308,12 @@ fn choose_edge_in(
 }
 
 fn arrive_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, by: &LfProcessId) -> StoreResult<()> {
-    let Some((definition, _, Some((edge, carrier)))) = workflow_row(tx, task)? else {
+    let Some(WorkflowRow {
+        definition,
+        edge: Some((edge, carrier)),
+        ..
+    }) = workflow_row(tx, task)?
+    else {
         return Ok(());
     };
     if &carrier.id != by {
@@ -318,7 +343,13 @@ fn set_node_in(
     by: Option<&LfProcessId>,
     note: Option<&str>,
 ) -> StoreResult<bool> {
-    let Some((definition, from, edge)) = workflow_row(tx, task)? else {
+    let Some(WorkflowRow {
+        graph,
+        node: from,
+        edge,
+        ..
+    }) = workflow_row(tx, task)?
+    else {
         return Ok(false);
     };
     tx.execute(
@@ -328,7 +359,7 @@ fn set_node_in(
     append_workflow_move(
         tx,
         task,
-        &definition.name,
+        &graph.name,
         WorkflowMoveKind::Set,
         (&from, node),
         edge.map(|(edge, _)| edge),
@@ -336,6 +367,26 @@ fn set_node_in(
         note,
     )?;
     Ok(true)
+}
+
+/// Where a graph taken up now places the Task: the last recorded position
+/// when it is one of the graph's stages, else `start`.
+fn placement_in(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+    definition: &WorkflowDefinition,
+) -> StoreResult<String> {
+    use rusqlite::OptionalExtension;
+    let last: Option<String> = conn
+        .query_row(
+            "SELECT to_node FROM task_workflow_moves WHERE task_id=?1 ORDER BY seq DESC LIMIT 1",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(last
+        .filter(|node| definition.node(node).is_some())
+        .unwrap_or_else(|| START.to_string()))
 }
 
 fn stands_at_end(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<bool> {
@@ -369,7 +420,7 @@ pub(super) fn reach_end_in(
         }
         EndMove::Set => {
             if !set_node_in(tx, task, END, by, note)? {
-                let unplanned = crate::workflow::unplanned();
+                let unplanned = CapturedGraph::unplanned();
                 tx.execute(
                     "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,?3,?4)",
                     rusqlite::params![
@@ -554,53 +605,86 @@ impl SqliteStore {
     }
 
     /// Whether the carrying Flow still runs is its Process's, read here.
-    fn read_workflow(
-        &self,
-        (definition, node, edge): WorkflowRow,
-        history: Vec<WorkflowMove>,
-    ) -> Workflow {
-        let position = match edge {
-            None => WorkflowPosition::Node { node },
+    fn read_workflow(&self, row: WorkflowRow, history: Vec<WorkflowMove>) -> Workflow {
+        let position = match row.edge {
+            None => WorkflowPosition::Node { node: row.node },
             Some((edge, process)) => WorkflowPosition::Edge {
                 edge,
                 lf_process_id: process.id.to_string(),
                 running: process.completed_at.is_none() && self.process_may_run(&process),
             },
         };
-        Workflow::new(definition, position, history)
+        Workflow::new(row.definition, row.routes, position, history)
     }
 
-    /// Take up `definition` for the Task as it is defined now, at `start`.
-    /// It replaces the Task's earlier Workflow; the history stays.
-    pub(crate) fn take_up_workflow(
+    /// The stage a graph taken up now is placed at: the Task's last recorded
+    /// position when the graph has that stage, else `start`.
+    pub(crate) fn workflow_placement(
         &self,
         task: &TaskId,
         definition: &WorkflowDefinition,
+    ) -> StoreResult<String> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(placement_in(&conn, task, definition)?)
+    }
+
+    /// Take up `graph` for the Task as it is defined now, placed by its
+    /// history. It replaces the Task's earlier Workflow; the history stays.
+    pub(crate) fn take_up_workflow(
+        &self,
+        task: &TaskId,
+        graph: &CapturedGraph,
         by: &LfProcessId,
         note: Option<&str>,
     ) -> StoreResult<()> {
+        let (definition, _) = graph
+            .project()
+            .map_err(crate::store::StoreError::InvalidData)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
+        let placed = placement_in(&tx, task, &definition)?;
         tx.execute(
             "INSERT OR REPLACE INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,?3,?4)",
             rusqlite::params![
                 task.as_str(),
-                serde_json::to_string(definition)?,
-                START,
+                serde_json::to_string(graph)?,
+                placed,
                 crate::store::rows::now_unix()
             ],
         )?;
         append_workflow_move(
             &tx,
             task,
-            &definition.name,
+            &graph.name,
             WorkflowMoveKind::TookUp,
-            (START, START),
+            (START, &placed),
             None,
             Some(by),
             note,
         )?;
         Ok(tx.commit()?)
+    }
+
+    /// The slice a Task on an edge runs: its captured graph, where the run
+    /// begins, the edge's name and the Process carrying it. `None` when the
+    /// Task is not on an edge that runs steps.
+    pub(crate) fn workflow_edge_slice(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Option<(CapturedGraph, crate::flow::runner::ExecutionCursor, String, LfProcess)>>
+    {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let Some(row) = workflow_row(&conn, task)? else {
+            return Ok(None);
+        };
+        let Some((edge, carrier)) = row.edge else {
+            return Ok(None);
+        };
+        let Some(start) = row.routes[edge as usize].start.clone() else {
+            return Ok(None);
+        };
+        let name = row.definition.edges[edge as usize].name.clone();
+        Ok(Some((row.graph, start, name, carrier)))
     }
 
     /// Leave by `edge`, one of `workflow.outgoing`. An edge with a Flow puts
@@ -657,13 +741,16 @@ impl SqliteStore {
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let Some((definition, node, edge)) = workflow_row(&tx, task)? else {
+        let Some(WorkflowRow {
+            graph, node, edge, ..
+        }) = workflow_row(&tx, task)?
+        else {
             return Ok(false);
         };
         append_workflow_move(
             &tx,
             task,
-            &definition.name,
+            &graph.name,
             WorkflowMoveKind::Shipped,
             (&node, &node),
             edge.map(|(edge, _)| edge),
@@ -682,9 +769,11 @@ impl SqliteStore {
     ) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(match workflow_row(&conn, task)? {
-            Some((definition, _, Some((edge, carrier)))) if &carrier.id == by => {
-                Some(definition.edges[edge as usize].to.clone())
-            }
+            Some(WorkflowRow {
+                definition,
+                edge: Some((edge, carrier)),
+                ..
+            }) if &carrier.id == by => Some(definition.edges[edge as usize].to.clone()),
             _ => None,
         })
     }
@@ -766,14 +855,15 @@ mod tests {
                 [task.as_str()],
             )
             .unwrap();
-        let definition = crate::workflow::WorkflowDefinition {
+        let definition = crate::workflow::CapturedGraph {
             name: "proof".into(),
-            nodes: vec![],
-            edges: vec![crate::workflow::WorkflowEdge {
-                from: "start".into(),
-                to: "end".into(),
-                flow: Some("pursue".into()),
-            }],
+            steps: vec![crate::flow::ConcreteStep::Skill(crate::flow::ConcreteSkill {
+                skill: crate::flow::Skill::named("pursue"),
+                id: None,
+                interactive: false,
+                returns: None,
+                sources: Vec::new(),
+            })],
         };
         store
             .take_up_workflow(&task, &definition, &by, None)

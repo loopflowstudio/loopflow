@@ -431,7 +431,7 @@ fn dual_kind_clients_share_selection_and_explicit_skill_steps_keep_review_metada
     assert!(resolve_definition(repo.path(), "solo", Some(DefinitionKind::Flow)).is_err());
     fs::write(
         repo.path().join(".lf/flows/outer.yaml"),
-        "- paired\n- flow: paired\n- step:\n    name: paired\n    id: review\n    human: true\n",
+        "- paired\n- flow: paired\n- interactive:\n    name: paired\n    id: review\n",
     )
     .unwrap();
     let expanded = compile_flow(&load_flow("outer", repo.path()).unwrap(), repo.path()).unwrap();
@@ -439,7 +439,7 @@ fn dual_kind_clients_share_selection_and_explicit_skill_steps_keep_review_metada
     assert!(matches!(&expanded[0], ConcreteStep::Skill(step) if step.skill.name == "solo"));
     assert!(matches!(&expanded[1], ConcreteStep::Skill(step) if step.skill.name == "solo"));
     assert!(
-        matches!(&expanded[2], ConcreteStep::Skill(step) if step.skill.name == "paired" && step.human)
+        matches!(&expanded[2], ConcreteStep::Skill(step) if step.skill.name == "paired" && step.interactive)
     );
     fs::write(repo.path().join(".lf/flows/paired.yaml"), "malformed: [").unwrap();
     assert!(resolve_definition(repo.path(), "paired", None)
@@ -902,7 +902,7 @@ fn flow_help_validates_expansion_and_review_boundaries_without_effects() {
     let flow = repo.path().join(".lf/flows/inspection.yaml");
     fs::write(
         &flow,
-        "- step:\n    name: solo\n    id: review\n    human: true\n",
+        "- interactive:\n    name: solo\n    id: review\n",
     )
     .unwrap();
     let output = success(run(
@@ -910,11 +910,11 @@ fn flow_help_validates_expansion_and_review_boundaries_without_effects() {
         home.path(),
         &["help", "flow", "inspection"],
     ));
-    assert!(String::from_utf8_lossy(&output).contains("Review steps: review"));
+    assert!(String::from_utf8_lossy(&output).contains("solo (interactive)"));
     for (definition, expected) in [
         ("- flow: absent-flow\n", "absent-flow"),
-        ("- step:\n    name: solo\n    human: true\n", "stable id"),
-        ("- step:\n    name: solo\n    id: review\n    human: true\n- step:\n    name: solo\n    id: review\n    human: true\n", "not unique"),
+        ("- step:\n    name: solo\n    human: true\n", "retired"),
+        ("- interactive:\n    name: solo\n    id: review\n- interactive:\n    name: solo\n    id: review\n", "not unique"),
     ] {
         fs::write(&flow, definition).unwrap();
         let output = run(repo.path(), home.path(), &["help", "flow", "inspection"]);

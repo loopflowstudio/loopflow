@@ -2179,8 +2179,7 @@ mod tests {
         fn skill(name: &str, human: bool) -> ConcreteStep {
             ConcreteStep::Skill(ConcreteSkill {
                 skill: Skill::named(name),
-
-                human,
+                interactive: human,
                 id: None,
                 returns: None,
                 sources: Vec::new(),

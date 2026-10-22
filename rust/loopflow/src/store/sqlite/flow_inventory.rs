@@ -330,7 +330,7 @@ impl SqliteStore {
                 ConcreteStep::Skill(ConcreteSkill {
                     skill: Skill::named(label),
                     id: None,
-                    human: false,
+                    interactive: false,
                     returns: None,
                     sources: Vec::new(),
                 })

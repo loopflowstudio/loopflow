@@ -33,7 +33,7 @@ func flowNodeStates(_ graph: FlowGraph, latest: FlowProcessDetail?) -> [UInt32: 
 }
 
 private func state(of node: FlowNode, latest: FlowProcessDetail?) -> FlowNodeState {
-    guard let latest else { return node.human ? .pendingHuman : .pending }
+    guard let latest else { return node.interactive ? .pendingHuman : .pending }
     let isCurrent = latest.current.map { node.contains($0) } ?? false
     if isCurrent {
         switch latest.presentation.execution {
@@ -45,7 +45,7 @@ private func state(of node: FlowNode, latest: FlowProcessDetail?) -> FlowNodeSta
         }
     }
     if latest.completed.contains(node.key) { return .completed }
-    return node.human ? .pendingHuman : .pending
+    return node.interactive ? .pendingHuman : .pending
 }
 
 // MARK: - Diagram
@@ -586,7 +586,7 @@ private struct FlowNodeDetail: View {
     private var facts: [String] {
         var facts: [String] = []
         switch node.kind {
-        case .skill where node.human: facts.append("Human review")
+        case .skill where node.interactive: facts.append("Stage")
         case .op: facts.append("Operation")
         case .xor: facts.append("Chooses one path")
         case .skill: break
@@ -626,7 +626,7 @@ enum FlowPalette {
         case .stalled: "stalled"
         case .stopped: "stopped here"
         case .unknown: "current, worker state unknown"
-        case .pendingHuman: "human review, pending"
+        case .pendingHuman: "stage, pending"
         case .pending: "pending"
         }
     }

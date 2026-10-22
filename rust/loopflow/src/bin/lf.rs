@@ -2303,23 +2303,22 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 directive: directive.clone(),
             },
         )?;
-        let Some(flow) = flow else {
+        let Some(edge) = flow else {
             // An edge that runs nothing: setting out on it is the whole move.
             println!(
-                "Task {} moved along a workflow edge that runs no Flow",
+                "Task {} moved along an edge that runs nothing",
                 task.identifier
             );
             return Ok(());
         };
         // This process carries the edge and writes where it left the Task: at
-        // the edge's target once an attempt at its Flow succeeded, otherwise
+        // the edge's target once an attempt at its slice succeeded, otherwise
         // still on the edge.
-        loopflow::lf::commands::flow::run_for_task(
+        loopflow::lf::commands::flow::run_task_edge_for(
             &cli,
             task.id.as_str(),
-            &flow,
+            &edge,
             task.worktree()?,
-            None,
         )?;
         return Ok(loopflow::ops::task::workflow_arrive(&task)?);
     }
@@ -2650,6 +2649,12 @@ fn execute_command(
             unreachable!("install dispatches before home routing")
         }
         Some(Commands::Flow { cmd }) => match cmd {
+            FlowCommand::Edge => {
+                let repo_root = loopflow::repo::working_directory()?;
+                with_runtime(&repo_root, args, || {
+                    loopflow::lf::commands::flow::run_task_edge(cli, &repo_root, binding)
+                })
+            }
             FlowCommand::List { json, inventory } if inventory.processes => {
                 loopflow::lf::commands::flow_inventory::list(inventory, *json)
             }

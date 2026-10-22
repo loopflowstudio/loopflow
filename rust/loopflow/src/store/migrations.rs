@@ -813,9 +813,6 @@ fn apply_set(
         migration_preflight(conn, migration, guards)?;
         conn.execute_batch(migration.sql)?;
         seed_peer_planning(conn, migration.sql)?;
-        if migration.sql.contains("CREATE TABLE wave_workflows (") {
-            super::sqlite::wave_definitions::import_registered_workflows(conn)?;
-        }
         backfill_known_checksums(conn, set)?;
         insert_applied_migration(conn, migration, &parent_history)?;
     }
@@ -3632,8 +3629,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<crate::workflow::WorkflowDefinition>(&placed.0).unwrap(),
-            crate::workflow::unplanned()
+            serde_json::from_str::<crate::workflow::CapturedGraph>(&placed.0).unwrap(),
+            crate::workflow::CapturedGraph::unplanned()
         );
         assert_eq!((placed.1, placed.2, placed.3, placed.4), (25, None, 25, 1));
         assert_eq!(

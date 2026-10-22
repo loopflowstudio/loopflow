@@ -519,6 +519,7 @@ fn format_written_steps(steps: &[Step]) -> String {
 fn format_written_step(step: &Step) -> String {
     match &step.target {
         Target::Flow(flow) => flow.name.clone(),
+        Target::Skill(skill) if step.interactive => format!("{} (interactive)", skill.name),
         target => format_target(target),
     }
 }
@@ -560,12 +561,7 @@ fn definition_help(
             skill.source.as_ref().map(|source| source.path.clone()),
         ),
         Target::Flow(flow) => {
-            let mut reviews = crate::flow::human_occurrence_ids(flow, repo)?;
-            reviews.sort();
-            let mut description = format_written_steps(&flow.items);
-            if !reviews.is_empty() {
-                description.push_str(&format!("\nReview steps: {}", reviews.join(", ")));
-            }
+            let description = format_written_steps(&flow.items);
             (
                 flow.name.as_str(),
                 DefinitionKind::Flow,

@@ -39,9 +39,6 @@ use crate::agent::checkout_execution_boundary;
 use crate::child::ChildRef;
 use crate::config::{load_config_or_default, parse_agent};
 use crate::durable::{TaskState, WorkStatus};
-use crate::flow::compile_flow;
-use crate::flow::load_flow;
-use crate::flow::ConcreteStep;
 use crate::git::worktree_name::WorktreeName;
 use crate::git::worktrees::{
     plan_branch_placement, PlacementPlan, PlacementStrategy, WorktreeSegment,
@@ -491,11 +488,11 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 }
 
 /// Place the Task and fill what a run leaves unsaid: `agent` as the Task's
-/// agent, `reason` as a steer, and the Flow. A Task on a workflow sets out on
-/// the outgoing edge that runs the named Flow, or on its only one; otherwise
-/// the Task takes up the workflow named, then its Wave or repository default. The caller then
-/// runs the returned Flow like any `lf --task ISSUE flow FLOW`; `None` is an
-/// edge that runs nothing.
+/// agent, `reason` as a steer, and the route. A Task on a graph sets out on
+/// the outgoing edge named, or on its only one; otherwise the Task takes up
+/// the graph named, then its Wave or repository default. The caller then runs
+/// the edge's slice as `lf --task ISSUE flow __edge`; `None` is an edge that
+/// runs nothing. The returned name is the edge's.
 pub fn task_place(
     repo: &Path,
     issue: &str,
@@ -527,15 +524,13 @@ pub fn task_place(
     })
 }
 
-/// Read the same edge choice for launch and explanation, without taking it up.
+/// The same edge choice for launch and explanation, without taking it up.
 #[derive(Debug)]
-pub(crate) enum TaskRunSelection {
-    Edge {
-        workflow: crate::ops::workflow::Workflow,
-        index: u32,
-        take_up: bool,
-    },
-    Flow(String),
+pub(crate) struct TaskRunSelection {
+    pub workflow: crate::ops::workflow::Workflow,
+    pub index: u32,
+    /// The graph the Task takes up first, when it has none or named another.
+    pub take_up: Option<crate::workflow::CapturedGraph>,
 }
 
 pub(crate) fn task_workflow_default(
@@ -575,23 +570,32 @@ pub(crate) fn select_task_run(
         )));
     }
     let current = store.sqlite.workflow(&task.id).map_err(task_error)?;
-    // A name that leaves the current node is that edge, whatever else
+    // A name that leaves the current stage is that edge, whatever else
     // shares its name.
     let names_edge = |name: &str| {
         current.as_ref().is_some_and(|workflow| {
             workflow
                 .definition
                 .outgoing(workflow.node())
-                .any(|(_, edge)| edge.name() == name)
+                .any(|(_, edge)| edge.name == name)
         })
     };
     let named = match requested {
-        Some(name) if !names_edge(name) => {
+        Some(name) if !names_edge(name) => Some(
             super::project::load_workflow(store, task.wave_id.as_ref(), name, checkout)?
-        }
+                .ok_or_else(|| {
+                    task_error(format!(
+                        "{name:?} is neither an edge leaving {} nor a graph. Outgoing edges: {}",
+                        current.as_ref().map_or(START, |workflow| workflow.node()),
+                        current
+                            .as_ref()
+                            .map_or("none".to_string(), |workflow| workflow.describe_outgoing()),
+                    ))
+                })?,
+        ),
         _ => None,
     };
-    // Naming a workflow names no edge of it.
+    // Naming a graph names no edge of it.
     let requested = requested.filter(|_| named.is_none());
     let take_up = match (&current, named) {
         (Some(workflow), named)
@@ -603,16 +607,13 @@ pub(crate) fn select_task_run(
         }
         (_, Some(named)) => Some(named),
         (_, None) => {
-            if let Some(flow) = requested {
-                return Ok(TaskRunSelection::Flow(load_task_flow(checkout, flow)?.0));
-            }
             let selection = task_workflow_default(store, task)?;
             let Some((name, source)) = selection else {
-                let available = crate::workflow::available_workflow_names(checkout)
+                let available = crate::flow::available_flow_names(checkout)
                     .map_err(task_error)?
                     .join(", ");
                 return Err(task_error(format!(
-                    "No workflow selected. Use `lf task run {} <workflow>`. Available: {available}",
+                    "No graph selected. Use `lf task run {} <graph>`. Available: {available}",
                     task.identifier
                 )));
             };
@@ -626,21 +627,26 @@ pub(crate) fn select_task_run(
                     &name,
                     &repository_for_task(store, task)?,
                 )?
-                .ok_or_else(|| task_error(format!("{source} Workflow {name:?} is unavailable")))?,
+                .ok_or_else(|| task_error(format!("{source} graph {name:?} is unavailable")))?,
             )
         }
     };
     // Validate the choice against the Workflow the Task will be on before
     // anything is written.
-    let taking_up = take_up.is_some();
-    let workflow = match take_up {
-        Some(definition) => crate::ops::workflow::Workflow::new(
-            definition,
-            WorkflowPosition::Node {
-                node: START.to_string(),
-            },
-            Vec::new(),
-        ),
+    let workflow = match &take_up {
+        Some(graph) => {
+            let (definition, routes) = graph.project().map_err(task_error)?;
+            let placed = store
+                .sqlite
+                .workflow_placement(&task.id, &definition)
+                .map_err(task_error)?;
+            crate::ops::workflow::Workflow::new(
+                definition,
+                routes,
+                WorkflowPosition::Node { node: placed },
+                Vec::new(),
+            )
+        }
         None => current.expect("a Task that takes nothing up keeps its Workflow"),
     };
     let issue = &task.identifier;
@@ -648,7 +654,7 @@ pub(crate) fn select_task_run(
     let node = workflow.node();
     let refuse = |asked: String| {
         task_error(format!(
-            "Task {issue} is at {node} of workflow {name}: {asked}. Outgoing edges: {}. `lf task workflow move {issue} <node>` puts the Task at a node without running anything; `lf task run {issue} <workflow>` takes up another workflow; `lf flow <flow>` in the Task worktree runs a Flow without moving the Task",
+            "Task {issue} is at {node} of graph {name}: {asked}. Outgoing edges: {}. `lf task workflow move {issue} <stage>` puts the Task at a stage without running anything; `lf task run {issue} <graph>` takes up another graph; `lf flow <flow>` in the Task worktree runs a Flow without moving the Task",
             workflow.describe_outgoing(),
         ))
     };
@@ -660,19 +666,19 @@ pub(crate) fn select_task_run(
     {
         return Err(refuse(format!(
             "{} is running",
-            workflow.definition.edges[*edge as usize].name()
+            workflow.definition.edges[*edge as usize].name
         )));
     }
     let mut edges = workflow
         .definition
         .outgoing(node)
-        .filter(|(_, edge)| requested.is_none_or(|name| edge.name() == name));
+        .filter(|(_, edge)| requested.is_none_or(|name| edge.name == name));
     let (index, _) = match (edges.next(), edges.next()) {
         (Some(edge), None) => edge,
         (None, _) | (Some(_), Some(_)) => {
             return Err(refuse(match requested {
                 Some(flow) => format!("{flow} does not leave {node}"),
-                None if node == END => format!("workflow {name} has reached its end"),
+                None if node == END => format!("graph {name} has reached its end"),
                 None => format!(
                     "{node} has more than one outgoing edge; name one as `lf task run {issue} <name>`"
                 ),
@@ -680,45 +686,41 @@ pub(crate) fn select_task_run(
         }
     };
     drop(edges);
-    Ok(TaskRunSelection::Edge {
+    Ok(TaskRunSelection {
         index,
-        take_up: taking_up,
+        take_up,
         workflow,
     })
 }
 
-/// Choose what `lf task run` runs and, for a Task on a Workflow, put the Task
-/// on the edge this process sets out on. A Task keeps the Workflow it has; one
-/// with none takes up the workflow named, then its Wave or repository default. A named Flow
-/// runs directly when it names a Flow rather than a Workflow.
+/// Choose what `lf task run` runs and put the Task on the edge this process
+/// sets out on. A Task keeps the graph it has; one with none takes up the
+/// graph named, then its Wave or repository default.
 async fn traverse_workflow(
     store: &SharedStore,
     task: &Task,
     requested: Option<&str>,
     note: Option<&str>,
 ) -> OpsResult<Option<String>> {
-    let (workflow, index, take_up) =
-        match select_task_run(store, task, task.worktree()?, requested)? {
-            TaskRunSelection::Edge {
-                workflow,
-                index,
-                take_up,
-            } => (workflow, index, take_up),
-            TaskRunSelection::Flow(flow) => return Ok(Some(flow)),
-        };
+    let TaskRunSelection {
+        workflow,
+        index,
+        take_up,
+    } = select_task_run(store, task, task.worktree()?, requested)?;
     let issue = &task.identifier;
     let name = &workflow.definition.name;
     let edge = workflow.definition.edges[index as usize].clone();
     let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| task_error("a workflow move requires a registered Process"))?;
-    if take_up {
+    if let Some(graph) = &take_up {
         store
             .sqlite
-            .take_up_workflow(&task.id, &workflow.definition, &process, note)
+            .take_up_workflow(&task.id, graph, &process, note)
             .map_err(task_error)?;
     }
     // Choosing an empty edge records arrival, then requests completion.
-    let chose = if edge.flow.is_none() {
+    let runs = workflow.edge_runs(index);
+    let chose = if !runs {
         let how = EndMove::Choose {
             workflow: workflow.clone(),
             edge: index,
@@ -732,13 +734,10 @@ async fn traverse_workflow(
     };
     if !chose {
         return Err(task_error(format!(
-            "Task {issue} moved on workflow {name} while this run was choosing; read `lf task status {issue}` and choose again"
+            "Task {issue} moved on graph {name} while this run was choosing; read `lf task status {issue}` and choose again"
         )));
     }
-    match &edge.flow {
-        Some(flow) => Ok(Some(load_task_flow(task.worktree()?, flow)?.0)),
-        None => Ok(None),
-    }
+    Ok(runs.then_some(edge.name))
 }
 
 /// The edge this process carried the Task along succeeded: put the Task at
@@ -811,7 +810,7 @@ pub fn workflow_set(issue: &str, node: &str, note: Option<&str>) -> OpsResult<St
             )));
         }
         Ok(format!(
-            "Task {issue} is at {node} of workflow {}",
+            "Task {issue} is at {node} of graph {}",
             definition.name
         ))
     })
@@ -829,7 +828,7 @@ fn validate_workflow_move(
     }
     let workflow = workflow.ok_or_else(|| {
         task_error(format!(
-            "Task {issue} has no workflow; `lf task run {issue} <workflow>` takes one up"
+            "Task {issue} has no graph; `lf task run {issue} <graph>` takes one up"
         ))
     })?;
     if !workflow.names_node(node) {
@@ -844,7 +843,7 @@ fn validate_workflow_move(
             .chain([END])
             .collect();
         return Err(task_error(format!(
-            "workflow {} has no node {node:?}. Nodes: {}",
+            "graph {} has no stage {node:?}. Stages: {}",
             workflow.definition.name,
             nodes.join(", ")
         )));
@@ -951,7 +950,7 @@ fn prepare_task(
                 if super::project::load_workflow(&store, task.wave_id.as_ref(), flow, repo)?
                     .is_none()
                 {
-                    load_task_flow(repo, flow)?;
+                    return Err(task_error(format!("graph {flow:?} is not defined")));
                 }
             }
             // A retained provider branch may already own Git work. It is metadata,
@@ -1704,19 +1703,6 @@ pub(crate) async fn task_worktree_blocker(
             task.identifier,
         ),
     }))
-}
-
-fn load_task_flow(repo: &Path, requested: &str) -> OpsResult<(String, Vec<ConcreteStep>)> {
-    let definition = load_flow(requested, repo)
-        .map_err(|error| task_error(format!("failed to load Task flow {requested:?}: {error}")))?;
-    let steps = compile_flow(&definition, repo).map_err(|error| {
-        task_error(format!("failed to expand Task flow {requested:?}: {error}"))
-    })?;
-    if steps.is_empty() {
-        return Err(task_error(format!("Task flow {requested:?} has no steps")));
-    }
-
-    Ok((definition.name, steps))
 }
 
 pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsResult<Option<Task>> {

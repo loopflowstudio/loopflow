@@ -2198,16 +2198,15 @@ fn waited_task_landing(destination: &str, failed_startup: bool) {
     }
     repo.create_branch("waited-repair");
     let worktree = repo.path().canonicalize().unwrap();
-    let workflow = if destination == "end" {
-        "nodes: {}\nedges:\n  - {from: start, to: end, flow: delivery-proof}\n"
-    } else {
-        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: delivery-proof}\n  - {from: review, to: end}\n"
-    };
+    // The graph lands, then reaches a stage or its end.
+    let mut graph = "- cmd: flow show deliver\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n".to_string();
+    if destination != "end" {
+        graph.push_str("- interactive: {name: demo, id: review}\n");
+    }
     for (path, contents) in [
         ("feature.txt", "keep the feature"),
         (".lf/config.yaml", "agent: codex\nlinear:\n  team: team-task-pr-tests\n"),
-        (".lf/workflows/delivery-proof.yaml", workflow),
-        (".lf/flows/delivery-proof.yaml", "- cmd: flow show ship\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n"),
+        (".lf/flows/delivery-proof.yaml", graph.as_str()),
     ] {
         let path = worktree.join(path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();

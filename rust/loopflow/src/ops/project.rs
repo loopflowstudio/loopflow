@@ -269,10 +269,14 @@ pub async fn workflow_catalog(
         .map(|entry| (entry.name.clone(), entry))
         .collect();
     for (name, content) in stored {
-        let (workflow, unavailable) = match crate::workflow::parse_workflow(&name, &content, repo) {
-            Ok(workflow) => (Some(workflow), None),
-            Err(error) => (None, Some(error)),
-        };
+        let (workflow, unavailable) =
+            match crate::workflow::CapturedGraph::from_source(&name, &content, repo)
+                .map_err(|error| error.to_string())
+                .and_then(|graph| graph.project().map(|(definition, _)| definition))
+            {
+                Ok(workflow) => (Some(workflow), None),
+                Err(error) => (None, Some(error)),
+            };
         entries.insert(
             name.clone(),
             crate::workflow::WorkflowCatalogEntry {
@@ -394,16 +398,18 @@ fn read_saved(
     Ok((project, sync))
 }
 
+/// The graph named `name`, compiled now: the Wave's stored definition first,
+/// then the repository's file or the builtin.
 pub(crate) fn load_workflow(
     store: &Store,
     wave: Option<&crate::id::WaveId>,
     name: &str,
     repo: &Path,
-) -> OpsResult<Option<crate::workflow::WorkflowDefinition>> {
+) -> OpsResult<Option<crate::workflow::CapturedGraph>> {
     read_workflow_source(store, wave, name, repo)?
         .map(|content| {
-            crate::workflow::parse_workflow(name, &content, repo)
-                .map_err(|error| project_error(format!("workflow {name}: {error}")))
+            crate::workflow::CapturedGraph::from_source(name, &content, repo)
+                .map_err(|error| project_error(format!("graph {name}: {error}")))
         })
         .transpose()
 }

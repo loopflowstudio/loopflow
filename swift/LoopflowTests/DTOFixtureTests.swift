@@ -136,9 +136,9 @@ struct DTOFixtureTests {
     @Test func taskRunExplanationsPreserveActionsAndMissingEvidence() throws {
         let data = try loadFixtureData("task_run_explanations.json")
         let reports = try JSONDecoder().decode([TaskRunExplanation].self, from: data)
-        #expect(reports[0].action == .edge(workflow: "feature", takeUp: true, from: "start", to: "design", flow: "task-design"))
-        #expect(reports[1].action == .edge(workflow: "feature", takeUp: false, from: "design", to: "end", flow: nil))
-        #expect(reports[2].action == .flow("proof"))
+        #expect(reports[0].action == .edge(workflow: "feature", takeUp: true, from: "start", to: "review-design", name: "kickoff", runs: true))
+        #expect(reports[1].action == .edge(workflow: "feature", takeUp: false, from: "review-design", to: "end", name: "end", runs: false))
+        #expect(reports[2].action == .edge(workflow: "proof", takeUp: false, from: "start", to: "end", name: "proof", runs: true))
         #expect(reports[3].action == nil)
         #expect(try JSONDecoder().decode([TaskRunExplanation].self, from: JSONEncoder().encode(reports)) == reports)
     }
@@ -370,14 +370,13 @@ struct DTOFixtureTests {
         #expect(work.flowProcesses[0].state == .current)
         #expect(!work.processes.isEmpty)
         let workflow = try #require(work.workflow)
-        #expect(workflow.nodes.map(\.name) == ["design", "demo"])
+        #expect(workflow.nodes.map(\.name) == ["review-design", "demo"])
         #expect(workflow.nodes.map(\.description) == ["you review the plan", "you try the change"])
-        #expect(workflow.edges.last?.launchName == "ship")
-        // An edge that runs nothing is chosen by the node it enters.
+        #expect(workflow.edges.last?.name == "deliver")
+        // An edge that runs nothing is named by the end it enters.
         let research = try JSONDecoder().decode([WorkflowCatalogEntry].self, from: loadFixtureData("workflow_catalog.json"))
             .first { $0.name == "research" }?.workflow
-        #expect(research?.edges.last?.flow == nil)
-        #expect(research?.edges.last?.launchName == "end")
+        #expect(research?.edges.last?.name == "end")
         #expect(workflow.position == .edge(index: 2, lfProcessId: work.flowProcesses[0].id, running: true))
         #expect(workflow.outgoing.isEmpty)
         #expect(workflow.history.map(\.kind) == [.set, .tookUp, .chose, .arrived, .shipped, .chose])

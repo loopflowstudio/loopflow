@@ -8,7 +8,7 @@ use crate::definition::{resolve_definition, DefinitionKind, Target};
 use crate::flow::graph::{FlowGraph, FlowNode, FlowNodeKind};
 use crate::flow::output::FlowOutput;
 use crate::flow::{compile_flow, FlowDefinition};
-use crate::lf::commands::{flow, run};
+use crate::lf::commands::run;
 use crate::lf::Cli;
 use crate::ops::WorkBinding;
 use crate::skills::invocation::SkillInvocation;
@@ -205,7 +205,6 @@ fn preview_flow(
     binding: Option<&WorkBinding>,
 ) -> Result<FlowContextPreview> {
     let items = compile_flow(flow, repo)?;
-    flow::require_autonomous_steps(&items)?;
     let graph = FlowGraph::new(&flow.name, &items);
     let mut current = if let Some(skill) = match items.first() {
         Some(crate::flow::ConcreteStep::Skill(skill)) => Some(skill.clone()),

@@ -55,14 +55,14 @@ public struct ContextExplanation: Codable, Equatable, Sendable {
 }
 
 public enum TaskRunAction: Codable, Equatable, Sendable {
-    case edge(workflow: String, takeUp: Bool, from: String, to: String, flow: String?)
-    case flow(String)
+    /// The edge a run would take; `runs` is false for an edge into `end` that runs nothing.
+    case edge(workflow: String, takeUp: Bool, from: String, to: String, name: String, runs: Bool)
 
     private enum CodingKeys: String, CodingKey {
-        case kind, workflow, from, to, flow
+        case kind, workflow, from, to, name, runs
         case takeUp = "take_up"
     }
-    private enum Kind: String, Codable { case edge, flow }
+    private enum Kind: String, Codable { case edge }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -72,24 +72,22 @@ public enum TaskRunAction: Codable, Equatable, Sendable {
                          takeUp: try values.decode(Bool.self, forKey: .takeUp),
                          from: try values.decode(String.self, forKey: .from),
                          to: try values.decode(String.self, forKey: .to),
-                         flow: try values.decodeIfPresent(String.self, forKey: .flow))
-        case .flow: self = .flow(try values.decode(String.self, forKey: .flow))
+                         name: try values.decode(String.self, forKey: .name),
+                         runs: try values.decode(Bool.self, forKey: .runs))
         }
     }
 
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .edge(let workflow, let takeUp, let from, let to, let flow):
+        case .edge(let workflow, let takeUp, let from, let to, let name, let runs):
             try values.encode(Kind.edge, forKey: .kind)
             try values.encode(workflow, forKey: .workflow)
             try values.encode(takeUp, forKey: .takeUp)
             try values.encode(from, forKey: .from)
             try values.encode(to, forKey: .to)
-            try values.encode(flow, forKey: .flow)
-        case .flow(let flow):
-            try values.encode(Kind.flow, forKey: .kind)
-            try values.encode(flow, forKey: .flow)
+            try values.encode(name, forKey: .name)
+            try values.encode(runs, forKey: .runs)
         }
     }
 }

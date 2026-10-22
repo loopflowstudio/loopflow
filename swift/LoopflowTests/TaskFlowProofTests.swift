@@ -59,8 +59,8 @@ struct TaskFlowTests {
         let catalog = try JSONDecoder().decode([FlowCatalogEntry].self, from: fixture("flow_catalog.json"))
         let workflows = try JSONDecoder().decode([WorkflowCatalogEntry].self, from: fixture("workflow_catalog.json"))
         #expect(catalog.map(\.id) == ["feature", "broken"])
-        #expect(workflows[0].workflow?.edges.map(\.launchName) == ["pursue", "pursue", "ship"])
-        #expect(workflows[1].source == ".lf/workflows/proof.yaml" && workflows[1].unavailable != nil)
+        #expect(workflows[0].workflow?.edges.map(\.name) == ["pursue", "pursue", "deliver"])
+        #expect(workflows[1].source == ".lf/flows/proof.yaml" && workflows[1].unavailable != nil)
         #expect(catalog[0].graph?.steps.count == 8 && catalog[1].unavailable != nil)
         let graph = try #require(catalog[0].graph)
         let composition = try #require(catalog[0].composition)
@@ -118,7 +118,7 @@ struct TaskFlowTests {
         #expect(flowNodeStates(blocked.graph, latest: blocked)[3] == .blocked)
         let evidence = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_stalled.json"))
         #expect(evidence.state == .stalled)
-        // A preview only marks human boundaries.
+        // A preview only marks stages.
         let preview = flowNodeStates(review.graph, latest: nil)
         #expect(preview[4] == .pendingHuman && preview[1] == .pending)
     }
@@ -456,7 +456,7 @@ struct TaskFlowProofTests {
         #expect((try? find("flow-node-4")) == nil, "composition starts folded")
         try find("composition-group-group-0").disclosureGroup().expand()
         try await settle(window)
-        #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, human review, pending")
+        #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, stage, pending")
 
         let oldRevision = try #require(model.flowCatalog.value?.first?.composition?.revision)
         try await source.reviseTemplate()
@@ -656,7 +656,7 @@ private actor FlowSource {
                 let target = prefix.isEmpty ? "implement" : "fix-implement"
                 return ["key": (prefix.isEmpty ? 0 : 4) + index, "id": NSNull(),
                  "label": index == 0 ? target : "loop-or-next", "kind": "skill",
-                 "human": false, "returns_to": index == 0 ? NSNull() : (prefix.isEmpty ? 0 : 4) as Any,
+                 "interactive": false, "returns_to": index == 0 ? NSNull() : (prefix.isEmpty ? 0 : 4) as Any,
                  "sources": ["feature"], "paths": []]
             }
         }
@@ -672,7 +672,7 @@ private actor FlowSource {
         }
         var nodes = steps("")
         nodes.append(["key": 3, "id": NSNull(), "label": "xor-route", "kind": "xor",
-                      "human": false, "returns_to": NSNull(), "sources": ["feature"],
+                      "interactive": false, "returns_to": NSNull(), "sources": ["feature"],
                       "paths": [["name": "fix", "description": "Repair", "steps": steps("3/fix/")]]])
         var tree = items("")
         tree.append(["kind": "node", "key": 3, "paths": ["fix": items("3/fix/")]])

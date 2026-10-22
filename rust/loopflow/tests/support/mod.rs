@@ -622,7 +622,7 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
         &[ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(label),
             id: None,
-            human: false,
+            interactive: false,
             returns: None,
             sources: Vec::new(),
         })],

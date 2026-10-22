@@ -368,10 +368,7 @@ fn fixture(
         "---\nlinear:\n  initiative: initiative-1\n---\nProduct\n",
     )
     .unwrap();
-    repo.create_file(
-        ".lf/workflows/delivery.yaml",
-        "edges:\n  - {from: start, to: end, flow: delivery}\n",
-    );
+    repo.create_file(".lf/flows/delivery.yaml", "- cmd: sync --plan\n");
     let now = time::OffsetDateTime::now_utc();
     let wave = Wave::new(
         WaveId::new(),

@@ -17,10 +17,9 @@ pub enum TaskRunAction {
         take_up: bool,
         from: String,
         to: String,
-        flow: Option<String>,
-    },
-    Flow {
-        flow: String,
+        name: String,
+        /// Whether the edge runs steps, or enters `end` running nothing.
+        runs: bool,
     },
 }
 
@@ -41,15 +40,17 @@ impl TaskRunExplanation {
                 take_up,
                 from,
                 to,
-                flow,
+                name,
+                runs,
             }) => format!(
-                "{}Workflow {workflow}: {from} → {to}; {}",
+                "{}graph {workflow}: {from} → {to}; {}",
                 if *take_up { "take up " } else { "" },
-                flow.as_ref()
-                    .map(|flow| format!("run {flow}"))
-                    .unwrap_or_else(|| "run no Flow".into()),
+                if *runs {
+                    format!("run {name}")
+                } else {
+                    "run nothing".into()
+                },
             ),
-            Some(TaskRunAction::Flow { flow }) => format!("run {flow} without moving the Workflow"),
             None => "unavailable".into(),
         };
         let mut lines = vec![
@@ -143,29 +144,23 @@ async fn read_task_run(
             return Ok(());
         }
     };
-    report.action = Some(match choice {
-        TaskRunSelection::Flow(flow) => TaskRunAction::Flow { flow },
-        TaskRunSelection::Edge {
-            workflow,
-            index,
-            take_up,
-        } => {
-            let edge = &workflow.definition.edges[index as usize];
-            if let Some(flow) = &edge.flow {
-                if let Err(error) = super::load_task_flow(checkout, flow) {
-                    report.impediments.push(error.to_string());
-                }
-            } else {
-                report.unavailable.push("Arrival requests planning completion; PR gates and eligible checkout cleanup are evaluated during settlement, not by this preview".into());
-            }
-            TaskRunAction::Edge {
-                workflow: workflow.definition.name,
-                take_up,
-                from: edge.from.clone(),
-                to: edge.to.clone(),
-                flow: edge.flow.clone(),
-            }
-        }
+    let TaskRunSelection {
+        workflow,
+        index,
+        take_up,
+    } = choice;
+    let edge = &workflow.definition.edges[index as usize];
+    let runs = workflow.edge_runs(index);
+    if !runs {
+        report.unavailable.push("Arrival requests planning completion; PR gates and eligible checkout cleanup are evaluated during settlement, not by this preview".into());
+    }
+    report.action = Some(TaskRunAction::Edge {
+        workflow: workflow.definition.name.clone(),
+        take_up: take_up.is_some(),
+        from: edge.from.clone(),
+        to: edge.to.clone(),
+        name: edge.name.clone(),
+        runs,
     });
     report
         .unavailable

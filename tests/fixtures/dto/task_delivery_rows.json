@@ -96,7 +96,7 @@
             "id": "design",
             "label": "task-design",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -108,7 +108,7 @@
             "id": "implement",
             "label": "implement",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -121,7 +121,7 @@
             "id": null,
             "label": "realign",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -134,7 +134,7 @@
             "id": "decide",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -147,7 +147,7 @@
             "id": "demo",
             "label": "demo",
             "kind": "skill",
-            "human": true,
+            "interactive": true,
             "returns_to": null,
             "sources": [
               "feature",
@@ -160,7 +160,7 @@
             "id": "decide_delivery",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -173,7 +173,7 @@
             "id": null,
             "label": "xor-route",
             "kind": "xor",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -188,7 +188,7 @@
                     "id": "patch",
                     "label": "patch",
                     "kind": "skill",
-                    "human": false,
+                    "interactive": false,
                     "returns_to": null,
                     "sources": [],
                     "paths": []
@@ -207,7 +207,7 @@
             "id": null,
             "label": "pr land -c",
             "kind": "op",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -510,7 +510,7 @@
             "id": "design",
             "label": "task-design",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -522,7 +522,7 @@
             "id": "implement",
             "label": "implement",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -535,7 +535,7 @@
             "id": null,
             "label": "realign",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -548,7 +548,7 @@
             "id": "decide",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -561,7 +561,7 @@
             "id": "demo",
             "label": "demo",
             "kind": "skill",
-            "human": true,
+            "interactive": true,
             "returns_to": null,
             "sources": [
               "feature",
@@ -574,7 +574,7 @@
             "id": "decide_delivery",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -587,7 +587,7 @@
             "id": null,
             "label": "xor-route",
             "kind": "xor",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -602,7 +602,7 @@
                     "id": "patch",
                     "label": "patch",
                     "kind": "skill",
-                    "human": false,
+                    "interactive": false,
                     "returns_to": null,
                     "sources": [],
                     "paths": []
@@ -621,7 +621,7 @@
             "id": null,
             "label": "pr land -c",
             "kind": "op",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -924,7 +924,7 @@
             "id": "design",
             "label": "task-design",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -936,7 +936,7 @@
             "id": "implement",
             "label": "implement",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -949,7 +949,7 @@
             "id": null,
             "label": "realign",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -962,7 +962,7 @@
             "id": "decide",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -975,7 +975,7 @@
             "id": "demo",
             "label": "demo",
             "kind": "skill",
-            "human": true,
+            "interactive": true,
             "returns_to": null,
             "sources": [
               "feature",
@@ -988,7 +988,7 @@
             "id": "decide_delivery",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -1001,7 +1001,7 @@
             "id": null,
             "label": "xor-route",
             "kind": "xor",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -1016,7 +1016,7 @@
                     "id": "patch",
                     "label": "patch",
                     "kind": "skill",
-                    "human": false,
+                    "interactive": false,
                     "returns_to": null,
                     "sources": [],
                     "paths": []
@@ -1035,7 +1035,7 @@
             "id": null,
             "label": "pr land -c",
             "kind": "op",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1476,7 +1476,7 @@
             "id": "design",
             "label": "task-design",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -1488,7 +1488,7 @@
             "id": "implement",
             "label": "implement",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1501,7 +1501,7 @@
             "id": null,
             "label": "realign",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1514,7 +1514,7 @@
             "id": "decide",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -1527,7 +1527,7 @@
             "id": "demo",
             "label": "demo",
             "kind": "skill",
-            "human": true,
+            "interactive": true,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1540,7 +1540,7 @@
             "id": "decide_delivery",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -1553,7 +1553,7 @@
             "id": null,
             "label": "xor-route",
             "kind": "xor",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -1568,7 +1568,7 @@
                     "id": "patch",
                     "label": "patch",
                     "kind": "skill",
-                    "human": false,
+                    "interactive": false,
                     "returns_to": null,
                     "sources": [],
                     "paths": []
@@ -1587,7 +1587,7 @@
             "id": null,
             "label": "pr land -c",
             "kind": "op",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1890,7 +1890,7 @@
             "id": "design",
             "label": "task-design",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -1902,7 +1902,7 @@
             "id": "implement",
             "label": "implement",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1915,7 +1915,7 @@
             "id": null,
             "label": "realign",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1928,7 +1928,7 @@
             "id": "decide",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -1941,7 +1941,7 @@
             "id": "demo",
             "label": "demo",
             "kind": "skill",
-            "human": true,
+            "interactive": true,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1954,7 +1954,7 @@
             "id": "decide_delivery",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -1967,7 +1967,7 @@
             "id": null,
             "label": "xor-route",
             "kind": "xor",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -1982,7 +1982,7 @@
                     "id": "patch",
                     "label": "patch",
                     "kind": "skill",
-                    "human": false,
+                    "interactive": false,
                     "returns_to": null,
                     "sources": [],
                     "paths": []
@@ -2001,7 +2001,7 @@
             "id": null,
             "label": "pr land -c",
             "kind": "op",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",

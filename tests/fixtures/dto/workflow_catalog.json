@@ -15,17 +15,17 @@
         {
           "from": "start",
           "to": "demo",
-          "flow": "pursue"
+          "name": "pursue"
         },
         {
           "from": "demo",
           "to": "demo",
-          "flow": "pursue"
+          "name": "pursue"
         },
         {
           "from": "demo",
           "to": "end",
-          "flow": "ship"
+          "name": "deliver"
         }
       ]
     },
@@ -33,9 +33,9 @@
   },
   {
     "name": "proof",
-    "source": ".lf/workflows/proof.yaml",
+    "source": ".lf/flows/proof.yaml",
     "workflow": null,
-    "unavailable": "invalid flow: workflow proof: stage lost is unreachable from start"
+    "unavailable": "invalid flow: graph proof: two routes leave demo as implement; compose one of them as a graph of its own"
   },
   {
     "name": "research",
@@ -44,7 +44,7 @@
       "name": "research",
       "nodes": [
         {
-          "name": "findings",
+          "name": "research",
           "skill": "research",
           "description": "you read the findings"
         }
@@ -52,18 +52,18 @@
       "edges": [
         {
           "from": "start",
-          "to": "findings",
-          "flow": "research"
+          "to": "research",
+          "name": "research"
         },
         {
-          "from": "findings",
-          "to": "findings",
-          "flow": "research"
+          "from": "research",
+          "to": "research",
+          "name": "research"
         },
         {
-          "from": "findings",
+          "from": "research",
           "to": "end",
-          "flow": null
+          "name": "end"
         }
       ]
     },

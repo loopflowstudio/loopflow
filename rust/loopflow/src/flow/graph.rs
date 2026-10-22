@@ -32,7 +32,7 @@ pub struct FlowNode {
     /// Literal skill name, operation, or XOR router.
     pub label: String,
     pub kind: FlowNodeKind,
-    pub human: bool,
+    pub interactive: bool,
     /// Key of the earlier node this deciding occurrence can return to.
     pub returns_to: Option<u32>,
     /// Composed Flows this occurrence was compiled from, outermost first.
@@ -218,7 +218,7 @@ fn project_interaction_nodes(steps: &[FlowNode]) -> InteractionGraph {
             let next = steps
                 .get(index + 1)
                 .map_or_else(|| end.to_string(), |node| node.key.to_string());
-            if node.human {
+            if node.interactive {
                 stages.push(node.key.to_string());
             }
             if node.kind == FlowNodeKind::Xor {
@@ -365,7 +365,7 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<FlowNode> {
                 id: skill.id.clone(),
                 label: skill.skill.name.clone(),
                 kind: FlowNodeKind::Skill,
-                human: skill.human,
+                interactive: skill.interactive,
                 sources: skill.sources.clone(),
                 paths: Vec::new(),
             },
@@ -374,7 +374,7 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<FlowNode> {
                 id: None,
                 label: op.item.display_name(),
                 kind: FlowNodeKind::Op,
-                human: false,
+                interactive: false,
                 returns_to: None,
                 sources: op.sources.clone(),
                 paths: Vec::new(),
@@ -398,7 +398,7 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<FlowNode> {
                     id: None,
                     label: branch.router.name.clone(),
                     kind: FlowNodeKind::Xor,
-                    human: false,
+                    interactive: false,
                     returns_to: None,
                     sources: branch.sources.clone(),
                     paths,
@@ -708,7 +708,7 @@ mod tests {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(name),
             id: id.map(str::to_string),
-            human,
+            interactive: human,
             returns,
             sources: Vec::new(),
         })
@@ -857,8 +857,7 @@ mod tests {
                 &[],
                 2,
             ),
-            ("deploy", &["gate", "pr land"], &[], 0),
-            ("ship", &["gate", "land --wait-and-fix"], &[], 0),
+            ("deliver", &["gate", "land --wait-and-fix"], &[], 0),
             ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
         ];
         for (name, labels, humans, returns) in cases {
@@ -878,7 +877,7 @@ mod tests {
                     .steps
                     .iter()
                     .enumerate()
-                    .filter_map(|(i, s)| s.human.then_some(i))
+                    .filter_map(|(i, s)| s.interactive.then_some(i))
                     .collect::<Vec<_>>(),
                 *humans,
                 "{name}"
@@ -939,7 +938,7 @@ mod tests {
             ]
         );
         // Review and landing are the conversation's to launch, not this Flow's.
-        assert!(graph.steps.iter().all(|node| !node.human));
+        assert!(graph.steps.iter().all(|node| !node.interactive));
         assert!(graph
             .steps
             .iter()

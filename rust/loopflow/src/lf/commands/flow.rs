@@ -1,4 +1,3 @@
-use crate::definition::{resolve_definition, Target};
 use crate::durable::WorkRef;
 use crate::flow::compile_flow;
 use crate::flow::output::FlowOutput;
@@ -41,7 +40,6 @@ pub fn run(
     };
     let binding = binding.or(checkout.as_ref());
     let items = compile_flow(flow, repo)?;
-    require_autonomous_steps(&items)?;
     if let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) {
         block_on(async {
             let store = open_flow_store().await?;
@@ -56,6 +54,7 @@ pub fn run(
     execute(
         &flow.name,
         &items,
+        ExecutionCursor::default(),
         bound_message.as_deref().or(message),
         cli,
         repo,
@@ -63,21 +62,22 @@ pub fn run(
     )
 }
 
-pub(crate) fn require_autonomous_steps(items: &[ConcreteStep]) -> Result<()> {
-    for item in items {
-        match item {
-            ConcreteStep::Skill(skill) if skill.human => anyhow::bail!(
-                "Human step {} belongs in the Task conversation; operational Flows cannot launch review Sessions", skill.skill.name
-            ),
-            ConcreteStep::Xor(branch) => {
-                for path in branch.paths.values() {
-                    require_autonomous_steps(&path.steps)?;
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(())
+/// `lf --task ISSUE flow __edge`: run the slice of the Task's captured graph
+/// that its current edge names, from the route's first step to the next
+/// stage. The Task run that chose the edge is this process's parent; it
+/// writes the arrival when this process succeeds.
+pub fn run_task_edge(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> Result<()> {
+    let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) else {
+        anyhow::bail!("`lf flow __edge` runs a Task's edge; name the Task with --task");
+    };
+    let store = block_on(open_flow_store())?;
+    store.sqlite.require_task_launch(task)?;
+    let (graph, start, edge, _) = store
+        .sqlite
+        .workflow_edge_slice(task)?
+        .context("the Task is not on an edge that runs steps; `lf task run` chooses one")?;
+    print_pipeline_header(&format!("{} · {edge}", graph.name), &graph.steps);
+    execute(&graph.name, &graph.steps, start, None, cli, repo, binding)
 }
 
 pub fn show(name: &str, repo: &Path) -> Result<()> {
@@ -108,53 +108,21 @@ pub fn list(repo: &Path, json: bool) -> Result<()> {
 /// How many times one `lf task run` starts its Flow before giving up.
 const TASK_RUN_ATTEMPTS: u32 = 3;
 
-/// Carry one Task run: resolve the edge to an explicit skill or Flow child,
-/// and start it again while a Flow process fails. Each Flow attempt records its
-/// own FlowProcess beneath this process; a single skill remains a skill launch. A Flow held for a person or a watcher, an interrupted
-/// one, and a launch refused before any Flow started are returned as they
-/// ended. `message` is the step's first turn, such as a stand-in's instruction.
-pub fn run_for_task(
-    cli: &Cli,
-    issue: &str,
-    flow: &str,
-    checkout: &Path,
-    message: Option<&str>,
-) -> Result<()> {
-    let owner = match resolve_definition(checkout, flow, None)? {
-        Target::Flow(_) => "flow",
-        Target::Skill(_) => "skill",
-        Target::Command(_) | Target::Xor(_) => {
-            unreachable!("named definitions are skills or Flows")
-        }
-    };
-    let mut args = task_run_args(cli, issue, owner, flow);
-    args.extend(message.map(str::to_owned));
-    let lf = crate::os_process::resolve_lf_binary()?;
+/// Carry one Task run: start the Task's current edge as a child Flow process,
+/// and start it again while a Flow process fails. Each attempt records its own
+/// FlowProcess beneath this process. A Flow held for a person or a watcher, an
+/// interrupted one, and a launch refused before any Flow started are returned
+/// as they ended. `edge` names the edge for messages.
+pub fn run_task_edge_for(cli: &Cli, issue: &str, edge: &str, checkout: &Path) -> Result<()> {
+    let args = task_run_args(cli, issue, &["flow", "__edge"]);
     let store = block_on(open_flow_store())?;
     let store = &store.sqlite;
     let process =
         journal::current_lf_process_id().context("a Task run requires a registered Process")?;
-    // An interrupted Task run takes its running attempt with it.
-    static ATTEMPT_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    crate::agent::register_interrupt_cleanup(|| {
-        let pid = ATTEMPT_PID.load(std::sync::atomic::Ordering::Acquire);
-        if pid != 0 {
-            crate::platform::kill_process(pid);
-        }
-    });
     let mut attempt = 1;
     loop {
         let mark = store.process_mark()?;
-        let mut command = std::process::Command::new(&lf);
-        command.args(&args).current_dir(checkout);
-        crate::transport::configure_child(&mut command);
-        let output = crate::terminal_output::TerminalOutput::for_child(&mut command)?;
-        let mut child = command.spawn().context("could not start the Task's Flow")?;
-        ATTEMPT_PID.store(child.id(), std::sync::atomic::Ordering::Release);
-        let status = child.wait();
-        drop(output);
-        ATTEMPT_PID.store(0, std::sync::atomic::Ordering::Release);
-        let status = status.context("could not wait for the Task's Flow")?;
+        let status = spawn_task_child(&args, checkout)?;
         if status.success() {
             return Ok(());
         }
@@ -165,32 +133,99 @@ pub fn run_for_task(
                 .is_some_and(|child| matches!(store.flow_process(child.as_str()), Ok(Some(_))));
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {
-                eprintln!("Flow {flow} failed {attempt} times; this Task run stops here.");
+                eprintln!("Edge {edge} failed {attempt} times; this Task run stops here.");
             }
-            let code = status.code().and_then(|code| u8::try_from(code).ok());
-            return Err(crate::process::CommandExit(code.unwrap_or(130)).into());
+            return Err(exit_of(status).into());
         }
-        eprintln!(
-            "Flow {flow} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again."
-        );
+        eprintln!("Edge {edge} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again.");
         attempt += 1;
     }
 }
 
-/// The Flow child a Task run starts.
-fn task_run_args(cli: &Cli, issue: &str, owner: &str, flow: &str) -> Vec<String> {
+/// Run `skill` for the Task as a headless child, `message` as its first turn,
+/// and read the structured answer `output` asks for. `None` when the skill
+/// runs with no contract or answers outside it; the caller decides without.
+pub(crate) fn run_task_skill(
+    cli: &Cli,
+    issue: &str,
+    checkout: &Path,
+    skill: &str,
+    message: &str,
+    output: Option<&FlowOutput>,
+) -> Result<Option<SkillOutcome>> {
+    let mut step_cli = cli.process_options();
+    step_cli.output_schema = output.map(FlowOutput::schema);
+    step_cli.wave = cli.wave.clone();
+    let mut args = task_run_args(&step_cli, issue, &["skill", "--", skill]);
+    args.push(message.to_owned());
+    let store = block_on(open_flow_store())?;
+    let store = &store.sqlite;
+    let process =
+        journal::current_lf_process_id().context("a Task run requires a registered Process")?;
+    let mark = store.process_mark()?;
+    let status = spawn_task_child(&args, checkout)?;
+    if !status.success() {
+        return Err(exit_of(status).into());
+    }
+    let Some(output) = output else {
+        return Ok(None);
+    };
+    let Some(step) = store.child_process_after(&process, mark)? else {
+        return Ok(None);
+    };
+    let Some((_, input, _)) = store.process_input(&step)? else {
+        return Ok(None);
+    };
+    Ok(store
+        .input_final_answer(&input)?
+        .and_then(|text| answer_value(&text).ok())
+        .and_then(|value| output.decode(&value).ok()))
+}
+
+fn exit_of(status: std::process::ExitStatus) -> crate::process::CommandExit {
+    let code = status.code().and_then(|code| u8::try_from(code).ok());
+    crate::process::CommandExit(code.unwrap_or(130))
+}
+
+/// Start `lf <args>` in `checkout` and wait for it. An interrupted caller
+/// takes the running child with it.
+fn spawn_task_child(args: &[String], checkout: &Path) -> Result<std::process::ExitStatus> {
+    static ATTEMPT_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    crate::agent::register_interrupt_cleanup(|| {
+        let pid = ATTEMPT_PID.load(std::sync::atomic::Ordering::Acquire);
+        if pid != 0 {
+            crate::platform::kill_process(pid);
+        }
+    });
+    let lf = crate::os_process::resolve_lf_binary()?;
+    let mut command = std::process::Command::new(&lf);
+    command.args(args).current_dir(checkout);
+    crate::transport::configure_child(&mut command);
+    let output = crate::terminal_output::TerminalOutput::for_child(&mut command)?;
+    let mut child = command.spawn().context("could not start the Task's step")?;
+    ATTEMPT_PID.store(child.id(), std::sync::atomic::Ordering::Release);
+    let status = child.wait();
+    drop(output);
+    ATTEMPT_PID.store(0, std::sync::atomic::Ordering::Release);
+    status.context("could not wait for the Task's step")
+}
+
+/// The child a Task run starts: this launcher's options, the Task, then `tail`.
+pub(crate) fn task_run_args(cli: &Cli, issue: &str, tail: &[&str]) -> Vec<String> {
     let mut args = cli.step_args();
     if let Some(wave) = &cli.wave {
         args.extend(["--wave".to_owned(), wave.clone()]);
     }
-    args.extend(["--task", issue, owner, "--", flow].map(str::to_owned));
+    args.extend(["--task", issue].map(str::to_owned));
+    args.extend(tail.iter().map(|arg| arg.to_string()));
     args
 }
 
-/// Drive the Flow in this process, bracketed by flow journal events.
+/// Drive the Flow in this process from `start`, bracketed by flow journal events.
 fn execute(
     flow_name: &str,
     items: &[ConcreteStep],
+    start: ExecutionCursor,
     message: Option<&str>,
     cli: &Cli,
     repo: &Path,
@@ -210,7 +245,7 @@ fn execute(
             message,
             cwd: repo,
             launcher: cli,
-            position: Mutex::new(ExecutionCursor::default()),
+            position: Mutex::new(start.clone()),
             task: binding.and_then(|binding| match &binding.work {
                 WorkRef::Task(id) => Some(id.clone()),
                 _ => None,
@@ -231,7 +266,7 @@ fn execute(
             )
             .context("could not record the Flow; no steps launched")?;
         drop(admission);
-        let outcome = drive(&running, accounts).await?;
+        let outcome = drive(&running, start, accounts).await?;
         // A step that completed its Task could not clean up under its own live
         // Flow; the finished Flow can.
         if let (FlowOutcome::Completed, Some(task)) = (&outcome, &running.task) {
@@ -264,6 +299,10 @@ async fn open_flow_store() -> Result<SharedStore> {
 fn report_outcome(outcome: FlowOutcome) -> Result<()> {
     match outcome {
         FlowOutcome::Completed => Ok(()),
+        FlowOutcome::Staged(stage) => {
+            eprintln!("Reached {stage}, where a person takes part; a Task carries the graph on from there.");
+            Ok(())
+        }
         FlowOutcome::Waiting => Err(crate::process::FlowHeld(
             "Flow stopped before its last step; inspect its history and effects".into(),
         )
@@ -278,6 +317,7 @@ fn report_outcome(outcome: FlowOutcome) -> Result<()> {
 /// A Flow process that dies leaves its Processes as history; nothing resumes it.
 async fn drive(
     running: &RunningFlow<'_>,
+    start: ExecutionCursor,
     accounts: crate::provider_account::selection::AccountSelection,
 ) -> Result<FlowOutcome> {
     let fields = |extra: LfEventFields| LfEventFields {
@@ -293,14 +333,14 @@ async fn drive(
     let result = async {
         let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", running.flow);
         let _accounts = accounts.activate()?;
-        let mut cursor = ExecutionCursor::default();
+        let mut cursor = start;
         FlowRunner::new(running)
             .run_with_cursor(running.steps, &mut cursor)
             .await
     }
     .await;
     let (event, error) = match &result {
-        Ok(FlowOutcome::Completed) => (LfEventType::Completed, None),
+        Ok(FlowOutcome::Completed | FlowOutcome::Staged(_)) => (LfEventType::Completed, None),
         Ok(_) => (LfEventType::Escalated, None),
         Err(error) => (LfEventType::Errored, Some(error.to_string())),
     };
@@ -344,15 +384,13 @@ fn render_pipeline_lines(items: &[ConcreteStep]) -> Vec<String> {
     let mut lines = Vec::new();
     for item in items {
         match item {
-            ConcreteStep::Skill(skill) if skill.human => lines.push(format!(
-                "{} [review:{}]",
-                skill.skill.name,
-                skill
-                    .id
-                    .as_deref()
-                    .expect("validated review node has an id"),
-            )),
-            ConcreteStep::Skill(skill) => lines.push(skill.skill.name.clone()),
+            ConcreteStep::Skill(skill) => match skill.stage() {
+                Some(stage) if stage != skill.skill.name => {
+                    lines.push(format!("{} [stage {stage}]", skill.skill.name))
+                }
+                Some(_) => lines.push(format!("{} [stage]", skill.skill.name)),
+                None => lines.push(skill.skill.name.clone()),
+            },
             ConcreteStep::Command(command) => lines.push(command.item.to_string()),
             ConcreteStep::Xor(branch) => lines.extend(render_branch_lines(branch)),
         }
@@ -785,7 +823,7 @@ mod tests {
             let skill = ConcreteSkill {
                 skill: Skill::named("probe"),
                 id: None,
-                human: false,
+                interactive: false,
                 returns: None,
                 sources: Vec::new(),
             };
@@ -883,33 +921,39 @@ mod tests {
     }
 
     #[test]
-    fn builtin_task_flows_launch_as_operational_work() {
+    fn builtin_task_graphs_compile_and_the_stageless_ones_run_whole() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for name in ["task-design", "pursue", "queue", "ship"] {
+        for name in ["task-design", "pursue", "queue", "deliver"] {
             let flow = crate::flow::load_flow(name, &repo).unwrap();
             let items = crate::flow::compile_flow(&flow, &repo).unwrap();
-            super::require_autonomous_steps(&items)
-                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert!(
+                items.iter().all(|item| !matches!(item, ConcreteStep::Skill(skill) if skill.interactive)),
+                "{name} has a stage"
+            );
+        }
+        for name in ["feature", "code", "research"] {
+            let definition = crate::workflow::load_workflow(name, &repo)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{name} is a builtin graph"));
+            assert!(!definition.nodes.is_empty(), "{name} has stages");
         }
     }
 
     #[test]
-    fn validation_lists_human_nodes_hidden_in_xor_paths() {
+    fn pipeline_lines_mark_stages_hidden_in_xor_paths() {
         let repo = tempdir().unwrap();
         let flows = repo.path().join(".lf/flows");
         fs::create_dir_all(&flows).unwrap();
         fs::write(
             flows.join("choice.yaml"),
-            "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - step:\n              id: revise_choice\n              name: implement\n          - step:\n              id: review_choice\n              name: review-design\n              human: true\n",
+            "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - step:\n              id: revise_choice\n              name: implement\n          - interactive:\n              id: review_choice\n              name: review-design\n",
         )
         .unwrap();
         let flow = crate::flow::load_flow("choice", repo.path()).unwrap();
-        let human = crate::flow::human_occurrence_ids(&flow, repo.path()).unwrap();
-        assert_eq!(human, vec!["review_choice"]);
         let items = crate::flow::compile_flow(&flow, repo.path()).unwrap();
         assert!(render_pipeline_lines(&items)
             .iter()
-            .any(|line| line.contains("review-design [review:review_choice]")));
+            .any(|line| line.contains("review-design [stage review_choice]")));
     }
 
     #[test]
@@ -917,10 +961,8 @@ mod tests {
         use clap::Parser;
         let mode = |argv: &[&str]| {
             let cli = crate::lf::Cli::try_parse_from(argv).unwrap();
-            let args = task_run_args(&cli, "INF-1", "flow", "autonomous");
-            assert!(
-                args.ends_with(&["--task", "INF-1", "flow", "--", "autonomous"].map(String::from))
-            );
+            let args = task_run_args(&cli, "INF-1", &["flow", "__edge"]);
+            assert!(args.ends_with(&["--task", "INF-1", "flow", "__edge"].map(String::from)));
             (
                 args.contains(&"--batch".to_owned()),
                 args.contains(&"--interactive".to_owned()),

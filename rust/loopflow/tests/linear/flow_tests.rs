@@ -797,7 +797,7 @@ fn flow_parsing_parity() {
                 content: None,
             }),
             id: None,
-            human: false,
+            interactive: false,
             returns: None,
         }
     );
@@ -1095,12 +1095,11 @@ fn flow_output_shows_steps_and_agent_messages_with_opt_in_diagnostics() {
 }
 
 #[test]
-fn operational_flow_rejects_review_before_launch_or_capture() {
+fn operational_flow_stops_at_its_stage_without_launching_it() {
     for source in [
-        "- step:
+        "- interactive:
     id: review
     name: review-proof
-    human: true
 ",
         "- flow: nested-review
 ",
@@ -1112,10 +1111,9 @@ fn operational_flow_rejects_review_before_launch_or_capture() {
         write_flow(
             repo.path(),
             "nested-review",
-            "- step:
+            "- interactive:
     id: review
     name: review-proof
-    human: true
 ",
         );
         write_flow(repo.path(), "operational", source);
@@ -1125,20 +1123,17 @@ fn operational_flow_rejects_review_before_launch_or_capture() {
             &["--batch", "flow", "operational"],
             None,
         );
-        assert!(!output.status.success());
+        assert!(output.status.success(), "{output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
-            String::from_utf8_lossy(&output.stderr).contains("belongs in the Task conversation"),
+            stderr.contains("Reached review, where a person takes part") || stderr.contains("Reached review"),
             "{output:?}"
-        );
-        assert!(
-            support::recorded_flows(home.path()).is_empty(),
-            "a rejected definition launched a step"
         );
         let sessions: i64 = rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(sessions, 0, "a rejected definition opened a Session");
+        assert_eq!(sessions, 0, "a stage opened a Session with no one there");
     }
 }
 
@@ -1252,7 +1247,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
     write_flow(
         repo.path(),
         "review-first",
-        "- step:\n    id: review\n    name: review-proof\n    human: true\n",
+        "- interactive:\n    id: review\n    name: review-proof\n",
     );
     let prepared = run_lf(
         repo.path(),
@@ -1260,9 +1255,13 @@ fn observing_and_preparing_a_task_are_not_execution() {
         &["--task", "INF-123", "flow", "review-first", "--batch"],
         None,
     );
-    assert!(!prepared.status.success());
     assert!(
-        String::from_utf8_lossy(&prepared.stderr).contains("belongs in the Task conversation"),
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&prepared.stderr).contains("Reached review"),
         "{}",
         String::from_utf8_lossy(&prepared.stderr)
     );
@@ -1279,7 +1278,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
     );
     let sessions: Vec<serde_json::Value> = serde_json::from_slice(&sessions.stdout).unwrap();
     assert!(sessions.is_empty());
-    assert_eq!(entries(), 1, "rejected review writes no ownership entry");
+    assert_eq!(entries(), 1, "a stage reached writes no ownership entry");
 }
 
 #[test]
@@ -1700,12 +1699,12 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
             1
         );
     }
-    // A human boundary remains explicit and cannot silently run the next step
-    // just because the invocation has Task attribution.
+    // A stage remains explicit and cannot silently run the next step just
+    // because the invocation has Task attribution.
     write_flow(
         repo.path(),
         "review-contribution",
-        "- step:\n    id: accept\n    name: first\n    human: true\n- second\n",
+        "- interactive:\n    id: accept\n    name: first\n- second\n",
     );
     fs::remove_file(home.path().join("prompts")).unwrap();
     let output = run_lf(
@@ -1714,8 +1713,8 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
         &["--task", "INF-123", "review-contribution", "--batch"],
         Some(&path),
     );
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("belongs in the Task conversation"));
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Reached accept"));
     assert!(!home.path().join("prompts").exists());
     let listed = run_lf(
         repo.path(),
@@ -2034,7 +2033,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
         .select_wave_workflow(
             task.task.wave_id.as_ref().unwrap(),
             "feature",
-            loopflow::workflow::builtin_workflow("feature").unwrap(),
+            loopflow::builtins::get_builtin_flow("feature").unwrap(),
         )
         .unwrap();
     for skill in [
@@ -2337,13 +2336,13 @@ fn the_research_workflow_ends_on_its_edge_that_runs_nothing() {
         "{}",
         String::from_utf8_lossy(&ran.stderr)
     );
-    assert_eq!(position(), "findings");
-    // Two edges leave findings; the refusal names the one that runs nothing.
+    assert_eq!(position(), "research");
+    // Two edges leave research; the refusal names the one that runs nothing.
     let refused = run(&["task", "run", "INF-123"]);
     assert!(!refused.status.success());
     let error = String::from_utf8_lossy(&refused.stderr).to_string();
-    assert!(error.contains("end (runs no Flow)"), "{error}");
-    assert_eq!(position(), "findings");
+    assert!(error.contains("end (runs nothing)"), "{error}");
+    assert_eq!(position(), "research");
     let ended = run(&["task", "run", "INF-123", "end"]);
     assert!(
         ended.status.success(),

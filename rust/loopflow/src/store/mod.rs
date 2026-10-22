@@ -1567,14 +1567,15 @@ mod tests {
                 "INSERT INTO processes(id,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",
                 rusqlite::params![process,crate::id::TraceId::new()],
             ).unwrap();
-            let definition = crate::workflow::WorkflowDefinition {
+            let definition = crate::workflow::CapturedGraph {
                 name: "review".into(),
-                nodes: vec![crate::workflow::WorkflowNode {
-                    name: "review".into(),
-                    skill: "review".into(),
-                    description: None,
-                }],
-                edges: Vec::new(),
+                steps: vec![crate::flow::ConcreteStep::Skill(crate::flow::ConcreteSkill {
+                    skill: crate::flow::Skill::named("review"),
+                    id: None,
+                    interactive: true,
+                    returns: None,
+                    sources: Vec::new(),
+                })],
             };
             store
                 .sqlite

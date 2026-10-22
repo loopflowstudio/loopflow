@@ -36,10 +36,10 @@ struct TaskWorkflowHeader: View {
                     ForEach(workflow.outgoing, id: \.self) { index in
                         if workflow.edges.indices.contains(index) {
                             let edge = workflow.edges[index]
-                            Button(edge.launchName) { Task { await model.startTask(edge.launchName, task: task) } }
+                            Button(edge.name) { Task { await model.startTask(edge.name, task: task) } }
                                 .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
                                 .disabled(unavailable != nil)
-                                .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.launchName)")
+                                .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.name)")
                                 .accessibilityIdentifier("task-workflow-action-\(index)")
                         }
                     }
@@ -125,8 +125,8 @@ struct TaskWorkflowHeader: View {
                     WorkflowGraph(
                         nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
                         choices: workflow.outgoing, unavailable: unavailable, fits: true,
-                        hint: { "lf task run \(task.task.identifier) \($0.launchName) · to \($0.to)" },
-                        choose: { edge in Task { await model.startTask(edge.launchName, task: task) } })
+                        hint: { "lf task run \(task.task.identifier) \($0.name) · to \($0.to)" },
+                        choose: { edge in Task { await model.startTask(edge.name, task: task) } })
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Text(task.task.description)

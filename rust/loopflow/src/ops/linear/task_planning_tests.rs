@@ -633,7 +633,7 @@ async fn wave_workflow_uses_stored_definition_offline() {
 
     let fixture = Fixture::new().await;
     let (repo, wave) = planning_repo(&fixture).await;
-    let definition = "nodes: {}\nedges: [{from: start, to: end}]\n";
+    let definition = "[]\n";
     let source = repo.join("workflow.yaml");
     std::fs::write(&source, definition).unwrap();
     LINEAR_TEST_CONTEXT
@@ -1441,14 +1441,9 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             .sqlite
             .take_up_workflow(
                 &task.id,
-                &crate::workflow::WorkflowDefinition {
+                &crate::workflow::CapturedGraph {
                     name: "reopen".into(),
-                    nodes: vec![crate::workflow::WorkflowNode {
-                        name: "start".into(),
-                        skill: "review".into(),
-                        description: None,
-                    }],
-                    edges: vec![],
+                    steps: Vec::new(),
                 },
                 &process.id,
                 None,

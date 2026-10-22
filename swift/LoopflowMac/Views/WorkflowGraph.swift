@@ -31,10 +31,10 @@ struct WorkflowGraphLayout {
         let label: CGPoint
         let labelWidth: CGFloat
 
-        /// An edge is named by what it runs.
+        /// An edge is named by what it runs first.
         var text: String { Self.text(edge) }
 
-        static func text(_ edge: Workflow.Edge) -> String { edge.flow ?? "finish" }
+        static func text(_ edge: Workflow.Edge) -> String { edge.name }
     }
 
     static let nodeHeight: CGFloat = 44

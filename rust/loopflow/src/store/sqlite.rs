@@ -825,7 +825,6 @@ impl SqliteStore {
             "UPDATE waves SET promoted_at=COALESCE(promoted_at,?2) WHERE id=?1",
             params![wave.id(), wave.promoted_at().map(|at| at.unix_timestamp())],
         )?;
-        wave_definitions::import_workflows_on(&tx, wave.id().as_str(), Path::new(wave.repo()))?;
         tx.commit()?;
         Ok(())
     }

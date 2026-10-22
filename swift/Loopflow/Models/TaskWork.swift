@@ -26,25 +26,23 @@ public struct TaskOverview: Codable, Sendable, Equatable {
     }
 }
 
-/// A Task's Workflow: the definition it took up, where the Task stands on it,
-/// and how it got there. `start` and `end` are implicit nodes.
+/// A Task's Workflow: the graph it took up, where the Task stands on it, and
+/// how it got there. Nodes are stages where a person takes part; edges are the
+/// routes between them. `start` and `end` are implicit.
 public struct Workflow: Codable, Sendable, Equatable {
     public struct Node: Codable, Sendable, Hashable {
         public let name: String
         public let skill: String
-        /// One line saying what the person does here; `nil` when neither the
-        /// definition nor its skill says.
+        /// One line saying what the person does here; `nil` when the skill says nothing.
         public let description: String?
     }
 
     public struct Edge: Codable, Sendable, Hashable {
         public let from: String
         public let to: String
-        public let flow: String?
-
-        /// What `lf task run ISSUE <name>` takes to choose it: its Flow, or
-        /// the node it enters when it runs none.
-        public var launchName: String { flow ?? to }
+        /// What `lf task run ISSUE <name>` takes to choose it: the graph or
+        /// skill it runs first, or `end` when it runs nothing.
+        public let name: String
     }
 
     /// One change to the Task's position.

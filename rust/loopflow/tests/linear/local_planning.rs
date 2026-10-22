@@ -2759,7 +2759,7 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
         let wave_id = loopflow::id::WaveId::new();
         let root = repo.path().join(".lf/wave/tools");
         std::fs::create_dir_all(root.join("parser")).unwrap();
-        std::fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
+        std::fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
         if connected {
             std::fs::write(
                 repo.path().join(".lf/config.yaml"),
@@ -2780,8 +2780,8 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
             "Additional authored context.\n",
         )
         .unwrap();
-        let workflow = "nodes: {}\nedges: [{from: start, to: end}]\n";
-        std::fs::write(repo.path().join(".lf/workflows/finish.yaml"), workflow).unwrap();
+        let workflow = "- cmd: help\n";
+        std::fs::write(repo.path().join(".lf/flows/finish.yaml"), workflow).unwrap();
         let project = lf(
             repo.path(),
             home.path(),
@@ -2822,7 +2822,7 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
             repo.path().join("authored-wave"),
         )
         .unwrap();
-        std::fs::remove_file(repo.path().join(".lf/workflows/finish.yaml")).unwrap();
+        std::fs::remove_file(repo.path().join(".lf/flows/finish.yaml")).unwrap();
         let absent = lf(
             repo.path(),
             home.path(),
@@ -2836,10 +2836,10 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
             home.path(),
             &["wave", "workflow", "source", "finish", "tools/parser"],
         );
-        assert!(source.as_str().unwrap().contains("from: start"));
-        std::fs::write(repo.path().join(".lf/workflows/unimported.yaml"), workflow).unwrap();
+        assert_eq!(source.as_str().unwrap(), workflow);
+        std::fs::write(repo.path().join(".lf/flows/unimported.yaml"), workflow).unwrap();
         std::fs::write(
-            repo.path().join(".lf/workflows/finish.yaml"),
+            repo.path().join(".lf/flows/finish.yaml"),
             "invalid: true",
         )
         .unwrap();
@@ -3785,14 +3785,12 @@ fn offline_linear_checkout_uses_known_identifier_and_caps_title() {
 fn waveless_task_lifecycle() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
+    std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
     std::fs::write(repo.path().join(".lf/config.yaml"), "workflow: proof\n").unwrap();
-    std::fs::write(
-        repo.path().join(".lf/workflows/proof.yaml"),
-        "nodes: {review: demo}\nedges: [{from: start, to: review, flow: proof}, {from: review, to: end}]\n",
-    )
-    .unwrap();
-    repo.create_file(".lf/flows/proof.yaml", "- cmd: flow show proof\n");
+    repo.create_file(
+        ".lf/flows/proof.yaml",
+        "- cmd: flow show proof\n- interactive: {name: demo, id: review}\n",
+    );
     repo.stage_all();
     repo.commit("Configure repository workflow");
     repo.push();
@@ -3894,7 +3892,10 @@ fn workflow_defaults_follow_task_wave_and_repository() {
         ("wave", "wave-review"),
         ("explicit", "task-review"),
     ] {
-        repo.create_file(&format!(".lf/workflows/{name}.yaml"), &format!("nodes: {{{node}: demo}}\nedges: [{{from: start, to: {node}, flow: proof}}, {{from: {node}, to: end}}]\n"));
+        repo.create_file(
+            &format!(".lf/flows/{name}.yaml"),
+            &format!("- flow: proof\n- interactive: {{name: demo, id: {node}}}\n"),
+        );
     }
     repo.stage_all();
     repo.commit("Configure selection proof");
@@ -3962,7 +3963,7 @@ fn workflow_defaults_follow_task_wave_and_repository() {
         .output()
         .unwrap();
     assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("invalid Workflow name"));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("invalid graph name"));
     repo.create_file(".lf/config.yaml", "workflow: repository\n");
     let explicit = lf(
         repo.path(),

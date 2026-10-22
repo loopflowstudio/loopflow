@@ -194,7 +194,7 @@
                         "name": "delivery",
                         "steps": [
                           {
-                            "human": false,
+                            "interactive": false,
                             "id": null,
                             "key": 0,
                             "kind": "op",
@@ -206,7 +206,7 @@
                             ]
                           },
                           {
-                            "human": false,
+                            "interactive": false,
                             "id": null,
                             "key": 1,
                             "kind": "op",
@@ -519,7 +519,7 @@
                     "name": "delivery",
                     "steps": [
                       {
-                        "human": false,
+                        "interactive": false,
                         "id": null,
                         "key": 0,
                         "kind": "op",
@@ -531,7 +531,7 @@
                         ]
                       },
                       {
-                        "human": false,
+                        "interactive": false,
                         "id": null,
                         "key": 1,
                         "kind": "op",
@@ -776,7 +776,7 @@
           "name": "delivery",
           "steps": [
             {
-              "human": false,
+              "interactive": false,
               "id": null,
               "key": 0,
               "kind": "op",
@@ -788,7 +788,7 @@
               ]
             },
             {
-              "human": false,
+              "interactive": false,
               "id": null,
               "key": 1,
               "kind": "op",
@@ -1474,7 +1474,7 @@
               "name": "delivery",
               "steps": [
                 {
-                  "human": false,
+                  "interactive": false,
                   "id": null,
                   "key": 0,
                   "kind": "op",
@@ -1486,7 +1486,7 @@
                   ]
                 },
                 {
-                  "human": false,
+                  "interactive": false,
                   "id": null,
                   "key": 1,
                   "kind": "op",
@@ -2083,7 +2083,7 @@
                         "name": "delivery",
                         "steps": [
                           {
-                            "human": false,
+                            "interactive": false,
                             "id": null,
                             "key": 0,
                             "kind": "op",
@@ -2095,7 +2095,7 @@
                             ]
                           },
                           {
-                            "human": false,
+                            "interactive": false,
                             "id": null,
                             "key": 1,
                             "kind": "op",
@@ -2393,7 +2393,7 @@
                     "name": "delivery",
                     "steps": [
                       {
-                        "human": false,
+                        "interactive": false,
                         "id": null,
                         "key": 0,
                         "kind": "op",
@@ -2405,7 +2405,7 @@
                         ]
                       },
                       {
-                        "human": false,
+                        "interactive": false,
                         "id": null,
                         "key": 1,
                         "kind": "op",
@@ -2635,7 +2635,7 @@
           "name": "delivery",
           "steps": [
             {
-              "human": false,
+              "interactive": false,
               "id": null,
               "key": 0,
               "kind": "op",
@@ -2647,7 +2647,7 @@
               ]
             },
             {
-              "human": false,
+              "interactive": false,
               "id": null,
               "key": 1,
               "kind": "op",
@@ -3224,7 +3224,7 @@
               "name": "delivery",
               "steps": [
                 {
-                  "human": false,
+                  "interactive": false,
                   "id": null,
                   "key": 0,
                   "kind": "op",
@@ -3236,7 +3236,7 @@
                   ]
                 },
                 {
-                  "human": false,
+                  "interactive": false,
                   "id": null,
                   "key": 1,
                   "kind": "op",
@@ -3650,7 +3650,7 @@
                         "name": "delivery",
                         "steps": [
                           {
-                            "human": false,
+                            "interactive": false,
                             "id": null,
                             "key": 0,
                             "kind": "op",
@@ -3662,7 +3662,7 @@
                             ]
                           },
                           {
-                            "human": false,
+                            "interactive": false,
                             "id": null,
                             "key": 1,
                             "kind": "op",
@@ -3883,7 +3883,7 @@
                     "name": "delivery",
                     "steps": [
                       {
-                        "human": false,
+                        "interactive": false,
                         "id": null,
                         "key": 0,
                         "kind": "op",
@@ -3895,7 +3895,7 @@
                         ]
                       },
                       {
-                        "human": false,
+                        "interactive": false,
                         "id": null,
                         "key": 1,
                         "kind": "op",
@@ -4125,7 +4125,7 @@
           "name": "delivery",
           "steps": [
             {
-              "human": false,
+              "interactive": false,
               "id": null,
               "key": 0,
               "kind": "op",
@@ -4137,7 +4137,7 @@
               ]
             },
             {
-              "human": false,
+              "interactive": false,
               "id": null,
               "key": 1,
               "kind": "op",
@@ -4653,7 +4653,7 @@
               "name": "delivery",
               "steps": [
                 {
-                  "human": false,
+                  "interactive": false,
                   "id": null,
                   "key": 0,
                   "kind": "op",
@@ -4665,7 +4665,7 @@
                   ]
                 },
                 {
-                  "human": false,
+                  "interactive": false,
                   "id": null,
                   "key": 1,
                   "kind": "op",

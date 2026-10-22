@@ -56,7 +56,8 @@ public struct FlowNode: Decodable, Sendable, Hashable {
     /// Literal skill name, operation, or XOR router.
     public let label: String
     public let kind: FlowNodeKind
-    public let human: Bool
+    /// A stage: a person takes part here.
+    public let interactive: Bool
     public let returnsTo: UInt32?
     /// Composed Flows this occurrence came from, outermost first.
     public let sources: [String]
@@ -68,7 +69,7 @@ public struct FlowNode: Decodable, Sendable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case key, id, label, kind, human, sources, paths
+        case key, id, label, kind, interactive, sources, paths
         case returnsTo = "returns_to"
     }
 }
@@ -182,7 +183,7 @@ public struct WorkflowCatalogEntry: Decodable, Sendable, Hashable, Identifiable 
     public var id: String { name }
 }
 
-/// An authored workflow before any Task has taken it up.
+/// A graph projected as a Workflow before any Task has taken it up.
 public struct WorkflowDefinition: Decodable, Sendable, Hashable {
     public let name: String
     public let nodes: [Workflow.Node]
@@ -267,12 +268,12 @@ public struct FlowCompositionProjection {
                     let keys = item.nodeKeys
                     for key in keys { visible[key] = groupKey }
                     return [FlowNode(key: groupKey, id: nil, label: "▸ \(name) · \(keys.count)",
-                                     kind: .op, human: false, returnsTo: nil, sources: [], paths: [])]
+                                     kind: .op, interactive: false, returnsTo: nil, sources: [], paths: [])]
                 case .node(let key, let paths):
                     guard let node = sourceNodes[key] else { return [] }
                     visible[key] = key
                     return [FlowNode(key: key, id: node.id, label: node.label, kind: node.kind,
-                                     human: node.human, returnsTo: node.returnsTo, sources: node.sources,
+                                     interactive: node.interactive, returnsTo: node.returnsTo, sources: node.sources,
                                      paths: node.paths.map { path in
                         FlowGraphPath(name: path.name, description: path.description,
                                       steps: nodes(paths[path.name] ?? []))

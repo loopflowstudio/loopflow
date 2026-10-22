@@ -121,8 +121,8 @@ for line in sys.stdin:
             "- step: {name: second, agent: codex}\n",
         ),
         (
-            ".lf/workflows/feature.yaml",
-            "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n",
+            ".lf/flows/feature.yaml",
+            "- flow: pursue\n- interactive: {name: demo, id: review}\n",
         ),
     ] {
         let path = repo.path().join(path);
@@ -133,7 +133,7 @@ for line in sys.stdin:
     repo.commit("Define agent selection fixtures");
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let workflow = fs::read_to_string(repo.path().join(".lf/workflows/feature.yaml")).unwrap();
+    let workflow = fs::read_to_string(repo.path().join(".lf/flows/feature.yaml")).unwrap();
     store
         .select_wave_workflow(
             registered.task.wave_id.as_ref().unwrap(),
@@ -415,14 +415,6 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             record.item.team_id = Some("another-team".into());
         }
         if condition == "moved" {
-            // The repository still selects proof; give that Workflow a proof edge
-            // so this fixture reaches the planning mismatch admission check.
-            fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
-            fs::write(
-                repo.path().join(".lf/workflows/proof.yaml"),
-                "edges:\n  - {from: start, to: end, flow: proof}\n",
-            )
-            .unwrap();
             record.project.as_mut().unwrap().id = "another-project".into();
             record.item.project_id = Some("another-project".into());
         }
@@ -857,23 +849,23 @@ impl WorkflowTask {
             (".lf/flows/gate.yaml", "- cmd: flow show late\n"),
             // Another round succeeds; accepting fails until `late` exists.
             (
-                ".lf/workflows/gated.yaml",
-                "nodes:\n  review: demo\n  accepted: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: review, flow: proof}\n  - {from: review, to: accepted, flow: gate}\n  - {from: accepted, to: end}\n",
+                ".lf/flows/gated.yaml",
+                "- flow: proof\n- loop: proof\n  interactive: {name: demo, id: review}\n- flow: gate\n- interactive: {name: demo, id: accepted}\n",
             ),
             // The Wave's default, `feature`, as this repository defines it.
             (
-                ".lf/workflows/feature.yaml",
-                "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: end}\n",
+                ".lf/flows/feature.yaml",
+                "- flow: proof\n- interactive: {name: demo, id: review}\n",
             ),
-            // No PR: the last edge runs nothing.
+            // No PR: the last route runs nothing.
             (
-                ".lf/workflows/findings.yaml",
-                "nodes:\n  findings: research\nedges:\n  - {from: start, to: findings, flow: proof}\n  - {from: findings, to: end}\n",
+                ".lf/flows/findings.yaml",
+                "- flow: proof\n- interactive: {name: research, id: findings}\n",
             ),
-            // An ordinary repeatable edge returns to its review node.
+            // An ordinary repeatable route returns to its review stage.
             (
-                ".lf/workflows/rounds.yaml",
-                "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: review, flow: land-proof}\n  - {from: review, to: end, flow: broken}\n",
+                ".lf/flows/rounds.yaml",
+                "- flow: proof\n- flow: land-proof\n- loop: land-proof\n  interactive: {name: demo, id: review}\n- flow: broken\n",
             ),
         ] {
             let path = repo.path().join(path);
@@ -882,7 +874,7 @@ impl WorkflowTask {
         }
         // The Task's branch starts from these definitions and holds nothing.
         repo.stage_all();
-        repo.commit("Define the fixture Flows and workflows");
+        repo.commit("Define the fixture Flows and graphs");
         repo.create_branch("launch-proof");
         let registered = support::register_task_without_pr(
             home.path(),
@@ -906,8 +898,7 @@ impl WorkflowTask {
             loopflow::store::sqlite::SqliteStore::new(&self.home.path().join("loopflow.db"))
                 .unwrap();
         let content =
-            fs::read_to_string(self.repo.path().join(format!(".lf/workflows/{name}.yaml")))
-                .unwrap();
+            fs::read_to_string(self.repo.path().join(format!(".lf/flows/{name}.yaml"))).unwrap();
         store
             .select_wave_workflow(
                 self.registered.task.wave_id.as_ref().unwrap(),
@@ -1080,7 +1071,7 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
     let select = |name: &str| {
         sqlite.select_wave_workflow(task.wave_id.as_ref().unwrap(),
             name,
-            "nodes: {review: demo}\nedges: [{from: start, to: review, flow: proof}, {from: review, to: end}]\n",
+            "- flow: proof\n- interactive: {name: demo, id: review}\n",
         ).unwrap();
     };
     select("before-checkout");
@@ -1291,7 +1282,7 @@ fn a_stopped_edge_is_chosen_again_and_the_task_can_go_back() {
     );
     let error = refusal(task.run(&["task", "workflow", "move", "INF-123", "nowhere"]));
     assert!(
-        error.contains("Nodes: start, review, accepted, end"),
+        error.contains("Stages: start, review, accepted, end"),
         "{error}"
     );
     // Taking up another workflow starts over and keeps the history.
@@ -1313,8 +1304,8 @@ fn task_edges_launch_flows_named_after_collection_commands() {
     )
     .unwrap();
     fs::write(
-        task.repo.path().join(".lf/workflows/reserved.yaml"),
-        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: list}\n",
+        task.repo.path().join(".lf/flows/reserved.yaml"),
+        "- flow: list\n- interactive: {name: demo, id: review}\n",
     )
     .unwrap();
     task.select_workflow("reserved");
@@ -1335,11 +1326,13 @@ fn a_plain_flow_process_in_the_worktree_does_not_move_the_task() {
     task.ok(&["-b", "--task", "INF-123", "flow", "land-proof"]);
     assert_eq!(support::recorded_flows(task.home.path()).len(), 3);
     assert_eq!(task.workflow(), before);
-    // A workflow is traversed, never run as a Flow.
-    let refused = task.run(&["-b", "flow", "rounds"]);
-    assert!(!refused.status.success());
-    let error = String::from_utf8_lossy(&refused.stderr).to_string();
-    assert!(error.contains("lf task run <issue> rounds"), "{error}");
+    // Run as a plain Flow, a graph stops at its first stage and moves no Task.
+    let staged = task.run(&["-b", "flow", "rounds"]);
+    assert!(staged.status.success());
+    let stderr = String::from_utf8_lossy(&staged.stderr).to_string();
+    assert!(stderr.contains("Reached review"), "{stderr}");
+    assert_eq!(support::recorded_flows(task.home.path()).len(), 4);
+    assert_eq!(task.workflow(), before);
 }
 
 #[test]
@@ -1390,7 +1383,7 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
     // Every attempt fails: the Task run gives up and the edge holds the Task.
     let output = task.run(&["-b", "task", "run", "INF-123", "gate"]);
     let error = refusal(output);
-    assert!(error.contains("Flow gate failed 3 times"), "{error}");
+    assert!(error.contains("Edge gate failed 3 times"), "{error}");
     let stopped = task.workflow();
     assert_eq!(stopped["position"]["edge"], 2);
     assert_eq!(stopped["position"]["running"], false);
@@ -1662,7 +1655,7 @@ fn workflow_restart_keeps_the_captured_graph_and_execution_history() {
     let before = task.workflow();
     let processes = support::recorded_flows(task.home.path());
     fs::write(
-        task.repo.path().join(".lf/workflows/rounds.yaml"),
+        task.repo.path().join(".lf/flows/rounds.yaml"),
         "invalid: source\n",
     )
     .unwrap();
@@ -1766,8 +1759,8 @@ fn unmerged_completion_in_flow_is_retryable_without_replaying_it() {
     )
     .unwrap();
     fs::write(
-        task.repo.path().join(".lf/workflows/delivery.yaml"),
-        "edges:\n  - {from: start, to: end, flow: finish-proof}\n",
+        task.repo.path().join(".lf/flows/delivery.yaml"),
+        "- flow: finish-proof\n",
     )
     .unwrap();
     task.publish(false);
@@ -1809,10 +1802,7 @@ fn provider_completion_preserves_a_live_edge_and_the_flow_process_records_its_re
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, content).unwrap();
     };
-    write(
-        ".lf/workflows/live-workflow.yaml",
-        "edges:\n  - {from: start, to: end, flow: live}\n",
-    );
+    write(".lf/flows/live-workflow.yaml", "- flow: live\n");
     write(
         ".lf/flows/live.yaml",
         "- cmd: __telemetry-scorecard\n- cmd: task complete INF-123\n",
@@ -1839,7 +1829,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         task.registered.task.wave_id.as_ref().unwrap().as_str(),
         "--file",
         worktree
-            .join(".lf/workflows/live-workflow.yaml")
+            .join(".lf/flows/live-workflow.yaml")
             .to_str()
             .unwrap(),
     ]);
@@ -1928,10 +1918,8 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
 #[test]
 fn successful_final_flow_keeps_arrival_when_completion_fails_and_never_replays() {
     let task = WorkflowTask::new();
-    task.repo.create_file(
-        ".lf/workflows/final.yaml",
-        "edges:\n  - {from: start, to: end, flow: proof}\n",
-    );
+    task.repo
+        .create_file(".lf/flows/final.yaml", "- flow: proof\n");
     task.select_workflow("final");
     task.publish(false);
     let error = refusal(task.run(&["-b", "task", "run", "INF-123", "final"]));

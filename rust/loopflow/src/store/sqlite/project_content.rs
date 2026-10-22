@@ -89,7 +89,9 @@ impl SqliteStore {
             [wave.as_str()],
             |row| row.get(0),
         )?;
-        crate::workflow::parse_workflow(name, definition, std::path::Path::new(&repo))
+        crate::workflow::CapturedGraph::from_source(name, definition, std::path::Path::new(&repo))
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            .project()
             .map_err(StoreError::InvalidData)?;
         super::planning_write::local(
             &tx,
@@ -363,7 +365,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&database).unwrap();
-        let definition = "nodes: {}\nedges: [{from: start, to: end}]\n";
+        let definition = "- cmd: help\n";
         let mut owners = Vec::new();
         for (name, mapping) in [("offline", None), ("connected", Some("linear-project"))] {
             let wave = Wave::new(WaveId::new(), name.into(), "/repo".into());
@@ -410,7 +412,7 @@ mod tests {
                 store.selected_wave_workflow(&wave).unwrap().as_deref(),
                 Some("review")
             );
-            for (name, source) in [("invalid/review", definition), ("review", "changed")] {
+            for (name, source) in [("invalid:review", definition), ("review", "changed")] {
                 assert!(store.select_wave_workflow(&wave, name, source).is_err());
             }
             assert_eq!(
@@ -421,7 +423,7 @@ mod tests {
                 store.wave_workflow(&wave, "review").unwrap().as_deref(),
                 Some(definition)
             );
-            let changed = "nodes: {}\nedges: [{from: start, to: end, flow: debug}]\n";
+            let changed = "- cmd: help --all\n";
             store
                 .select_wave_workflow(&wave, "review", changed)
                 .unwrap();

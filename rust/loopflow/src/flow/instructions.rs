@@ -81,13 +81,13 @@ fn render_steps(
                     } else {
                         output.push_str(&format!("{position}. {}\n   Use its criteria to decide in ordinary language: advance continues after step {position}; iterate repeats steps {prefix}{} through {prefix}{index}, including intervening commands and branches, then returns to this decision; blocked explains what needs resolving and stops here.\n", conversational_skill(skill), target + 1));
                     }
-                } else if occurrence.human {
+                } else if occurrence.interactive {
                     output.push_str(&format!("{position}. {}\n", conversational_skill(skill)));
                 } else {
                     let command = headless_command(skill, flow_names, commands)?;
                     output.push_str(&format!("{position}. Run `{command}`.\n"));
                 }
-                if occurrence.human {
+                if occurrence.interactive {
                     output.push_str("   Wait for the participant's response here before continuing; never substitute another reviewer or assume approval.\n");
                 }
             }
@@ -169,7 +169,7 @@ mod tests {
       skip:
         description: Nothing to repair
 - loop: first
-- step: {name: demo, id: review, human: true}
+- interactive: {name: demo, id: review}
 "#,
         )
         .unwrap();

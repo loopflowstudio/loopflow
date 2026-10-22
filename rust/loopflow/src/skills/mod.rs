@@ -666,7 +666,7 @@ mod tests {
 
         fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
         let flow = repo.path().join(".lf/flows/pursue.yaml");
-        fs::write(&flow, "- step: {name: demo, id: review, human: true}\n").unwrap();
+        fs::write(&flow, "- interactive: {name: demo, id: review}\n").unwrap();
         let options = SkillSyncOptions {
             repo: Some(repo.path().to_path_buf()),
             ..options_for(&home)

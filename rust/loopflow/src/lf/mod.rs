@@ -816,6 +816,9 @@ pub enum FlowCommand {
     /// Print the repository file that defines a Flow, creating
     /// it from the builtin when the repository has none
     Customize { name: String },
+    /// Run the slice of the Task's graph its current edge names; `lf task run` starts it
+    #[command(name = "__edge", hide = true)]
+    Edge,
     #[command(external_subcommand)]
     External(Vec<String>),
 }

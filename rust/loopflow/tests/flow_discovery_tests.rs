@@ -200,7 +200,7 @@ fn flow_inventory_flags_do_not_select_task_launch_context() {
 }
 
 #[test]
-fn flow_and_workflow_catalogs_keep_same_name_sources_separate() {
+fn flow_and_workflow_catalogs_read_the_same_graphs() {
     let repo = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
     let run = |args: &[&str]| {
@@ -231,7 +231,7 @@ fn flow_and_workflow_catalogs_keep_same_name_sources_separate() {
     };
     assert_eq!(entry(&flows)["source"], ".lf/flows/feature.yaml");
     assert!(entry(&workflows)["workflow"].is_object());
-    assert!(entry(&workflows)["source"].is_null());
+    assert_eq!(entry(&workflows)["source"], ".lf/flows/feature.yaml");
     let shown = run(&["flow", "show", "feature", "--json"]);
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&shown.stdout).unwrap(),
@@ -248,11 +248,7 @@ fn flow_and_workflow_catalogs_keep_same_name_sources_separate() {
         )
         .unwrap();
     let definition = repo.path().join("workflow.yaml");
-    std::fs::write(
-        &definition,
-        "nodes: {}\nedges:\n  - from: start\n    to: end\n    flow: feature\n",
-    )
-    .unwrap();
+    std::fs::write(&definition, "- flow: feature\n").unwrap();
     let selected = run(&[
         "wave",
         "workflow",

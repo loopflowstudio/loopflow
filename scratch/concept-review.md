@@ -40,3 +40,9 @@ before commit, after commit before reopen, and after reopen before archival;
 include first-install cancellation, failed open, updates and helper-only
 installation. Observe CLI/daemon/store selection, eventual receipt removal and
 no repeated restart. A temporary HOME does not isolate this boundary.
+
+2026-10-22 review of settled reuse (`48fa0dabfd`, `2443ee444b`): matches the
+accepted contract. The match uses the canonicalized bundle and the helper's
+digest, so a different release or copy still promotes and a pending receipt
+still recovers. No design change. The setup view still waits on the live
+baseline (display session); headless implementation has nothing left to do here.

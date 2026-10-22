@@ -129,6 +129,31 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
     task_on(conn, &input.id)?.ok_or(StoreError::NotFound)
 }
 
+/// Without Linear, the planning journal carries the Task's branch, so whoever
+/// runs it next checks out the same branch and finds the same PR. Linear owns
+/// its own `branchName`. An already-recorded branch writes nothing.
+fn record_task_branch_in(tx: &Connection, task: &TaskId, branch: &str) -> StoreResult<()> {
+    let (repo, recorded): (String, Option<String>) = tx.query_row(
+        "SELECT w.repo,t.planning_branch_name FROM tasks t
+         JOIN repository_plans w ON w.id=t.repository_id WHERE t.id=?1",
+        [task.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if recorded.as_deref() == Some(branch) || crate::ops::linear_observe::connected(&repo) {
+        return Ok(());
+    }
+    super::planning_write::local(
+        tx,
+        &crate::work::edit::WorkEdit::for_target(
+            task.as_str(),
+            &[crate::work::edit::WorkValue::TaskBranch(Some(
+                branch.into(),
+            ))],
+        ),
+    )?;
+    Ok(())
+}
+
 impl SqliteStore {
     /// Apply the placement transaction's admission rule before preparing Git work.
     pub fn validate_task_planning(&self, task: &Task) -> StoreResult<()> {
@@ -167,6 +192,7 @@ impl SqliteStore {
         // Allocating a checkout is the actual work reservation: it claims an
         // unowned Task, and refuses one owned on another Machine.
         super::task_ownership::claim_in(&tx, task_id)?;
+        record_task_branch_in(&tx, task_id, &pr.branch)?;
         let local = super::durable::map_local_machine(&tx)?.id;
         task.worktree = Some(worktree.to_path_buf());
         task.workspace_slug = workspace_slug.to_string();

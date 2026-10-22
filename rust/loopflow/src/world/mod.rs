@@ -10,7 +10,7 @@
 //! Session from its transcript and echoes each input line, so Sessions open live
 //! without an account or network; a `gh` answers pull-request reads from files
 //! under `github/pulls/` and refuses everything else, so nothing run inside a
-//! World reaches GitHub.
+//! World reaches GitHub; a `launchctl` records cron jobs instead of loading them.
 
 pub mod recipes;
 
@@ -77,6 +77,28 @@ answer() {
     exit 0
 }
 case "$1 $2" in
+"--version ")
+    echo "gh version 2.0.0 (lf-world)"
+    exit 0
+    ;;
+"pr list")
+    head=
+    while [ $# -gt 0 ]; do
+        [ "$1" = --head ] && head=$2
+        shift
+    done
+    printf '['
+    separator=
+    for pr in "$pulls"/*.json; do
+        case "$pr" in *.files.json) continue ;; esac
+        grep -q "\"headRefName\": *\"$head\"" "$pr" 2>/dev/null || continue
+        printf '%s' "$separator"
+        cat "$pr"
+        separator=,
+    done
+    echo ']'
+    exit 0
+    ;;
 "pr view")
     number="${3##*/}"
     for arg in "$@"; do
@@ -94,6 +116,20 @@ case "$1 $2" in
     ;;
 esac
 refuse "$@"
+"#;
+
+const LAUNCHCTL: &str = r#"#!/bin/sh
+# lf-world's launchd. Records the jobs `lf cron` loads under ../launchd, so
+# nothing run inside a World schedules a real job; refuses everything else.
+jobs="$(dirname "$0")/../launchd"
+mkdir -p "$jobs"
+case "$1" in
+load) touch "$jobs/$(basename "$2" .plist)"; exit 0 ;;
+unload) rm -f "$jobs/$(basename "$2" .plist)"; exit 0 ;;
+print) [ -e "$jobs/${2##*/}" ]; exit ;;
+esac
+echo "lf-world's launchd answers only load, unload and print: $*" >&2
+exit 1
 "#;
 
 /// What the World's GitHub reports for one pull request.
@@ -246,6 +282,7 @@ impl World {
         }
         write_executable(&dir, "claude", STUB_CLAUDE)?;
         write_executable(&dir, "gh", GH)?;
+        write_executable(&dir, "launchctl", LAUNCHCTL)?;
         std::fs::write(
             env.lf_home.join("config.yaml"),
             format!("user:\n  name: {PERSON}\n"),
@@ -277,6 +314,78 @@ impl World {
     /// Unix time `days` before this world was built.
     pub fn days_ago(&self, days: f64) -> i64 {
         self.now - (days * DAY as f64) as i64
+    }
+
+    /// Name the World's person in its checkout's Git config and its Home:
+    /// claims name a person by `user.email`, and show the Home's `user.name`.
+    pub fn person(&self, name: &str, email: &str) -> Result<()> {
+        let path = self.env.lf_home.join("config.yaml");
+        let mut config: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str(&std::fs::read_to_string(&path)?)?;
+        config["user"]["name"] = name.into();
+        std::fs::write(&path, serde_yaml_ng::to_string(&config)?)?;
+        identify(&self.repo, name, email)
+    }
+
+    /// Write `content` as `.lf/config.yaml` and push it, so every clone of
+    /// `origin` shares it.
+    pub fn configure(&self, content: &str) -> Result<()> {
+        std::fs::write(self.repo.join(".lf/config.yaml"), content)?;
+        self.push_authored("Configure the project")
+    }
+
+    /// Commit everything under `.lf/` (Wave goals, Workflows, config) and push it.
+    pub fn push_authored(&self, message: &str) -> Result<()> {
+        git(Some(&self.repo), &["add", ".lf"])?;
+        git(Some(&self.repo), &["commit", "-m", message])?;
+        git(Some(&self.repo), &["push", "origin", "main"])?;
+        Ok(())
+    }
+
+    /// Add a teammate beside this World's person: their own Home and clone of
+    /// `origin` under `<dir>/<slug>`, described by `<dir>/<slug>/env.json`.
+    /// They share the World's `bin`, so one GitHub answers both people.
+    pub fn teammate(&self, slug: &str, name: &str, email: &str) -> Result<WorldEnv> {
+        let root = self.dir.join(slug);
+        let env = WorldEnv {
+            lf_home: root.join("home"),
+            claude_config_dir: root.join("claude"),
+            codex_home: root.join("codex"),
+            path: self.env.path.clone(),
+        };
+        for path in [&env.lf_home, &env.claude_config_dir, &env.codex_home] {
+            std::fs::create_dir_all(path)?;
+        }
+        let repo = root.join("repo");
+        git(
+            None,
+            &[
+                "clone",
+                &self.dir.join("origin.git").to_string_lossy(),
+                &repo.to_string_lossy(),
+            ],
+        )?;
+        identify(&repo, name, email)?;
+        // The teammate's Home registers only their clone; the process then
+        // points back at this World.
+        for (name, value) in env.vars() {
+            std::env::set_var(name, value);
+        }
+        let registered = crate::portfolio::change(&crate::portfolio::PortfolioCommand::Manual)
+            .and_then(|_| {
+                crate::portfolio::change(&crate::portfolio::PortfolioCommand::Add {
+                    paths: vec![repo.clone()],
+                })
+            });
+        for (name, value) in self.env.vars() {
+            std::env::set_var(name, value);
+        }
+        registered?;
+        std::fs::write(
+            root.join("env.json"),
+            serde_json::to_string_pretty(&env)? + "\n",
+        )?;
+        Ok(env)
     }
 
     /// Ensure a Wave and its current Project.
@@ -1015,6 +1124,12 @@ fn create_repo(repo: &Path, origin: &Path) -> Result<()> {
         &["remote", "add", "origin", &origin.to_string_lossy()],
     )?;
     git(Some(repo), &["push", "-u", "origin", "main"])?;
+    Ok(())
+}
+
+fn identify(repo: &Path, name: &str, email: &str) -> Result<()> {
+    git(Some(repo), &["config", "user.name", name])?;
+    git(Some(repo), &["config", "user.email", email])?;
     Ok(())
 }
 

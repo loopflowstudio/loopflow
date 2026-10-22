@@ -9,7 +9,7 @@ written.
 lf doctor
 lf cron list
 lf cron history --wave infrastructure --flow telemetry-daily --days 2
-lf cron sync --wave infrastructure
+lf cron sync
 ```
 
 Doctor checks installation selection, store compatibility, Process integrity and
@@ -21,7 +21,7 @@ successful completion of its Flow or Skill.
 For a missing receipt, inspect the executable and log path Doctor prints. Jobs
 installed before the stable entry gate may pin a superseded binary, which a
 later install removes, and fail before recording a receipt. After installing a release with this repair,
-run `lf cron sync --wave <wave>` from that Wave's repository to refresh its jobs;
+run `lf cron sync` from the repository to reinstall your jobs;
 use `lf cron sync --repo` for repository Task checks. New scheduled invocations
 follow the selected installation across promotions. Existing Sessions
 retain their runtime ownership.

@@ -818,8 +818,8 @@ registered-Task fixtures must reuse it rather than insert a second owner.
 
 Planning-owner changes must cover context/catalog reads, Wave relocation, Task
 initialization, Workflow completion/reopening and PR delivery fixtures alongside
-the new planning APIs. Write Wave goal/memory fixtures directly in their checkout. Seed stored Workflow
-definitions explicitly; writing a Workflow file is not a planning mutation.
+the new planning APIs. Write Wave goal/memory and `.lf/workflows/` fixtures directly in their checkout;
+writing a Workflow file is not a planning mutation.
 An existing checkout fixture must settle initialization before testing delivery.
 Prompt fixtures nested in the source tree must fence Git discovery so the enclosing
 checkout cannot become their stored Wave owner. Verify them inside a Git checkout;

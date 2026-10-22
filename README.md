@@ -191,7 +191,7 @@ after an agent turn, when showing planning, and before a Linear write. Team chec
 share ten-second freshness. Only Desktop and `--watch` keep a slow clock, backing
 off while nothing changes; idle agents do not poll. Teams without live Tasks make
 no acquisition requests. A rate limit pauses requests across repositories in the
-same Home until reset, retaining pending writes. Acquired Task comments become steers for each associated
+same Home until reset, retaining pending writes. Acquired Task comments, through Linear or Git planning, become steers for each associated
 Session, with independent delivery at its next supported provider boundary.
 Steering leaves idle Sessions idle. A stopped Flow is history: `task run` never
 continues it, so inspect `lf task status` first.

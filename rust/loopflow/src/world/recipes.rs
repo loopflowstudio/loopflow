@@ -74,6 +74,13 @@ pub const RECIPES: &[Recipe] = &[
         build: task_review,
     },
     Recipe {
+        name: "two-people",
+        rung: Rung::Rows,
+        demos:
+            "LOO-555: Maya and Lee, each on their own Home, sharing one repository's Git planning",
+        build: two_people,
+    },
+    Recipe {
         name: "wave-lifecycle",
         rung: Rung::Artifacts,
         demos: "LOO-500: adding a Wave and removing empty and populated ones",
@@ -806,6 +813,26 @@ fn task_review(world: &World) -> Result<()> {
         "Pages long result lists.",
         &PrSurface::Unavailable,
     )?;
+    Ok(())
+}
+
+/// Maya's Home is the World; Lee's is `lee/`, with its own `env.json`. Both
+/// clone one `origin` that plans through a shared Git ref, and each clone
+/// names its person. What they do to each other's work is left to the demo.
+fn two_people(world: &World) -> Result<()> {
+    world.person("Maya", "maya@example.com")?;
+    world.configure("agent: claude\nplanning:\n  provider: git\n  shared: team\n")?;
+    world.wave("infra")?;
+    world.push_authored("Add the infra Wave")?;
+    world.wave_conversation(
+        "infra",
+        &[
+            "Lee is joining this repository from their own Machine.",
+            "Planning syncs through the shared Git ref; `lf refresh` brings in each other's Tasks.",
+        ],
+        0.1,
+    )?;
+    world.teammate("lee", "Lee", "lee@example.com")?;
     Ok(())
 }
 

@@ -118,9 +118,13 @@ struct TaskRowMetadataTests {
         let unowned = try #require(tasks.first { $0.runtime != nil && $0.runtime?.owner == nil })
         #expect(try TaskRowMetadata(task: unowned, status: .unknown).inspect().find(text: "Unowned").string() == "Unowned")
         let unknown = try JSONDecoder().decode(TaskOwner.self, from: Data("""
-        {"person":null,"machine":{"id":null,"label":null}}
+        {"person":null,"person_key":null,"machine":{"id":null,"label":null}}
         """.utf8))
         #expect(unknown.summary == "Someone · Machine unknown")
+        let unnamed = try JSONDecoder().decode(TaskOwner.self, from: Data("""
+        {"person":null,"person_key":"maya@example.com","machine":{"id":null,"label":"maya-mbp"}}
+        """.utf8))
+        #expect(unnamed.summary == "maya@example.com on maya-mbp")
     }
 
     @Test("Task identifiers remain visible without an external issue URL")

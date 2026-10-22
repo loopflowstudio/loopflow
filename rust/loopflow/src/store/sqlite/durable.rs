@@ -66,6 +66,27 @@ impl SqliteStore {
         map_local_machine(&conn)
     }
 
+    /// The name teammates see for this Machine, when it is public.
+    pub fn local_public_name(&self) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        local_public_name_in(&conn)
+    }
+
+    /// Make this Machine public under `name`, or private again with `None`.
+    pub fn set_local_public_name(&self, name: Option<&str>) -> StoreResult<()> {
+        if name.is_some_and(|name| name.trim().is_empty()) {
+            return Err(StoreError::InvalidData(
+                "a public Machine name cannot be empty".into(),
+            ));
+        }
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE machines SET public_name=?1 WHERE route='local'",
+            [name.map(str::trim)],
+        )?;
+        Ok(())
+    }
+
     pub fn add_machine(
         &self,
         machine_id: &MachineId,
@@ -401,6 +422,15 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         tool_response_in(&conn, work, request_id)
     }
+}
+
+pub(super) fn local_public_name_in(conn: &Connection) -> StoreResult<Option<String>> {
+    conn.query_row(
+        "SELECT public_name FROM machines WHERE route='local'",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
 }
 
 pub(super) fn map_local_machine(conn: &Connection) -> StoreResult<Machine> {

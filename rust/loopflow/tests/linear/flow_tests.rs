@@ -2031,11 +2031,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     observe_planning(&task, &checkout);
     task.store
         .sqlite
-        .select_wave_workflow(
-            task.task.wave_id.as_ref().unwrap(),
-            "feature",
-            loopflow::workflow::builtin_workflow("feature").unwrap(),
-        )
+        .select_wave_workflow(task.task.wave_id.as_ref().unwrap(), "feature")
         .unwrap();
     for skill in [
         "implement-proof",

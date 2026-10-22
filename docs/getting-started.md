@@ -238,8 +238,8 @@ lf wave status shipper
 lf ps --json
 ```
 
-Author `.lf/wave/shipper/GOAL.md` with an objective and operating guidance. Optional
-`crons:` schedules recurring commands; `pm:` connects shared planning. Each
+Author `.lf/wave/shipper/GOAL.md` with an objective and operating guidance.
+`lf cron add` schedules recurring commands on your Machine; `pm:` connects shared planning. Each
 `wave-operate` invocation reviews the plan and keeps every started Task moving.
 Tasks own implementation in stable worktrees; `lf land` hands off delivery and
 `lf pr reconcile` settles verified merges; `lf ci watch` repairs failed CI

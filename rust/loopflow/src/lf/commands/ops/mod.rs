@@ -969,6 +969,9 @@ pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
         }
         RepoCommand::Refresh { wave, all } => {
             let repo = crate::repo::working_directory()?;
+            if crate::lf::commands::planning::plans_through_git(&repo)? {
+                return crate::lf::commands::planning::refresh(&repo);
+            }
             sync_planning(&repo, wave.as_deref(), *all, false, false)
         }
         RepoCommand::NewChapter {
@@ -1219,6 +1222,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             name,
             command,
             schedule,
+            publish,
         } => {
             require_release_cron_binary()?;
             let parsed = crate::ops::cron::parse_cron_command(command)?;
@@ -1227,6 +1231,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             ensure_cron_placement(&wave, &authority)?;
             let spec = CronSpec {
                 wave,
+                published: *publish,
                 flow: name.clone(),
                 command: command.clone(),
                 schedule: crate::ops::parse_schedule(schedule)?,
@@ -1236,70 +1241,66 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             };
             let cron = crate::ops::add_cron(&launch_agents_dir, &spec, &SystemLaunchctl)?;
             println!("installed {} at {}", cron.label, cron.path.display());
+            publish_crons(&launch_agents_dir, &cron.repo);
         }
         CronCommand::List { wave, task, json } => {
-            let mut crons = crate::ops::list_crons(&launch_agents_dir, &SystemLaunchctl)?;
-            crons = crons
-                .into_iter()
-                .filter_map(|cron| {
-                    match crate::ops::cron::command_matches_scope(
-                        &cron.command,
-                        wave.as_deref(),
-                        task.as_deref(),
-                    ) {
-                        Ok(true) => Some(Ok(cron)),
-                        Ok(false) => None,
-                        Err(error) => Some(Err(error)),
-                    }
-                })
-                .collect::<crate::ops::OpsResult<Vec<_>>>()?;
-            if *json {
-                println!("{}", serde_json::to_string(&crons)?);
-                return Ok(());
-            }
-            if crons.is_empty() {
-                println!("no loopflow crons installed");
-            } else {
-                for cron in crons {
-                    let latest = cron
-                        .latest_receipt
-                        .as_ref()
-                        .map(cron_receipt_outcome)
-                        .unwrap_or("never");
-                    println!(
-                        "{}  {}  {}  {}  {}",
-                        cron.flow,
-                        cron.schedule,
-                        if cron.loaded { "loaded" } else { "not-loaded" },
-                        cron.machine_id,
-                        latest,
-                    );
+            let in_scope = |command: &[String]| {
+                crate::ops::cron::command_matches_scope(command, wave.as_deref(), task.as_deref())
+            };
+            let mut installed = Vec::new();
+            for cron in crate::ops::list_crons(&launch_agents_dir, &SystemLaunchctl)? {
+                if in_scope(&cron.command)? {
+                    installed.push(cron);
                 }
             }
+            let (mut published, fetch_error) = observed_crons()?;
+            // A teammate's command may come from another lf version; keep it
+            // unless it parses outside the selected scope.
+            published.retain(|observed| in_scope(&observed.cron.command).unwrap_or(true));
+            let listing = crate::ops::cron::CronListing {
+                installed,
+                published,
+                fetch_error,
+            };
+            if *json {
+                println!("{}", serde_json::to_string(&listing)?);
+                return Ok(());
+            }
+            print_cron_listing(&listing);
         }
-        CronCommand::Preflight { wave, task } => {
+        CronCommand::Publish { name, wave } | CronCommand::Unpublish { name, wave } => {
+            let publish = matches!(cmd, CronCommand::Publish { .. });
+            let installed = crate::ops::list_crons(&launch_agents_dir, &SystemLaunchctl)?;
+            let matching: Vec<_> = installed
+                .iter()
+                .filter(|cron| cron.flow == *name && wave.as_ref().is_none_or(|w| *w == cron.wave))
+                .collect();
+            let cron = match matching.as_slice() {
+                [cron] => *cron,
+                [] => return Err(anyhow!("cron {name} is not installed on this Machine")),
+                _ => {
+                    return Err(anyhow!(
+                        "cron {name} is installed for several Waves; choose one with --wave"
+                    ))
+                }
+            };
+            let cron = crate::ops::cron::set_cron_published(
+                &launch_agents_dir,
+                cron,
+                publish,
+                &SystemLaunchctl,
+            )?;
+            println!(
+                "{} {}",
+                if publish { "published" } else { "unpublished" },
+                cron.label
+            );
+            publish_crons(&launch_agents_dir, &cron.repo);
+        }
+        CronCommand::Sync { repo, disable } => {
             require_release_cron_binary()?;
             let authority = cron_authority("")?;
-            let specs = cron_specs(&authority, wave.as_deref(), task.as_deref())?;
-            for spec in &specs {
-                ensure_cron_placement(&spec.wave, &cron_authority(&spec.wave)?)?;
-            }
-            crate::ops::validate_cron_specs(&specs)?;
-            println!(
-                "cron preflight passed: {} jobs on Machine {}",
-                specs.len(),
-                authority.local_machine
-            );
-        }
-        CronCommand::Sync {
-            wave,
-            task,
-            repo,
-            disable,
-        } => {
             if *repo {
-                require_release_cron_binary()?;
-                let authority = cron_authority("")?;
                 let key = crate::ops::cron::repository_cron_key(
                     &authority.repo,
                     &authority.local_machine,
@@ -1309,6 +1310,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                 } else {
                     let spec = CronSpec {
                         wave: String::new(),
+                        published: false,
                         flow: key,
                         command: vec!["task".into(), "reconcile".into(), "--json".into()],
                         schedule: crate::ops::parse_schedule("every-minute")?,
@@ -1320,29 +1322,20 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                 }
                 return Ok(());
             }
-            require_release_cron_binary()?;
-            let authority = cron_authority("")?;
-            let specs = cron_specs(&authority, wave.as_deref(), task.as_deref())?;
-            for spec in &specs {
-                ensure_cron_placement(&spec.wave, &cron_authority(&spec.wave)?)?;
-            }
-            let result = crate::ops::sync_crons(
+            let installed = crate::ops::reinstall_crons(
                 &launch_agents_dir,
                 &authority.repo,
-                wave.as_deref(),
-                task.as_deref(),
-                &specs,
+                &crate::ops::resolve_lf_path()?,
+                &authority.host,
                 &SystemLaunchctl,
             )?;
-            if result.installed.is_empty() && result.removed.is_empty() {
-                println!("no matching crons declared; nothing to sync");
+            if installed.is_empty() {
+                println!("no crons installed on this Machine for this repository");
             }
-            for cron in &result.installed {
-                println!("installed {} ({})", cron.label, cron.flow);
+            for cron in &installed {
+                println!("reinstalled {} ({})", cron.label, cron.flow);
             }
-            for cron in &result.removed {
-                println!("pruned {} ({})", cron.label, cron.flow);
-            }
+            publish_crons(&launch_agents_dir, &authority.repo);
         }
         CronCommand::Run {
             wave,
@@ -1486,7 +1479,10 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
         }
         CronCommand::Remove { wave, flow } => {
             match crate::ops::remove_cron(&launch_agents_dir, wave, flow, &SystemLaunchctl)? {
-                Some(cron) => println!("removed {}", cron.label),
+                Some(cron) => {
+                    println!("removed {}", cron.label);
+                    publish_crons(&launch_agents_dir, &cron.repo);
+                }
                 None => println!("not installed"),
             }
         }
@@ -1566,103 +1562,117 @@ fn ensure_cron_placement(wave: &str, authority: &CronAuthority) -> Result<()> {
         return Ok(());
     }
     Err(anyhow!(
-        "Wave {wave} is owned by Machine {}, not local Machine {}; run `lf --machine {} cron sync --wave {wave}`",
+        "Wave {wave} is owned by Machine {}, not local Machine {}; run `lf --machine {} cron add …` there",
         authority.placed_machine,
         authority.local_machine,
         authority.placed_machine,
     ))
 }
 
-fn cron_specs(
-    authority: &CronAuthority,
-    wave: Option<&str>,
-    task: Option<&str>,
-) -> Result<Vec<CronSpec>> {
-    let lf_path = crate::ops::resolve_lf_path()?;
-    let definitions = crate::config::load_config(Some(&authority.repo))?
-        .and_then(|config| config.crons)
-        .ok_or_else(|| anyhow!("No cron list in repository configuration; declare crons: [] to remove scheduled jobs"))?;
-    let mut specs = Vec::new();
-    for definition in definitions {
-        if !crate::ops::cron::command_matches_scope(&definition.command, wave, task)? {
-            continue;
-        }
-        let parsed = crate::ops::cron::parse_cron_command(&definition.command)?;
-        specs.push(CronSpec {
-            wave: parsed.wave.unwrap_or_default(),
-            flow: definition.name,
-            command: definition.command,
-            schedule: crate::ops::parse_schedule(&definition.schedule)?,
-            working_directory: authority.repo.clone(),
-            lf_path: lf_path.clone(),
-            host: authority.host.clone(),
-        });
+/// Push every published cron again after this Machine's public name changes,
+/// so no repository keeps the old name.
+pub(crate) fn republish_crons() -> Result<()> {
+    let launch_agents_dir = crate::ops::default_launch_agents_dir()?;
+    let mut repos = crate::ops::list_crons(&launch_agents_dir, &SystemLaunchctl)?
+        .into_iter()
+        .filter(|cron| cron.published)
+        .map(|cron| cron.repo)
+        .collect::<Vec<_>>();
+    repos.sort();
+    repos.dedup();
+    for repo in repos {
+        publish_crons(&launch_agents_dir, &repo);
     }
-    Ok(specs)
+    Ok(())
 }
 
-#[cfg(test)]
-mod cron_catalog_tests {
-    use super::{cron_specs, CronAuthority};
-    use crate::durable::MachineId;
-    use crate::ops::CronHost;
-    use std::fs;
+/// Push this Machine's published crons for `repo` so teammates see the change.
+/// The installed jobs are already saved; a failed publication only warns.
+fn publish_crons(launch_agents_dir: &Path, repo: &Path) {
+    if let Err(error) = try_publish_crons(launch_agents_dir, repo) {
+        eprintln!("warning: published crons were not pushed: {error}");
+    }
+}
 
-    #[test]
-    fn one_repository_list_filters_the_commands_wave_and_task() {
-        let _lock = crate::journal::test_env_lock();
-        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
-        let repo = tempfile::tempdir().unwrap();
-        fs::create_dir_all(repo.path().join(".lf")).unwrap();
-        fs::write(
-            repo.path().join(".lf/config.yaml"),
-            r#"
-crons:
-  - name: release-run
-    command: [--wave, infrastructure, --batch, flow, release-run]
-    schedule: '0 0 10 * * *'
-  - name: task-check
-    command: [--task, FIX-1, task, status, FIX-1, --json]
-    schedule: every-minute
-  - name: repository
-    command: [task, reconcile, --json]
-    schedule: every-minute
-"#,
-        )
-        .unwrap();
-        let machine = MachineId::new();
-        let authority = CronAuthority {
-            host: CronHost {
-                machine_id: machine.clone(),
-                lf_home: repo.path().join("home"),
-                path_env: "/usr/bin:/bin".into(),
-            },
-            local_machine: machine.clone(),
-            placed_machine: machine,
-            repo: repo.path().canonicalize().unwrap(),
-        };
-        std::env::set_var("LF_HOME", &authority.host.lf_home);
-        let all = cron_specs(&authority, None, None).unwrap();
-        assert_eq!(all.len(), 3);
-        let wave = cron_specs(&authority, Some("infrastructure"), None).unwrap();
-        assert_eq!(wave.len(), 1);
-        assert_eq!(wave[0].flow, "release-run");
-        assert_eq!(wave[0].wave, "infrastructure");
-        assert_eq!(wave[0].schedule.expression(), "0 0 10 * * *");
-        let task = cron_specs(&authority, None, Some("FIX-1")).unwrap();
-        assert_eq!(task.len(), 1);
-        assert_eq!(task[0].flow, "task-check");
-        assert!(
-            cron_specs(&authority, Some("infrastructure"), Some("FIX-1"))
-                .unwrap()
-                .is_empty()
+fn try_publish_crons(launch_agents_dir: &Path, repo: &Path) -> Result<()> {
+    use crate::ops::cron::published;
+    let (machine_id, public_name) = local_machine_and_public_name()?;
+    let publisher = published::Publisher {
+        person: crate::config::participant_name()?,
+        person_key: crate::config::participant_email(repo),
+        // A private Machine publishes only its id.
+        machine_label: public_name,
+        machine_id,
+    };
+    let installed = crate::ops::list_crons(launch_agents_dir, &SystemLaunchctl)?;
+    let crons = published::published_from(repo, &installed, &publisher)?;
+    if !published::publish(repo, &publisher.machine_id, &crons)? && !crons.is_empty() {
+        eprintln!("note: no origin remote; published crons stay in this checkout");
+    }
+    Ok(())
+}
+
+/// This Machine's id and its public name, if it has one.
+fn local_machine_and_public_name() -> Result<(crate::durable::MachineId, Option<String>)> {
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = crate::store::open_registry_for_authority()
+            .await
+            .map_err(cron_registry_error)?;
+        let machine = store.local_machine().await?;
+        Ok((machine.id, store.sqlite.local_public_name()?))
+    })
+}
+
+/// Teammates' published crons for this repository, and why fetching failed.
+fn observed_crons() -> Result<(
+    Vec<crate::ops::cron::published::ObservedCron>,
+    Option<String>,
+)> {
+    use crate::ops::cron::published;
+    let Ok(checkout) = find_repo_root() else {
+        return Ok((Vec::new(), None));
+    };
+    let repo = main_repo_root(&checkout)?;
+    let (local, _) = local_machine_and_public_name()?;
+    let fetch_error = published::fetch(&repo).err().map(|error| error.to_string());
+    Ok((published::observed(&repo, &local)?, fetch_error))
+}
+
+fn print_cron_listing(listing: &crate::ops::cron::CronListing) {
+    if listing.installed.is_empty() {
+        println!("no loopflow crons installed here");
+    }
+    for cron in &listing.installed {
+        let latest = cron
+            .latest_receipt
+            .as_ref()
+            .map(cron_receipt_outcome)
+            .unwrap_or("never");
+        println!(
+            "{}  {}  {}  {}  {}{}",
+            cron.flow,
+            cron.schedule,
+            if cron.loaded { "loaded" } else { "not-loaded" },
+            cron.machine_id,
+            latest,
+            if cron.published { "  published" } else { "" },
         );
-        // Reading the cloned declaration does not provision a Machine or activate a job.
-        assert!(!authority.host.lf_home.exists());
-        fs::write(repo.path().join(".lf/config.yaml"), "crons: []\n").unwrap();
-        assert!(cron_specs(&authority, None, None).unwrap().is_empty());
-        fs::write(repo.path().join(".lf/config.yaml"), "{}\n").unwrap();
-        assert!(cron_specs(&authority, None, None).is_err());
+    }
+    if let Some(error) = &listing.fetch_error {
+        println!("teammates' published crons as last observed; fetch failed: {error}");
+    }
+    for observed in &listing.published {
+        let cron = &observed.cron;
+        println!(
+            "{} · {} · {} · {} (not installed here; published {})",
+            crate::durable::person_text(cron.person.as_deref(), cron.person_key.as_deref()),
+            cron.name,
+            cron.schedule,
+            cron.machine_label
+                .clone()
+                .unwrap_or_else(|| cron.machine_id.to_string()),
+            crate::lf::output::format_time(observed.published_at),
+        );
     }
 }
 

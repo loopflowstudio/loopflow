@@ -1,5 +1,16 @@
 use std::io::IsTerminal;
 
+/// Local wall-clock time for a Unix timestamp, e.g. `Oct 21 14:02`.
+pub(crate) fn format_time(unix: i64) -> String {
+    chrono::DateTime::from_timestamp(unix, 0)
+        .map(|utc| {
+            utc.with_timezone(&chrono::Local)
+                .format("%b %-d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_else(|| unix.to_string())
+}
+
 pub(crate) fn print_process(process: &crate::process::LfProcess) {
     let command = process.command.as_deref().unwrap_or("unknown command");
     let display = serde_json::from_str::<Vec<String>>(command)

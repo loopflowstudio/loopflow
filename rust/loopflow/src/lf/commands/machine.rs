@@ -12,7 +12,12 @@ use crate::store::Store;
 
 pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(run_async(cmd, batch))
+    runtime.block_on(run_async(cmd, batch))?;
+    if matches!(cmd, MachineCommand::Public { .. }) {
+        // Publication runs its own runtime, so it waits until this one is done.
+        super::ops::republish_crons()?;
+    }
+    Ok(())
 }
 
 async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
@@ -42,6 +47,14 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         .await
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
     match cmd {
+        MachineCommand::Public { name } => {
+            let name = (name != "off").then_some(name.as_str());
+            store.sqlite.set_local_public_name(name)?;
+            match name {
+                Some(name) => println!("This Machine is public as {name}"),
+                None => println!("This Machine is private"),
+            }
+        }
         MachineCommand::Id { json } => {
             let machine = store.local_machine().await?;
             if *json {

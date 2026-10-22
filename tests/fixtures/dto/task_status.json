@@ -99,6 +99,7 @@
   "ownership": {
     "owner": {
       "person": "Jack Heart",
+      "person_key": "jack@loopflow.studio",
       "machine": {
         "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
         "label": "mini"
@@ -111,7 +112,9 @@
         "task_id": "task_11111111111111111111111111111111",
         "kind": "claim",
         "person": "Jack Heart",
+        "person_key": "jack@loopflow.studio",
         "machine_id": "home_1b2c3d4e5f60718293a4b5c6d7e8f901",
+        "machine_label": "jack-mbp",
         "at": 1790683100
       },
       {
@@ -119,7 +122,9 @@
         "task_id": "task_11111111111111111111111111111111",
         "kind": "handoff",
         "person": "Jack Heart",
+        "person_key": "jack@loopflow.studio",
         "machine_id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
+        "machine_label": "mini",
         "at": 1790683150
       }
     ]

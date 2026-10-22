@@ -180,6 +180,9 @@ jobs:
           - { suite: integration, shard: 3, partitions: 3 }
     steps:
       - uses: actions/checkout@v7
+      # Claims name their person by Git user.email; repository-local test identities win.
+      - name: Give tests a fallback Git identity
+        run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
       - uses: taiki-e/install-action@nextest
@@ -223,6 +226,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Claims name their person by Git user.email; repository-local test identities win.
+      - name: Give tests a fallback Git identity
+        run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
       - uses: astral-sh/setup-uv@v7
       - name: Acquire and fingerprint the installation image
         id: image
@@ -293,6 +299,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Claims name their person by Git user.email; repository-local test identities win.
+      - name: Give tests a fallback Git identity
+        run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
       - name: Materialize draft migrations for tests
@@ -325,6 +334,9 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v7
+      # Claims name their person by Git user.email; repository-local test identities win.
+      - name: Give tests a fallback Git identity
+        run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
         with:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
@@ -411,6 +423,9 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v7
+      # Claims name their person by Git user.email; repository-local test identities win.
+      - name: Give tests a fallback Git identity
+        run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
       - name: Fingerprint workspace build profiles
@@ -448,6 +463,9 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v7
+      # Claims name their person by Git user.email; repository-local test identities win.
+      - name: Give tests a fallback Git identity
+        run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
       - name: Fingerprint workspace build profiles

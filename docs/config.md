@@ -183,8 +183,7 @@ context:
   - docs/api.md           # combined with global context
 ```
 
-`crons` is one list of scheduled `lf` commands; a repository list replaces the
-global list. Definitions activate only through explicit `lf cron sync`. See
+Scheduled commands are personal and never configured here; see
 [Schedule ordinary commands](lf.md#schedule-ordinary-commands).
 
 Example repo config:

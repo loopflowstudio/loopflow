@@ -131,8 +131,8 @@ lf session list --available --json              # conversations available for yo
 lf connect <session-id> --prepare --json           # recover one exact conversation
 ```
 
-Task comments save steers locally and sync when Linear is configured. Acquired
-Linear comments also become steers. Each associated Session receives them
+Task comments save steers locally and sync through Linear or Git planning.
+Acquired comments from teammates also become steers, under either transport. Each associated Session receives them
 independently at its next supported provider boundary. Idle Sessions stay idle.
 Inspect delivery with `lf session steers SESSION`; retry an uncertain delivery
 with `lf session steers SESSION --retry STEER_ID`. Delivery evidence does not

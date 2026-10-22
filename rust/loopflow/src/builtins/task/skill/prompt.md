@@ -168,7 +168,7 @@ loop well:
 5. **Stop discipline** — when to record a blocker instead of manufacturing
    work.
 
-Frontmatter carries machine policy such as `agent`, `crons`, `pm`, and `home`.
+Frontmatter carries machine policy such as `agent`, `pm`, and `home`.
 Keep current chapter metric targets and proof-shaped KRs in the internal Project, edited with `lf update-plan`. Keep
 concrete implementation in Tasks. A Wave steers one current chapter; it does
 not contain a roadmap disguised as a prompt.

@@ -62,6 +62,10 @@ name = "discovery_tests"
 path = "tests/discovery_tests.rs"
 
 [[test]]
+name = "two_people"
+path = "tests/two_people.rs"
+
+[[test]]
 name = "golden_prompt"
 path = "tests/golden_prompt.rs"
 

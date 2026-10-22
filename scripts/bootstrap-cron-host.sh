@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Bootstrap repo-owned cron jobs on the Wave's placed Machine.
+# Install the release cron jobs on the Wave's placed Machine. Crons are personal:
+# this Machine installs them with `lf cron add`; they stay private until
+# `lf cron publish <name>` shows one to teammates.
 #
 # Run this from the placed Machine after promoting a release `lf`. The script
 # reconstructs the unattended environment from non-secret host-local paths;
@@ -41,10 +43,6 @@ minimal_env=(
   "LANG=${LANG:-C}"
 )
 
-step "installed binary + declared jobs"
-"${minimal_env[@]}" lf cron preflight --wave "$wave" >/dev/null
-printf 'installed cron preflight passed for Wave %s\n' "$wave"
-
 step "unattended tool path"
 "${minimal_env[@]}" sh -c '
   missing=0
@@ -72,10 +70,13 @@ step "configured publisher authority"
 "${minimal_env[@]}" loopflow-release-publisher \
   uv run python scripts/publish_release.py check
 
-step "sync repo-owned schedules"
-"${minimal_env[@]}" lf cron sync --wave "$wave"
+step "install release schedules"
+"${minimal_env[@]}" lf cron add telemetry-daily --schedule "0 0 9 * * *" \
+  -- --wave "$wave" --batch flow telemetry-daily
+"${minimal_env[@]}" lf cron add release-run --schedule "0 0 10 * * *" \
+  -- --wave "$wave" --batch flow release-run
 
-step "prove GOAL.md matches loaded launchd jobs"
+step "prove the release schedules are loaded here"
 cron_json="$("${minimal_env[@]}" lf cron list --wave "$wave" --json)"
 "${minimal_env[@]}" \
   "CRON_LIST_JSON=$cron_json" \
@@ -84,21 +85,13 @@ cron_json="$("${minimal_env[@]}" lf cron list --wave "$wave" --json)"
 import json
 import os
 import sys
-from pathlib import Path
-
-import yaml
 
 wave = sys.argv[1]
-goal = Path("wave") / wave / "GOAL.md"
-frontmatter = yaml.safe_load(goal.read_text().split("---", 2)[1])
-expected = [
-    (entry["flow"], entry["schedule"])
-    for entry in frontmatter.get("crons", [])
-]
-installed = json.loads(os.environ["CRON_LIST_JSON"])
+expected = [("release-run", "0 0 10 * * *"), ("telemetry-daily", "0 0 9 * * *")]
+installed = json.loads(os.environ["CRON_LIST_JSON"])["installed"]
 actual = [(entry["flow"], entry["schedule"]) for entry in installed]
-if sorted(actual) != sorted(expected):
-    raise SystemExit(f"cron drift: GOAL.md={sorted(expected)!r} installed={sorted(actual)!r}")
+if sorted(actual) != expected:
+    raise SystemExit(f"cron drift: expected={expected!r} installed={sorted(actual)!r}")
 for entry in installed:
     if entry["wave"] != wave:
         raise SystemExit(f"wrong Wave in installed cron: {entry['flow']}")

@@ -1028,7 +1028,43 @@ pub(crate) fn worktree_add_inheriting(
             ),
         });
     }
+    if let Err(error) = _mark_lf_created(path, inherit) {
+        tracing::warn!(path = %path.display(), %error, "failed to mark worktree as lf-created");
+    }
     Ok(())
+}
+
+/// Admin-dir file recording that lf created a worktree. Git removes it with
+/// the worktree; the working tree never sees it.
+const LF_CREATED_MARKER: &str = "loopflow-created";
+
+fn _mark_lf_created(path: &Path, inherit: &impl Fn(&mut Command)) -> Result<(), GitError> {
+    let marker = git_stdout_inheriting(
+        path,
+        &["rev-parse", "--git-path", LF_CREATED_MARKER],
+        inherit,
+    )?;
+    fs::write(path.join(marker.trim()), "")?;
+    Ok(())
+}
+
+/// The canonical root of the worktree containing `cwd`, when lf created it.
+pub(crate) fn lf_created_worktree(cwd: &Path) -> Option<PathBuf> {
+    let output = git_stdout_inheriting(
+        cwd,
+        &[
+            "rev-parse",
+            "--show-toplevel",
+            "--git-path",
+            LF_CREATED_MARKER,
+        ],
+        &|_| {},
+    )
+    .ok()?;
+    let mut lines = output.lines();
+    let root = PathBuf::from(lines.next()?);
+    cwd.join(lines.next()?).is_file().then_some(())?;
+    root.canonicalize().ok()
 }
 
 /// Read a file's contents at a given revision.
@@ -1798,7 +1834,39 @@ mod tests {
         let branch = current_branch(&wt_path).expect("get branch");
         assert_eq!(branch, Some("new-feature".to_string()));
 
+        assert_eq!(
+            lf_created_worktree(&wt_path),
+            Some(wt_path.canonicalize().unwrap())
+        );
+        assert!(!wt_path.join(LF_CREATED_MARKER).exists());
+
         // Clean up
         worktree_remove(repo.path(), &wt_path).expect("remove worktree");
+    }
+
+    #[test]
+    fn main_checkout_and_hand_made_worktrees_are_not_lf_created() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+        let hand_made = repo.path().parent().unwrap().join(format!(
+            "{}.mine",
+            repo.path().file_name().unwrap().to_string_lossy()
+        ));
+        git_stdout(
+            repo.path(),
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "mine",
+                &hand_made.to_string_lossy(),
+            ],
+        )
+        .expect("hand-made worktree");
+
+        assert_eq!(lf_created_worktree(repo.path()), None);
+        assert_eq!(lf_created_worktree(&hand_made), None);
+
+        worktree_remove(repo.path(), &hand_made).expect("remove worktree");
     }
 }

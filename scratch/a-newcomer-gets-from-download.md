@@ -399,8 +399,8 @@ Implemented in the existing installer owner:
   published promotion with the bundle as source and target, then writes PATH.
   A relaunch of the settled copy (no pending receipt, active `activation.app`
   is this bundle, active CLI digest is the bundled helper's) returns "Loopflow
-  <version> is installed at <bundle>." before signature checks, promotion and
-  the `.zshrc` write; a removed block stays removed until `lf install
+  <version> is installed at <bundle>." before the downgrade preflight (which
+  runs the installed `lf`), signature checks, promotion and the `.zshrc` write; a removed block stays removed until `lf install
   shell-path`. A pending receipt, including a committed `Settled` one, still
   enters promotion for recovery.
 - Published promotion with an app source verifies `codesign --deep --strict`
@@ -493,6 +493,7 @@ open findings are folded into Remaining above.
 | Compress (Swift activation) | Release README activation paragraph untangled; folding `.failed` into the view's own error broke `AppActivationTests` (unhosted `@State` is invisible), so the state stays. `AppActivationTests` 2 passed. | Same limits. |
 | Realign (after Swift activation) | Plan, docs and code agree; origin/main unchanged since `98dab5ea8e`; `website/content.yaml` already links the DMG and getting-started, so no change. No tests rerun. | Reuses results above. |
 | Settled reuse (2026-10-22) | `is_settled_here` tests: matching settled install reused; other digest/copy and committed-pending receipt enter promotion. `cargo test -p loopflow --lib -- lf::commands::install machine_install app_activation_tests`: 42 passed, 2 ignored; fmt/clippy clean. | Decision tested on fixtures; `activate_app` itself is unreachable from a validation-only test build, and the install root is the real account home, so no end-to-end `.zshrc` byte check. |
+| Compress (settled reuse) | Reuse check moved ahead of the downgrade preflight, so a relaunch spawns no installed `lf`; `cargo test -p loopflow --lib -- lf::commands::install machine_install app_activation_tests` 42 passed, 2 ignored; fmt/clippy clean. | Same limits. |
 
 Proposed Wave memory update after landing (memory is read-only here): items 1,
 3 and 7 of "What stands between a newcomer and a first task" are addressed in

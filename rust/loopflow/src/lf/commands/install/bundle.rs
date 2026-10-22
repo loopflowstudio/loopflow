@@ -209,6 +209,19 @@ pub fn activate_app(bundle: &Path) -> Result<()> {
         ));
     }
     let root = crate::installation::root()?;
+    // A settled copy's installed CLI is this helper, so it cannot be a downgrade.
+    if is_settled_here(
+        &crate::installation::read_state(&root)?,
+        &bundle,
+        &helper_digest,
+    ) {
+        println!(
+            "Loopflow {} is installed at {}.",
+            opened.display_version(),
+            bundle.display()
+        );
+        return Ok(());
+    }
     // Published promotion verifies the signature before any target changes.
     if let Some(active) = crate::installation::active_install(&root)? {
         let cli = active
@@ -223,18 +236,6 @@ pub fn activate_app(bundle: &Path) -> Result<()> {
                 active.activation.as_ref().and_then(|a| a.app.as_deref()),
             )?;
         }
-    }
-    if is_settled_here(
-        &crate::installation::read_state(&root)?,
-        &bundle,
-        &helper_digest,
-    ) {
-        println!(
-            "Loopflow {} is installed at {}.",
-            opened.display_version(),
-            bundle.display()
-        );
-        return Ok(());
     }
     let directory = super::published::install_dir()?;
     fs::create_dir_all(&directory)

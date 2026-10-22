@@ -164,6 +164,9 @@ pub struct AgentWorktree {
 }
 
 pub fn git_common_dir(repo: &Path) -> Result<PathBuf, GitError> {
+    if let Some(layout) = crate::git::read_layout(repo) {
+        return Ok(layout.common_dir);
+    }
     let output = crate::git::retained_output(
         repo,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -189,10 +192,11 @@ pub fn git_common_dir(repo: &Path) -> Result<PathBuf, GitError> {
 }
 
 pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
-    if let Ok(root) = crate::git::worktree_root(repo) {
-        if root.join(".git").is_dir() {
-            return Ok(root);
-        }
+    match crate::git::worktree_root(repo) {
+        Ok(root) if root.join(".git").is_dir() => return Ok(root),
+        // A path that cannot be resolved holds no repository; `git` cannot say otherwise.
+        Err(GitError::Io(error)) => return Err(GitError::Io(error)),
+        _ => {}
     }
     let worktrees = list_porcelain(repo)?;
     // A bare or separate Git directory can appear first instead of a checkout.

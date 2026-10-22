@@ -399,10 +399,11 @@ struct DesktopPerformanceTests {
         multiplexer.load(sessionId: "perf-session-0", location: model.sessions.value?.first { $0.id == "perf-session-0" }?.workspace?.identity)
         let sessionPane = multiplexer.focusedPaneId
         multiplexer.newShell(location: workspace.location)
-        let companionPane = multiplexer.focusedPaneId
+        let companion = multiplexer.focusedPane
+        let companionPane = companion.id
         multiplexer.load(sessionId: "perf-session-2", location: model.sessions.value?.first { $0.id == "perf-session-2" }?.workspace?.identity)
         let otherPane = multiplexer.focusedPaneId
-        let identities: [TerminalIdentity] = [.session("perf-session-0", machineId: fixtureMachineId), .shell(companionPane, machineId: fixtureMachineId), .session("perf-session-2", machineId: fixtureMachineId)]
+        let identities: [TerminalIdentity] = [.session("perf-session-0", machineId: fixtureMachineId), try #require(companion.terminal), .session("perf-session-2", machineId: fixtureMachineId)]
         let terminals = identities.map { registry.surfaces.view(for: $0) }
         defer { for identity in identities { registry.surfaces.release(identity) } }
         for terminal in terminals {
@@ -413,7 +414,9 @@ struct DesktopPerformanceTests {
         }
         let surfaces = try terminals.map { try #require($0.surface) }
         multiplexer.setFocusedPane(sessionPane)
-        for index in 0..<taskCount { model.select(.task(id: "perf-task-\(index)")) }
+        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
+            members: (0..<taskCount).map { fixtureViewContent(work: .init(repository: "repo", kind: .task, id: "perf-task-\($0)"), title: "") })],
+            reason: "")
         model.select(.task(id: "perf-task-0"))
         model.navigation.content = .terminals
         let view = SessionsView(model: model, repoPath: checkout.path, workspaces: registry, query: query)
@@ -612,7 +615,7 @@ struct DesktopPerformanceTests {
             navigator.onOpenSession(first)
             try await wait(window) { window.firstResponder === terminals[0] }
             guard terminals.enumerated().allSatisfy({ $0.element.surface == surfaces[$0.offset] }),
-                  multiplexer.layout.pane(for: companionPane)?.content == .shell(location: workspace.location),
+                  multiplexer.layout.pane(for: companionPane) == companion,
                   multiplexer.layout.pane(for: otherPane)?.sessionId == other.id else {
                 throw PerformanceFailure("failed", "Retained terminal identity or companion changed")
             }
@@ -964,7 +967,7 @@ struct DesktopPerformanceTests {
         let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))
         var snapshot = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var wave = try #require((snapshot["waves"] as? [[String: Any]])?.first)
-        var tasks = try #require(wave["tasks"] as? [String: Any])
+        var tasks = try #require(snapshot["tasks"] as? [String: Any])
         let template = try #require((tasks["items"] as? [[String: Any]])?.first)
         tasks["items"] = try (0..<taskCount).map { index in
             var task = template
@@ -990,7 +993,6 @@ struct DesktopPerformanceTests {
             task["runtime"] = runtime
             return task
         }
-        wave["tasks"] = tasks
         wave["unavailable_tasks"] = []
         var waveInfo = try #require(wave["wave"] as? [String: Any])
         waveInfo["repo"] = checkout

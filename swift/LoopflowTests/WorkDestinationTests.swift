@@ -73,6 +73,32 @@ struct WorkDestinationTests {
         #expect(model.navigation.content == .terminals)
     }
 
+    @Test func dashboardTileOpensConversationInPlace() async throws {
+        let planning = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            if args.contains("connect") { return encoded }
+            if args.starts(with: ["wave", "show"]) { return planning }
+            throw RegistryQueryError("Opening in a tile reads nothing else")
+        }
+        let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.selectWorkingTasksDashboard()
+        let tile = registry.workspace(for: model.workspaceKey(for: .task(id: task.id), repository: "repo"),
+                                      title: task.task.name, location: nil)
+        try DashboardConversationOffer(model: model, task: task, workspace: tile).inspect()
+            .find(viewWithAccessibilityIdentifier: "dashboard-open-conversation-\(task.id)").button().tap()
+        for _ in 0..<200 where tile.multiplexer.pane(forSessionId: record.id) == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(tile.multiplexer.pane(forSessionId: record.id) != nil)
+        #expect(tile.conversationError == nil)
+        #expect(model.navigation.destination == .workingTasks)
+    }
+
     @Test("Task entry exposes Move here without taking over the external terminal", arguments: [false, true])
     func taskConversationActiveElsewhere(explicitSession: Bool) async throws {
         let data = try fixture()
@@ -155,20 +181,13 @@ struct WorkDestinationTests {
         var initial = snapshot
         if unprepared {
             var planning = try JSONSerialization.jsonObject(with: Data(data.utf8)) as! [String: Any]
-            var waves = planning["waves"] as! [[String: Any]]
-            var tasks = waves[0]["tasks"] as! [String: Any]
-            var items = tasks["items"] as! [[String: Any]]
-            items[0]["runtime"] = NSNull()
-            var reference = items[0]["reference"] as! [String: Any]
-            reference["workspace"] = NSNull()
-            items[0]["reference"] = reference
-            tasks["items"] = items
-            waves[0]["tasks"] = tasks
-            planning["waves"] = waves
             var inventory = try #require(planning["tasks"] as? [String: Any])
             var allTasks = try #require(inventory["items"] as? [[String: Any]])
             let index = try #require(allTasks.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == task.id })
-            allTasks[index] = items[0]
+            allTasks[index]["runtime"] = NSNull()
+            var reference = allTasks[index]["reference"] as! [String: Any]
+            reference["workspace"] = NSNull()
+            allTasks[index]["reference"] = reference
             inventory["items"] = allTasks
             planning["tasks"] = inventory
             initial = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: planning))
@@ -430,15 +449,15 @@ struct WorkDestinationTests {
             let targetPane = remote.multiplexer.focusedPane
             remote.multiplexer.setZoom(targetPane.id, enabled: true)
             let target = DesktopPaneTarget(repository: "repository", window: UUID().uuidString,
-                work: remote.key, pane: targetPane.id, incarnation: targetPane.incarnation)
+                work: remote.key, pane: targetPane.id, incarnation: targetPane.incarnation, tab: nil)
             try registry.controlPane(.init(target: target, action: .shell), model: model)
             let shell = try #require(remote.multiplexer.layout.allPanes.first { $0.content.selectedShell?.location == remoteIdentity })
             let command = try #require(remote.multiplexer.layout.pane(for: shell.id)?.content.selectedShell?.command)
             #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repository", "repository",
                 "task", "shell", remoteID, "--checkout", remoteIdentity.worktree])
             let splitID = try registry.controlPane(.init(target: target, action: .shell), model: model)
-            #expect(remote.multiplexer.layout.pane(for: splitID)?.content.selectedShell?.execution == request.location)
-            #expect(remote.multiplexer.layout.pane(for: splitID)?.content.selectedShell?.command == command)
+            #expect(remote.multiplexer.shell(splitID.tab ?? "")?.execution == request.location)
+            #expect(remote.multiplexer.layout.pane(for: splitID.pane)?.content.selectedShell?.command == command)
             #expect(remote.multiplexer.layout.pane(for: targetPane.id) == targetPane)
             #expect(remote.multiplexer.focusedPaneId == shell.id)
             #expect(remote.multiplexer.zoomedPaneId == nil)
@@ -1001,28 +1020,6 @@ struct WorkDestinationTests {
         }
     }
 
-    @Test(arguments: [false, true])
-    func taskLinkUsesRepositoryInventoryWithAnotherWaveUnavailable(scoped: Bool) async throws {
-        let data = try fixture()
-        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
-        let wave = try #require(snapshot.waves.first)
-        let task = try #require(wave.tasks.items.first)
-        let exact = try oneTask(data, taskId: task.id)
-        var result = try #require(JSONSerialization.jsonObject(with: Data(exact.utf8)) as? [String: Any])
-        var waves = try #require(result["waves"] as? [[String: Any]])
-        let other = try #require(waves.indices.first { index in
-            let tasks = waves[index]["tasks"] as? [String: Any]
-            return (tasks?["items"] as? [Any])?.isEmpty == true
-        })
-        waves[other]["tasks"] = ["state": "unavailable", "reason": "Chapter unavailable"]
-        result["waves"] = waves
-        let response = String(decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self)
-        let (model, _) = destinationModel(query: RegistryQuery { _, _ in response })
-        await model.openTaskLink(TaskLink(issue: task.task.identifier, repo: scoped ? wave.wave.repo : nil))
-        #expect(model.selection == .task(id: task.id))
-        #expect(!model.showsTaskLink)
-    }
-
     @Test func inspectionForwardsTaskControlIndependentlyOfSessionFailure() throws {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(fixture().utf8))
         let wave = try #require(snapshot.waves.first)
@@ -1036,7 +1033,7 @@ struct WorkDestinationTests {
         let workspaces = SessionsWorkspaceRegistry()
         let report = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: workspaces)
         #expect(report.reading == "loading")
-        #expect(report.supportedOperations.contains("list"))
+        #expect(report.supportedOperations.contains("state"))
         #expect(report.supportedOperations.contains("read"))
         #expect(!report.supportedOperations.contains("inspect"))
         #expect(report.task?.reading == "current")
@@ -1094,7 +1091,8 @@ struct WorkDestinationTests {
         #expect(stale.task?.actions == nil)
         #expect(stale.task?.runControl == nil)
 
-        let empty = RoadmapSnapshot(generatedAt: "2026-10-08T21:00:00Z", waves: [], tasks: .available(items: [], truncated: false))
+        let empty = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(
+            #"{"generated_at":"2026-10-08T21:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#.utf8))
         model.applyFixture(roadmap: .available(empty), waves: .available([]), workActivity: .loading, repos: [])
         model.select(.task(id: task.id))
         let removed = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: SessionsWorkspaceRegistry())
@@ -1211,7 +1209,7 @@ struct WorkDestinationTests {
         let window = UUID()
         var received: [LinkedWork] = []
         router.register(window, repository: workspace.id, focus: {}, inspect: windowInspection,
-            controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { url in
+            controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { url in
             received.append(url)
         }
         for machine in ["local-owner", "peer-owner"] {
@@ -1236,7 +1234,7 @@ struct WorkDestinationTests {
         var raised = 0
         var received: [String] = []
         router.register(UUID(), repository: workspace.id, focus: { raised += 1 }, inspect: windowInspection,
-            controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { link in
+            controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { link in
             if case .task(let task) = link { received.append(task.issue) }
         }
         // The first read outlasts the second address's arrival.
@@ -1269,7 +1267,7 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings.first?.status == .opening)
         let id = UUID()
         router.register(id, repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
-                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .usable)
         _ = try await router.openRepository(path: repositoryFixturePath(), link: nil, query: query) { _ in
             Issue.record("An open repository must reuse its window")
@@ -1299,10 +1297,10 @@ struct WorkDestinationTests {
         }
         #expect(router.inspect().openings.first?.status == .opening)
         router.register(UUID(), repository: "old-plan", focus: {}, inspect: windowInspection,
-                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .opening)
         router.register(UUID(), repository: current.id, openingRequests: router.workspaceRequests(current.id), focus: {}, inspect: windowInspection,
-                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .usable)
     }
 
@@ -1332,12 +1330,12 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings.first?.status == .opening)
         let stale = UUID()
         router.register(stale, repository: workspace.id, openingRequests: oldRequests, focus: {}, inspect: windowInspection,
-                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .opening)
         router.remove(stale, repository: workspace.id)
         _ = try await router.resolveWorkspace(workspace, query: query)
         router.register(UUID(), repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
-                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .usable)
     }
 
@@ -1352,7 +1350,7 @@ struct WorkDestinationTests {
         let current = router.workspaceRequests(workspace.id)
         let id = UUID()
         router.register(id, repository: workspace.id, openingRequests: validated, focus: {}, inspect: windowInspection,
-                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .opening)
         router.confirmRegisteredWorkspace(workspace.id, requests: validated)
         #expect(router.inspect().openings.first?.status == .opening)
@@ -1373,7 +1371,7 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings.first?.status == .failed)
         let receipt = router.inspect().openings
         router.register(UUID(), repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
-                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings == receipt)
     }
 
@@ -1398,7 +1396,7 @@ struct WorkDestinationTests {
         document.editor.setSelectedRange(NSRange(location: 2, length: 4))
         let layout = store.layout, focus = store.focusedPaneId
         #if canImport(GhosttyKit)
-        let terminal = pane.terminal!
+        let terminal = try #require(pane.terminal)
         let view = registry.surfaces.view(for: terminal)
         defer { registry.surfaces.release(terminal) }
         #endif
@@ -1439,12 +1437,12 @@ struct WorkDestinationTests {
         #expect(document.editor.string == "unfinished draft")
         #expect(document.editor.selectedRange() == NSRange(location: 2, length: 4))
         let stale = DesktopPaneTarget(repository: "old-plan", window: window.uuidString,
-            work: oldKey, pane: pane.id, incarnation: pane.incarnation)
+            work: oldKey, pane: pane.id, incarnation: pane.incarnation, tab: nil)
         #expect(throws: RegistryQueryError.self) {
             try router.controlPane(.init(target: stale, action: .hide))
         }
         let current = DesktopPaneTarget(repository: "plan", window: report.windows[0].window,
-            work: retained.key, pane: pane.id, incarnation: pane.incarnation)
+            work: retained.key, pane: pane.id, incarnation: pane.incarnation, tab: nil)
         _ = try router.controlPane(.init(target: current, action: .hide))
         _ = try router.controlPane(.init(target: current, action: .restore))
         #expect(store.layout == layout)
@@ -1494,7 +1492,7 @@ struct WorkDestinationTests {
         #expect(try await router.resolveWorkspace(restoredAlias, query: after) == scene)
         let window = UUID()
         router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id), focus: {},
-            inspect: windowInspection, controlPane: { $0.target.pane },
+            inspect: windowInspection, controlPane: { ($0.target.pane, $0.target.tab) },
             readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().windows.map(\.repository) == ["plan"])
         #expect(router.inspect().openings.first?.status == .usable)
@@ -1514,7 +1512,7 @@ struct WorkDestinationTests {
         let window = UUID()
         if registered {
             router.register(window, repository: scene.id, focus: {}, inspect: windowInspection,
-                controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         }
         let validation = Task {
             try await router.resolveWorkspace(RepositoryWorkspace(id: "plan", path: path), query: RegistryQuery { _, _ in
@@ -1530,7 +1528,7 @@ struct WorkDestinationTests {
         #expect(try await validation.value == scene)
         if !registered {
             router.register(window, repository: scene.id, focus: {}, inspect: windowInspection,
-                controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         }
         #expect(router.inspect().windows.map(\.repository) == ["old-plan"])
         #expect(router.inspect().windows.first?.window == (reboundWindow ?? window.uuidString))
@@ -1553,7 +1551,7 @@ struct WorkDestinationTests {
         let register: (RepositoryWorkspace) -> Void = { scene in
             router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id),
                 focus: {}, inspect: windowInspection,
-                controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { received.append($0) }
+                controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { received.append($0) }
         }
         if alreadyOpen {
             _ = try await router.openRepository(path: path, link: nil,
@@ -1605,7 +1603,7 @@ struct WorkDestinationTests {
         let workspace = try await router.openRepository(path: before.path, link: nil, query: query) { _ in }
         let window = UUID()
         router.register(window, repository: workspace.id, focus: {}, inspect: windowInspection,
-            controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+            controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         let registry = SessionsWorkspaceRegistry(localMachineId: "local")
         let store = registry.sessionStore(repository: workspace.id, repoPath: before.path, query: query)
         try FileManager.default.moveItem(at: before, to: after)
@@ -1634,7 +1632,7 @@ struct WorkDestinationTests {
     private func windowInspection(_ repository: String, _ id: UUID) -> DesktopWindowInspection {
         DesktopWindowInspection(repository: repository, window: id.uuidString, path: nil,
             selectionKind: nil, selectionId: nil, reading: "loading", reason: nil,
-            task: nil, session: nil, supportedOperations: ["list"], workspaces: [], opening: nil)
+            task: nil, session: nil, supportedOperations: ["state"], workspaces: [], openWork: [], view: nil, opening: nil)
     }
 
     @Test func inspectionIncludesOnlyRegisteredWindowIncarnationsWithoutFocusing() {
@@ -1855,16 +1853,6 @@ struct WorkDestinationTests {
 
     private func oneTask(_ data: String, taskId: String) throws -> String {
         var snapshot = try #require(JSONSerialization.jsonObject(with: Data(data.utf8)) as? [String: Any])
-        var waves = try #require(snapshot["waves"] as? [[String: Any]])
-        for index in waves.indices {
-            var evidence = try #require(waves[index]["tasks"] as? [String: Any])
-            let items = evidence["items"] as? [[String: Any]] ?? []
-            evidence["state"] = "ok"
-            evidence["truncated"] = false
-            evidence["items"] = items.filter { ($0["task"] as? [String: Any])?["id"] as? String == taskId }
-            waves[index]["tasks"] = evidence
-        }
-        snapshot["waves"] = waves
         var inventory = try #require(snapshot["tasks"] as? [String: Any])
         let tasks = try #require(inventory["items"] as? [[String: Any]])
         inventory["items"] = tasks.filter { ($0["task"] as? [String: Any])?["id"] as? String == taskId }

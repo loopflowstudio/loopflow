@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use fs2::FileExt;
 use rusqlite::{params, Connection};
 
-use super::{_migration_transaction, apply_sqlite};
+use super::{_migration_transaction, apply_build_drafts, apply_sqlite};
 use crate::id::LfProcessId;
 use crate::journal::{ProcessIdentityEvidence, ProcessReceipt, PROCESS_RECEIPT_ROOT};
 use crate::store::canonical_ids::{preflight, session_fence_file};
@@ -31,17 +31,6 @@ fn released() -> (tempfile::TempDir, Connection) {
 }
 
 /// Released stores open as experiments only after this build's drafts apply.
-fn apply_drafts(conn: &Connection) {
-    super::_migration_transaction(conn, |conn, _| {
-        for draft in crate::build_info::migration_draft_manifest() {
-            conn.execute_batch(draft.sql)?;
-            super::seed_peer_planning(conn, draft.sql)?;
-        }
-        Ok(())
-    })
-    .unwrap();
-}
-
 fn conversion_sql() -> &'static str {
     super::MIGRATIONS
         .iter()
@@ -551,7 +540,7 @@ fn canonical_ids_metric_upgrade_retains_evidence_and_reimport() {
         )
         .unwrap();
     apply_sqlite(&conn).unwrap();
-    apply_drafts(&conn);
+    apply_build_drafts(&conn);
     assert_eq!(retained(), before);
     assert_eq!(
         conn.query_row(
@@ -805,7 +794,7 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
             .collect::<Result<_, _>>()
             .unwrap();
     apply_sqlite(&conn).unwrap();
-    apply_drafts(&conn);
+    apply_build_drafts(&conn);
     assert_eq!(
         conn.query_row(
             "SELECT session_id,payload FROM session_events WHERE receipt_key='Case-Receipt'",
@@ -1003,7 +992,7 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
     conn.execute("UPDATE agent_sessions SET repo=?1,cwd=?1", [repo_path])
         .unwrap();
     apply_sqlite(&conn).unwrap();
-    apply_drafts(&conn);
+    apply_build_drafts(&conn);
     let binary = loopflow_test_support::lf_binary();
     let lf = |args: &[&str]| {
         let mut command = std::process::Command::new(binary);

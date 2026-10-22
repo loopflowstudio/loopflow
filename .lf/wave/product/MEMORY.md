@@ -21,7 +21,8 @@
   worktrees lf created (git admin-dir marker; exact-path `hasTrustDialogAccepted`
   in the config the launched child reads). No hooks or other global Claude
   settings. Found in LOO-554's fresh-Linux QA; real-Claude verification is review's.
-- LOO-416 owns saved per-Task panes and reattachment; LOO-426 owns Task/Session
+- LOO-497 owns saved pane records and their Console integration; LOO-489 owns
+  ordinary navigation, LOO-416 reattachment. LOO-426 owns Task/Session
   opening; LOO-402 owns Waiting navigation, including blocked shell panes through
   shared Swift while Session Waiting stays in Rust. LOO-403 owns shortcuts and
   palette, LOO-387 native draft preparation. Programmatic Desktop control must
@@ -202,6 +203,7 @@ Flow detach/reattach and CLI-stream workspace/file-draft retention. A file draft
 does not prove unsent provider input. Broader gate, between-Wave and configured
 native proof remain; no external-progress credit follows. LOO-489 owns query UI;
 LOO-416 retains lifecycle scope.
+
 
 ## Task delivery boundary (LOO-418, revised 2026-10-11)
 
@@ -486,26 +488,15 @@ process evidence grants neither retirement nor Flow settlement. Full Desktop acc
 
 ## Task workspace and primary Sessions (updated 2026-10-01)
 
-Jack Heart accepted a Task workspace that keeps Sessions, shells and files
-together while background Flows prepare the next interactive stage. Direct
-Flow reviews remain their own conversations. Jack’s October 1 correction makes
-all conversations in a Task checkout Task Sessions, regardless of attention or
-Flow membership. Repo and Wave Sessions retain their explicit scopes and are
-excluded. Any number of Task Sessions is allowed. `session list --orphan` filters
-Sessions without Task association; it provides no creation opt-out. LOO-462 removes
-its Desktop navigation.
-
-Earlier primary-runtime planning selected eager repo/Wave Sessions and a Task
-conversation on launch. The October 1 correction supersedes any interpretation
-that a Task has only one Session or that it owns every other conversation. Repo owns onboarding and last-resort help,
-including without Waves or PM; Wave combines autonomous operation and emerging
-design; the Task Flow authority it once operated is deleted. Primary repo/Wave
-Ctrl-C replaces the conversation. TaskSession Ctrl-C remains undecided and must
-never silently restart its Flow. Ordinary reads remain read-only.
-
-The automatic Wave-wake plan is superseded by the Ask removal above
-(`f57abb655:wave/product/MEMORY.md`). Upstream `3dc89bc9a` removed the resident/listener and chat
-bridge; do not restore that service or assume its journal provides recovery.
+Jack Heart's October 1 correction permits any number of Task Sessions, associated
+by checkout regardless of attention/Flow; explicit repo/Wave scopes are excluded.
+`session list --orphan` filters unassociated Sessions, not creation;
+LOO-462 removes its Desktop navigation. Repo owns onboarding/last-resort help,
+Wave operation/design. Primary repo/Wave Ctrl-C replaces the conversation;
+TaskSession Ctrl-C remains undecided and cannot silently restart a Flow.
+Reads acquire nothing. The retired eager-primary/automatic-wake account is at
+`463c5803a2:.lf/wave/product/MEMORY.md`, this heading; `3dc89bc9a` removed the
+resident/listener and chat bridge, whose journal supplies no recovery authority.
 
 The Task workspace implements Rust-derived checkout association
 and a paged directory browser independent of Project hydration and PR diff bases.
@@ -523,11 +514,6 @@ visibility derives from retained preference plus zoom, without a second focus
 backup. Its transport fixtures were simulated; the proof left unshown is listed
 under the LOO-353 section above. The branch-status account is at
 `e67cdc62f:wave/product/MEMORY.md` under this heading.
-
-Selection is split-owned: ordinary selection preserves other splits and
-Command-click changes visibility without terminating Sessions. New arrivals
-preserve focus and manual layout. October 6 removed the Sessions sidebar.
-Primary Sessions runtime moved to LOO-364.
 
 Jack also accepted ordinary Projects independent of optional chapter coordination
 (LOO-366), and a Task admission/completion audit (LOO-367). Task supplies purpose and
@@ -616,7 +602,7 @@ LOO-297's attempted read failed on missing Linear credentials; local Task absenc
 did not establish remote absence. Any sentence repair requires a fresh authorized
 issue read. No Task was filed or changed by these records.
 
-## Workspace redesign decisions (reconciled 2026-10-17)
+## Workspace redesign decisions
 
 Jack Heart approved LOO-489's Console hybrid and Swift demo on October 17,
 superseding dashboard/grid, favorites, attention sorting and automatic sidebar
@@ -655,6 +641,39 @@ An exited status writer restarts on a later event. Headless checks cover refusal
 retry, new-turn clearing and observation recovery; mounted retention and visual
 acceptance remain open. Jack Heart cut Open in editor on October 17.
 
+October 16–17, LOO-497/489/416: Jack Heart separated selection from arrangement.
+One Task layout projects primary Session or explicit zoom, never focus. Defaults
+retain child Waves (even empty) and descendant started unfinished Tasks, including
+paused/idle. Jack chose first-wins duplicates and lfdb persistence. First-visible
+tree traversal is the implementation interpretation; incomplete evidence retains
+geometry/order because reordering can promote duplicates. Hide preserves edits.
+
+Jack accepted implementation/review publication, not merge/completion; breadcrumbs,
+Attention first, arrivals at the end, Available and cross-repo Cmd K Find Work.
+Other repos open separate windows; Edit view is separate. Repo scope is implicit;
+backlog selection starts nothing. October 17: independent Dashboards reuse Task
+workspaces; repository/Wave defaults cannot be replaced. Work bindings were removed.
+
+October 17: Jack Heart had 497 integrate the captured 489 Console.
+497 supplies plans, Dashboards and pane/draft persistence; 489 ordinary navigation,
+416 lifetime, 498 host consumption. October 18: Jack Heart restricted side-by-side
+Tasks to query results in Dashboards, including unsaved queries; ordinary navigation
+selects one destination. Anonymous arrangement remains a draft save-first choice. Geometry keys by Dashboard and ordered expression, excluding
+clause IDs; distinct Dashboards need distinct occurrence roots. Intent proves no
+liveness; Waiting's 2:1 weight is provisional.
+
+Jack's October 17 tab decision: each Task has at most one Shell and one Files pane;
+shell tabs own independent processes, file tabs share Task/path documents. No
+tear-out, extra tool panes or repo/Wave/Dashboard shells. Creation selects a tab;
+arrangement groups existing panes. Shell identity is independent of pane/selection;
+empty Files keeps location. October 18 application tests cover delayed reads
+merging missing content without replacing newer tabs, selection, geometry or drafts.
+Revision conflicts preserve live and durable edits. Cold shells have no launch command. Native
+launch still records no Shell Process ID, so cold attachment and mounted restart/
+cross-machine continuity remain unproved with 416.
+Pane ownership follows Task.repository_id, not optional Project/Wave membership;
+leaving a Project must preserve the same saved panes and drafts.
+
 October 15, LOO-492: Jack Heart clarified that nested corner curves need even
 clearance; text padding alone does not satisfy the defect. The implementation
 derives workspace radius from pane radius plus inset. Terminal clearance sits
@@ -689,8 +708,9 @@ preserve the failed attempts and superseded proposals. Current usage lives in
   and aligned headers. Task context shows its recorded worktree without an
   independent selector. One document per Task/path in the window's existing
   workspace registry shares draft, selection and Undo across both sources,
-  File/Diff, sheets and Sessions. Browser visibility survives relaunch; unsaved
-  drafts remain window-local. File browsing, read and save do not require a PR
+  File/Diff, sheets and Sessions. LOO-497 now persists tool intent and file drafts
+  by Work; recovered text stays read-only until base/disk reconciliation. Mounted
+  relaunch acceptance remains unproved. File browsing, read and save do not require a PR
   or hydrated Project; comparisons still require their recorded base.
 - **Comparison authority stays in `lf`.** Parent means the active Task PR's
   recorded base, HEAD its resolved worktree commit. The exact SHA pins list and
@@ -998,20 +1018,16 @@ Watch**. Integration is not acceptance.
 
 ### Terminal ownership and input (branch evidence, 2026-09-22)
 
-- Each window owns a repository workspace registry, which retains checkout
-  layouts and one terminal view pool across outline/content and repository switches.
-  Each view owns its Ghostty surface. A global Session-ID surface registry caused
-  one window's release to destroy another's terminal; it is deleted. Do not
-  share an NSView between windows or evict a hidden Session to save memory:
-  freeing a surface ends its PTY. Window close/app quit still end embedded
-  clients; history resumes, unfinished drafts do not survive.
+- LOO-416's October 16 local foundation retains repository registries across
+  window close, not app death; composed native proof remains. Earlier window-owned
+  lifetime and global-surface failure: `463c5803a2:.lf/wave/product/MEMORY.md`,
+  this heading. Never share an NSView between windows or evict hidden live surfaces.
 - Session identity, provider process, local opening/error state, terminal view,
-  and pane placement have different lifetimes. Keep them separate. In particular,
-  `.prepared` bridges async opening and surface creation, and an open failure
-  stays visible until retried or superseded. Shell panes also survive navigation,
-  and closing an outer checkout slot only hides its entire inner layout. Explicit
-  inner close/process exit closes that shell. September 30's Task workspace removes
-  the separate Task terminal owner and uses these retained shell/Session lifetimes.
+  and pane placement have different lifetimes. `.prepared` bridges opening and
+  surface creation; failures stay visible until retried or superseded. Task-owned
+  shells survive navigation. October 18 removes outer checkout slots; Dashboard
+  hiding retains the Work's panes. Closing a tool and Process exit remain separate
+  from changing destinations.
 - `TerminalIdentity` carries Session or shell purpose through
   views, pools, and bell/title/close notifications. Input policy follows the
   enum case, never string prefixes. Resolve callback identity from surface
@@ -1118,13 +1134,12 @@ Workflow-loading landing hold survives; LOO-488 owns whole-app theming.
 
 ### Shared viewing boundary
 
-Native launch plus explicit Move here stays the main path. Optional
-simultaneous Warp/Loopflow viewing (second attachment view-only, explicit
-**Take control**) is unbuilt; compare an opt-in tmux configuration with a
-transparent PTY relay before changing the contract. The proof list and tmux
-findings are at `f8fe8aff0:wave/product/MEMORY.md` under this heading. Filed
-2026-09-22: LOO-280 build/resource parity; LOO-281 shell blocks and visual
-proof; LOO-282 client provenance; LOO-283 the shared-viewing comparison.
+Jack Heart accepted per-conversation ownership October 16. LOO-416 integrated
+LOO-415's attach-only transport at `7bfa10fa72` October 17; Desktop adoption and
+combined continuity remain unproved. Viewer loss must not restart execution.
+Text-grid snapshots do not prove exact renderer restoration. Earlier tmux
+comparison and LOO-280–283 allocations: `f8fe8aff0:wave/product/MEMORY.md`, this
+heading.
 
 ## Learnings
 

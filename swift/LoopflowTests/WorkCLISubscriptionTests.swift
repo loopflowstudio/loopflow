@@ -43,7 +43,8 @@ struct WorkCLISubscriptionTests {
         let created = try await fixture.json(["task", "create", "--wave", waveName, "--title", "Arrives through CLI", "--json"])
         let id = try #require(created["id"] as? String)
         try await eventually { model.task(id: id) != nil }
-        #expect(selectedPlanMembers(model).allSatisfy { $0.work.kind != .task }) // Unstarted backlog stays hidden.
+        // A Wave lists its unstarted Tasks so each can offer Start.
+        try await eventually { selectedPlanMembers(model).first { $0.work.id == id }?.states == [.backlog] }
         _ = try await fixture.run(["-b", "task", "run", id])
         // Membership and checkout details arrive in separate observation frames.
         try await eventually {
@@ -83,10 +84,10 @@ struct WorkCLISubscriptionTests {
         // Planning and sidebar membership arrive as independent stream frames.
         try await eventually {
             guard let plan = model.selectionPlans.value?.first(where: {
-                $0.owner.reference == .wave(id: wave.wave.id)
+                $0.dashboardID == nil && $0.selection.expression == .wave(wave.wave.id)
             }) else { return false }
             return model.task(id: id)?.task.task.state == state
-                && !plan.members.contains { $0.work.id == id }
+                && !plan.contents.contains { $0.work.id == id }
         }
         #expect(model.selection == .task(id: id))
         #expect(selectedPlanMembers(model).isEmpty) // Built-in plans belong to repositories and Waves, not Tasks.
@@ -199,8 +200,15 @@ struct WorkCLISubscriptionTests {
         #expect((status["task"] as? [String: Any])?["id"] as? String == id)
     }
 
-    private func selectedPlanMembers(_ model: WorkModel) -> [ViewMember] {
-        model.selectionPlans.value?.first { $0.owner.reference == model.selection }?.members ?? []
+    private func selectedPlanMembers(_ model: WorkModel) -> [WorkViewPlan.Content] {
+        model.selectionPlans.value?.first { plan in
+            guard plan.dashboardID == nil else { return false }
+            switch plan.selection.expression {
+            case .repository: return model.selection == nil
+            case .wave(let id): return model.selection == .wave(id: id)
+            default: return false
+            }
+        }?.contents ?? []
     }
 
     private func eventually(_ condition: @MainActor () -> Bool) async throws {

@@ -1201,17 +1201,31 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     override func scrollWheel(with event: NSEvent) {
         guard let surface else { return }
 
-        var scrollMods: ghostty_input_scroll_mods_t = 0
-        if event.hasPreciseScrollingDeltas {
-            scrollMods |= 1 // GHOSTTY_SCROLL_MODS_PRECISE
-        }
+        // Match Ghostty's own view: precise (trackpad) deltas are doubled, and the
+        // momentum phase rides in the mods so inertial scrolling stays smooth.
+        let precise = event.hasPreciseScrollingDeltas
+        let scale: CGFloat = precise ? 2 : 1
+        var scrollMods: ghostty_input_scroll_mods_t = precise ? 1 : 0
+        scrollMods |= ghostty_input_scroll_mods_t(Self.momentum(event.momentumPhase).rawValue) << 1
 
         ghostty_surface_mouse_scroll(
             surface,
-            event.scrollingDeltaX,
-            event.scrollingDeltaY,
+            event.scrollingDeltaX * scale,
+            event.scrollingDeltaY * scale,
             scrollMods
         )
+    }
+
+    private static func momentum(_ phase: NSEvent.Phase) -> ghostty_input_mouse_momentum_e {
+        switch phase {
+        case .began: GHOSTTY_MOUSE_MOMENTUM_BEGAN
+        case .stationary: GHOSTTY_MOUSE_MOMENTUM_STATIONARY
+        case .changed: GHOSTTY_MOUSE_MOMENTUM_CHANGED
+        case .ended: GHOSTTY_MOUSE_MOMENTUM_ENDED
+        case .cancelled: GHOSTTY_MOUSE_MOMENTUM_CANCELLED
+        case .mayBegin: GHOSTTY_MOUSE_MOMENTUM_MAY_BEGIN
+        default: GHOSTTY_MOUSE_MOMENTUM_NONE
+        }
     }
 
     // MARK: - Context Menu

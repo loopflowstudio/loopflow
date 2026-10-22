@@ -1016,7 +1016,10 @@ lf task run LOO-427 --explain --json
 lf --explain                                # resolve the current checkout
 lf session connect SESSION_ID --explain
 lf history show PROCESS_LFID --explain
-lf desktop list --json                       # read an already-running Mac app
+lf desktop state --json                       # read an already-running Mac app
+lf desktop view 'query:attention'             # open a Dashboard in its repository window
+lf desktop view 'state:available' --plan       # derive Work without opening Desktop
+lf desktop query attention 'state:available'  # create a Dashboard; edits need --revision
 ```
 
 Explanation reads local records without allocating a checkout, creating a plan,
@@ -1028,6 +1031,23 @@ permission to start. Process checkout resolution describes current Work at that
 location, not historical usage attribution. Ordinary `lf context` still reads
 prompt budgets.
 
+`desktop view EXPRESSION` opens the shared query results as a Dashboard in the Mac
+app, including unsaved queries. Save the Dashboard to name, pin and arrange it.
+Only Dashboard query results compose Tasks side by side; ordinary navigation
+selects one destination. `state --json` includes the
+selected `view` plan, retained occurrences, hidden members and duplicate winners.
+Repository and Wave navigation still opens their ordinary conversations.
+
+`desktop view --plan`, `query`, `pin`/`unpin`, `rename`, `arrange`, `slots`,
+`order` and `layout` work without macOS and print JSON. Plans contain
+shared selection/arrangement intent and current Work evidence, including explicit
+missing primary Sessions or locations. They acquire no client and do not describe
+native mounted panes. Query edits use the saved revision; `query:ID` reopens the
+Dashboard. Revisit restores the earlier expression’s arrangement. Dashboards
+have independent identities and arrangements; repository/Wave defaults remain
+built in. `layout` reads or saves the referenced Work’s portable pane/draft intent
+without mounting panes. See [query syntax and plan fields](../rust/loopflow/src/work/README.md).
+
 Desktop receives the Work address and resolves it through `lf open --link
 --json`; it never repeats repository selection. A Task address opens the Task's
 primary conversation through its ordinary primary-Session owner. `--session`
@@ -1036,7 +1056,7 @@ Changes browser without replacing file selection or drafts. Session and Changes
 requests require the Task's execution location.
 
 JSON returns `opening`, not `usable`: macOS accepting a link proves no native
-endpoint. `desktop list --json` includes each window's latest Task `opening`
+endpoint. `desktop state --json` includes each window's latest Task `opening`
 reading and lookup failures. Page mounting and requested Session/Changes readiness
 settle that request; connection/comparison failures remain visible. These receipts
 are not configured/native acceptance, and `opening` must not authorize pane input.
@@ -1046,7 +1066,8 @@ operations run on that owner after a fresh location read. Missing owners never c
 a local checkout or transfer execution.
 
 Desktop inspection reports registered repository/window identities, selection,
-reading availability and retained Work pane trees with focus, zoom
+reading availability, the outer `layout` split tree with axes and ratios,
+and retained Work pane trees with focus, zoom
 and hidden panes. Each workspace reports its repository/Wave/Task key, title, open
 state and selection; Machine/checkout locations belong to its pane contents. `task` forwards Rust's recommendation and `run_control`;
 `session` forwards its actions, including unavailable reasons and takeover warnings.
@@ -1060,16 +1081,17 @@ content incarnation; inspection never creates a surface or cleans up an exited
 child. Neither token authorizes terminal input.
 It requires macOS and a running app with automation access; failure leaves
 `lf task status <task>` available in the terminal.
-The outer checkout-slot `layouts` field is removed; `workspaces` retains pane trees.
-Opening Work selects its named tab without starting a conversation or preparing a
-checkout. Closing a tab hides its workspace; reopening restores panes, drafts and
-zoom. Closing the last tab starts nothing. This retention lasts for the window,
-not across app quit. Mutation receipts identify `work` and `pane`, not readiness.
+The window `layout` places open Work; `workspaces` also includes retained Work
+outside that tree. Hiding a Dashboard occurrence preserves its split position and inner panes;
+restoring it keeps edits made to its visible neighbors. Work navigation starts no
+Session or checkout. Pane layouts, selected tool tabs and file drafts save through
+lfdb; restored shell tabs remain unattached. Mutation receipts identify `work` and
+`pane`, not readiness.
 
 Select Work and use pane IDs from the retained layout:
 
 ```sh
-lf desktop list --json
+lf desktop state --json
 lf --task LOO-427 desktop text -- 'add to the draft'
 lf --task LOO-427 desktop key enter
 lf --repo loopflow --task LOO-427 desktop hide --pane "$pane"
@@ -1081,7 +1103,9 @@ PTY selects that terminal within the chosen Work. Explicit `--pane` wins.
 Otherwise one eligible pane is selected; ambiguity lists choices and changes
 nothing. Redirected stdin, agent tool subprocesses without that PTY, and markers
 inherited across SSH do not establish caller identity: use `--pane` when needed.
-Selection never follows current focus. Text/key/read require an existing terminal surface. Restore without a pane
+Terminal targeting never follows current focus. Use `--pane shell:ID` or the raw shell ID
+to address a retained shell, including a background tab. State lists ordered `tabs`
+and `selected_tab` on each Shell pane. Text/key/read require an existing terminal surface. Restore without a pane
 selects a unique hidden pane. Wave and Task scope select their Work workspace;
 a repository without Task scope considers its retained workspaces. Unavailable Work
 or no matching pane produces an error without opening a window or preparing Work.
@@ -1098,10 +1122,16 @@ lf --task LOO-427 desktop zoom --pane "$pane"
 lf --task LOO-427 desktop zoom --pane "$pane" --off
 ```
 
-Shell adds a tab to the Task’s single Shell tool on its recorded execution Machine and checkout; a missing remote location refuses before changing layout.
+Each Task has one Shell pane. Creating a shell adds and selects a tab with its own
+identity and recorded Task location. Repository and Wave shell requests change nothing.
+Files reuse one Task pane and one document per path; reopening a file selects its tab
+and preserves its draft.
 
 ```sh
-pane=$(lf --task LOO-427 desktop shell --pane "$anchor" --json | jq -r .pane)
+receipt=$(lf --task LOO-427 desktop shell --json)
+pane=$(printf '%s' "$receipt" | jq -r .pane)
+shell=$(printf '%s' "$receipt" | jq -r .tab)
+lf --task LOO-427 desktop focus --pane "shell:$shell"
 lf --task LOO-427 desktop zoom --pane "$pane"
 lf help desktop shell --json          # installed arguments and JSON result schema
 lf help desktop --all --json          # all Desktop command contracts
@@ -1110,17 +1140,18 @@ lf help desktop --all --json          # all Desktop command contracts
 Structured help derives syntax from Clap and Desktop output schemas from their
 wire types. It describes the installed CLI without opening the app. A null
 `result_schema` means that command has no schema advertised yet. Running-app
-support remains in `desktop list`; current Work eligibility stays in its legal
+support remains in `desktop state`; current Work eligibility stays in its legal
 actions. A successful shell receipt may precede its surface: inspect readiness
 before input, and do not repeat creation after a lost reply.
 
 Move and resize use two distinct panes in the same Machine/checkout. Vertical
 places a pane to the right; horizontal below. Resize gives the selected side its
 share (0.1–0.9). Move, resize, zoom, hide and restore retain drafts and
-selection. Focus selects the addressed pane without changing Work or foregrounding
-a window. Closing a view does not end a Session. Mutations print the affected
-pane ID; `--json` adds its repository, window, Machine, checkout and observation
-time. Companions return the created or reused pane.
+selection. Focus selects the addressed pane, preserving a visible Dashboard or
+opening the pane's workspace when needed, without foregrounding a window.
+Closing a view does not end a Session. Mutations print the affected
+pane ID; `--json` adds its repository, window, Work and observation time.
+Shell receipts identify the tool pane and newly selected tab separately.
 A receipt confirms the operation, not terminal readiness or usable rendering. Inspect after a lost reply; shell creation is not safe to replay.
 
 ```sh

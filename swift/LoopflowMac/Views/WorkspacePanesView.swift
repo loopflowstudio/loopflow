@@ -1,5 +1,5 @@
-#if os(macOS)
 import AppKit
+import Foundation
 import Loopflow
 import SwiftUI
 
@@ -11,20 +11,19 @@ struct WorkspacePanesView: View {
     let sessions: SessionsStore
     let model: WorkModel
     let onFocus: (String, String?) -> Void
+    var face: PaneState? = nil
 
     var body: some View {
         let store = workspace.multiplexer
         Group {
-            if let zoom = store.zoomedPaneId, let pane = store.layout.pane(for: zoom) {
+            if let face { panes(.leaf(face)) }
+            else if let zoom = store.zoomedPaneId, let pane = store.layout.pane(for: zoom) {
                 panes(.leaf(pane))
             } else if let layout = store.visibleLayout {
                 panes(layout)
             } else {
-                ContentUnavailableView {
-                    Label("Panes collapsed", systemImage: "rectangle.compress.vertical")
-                } description: {
-                    Text("Your panes are retained. Show a pane to continue.")
-                } actions: {
+                PaneEmptyState(title: "Panes collapsed", systemImage: "rectangle.compress.vertical",
+                               description: "Your panes are retained. Show a pane to continue.") {
                     if workspace.key.kind == .task,
                        !store.layout.allPanes.contains(where: { $0.sessionId != nil }) {
                         Button("Open conversation") {
@@ -39,6 +38,7 @@ struct WorkspacePanesView: View {
                 }
             }
         }
+        .environment(workspace)
         .onChange(of: store.zoomedPaneId) { _, _ in endWorkspaceAction() }
         .onChange(of: store.collapsedPaneIds) { _, _ in endWorkspaceAction() }
     }
@@ -55,6 +55,104 @@ struct WorkspacePanesView: View {
 
     private func endWorkspaceAction() {
         Perf.endAfterCommit(Perf.retainedWorkspaceAction, id: "workspace")
+    }
+}
+
+/// The Session slot before a conversation runs here: what that means and its
+/// one explicit action. Move here and an unstarted Task's Start share it.
+struct SessionSlotOffer<Description: View>: View {
+    let title: String
+    let systemImage: String
+    /// Nil when no action applies; the slot still explains itself.
+    let action: String?
+    let actionImage: String
+    var note: String?
+    var unavailable: String?
+    var help: String
+    var accessibilityLabel: String?
+    var accessibilityHint: String?
+    let actionIdentifier: String
+    let perform: () -> Void
+    @ViewBuilder let description: Description
+    @Environment(\.theme) private var theme
+    @Environment(\.compactPanes) private var compact
+
+    var body: some View {
+        PaneEmptyState(title: title, systemImage: systemImage, summary: unavailable ?? note) {
+            description
+        } actions: {
+            if let action {
+                VStack(spacing: Spacing.sm) {
+                    Button(action: perform) { Label(action, systemImage: actionImage) }
+                        .buttonStyle(.bordered)
+                        .tint(theme.palette.text)
+                        .foregroundStyle(theme.palette.text)
+                        .disabled(unavailable != nil)
+                        .help(unavailable ?? help)
+                        .accessibilityLabel(accessibilityLabel ?? action)
+                        .accessibilityHint(accessibilityHint ?? "")
+                        .accessibilityIdentifier(actionIdentifier)
+                    if !compact, let note = unavailable ?? note {
+                        Text(note)
+                            .font(Typography.caption(9))
+                            .foregroundStyle(theme.palette.textSecondary)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+extension EnvironmentValues {
+    /// Dashboard slots: a pane's empty state reads as one line sized to the slot.
+    @Entry var compactPanes = false
+}
+
+/// A pane with nothing running in it yet: what that means and its next action.
+/// Full panes explain themselves; a compact pane says the state in one line,
+/// with `summary` as its help.
+struct PaneEmptyState<Description: View, Actions: View>: View {
+    let title: String
+    let systemImage: String
+    let summary: String?
+    @ViewBuilder let description: Description
+    @ViewBuilder let actions: Actions
+    @Environment(\.compactPanes) private var compact
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        if compact {
+            HStack(spacing: Spacing.sm) {
+                Label(title, systemImage: systemImage)
+                    .lineLimit(1).truncationMode(.tail)
+                    .foregroundStyle(theme.palette.text)
+                    .help(summary ?? title)
+                actions.controlSize(.small).fixedSize()
+            }
+            .font(Typography.body(12))
+            .padding(Spacing.sm)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ContentUnavailableView {
+                Label(title, systemImage: systemImage).foregroundStyle(theme.palette.text)
+            } description: {
+                description.foregroundStyle(theme.palette.textSecondary)
+            } actions: { actions }
+        }
+    }
+}
+
+extension PaneEmptyState where Description == Text? {
+    init(title: String, systemImage: String, description: String? = nil, @ViewBuilder actions: () -> Actions) {
+        self.init(title: title, systemImage: systemImage, summary: description,
+                  description: { description.map { Text($0) } }, actions: actions)
+    }
+}
+
+extension PaneEmptyState where Description == Text?, Actions == EmptyView {
+    init(title: String, systemImage: String) {
+        self.init(title: title, systemImage: systemImage) { EmptyView() }
     }
 }
 
@@ -175,6 +273,7 @@ struct SplitDivider: View {
     let ratio: Double
     let sizing: SplitSizing
     let update: (Double) -> Void
+    var commit: ((Double) -> Void)? = nil
     @Environment(\.palette) private var palette
     @State private var dragStart: Double?
     @State private var hovering = false
@@ -201,12 +300,18 @@ struct SplitDivider: View {
                         guard sizing.extent > 0 else { return }
                         update(sizing.snapped(start + Double(delta / sizing.extent)))
                     }
-                    .onEnded { _ in dragStart = nil }
+                    .onEnded { value in
+                        let delta = axis == .vertical ? value.translation.width : value.translation.height
+                        if sizing.extent > 0 { commit?(sizing.snapped((dragStart ?? ratio) + Double(delta / sizing.extent))) }
+                        dragStart = nil
+                    }
             )
             .accessibilityLabel(axis == .vertical ? "Resize panes horizontally" : "Resize panes vertically")
             .accessibilityValue("\(Int(ratio * 100)) percent")
             .accessibilityAdjustableAction { direction in
-                update(sizing.constrain(ratio + (direction == .increment ? 0.02 : -0.02)))
+                let value = sizing.constrain(ratio + (direction == .increment ? 0.02 : -0.02))
+                update(value)
+                commit?(value)
             }
     }
 }
@@ -286,7 +391,7 @@ struct SessionPaneView: View {
         .onChange(of: isFocused) { _, focused in
             if focused { bellRinging = false }
         }
-        .onChange(of: pane.incarnation) { _, _ in
+        .onChange(of: pane.content.selectedShell?.incarnation ?? pane.incarnation) { _, _ in
             bellRinging = false
             terminalTitle = nil
             copyConfirmation = nil
@@ -442,8 +547,12 @@ struct SessionPaneView: View {
                     record = try await sessions.reset(session.id)
                 }
                 guard store.layout.pane(for: pane.id)?.incarnation == pane.incarnation else { return }
-                store.replace(pane.id, with: .session(id: record.id, location: record.workspace?.identity,
-                    execution: pane.executionLocation))
+                if case .shell = pane.content {
+                    store.reveal(sessionId: record.id, location: record.workspace?.identity)
+                } else {
+                    store.replace(pane.id, with: .session(id: record.id, location: record.workspace?.identity,
+                        execution: pane.executionLocation))
+                }
                 workspace.presentation.selectedSessionId = record.id
                 if model.workspaceKey(for: model.selection, repository: workspace.key.repository) == workspace.key {
                     model.navigation.selectedSessionId = record.id
@@ -586,26 +695,16 @@ struct SessionPaneView: View {
                 .foregroundStyle(theme.palette.text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if workspace.key.kind == .task {
-            ContentUnavailableView {
-                Label("No Task conversation open", systemImage: "bubble.left")
-                    .foregroundStyle(theme.palette.text)
-            } description: {
-                Text(workspace.conversationError == nil
+            PaneEmptyState(title: "No Task conversation open", systemImage: "bubble.left",
+                description: workspace.conversationError == nil
                     ? "Open this Task’s recorded conversation."
-                    : "The conversation could not open. Retry the opening above.")
-                    .foregroundStyle(theme.palette.textSecondary)
-            } actions: {
+                    : "The conversation could not open. Retry the opening above.") {
                 Button("Open conversation") { Task { await model.openTaskConversation(workspace.key.id) } }
                     .accessibilityIdentifier("task-open-conversation")
             }
         } else {
-            ContentUnavailableView {
-                Label("No session open", systemImage: "terminal")
-                    .foregroundStyle(theme.palette.text)
-            } description: {
-                Text("Open the retained conversation when you’re ready.")
-                    .foregroundStyle(theme.palette.textSecondary)
-            } actions: {
+            PaneEmptyState(title: "No session open", systemImage: "terminal",
+                           description: "Open the retained conversation when you’re ready.") {
                 Button("Open conversation") {
                     let wave = workspace.key.kind == .wave ? model.wave(id: workspace.key.id)?.wave.name : nil
                     Task { await model.openPrimaryConversation(in: workspace, wave: wave, store: sessions) }
@@ -636,13 +735,8 @@ struct SessionPaneView: View {
                 openButton(item)
             }.padding()
         case .failed(let message):
-            ContentUnavailableView {
-                Label("Session failed to open", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(theme.palette.text)
-            } description: {
-                Text(message)
-                    .foregroundStyle(theme.palette.textSecondary)
-            } actions: {
+            PaneEmptyState(title: "Session failed to open", systemImage: "exclamationmark.triangle",
+                           description: message) {
                 openButton(item)
             }
         case .pending where workspace.openingConversation:
@@ -650,13 +744,8 @@ struct SessionPaneView: View {
                 .foregroundStyle(theme.palette.text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .pending, .live:
-            ContentUnavailableView {
-                Label("Not running here", systemImage: "terminal")
-                    .foregroundStyle(theme.palette.text)
-            } description: {
-                Text("This Session has no live terminal in this pane yet.")
-                    .foregroundStyle(theme.palette.textSecondary)
-            } actions: {
+            PaneEmptyState(title: "Not running here", systemImage: "terminal",
+                           description: "This Session has no live terminal in this pane yet.") {
                 openButton(item)
             }
         }
@@ -687,10 +776,20 @@ struct SessionPaneView: View {
     /// explains what that means and makes the takeover explicit: nothing is
     /// stopped until Move here.
     private func _elsewherePlaceholder(_ item: SessionItem) -> some View {
-        ContentUnavailableView {
-            Label("Active in another terminal", systemImage: "rectangle.on.rectangle")
-                .foregroundStyle(theme.palette.text)
-        } description: {
+        let action = item.record.action(.moveHere)
+        return SessionSlotOffer(
+            title: "Active in another terminal", systemImage: "rectangle.on.rectangle",
+            action: action?.label, actionImage: "arrow.down.forward.square",
+            note: "Moving stops the other client. Unsent text typed there is lost.",
+            unavailable: action?.unavailableReason, help: action?.help ?? "",
+            accessibilityLabel: "Move session here",
+            accessibilityHint: "Stops the other client; unsent text typed there is lost",
+            actionIdentifier: "session-move-here-\(item.id)",
+            perform: {
+                sessions.beginPaneLoad(item.id)
+                Task { @MainActor in await sessions.moveHere(item.id) }
+            }
+        ) {
             Text(
                 """
                 \(item.record.title) is attached to a provider client outside \
@@ -698,31 +797,7 @@ struct SessionPaneView: View {
                 It keeps running there until you move it.
                 """
             )
-            .foregroundStyle(theme.palette.textSecondary)
-        } actions: {
-            if let action = item.record.action(.moveHere) {
-                VStack(spacing: Spacing.sm) {
-                    Button {
-                        sessions.beginPaneLoad(item.id)
-                        Task { @MainActor in await sessions.moveHere(item.id) }
-                    } label: {
-                        Label(action.label, systemImage: "arrow.down.forward.square")
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(theme.palette.text)
-                    .foregroundStyle(theme.palette.text)
-                    .disabled(action.unavailableReason != nil)
-                    .help(action.unavailableReason ?? action.help)
-                    .accessibilityLabel("Move session here")
-                    .accessibilityHint("Stops the other client; unsent text typed there is lost")
-                    .accessibilityIdentifier("session-move-here-\(item.id)")
-                    Text("Moving stops the other client. Unsent text typed there is lost.")
-                        .font(Typography.caption(9))
-                        .foregroundStyle(theme.palette.textSecondary)
-                }
-            }
         }
-        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("session-elsewhere-\(item.id)")
     }
 
@@ -872,5 +947,3 @@ private struct PaneFocusTarget: NSViewRepresentable {
         }
     }
 }
-
-#endif

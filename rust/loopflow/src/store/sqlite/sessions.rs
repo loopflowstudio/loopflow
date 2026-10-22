@@ -250,7 +250,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,p.completed_at,p.pid,p.os_started_at,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),
         (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
-         AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL)
+         AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
+        p.started_at
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
@@ -306,6 +307,7 @@ fn read_summary(
             row.get(32)?,
             row.get(33)?,
             row.get(34)?,
+            row.get(37)?,
             crate::journal::process_identity_evidence,
         );
         let live = agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live;
@@ -379,7 +381,7 @@ fn task_primary_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<LfSes
     .transpose()
 }
 
-fn primary_session_in(
+pub(super) fn primary_session_in(
     conn: &rusqlite::Connection,
     scope: &PrimaryScope,
 ) -> StoreResult<Option<LfSession>> {
@@ -400,6 +402,21 @@ fn primary_session_in(
         PrimaryScope::Wave(wave) => marked("wave", "wave_id", wave.to_string()),
         PrimaryScope::Task(task) => task_primary_in(conn, task),
     }
+}
+
+pub(super) fn session_summaries_in(
+    conn: &Connection,
+    filter: &crate::session::SessionFilter,
+    now: i64,
+    live_agents: &str,
+) -> StoreResult<Vec<crate::session::SessionSummary>> {
+    let mut labels = std::collections::HashMap::new();
+    let (page, values) = inventory_query(filter, SUMMARY_SELECT, now, live_agents)?;
+    let mut query = conn.prepare(&summary_query(&page, filter.after.is_some(), now))?;
+    let rows = query.query_map(rusqlite::params_from_iter(values), |row| {
+        read_summary(conn, &mut labels, row)
+    })?;
+    rows.map(|row| row?).collect()
 }
 
 pub(super) fn complete_primary_session_in(
@@ -681,6 +698,7 @@ impl SqliteStore {
                     None,
                     pid,
                     start,
+                    None,
                     crate::journal::process_identity_evidence,
                 ) == crate::journal::ProcessIdentityEvidence::Live
                 {
@@ -700,13 +718,7 @@ impl SqliteStore {
         let live_agents = self.live_agent_ids(filter.available)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
-        let mut labels = std::collections::HashMap::new();
-        let (page, values) = inventory_query(filter, SUMMARY_SELECT, now, &live_agents)?;
-        let mut query = conn.prepare(&summary_query(&page, filter.after.is_some(), now))?;
-        let rows = query.query_map(rusqlite::params_from_iter(values), |row| {
-            read_summary(&conn, &mut labels, row)
-        })?;
-        rows.map(|row| row?).collect()
+        session_summaries_in(&conn, filter, now, &live_agents)
     }
 
     pub(crate) fn session_summary(

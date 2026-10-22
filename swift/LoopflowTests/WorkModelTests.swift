@@ -108,15 +108,13 @@ struct WorkModelTests {
         model.select(.task(id: "issue-now"))
         var wire = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
         var waves = try #require(wire["waves"] as? [[String: Any]])
-        var tasks = try #require(waves[0]["tasks"] as? [String: Any])
+        var tasks = try #require(wire["tasks"] as? [String: Any])
         var items = try #require(tasks["items"] as? [[String: Any]])
         let index = try #require(items.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-now" })
         var planning = try #require(items[index]["task"] as? [String: Any])
         planning["name"] = "Updated while selected"
         items[index]["task"] = planning
         tasks["items"] = items
-        waves[0]["tasks"] = tasks
-        wire["waves"] = waves
         wire["tasks"] = tasks
         let updated = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
         model.applyFixture(roadmap: .available(updated), waves: .available(fixture.waves),
@@ -131,7 +129,6 @@ struct WorkModelTests {
         plans.append(successor)
         projects["items"] = plans
         waves[0]["projects"] = projects
-        waves[0]["tasks"] = ["state": "ok", "items": [], "truncated": false]
         wire["waves"] = waves
         let transferring = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
         model.applyFixture(roadmap: .available(transferring), waves: .available(fixture.waves),
@@ -460,8 +457,8 @@ struct WorkModelStreamTests {
         #expect(model.observingMachineId == "machine-local")
     }
 
-    @Test("Failed or truncated planning retains saved rows, selection, panes and cache", arguments: [false, true])
-    func incompletePlanningRetainsSavedWork(repositoryInventory: Bool) async throws {
+    @Test("Failed or truncated planning retains saved rows, selection, panes and cache")
+    func incompletePlanningRetainsSavedWork() async throws {
         let fixture = try WorkTestFixture.load()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -502,13 +499,7 @@ struct WorkModelStreamTests {
             let failure: [String: Any] = truncated
                 ? ["state": "ok", "items": [], "truncated": true]
                 : ["state": "unavailable", "reason": "Task snapshot: no such column: t.paused"]
-            if repositoryInventory {
-                wire["tasks"] = failure
-            } else {
-                var waves = try #require(wire["waves"] as? [[String: Any]])
-                waves[0]["tasks"] = failure
-                wire["waves"] = waves
-            }
+            wire["tasks"] = failure
             let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
             await feed.send(try fixture.frame("planning", sequence: index + 2, answers: scope.id,
                 body: "{\"roadmap\":\(roadmap),\"waves\":\(fixture.wavesJSON)}"))
@@ -967,7 +958,6 @@ struct WorkModelStreamTests {
         let now = Date(timeIntervalSince1970: 1000)
         let entries = try fixture.sessionEntries()
         let original = try #require((JSONSerialization.jsonObject(with: Data(entries.json.utf8)) as? [[String: Any]])?.first)
-        model.navigation.retainWorkingTask("preview-task")
         var answers = 0
         func sessionFrame(_ sequence: Int, turn: String?, available: Bool = false) throws -> WorkFrame {
             var entry = original
@@ -997,6 +987,9 @@ struct WorkModelStreamTests {
         await feed.send(try fixture.planningFrame(sequence: 1, answers: answers))
         await feed.send(try sessionFrame(2, turn: "Previous result", available: true))
         try await eventually { preview() == "Previous result" }
+        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [
+            fixtureViewContent(work: .init(repository: "repo", kind: .task, id: "preview-task"), title: "Preview")
+        ])], reason: "")
         model.navigation.sidebarFilter = .available
         #expect(model.sidebarTaskIDs == ["preview-task"])
         await feed.send(try sessionFrame(3, turn: nil))
@@ -1174,29 +1167,22 @@ private struct WorkTestFixture {
         }
         if let task {
             var root = try #require(JSONSerialization.jsonObject(with: Data(roadmap.utf8)) as? [String: Any])
-            var waves = try #require(root["waves"] as? [[String: Any]])
-            for wave in waves.indices {
-                guard var evidence = waves[wave]["tasks"] as? [String: Any],
-                      var rows = evidence["items"] as? [[String: Any]] else { continue }
-                for row in rows.indices {
-                    guard var plan = rows[row]["task"] as? [String: Any], plan["id"] as? String == task else { continue }
-                    plan["state"] = "completed"
-                    plan["completed"] = true
-                    plan["completed_at"] = Date().addingTimeInterval(-60).formatted(.iso8601)
-                    rows[row]["task"] = plan
-                    rows[row]["runtime"] = NSNull()
-                    if var condition = rows[row]["condition"] as? [String: Any] {
-                        condition["unresolved_execution"] = false
-                        rows[row]["condition"] = condition
-                    }
+            var evidence = try #require(root["tasks"] as? [String: Any])
+            var rows = try #require(evidence["items"] as? [[String: Any]])
+            for row in rows.indices {
+                guard var plan = rows[row]["task"] as? [String: Any], plan["id"] as? String == task else { continue }
+                plan["state"] = "completed"
+                plan["completed"] = true
+                plan["completed_at"] = Date().addingTimeInterval(-60).formatted(.iso8601)
+                rows[row]["task"] = plan
+                rows[row]["runtime"] = NSNull()
+                if var condition = rows[row]["condition"] as? [String: Any] {
+                    condition["unresolved_execution"] = false
+                    rows[row]["condition"] = condition
                 }
-                evidence["items"] = rows
-                waves[wave]["tasks"] = evidence
             }
-            root["waves"] = waves
-            root["tasks"] = ["state": "ok", "truncated": false, "items": waves.flatMap {
-                ($0["tasks"] as? [String: Any])?["items"] as? [[String: Any]] ?? []
-            }]
+            evidence["items"] = rows
+            root["tasks"] = evidence
             roadmap = try #require(String(data: JSONSerialization.data(withJSONObject: root), encoding: .utf8))
         }
         return try frame("planning", sequence: sequence, answers: answers, home: home, copy: copy,

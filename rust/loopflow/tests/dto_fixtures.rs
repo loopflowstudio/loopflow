@@ -155,7 +155,12 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
     ));
 
     let roadmap: RoadmapSnapshot = serde_json::from_str(ROADMAP).unwrap();
-    let Evidence::Ok { items, .. } = &roadmap.waves[0].tasks else {
+    // Each Task is written once, under the roadmap; Waves do not repeat them.
+    assert_eq!(
+        serde_json::to_value(&roadmap).unwrap(),
+        serde_json::from_str::<serde_json::Value>(ROADMAP).unwrap()
+    );
+    let Evidence::Ok { items, .. } = roadmap.wave_tasks(&roadmap.waves[0]) else {
         panic!("fixture has current Project evidence")
     };
     assert!(!items.is_empty());
@@ -553,10 +558,6 @@ fn work_frames_keep_each_part_and_require_every_envelope_field() {
     assert!(matches!(frames[2].content, WorkContent::Task(None)));
     assert!(frames[2].unavailable.is_some());
     assert!(frames[4].revisions.is_none());
-    let WorkContent::Selections(Some(selections)) = &frames[10].content else {
-        panic!("selection plans frame");
-    };
-    assert_eq!(selections.plans[0].members[0].title, "Retained work");
     assert!(matches!(frames[8].content, WorkContent::Checkpoint));
     assert_eq!(frames[8].answers, Some(8));
     let WorkContent::TaskHistory(Some(history)) = &frames[9].content else {
@@ -658,7 +659,7 @@ fn composed_lifecycle_preserves_completion_before_workflow_arrival() {
         assert_eq!(task.work.workflow, execution.work.workflow);
         assert_eq!(row.runtime.as_ref().unwrap().status, execution.status);
         let loopflow::lf::commands::waves::Evidence::Ok { items, .. } =
-            &plan.roadmap.waves[0].tasks
+            plan.roadmap.wave_tasks(&plan.roadmap.waves[0])
         else {
             panic!("Task plan unavailable")
         };
@@ -1172,5 +1173,23 @@ fn task_overview_excludes_diagnostic_process_history() {
     assert_eq!(
         serde_json::to_value(overview).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()
+    );
+}
+
+#[test]
+fn desktop_state_retains_outer_and_inner_layouts() {
+    use loopflow::lf::commands::desktop::DesktopInspection;
+    let reading: DesktopInspection = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/desktop_inspection.json"
+    ))
+    .unwrap();
+    let window = &reading.windows[0];
+    assert_eq!(window.open_work, [window.workspaces[0].work.clone()]);
+    assert_eq!(window.workspaces[0].layout.ratio, Some(0.6));
+    assert_eq!(window.workspaces[0].hidden_panes, ["files-pane"]);
+    let encoded = serde_json::to_string(&reading).unwrap();
+    assert_eq!(
+        serde_json::from_str::<DesktopInspection>(&encoded).unwrap(),
+        reading
     );
 }

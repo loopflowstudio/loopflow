@@ -37,18 +37,20 @@ Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
 the Machine. Durations and command names only; the files stay on this machine.
 
-Open a started Task to add it to the working list. Reopening it keeps its position;
-activity, completion, Wave navigation and sidebar filtering do not reorder it.
-Paused Tasks leave the list and number slots while keeping their stored position,
-panes and drafts. They remain reachable in their Wave and search. Unstarted Tasks
-open their brief without joining the list or starting execution. Waves follow Tasks
-in the same scrolling sidebar, with counts from the planning inventory.
+Working Tasks lists every started, uncompleted Task, on any Machine this store
+records, in the repository plan's order (waiting first, then rank). It is the
+repository's built-in query, so opening a Task neither adds nor reorders it.
+Click a Wave to scope the sidebar to its uncompleted Tasks and subwaves;
+**‹ Repo** returns to Working Tasks. Unstarted Tasks open their brief beside
+**Start**, which runs the Task's Workflow; opening alone starts nothing. Waves
+follow Tasks in the same scrolling sidebar, with counts from the planning inventory.
 
-Click a row to select its retained workspace. The title-bar **Repo / Wave / Task**
-path follows hierarchy; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
+Click a row to select its retained workspace. The title-bar **Repo › Wave › Task**
+path follows hierarchy: click a name to go there, or the **›** after it to list and
+search what it contains; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
 across repositories and opens another repository in its own window. Its
 **Sidebar shows** picker filters Working tasks / Available / Running without
-changing the selected Work. **⌘1–9** selects stable working slots regardless of the
+changing the selected Work. **⌘1–9** selects Working Tasks by position regardless of the
 filter; **⌃Tab / ⌃⇧Tab** cycles them. Missing slots do nothing.
 With sidebar focus, **⌘F** searches its visible Tasks and Waves; **Search all Work**
 widens the same navigator. **Shift-F10** opens the focused Task's actions without
@@ -236,7 +238,8 @@ shows the draft comparison read-only. Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
 Changing Work assignment leaves the recorded checkout Machine and path intact.
 Files panes retain their opening location through Close/Undo, including a first open
-without a Session link. Shell tabs use that same location.
+without a Session link. New shell tabs use the Task's recorded location;
+existing tabs and file drafts keep their original locations.
 Unknown or changed owners stay unavailable without redirecting retained drafts.
 Remote paths are never opened or watched on the presentation Mac. Filesystem events
 on the execution Machine refresh retained documents, including hidden drafts. Disconnects
@@ -489,7 +492,7 @@ waiting for input, plus disclosed Session history and raw diagnostics.
 Use **New conversation** to talk about the selected repo, Wave, or Task
 in the configured app or terminal. It opens an interactive prompt without
 creating a Task or running an autonomous operating pass. **New shell** opens
-an ordinary shell in the active checkout. A conversation launched here returns
+another ordinary shell tab in the Task's recorded checkout. A conversation launched here returns
 to a shell when it exits or hands off to an external app.
 
 Running shells stay intact when a Task's Session or another pane opens.
@@ -777,20 +780,22 @@ supplies `graph_processes`, using the same execution details as CLI inspection.
 
 ```sh
 lf open loopflow://loopflow/task/LOO-427 --diff --json
-lf desktop list --json
+lf desktop state --json
 lf task run LOO-427 --explain --json
 ```
 
 Inspection reads the open repository windows through macOS automation without
 launching the app, changing focus or acquiring a Session. Window incarnations,
-Work tabs, pane layouts and hidden panes come from the retained workspace owners.
-Repository, Wave and Task tabs remain distinct even at the same checkout. Closing a
-tab hides its workspace without releasing terminals or file drafts; reopening
-restores focus and zoom. Bare Work navigation starts no Session or checkout.
-The last tab can close without starting a repository conversation. Window close
-and app quit still end embedded clients; this is not draft recovery after quit.
+pane layouts and hidden panes come from the retained workspace owners.
+Repository, Wave and Task workspaces remain distinct even at the same checkout.
+Leaving Work retains its terminals, file drafts, focus and zoom. Bare Work navigation
+starts no Session or checkout. App quit still ends embedded clients. Saved pane
+intent and file drafts recover after relaunch; restored shell tabs remain unattached.
 
-Inspection reports each workspace's `work`, title, open state and selection.
+Inspection reports the window's `open_work` in slot fill order and its selected
+`view` plan, plus each retained workspace's `work`, title, open state, pane
+`layout` and selection.
+Hidden Dashboard occurrences retain their split position while visible neighbors are rearranged.
 Execution locations live on contents, not workspace keys or pane receipts.
 There is no outer checkout-slot layout or checkout-split menu. Graph logs use their
 content location: the matching local Work stream, or an owner-pinned read with
@@ -842,12 +847,15 @@ the verified caller terminal wins within selected Work, otherwise one eligible
 pane is required; ambiguity lists choices and does nothing. Surface/window/content tokens are internal.
 Move retains the pane itself,
 including its content occurrence and surface key; it never closes/reopens a client.
-Shell adds and selects a tab in the Task’s single Shell tool on its recorded execution Machine and checkout. Shell tabs retain their creation location through arrangement and Close/Undo. Session panes capture their recorded location; changed readings invalidate old pane targets without changing focus. Unknown locations never open a local replacement. Move, resize, hide and restore preserve selection;
+Shell creation adds and selects a tab at the Task's recorded location. Each tab
+retains its location through arrangement and Close/Undo; restored intent does not
+restart a process. Session panes capture their recorded location; changed readings invalidate old pane targets without changing focus. Unknown locations never open a local replacement. Arrangement preserves selection except explicit focus;
 zoom does not redirect input to an unselected pane. Window/content replacement
 rejects stale targets, including the second target of a move or resize. Mutation replies
-identify the affected pane directly; they are not native-rendering proof. Files and Graph-log add
-companions beside the exact target without changing focus or zoom. Files and
-Graph-log reuse existing panes for the named Task; its recorded checkout must
+identify the affected pane directly; shell creation also returns its new `tab`.
+They are not native-rendering proof. `--pane shell:ID` targets an exact shell even
+when another tab is selected. Files and Graph-log reveal retained companions without
+changing focus or zoom. They reuse existing panes for the named Task; its recorded checkout must
 match. Remote shells run on the recorded execution Machine; changed or missing checkouts
 refuse launch without opening a local shell. Disconnects never replay shell commands.
 
@@ -878,3 +886,27 @@ stale or disconnected evidence shows a labeled Task summary. Codex currently
 supplies turn-qualified excerpts; providers without that evidence use the summary.
 Repository and Wave navigation displays retained conversation entry without
 starting a provider. Waves group their full inventory as Owned and Unowned; rows read "Jack Heart on mini" or "Unowned".
+
+
+## Dashboards
+
+Use **+** beside Dashboards to name and pin a query such as
+`(wave:product state:open) or state:available`. Cmd-K finds saved Dashboards.
+Edit changes only that Dashboard; repository and Wave conversations keep their
+normal views. Unstarted Tasks show **Start** and their brief without opening a Session.
+
+`lf desktop view 'state:available'` opens an unsaved Dashboard. Save it to name,
+pin and arrange it. Tasks appear side by side only in Dashboard query results;
+ordinary navigation, including Command-click, selects one destination and retains
+each Task's panes and drafts for its next visit.
+
+Drag tile headers to reorder, add or remove slots, or hide an occurrence and
+restore it from Hidden. Rust resolves membership and the first visible occurrence; tiles
+reuse each Task's retained Session, tools and drafts. Focus never changes which
+occurrence wins or replaces its primary Session face.
+
+Task pane layouts, selected shell/file tabs and file drafts save through lfdb.
+A delayed restore keeps newer tabs and edits. Conflicts leave local content intact
+and show an error; **Reload saved intent** reconciles retained content before another
+save. File drafts compare their saved base with disk before editing. Restored shell
+intent has no launch command: a saved tab alone does not reattach a Process.

@@ -16,11 +16,11 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use sha2::Digest as _;
 
-use super::desktop::WorkWorkspaceKind;
 use crate::ops::context::{ContextExplanation, ContextFact};
 use crate::session::PrimaryScope;
 use crate::store::Store;
 use crate::work::link::{WorkTarget, WorkUrl};
+use crate::work::selection::WorkWorkspaceKind;
 
 pub(crate) const DESKTOP_BUNDLE: &str = "com.loopflow.mac";
 const HOST_TIMEOUT: Duration = Duration::from_secs(2);

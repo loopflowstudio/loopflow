@@ -77,7 +77,6 @@ pub enum WorkContent {
     Planning(Option<Box<PlanningPart>>),
     PeerPlanning(Option<PeerPlanningPart>),
     Sessions(Option<SessionsPart>),
-    Selections(Option<SelectionsPart>),
     Task(Option<Box<TaskPart>>),
     TaskHistory(Option<Box<TaskHistoryPart>>),
     Wave(Option<Box<WavePart>>),
@@ -92,6 +91,7 @@ pub enum WorkContent {
 /// `lf wave show --all` and `lf wave list --all --current`, read together.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanningPart {
+    pub selections: Option<Vec<crate::work::selection::ViewPlan>>,
     pub roadmap: RoadmapSnapshot,
     pub waves: Vec<WaveSnapshot>,
 }
@@ -109,12 +109,6 @@ pub struct SessionsPart {
     pub repo: String,
     pub includes_headless: bool,
     pub entries: Vec<SessionRecord>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SelectionsPart {
-    pub repo: String,
-    pub plans: Vec<crate::work::selection::ViewPlan>,
 }
 
 /// Selected workspace facts and `lf graph show --processes` for each of its Graphs,
@@ -200,7 +194,6 @@ struct Scope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Part {
-    Selections,
     TaskHistory,
     Sessions,
     Planning,
@@ -214,20 +207,18 @@ enum Part {
 impl Part {
     // Deliver the selected Work before the portfolio; every part still reads
     // the same snapshot, and a checkpoint follows the complete pass.
-    const ALL: [Part; 9] = [
+    const ALL: [Part; 8] = [
         Part::Task,
         Part::Wave,
         Part::Sessions,
-        Part::Selections,
         Part::Planning,
         Part::PeerPlanning,
         Part::WorkActivity,
         Part::TaskHistory,
         Part::Activity,
     ];
-    const SCOPED: [Part; 6] = [
+    const SCOPED: [Part; 5] = [
         Part::Sessions,
-        Part::Selections,
         Part::PeerPlanning,
         Part::Task,
         Part::Wave,
@@ -237,7 +228,6 @@ impl Part {
     fn name(self) -> &'static str {
         match self {
             Part::Sessions => "sessions",
-            Part::Selections => "selections",
             Part::Planning => "planning",
             Part::PeerPlanning => "peer_planning",
             Part::Task => "task",
@@ -286,7 +276,6 @@ impl Part {
             Part::PeerPlanning => Duration::from_secs(5),
             Part::Activity
             | Part::Sessions
-            | Part::Selections
             | Part::Task
             | Part::TaskHistory
             | Part::WorkActivity => ACTIVITY_CLOCK,
@@ -295,7 +284,7 @@ impl Part {
 
     fn selected(self, scope: &Scope) -> bool {
         match self {
-            Part::Sessions | Part::PeerPlanning | Part::Selections => scope.repo.is_some(),
+            Part::Sessions | Part::PeerPlanning => scope.repo.is_some(),
             Part::Task => scope.task.is_some(),
             Part::TaskHistory => scope.history.is_some(),
             Part::Wave => scope.wave.is_some(),
@@ -433,6 +422,17 @@ fn fingerprint(unavailable: &Option<String>, content: &WorkContent) -> Result<[u
                 .pointer_mut("/body/snapshot")
                 .and_then(|body| body.as_object_mut())
                 .map(|body| body.remove("since"));
+        }
+        // Each Dashboard plan restates when it was read.
+        WorkContent::Planning(_) => {
+            if let Some(plans) = value
+                .pointer_mut("/body/selections")
+                .and_then(|plans| plans.as_array_mut())
+            {
+                for plan in plans.iter_mut().filter_map(|plan| plan.as_object_mut()) {
+                    plan.remove("observed_at");
+                }
+            }
         }
         _ => {}
     }
@@ -600,7 +600,6 @@ impl Reader {
                 };
                 for part in Part::SCOPED {
                     let changed = match part {
-                        Part::Selections => self.scope.repo != next.repo,
                         Part::Sessions => {
                             self.scope.repo != next.repo || self.scope.headless != next.headless
                         }
@@ -618,6 +617,10 @@ impl Reader {
                         // Deliver unchanged siblings from cache, without queries.
                         state.replay = true;
                     }
+                }
+                if self.scope.repo != next.repo {
+                    // Planning is unscoped except for its repository Dashboard plans.
+                    self.parts.entry(Part::Planning).or_default().force = true;
                 }
                 self.scope = next;
                 id
@@ -701,23 +704,31 @@ impl Reader {
         };
         self.runtime.block_on(async {
             Ok(match part {
-                Part::Planning => WorkContent::Planning(Some(Box::new(PlanningPart {
-                    roadmap: super::waves::roadmap_all(store).await?,
-                    waves: super::waves::wave_snapshots(store, true, true).await?,
-                }))),
+                Part::Planning => {
+                    let selections = match &self.scope.repo {
+                        Some(repo) => {
+                            let canonical = CanonicalRepo::discover(Path::new(repo))?;
+                            store
+                                .sqlite
+                                .repository_id(&canonical.to_string())?
+                                .map(|id| store.sqlite.selection_plans(&id))
+                                .transpose()?
+                        }
+                        None => None,
+                    };
+                    let roadmap = super::waves::roadmap_all(store).await?;
+                    WorkContent::Planning(Some(Box::new(PlanningPart {
+                        selections,
+                        waves: super::waves::current_waves(&roadmap),
+                        roadmap,
+                    })))
+                }
                 Part::PeerPlanning => {
                     let repo = self.scope.repo.clone().context("no repository in scope")?;
                     let root = CanonicalRepo::discover(Path::new(&repo))?;
                     let destinations =
                         crate::ops::planning_sync::peer_status(store, &root.to_string()).await?;
                     WorkContent::PeerPlanning(Some(PeerPlanningPart { repo, destinations }))
-                }
-                Part::Selections => {
-                    let repo = self.scope.repo.clone().context("no repository in scope")?;
-                    let root = CanonicalRepo::discover(Path::new(&repo))?;
-                    let plans =
-                        crate::work::selection::default_plans(&store.sqlite, &root.to_string())?;
-                    WorkContent::Selections(Some(SelectionsPart { repo, plans }))
                 }
                 Part::Sessions => {
                     let repo = self.scope.repo.clone().context("no repository in scope")?;
@@ -813,6 +824,7 @@ impl Reader {
     fn absent(&self, part: Part) -> Result<WorkContent> {
         Ok(match part {
             Part::Planning => WorkContent::Planning(Some(Box::new(PlanningPart {
+                selections: None,
                 roadmap: RoadmapSnapshot {
                     generated_at: time::OffsetDateTime::now_utc()
                         .format(&time::format_description::well_known::Rfc3339)?,
@@ -834,7 +846,7 @@ impl Reader {
                 entries: Vec::new(),
             })),
             Part::Activity => WorkContent::Activity(Some(super::top::load_snapshot()?)),
-            Part::Selections | Part::Task | Part::TaskHistory | Part::Wave | Part::WorkActivity => {
+            Part::Task | Part::TaskHistory | Part::Wave | Part::WorkActivity => {
                 anyhow::bail!("no Loopflow store exists in this Machine yet")
             }
         })
@@ -846,7 +858,6 @@ fn unavailable(part: Part) -> WorkContent {
         Part::Planning => WorkContent::Planning(None),
         Part::PeerPlanning => WorkContent::PeerPlanning(None),
         Part::Sessions => WorkContent::Sessions(None),
-        Part::Selections => WorkContent::Selections(None),
         Part::Task => WorkContent::Task(None),
         Part::TaskHistory => WorkContent::TaskHistory(None),
         Part::Wave => WorkContent::Wave(None),

@@ -212,6 +212,10 @@ struct LoopflowApp: App {
     private func handleDeepLink(_ url: URL) {
         guard url.scheme == "loopflow" else { return }
         switch url.host {
+        case "open" where url.path.isEmpty && viewItems(url) != nil:
+            // `lf desktop view` names a selection expression, not a Work address.
+            guard let (repoPath, expression) = viewItems(url) else { return }
+            requestRepository(repoPath, .view(expression: expression, address: url.absoluteString))
         case "portfolio" where url.path.isEmpty:
             openWindow(id: "portfolio")
         case "sessions" where url.path.isEmpty:
@@ -228,6 +232,13 @@ struct LoopflowApp: App {
                 } catch { reportOpeningError(error) }
             }
         }
+    }
+
+    private func viewItems(_ url: URL) -> (repo: String, expression: String)? {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        guard let repo = items.first(where: { $0.name == "repo" })?.value,
+              let expression = items.first(where: { $0.name == "view" })?.value else { return nil }
+        return (repo, expression)
     }
 
     @MainActor

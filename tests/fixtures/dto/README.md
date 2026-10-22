@@ -73,7 +73,8 @@ opening receipt.
 
 `desktop_openings.json` distinguishes request acceptance, usable endpoints and failures;
 `desktop_inspection.json` requires top-level `openings` for failures before window
-registration. Window receipts own Task/Session outcomes. Fixture shape is not native
+registration. Optional window `view` contains the same shared selection plan,
+including hidden/suppressed occurrences. Window receipts own Task/Session outcomes. Fixture shape is not native
 readiness proof.
 
 `task_run_explanations.json` covers edge take-up, no-Graph completion, ad-hoc Graph
@@ -96,3 +97,17 @@ pathless execution, local absence and unavailable peers. Negative readings grant
 no ownership; execution locations never enter planning exchange.
 
 `task_files_frames.json` preserves request/Task/Machine/checkout identity and distinguishes filesystem invalidation from heartbeat.
+
+`dashboard.json` pins an independently identified Dashboard and its expression
+and arrangement; Task panes and drafts remain Work-owned. Rust and Swift round-trip
+it without manufacturing defaults.
+
+`view_plan.json` pins the shared headless selection/arrangement plan, including
+repeated Work, duplicate suppression and a backlog Task without a primary Session.
+Rust round-trips it; Swift decodes the same plan directly and in `work_frame.json`.
+
+`pane_layout.json` covers portable pane content, focus versus explicit zoom, hidden
+members, two Shell tabs, two Files tabs, selected-tab identities and file-draft
+base recovery. Shell identity is independent of its tool pane; saved intent never
+asserts a live native process. `view_plan.json` includes query discovery
+metadata, independent Dashboard identity and portable tile-face intent.

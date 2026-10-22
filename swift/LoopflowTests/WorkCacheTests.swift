@@ -53,7 +53,6 @@ struct WorkCacheTests {
         #expect(returning.roadmap.value?.waves.map(\.wave.id) == first.roadmap.value?.waves.map(\.wave.id))
         #expect(returning.sessions.value?.map(\.id) == first.sessions.value?.map(\.id))
         #expect(returning.selection == nil)
-        #expect(returning.workingTaskIDs == ["issue-review"])
         #expect(returning.task(id: "issue-now") != nil)
         #expect(try Data(contentsOf: cacheURL) == savedBytes)
     }

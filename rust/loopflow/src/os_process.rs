@@ -449,6 +449,7 @@ mod tests {
 
     #[test]
     fn private_home_keeps_explicit_binary_selection() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());

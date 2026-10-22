@@ -1,9 +1,11 @@
 # LOO-554: lf on Linux with Claude, Codex, OpenCode and Pi
 
-Status: implemented and QA'd on a rented machine, 2026-10-21; Jack Heart
-directed a fully autonomous run (plan, implement, land) the same day, so
-assumptions in `questions.md` stand. Ledger: `scratch/loo-554-qa.md`. Jack Heart requested QA, not testing: run lf as
-a newcomer on a rented Linux machine with Jack's real logins forwarded through
+Status: first round implemented and QA'd on a rented machine, 2026-10-21
+(ledger `scratch/loo-554-qa.md`). Jack Heart added scope the same day before
+publishing (below); that round is planned, not built. Jack Heart directed a
+fully autonomous run (plan, implement, land), so assumptions in
+`questions.md` stand. Jack Heart requested QA, not testing: run lf as a
+newcomer on a rented Linux machine with Jack's real logins forwarded through
 Loopflow, and fix what it finds at its owners in this branch.
 
 ## Problem
@@ -28,6 +30,207 @@ lf account                      # forwarded claude and codex logins listed
 
 Jack's eyes are needed only for: approving Claude's browser login once, and
 judging the captured screens (`scratch/loo-554-qa/*.txt`) as the experience.
+
+## Round two: added scope (Jack Heart, October 21; planned)
+
+Jack Heart added four items before publishing: OpenCode credential forwarding
+for customers (P8), the `install.sh` maintainer block, the vague missing-`gh`
+error, and an end-to-end Codex forwarding proof on a rented machine. Claude's
+per-worktree trust prompt moved to LOO-565.
+
+### Demo
+
+From the laptop, with a fresh rented machine added as `m` that has no `gh`:
+
+```bash
+lf machine connect m github
+# Error: … GitHub CLI (gh) is not installed on m; install it (https://cli.github.com) and run this again
+lf machine connect m codex jack@loopflow.studio      # approve in Chrome
+lf machine connect m opencode                        # approve OpenCode's device page in Chrome
+# Connected OpenCode jack@… on m: Zen accepted the login; same OpenCode account as this laptop
+lf --machine m -b -a codex : "Reply with PONG"                          # PONG
+lf --machine m -b -a opencode:opencode/gpt-5.4-nano : "Reply with PONG" # PONG on a paid Zen model
+```
+
+Before the connect, the same OpenCode command on `m` fails with OpenCode's
+"Model unavailable: opencode/gpt-5.4-nano". A newcomer's `install.sh` ends
+with `Installed to …` and no "Promotion preflight … VERDICT" block (visible
+from the first release cut after this lands).
+
+### Risk findings (probed 2026-10-21 on the laptop, OpenCode 2.0.32)
+
+- **OpenCode 2 owns its credentials in its own store**, not the 1.x
+  `~/.local/share/opencode/auth.json` that lf reads. `opencode auth
+  export [opencode]` prints stored credentials as JSON (`id`,
+  `integrationID`, `label`, `active`, `value`); `opencode auth import`
+  reads that JSON on stdin, prints "Imported 1 credential", and is idempotent
+  by `id` ("skipped 1 already present"). An imported entry on a clean home
+  ran a paid model (`opencode/gpt-5.4-nano` → PONG).
+- **Jack's laptop has two OpenCode entries**: an inactive API key that Zen
+  rejects (`401 api_key_expired`) and the active OpenCode Console OAuth login
+  ("Default", `methodID: device`, with refresh grant, expiry and
+  `metadata.{email, accountID, orgID}`). lf's 1.x reader still finds the
+  expired key in `auth.json`, and `lf account` calls it "cached active".
+- **Zen validates any bearer it is sent.** `GET
+  https://opencode.ai/zen/v1/models`: no bearer → 200 (public list); bogus
+  bearer → 401 "Invalid credential"; expired key → 401 `api_key_expired`;
+  the active OAuth access token → 200. That request is the honest check:
+  Zen accepted the credential. It names no owner.
+- **OpenCode honours `OPENCODE_API_KEY` only without its own login.** Clean
+  home + env key → paid model works; clean home + bogus env → "Reconnect
+  OpenCode Console to continue"; laptop with its own login + bogus env →
+  works (env ignored). lf's stale-key injection is harmless while OpenCode's
+  own login exists.
+- **Device login runs without a terminal.** `opencode auth login opencode
+  --method device --standalone` with stdin closed prints "Enter code:
+  XXXX-XXXX" and `https://opencode.ai/console/device?user_code=…&client_id=opencode-cli`,
+  then waits for approval. Without `--method` it refuses ("Pass --method when
+  running without an interactive terminal").
+- **Missing `gh`**: the remote's `inspect` reads `hosts.yml` and passes;
+  `receive` then fails spawning `gh auth login` (ENOENT). Locally,
+  `remote_command` discards the remote's stderr, so the only text is "machine
+  credential command failed … inspect its account status".
+- **`install.sh` block**: `release/install.sh` runs the downloaded release's
+  `lf install promote`; `promote_published_from_installation` calls
+  `render_human` on every promotion. The fix ships with the next release, and
+  a dev build cannot exercise `promote` (only a published candidate may
+  advance).
+- **Codex proof**: `lf machine connect m codex <email>` mints a fresh login in
+  a laptop staging home and opens the verified Chrome profile. The two earlier
+  requests ended without a login because nobody approved them.
+
+### Alternatives for OpenCode forwarding
+
+| Route | Mechanism | Verdict |
+|---|---|---|
+| Copy the active entry | `auth export opencode` on the laptop → `auth import` on `m` | Zero-touch, but an OAuth login shares one refresh grant across machines, which `docs/security.md` rules out for Claude, Codex and Linear ("not the laptop's existing refresh credential"). Kept only for API keys, as GitHub tokens are copied. |
+| Mint a fresh device login on the laptop | device login in a private staging home, approved in the laptop's Chrome profile, export from staging, transfer, import on `m` | **Chosen for OAuth logins.** The same shape as Claude/Codex/Linear: fresh grant, laptop login untouched, identity checked before transfer. |
+| Mint on the machine | run the device login on `m` over SSH, relay the URL | Credential never transits, but needs a streaming remote command beside `remote_command`; no other provider works this way. Rejected. |
+| lf-owned `OPENCODE_API_KEY` token | store a ProviderToken on `m`; inject at launch | OpenCode ignores the env key once it has its own login, and an OAuth access token expires without lf refreshing it. Rejected. |
+
+### Chosen approach
+
+**OpenCode forwarding** (`machine_credentials.rs`, `account.rs`):
+
+- `lf machine connect m opencode [email]` (`Provider::OpenCodeZen`; the
+  existing parser already accepts `opencode`, `zen`, `oc`). The laptop reads
+  `opencode auth export opencode --standalone` and takes the active entry.
+  No OpenCode, or a 1.x `opencode` without `auth export` → "forwarding needs
+  OpenCode 2 on this laptop; install it with `npm install -g @opencode/cli`".
+  No active entry → "OpenCode has no active login on this laptop; run
+  `opencode auth login`".
+- Active entry is an **API key** → validate it with Zen and send it as is.
+  The success line says Zen accepted the key and no owner was checked.
+- Active entry is an **OAuth login** → `fresh_opencode_login` (beside
+  `fresh_linear_login`): staging temp home (`HOME` and `XDG_*` pointed into
+  it), spawn the device login, read the `…/console/device?user_code=…` URL
+  from its stdout (ANSI stripped), open it in the verified Chrome profile
+  (`browser_profiles(store, Provider::OpenCodeZen, None, chrome_profile)`),
+  wait for exit 0 within the device timeout, export from staging. The fresh
+  entry must carry the same `metadata.accountID` as the laptop's active login
+  ("fresh OpenCode login belongs to a different account; discarded"), and Zen
+  must accept its access token. Then the staging home is dropped.
+- `email`, when given, must equal the entry's `metadata.email`; an API key has
+  none, so an email with a key fails naming that.
+- Transfer: `Credential::OpenCode { login, id, entry }` where `entry` is the
+  exported JSON object, through the existing `receive` path. `login` is the
+  metadata email or the entry label.
+- `remote_has` → `inspect opencodezen <id>`: true when `m`'s export holds an
+  entry with that `id` and Zen accepts it.
+- `install` on `m` (under `credential_lock("opencode")`): Zen must accept the
+  received entry. Another active `opencode` entry that Zen accepts → "a
+  different OpenCode login is already active on this machine; left unchanged".
+  A same-`id` entry Zen rejects → `opencode auth logout opencode <id>`, then
+  import. `opencode auth import --standalone` with `[entry]` on stdin, its
+  output discarded; then the export must show that `id` active (`opencode
+  auth switch opencode <id>` when it is not). OpenCode missing on `m` →
+  "OpenCode 2 is not installed on this machine; install it with `npm install
+  -g @opencode/cli`".
+- Zen URL follows the GitHub/Linear test seam (`#[cfg(test)]`
+  `LF_TEST_MACHINE_ZEN_URL`); tests put a stub `opencode` on `PATH`, as the
+  Codex tests do.
+
+**Remote reason** (`remote_command`): keep withholding the remote's raw
+output, but name the remote lf's own `Error: ` line when it printed one
+(`machine credential command failed on m: <reason>`). Only lf's authored
+message crosses: child output is already discarded in `install`, provider
+errors are mapped to fixed strings, and tracing lines are not `Error: `
+lines. With no such line (ssh failure), use `os_process::exit_reason` of
+stderr.
+
+**Missing gh** (`install`, GitHub arm): a `gh` spawn that fails with
+`NotFound` bails "GitHub CLI (gh) is not installed on this machine; install
+it (https://cli.github.com) and run `lf machine connect` again". No precheck.
+
+**install.sh block** (`install.rs`): `promote_published_from_installation`
+renders the preview only for `--preview`; a refusal already lists its reasons
+in the error. `lf install preflight` keeps the full block for maintainers.
+
+**Codex proof**: run on the machine, approve the Codex login in Jack's
+verified Chrome profile (see `questions.md`), then a headless `lf -a codex`
+turn there and `lf account` listing the login.
+
+### Machine run (one rental, ≤ $1 of the $4.20 left)
+
+1. RunPod CPU pod as in round one (2 vCPU, ~$0.06/h, deadline-delete guard),
+   user `qa`, no `gh`. Harnesses at npm latest; OpenCode via `@opencode/cli`.
+2. Remote `lf` on `PATH` is this branch's Docker `linux/amd64` build (the
+   receive side changed); the laptop runs this branch's build too
+   (`remote_command` and the OpenCode source changed).
+3. `lf machine connect m github` without `gh` → the new message; install `gh`,
+   rerun → connected.
+4. Codex: connect, approve, `lf -b -a codex : …` on `m` → answer, `lf account`
+   lists `codex jack@loopflow.studio`.
+5. OpenCode: paid-model turn on `m` fails first; connect, approve, rerun →
+   PONG; rerun connect → no transfer ("already connected" path); laptop's
+   `opencode auth list` unchanged.
+6. Token-name scan of `/proc/<pid>/environ`, argv and `~/.lf/logs` as in
+   round one. Delete the pod, confirm, record spend.
+
+### Exclusions
+
+- lf's local OpenCode account integration stays as is: the 1.x `auth.json`
+  reader, `OpenCodeZenBroker` (waits for a 1.x file), `lf account` calling the
+  expired key active, and `OPENCODE_API_KEY` injection. Separate Task
+  (`questions.md`).
+- Pi credential forwarding (Pi owns its credentials); Claude trust (LOO-565).
+- Launch-time OpenCode forwarding for `lf --machine m -a opencode`: it has no
+  managed account to select; explicit `lf machine connect` only.
+
+### Forbidden outcomes (round two)
+
+- Sending the laptop's own OpenCode OAuth refresh grant to another machine.
+- Any credential byte, Zen response body or `auth export` output in stderr,
+  logs, captures or notes. Zen's error *message* (e.g. "This API key has
+  expired") is fine.
+- A remote precheck for `gh` or `opencode` instead of naming the failure.
+- Replacing a different, working OpenCode login on the machine.
+- A second OpenCode export/import helper outside `machine_credentials.rs`.
+
+### Done when (round two)
+
+- Without `gh`, `lf machine connect m github` names gh and how to install it.
+- On a rented machine, a forwarded Codex login answers a headless turn and is
+  listed by `lf account` there.
+- `lf machine connect m opencode` makes a paid Zen model answer on `m` that
+  failed before; the laptop's OpenCode login is unchanged; a second connect
+  transfers nothing; a laptop with only an expired key is refused with Zen's
+  reason.
+- A published promotion prints no preflight block; `--preview` still does.
+- Docs (`docs/subscriptions.md`, `docs/security.md`, `docs/getting-started.md`
+  machine sections, `lf machine connect` help) list OpenCode and say an
+  OpenCode OAuth login gets a fresh device grant while an API key is copied.
+
+### Gate (round two, headless)
+
+```bash
+cargo test -p loopflow --lib -- machine_credentials   # opencode install/inspect/refusals, gh NotFound reason, remote Error: line
+cargo clippy --all-targets -- -D warnings
+```
+
+Expected: pass. The machine run's ledger lines carry the end-to-end proof;
+the `install.sh` output is checked on the next release's install
+(release-run), since a dev build cannot promote.
 
 ## Findings before renting (code reading, 2026-10-21)
 
@@ -143,14 +346,12 @@ Fixed in this branch, each re-run on the machine unless noted:
   `lf : <message>`.
 
 Refuted or not built: P6 (already refused by `validate_agent_policy`), P10
-(no token env seen on Claude's route), P11/P12 (not exercised), P8 (deferred,
-see questions). P3/P4 confirmed on 0.14.14 and gone with #1635 merged; they
+(no token env seen on Claude's route), P11/P12 (not exercised). P8 moved
+into round two. P3/P4 confirmed on 0.14.14 and gone with #1635 merged; they
 stay on main until #1635 lands.
 
-Remaining: Codex account-dependent checks (no login reached the machine),
-Claude paste/OSC 52 copy-out and OpenCode's own OSC 52 copy are UNKNOWN; demo
-steps for Jack. Claude's per-worktree trust prompt is an open product call
-(`questions.md`).
+Remaining after round one: Codex account checks (round two proves them),
+Claude paste/OSC 52 copy-out and OpenCode's own OSC 52 copy are UNKNOWN.
 
 ## Concept review (2026-10-21, headless)
 
@@ -168,12 +369,12 @@ stdout a pipe) no longer gets the relayed screen. Piping an interactive TUI is
 not a supported path; `lf -b … > out` typed at a terminal is, and it now writes
 only the answer.
 
-Not blocking this Task (Jack Heart directed a fully autonomous run; the accepted
-outcome does not depend on them): Claude's per-worktree trust prompt, Pi using
-forwarded logins, and OpenCode Zen forwarding stay open product calls in
-`questions.md` for separate Tasks.
+Since resolved by Jack Heart: OpenCode forwarding joined this Task (round
+two); Claude's trust prompt went to LOO-565. Pi using forwarded logins stays
+an open product call in `questions.md`.
 
 ## Check results
 
 Check (2026-10-21, compress): `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- platform::clipboard machine::tests` passed; full suites → gate/CI.
 Check (2026-10-21, publish): cargo fmt --check, gate lib tests (5), golden_prompt, clippy -D warnings → pass; full matrix → CI.
+Check (2026-10-21, kickoff round two): laptop probes of OpenCode 2.0.32 export/import/device login and Zen `/zen/v1/models` → findings above; plan only, no build.

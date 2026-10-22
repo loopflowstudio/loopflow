@@ -35,7 +35,7 @@ pub(super) fn spawn(owner: LfProcessId) -> mpsc::Sender<bool> {
 }
 
 fn watch(owner: &LfProcessId, changes: &mpsc::Receiver<bool>) -> Result<()> {
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let store = crate::journal::process_ledger()?;
     let repo = store.process(owner)?.and_then(|process| process.repo);
     let pause = match limit(repo.as_deref()) {
         Some(DetachedLimit::After(limit)) => {

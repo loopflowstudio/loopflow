@@ -162,7 +162,7 @@ the callback page, so the paste stays.
   account in the foreground; once any account has a token, accounts without
   one are skipped with a note naming `lf account token`.
 - **Untested against real `claude setup-token` output**: the harness assumes
-  it honours `$BROWSER`, reads the pasted code on piped stdin and prints the
+  it honours BROWSER, reads the pasted code on piped stdin and prints the
   `sk-ant-oat…` token on one line. If the TUI needs a TTY, `--file -` with a
   hand-minted token is the fallback.
 - **`--rent` under `-b` still refuses** (Q7 unchanged); with tokens stored the

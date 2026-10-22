@@ -1,6 +1,6 @@
 # LOO-526: Rent a machine from a pool and give it back
 
-Status: implemented except the live probe and demo (2026-10-21); design revised after Jack Heart's review in the Task conversation. Jack's brief (Task description) is the problem statement; this
+Status: implemented and live-probed, including long-lived Claude tokens (2026-10-22); the end-to-end Task demo remains. Jack's brief (Task description) is the problem statement; this
 doc chooses mechanisms. Decided in conversation: records are pulled by the
 laptop, not pushed (Q1); routing lives on `lf task run --pool | --rent` (Q2;
 `--machine` already exists as the root forwarding flag); vocabulary follows Etude's 2026-10-21 split (#23, #19) of
@@ -209,8 +209,9 @@ Laptop side, after `booting`: poll `GET pods/{id}` until `ssh.direct` names a
 host and published port for 22 (the proxy endpoint is PTY-only and never counts), wait for SSH, then the ordinary path: `lf machine add
 lf@IP:PORT --label code-1` (probe + identity), clone the repository's origin and
 `lf repo identity --bind <repo_id>` over `lf --machine code-1`, then `lf machine
-connect code-1 github` and `… claude` (Jack approves each in Chrome; `-b`
-reports which connects are still needed instead of waiting). The Rental is
+connect code-1 github` (the laptop's `gh` token, no approval) and every
+Claude account holding a long-lived token (below; `-b` reports which connects
+are still needed instead of waiting). The Rental is
 `running` once `machine_id` is set. Then the handoff and the forwarded run,
 exactly as to any Machine. Nothing in Task execution learns about rentals.
 
@@ -295,48 +296,38 @@ Code as `CLAUDE_CODE_OAUTH_TOKEN` and as a `.credentials.json` holding only
 `accessToken` (probe on `probe-token-1`, 2026-10-22). It lacks `user:profile`,
 so Anthropic's profile endpoint and usage polling refuse it.
 
-**Minting.** `lf account token claude <email>` runs `claude setup-token`
-through the existing login harness (`start_auth_command` with the `$BROWSER`
-handoff and `AuthCommandInput::AuthorizationCode`): the authorize URL opens in
-the account's verified Chrome profile, the person approves and pastes the
-one-time code, lf captures the token from the command's output and stores it
-on the account (new `provider_accounts.long_lived_token`, encrypted like other
-tokens, with `minted_at`). It refuses anything whose prefix is not an `oat`
-token: an API key bills per token, a subscription token does not. Rental
-`prepare` and `lf machine connect <m> claude <email>` mint when the account
-has none and the run is foreground; a background run with no stored token
-fails naming `lf account token`. `lf account token claude <email> --file F`
-or stdin takes a token minted by hand; never argv.
+Built 2026-10-22:
 
-**Installing.** `Credential::Claude` carries the token in a credentials file
-(`accessToken` only, `expiresAt` a year from minting) plus the laptop's
-`login` and `subject`. The pod's `install_managed` skips the identity probe
-for a long-lived token and registers the account from the laptop's assertion,
-which comes over the added Machine's SSH channel. Usage for that account on a
-rented machine reads "unavailable" rather than erroring.
+- **Minting.** `lf account token claude <email> [--file F|-]
+  [--chrome-profile P]` runs `claude setup-token` through the login harness
+  (BROWSER handoff, pasted authorization code; the harness keeps parsing
+  output after the URL to capture the printed token), or reads a hand-minted
+  token from a file or stdin, never argv. Anything not prefixed `sk-ant-oat`
+  is refused: an API key bills per token. Stored encrypted in draft columns
+  `provider_accounts.long_lived_token` and `long_lived_token_minted_at`. The
+  laptop account needs a verified email and subject first (`lf account
+  connect claude <email>`); the token cannot supply one.
+- **Installing.** `lf machine connect <m> claude <email>` sends
+  `Credential::Claude {login, email, subject, credential}`: an
+  `accessToken`-only file plus the laptop's verified identity. The receiver
+  refuses a refresh token or non-`oat` access token, registers the account
+  without a profile probe, and records the file's digest so the offline
+  identity check holds. With no stored token, connect mints in a foreground
+  terminal and fails under `-b` naming `lf account token`. Claude no longer
+  uses `fresh_machine_login` (Codex still does). Usage polling maps the
+  scope 403 to "unavailable".
+- **Several accounts** (Q11). Rental `prepare` (`connect_claude_accounts`)
+  connects every Claude account holding a token and names each skipped one;
+  with none stored anywhere, it mints for each connected account. The pod's
+  account selection then falls through as on any Machine.
 
-**Several accounts.** `prepare` connects every Claude account the laptop has a
-token for, not one; the Task's account selection on the pod works as on any
-Machine, so an exhausted account falls through to the next (Q11 revised).
-`lf machine connect <m> claude <email>` still adds one by hand.
-
-**Built 2026-10-22.** `lf account token claude <email> [--file F|-]
-[--chrome-profile P]`; draft columns `provider_accounts.long_lived_token`
-(encrypted) and `long_lived_token_minted_at`; the login harness keeps parsing
-provider output after the URL, so `start_claude_setup_token` captures the
-printed token; `Credential::Claude` now carries `{login, email, subject,
-credential}` with the laptop's verified email and subject, and the receiver
-refuses a refresh token or a non-`oat` access token, installs without a probe,
-and records the file's digest so the offline identity check holds;
-`connect_claude_accounts` in `prepare` connects every token-holding account
-(none stored: mints for each connected account in the foreground). Claude no
-longer uses `fresh_machine_login` (Codex still does). Usage polling already
-maps the 403 to "unavailable".
-
-**Verification.** Unit: refusal of non-`oat` prefixes; the credentials file
-shape; install path skipping the probe only for long-lived tokens; prepare
-iterating accounts. Live: Jack's next `--rent` opens Chrome zero times when
-tokens are stored, and `claude -p` on the pod answers under each account.
+Unit-tested: `oat`-only capture and install, encrypted storage, install
+under the asserted identity without a probe, setup-token output capture
+against a fake `claude`. Not covered: `connect_claude_accounts`'s
+token/no-token split (it drives SSH connects; left to the demo). Live and
+unverified: the real `claude setup-token` through the piped harness (if it
+needs a TTY, `--file -` is the fallback), and `claude -p` on a pod under each
+installed account.
 
 ## Deleting what this replaces
 
@@ -356,9 +347,9 @@ code is copied, never shared as a package.
   path; Etude's cases: deadline, budget shortening, backwards clock, delete retry.
 - Export/import round trip in a two-store fixture: origin stamping, no authority
   for copies, final record after the origin Machine is gone.
-- Live probe, ~$0.10, before pursue finishes: a 2-vCPU CPU pod boots the
-  guardian, sshd and lf; `lf machine add` succeeds; the pod-scoped key deletes
-  the pod at a 10-minute deadline. Then the demo at ≤ $0.40.
+- Live probe (done 2026-10-22, below): a 2-vCPU CPU pod boots the guardian,
+  sshd and lf; `lf machine add` succeeds; the pod-scoped key deletes the pod at
+  its deadline. Then the demo at ≤ $0.40.
 
 ## Demo
 
@@ -429,9 +420,6 @@ Live probe, 2026-10-22 (Task conversation, disposable `LF_HOME`, ~$0.03 total):
   machine id` returned the pod's Machine id. The pod was gone 15 s after the
   deadline; `lf ondemand list` then read "ended 01:26" and `lf machine status`
   "rental ended". Billing showed no records for a sub-hour pod, as expected.
-- Long-lived tokens (2026-10-22): unit and harness tests pass with a fake
-  `claude setup-token`; the real command's output through the piped harness,
-  and a token-only pod answering under each account, are left to the demo.
 - Not exercised: `lf history export` over SSH (the pod ran published lf, which
   lacks the command) and the Task path (`--rent`, connect, clone, hand-off).
 
@@ -465,18 +453,18 @@ copy banner still prints twice, once per lf process; cosmetic.
 
 Jack, during the demo: "I don't really want to have to approve my credentials
 every time I rent a machine." Q10 in `questions.md` has the options and the
-probe: a `claude setup-token` subscription token works on a pod as an env var
-and as an access-token-only credential file, is refused as an API key, and
-fails the profile scope check. Next pursue pass: `lf account token claude
-<email>` stores one per account (read from a file or stdin, never argv), connect
-installs it with the laptop asserting identity, one account per rented machine
-(Q11, revised by Jack to several accounts per machine).
+probe; the result is "Credentials on a rented machine" above.
 
 Remaining:
 
-1. **Jack's demo (≤ $0.40)**: the Task path end to end, with Chrome approvals
-   for the pod's GitHub and Claude logins and this branch's Linux build on the
-   pod for `lf history export`. The scheduled reconcile only gives back when
-   its environment carries `RUNPOD_API_KEY` (Q9).
+1. **Jack's demo (≤ $0.40)**: the Task path end to end with this branch's
+   Linux build on the pod for `lf history export`. First `lf account token
+   claude <email>` per account (one Chrome approval and code paste each, a
+   year's validity); then `--rent` should open Chrome zero times (GitHub
+   forwards the laptop's `gh` token). It proves the real setup-token capture,
+   several accounts on one pod, clone, hand-off, push, copy-up and delete.
+   `--rent` under `-b` still refuses on GitHub's `require_foreground` (Q7).
+   The scheduled reconcile only gives back when its environment carries
+   `RUNPOD_API_KEY` (Q9).
 
-Last check (demo repair 2026-10-22): `cargo clippy -p loopflow --all-targets -D warnings` and `cargo fmt --check` clean; `cargo test -p loopflow --lib -- os_process::tests store::copy released_flow_records_read_as_graphs_after_the_rename` 18 passed; `target/release/lf ondemand list` runs on the copy of the real store.
+Last check (realign 2026-10-22): `cargo test -p loopflow --lib -- claude_long_lived long_lived_token claude_refuses_api_keys setup_token_captures only_subscription_tokens` 5 passed.

@@ -51,20 +51,24 @@ impl Selection {
         if parser.at != parser.tokens.len() {
             return Err(invalid("unexpected closing parenthesis"));
         }
-        name_nodes(
-            &mut selection,
-            &format!("{:x}", Sha256::digest(source.as_bytes())),
-            &mut 0,
-        );
+        let mut used = BTreeSet::new();
         if let Some(previous) = previous {
             previous.validate()?;
             let mut available = Vec::new();
             collect(previous, &mut available);
-            let mut used = BTreeSet::from([previous.id.clone()]);
+            used.insert(previous.id.clone());
             restore_ids(&mut selection, &available, &mut used);
             selection.id = previous.id.clone();
             restore_edited_ids(&mut selection, &available, &mut used);
         }
+        // Unrestored nodes take source-derived IDs after restoration, skipping
+        // IDs that earlier edits moved onto other nodes of this same source.
+        name_nodes(
+            &mut selection,
+            &format!("{:x}", Sha256::digest(source.as_bytes())),
+            &mut 0,
+            &mut used,
+        );
         selection.validate()?;
         Ok(selection)
     }
@@ -237,7 +241,7 @@ fn restore_edited_ids(
     previous: &[&Selection],
     used: &mut BTreeSet<SelectionId>,
 ) {
-    if !used.contains(&selection.id) {
+    if selection.id.0.is_empty() {
         if let Some(prior) = previous.iter().find(|prior| {
             !used.contains(&prior.id) && same_clause(&selection.expression, &prior.expression)
         }) {
@@ -392,14 +396,28 @@ impl Parser {
     }
 }
 
-fn name_nodes(selection: &mut Selection, source: &str, next: &mut usize) {
-    selection.id = SelectionId(format!("{source}:{next}"));
-    *next += 1;
+fn name_nodes(
+    selection: &mut Selection,
+    source: &str,
+    next: &mut usize,
+    used: &mut BTreeSet<SelectionId>,
+) {
+    if selection.id.0.is_empty() {
+        let id = loop {
+            let id = SelectionId(format!("{source}:{next}"));
+            *next += 1;
+            if !used.contains(&id) {
+                break id;
+            }
+        };
+        used.insert(id.clone());
+        selection.id = id;
+    }
     if let SelectionExpression::Compose { items } | SelectionExpression::Intersect { items } =
         &mut selection.expression
     {
         for item in items {
-            name_nodes(item, source, next);
+            name_nodes(item, source, next, used);
         }
     }
 }

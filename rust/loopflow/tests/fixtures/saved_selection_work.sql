@@ -1,4 +1,4 @@
--- Current Work for selection readers; the released frontier remains in saved_selection_work.sql.
+-- Current Work for selection readers; the released frontier remains in migrations/saved_selection_work.sql.
 INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
 INSERT INTO waves(id,name,repo,created_at) VALUES('11111111-1111-1111-1111-111111111111','Product','/repo',1),('22222222-2222-2222-2222-222222222222','Empty','/repo',2);
 INSERT INTO projects(id,wave_id,created_at,project_name,status) VALUES('proj_11111111111111111111111111111111','11111111-1111-1111-1111-111111111111',1,'Chapter','started');

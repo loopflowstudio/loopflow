@@ -1044,65 +1044,60 @@ Show a Work selection, or derive a passive plan for external hosts
 | Argument | What it does |
 |---|---|
 | `<expression>` | wave/task/query/kind/state expression; omitted uses the repository default |
-| `--plan` | plan Default: false. |
-| `--json` | json Default: false. |
+| `--plan` | Print the derived plan as JSON without opening Desktop or starting a provider Default: false. |
+| `--json` | Print the opening receipt as JSON Default: false. |
 | `--help / -h` | Print help |
 
 ## lf desktop query
 
-Create or edit a Dashboard query with revision checking
+Create or edit a Dashboard query with revision checking; prints the Dashboard as JSON
 
 | Argument | What it does |
 |---|---|
-| `<container>` | container |
-| `<expression>` | expression |
+| `<container>` | Dashboard name or query:ID |
+| `<expression>` | Selection expression, as for `lf desktop view` |
 | `--revision` | Last observed revision; omit only when creating a new Dashboard |
-| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf desktop pin
 
-Pin a Dashboard in repository discovery
+Pin a Dashboard in repository discovery; prints the Dashboard as JSON
 
 | Argument | What it does |
 |---|---|
-| `<query>` | query |
-| `--revision` | revision |
-| `--json` | json Default: false. |
+| `<query>` | Dashboard name or query:ID |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
 | `--help / -h` | Print help |
 
 ## lf desktop unpin
 
-Unpin a Dashboard without changing its membership or arrangement
+Unpin a Dashboard without changing its membership or arrangement; prints the Dashboard as JSON
 
 | Argument | What it does |
 |---|---|
-| `<query>` | query |
-| `--revision` | revision |
-| `--json` | json Default: false. |
+| `<query>` | Dashboard name or query:ID |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
 | `--help / -h` | Print help |
 
 ## lf desktop rename
 
-Rename a Dashboard or Task through its shared owner
+Rename a Dashboard or Task through its shared owner; prints the owner's record as JSON
 
 | Argument | What it does |
 |---|---|
-| `<target>` | target |
-| `<name>` | name |
-| `--revision` | revision |
-| `--json` | json Default: false. |
+| `<target>` | query:ID or task:<durable-id> |
+| `<name>` | The new name, written to the shared owner so labels and crumbs follow |
+| `--revision` | The target's last read revision; a stale one writes nothing |
 | `--help / -h` | Print help |
 
 ## lf desktop arrange
 
-Replace a Dashboard's occurrence order and hidden members from JSON on stdin
+Replace a Dashboard's occurrence order and hidden members from JSON on stdin; prints the Dashboard as JSON
 
 | Argument | What it does |
 |---|---|
-| `<query>` | query |
-| `--revision` | revision |
-| `--json` | json Default: false. |
+| `<query>` | Dashboard name or query:ID |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
 | `--help / -h` | Print help |
 
 ## lf desktop slots
@@ -1111,14 +1106,13 @@ Replace a Dashboard's slot layout from JSON on stdin; `null` restores the defaul
 
 | Argument | What it does |
 |---|---|
-| `<query>` | query |
-| `--revision` | revision |
-| `--json` | json Default: false. |
+| `<query>` | Dashboard name or query:ID |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
 | `--help / -h` | Print help |
 
 ## lf desktop order
 
-Move a member into another's place: the repository's Task order, or a Dashboard's with --query
+Move a member into another's place: the repository's Task order, or a Dashboard's with --query; prints the result as JSON
 
 | Argument | What it does |
 |---|---|
@@ -1126,18 +1120,16 @@ Move a member into another's place: the repository's Task order, or a Dashboard'
 | `--to` | Member whose place it takes |
 | `--query` | Dashboard whose order to edit instead of the repository's Task order |
 | `--revision` | The Dashboard's last read revision; a stale one writes nothing |
-| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf desktop layout
 
-Read portable pane intent, or save a complete revision-checked record from stdin
+Read portable pane intent as JSON, or save a complete revision-checked record from stdin
 
 | Argument | What it does |
 |---|---|
-| `<work>` | work |
-| `--save` | save Default: false. |
-| `--json` | json Default: false. |
+| `<work>` | repository, wave:<durable-id> or task:<durable-id> |
+| `--save` | Replace the record from JSON on stdin instead of reading it Default: false. |
 | `--help / -h` | Print help |
 
 ## lf desktop text

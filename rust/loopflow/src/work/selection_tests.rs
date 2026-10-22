@@ -420,6 +420,28 @@ fn query_selection_edits_retain_source_ids_and_hidden_geometry() {
 }
 
 #[test]
+fn query_selection_edits_keep_restored_and_fresh_ids_distinct() {
+    // Earlier edits move source-derived IDs onto other clauses; returning to
+    // the original text must not hand one clause's retained ID to a fresh one.
+    let mut previous = None;
+    for source in [
+        "task:FIX-1 or task:FIX-3",
+        "task:FIX-3 or task:FIX-2",
+        "task:FIX-2 or task:FIX-1",
+    ] {
+        previous = Some(Selection::parse(source, previous.as_ref()).unwrap());
+    }
+    let before = previous.unwrap();
+    let after = Selection::parse("task:FIX-1 or task:FIX-3", Some(&before)).unwrap();
+    let clause = |selection: &Selection, index: usize| match &selection.expression {
+        SelectionExpression::Compose { items } => items[index].id.clone(),
+        other => panic!("expected composition, found {other:?}"),
+    };
+    assert_eq!(clause(&before, 1), clause(&after, 0));
+    assert_ne!(clause(&after, 0), clause(&after, 1));
+}
+
+#[test]
 fn query_selection_rejects_bad_syntax_and_ambiguous_refs_without_guessing() {
     for source in [
         "",

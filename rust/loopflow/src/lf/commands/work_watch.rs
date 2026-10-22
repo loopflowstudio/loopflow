@@ -618,6 +618,10 @@ impl Reader {
                         state.replay = true;
                     }
                 }
+                if self.scope.repo != next.repo {
+                    // Planning is unscoped except for its repository Dashboard plans.
+                    self.parts.entry(Part::Planning).or_default().force = true;
+                }
                 self.scope = next;
                 id
             }

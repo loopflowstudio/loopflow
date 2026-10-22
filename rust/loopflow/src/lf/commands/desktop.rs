@@ -273,7 +273,7 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         ["desktop", "query" | "pin" | "unpin" | "arrange" | "slots"] => {
             Some(schema::<crate::work::selection::Dashboard>())
         }
-        ["desktop", "order"] => Some(schema::<Vec<String>>()),
+        ["desktop", "order"] => Some(schema::<DesktopOrderResult>()),
         ["desktop", "layout"] => Some(schema::<Option<crate::work::selection::WorkPaneLayout>>()),
         ["open"] => Some(schema::<super::open::OpenReport>()),
         ["desktop", "read"] => Some(schema::<DesktopTextReading>()),
@@ -313,6 +313,14 @@ pub enum DesktopOpeningStatus {
 enum DesktopViewResult<'a> {
     Plan(&'a crate::work::selection::ViewPlan),
     Opening(&'a DesktopOpening),
+}
+
+/// The repository's Task order after a move, or the Dashboard edited with --query.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum DesktopOrderResult {
+    Tasks(Vec<String>),
+    Dashboard(Box<crate::work::selection::Dashboard>),
 }
 
 fn open_url(mut url: reqwest::Url, json: bool) -> Result<()> {
@@ -605,19 +613,25 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
             query: Some(query),
             revision: Some(revision),
             ..
-        } => serde_json::to_value(store.reorder_dashboard(
-            &repository,
-            &dashboard_id(query),
-            *revision,
-            &work_key(&repository, member)?,
-            &work_key(&repository, to)?,
-        )?)?,
+        } => serde_json::to_value(DesktopOrderResult::Dashboard(Box::new(
+            store.reorder_dashboard(
+                &repository,
+                &dashboard_id(query),
+                *revision,
+                &work_key(&repository, member)?,
+                &work_key(&repository, to)?,
+            )?,
+        )))?,
         DesktopCommand::Order { member, to, .. } => {
             let (member, to) = (work_key(&repository, member)?, work_key(&repository, to)?);
             if member.kind != WorkWorkspaceKind::Task || to.kind != WorkWorkspaceKind::Task {
                 bail!("the repository order holds Tasks; pass --query to order a Dashboard");
             }
-            serde_json::to_value(store.reorder_task(&repository, &member.id, &to.id)?)?
+            serde_json::to_value(DesktopOrderResult::Tasks(store.reorder_task(
+                &repository,
+                &member.id,
+                &to.id,
+            )?))?
         }
         DesktopCommand::Layout {
             work, save: true, ..

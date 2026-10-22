@@ -2,9 +2,9 @@
 
 ```sh
 lf desktop view 'wave:product state:open or state:available' --plan
-lf desktop query attention 'state:available' --json
+lf desktop query attention 'state:available'
 lf desktop view 'query:attention' --plan
-lf desktop query attention 'state:available or state:blocked' --revision 1 --json
+lf desktop query attention 'state:available or state:blocked' --revision 1
 ```
 
 Plans read current Work and saved intent without opening Desktop, allocating a
@@ -49,10 +49,11 @@ let saved = store.save_dashboard(
 ```
 
 Typed selections contain repository/Wave defaults, explicit Work, ordered
-composition, intersections, predicates and saved-query references. Defaults include started, unfinished
-Tasks and immediate child Waves; Task membership includes descendant Waves.
-Paused and idle Tasks remain. Explicit references also reach backlog and finished
-Tasks. Preserve authored node IDs across edits: occurrences use those source
+composition, intersections, predicates and saved-query references. The repository
+default includes started, unfinished Tasks and immediate child Waves; a Wave
+default also lists its unstarted Tasks, which offer Start. Task membership
+includes descendant Waves. Paused and idle Tasks remain. Explicit references also
+reach backlog and finished Tasks. Preserve authored node IDs across edits: occurrences use those source
 paths and canonical Work keys, so sibling insertion does not change identity.
 
 `resolve_selection` reads Work and query definitions in one SQLite savepoint.
@@ -83,8 +84,9 @@ belong to their existing native owners.
 lf desktop pin attention --revision 2
 lf desktop rename query:attention Available --revision 3
 lf desktop arrange attention --revision 4 < arrangement.json
-lf desktop order task:task_33333333333333333333333333333333 --to task:task_11111111111111111111111111111111 --query attention --revision 5
-lf desktop layout task:task_22222222222222222222222222222222 --json
+lf desktop slots attention --revision 5 < slots.json   # null restores the default slots
+lf desktop order task:task_33333333333333333333333333333333 --to task:task_11111111111111111111111111111111 --query attention --revision 6
+lf desktop layout task:task_22222222222222222222222222222222
 lf desktop layout task:task_22222222222222222222222222222222 --save < panes.json
 ```
 

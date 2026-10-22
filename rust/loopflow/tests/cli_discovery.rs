@@ -1261,13 +1261,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         String::from_utf8_lossy(&invalid.stderr)
     );
     assert_eq!(counts(), before);
-    let saved = invoke(&[
-        "desktop",
-        "query",
-        "query:backlog",
-        "state:backlog",
-        "--json",
-    ]);
+    let saved = invoke(&["desktop", "query", "query:backlog", "state:backlog"]);
     assert!(
         saved.status.success(),
         "{}",
@@ -1303,7 +1297,6 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         "Later task",
         "--revision",
         &revision,
-        "--json",
     ]);
     assert!(
         renamed.status.success(),
@@ -1335,7 +1328,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
             .title,
         "Later task"
     );
-    let pinned = invoke(&["desktop", "pin", "backlog", "--revision", "1", "--json"]);
+    let pinned = invoke(&["desktop", "pin", "backlog", "--revision", "1"]);
     assert!(
         pinned.status.success(),
         "{}",
@@ -1348,7 +1341,6 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         "Later",
         "--revision",
         "2",
-        "--json",
     ]);
     assert!(
         named.status.success(),
@@ -1368,7 +1360,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     assert_eq!(plan.name.as_deref(), Some("Later"));
     assert!(plan.pinned);
     assert_eq!(plan.contents.len(), 1);
-    let layout = invoke(&["desktop", "layout", "repository", "--json"]);
+    let layout = invoke(&["desktop", "layout", "repository"]);
     assert!(layout.status.success());
     assert_eq!(String::from_utf8_lossy(&layout.stdout).trim(), "null");
     assert_eq!(counts(), before_reads);

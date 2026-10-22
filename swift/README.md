@@ -792,8 +792,9 @@ Leaving Work retains its terminals, file drafts, focus and zoom. Bare Work navig
 starts no Session or checkout. App quit still ends embedded clients. Saved pane
 intent and file drafts recover after relaunch; restored shell tabs remain unattached.
 
-Inspection reports the window's outer `layout` with Work keys, split axes and
-ratios, plus each retained workspace's `work`, title, open state and selection.
+Inspection reports the window's `open_work` in slot fill order and its selected
+`view` plan, plus each retained workspace's `work`, title, open state, pane
+`layout` and selection.
 Hidden Dashboard occurrences retain their split position while visible neighbors are rearranged.
 Execution locations live on contents, not workspace keys or pane receipts.
 There is no outer checkout-slot layout or checkout-split menu. Flow logs use their
@@ -899,8 +900,8 @@ pin and arrange it. Tasks appear side by side only in Dashboard query results;
 ordinary navigation, including Command-click, selects one destination and retains
 each Task's panes and drafts for its next visit.
 
-Drag tile headers to swap, resize a divider, or hide an occurrence and restore it
-from Hidden. Rust resolves membership and the first visible occurrence; tiles
+Drag tile headers to reorder, add or remove slots, or hide an occurrence and
+restore it from Hidden. Rust resolves membership and the first visible occurrence; tiles
 reuse each Task's retained Session, tools and drafts. Focus never changes which
 occurrence wins or replaces its primary Session face.
 

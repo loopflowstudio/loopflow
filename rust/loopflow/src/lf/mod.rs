@@ -600,64 +600,67 @@ pub enum DesktopCommand {
     View {
         /// wave/task/query/kind/state expression; omitted uses the repository default
         expression: Option<String>,
+        /// Print the derived plan as JSON without opening Desktop or starting a provider
         #[arg(long)]
         plan: bool,
+        /// Print the opening receipt as JSON
         #[arg(long)]
         json: bool,
     },
-    /// Create or edit a Dashboard query with revision checking
+    /// Create or edit a Dashboard query with revision checking; prints the Dashboard as JSON
     Query {
+        /// Dashboard name or query:ID
         container: String,
+        /// Selection expression, as for `lf desktop view`
         expression: String,
         /// Last observed revision; omit only when creating a new Dashboard
         #[arg(long)]
         revision: Option<i64>,
-        #[arg(long)]
-        json: bool,
     },
 
-    /// Pin a Dashboard in repository discovery
+    /// Pin a Dashboard in repository discovery; prints the Dashboard as JSON
     Pin {
+        /// Dashboard name or query:ID
         query: String,
+        /// The Dashboard's last read revision; a stale one writes nothing
         #[arg(long)]
         revision: i64,
-        #[arg(long)]
-        json: bool,
     },
-    /// Unpin a Dashboard without changing its membership or arrangement
+    /// Unpin a Dashboard without changing its membership or arrangement; prints the Dashboard as JSON
     Unpin {
+        /// Dashboard name or query:ID
         query: String,
+        /// The Dashboard's last read revision; a stale one writes nothing
         #[arg(long)]
         revision: i64,
-        #[arg(long)]
-        json: bool,
     },
-    /// Rename a Dashboard or Task through its shared owner
+    /// Rename a Dashboard or Task through its shared owner; prints the owner's record as JSON
     Rename {
+        /// query:ID or task:<durable-id>
         target: String,
+        /// The new name, written to the shared owner so labels and crumbs follow
         name: String,
+        /// The target's last read revision; a stale one writes nothing
         #[arg(long)]
         revision: u64,
-        #[arg(long)]
-        json: bool,
     },
-    /// Replace a Dashboard's occurrence order and hidden members from JSON on stdin
+    /// Replace a Dashboard's occurrence order and hidden members from JSON on stdin; prints the Dashboard as JSON
     Arrange {
+        /// Dashboard name or query:ID
         query: String,
+        /// The Dashboard's last read revision; a stale one writes nothing
         #[arg(long)]
         revision: i64,
-        #[arg(long)]
-        json: bool,
     },
     /// Replace a Dashboard's slot layout from JSON on stdin; `null` restores the default
     Slots {
+        /// Dashboard name or query:ID
         query: String,
+        /// The Dashboard's last read revision; a stale one writes nothing
         #[arg(long)]
         revision: i64,
-        #[arg(long)]
-        json: bool,
     },
-    /// Move a member into another's place: the repository's Task order, or a Dashboard's with --query
+    /// Move a member into another's place: the repository's Task order, or a Dashboard's with --query; prints the result as JSON
     Order {
         /// Member to move: task:<durable-id>, or wave:<durable-id> on a Dashboard
         member: String,
@@ -670,16 +673,14 @@ pub enum DesktopCommand {
         /// The Dashboard's last read revision; a stale one writes nothing
         #[arg(long, requires = "query")]
         revision: Option<i64>,
-        #[arg(long)]
-        json: bool,
     },
-    /// Read portable pane intent, or save a complete revision-checked record from stdin
+    /// Read portable pane intent as JSON, or save a complete revision-checked record from stdin
     Layout {
+        /// repository, wave:<durable-id> or task:<durable-id>
         work: String,
+        /// Replace the record from JSON on stdin instead of reading it
         #[arg(long)]
         save: bool,
-        #[arg(long)]
-        json: bool,
     },
 
     /// Insert literal text at an exact surface's cursor; never submits or clears a draft

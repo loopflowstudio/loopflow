@@ -216,8 +216,7 @@ keeps an unavailable row. Work observation retains its last reading on failure.
 Wave navigation leaves working positions and the sidebar viewport intact.
 
 Title-bar breadcrumbs follow hierarchy as a jump bar: each name navigates, and the
-› after it lists what is inside (This Mac › repositories, repository › Waves and
-Dashboards, Wave › Tasks) with a filter that searches that scope. Back follows
+› after it lists what is inside (repository › Waves and Dashboards, Wave › Tasks) with a filter that searches that scope. Back follows
 visits, and Cmd+K routes
 cross-repository Work to its own window. Cmd+1–9 and Control+Tab address the same
 stable eligible slots, independent of the filter. Each Work owns one retained

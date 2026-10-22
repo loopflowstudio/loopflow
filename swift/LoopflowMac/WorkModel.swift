@@ -2443,7 +2443,13 @@ extension WorkModel {
 
     private func presentView(_ plan: WorkViewPlan) {
         guard let registry = workspaceRegistry else { return }
-        for content in plan.contents {
+        // Working Tasks renders the repository plan's Tasks; its Waves stay in the sidebar.
+        let open: [WorkWorkspaceKey] = if case .workingTasks = navigation.destination {
+            workingTaskMembers.map(\.work)
+        } else {
+            plan.projection.visible.map(\.work)
+        }
+        for content in plan.contents where open.contains(content.work) {
             let entry = registry.workspace(for: content.work, title: content.title,
                 location: content.location.map { WorkspaceIdentity(machineId: $0.machineID, worktree: $0.cwd) })
             if let primary = content.primarySession, entry.multiplexer.pane(forSessionId: primary) == nil {
@@ -2451,7 +2457,7 @@ extension WorkModel {
             }
             entry.startPersistence(query: query, repoPath: repoPath)
         }
-        registry.present(plan)
+        registry.present(open: open)
     }
 
     func saveDashboard(id: String, expression: String, name: String, pinned: Bool, revision: Int64?) async {

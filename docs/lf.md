@@ -957,8 +957,8 @@ selects one destination. `state --json` includes the
 selected `view` plan, retained occurrences, hidden members and duplicate winners.
 Repository and Wave navigation still opens their ordinary conversations.
 
-`desktop view --plan`, `query`, `pin`/`unpin`, `rename`, `arrange` and
-`layout` work without macOS. Plans contain
+`desktop view --plan`, `query`, `pin`/`unpin`, `rename`, `arrange`, `slots`,
+`order` and `layout` work without macOS and print JSON. Plans contain
 shared selection/arrangement intent and current Work evidence, including explicit
 missing primary Sessions or locations. They acquire no client and do not describe
 native mounted panes. Query edits use the saved revision; `query:ID` reopens the

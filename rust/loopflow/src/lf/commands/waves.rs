@@ -788,7 +788,6 @@ pub fn list_tasks(repo: &Path, wave: Option<&str>, json: bool) -> Result<()> {
     })
 }
 
-/// `lf wave show --all`: every current Wave in every repository.
 /// The current Waves a roadmap already read, ordered as `wave_snapshots` orders them.
 pub(crate) fn current_waves(roadmap: &RoadmapSnapshot) -> Vec<WaveSnapshot> {
     let mut waves: Vec<_> = roadmap.waves.iter().map(|wave| wave.wave.clone()).collect();
@@ -796,6 +795,7 @@ pub(crate) fn current_waves(roadmap: &RoadmapSnapshot) -> Vec<WaveSnapshot> {
     waves
 }
 
+/// `lf wave show --all`: every current Wave in every repository.
 pub(crate) async fn roadmap_all(store: &SharedStore) -> Result<RoadmapSnapshot> {
     let waves = store
         .list_waves(None)

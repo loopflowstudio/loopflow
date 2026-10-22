@@ -385,8 +385,8 @@ final class SessionsWorkspaceRegistry {
         selectedWork = nil
     }
 
-    func present(_ plan: WorkViewPlan) {
-        openWork = plan.projection.visible.map(\.work)
+    func present(open: [WorkWorkspaceKey]) {
+        openWork = open
         if selectedWork.map({ openWork.contains($0) }) != true {
             selectedWork = openWork.first
             surfaces.clearFocus()

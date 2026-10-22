@@ -77,7 +77,7 @@ struct DashboardWorkspaceTests {
         let moved = try plan(["task_c", "task_a", "task_b"])
         let query = RegistryQuery { args, _ in
             switch args {
-            case ["desktop", "order", "task:task_c", "--to", "task:task_a", "--json"]: return #"["task_c","task_a","task_b"]"#
+            case ["desktop", "order", "task:task_c", "--to", "task:task_a"]: return #"["task_c","task_a","task_b"]"#
             case ["desktop", "view", "--plan", "--json"]: return moved
             default: throw RegistryQueryError("Unexpected command \(args)")
             }
@@ -92,6 +92,32 @@ struct DashboardWorkspaceTests {
         #expect(model.dashboardError == nil)
         #expect(model.workingTaskIDs == ["task_c", "task_a", "task_b"])
         #expect(model.workingTaskMembers.map(\.work.id) == model.workingTaskIDs)
+    }
+
+    @Test func workingTasksOpensOnlyTheTasksItsGridShows() throws {
+        var json = try #require(JSONSerialization.jsonObject(with: loadFixtureData("view_plan.json")) as? [String: Any])
+        json["dashboard_id"] = NSNull()
+        json["saved_revision"] = NSNull()
+        json["selection"] = ["id": "repository-default", "expression": ["kind": "repository"]]
+        let repo = "repo_11111111111111111111111111111111"
+        let members: [[String: Any]] = [
+            ["source": ["repository-default"], "work": ["repository": repo, "kind": "wave", "id": "22222222-2222-4222-8222-222222222222"]],
+            ["source": ["repository-default"], "work": ["repository": repo, "kind": "task", "id": "task_a"]],
+        ]
+        var resolution = try #require(json["resolution"] as? [String: Any])
+        resolution["members"] = members
+        json["resolution"] = resolution
+        json["projection"] = ["visible": members, "suppressed": []]
+        json["contents"] = members.map { ["work": $0["work"]!, "title": "t", "states": [], "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "face": NSNull(), "pane_revision": NSNull()] }
+        let plan = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: json))
+        let model = WorkModel(query: RegistryQuery { args, _ in throw RegistryQueryError("Unexpected command \(args)") }, repoPath: "/repo")
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        model.bindWorkspaces(registry, repository: repo)
+        model.applySelectionPlans([plan], reason: "")
+        model.selectWorkingTasksDashboard()
+        // The sidebar keeps the repository plan's Waves; the grid and open Work hold its Tasks.
+        #expect(registry.openWork == [WorkWorkspaceKey(repository: repo, kind: .task, id: "task_a")])
+        #expect(registry.selectedWork?.kind == .task)
     }
 
     @Test func droppingTileCOnAMovesItThroughTheSharedOrderCommand() async throws {
@@ -112,7 +138,7 @@ struct DashboardWorkspaceTests {
         let query = RegistryQuery { args, _ in
             switch args {
             // Rust applies the same move as the repository order and decides the mode.
-            case ["desktop", "order", "task:task_c", "--to", "task:task_a", "--query", "picked", "--revision", "3", "--json"]:
+            case ["desktop", "order", "task:task_c", "--to", "task:task_a", "--query", "picked", "--revision", "3"]:
                 return String(decoding: try loadFixtureData("dashboard.json"), as: UTF8.self)
             case ["desktop", "view", "query:picked", "--plan", "--json"]: return moved
             default: throw RegistryQueryError("Unexpected command \(args)")

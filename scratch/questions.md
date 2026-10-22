@@ -163,10 +163,10 @@ the callback page, so the paste stays.
 - **No token stored anywhere**: `prepare` mints for every connected Claude
   account in the foreground; once any account has a token, accounts without
   one are skipped with a note naming `lf account token`.
-- **Untested against real `claude setup-token` output**: the harness assumes
-  it honours BROWSER, reads the pasted code on piped stdin and prints the
-  `sk-ant-oat…` token on one line. If the TUI needs a TTY, `--file -` with a
-  hand-minted token is the fallback.
+- **Real `claude setup-token` needs a terminal** (probed 2026-10-22): it
+  honours BROWSER on pipes but renders nothing and ignores the pasted code.
+  The harness runs it on a 500-column pseudo-terminal; an end-to-end approval
+  is still unexercised, and `--file -` stays the fallback.
 
 ## Raised in concept review after long-lived tokens (2026-10-22)
 

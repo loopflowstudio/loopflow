@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::future::Future;
 use std::io::Write as _;
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::Command as ProcessCommand;
@@ -364,14 +365,21 @@ impl AuthFlowHandle {
 #[derive(Debug, Clone)]
 pub(crate) struct AuthorizationCodeInput {
     provider: Provider,
-    stdin: Arc<Mutex<Option<ChildStdin>>>,
+    writer: Arc<Mutex<Option<CodeWriter>>>,
+}
+
+/// Where a pasted code goes: a line on a pipe, or Enter on the provider's terminal.
+#[derive(Debug)]
+enum CodeWriter {
+    Pipe(ChildStdin),
+    Terminal(tokio::fs::File),
 }
 
 impl AuthorizationCodeInput {
-    fn new(provider: Provider, stdin: ChildStdin) -> Self {
+    fn new(provider: Provider, writer: CodeWriter) -> Self {
         Self {
             provider,
-            stdin: Arc::new(Mutex::new(Some(stdin))),
+            writer: Arc::new(Mutex::new(Some(writer))),
         }
     }
 
@@ -384,33 +392,29 @@ impl AuthorizationCodeInput {
             });
         }
 
-        let mut stdin = self
-            .stdin
+        let writer = self
+            .writer
             .lock()
             .await
             .take()
             .ok_or(AuthError::CompletionUnavailable(self.provider))?;
-        stdin
-            .write_all(code.as_bytes())
-            .await
-            .map_err(|source| AuthError::CommandIo {
-                provider: self.provider,
-                source,
-            })?;
-        stdin
-            .write_all(b"\n")
-            .await
-            .map_err(|source| AuthError::CommandIo {
-                provider: self.provider,
-                source,
-            })?;
-        stdin
-            .shutdown()
-            .await
-            .map_err(|source| AuthError::CommandIo {
-                provider: self.provider,
-                source,
-            })
+        let io = |source| AuthError::CommandIo {
+            provider: self.provider,
+            source,
+        };
+        match writer {
+            CodeWriter::Pipe(mut stdin) => {
+                stdin.write_all(code.as_bytes()).await.map_err(io)?;
+                stdin.write_all(b"\n").await.map_err(io)?;
+                stdin.shutdown().await.map_err(io)
+            }
+            // A terminal in raw mode reads Enter as a carriage return.
+            CodeWriter::Terminal(mut terminal) => {
+                terminal.write_all(code.as_bytes()).await.map_err(io)?;
+                terminal.write_all(b"\r").await.map_err(io)?;
+                terminal.flush().await.map_err(io)
+            }
+        }
     }
 }
 
@@ -1725,7 +1729,7 @@ pub async fn start_claude_setup_token(
         Provider::Claude,
         "claude",
         ClaudeAuthBroker::for_profile(config_dir, None).setup_token_command(),
-        AuthCommandInput::AuthorizationCode,
+        AuthCommandInput::TerminalAuthorizationCode,
         move |line, builder| {
             if let Some(token) = subscription_token_in(line) {
                 *sink.0.lock().expect("minted token lock") = Some(SecretString::new(token));
@@ -2025,7 +2029,18 @@ struct AuthFlowBuilder {
 enum AuthCommandInput {
     None,
     AuthorizationCode,
+    /// A pasted code into a full-screen prompt that renders only on a terminal.
+    TerminalAuthorizationCode,
 }
+
+impl AuthCommandInput {
+    fn takes_code(self) -> bool {
+        self != Self::None
+    }
+}
+
+/// Wide enough that a printed token never wraps.
+const AUTH_TERMINAL_COLUMNS: u16 = 500;
 
 async fn start_auth_command(
     provider: Provider,
@@ -2035,19 +2050,39 @@ async fn start_auth_command(
     mut parse_line: impl FnMut(&str, &mut AuthFlowBuilder) + Send + 'static,
 ) -> Result<AuthFlowHandle, AuthError> {
     #[cfg(unix)]
-    let mut handoff =
-        if provider == Provider::Claude && input == AuthCommandInput::AuthorizationCode {
-            Some(
-                browser_handoff::BrowserHandoff::new(&mut command)
-                    .map_err(|source| AuthError::CommandIo { provider, source })?,
-            )
-        } else {
+    let mut handoff = if provider == Provider::Claude && input.takes_code() {
+        Some(
+            browser_handoff::BrowserHandoff::new(&mut command)
+                .map_err(|source| AuthError::CommandIo { provider, source })?,
+        )
+    } else {
+        None
+    };
+    let terminal = match input {
+        AuthCommandInput::None => {
+            command
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
             None
-        };
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    match input {
-        AuthCommandInput::None => command.stdin(Stdio::null()),
-        AuthCommandInput::AuthorizationCode => command.stdin(Stdio::piped()),
+        }
+        AuthCommandInput::AuthorizationCode => {
+            command
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            None
+        }
+        AuthCommandInput::TerminalAuthorizationCode => {
+            let io = |source| AuthError::CommandIo { provider, source };
+            let (master, slave) = crate::transport::terminal_pair().map_err(io)?;
+            crate::transport::resize(master.as_raw_fd(), 24, AUTH_TERMINAL_COLUMNS).map_err(io)?;
+            command
+                .stdin(slave.try_clone().map_err(io)?)
+                .stdout(slave.try_clone().map_err(io)?)
+                .stderr(slave);
+            Some(master)
+        }
     };
     command.kill_on_drop(true);
     #[cfg(unix)]
@@ -2069,40 +2104,62 @@ async fn start_auth_command(
         }
     };
 
+    // The child holds the terminal's only other end, so output ends when it exits.
+    drop(command);
     let process_group = crate::os_process::ProcessGroupGuard::new(
         child
             .id()
             .expect("newly spawned auth command should have a process id"),
     );
-    let authorization_code_input = match input {
-        AuthCommandInput::None => None,
-        AuthCommandInput::AuthorizationCode => {
-            let stdin = child.stdin.take().ok_or_else(|| AuthError::CommandFailed {
-                provider,
-                message: "missing authorization code input pipe".to_string(),
-            })?;
-            Some(AuthorizationCodeInput::new(provider, stdin))
+    let (line_tx, mut line_rx) = mpsc::channel::<String>(32);
+    let (authorization_code_input, readers) = match terminal {
+        Some(master) => {
+            let io = |source| AuthError::CommandIo { provider, source };
+            let writer = tokio::fs::File::from_std(master.try_clone().map_err(io)?);
+            let reader = spawn_line_reader(tokio::fs::File::from_std(master), line_tx);
+            (
+                Some(AuthorizationCodeInput::new(
+                    provider,
+                    CodeWriter::Terminal(writer),
+                )),
+                AuthReaders(vec![reader]),
+            )
+        }
+        None => {
+            let authorization_code_input = if input.takes_code() {
+                let stdin = child.stdin.take().ok_or_else(|| AuthError::CommandFailed {
+                    provider,
+                    message: "missing authorization code input pipe".to_string(),
+                })?;
+                Some(AuthorizationCodeInput::new(
+                    provider,
+                    CodeWriter::Pipe(stdin),
+                ))
+            } else {
+                None
+            };
+            let stdout = child
+                .stdout
+                .take()
+                .ok_or_else(|| AuthError::CommandFailed {
+                    provider,
+                    message: "missing stdout pipe".to_string(),
+                })?;
+            let stderr = child
+                .stderr
+                .take()
+                .ok_or_else(|| AuthError::CommandFailed {
+                    provider,
+                    message: "missing stderr pipe".to_string(),
+                })?;
+            let stdout_task = spawn_line_reader(stdout, line_tx.clone());
+            let stderr_task = spawn_line_reader(stderr, line_tx);
+            (
+                authorization_code_input,
+                AuthReaders(vec![stdout_task, stderr_task]),
+            )
         }
     };
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| AuthError::CommandFailed {
-            provider,
-            message: "missing stdout pipe".to_string(),
-        })?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| AuthError::CommandFailed {
-            provider,
-            message: "missing stderr pipe".to_string(),
-        })?;
-
-    let (line_tx, mut line_rx) = mpsc::channel::<String>(32);
-    let stdout_task = spawn_line_reader(stdout, line_tx.clone());
-    let stderr_task = spawn_line_reader(stderr, line_tx);
-    let readers = AuthReaders(vec![stdout_task, stderr_task]);
     let started_at = Instant::now();
     let mut builder = AuthFlowBuilder::default();
     let mut callback_url = None;
@@ -2126,9 +2183,7 @@ async fn start_auth_command(
             .try_wait()
             .map_err(|source| AuthError::CommandIo { provider, source })?;
         let drained = exited.is_some() && line_rx.is_closed() && line_rx.is_empty();
-        let capture_pending = cfg!(unix)
-            && provider == Provider::Claude
-            && input == AuthCommandInput::AuthorizationCode;
+        let capture_pending = cfg!(unix) && provider == Provider::Claude && input.takes_code();
         if callback_url.is_some() || !capture_pending || expired || drained {
             let manual = builder.verification_uri_complete.clone();
             if let Some(url) = &callback_url {
@@ -2136,7 +2191,7 @@ async fn start_auth_command(
                 builder.verification_uri_complete = Some(url.clone());
             }
             if let Some(mut response) = build_graph_response(provider, &builder) {
-                if input == AuthCommandInput::AuthorizationCode {
+                if input.takes_code() {
                     response.completion = if callback_url.is_some() {
                         AuthCompletion::Browser { manual_uri: manual }
                     } else {
@@ -4194,7 +4249,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
-    async fn setup_token_captures_the_token_printed_after_the_code() {
+    async fn setup_token_runs_on_a_wide_terminal_and_captures_the_printed_token() {
         use std::os::unix::fs::PermissionsExt;
         let _lock = crate::journal::test_env_lock();
         let tmp = tempdir().unwrap();
@@ -4203,6 +4258,9 @@ mod tests {
             &claude,
             r#"#!/bin/sh
 [ "$1" = setup-token ] || exit 3
+# The real prompt renders nothing off a terminal, and a narrow one wraps the token.
+[ -t 0 ] && [ -t 1 ] || exit 5
+[ "$(stty size | cut -d' ' -f2)" -ge 200 ] || exit 6
 "$BROWSER" 'https://claude.ai/oauth/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A19222'
 IFS= read -r code
 [ "$code" = pasted-code ] || exit 4

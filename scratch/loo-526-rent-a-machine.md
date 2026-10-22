@@ -324,13 +324,21 @@ Built 2026-10-22:
   account and a `-b` run skips them all. The pod's
   account selection then falls through as on any Machine.
 
+Probed 2026-10-22 against Claude Code 2.1.308: on pipes `claude setup-token`
+opens BROWSER but renders nothing and ignores a pasted code, so the first
+harness could never capture a token. Under a terminal it shows the paste
+prompt and submits the code on Enter. The harness now runs it on a 500-column
+pseudo-terminal (`AuthCommandInput::TerminalAuthorizationCode`, transport's
+`terminal_pair`) so the ~108-character token prints on one line, and sends the
+code with `\r`.
+
 Unit-tested: `oat`-only capture and install, encrypted storage, install
-under the asserted identity without a probe, setup-token output capture
-against a fake `claude`. Not covered: `connect_claude_accounts`'s
-token/no-token split (it drives SSH connects; left to the demo). Live and
-unverified: the real `claude setup-token` through the piped harness (if it
-needs a TTY, `--file -` is the fallback), and `claude -p` on a pod under each
-installed account.
+under the asserted identity without a probe, setup-token capture against a
+fake `claude` that refuses a non-terminal or a terminal under 200 columns. Not
+covered: `connect_claude_accounts`'s token/no-token split (it drives SSH
+connects; left to the demo). Live and unverified: a real approval through the
+terminal harness (`--file -` stays the fallback), and `claude -p` on a pod
+under each installed account.
 
 ## Deleting what this replaces
 
@@ -482,4 +490,4 @@ Remaining:
    It also runs `lf -b task run X --rent code -a claude` once. The scheduled
    reconcile only gives back when its environment carries `RUNPOD_API_KEY` (Q9).
 
-Last check (compress 2026-10-22, reused by realign): `cargo test -p loopflow --lib machine_credentials` 16 passed; `cargo clippy --all-targets -- -D warnings` clean.
+Last check (implement 2026-10-22): `cargo test -p loopflow --lib provider_auth` 85 passed; `cargo clippy --all-targets -- -D warnings` clean.

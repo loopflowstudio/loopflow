@@ -30,7 +30,7 @@ Probes ran the real `claude` binary in a pty against a scratch
 `CLAUDE_CONFIG_DIR`, a scratch repo and its linked worktrees.
 
 - **Trust lives only in the global config file.** `projects[<path>].hasTrustDialogAccepted`
-  in `$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`; a non-empty legacy
+  in `<CLAUDE_CONFIG_DIR>/.claude.json`, else `~/.claude.json`; a non-empty legacy
   `<claude dir>/.config.json` wins when present (`<claude dir>` = `CLAUDE_CONFIG_DIR`
   or `~/.claude`). `--settings` files carry no trust. There is no CLI flag for
   interactive session trust; `-p`/print mode trusts its session implicitly, and
@@ -157,7 +157,7 @@ Out:
   unmarked cases are proven once, through the config, in `claude_trust`.
 - Integration, `tests/context_launch_tests.rs`
   `claude_opens_lf_created_worktree_already_trusted`: stand-in
-  `claude` copies `$CLAUDE_CONFIG_DIR/.claude.json` at startup; launching through `lf` in an
+  `claude` copies `<CLAUDE_CONFIG_DIR>/.claude.json` at startup; launching through `lf` in an
   lf-created worktree shows the trust entry already present.
 - Command: `env -u LF_HOME … cargo test -p loopflow claude_trust context_launch < /dev/null` → pass.
 
@@ -174,3 +174,4 @@ Out:
 - Kickoff: real-Claude pty probes of the four trust cases and of accept-in-worktree → findings above.
 - Implement: `cargo test -p loopflow --lib -- claude_trust lf_created git_worktree_add` (8) and `--test integration -- claude_opens_lf_created_worktree_already_trusted` → pass; clippy `--all-targets -D warnings` clean. Gate owns broader suites.
 - Compress: dropped the duplicate git unmarked-worktree test and a redundant `create_dir_all`; `cargo test -p loopflow --lib -- claude_trust git_worktree_add` → 7 pass.
+- Realign: plan matches the diff and origin/main (54da279a8b) adds nothing; no rerun. Demo/review owns the real-Claude pty probes.

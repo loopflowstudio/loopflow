@@ -1,13 +1,21 @@
 # LOO-554: lf on Linux with Claude, Codex, OpenCode and Pi
 
-Status: first round implemented and QA'd on a rented machine, 2026-10-21
-(ledger `scratch/loo-554-qa.md`). Jack Heart added scope the same day before
-publishing (below); that round is built (34d866b5c3) and its machine run
-is recorded in the ledger. Jack Heart directed a
-fully autonomous run (plan, implement, land), so assumptions in
+Status: both rounds implemented and QA'd on rented machines (ledger
+`scratch/loo-554-qa.md`); ready to land, 2026-10-22. Round one ran
+2026-10-21; Jack Heart added scope the same day before publishing (round two,
+below), built at 34d866b5c3 and proven on a second machine. Jack Heart
+directed a fully autonomous run (plan, implement, land), so assumptions in
 `questions.md` stand. Jack Heart requested QA, not testing: run lf as a
 newcomer on a rented Linux machine with Jack's real logins forwarded through
 Loopflow, and fix what it finds at its owners in this branch.
+
+Round three (2026-10-22) is landing only: the earlier Flow stopped after
+implement when its steps could not launch (missing managed Claude credential),
+so nothing was published. No new defects are open. PR #1635 merged into main
+as 173bb90880, so the launch-output results below now describe this branch on
+main, not a combined tree. Main's eight newer commits touch `os_process.rs`
+(`terminate_process_group`) and `transport.rs` in regions this branch did not
+edit; a dry-run merge shows no conflicts, and gate builds the merged tree.
 
 ## Problem
 
@@ -222,6 +230,15 @@ turn there and `lf account` listing the login.
   machine sections, `lf machine connect` help) list OpenCode and say an
   OpenCode OAuth login gets a fresh device grant while an API key is copied.
 
+### Landing (round three)
+
+Sync with main, gate, publish and land through the Flow. The PR carries both
+rounds; the ledger is the QA evidence and the captures under
+`scratch/loo-554-qa/` are Jack's demo material. `lf scratch clear` removes
+them at submit, so the PR body summarizes the ledger's FAIL→PASS lines.
+Follow-ups stay in `questions.md`: OpenCode 2 account reads, OpenCode's
+pre-login failure text, Pi using forwarded logins (Jack's call).
+
 ### Gate (round two, headless)
 
 ```bash
@@ -254,12 +271,10 @@ Predicted defects; outcomes are in "Outcome" below.
 
 Constraints that shaped the run:
 
-- **P3/P4 belong to #1635 (decided 2026-10-21).** Its head e44ab917 sends
-  tracing to `logs/lf.log` and deletes the banners. This branch leaves
+- **P3/P4 belong to #1635 (decided 2026-10-21; merged 173bb90880).** It
+  sends tracing to `logs/lf.log` and deletes the banners. This branch leaves
   `init_tracing`, `terminal_output.rs` banners and the OpenCode banner alone;
-  the machine build merged #1635's head so output checks measured the
-  combined result. #1635 was still open on 2026-10-21, so until it lands the
-  launch-output PASS lines describe the combined tree, not this branch alone.
+  the machine build merged #1635's head, which is now main.
 - tmux `lf open` routing belongs to #1635; reconnecting here used `lf resume`
   from a second tmux session.
 - Pi and OpenCode run with their own credentials; lf's part is its messages.
@@ -348,8 +363,7 @@ Fixed in this branch, each re-run on the machine unless noted:
 
 Refuted or not built: P6 (already refused by `validate_agent_policy`), P10
 (no token env seen on Claude's route), P11/P12 (not exercised). P8 moved
-into round two. P3/P4 confirmed on 0.14.14 and gone with #1635 merged; they
-stay on main until #1635 lands.
+into round two. P3/P4 confirmed on 0.14.14 and gone with #1635, now on main.
 
 Remaining after round one: Codex account checks (round two proves them),
 Claude paste/OSC 52 copy-out and OpenCode's own OSC 52 copy are UNKNOWN.
@@ -380,3 +394,4 @@ Check (2026-10-21, compress): `cargo clippy --all-targets -- -D warnings` clean;
 Check (2026-10-21, publish): cargo fmt --check, gate lib tests (5), golden_prompt, clippy -D warnings → pass; full matrix → CI.
 Check (2026-10-21, kickoff round two): laptop probes of OpenCode 2.0.32 export/import/device login and Zen `/zen/v1/models` → findings above; plan only, no build.
 Check (2026-10-22, implement round two): `cargo test -p loopflow --lib -- machine_credentials` 13 pass; `cargo clippy --all-targets -- -D warnings` clean; machine run → ledger.
+Check (2026-10-22, kickoff round three): `cargo test -p loopflow --lib -- machine_credentials platform::clipboard machine::tests::release_numbers_order_by_component` 16 pass on HEAD 79c04625; `cargo fmt --check` clean; dry-run merge with origin/main (173bb90880 and seven later commits) → 0 conflicts; full matrix → gate/CI.

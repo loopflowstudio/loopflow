@@ -18,9 +18,9 @@
   `opencode-ai` stops at 1.19.3. QA ran Claude 2.1.307, Codex 0.163.0,
   OpenCode 2.1.2 and Pi 1.4.0 (`@earendil-works/pi-coding-agent`), each the
   npm latest on 2026-10-21. lf's OpenCode hint names `@opencode/cli`.
-- **#1635 owns tracing and banners (resolved 2026-10-21).** Its head
-  e44ab917 sends tracing to `logs/lf.log` and deletes the diagnostics banners.
-  This branch leaves those files alone; QA builds with #1635 merged in.
+- **#1635 owns tracing and banners (resolved; merged to main as 173bb90880).**
+  It sends tracing to `logs/lf.log` and deletes the diagnostics banners. This
+  branch leaves those files alone; QA built with #1635 merged in.
 - **Release state.** v0.14.14 (#1636) is published; baseline uses it via
   `install.sh`, fixes are verified with this branch's build on the machine.
 - **Claude trust prompt per agent worktree (decided; moved to LOO-565).**
@@ -45,11 +45,9 @@
 - **Approvals were clicked by the run (2026-10-22).** cmux computer use was
   down, so the run used Chrome's AppleScript JavaScript in the tab lf opened
   (Codex account chooser + consent; OpenCode device "Authorize"), both in the
-  jack@loopflow.studio profile. Earlier assumption:
-- **Approvals on the machine run (assumed).** Jack asked for the Codex proof
-  to be done without him, so the run completes the Codex and OpenCode
-  approvals in Jack's verified Chrome profile itself. No Claude approval is
-  needed this round.
+  jack@loopflow.studio profile. Jack asked for the Codex proof to be done
+  without him, so the run completed those approvals itself; no Claude approval
+  was needed in round two.
 - **lf's local OpenCode integration is 1.x (follow-up Task, not here).**
   `extract_opencode_zen_token` reads `~/.local/share/opencode/auth.json`,
   which OpenCode 2 no longer writes; on Jack's laptop it finds a key Zen

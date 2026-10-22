@@ -283,6 +283,48 @@ lf history export --since T             the export the copy reads
 `lf machine use <machine> --task X` keeps today's meaning (hand off). The Wave
 and repository defaults it sets stay single-Machine until the follow-up.
 
+## Credentials on a rented machine (Jack, 2026-10-22)
+
+Jack: no browser approval per rented machine; mint "as auto as possible";
+several Claude accounts per machine, one token each.
+
+**Token.** One long-lived subscription token per Claude account, minted once a
+year. `claude setup-token` mints it: prefix `sk-ant-oat01-`, refused as an API
+key (401), accepted on the OAuth subscription path (200), honoured by Claude
+Code as `CLAUDE_CODE_OAUTH_TOKEN` and as a `.credentials.json` holding only
+`accessToken` (probe on `probe-token-1`, 2026-10-22). It lacks `user:profile`,
+so Anthropic's profile endpoint and usage polling refuse it.
+
+**Minting.** `lf account token claude <email>` runs `claude setup-token`
+through the existing login harness (`start_auth_command` with the `$BROWSER`
+handoff and `AuthCommandInput::AuthorizationCode`): the authorize URL opens in
+the account's verified Chrome profile, the person approves and pastes the
+one-time code, lf captures the token from the command's output and stores it
+on the account (new `provider_accounts.long_lived_token`, encrypted like other
+tokens, with `minted_at`). It refuses anything whose prefix is not an `oat`
+token: an API key bills per token, a subscription token does not. Rental
+`prepare` and `lf machine connect <m> claude <email>` mint when the account
+has none and the run is foreground; a background run with no stored token
+fails naming `lf account token`. `lf account token claude <email> --file F`
+or stdin takes a token minted by hand; never argv.
+
+**Installing.** `Credential::Claude` carries the token in a credentials file
+(`accessToken` only, `expiresAt` a year from minting) plus the laptop's
+`login` and `subject`. The pod's `install_managed` skips the identity probe
+for a long-lived token and registers the account from the laptop's assertion,
+which comes over the added Machine's SSH channel. Usage for that account on a
+rented machine reads "unavailable" rather than erroring.
+
+**Several accounts.** `prepare` connects every Claude account the laptop has a
+token for, not one; the Task's account selection on the pod works as on any
+Machine, so an exhausted account falls through to the next (Q11 revised).
+`lf machine connect <m> claude <email>` still adds one by hand.
+
+**Verification.** Unit: refusal of non-`oat` prefixes; the credentials file
+shape; install path skipping the probe only for long-lived tokens; prepare
+iterating accounts. Live: Jack's next `--rent` opens Chrome zero times when
+tokens are stored, and `claude -p` on the pod answers under each account.
+
 ## Deleting what this replaces
 
 Nothing in the repository rents machines today; `website/home.html` mentions
@@ -412,7 +454,7 @@ and as an access-token-only credential file, is refused as an API key, and
 fails the profile scope check. Next pursue pass: `lf account token claude
 <email>` stores one per account (read from a file or stdin, never argv), connect
 installs it with the laptop asserting identity, one account per rented machine
-(Q11).
+(Q11, revised by Jack to several accounts per machine).
 
 Remaining:
 

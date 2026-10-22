@@ -144,7 +144,10 @@ cpu3c×2, $0.00 billed). Findings, token minted by Jack with `claude setup-token
 ### Q11. How many Claude accounts a rented machine gets
 
 Jack: "probably easier if each one is just one", then "but may have issues if
-we burn an account". Taken: one account per rented machine, the account the
-Task or `lf machine connect` names; a second `lf machine connect <m> claude
-<email>` adds another by hand when one is exhausted. Automatic failover
-across accounts is a later Task.
+we burn an account", then (after the probe): "let's include multiple accounts
+per machine, and make the token minting as auto as possible". Taken: every
+Claude account with a stored long-lived token is installed on a rented
+machine; the Task's account selection falls through as on any Machine. Minting
+runs `claude setup-token` through the login harness, so the person's part is
+the Chrome approval and one code paste per account per year; lf cannot read
+the callback page, so the paste stays.

@@ -70,10 +70,12 @@ public struct TaskFilesFrame: Codable, Equatable, Sendable {
     public let taskID: String
     public let machineID: String
     public let checkout: String
-    public let changed: Bool
+    /// Checkout-relative paths the peer did not find git-ignored: `.git/...` for
+    /// metadata, `""` for a rescan. Empty is a heartbeat.
+    public let paths: [String]
 
     enum CodingKeys: String, CodingKey {
-        case request, checkout, changed
+        case request, checkout, paths
         case taskID = "task_id", machineID = "machine_id"
     }
 }

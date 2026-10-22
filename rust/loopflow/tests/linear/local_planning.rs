@@ -607,7 +607,6 @@ fn nested_waves_create_files_and_store_project_identity() {
     assert!(by_id["id"].as_str().unwrap().starts_with("task_"));
     assert!(repo.path().join(".lf/wave").exists());
     assert!(!repo.path().join(".lf/config.yaml").exists());
-    assert!(!repo.path().join(".lf/workflows").exists());
 }
 
 #[test]
@@ -896,7 +895,6 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     assert!(!rejected.status.success());
     assert!(repo.path().join(".lf/wave").exists());
     assert!(!repo.path().join(".lf/config.yaml").exists());
-    assert!(!repo.path().join(".lf/workflows").exists());
     let changed = Command::new("git")
         .current_dir(repo.path())
         .args(["diff", "--name-only"])
@@ -979,7 +977,6 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         source.as_str().unwrap().trim(),
         std::fs::read_to_string(&definition).unwrap().trim()
     );
-    assert!(!repo.path().join(".lf/workflows").exists());
     let placed = lf(
         repo.path(),
         home.path(),
@@ -1743,7 +1740,6 @@ fn project_edits_save_offline_in_both_connection_modes() {
         }
         assert!(store.list_tasks(None).unwrap().is_empty());
         assert!(!repo.path().join(".lf/wave").exists());
-        assert!(!repo.path().join(".lf/workflows").exists());
     }
 }
 
@@ -3332,7 +3328,6 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         tasks_before
     );
     assert_eq!(store.task(&task_id).unwrap().unwrap(), task);
-    assert!(!repo.path().join(".lf/workflows").exists());
     // Wave selection uses the same writer; only future take-up changes.
     lf(
         repo.path(),

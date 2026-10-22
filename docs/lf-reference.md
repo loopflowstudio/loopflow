@@ -315,7 +315,7 @@ Delete a worktree and its local and remote branch; retain PR and Task outcomes
 
 ## lf ship
 
-Ship the Task: run every remaining step to merge and completion, standing in at each node
+Ship the Task: run every remaining step to merge and completion, standing in at each stage
 
 | Argument | What it does |
 |---|---|
@@ -1352,7 +1352,7 @@ Select and inspect the Wave default Workflow
 
 ## lf wave workflow source
 
-Read the authored definition without creating a repository file
+Read the authored graph without creating a repository file
 
 | Argument | What it does |
 |---|---|
@@ -1362,11 +1362,11 @@ Read the authored definition without creating a repository file
 
 ## lf wave workflow list
 
-List Workflow definitions, including unavailable local files
+List graphs, including unavailable local files
 
 | Argument | What it does |
 |---|---|
-| `--wave` | Include this Wave's stored Workflow definitions |
+| `--wave` | Include this Wave's stored graphs |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1382,13 +1382,13 @@ Show the Wave's default Workflow
 
 ## lf wave workflow set
 
-Select the Workflow future Tasks take up; captured Tasks stay unchanged
+Select the graph future Tasks take up; captured Tasks stay unchanged
 
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
 | `<wave>` | wave |
-| `--file` | Store this definition in the Wave |
+| `--file` | Store this graph in the Wave |
 | `--help / -h` | Print help |
 
 ## lf wave edit-plan
@@ -1654,7 +1654,7 @@ Move Workflow position without running anything; `end` requests completion
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `<node>` | `start`, `end` or one of the workflow's nodes |
+| `<node>` | `start`, `end` or one of the graph's stages |
 | `--reason` | Why, kept in the Task's workflow history |
 | `--help / -h` | Print help |
 
@@ -1727,7 +1727,7 @@ Place a Task's worktree, then run a Graph there like `lf --task ISSUE graph GRAP
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `<graph>` | The edge's Graph, or a workflow to take up; the Task's only edge or its Wave or repository default when omitted |
+| `<graph>` | A route from the Task's stage, or a graph to take up; the Task's only route or its Wave or repository default when omitted |
 | `--name` | name |
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |

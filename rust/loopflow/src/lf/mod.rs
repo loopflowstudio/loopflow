@@ -395,7 +395,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WtCommand,
     },
-    /// Ship the Task: run every remaining step to merge and completion, standing in at each node
+    /// Ship the Task: run every remaining step to merge and completion, standing in at each stage
     ///
     /// Runs in the foreground until the Task reaches its end; background it
     /// yourself (`nohup lf ship &`). A second `lf ship` while one runs exits 0.
@@ -748,11 +748,11 @@ impl WavePlanTarget {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveWorkflowCommand {
-    /// Read the authored definition without creating a repository file
+    /// Read the authored graph without creating a repository file
     Source { name: String, wave: Option<String> },
-    /// List Workflow definitions, including unavailable local files
+    /// List graphs, including unavailable local files
     List {
-        /// Include this Wave's stored Workflow definitions
+        /// Include this Wave's stored graphs
         #[arg(long)]
         wave: Option<String>,
         #[arg(long)]
@@ -764,11 +764,11 @@ pub enum WaveWorkflowCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Select the Workflow future Tasks take up; captured Tasks stay unchanged
+    /// Select the graph future Tasks take up; captured Tasks stay unchanged
     Set {
         name: String,
         wave: Option<String>,
-        /// Store this definition in the Wave
+        /// Store this graph in the Wave
         #[arg(long)]
         file: Option<std::path::PathBuf>,
     },
@@ -779,7 +779,8 @@ pub enum TaskWorkflowCommand {
     /// Move Workflow position without running anything; `end` requests completion
     Move {
         issue: String,
-        /// `start`, `end` or one of the workflow's nodes
+        /// `start`, `end` or one of the graph's stages
+        #[arg(value_name = "STAGE")]
         node: String,
         /// Why, kept in the Task's workflow history
         #[arg(long)]
@@ -1236,8 +1237,9 @@ pub enum TaskCommand {
     /// Place a Task's worktree, then run a Graph there like `lf --task ISSUE graph GRAPH`
     Run {
         issue: Option<String>,
-        /// The edge's Graph, or a workflow to take up; the Task's only edge or its
-        /// Wave or repository default when omitted
+        /// A route from the Task's stage, or a graph to take up; the Task's only
+        /// route or its Wave or repository default when omitted
+        #[arg(value_name = "ROUTE")]
         graph: Option<String>,
         #[arg(long)]
         name: Option<String>,

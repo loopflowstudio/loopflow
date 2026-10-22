@@ -670,7 +670,6 @@ async fn wave_workflow_uses_stored_definition_offline() {
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].source.as_deref(), Some("stored"));
             assert!(entries[0].workflow.as_ref().unwrap().nodes.is_empty());
-            assert!(!repo.join(".lf/workflows").exists());
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
         })
         .await;

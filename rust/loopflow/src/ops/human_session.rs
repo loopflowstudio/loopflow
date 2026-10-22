@@ -734,7 +734,7 @@ pub(crate) async fn open(
                 }
             }
         }
-        if crate::transport::delegate_current()? {
+        if crate::transport::delegate_current(false)? {
             return surface(store, session).await;
         }
     }

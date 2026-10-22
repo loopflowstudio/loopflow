@@ -42,7 +42,7 @@ fn pinned_checkout(issue: &str, expected: &Path) -> Result<TaskCheckout> {
 
 pub fn task_shell(issue: &str, expected: &Path) -> Result<()> {
     let checkout = pinned_checkout(issue, expected)?;
-    if crate::transport::delegate_current()? {
+    if crate::transport::delegate_current(false)? {
         return Ok(());
     }
     let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());

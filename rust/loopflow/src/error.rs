@@ -4,7 +4,7 @@ use serde::Serialize;
 
 #[derive(Debug, Error)]
 pub enum LoadError {
-    #[error("skill or graph not found: {0}. Run `lf list skill` or `lf list graph` to discover definitions")]
+    #[error("skill or graph not found: {0}. Run `lf list skill` or `lf list graph` to discover definitions, or `lf : <message>` to send a message")]
     TargetNotFound(String),
     #[error("graph not found: {0}. For a skill, use `lf skill {0}`")]
     GraphNotFound(String),

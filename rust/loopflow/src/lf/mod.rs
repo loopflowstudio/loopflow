@@ -1997,6 +1997,7 @@ pub enum MachineCommand {
     /// Install a separate login on an added machine using this laptop's browser.
     Connect {
         target: String,
+        /// github, claude, codex, opencode or linear
         provider: crate::provider_auth::Provider,
         email: Option<String>,
         #[arg(long)]

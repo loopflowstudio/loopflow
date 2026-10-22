@@ -10,7 +10,6 @@ use std::path::Path;
 use std::path::PathBuf;
 #[cfg(all(target_os = "macos", not(test)))]
 use std::process::Command;
-#[cfg(all(target_os = "macos", not(test)))]
 use std::process::Stdio;
 use std::sync::Arc;
 #[cfg(test)]
@@ -20,6 +19,7 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context, Result};
 use secrecy::{ExposeSecret, SecretString};
 use time::OffsetDateTime;
+use tokio::io::AsyncBufReadExt;
 
 use crate::lf::AccountCommand;
 use crate::profile::{AccessProfile, EmailAddress, LocalChromeProfile, ProfileId};
@@ -32,7 +32,7 @@ use crate::provider_auth::codex::{daemon_has_running_turn, daemon_login, restart
 use crate::provider_auth::{
     capture_claude_profile_credentials, disconnect_provider_account_auth,
     import_ambient_claude_profile_credentials, prepare_provider_account_access_token,
-    start_provider_account_auth, AuthBroker, AuthCompletion, AuthError, AuthFlowResponse, Provider,
+    start_provider_account_auth, AuthBroker, AuthCompletion, AuthFlowResponse, Provider,
     ProviderAuthService,
 };
 use crate::store::{
@@ -743,14 +743,66 @@ pub(super) async fn fresh_linear_login(
         .ok_or_else(|| anyhow!("Linear login completed without a credential"))
 }
 
-async fn wait_for_browser_confirmation<F>(
+/// Run OpenCode's device login in a private `home`, approved in the verified Chrome
+/// profile; the laptop's own OpenCode login is untouched.
+pub(super) async fn fresh_opencode_login(
+    store: &SharedStore,
+    chrome_profile: Option<&str>,
+    home: &Path,
+) -> Result<()> {
+    let (profiles, _) =
+        browser_profiles(store, Provider::OpenCodeZen, None, chrome_profile).await?;
+    let profile = profiles
+        .first()
+        .ok_or_else(|| anyhow!("no browser profile available"))?;
+    let chrome = verified_chrome_profile(profile)?;
+    let mut child = tokio::process::Command::from(super::machine_credentials::opencode(
+        Some(home),
+        &["auth", "login", "opencode", "--method", "device"],
+    ))
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null())
+    .kill_on_drop(true)
+    .spawn()
+    .context("start OpenCode device login")?;
+    let mut lines =
+        tokio::io::BufReader::new(child.stdout.take().expect("piped OpenCode stdout")).lines();
+    let login = async {
+        while let Some(line) = lines.next_line().await? {
+            if let Some(url) = line
+                .split(|c: char| c.is_whitespace() || c.is_control())
+                .find(|word| word.starts_with("https://") && word.contains("/device?"))
+            {
+                open_chrome_profile(&chrome, url)?;
+                println!("Approve the OpenCode login in Chrome; it completes automatically.");
+            }
+        }
+        let status = child.wait().await?;
+        if !status.success() {
+            bail!("OpenCode device login failed (exit {:?})", status.code());
+        }
+        Ok(())
+    };
+    let completion =
+        wait_for_browser_confirmation(login, None, Provider::OpenCodeZen, "remote machine");
+    tokio::pin!(completion);
+    tokio::select! {
+        biased;
+        result = &mut completion => result,
+        _ = tokio::signal::ctrl_c() => Err(anyhow!("authorization cancelled")),
+    }
+}
+
+async fn wait_for_browser_confirmation<F, E>(
     confirmation: F,
     expires_in: Option<u64>,
     provider: Provider,
     login: &str,
 ) -> Result<()>
 where
-    F: Future<Output = std::result::Result<(), AuthError>>,
+    F: Future<Output = std::result::Result<(), E>>,
+    E: Into<anyhow::Error>,
 {
     let timeout = Duration::from_secs(expires_in.unwrap_or(AUTH_CODE_FLOW_TIMEOUT_SECS));
     let started_at = tokio::time::Instant::now();
@@ -766,7 +818,7 @@ where
     loop {
         tokio::select! {
             biased;
-            result = &mut confirmation => return result.map_err(anyhow::Error::from),
+            result = &mut confirmation => return result.map_err(Into::into),
             _ = &mut deadline => {
                 return Err(anyhow!(
                     "timed out waiting for {} account '{}' browser confirmation",

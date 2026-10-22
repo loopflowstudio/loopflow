@@ -1,13 +1,8 @@
 # LOO-561 · Ship it — plan
 
-Status (2026-10-22, implement pass): design accepted (Jack Heart, 2026-10-21/22). Built: graphs
-with `interactive:` stages, the landing engine fixes, `lf ship` with stand-ins, Shipping lifecycle
-with Stop, #1580 taken (Shipping is `state:shipping`), one landing engine with lazy recovery,
-completion on merge while shipping, blocked backoff, Ship it on the Task heading, the
-`task_automation` fold (63f13b3805). Item 3 closed (In Review↔shipping is its own Task).
-Drafts beside this Task's `ship_it.sql`: #1643's
-`rename_flow_to_graph.sql`, main's `detached_owner_viewers.sql`, `saved_selections.sql`,
-`two_person_gaps.sql`.
+Status (2026-10-22, realign): design accepted (Jack Heart, 2026-10-21/22); every accepted
+slice is built and committed. What's left: re-demo and gate (see Remaining). Post-merge verify is
+on hold. This Task's schema draft is `store/migrations/drafts/ship_it.sql`, the only draft on the branch.
 
 ## Direction from Jack Heart (2026-10-21, design review)
 
@@ -68,7 +63,8 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
   leaf in the required check's `needs` closure while `tests-result` is absent.
 - **Flakes dominate**: `failed_checks` re-queues once before ci-fix; no early queue-commit
   repair (settled 2026-10-22). LOO-562 owns the Swift hang.
-- **Completion on any merge** (#1619, #1614): unverified on the branch (see Remaining).
+- **Completion on any merge** (#1619, #1614): the ship process completes a shipping Task once
+  its PR merges, whoever merged it (6a337048f7). Hosted proof is left to demo.
 
 ## Built (code is the reference)
 
@@ -90,10 +86,11 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
   through `task_work::unship_in`. `ShippingSnapshot{shipped_at, state, reason}` with
   `Building|Landing|Repairing|Restarting|Paused` and `ship_control` on `TaskDetailSnapshot`/
   `RoadmapTask`. `Shipped` move kind deleted. `flow_finished` events read as `GraphFinished`.
-- Desktop: `TaskWorkflowHeader` mounted in `WorkSurfaceView` with **Ship it** (`task-ship`,
-  replacing route buttons into `end`) and **Stop shipping**; `TaskActionItems` both;
-  `RegistryQuery.shipTask` (`-b --task X ship`, detached); interim `SidebarFilter.shipping`;
-  rows show `state · reason`.
+- Desktop: `TaskShipControl` on the main-pane Task heading (`TaskWorkView.swift`) holds **Ship
+  it** (`task-ship`, the only route into `end`) and, while shipping, `state · reason` with **Stop
+  shipping**. `ShipNoticeToast` Undo = Stop. `RegistryQuery.shipTask` runs `-b --task X ship`
+  detached. Sidebar rows and `TaskActionItems` menus carry no ship control, and there's no
+  `SidebarFilter.shipping` (Shipping is the #1580 `state:shipping` query).
 - One engine (2026-10-22): `lf ci watch`, `CIWatchers.swift`, `lf task reconcile/automation/
   automate`, the repository cron (`lf cron sync` removes released copies) and
   `tasks.automation_enabled` deleted; Pause holds repair and re-arm; `ops/recovery.rs` runs on
@@ -106,37 +103,29 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
 
 ## Remaining
 
-3. **State-model cleanup.** Done: `AbandonIntent`/`abandon_requested_at` deleted; the duplicate
-   `completed` bool deleted from the `Task` and `TaskSummary` DTOs (Rust, Swift, fixtures) —
-   `state == "completed"` says it, and `terminal_reason`/`classify_task` take the state alone.
-   Kept, with reasons (2026-10-22):
-   - `tasks.planning_completed(_at)` is the lifecycle's done authority (`task_state_sql`), not a
-     mirror, and `planning_state`/`planning_completed` travel in the portable `Disposition`
-     WorkValue that released peers read and the edit log retains. Folding them is a shared-wire
-     change with its own Task, not a cleanup here.
-   - `completion_request/error` is read: `task_completion_pending`/`fail_task_completion` carry
-     "a failed completion request retries without replaying the route".
-   Out of this Task (2026-10-22): In Review↔shipping. Deliveries and observations both carry
-   Linear state *types*, and In Review is a named `started` state. A shipping write to an
-   already-`started` issue would settle on read without moving, and inbound In Review would have
-   to decide whether a Linear edit starts a ship process. That is new sync behavior with its own
-   Task, not a cleanup. Backlog/Todo↔unstarted, In Progress↔working, Done↔done and
-   Canceled↔abandoned hold through `task_state_delivery::queue_in`. Item 3 is closed.
+1. **Re-demo** on the branch build. The pending items are under Demo findings: the heading
+   placement (variant B), the `loopflow://` world links and `unstarted` world Tasks.
+2. **Gate.** Run the acceptance check below. Also clear the shared-runner isolation failures:
+   `planning_lookup_tests` and some planning/store tests fail only when they share a runner with
+   `ship`/`task_work`/`ops::linear` and pass alone. The pre-existing
+   `agent_session_identity_is_durable…` failures are still open.
 
-Check (2026-10-22): clippy, fmt, `dto_fixtures` 42 ok; lib groups pr_landing/chapter/children/
-waves/task_execution ok; `ship`, `task_work`, `ops::linear` mixes each fail 1–2 planning/store
-tests that pass alone (shared-runner isolation, owner: gate).
-
-Settled this pass (2026-10-22):
+Settled (2026-10-22):
+- State-model cleanup (was item 3). `AbandonIntent`/`abandon_requested_at` and the duplicate DTO
+  `completed` bool are deleted (Rust, Swift, fixtures); `state == "completed"` says it.
+  `tasks.planning_completed(_at)`/`planning_state` stay: they are the done authority in the portable
+  `Disposition` WorkValue that released peers read. `completion_request/error` stays as the retry
+  path for a failed completion. Folding either is a shared-wire change with its own Task.
+  Backlog/Todo↔unstarted, In Progress↔working, Done↔done and Canceled↔abandoned go through
+  `task_state_delivery::queue_in`. In Review↔shipping is out of this Task: In Review is a named
+  `started` state and needs a per-team lookup and a rule for inbound edits.
 - Completion on merge is the ship process's job: before each route it reads the PR and completes
   the Task once merged. A non-shipping Task still follows "merge leaves the Task open until
-  completion"; `lf pr reconcile`, `lf land` and reads settle it as before.
-- Placement (Jack, variant B): Ship it/Stop shipping in `TaskShipControl` on the main-pane
-  heading, hover-revealed; `ShipNoticeToast` Undo = Stop shipping. Not in `TaskWorkflowHeader`,
-  sidebar rows, the sidebar/Dashboard/Sessions menus (`TaskActionItems`). Variant C (Workflow
-  rail) is later and unsettled.
+  completion"; `lf pr reconcile`, `lf land` and reads settle it.
+- Placement (Jack, variant B): main-pane heading only, hover-revealed. Variant C (Workflow rail)
+  comes later and is still unsettled.
 
-7. **Post-merge `verify` (Jack Heart, 2026-10-22). ON HOLD — do not build yet.** Jack then
+3. **Post-merge `verify` (Jack Heart, 2026-10-22). ON HOLD — do not build yet.** Jack then
    added: "its notable that right now verify often wants to be human, and its very task by task
    if needed" and "im not exactly sure how to fit that into our model". Then, correcting the
    operator's "human-only stage" reading: "no verify is not a stage only humans can do". So verify
@@ -202,15 +191,12 @@ The hosted merge-queue run is left to demo.
 ## Demo findings (2026-10-22, branch build on lf-world `portfolio`)
 
 - Jack accepted the naming ("ok that works").
-- Header not visible on main or branch: fixed by mounting it (ec9bdfdcfe); re-demo pending.
+- Header not visible on main or branch: Ship it now lives on the main-pane heading
+  (`TaskShipControl`, 3f906af16f); re-demo pending.
 - `loopflow://` links in the dev app resolve against the real `~/.lf`, not the world's
   `LF_HOME`. Not checked against main.
 - World Tasks that ran a Graph read `unstarted` on the branch; main's builder says a Graph in a
   checkout starts its Task. Possible regression, unverified.
 
-Check (2026-10-22 realign): clippy clean; `cargo test --lib -- pr_landing ship task_execution
-task_work` 103 pass, 3 `planning_lookup_tests` fail only under that mix (22/22 pass alone) — gate.
-Check (2026-10-22 second implement pass): lib cron/pr_landing/ship/doctor/task_work/migrations/
-canonical_ids/planning, task_graph_launch ship tests (5), integration documented_commands/
-cli_reference/dto_fixtures, Swift DesktopHeadless/DTOFixture/WorkModel/WorkNavigation 137 pass,
-clippy clean. Earlier pre-existing failures (`agent_session_identity_is_durable…` etc.) deferred to gate.
+Check (2026-10-22): clippy/fmt clean; `dto_fixtures` 42 ok; lib pr_landing/chapter/children/waves/
+task_execution ok; mixed-runner planning/store failures pass alone (owner: gate).

@@ -48,7 +48,10 @@ probe duplicates that check. Launch retains its sender probe and credential
 preparation. `--context`/`--explain` skip both, and neither side admits a Process.
 Names and paths resolve at the destination. Missing or changed identity fails without
 initialization, repair or local fallback. `lf machine connect mini <provider> [email]` installs a separate
-login through SSH stdin; account-selected launches connect missing logins in the
+login through SSH stdin. Claude's is the account's long-lived subscription token
+(`lf account token claude <email>`, minted on first use in a foreground run):
+it cannot refresh, so no machine rotates another's login, and it cannot read
+its profile, so the receiving machine registers the identity the sender asserts; account-selected launches connect missing logins in the
 foreground. See [subscriptions](../subscriptions.md#use-subscriptions-over-ssh).
 
 Remove forgets the connection without contacting the remote. Historical machine
@@ -232,8 +235,8 @@ becomes once reachable. Task execution never learns a Machine is rented.
 unfinished Task and has not expired; there is no queue. `--rent R` admits
 (limit, stock, price), writes the rental as `requested` with its provider name
 `lf-<id>` before the create, creates once, waits for SSH, adds the Machine,
-signs it into GitHub and Claude, clones and binds the repository, then hands
-off. An unanswered create is `unconfirmed` until the inventory shows the name
+forwards GitHub and installs every Claude account's long-lived token, clones
+and binds the repository, then hands off. An unanswered create is `unconfirmed` until the inventory shows the name
 (adopt) or the create's window passes (`lost`); it is never resent.
 
 The pod's start command runs the standard-library guardian first

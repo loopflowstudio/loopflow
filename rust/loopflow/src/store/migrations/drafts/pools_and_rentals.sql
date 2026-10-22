@@ -56,3 +56,8 @@ CREATE TABLE machine_records (
   observed_at INTEGER NOT NULL,
   PRIMARY KEY(origin_machine_id, kind, key)
 );
+
+-- A Claude subscription token minted with `claude setup-token` for headless
+-- machines: encrypted like provider_tokens, valid about a year from minting.
+ALTER TABLE provider_accounts ADD COLUMN long_lived_token TEXT;
+ALTER TABLE provider_accounts ADD COLUMN long_lived_token_minted_at INTEGER;

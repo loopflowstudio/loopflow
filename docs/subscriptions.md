@@ -393,10 +393,24 @@ lf --machine mini --account codex=work@ implement
 ```
 
 Add the machine first with `lf machine add`. GitHub installs the laptop's selected
-token in the target's gh configuration. Claude, Codex and Linear mint a fresh login
-on the laptop; approve it in the laptop's browser. Claude and Codex stage the login
+token in the target's gh configuration. Codex and Linear mint a fresh login
+on the laptop; approve it in the laptop's browser. Codex stages the login
 in a private temporary directory. The laptop's existing login is not replaced.
 The target retains its own refresh credential and existing accounts.
+
+Claude installs the account's long-lived subscription token, so every machine
+after the first needs no browser approval:
+
+```bash
+lf account token claude personal@example.com            # claude setup-token in the account's Chrome profile
+lf account token claude personal@example.com --file -   # or one minted by hand, from stdin
+```
+
+The token is stored encrypted on the laptop account and lasts about a year.
+Only `sk-ant-oat` subscription tokens are accepted; an API key bills per token.
+It cannot read the account profile, so the target registers the identity the
+laptop verified, and usage for that account reads unavailable there. A connect
+with no stored token mints one in the foreground.
 
 An account-selected launch connects the requested account if missing. Invocation selectors resolve
 against the laptop's managed logins;

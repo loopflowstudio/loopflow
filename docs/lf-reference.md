@@ -638,6 +638,18 @@ Edit account configuration or remembered browser choices
 | `--clear-chrome-profiles` | clear chrome profiles Default: false. |
 | `--help / -h` | Print help |
 
+## lf account token
+
+Store a long-lived Claude token for rented machines: mint it with `claude setup-token` in the account's Chrome profile, or read one minted by hand from --file (`-` for stdin)
+
+| Argument | What it does |
+|---|---|
+| `<provider>` | provider |
+| `<email>` | email |
+| `--file` | file |
+| `--chrome-profile` | chrome profile |
+| `--help / -h` | Print help |
+
 ## lf account redeem-reset
 
 Spend one banked Codex reset for this named login
@@ -1382,7 +1394,7 @@ Name what to rent and the most it may cost
 | `--memory-gb` | memory gb |
 | `--disk-gb` | disk gb |
 | `--image` | Image, pinned by digest when added (default: RunPod's stock Ubuntu) |
-| `--data-center` | data center |
+| `--data-center` | A data center (US-IL-1) or a region prefix (US); rents where it is in stock |
 | `--hours` | Hard deadline for each machine it rents Default: 4. |
 | `--max` | Machines rented at once |
 | `--max-usd-per-hour` | Above this hourly price nothing is rented |

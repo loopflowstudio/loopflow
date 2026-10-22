@@ -193,13 +193,17 @@ Session (`--tasks` or `--session` sets one); it is yours, never committed. Conne
 
 ```bash
 lf pool add lab && lf machine add jack@mini --pool lab        # machines you own
+lf account token claude jack@example.com                      # once a year: Claude for rented machines
 lf ondemand add code --provider runpod --vcpus 8 --memory-gb 16 --max 1 --max-usd-per-hour 0.40
 lf task run LOO-570 --pool lab --rent code --quote            # where it would run, the most it could cost
 lf task run LOO-570 --pool lab --rent code                    # a free lab machine, else rent one
 lf machine end code-1                                         # give a rented machine back now
 ```
 
-Renting reads `RUNPOD_API_KEY` from the environment (`doppler run -- lf …`). A
+Renting reads `RUNPOD_API_KEY` from the environment (`doppler run -- lf …`).
+A rented machine gets GitHub forwarded and every Claude account with a stored
+long-lived token (`claude setup-token`, approved once in the account's Chrome
+profile; API keys are refused). A
 rented machine's own guardian deletes it at its deadline or when its budget runs
 out. The end of a forwarded `lf task run`, and the scheduled `lf task
 reconcile`, give back drained machines: first their Sessions and Processes are

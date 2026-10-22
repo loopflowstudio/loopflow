@@ -1506,6 +1506,14 @@ impl ClaudeAuthBroker {
         command
     }
 
+    /// `claude setup-token`: the same browser approval and code paste as a
+    /// login, ending with a long-lived subscription token printed once.
+    fn setup_token_command(&self) -> Command {
+        let mut command = self.command();
+        command.arg("setup-token");
+        command
+    }
+
     fn login_command(&self) -> Command {
         let mut command = self.command();
         command.args(["auth", "login"]);
@@ -1694,6 +1702,53 @@ fn provider_account_broker(
         Provider::Codex => Ok(Arc::new(CodexAuthBroker::for_profile(provider_home))),
         _ => Err(AuthError::UnsupportedProvider(provider.to_string())),
     }
+}
+
+/// What `claude setup-token` printed, once its flow completes.
+#[derive(Debug, Clone, Default)]
+pub struct MintedToken(Arc<std::sync::Mutex<Option<SecretString>>>);
+
+impl MintedToken {
+    pub fn take(&self) -> Option<SecretString> {
+        self.0.lock().expect("minted token lock").take()
+    }
+}
+
+/// Start `claude setup-token` in a throwaway config home. Its line output is
+/// parsed for the URL and then for the token; neither is logged.
+pub async fn start_claude_setup_token(
+    config_dir: PathBuf,
+) -> Result<(AuthFlowHandle, MintedToken), AuthError> {
+    let minted = MintedToken::default();
+    let sink = minted.clone();
+    let handle = start_auth_command(
+        Provider::Claude,
+        "claude",
+        ClaudeAuthBroker::for_profile(config_dir, None).setup_token_command(),
+        AuthCommandInput::AuthorizationCode,
+        move |line, builder| {
+            if let Some(token) = subscription_token_in(line) {
+                *sink.0.lock().expect("minted token lock") = Some(SecretString::new(token));
+            } else {
+                parse_generic_auth_line(line, builder);
+            }
+        },
+    )
+    .await?;
+    Ok((handle, minted))
+}
+
+/// The Claude subscription token prefix. API keys (`sk-ant-api…`) bill per
+/// token, so nothing else is accepted as a long-lived machine credential.
+pub const SUBSCRIPTION_TOKEN_PREFIX: &str = "sk-ant-oat";
+
+fn subscription_token_in(line: &str) -> Option<String> {
+    let start = line.find(SUBSCRIPTION_TOKEN_PREFIX)?;
+    let token: String = line[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    (token.len() > SUBSCRIPTION_TOKEN_PREFIX.len() + 8).then_some(token)
 }
 
 pub async fn start_provider_account_auth(
@@ -1977,7 +2032,7 @@ async fn start_auth_command(
     command_name: &'static str,
     mut command: Command,
     input: AuthCommandInput,
-    mut parse_line: impl FnMut(&str, &mut AuthFlowBuilder),
+    mut parse_line: impl FnMut(&str, &mut AuthFlowBuilder) + Send + 'static,
 ) -> Result<AuthFlowHandle, AuthError> {
     #[cfg(unix)]
     let mut handoff =
@@ -2119,10 +2174,19 @@ async fn start_auth_command(
         // The private FIFO and helper live exactly as long as the provider.
         #[cfg(unix)]
         let _handoff = handoff;
-        let status = child
-            .wait()
-            .await
-            .map_err(|source| AuthError::CommandIo { provider, source })?;
+        // Output after the URL still reaches the parser: `setup-token` prints its result.
+        let status = loop {
+            tokio::select! {
+                status = child.wait() => break status,
+                Some(line) = line_rx.recv() => parse_line(&strip_ansi_escape_codes(&line), &mut builder),
+            }
+        }
+        .map_err(|source| AuthError::CommandIo { provider, source })?;
+        while let Ok(Some(line)) =
+            tokio::time::timeout(AUTH_URL_POLL_INTERVAL, line_rx.recv()).await
+        {
+            parse_line(&strip_ansi_escape_codes(&line), &mut builder);
+        }
         if status.success() {
             process_group.disarm();
         }
@@ -4125,6 +4189,60 @@ mod tests {
             .await
             .expect("submit authorization code");
         handle.wait().await.expect("auth command should complete");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn setup_token_captures_the_token_printed_after_the_code() {
+        use std::os::unix::fs::PermissionsExt;
+        let _lock = crate::journal::test_env_lock();
+        let tmp = tempdir().unwrap();
+        let claude = tmp.path().join("claude");
+        fs::write(
+            &claude,
+            r#"#!/bin/sh
+[ "$1" = setup-token ] || exit 3
+"$BROWSER" 'https://claude.ai/oauth/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A19222'
+IFS= read -r code
+[ "$code" = pasted-code ] || exit 4
+printf '\033[32m✓ Long-lived authentication token created:\033[0m\n'
+printf '  sk-ant-oat01-Fixture_Token-123456  \n'
+printf 'Store this token securely.\n'
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&claude, fs::Permissions::from_mode(0o700)).unwrap();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let mut paths = vec![tmp.path().to_path_buf()];
+        paths.extend(std::env::split_paths(&path));
+        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        let started = start_claude_setup_token(tmp.path().join("home")).await;
+        std::env::set_var("PATH", path);
+        let (handle, minted) = started.unwrap();
+        assert!(handle
+            .response
+            .verification_uri
+            .contains("claude.ai/oauth/authorize"));
+        handle
+            .submit_authorization_code("pasted-code")
+            .await
+            .unwrap();
+        handle.wait().await.unwrap();
+        assert_eq!(
+            minted.take().unwrap().expose_secret(),
+            "sk-ant-oat01-Fixture_Token-123456"
+        );
+    }
+
+    #[test]
+    fn only_subscription_tokens_are_captured() {
+        assert_eq!(
+            subscription_token_in("token: sk-ant-oat01-abc_DEF-0123456789.").as_deref(),
+            Some("sk-ant-oat01-abc_DEF-0123456789")
+        );
+        assert!(subscription_token_in("sk-ant-api03-abcdefghijklmnop").is_none());
+        assert!(subscription_token_in("prefix sk-ant-oat").is_none());
     }
 
     #[tokio::test]

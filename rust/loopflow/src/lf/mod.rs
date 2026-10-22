@@ -2237,6 +2237,17 @@ pub enum AccountCommand {
         #[arg(long)]
         clear_chrome_profiles: bool,
     },
+    /// Store a long-lived Claude token for rented machines: mint it with
+    /// `claude setup-token` in the account's Chrome profile, or read one minted
+    /// by hand from --file (`-` for stdin)
+    Token {
+        provider: String,
+        email: String,
+        #[arg(long)]
+        file: Option<PathBuf>,
+        #[arg(long, conflicts_with = "file")]
+        chrome_profile: Option<String>,
+    },
     /// Spend one banked Codex reset for this named login
     RedeemReset {
         provider: String,

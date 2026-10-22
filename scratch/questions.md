@@ -151,3 +151,19 @@ machine; the Task's account selection falls through as on any Machine. Minting
 runs `claude setup-token` through the login harness, so the person's part is
 the Chrome approval and one code paste per account per year; lf cannot read
 the callback page, so the paste stays.
+
+## Assumptions taken implementing long-lived tokens (2026-10-22)
+
+- **Hand-minted input** is `--file F`, with `--file -` for stdin; never argv.
+- **The laptop account must exist with a verified email and subject** before a
+  token is minted or sent (`lf account connect claude <email>` first): the pod
+  registers that identity, and the token cannot supply one.
+- **No token stored anywhere**: `prepare` mints for every connected Claude
+  account in the foreground; once any account has a token, accounts without
+  one are skipped with a note naming `lf account token`.
+- **Untested against real `claude setup-token` output**: the harness assumes
+  it honours `$BROWSER`, reads the pasted code on piped stdin and prints the
+  `sk-ant-oat…` token on one line. If the TUI needs a TTY, `--file -` with a
+  hand-minted token is the fallback.
+- **`--rent` under `-b` still refuses** (Q7 unchanged); with tokens stored the
+  only remaining blocker is `require_foreground` on GitHub's forwarding.

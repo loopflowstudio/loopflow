@@ -641,7 +641,7 @@ pub fn place(
     }
     if batch {
         return Err(anyhow!(
-            "renting for a Task signs a fresh machine into GitHub and Claude, one browser approval each; \
+            "renting for a Task connects a fresh machine from a foreground terminal; \
              run it without -b, or `lf ondemand rent {name}` and `lf machine connect` first"
         ));
     }
@@ -689,11 +689,16 @@ fn prepare(
 ) -> anyhow::Result<()> {
     use crate::provider_auth::Provider as Login;
     let machine = runtime.block_on(super::ssh::resolve_target(label, false))?;
-    for login in [Login::GitHub, Login::Claude] {
-        runtime.block_on(super::machine_credentials::connect(
-            &machine, login, None, None, false,
-        ))?;
-    }
+    runtime.block_on(super::machine_credentials::connect(
+        &machine,
+        Login::GitHub,
+        None,
+        None,
+        false,
+    ))?;
+    runtime.block_on(super::machine_credentials::connect_claude_accounts(
+        &machine, false,
+    ))?;
     let key = crate::repository::CanonicalRepo::discover(repo)?.to_string();
     let id = sqlite
         .repository_id(&key)?

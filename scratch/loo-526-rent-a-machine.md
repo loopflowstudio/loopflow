@@ -320,6 +320,19 @@ token for, not one; the Task's account selection on the pod works as on any
 Machine, so an exhausted account falls through to the next (Q11 revised).
 `lf machine connect <m> claude <email>` still adds one by hand.
 
+**Built 2026-10-22.** `lf account token claude <email> [--file F|-]
+[--chrome-profile P]`; draft columns `provider_accounts.long_lived_token`
+(encrypted) and `long_lived_token_minted_at`; the login harness keeps parsing
+provider output after the URL, so `start_claude_setup_token` captures the
+printed token; `Credential::Claude` now carries `{login, email, subject,
+credential}` with the laptop's verified email and subject, and the receiver
+refuses a refresh token or a non-`oat` access token, installs without a probe,
+and records the file's digest so the offline identity check holds;
+`connect_claude_accounts` in `prepare` connects every token-holding account
+(none stored: mints for each connected account in the foreground). Claude no
+longer uses `fresh_machine_login` (Codex still does). Usage polling already
+maps the 403 to "unavailable".
+
 **Verification.** Unit: refusal of non-`oat` prefixes; the credentials file
 shape; install path skipping the probe only for long-lived tokens; prepare
 iterating accounts. Live: Jack's next `--rent` opens Chrome zero times when
@@ -416,6 +429,9 @@ Live probe, 2026-10-22 (Task conversation, disposable `LF_HOME`, ~$0.03 total):
   machine id` returned the pod's Machine id. The pod was gone 15 s after the
   deadline; `lf ondemand list` then read "ended 01:26" and `lf machine status`
   "rental ended". Billing showed no records for a sub-hour pod, as expected.
+- Long-lived tokens (2026-10-22): unit and harness tests pass with a fake
+  `claude setup-token`; the real command's output through the piped harness,
+  and a token-only pod answering under each account, are left to the demo.
 - Not exercised: `lf history export` over SSH (the pod ran published lf, which
   lacks the command) and the Task path (`--rent`, connect, clone, hand-off).
 

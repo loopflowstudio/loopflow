@@ -596,6 +596,36 @@ impl Store {
         .await
     }
 
+    pub async fn set_long_lived_token(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        token: &secrecy::SecretString,
+        minted_at: i64,
+    ) -> StoreResult<bool> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        let token = token.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            use secrecy::ExposeSecret;
+            store.set_long_lived_token(&provider, &account_id, token.expose_secret(), minted_at)
+        })
+        .await
+    }
+
+    pub async fn long_lived_token(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<Option<LongLivedToken>> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.long_lived_token(&provider, &account_id)
+        })
+        .await
+    }
+
     pub async fn list_provider_accounts(
         &self,
         provider: Option<&str>,
@@ -910,6 +940,14 @@ pub(crate) enum ProviderTokenReplacement {
     Replaced,
     Changed(ProviderToken),
     Missing,
+}
+
+/// A subscription token for machines that cannot refresh a login: Claude's
+/// `setup-token`, approved once and valid about a year.
+#[derive(Debug, Clone)]
+pub struct LongLivedToken {
+    pub token: secrecy::SecretString,
+    pub minted_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

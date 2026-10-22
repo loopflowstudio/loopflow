@@ -58,6 +58,15 @@ struct WorkspacePanesView: View {
     }
 }
 
+/// Inputs compared without `onFocus`: a closure never compares equal, so it
+/// would re-run every pane on each parent render. It captures only references.
+extension WorkspacePanesView: @MainActor Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.workspace === rhs.workspace && lhs.isFocused == rhs.isFocused && lhs.sessions === rhs.sessions
+            && lhs.model === rhs.model && lhs.face == rhs.face
+    }
+}
+
 /// The Session slot before a conversation runs here: what that means and its
 /// one explicit action. Move here and an unstarted Task's Start share it.
 struct SessionSlotOffer<Description: View>: View {
@@ -182,44 +191,41 @@ private struct MultiplexerNodeView: View {
 
     private var store: MultiplexerStore { workspace.multiplexer }
 
-    var body: some View {
+    // Structural, not AnyView: SwiftUI diffs panes and splits by their types.
+    @ViewBuilder var body: some View {
         switch node {
         case .leaf(let pane):
-            return AnyView(
-                SessionPaneView(
-                    pane: pane,
-                    isFocused: pane.id == focusedPaneId,
-                    sessions: sessions,
-                    workspace: workspace, model: model, onFocus: onFocus
-                )
-                .id(pane.id)
+            SessionPaneView(
+                pane: pane,
+                isFocused: pane.id == focusedPaneId,
+                sessions: sessions,
+                workspace: workspace, model: model, onFocus: onFocus
             )
+            .id(pane.id)
         case .split(let axis, let first, let second, let ratio):
-            return AnyView(
-                GeometryReader { geometry in
-                    let vertical = axis == .vertical
-                    let extent = vertical ? geometry.size.width : geometry.size.height
-                    let firstSize = first.minimumPaneSize
-                    let secondSize = second.minimumPaneSize
-                    let sizing = SplitSizing(extent: extent,
-                        firstMinimum: vertical ? firstSize.width : firstSize.height,
-                        secondMinimum: vertical ? secondSize.width : secondSize.height)
-                    let displayedRatio = sizing.constrain(ratio)
-                    let firstExtent = max(0, extent * displayedRatio - sizing.divider / 2)
-                    let secondExtent = max(0, extent - firstExtent - sizing.divider)
-                    let stack = vertical ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
-                    stack {
-                        _child(first)
-                            .frame(width: vertical ? firstExtent : nil, height: vertical ? nil : firstExtent)
-                            .clipped()
-                        SplitDivider(axis: axis, ratio: displayedRatio, sizing: sizing,
-                            update: { store.updateRatio(between: first.firstPane.id, and: second.firstPane.id, ratio: $0) })
-                        _child(second)
-                            .frame(width: vertical ? secondExtent : nil, height: vertical ? nil : secondExtent)
-                            .clipped()
-                    }
+            GeometryReader { geometry in
+                let vertical = axis == .vertical
+                let extent = vertical ? geometry.size.width : geometry.size.height
+                let firstSize = first.minimumPaneSize
+                let secondSize = second.minimumPaneSize
+                let sizing = SplitSizing(extent: extent,
+                    firstMinimum: vertical ? firstSize.width : firstSize.height,
+                    secondMinimum: vertical ? secondSize.width : secondSize.height)
+                let displayedRatio = sizing.constrain(ratio)
+                let firstExtent = max(0, extent * displayedRatio - sizing.divider / 2)
+                let secondExtent = max(0, extent - firstExtent - sizing.divider)
+                let stack = vertical ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+                stack {
+                    _child(first)
+                        .frame(width: vertical ? firstExtent : nil, height: vertical ? nil : firstExtent)
+                        .clipped()
+                    SplitDivider(axis: axis, ratio: displayedRatio, sizing: sizing,
+                        update: { store.updateRatio(between: first.firstPane.id, and: second.firstPane.id, ratio: $0) })
+                    _child(second)
+                        .frame(width: vertical ? secondExtent : nil, height: vertical ? nil : secondExtent)
+                        .clipped()
                 }
-            )
+            }
         }
     }
 
@@ -362,15 +368,17 @@ struct SessionPaneView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.terminal.background.color)
         .clipShape(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius))
-        // Retained pane selection is not proof of native keyboard focus.
-        .overlay {
-            RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)
-                .strokeBorder(isFocused ? theme.palette.borderStrong : theme.palette.border, lineWidth: 1)
-                .allowsHitTesting(false)
+        // Retained pane selection is not proof of native keyboard focus. Only the
+        // frame animates: an animated pane would animate its terminal's layout too.
+        .animation(DesignAnimation.standard(reduceMotion)) { pane in
+            pane.overlay {
+                RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)
+                    .strokeBorder(isFocused ? theme.palette.borderStrong : theme.palette.border, lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+            .shadow(color: theme.palette.shadow.opacity(isFocused ? 0.22 : 0.08), radius: isFocused ? 4 : 1, y: isFocused ? 2 : 1)
         }
-        .shadow(color: theme.palette.shadow.opacity(isFocused ? 0.22 : 0.08), radius: isFocused ? 4 : 1, y: isFocused ? 2 : 1)
         .renderFlash()
-        .animation(DesignAnimation.standard(reduceMotion), value: isFocused)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
         .accessibilityIdentifier(item.map { "session-pane-\($0.id)" } ?? "session-pane-empty")

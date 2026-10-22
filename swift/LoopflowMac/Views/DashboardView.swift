@@ -118,13 +118,16 @@ struct DashboardView: View {
                 DashboardSlotGrid(members: workingTasks ? model.workingTaskMembers : plan.projection.visible,
                                   focused: workspaces.selectedWork, layout: plan.slots,
                                   editing: editingSlots && plan.dashboardID != nil && !model.dashboardSaving
-                                      ? DashboardSlotEditing { writeSlots(plan, $0) } : nil) { tile($0, plan: plan) }
+                                      ? DashboardSlotEditing { writeSlots(plan, $0) } : nil) { member in
+                    DashboardTile(model: model, workspaces: workspaces, sessions: sessions, member: member, plan: plan,
+                                  workingTasks: workingTasks, focused: workspaces.selectedWork == member.work)
+                }
                 if !plan.arrangement.hidden.isEmpty {
                     HStack {
                         Text("Hidden")
                         ForEach(plan.arrangement.hidden, id: \.self) { member in
                             Button {
-                                arrange(plan, hidden: plan.arrangement.hidden.filter { $0 != member })
+                                model.hideInDashboard(plan, hidden: plan.arrangement.hidden.filter { $0 != member })
                             } label: {
                                 Text(model.task(id: member.work.id)?.task.task.name
                                     ?? plan.contents.first { $0.work == member.work }?.title ?? member.work.id)
@@ -148,8 +151,21 @@ struct DashboardView: View {
         guard let id = plan.dashboardID, let revision = plan.savedRevision else { return }
         Task { await model.setDashboardSlots(id, slots: slots, revision: revision) }
     }
+}
 
-    private func tile(_ member: WorkMemberRef, plan: WorkViewPlan) -> some View {
+/// One Dashboard slot. A view of its own, with value inputs, so a change re-runs
+/// the tiles it touches instead of every tile and its terminals.
+struct DashboardTile: View {
+    let model: WorkModel
+    let workspaces: SessionsWorkspaceRegistry
+    let sessions: SessionsStore
+    let member: WorkMemberRef
+    let plan: WorkViewPlan
+    let workingTasks: Bool
+    let focused: Bool
+    @Environment(\.palette) private var palette
+
+    var body: some View {
         let content = plan.contents.first { $0.work == member.work }
         let entry = workspaces.retained(member.work)
         let task = model.task(id: member.work.id)
@@ -157,7 +173,7 @@ struct DashboardView: View {
         let arrangeable = plan.dashboardID != nil
         return VStack(spacing: 0) {
             HStack(spacing: Spacing.sm) {
-                Button { zoom(member, plan: plan) } label: {
+                Button { model.zoomTile(member, plan: plan) } label: {
                     if let task { TaskHeading(task: task.task) }
                     else { Text(content?.title ?? member.work.id).lineLimit(1) }
                 }.buttonStyle(.plain)
@@ -167,10 +183,10 @@ struct DashboardView: View {
                         label: { Image(systemName: "ellipsis") }
                         .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
                 }
-                Button { zoom(member, plan: plan) } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                Button { model.zoomTile(member, plan: plan) } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
                     .help("Open this Work in full")
                 if arrangeable {
-                    Button { arrange(plan, hidden: plan.arrangement.hidden + [member]) } label: { Image(systemName: "eye.slash") }
+                    Button { model.hideInDashboard(plan, hidden: plan.arrangement.hidden + [member]) } label: { Image(systemName: "eye.slash") }
                         .help("Hide this occurrence").disabled(model.dashboardSaving)
                 }
             }.padding(8).background(palette.surface)
@@ -194,11 +210,12 @@ struct DashboardView: View {
                     ?? content.primarySession.flatMap({ entry.multiplexer.pane(forSessionId: $0) })
                     // A conversation attached in this tile shows before the plan names it primary.
                     ?? entry.multiplexer.layout.allPanes.first(where: { $0.sessionId != nil }) {
-                    WorkspacePanesView(workspace: entry, isFocused: workspaces.selectedWork == member.work, sessions: sessions, model: model,
+                    WorkspacePanesView(workspace: entry, isFocused: focused, sessions: sessions, model: model,
                         onFocus: { pane, _ in
                             workspaces.focus(entry.key)
                             entry.multiplexer.setFocusedPane(pane)
                         }, face: pane)
+                        .equatable()
                 } else if let task = task?.task {
                     // Only an unstarted Task offers Start. A started one opens its conversation,
                     // which `lf session connect --task` creates when only headless Runs exist.
@@ -214,23 +231,25 @@ struct DashboardView: View {
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             // The slot grid clips each tile at its frame.
             .overlay(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)
-                .strokeBorder(workspaces.selectedWork == member.work ? palette.borderActive : palette.border))
+                .strokeBorder(focused ? palette.borderActive : palette.border))
             .contentShape(Rectangle())
             .renderFlash()
             .simultaneousGesture(TapGesture().onEnded { workspaces.focus(member.work) })
     }
+}
 
-    private func zoom(_ member: WorkMemberRef, plan: WorkViewPlan) {
-        guard let id = plan.dashboardID, let work = member.work.reference else { return model.select(member.work.reference) }
-        model.zoom(into: work, from: id)
+extension WorkModel {
+    func zoomTile(_ member: WorkMemberRef, plan: WorkViewPlan) {
+        guard let id = plan.dashboardID, let work = member.work.reference else { return select(member.work.reference) }
+        zoom(into: work, from: id)
     }
 
     /// Hide or restore occurrences. Rust decides the mode; hiding never touches the order.
-    private func arrange(_ plan: WorkViewPlan, hidden: [WorkMemberRef]) {
+    func hideInDashboard(_ plan: WorkViewPlan, hidden: [WorkMemberRef]) {
         guard let id = plan.dashboardID, let revision = plan.savedRevision else {
-            model.dashboardError = "Save this Dashboard before arranging its Work."; return
+            dashboardError = "Save this Dashboard before arranging its Work."; return
         }
-        Task { await model.arrangeDashboard(id, order: plan.arrangement.order, hidden: hidden, revision: revision) }
+        Task { await arrangeDashboard(id, order: plan.arrangement.order, hidden: hidden, revision: revision) }
     }
 }
 

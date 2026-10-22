@@ -1001,6 +1001,36 @@ struct SessionsView: View {
 }
 
 /// Unified Work navigation around the existing retained native workspace.
+/// The sidebar's width, read here so a divider drag re-renders this column
+/// rather than the whole window.
+private struct SidebarColumn<Content: View>: View {
+    let navigation: WorkNavigation
+    let availableWidth: CGFloat
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content.frame(width: min(navigation.sidebarWidth, max(240, availableWidth - 360)))
+    }
+}
+
+/// Applies each Session reading to the window's stores. Zero-size, so a Session
+/// change re-runs this view and not the window that hosts it.
+private struct SessionsReconciler: View {
+    let model: WorkModel
+    let store: SessionsStore
+    let workspaces: SessionsWorkspaceRegistry
+
+    var body: some View {
+        Color.clear.frame(width: 0, height: 0)
+            .onChange(of: model.sessions.value, initial: true) { _, records in
+                guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
+                      let records else { return }
+                store.reconcile(records)
+                if model.sessions.errorMessage == nil { workspaces.reconcileMembership(records); model.revealPrimaryConversation() }
+            }
+    }
+}
+
 struct SessionsContentView: View {
     @Environment(\.theme) private var theme
     let machineId: String
@@ -1068,10 +1098,12 @@ struct SessionsContentView: View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
                 if navigation.showsNavigator {
-                    WorkNavigator(model: model, onOpenSession: openSession, onNewTaskSession: { id in
-                        Task { do { try await newTaskSession(id) } catch { launchError = error.localizedDescription } }
-                    })
-                        .frame(width: min(navigation.sidebarWidth, max(240, geometry.size.width - 360)))
+                    SidebarColumn(navigation: navigation, availableWidth: geometry.size.width) {
+                        WorkNavigator(model: model, onOpenSession: openSession, onNewTaskSession: { id in
+                            Task { do { try await newTaskSession(id) } catch { launchError = error.localizedDescription } }
+                        })
+                        .equatable()
+                    }
                     SidebarDivider(navigation: navigation, availableWidth: geometry.size.width)
                 }
                 if navigation.showsSelection {
@@ -1170,12 +1202,7 @@ struct SessionsContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
             navigation.showsSlotHints = false
         }
-        .onChange(of: model.sessions.value, initial: true) { _, records in
-            guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
-                  let records else { return }
-            store.reconcile(records)
-            if model.sessions.errorMessage == nil { workspaces.reconcileMembership(records); model.revealPrimaryConversation() }
-        }
+        .background { SessionsReconciler(model: model, store: store, workspaces: workspaces) }
 
         .onReceive(NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)) { notification in
             guard let terminal = notification.object as? TerminalIdentity else { return }
@@ -1243,6 +1270,7 @@ struct SessionsContentView: View {
                     HStack(spacing: 0) {
                         WorkspacePanesView(workspace: entry, isFocused: navigation.palette == nil, sessions: store, model: model,
                             onFocus: { pane, session in focusPane(pane, session: session, in: entry) })
+                            .equatable()
                             .frame(width: geometry.size.width * 0.62)
                         Divider()
                         WaveTaskInventory(model: model, waveID: key.id)
@@ -1251,6 +1279,7 @@ struct SessionsContentView: View {
             } else if terminals {
                 WorkspacePanesView(workspace: entry, isFocused: active && navigation.palette == nil, sessions: store, model: model,
                     onFocus: { pane, session in focusPane(pane, session: session, in: entry) })
+                    .equatable()
                     .overlay(alignment: .top) {
                         if let error = entry.conversationError {
                             HStack {

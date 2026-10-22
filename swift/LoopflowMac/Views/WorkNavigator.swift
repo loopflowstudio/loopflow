@@ -41,6 +41,8 @@ struct WorkNavigator: View {
                 Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
             }
             WorkTaskList(navigation: model.navigation) {
+                // Read once: each read re-filters the plan and every Task's Sessions.
+                let taskIDs = model.sidebarTaskIDs
                 VStack(alignment: .leading, spacing: 5) {
                     if model.navigation.sidebarWaveID != nil {
                         Button { model.select(nil) } label: {
@@ -54,16 +56,19 @@ struct WorkNavigator: View {
                     HStack {
                         Text(listTitle.uppercased()).lineLimit(1)
                         Spacer()
-                        Text("\(model.sidebarTaskIDs.count)")
+                        Text("\(taskIDs.count)")
                     }.font(Typography.code(10)).foregroundStyle(palette.textSecondary).padding(10)
-                    ForEach(model.sidebarTaskIDs, id: \.self) { id in taskRow(id) }
-                    if model.sidebarTaskIDs.isEmpty {
+                    // One pass for every row's ⌘N slot; each lookup rebuilds the plan's members.
+                    let slots = Dictionary(model.workingTaskIDs.prefix(9).enumerated().map { ($1, "⌘\($0 + 1)") },
+                                           uniquingKeysWith: { first, _ in first })
+                    ForEach(taskIDs, id: \.self) { id in taskRow(id, slotHint: slots[id]) }
+                    if taskIDs.isEmpty {
                         Text(model.navigation.sidebarWaveID == nil ? "No working Tasks in this list" : "No open Tasks in this Wave")
                             .font(Typography.body(12))
                             .foregroundStyle(palette.textSecondary).padding(10)
                     }
                     if let selection = model.selection, selection.kind == .task,
-                       !model.sidebarTaskIDs.contains(where: { model.isSelected(.task(id: $0)) }) {
+                       !taskIDs.contains(where: { model.isSelected(.task(id: $0)) }) {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Open Task is outside this list")
                             Button("Show working tasks") {
@@ -137,7 +142,7 @@ struct WorkNavigator: View {
         .onDisappear { if focusedWork != nil { focusMemory.restore() } }
     }
 
-    private func taskRow(_ id: String) -> some View {
+    private func taskRow(_ id: String, slotHint: String?) -> some View {
         let found = model.task(id: id)
         let selected = model.isSelected(.task(id: id))
         let otherWave = model.selection?.kind == .wave && found?.wave?.wave.id != model.selection?.id
@@ -149,23 +154,16 @@ struct WorkNavigator: View {
         return RowHover { hover in VStack(alignment: .leading, spacing: 6) {
             Text(title).font(Typography.strong(13)).lineLimit(2).help(title)
                 .allowsHitTesting(false)
-            TimelineView(.periodic(from: .now, by: 5)) { clock in
-                let preview = status.preview(now: clock.date, fallback: found?.task.task.description ?? "Planning unavailable", sessions: sessions)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(preview.text).font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
-                        .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
-                        .help(preview.help).allowsHitTesting(false)
-                    if let task = found?.task {
-                        TaskRowMetadata(task: task, status: status, selected: selected,
-                            slotHint: model.workingTaskIDs.firstIndex(of: id).flatMap { $0 < 9 ? "⌘\($0 + 1)" : nil },
-                            showsSlotHint: model.navigation.showsSlotHints, hover: hover,
-                            sourceAge: preview.age)
-                    } else {
-                        Text("Planning unavailable").font(Typography.code(10))
-                            .foregroundStyle(palette.textSecondary).allowsHitTesting(false)
-                    }
+            // Only a live excerpt ages; a row showing its summary needs no clock.
+            let fallback = found?.task.task.description ?? "Planning unavailable"
+            let current = status.preview(now: .now, fallback: fallback, sessions: sessions)
+            if current.age == nil {
+                rowDetail(current, slotHint: slotHint, found: found, status: status, selected: selected, hover: hover)
+            } else {
+                TimelineView(.periodic(from: .now, by: 5)) { clock in
+                    rowDetail(status.preview(now: clock.date, fallback: fallback, sessions: sessions),
+                              slotHint: slotHint, found: found, status: status, selected: selected, hover: hover)
                 }
-                .renderFlash()
             }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -199,6 +197,26 @@ struct WorkNavigator: View {
         }
     }
 
+    /// The preview line and metadata beneath a row's title.
+    private func rowDetail(_ preview: (text: String, help: String, age: String?), slotHint: String?, found: (wave: WaveRoadmap?, task: RoadmapTask)?,
+                           status: SessionProgramStatus, selected: Bool, hover: HoverFlag) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(preview.text).font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
+                .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
+                .help(preview.help).allowsHitTesting(false)
+            if let task = found?.task {
+                TaskRowMetadata(task: task, status: status, selected: selected,
+                    slotHint: slotHint,
+                    showsSlotHint: model.navigation.showsSlotHints, hover: hover,
+                    sourceAge: preview.age)
+            } else {
+                Text("Planning unavailable").font(Typography.code(10))
+                    .foregroundStyle(palette.textSecondary).allowsHitTesting(false)
+            }
+        }
+        .renderFlash()
+    }
+
     @ViewBuilder private func actions(for id: String) -> some View {
         if let found = model.task(id: id) {
             TaskActionItems(model: model, task: found.task, wave: found.wave?.wave,
@@ -206,6 +224,12 @@ struct WorkNavigator: View {
                 openSession: onOpenSession)
         }
     }
+}
+
+/// Compared by model alone: its callbacks are closures over references, and
+/// every row reads what it needs from the model itself.
+extension WorkNavigator: @MainActor Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model === rhs.model }
 }
 
 struct WorkBreadcrumbs: View {

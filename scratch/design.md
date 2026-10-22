@@ -229,6 +229,10 @@ Check results:
 - 2026-10-21 implement: `agent_startup` (budget `< 18_000`) → pass, 15,740 / 13,825 rows; `cached_schema_is_reread_after_ddl_from_another_connection` → pass, fails with the cookie dropped from the key; `loopflow` lib `store::` → 342 pass (run from the built test binary; cargo rebuilt on each invocation under load); `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` → clean.
 - 2026-10-21 compress: `user_tables` deleted, cookie folded into `SchemaCookie`; `store::migrations` lib tests → 127 pass; `cargo fmt --check` → clean; clippy and affected suites left to gate.
 
+Concept review (2026-10-21, headless): no change. The change has no user-facing
+surface; one schema reader with a read cache matches the accepted "cache the
+read, not a verdict" decision, and no open product choice remains.
+
 Implementation notes: `build.rs` includes `migration_schema.rs`, so it now
 serializes `&*schema`. The cookie is read before `sqlite_master`, so a DDL
 commit between the two reads stores a newer schema under a cookie the file

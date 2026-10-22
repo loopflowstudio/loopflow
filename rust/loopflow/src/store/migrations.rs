@@ -185,7 +185,7 @@ pub(crate) fn initialize_experimental_sqlite(
     drafts: &[crate::build_info::MigrationDraft],
 ) -> StoreResult<()> {
     if _read_snapshot(conn, |conn| {
-        if user_tables(conn)?.is_empty() {
+        if user_table_count(conn)? == 0 {
             return Ok(false);
         }
         validate_experimental_schema(conn, drafts)?;
@@ -203,7 +203,7 @@ fn _initialize_experiment_in(
     drafts: &[crate::build_info::MigrationDraft],
     guards: &mut Vec<File>,
 ) -> StoreResult<()> {
-    if !user_tables(conn)?.is_empty() {
+    if user_table_count(conn)? > 0 {
         return validate_experimental_schema(conn, drafts);
     }
     apply_set(conn, MIGRATIONS, guards)?;
@@ -240,10 +240,7 @@ pub(crate) fn validate_experimental_sqlite(
 
 fn _validate_canonical_history_for_development(conn: &rusqlite::Connection) -> StoreResult<()> {
     validate_set(MIGRATIONS).map_err(StoreError::InvalidData)?;
-    if !user_tables(conn)?
-        .iter()
-        .any(|table| table == "schema_migrations")
-    {
+    if !has_ledger(conn)? {
         return Err(StoreError::IncompatibleDevelopment(
             "canonical migration ledger is missing".to_string(),
         ));
@@ -269,7 +266,7 @@ fn _validate_development_schema(
             .map(|migration| migration.sql)
             .chain(drafts.iter().map(|draft| draft.sql)),
     )?;
-    if product_schema(conn)?.as_slice() != expected.as_ref() {
+    if *product_schema(conn)? != *expected {
         return Err(StoreError::IncompatibleDevelopment(
             "schema does not match this experiment".to_string(),
         ));
@@ -351,10 +348,7 @@ pub(crate) fn old_reader_recognizes(conn: &rusqlite::Connection) -> bool {
 pub(crate) fn validate_sqlite_schema(conn: &rusqlite::Connection) -> StoreResult<()> {
     _read_snapshot(conn, |conn| {
         validate_set(MIGRATIONS).map_err(StoreError::InvalidData)?;
-        if !user_tables(conn)?
-            .iter()
-            .any(|table| table == "schema_migrations")
-        {
+        if !has_ledger(conn)? {
             return Err(StoreError::InvalidData(
                 "a validation-only lf cannot initialize the release database; install a published lf"
                     .to_string(),
@@ -734,21 +728,21 @@ fn migration_history_fingerprint(conn: &rusqlite::Connection) -> StoreResult<Str
     }
     let schema = product_schema(conn)?;
     digest.update((schema.len() as u64).to_be_bytes());
-    for object in schema {
+    for object in schema.iter() {
         hash_text(&mut digest, &object.object_type);
         hash_text(&mut digest, &object.name);
         hash_text(&mut digest, &object.table_name);
         hash_text(&mut digest, &object.sql);
         digest.update((object.foreign_keys.len() as u64).to_be_bytes());
-        for foreign_key in object.foreign_keys {
+        for foreign_key in &object.foreign_keys {
             digest.update(foreign_key.id.to_be_bytes());
             digest.update(foreign_key.sequence.to_be_bytes());
             hash_text(&mut digest, &foreign_key.table);
             hash_text(&mut digest, &foreign_key.from);
-            match foreign_key.to {
+            match &foreign_key.to {
                 Some(to) => {
                     digest.update([1]);
-                    hash_text(&mut digest, &to);
+                    hash_text(&mut digest, to);
                 }
                 None => digest.update([0]),
             }
@@ -789,10 +783,9 @@ fn apply_set(
 ) -> StoreResult<()> {
     validate_set(set).map_err(StoreError::InvalidData)?;
 
-    let tables = user_tables(conn)?;
-    if !tables.iter().any(|table| table == "schema_migrations") {
+    if !has_ledger(conn)? {
         // Product tables with no ledger were never written by us.
-        if !tables.is_empty() {
+        if user_table_count(conn)? > 0 {
             return Err(incompatible());
         }
         conn.execute_batch(
@@ -1093,7 +1086,7 @@ fn adopt_permuted_history(conn: &rusqlite::Connection, set: &[Migration]) -> Sto
     };
 
     let expected = expected_schema(set[..prefix_len].iter().map(|migration| migration.sql))?;
-    if product_schema(conn)?.as_slice() != expected.as_ref() {
+    if *product_schema(conn)? != *expected {
         return Err(incompatible());
     }
 
@@ -1243,7 +1236,7 @@ fn validate_divergent_schema(
             .chain(&DIVERGENT_MIGRATIONS[..divergent_len])
             .map(|migration| migration.sql),
     )?;
-    if product_schema(conn)?.as_slice() != expected.as_ref() {
+    if *product_schema(conn)? != *expected {
         return Err(incompatible());
     }
     Ok(())
@@ -1397,14 +1390,25 @@ fn raised_floor_over(
         .filter(|next| parse_release(next) > parse_release(&current)))
 }
 
-fn user_tables(conn: &rusqlite::Connection) -> StoreResult<Vec<String>> {
-    let mut statement = conn.prepare(
-        "SELECT name FROM sqlite_master
-         WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-         ORDER BY name",
-    )?;
-    let rows = statement.query_map([], |row| row.get(0))?;
-    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+/// One row, however many tables: every open asks this, so it never lists them.
+fn user_table_count(conn: &rusqlite::Connection) -> StoreResult<i64> {
+    Ok(conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+fn has_table(conn: &rusqlite::Connection, name: &str) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [name],
+        |row| row.get(0),
+    )?)
+}
+
+fn has_ledger(conn: &rusqlite::Connection) -> StoreResult<bool> {
+    has_table(conn, "schema_migrations")
 }
 
 /// Applied versions in the order they were applied. Sorting by the version string
@@ -1444,7 +1448,7 @@ pub fn validate_set(set: &[Migration]) -> Result<(), String> {
 /// and foreign-key drift.
 fn validate_schema(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
     let expected = expected_schema(set.iter().map(|migration| migration.sql))?;
-    if product_schema(conn)?.as_slice() != expected.as_ref() {
+    if *product_schema(conn)? != *expected {
         return Err(incompatible());
     }
     Ok(())
@@ -1553,8 +1557,9 @@ fn table_parts(sql: &str) -> Option<(&str, Vec<&str>, &str)> {
     None
 }
 
-/// Cache only the immutable reference derived from this build's ordered SQL.
-/// Every caller still reads and compares the actual database schema afresh.
+/// Cache the immutable reference derived from this build's ordered SQL. Every
+/// caller still compares it against the live schema, which `product_schema`
+/// serves per file and schema cookie; no comparison result is cached.
 fn expected_schema(
     sql: impl IntoIterator<Item = &'static str>,
 ) -> StoreResult<Arc<[ProductSchemaObject]>> {
@@ -1608,7 +1613,7 @@ fn expected_schema(
     for statement in &sql {
         expected.execute_batch(statement)?;
     }
-    let schema: Arc<[ProductSchemaObject]> = product_schema(&expected)?.into();
+    let schema = product_schema(&expected)?;
     references.insert(sql, Arc::clone(&schema));
     Ok(schema)
 }
@@ -1650,10 +1655,7 @@ pub(crate) fn pending_shared_migration(conn: &rusqlite::Connection) -> StoreResu
 }
 
 pub fn latest_applied_version_sqlite(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
-    if !user_tables(conn)?
-        .iter()
-        .any(|table| table == "schema_migrations")
-    {
+    if !has_ledger(conn)? {
         return Ok(None);
     }
     Ok(applied_versions(conn)?.last().cloned())
@@ -1666,16 +1668,15 @@ pub fn latest_applied_version_sqlite(conn: &rusqlite::Connection) -> StoreResult
 /// current schema is.
 pub(crate) fn requires_migration_sqlite(conn: &rusqlite::Connection) -> StoreResult<bool> {
     _read_snapshot(conn, |conn| {
-        let tables = user_tables(conn)?;
-        if !tables.iter().any(|table| table == "schema_migrations") {
-            return if tables.is_empty() {
+        if !has_ledger(conn)? {
+            return if user_table_count(conn)? == 0 {
                 Ok(true)
             } else {
                 Err(incompatible())
             };
         }
         let applied = applied_versions(conn)?;
-        if applied.is_empty() && tables.len() == 1 {
+        if applied.is_empty() && user_table_count(conn)? == 1 {
             return Ok(true);
         }
         if applied.as_slice() == [LEGACY_BASELINE_VERSION] {
@@ -1701,7 +1702,7 @@ mod tests {
     use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
     use std::time::Duration;
 
-    use super::{_initialize_experiment_in, _read_snapshot, user_tables};
+    use super::{_initialize_experiment_in, _read_snapshot, has_table, user_table_count};
     use rusqlite::OptionalExtension;
 
     use super::apply_newer_release;
@@ -2942,7 +2943,7 @@ mod tests {
             "CREATE TABLE unfinished (id TEXT); INSERT INTO missing_table VALUES (1);",
         )];
         assert!(initialize_experimental_sqlite(&conn, &drafts).is_err());
-        assert!(user_tables(&conn).unwrap().is_empty());
+        assert_eq!(user_table_count(&conn).unwrap(), 0);
         assert!(conn.is_autocommit());
         assert!(conn
             .pragma_query_value(None, "foreign_keys", |row| row.get::<_, bool>(0))
@@ -5245,6 +5246,42 @@ mod tests {
     }
 
     #[test]
+    fn cached_schema_is_reread_after_ddl_from_another_connection() {
+        let migration = Migration {
+            sql: "CREATE TABLE example (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+                  CREATE INDEX idx_example_value ON example(value);",
+            ..MIGRATIONS[0]
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let first = rusqlite::Connection::open(&path).unwrap();
+        first.execute_batch(migration.sql).unwrap();
+        validate_schema(&first, &[migration]).unwrap();
+
+        let second = rusqlite::Connection::open(&path).unwrap();
+        second
+            .execute_batch("DROP INDEX idx_example_value;")
+            .unwrap();
+        assert!(validate_schema(&first, &[migration]).is_err());
+
+        let third = rusqlite::Connection::open(&path).unwrap();
+        third
+            .execute_batch("CREATE INDEX idx_example_value ON example(value);")
+            .unwrap();
+        validate_schema(&first, &[migration]).unwrap();
+        third
+            .execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE INDEX idx_example_extra ON example(id, value);",
+            )
+            .unwrap();
+        assert!(validate_schema(&third, &[migration]).is_err());
+        third.execute_batch("ROLLBACK;").unwrap();
+        validate_schema(&second, &[migration]).unwrap();
+        validate_schema(&third, &[migration]).unwrap();
+    }
+
+    #[test]
     fn schema_reference_distinguishes_sql_under_the_same_migration_identity() {
         let required = Migration {
             sql: "CREATE TABLE example (id TEXT PRIMARY KEY, value TEXT NOT NULL);",
@@ -6862,10 +6899,7 @@ mod tests {
             "run_events",
             "task_flow_positions",
         ] {
-            assert!(
-                !user_tables(&conn).unwrap().iter().any(|name| name == table),
-                "{table}"
-            );
+            assert!(!has_table(&conn, table).unwrap(), "{table}");
         }
         validate_foreign_keys(&conn).unwrap();
     }
@@ -6929,10 +6963,7 @@ mod tests {
         assert_eq!(snapshot["projects"][0]["flow"], "custom");
         assert_eq!(snapshot["projects"][0]["status"], "started");
         assert_eq!(snapshot["projects"][1]["status"], "planned");
-        assert!(!user_tables(&conn)
-            .unwrap()
-            .iter()
-            .any(|table| table == "wave_chapters"));
+        assert!(!has_table(&conn, "wave_chapters").unwrap());
         validate_foreign_keys(&conn).unwrap();
     }
 

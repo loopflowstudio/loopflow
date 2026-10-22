@@ -247,7 +247,7 @@ mod tests {
     fn format_context_header_with_content() {
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "task");
         let components = PromptComponents {
-            skill: Some(crate::flow::Skill::named("implement")),
+            skill: Some(crate::graph::Skill::named("implement")),
             wave: Some("intelligence".to_string()),
             ..Default::default()
         };

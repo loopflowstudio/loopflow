@@ -1,6 +1,5 @@
 use crate::agent::{run_agent, ProcessConfig};
 use crate::config::{load_config_or_default, Config};
-use crate::flow::load_skill;
 use crate::git::worktree_name::WorktreeName;
 use crate::git::worktrees::{
     create_from_placement_plan, diff_shortstats, list_worktrees, list_worktrees_timed,
@@ -9,6 +8,7 @@ use crate::git::worktrees::{
     WorktreeSegment,
 };
 use crate::git::{current_branch, get_default_branch};
+use crate::graph::load_skill;
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::output::{column_width, Colors};
 use crate::lf::{CronCommand, PrCommand, ReleaseCommand, RepoCommand, WtCommand};
@@ -160,7 +160,7 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
                     println!(
                         "{}/{} on {} ({})",
                         obligation.wave,
-                        obligation.flow,
+                        obligation.graph,
                         obligation.machine_id,
                         obligation.timezone
                     );
@@ -242,7 +242,7 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
                     println!(
                         "failed {} {}: {}",
                         receipt.id,
-                        receipt.flow,
+                        receipt.graph,
                         receipt.error.as_deref().unwrap_or("inspect cron log")
                     );
                 }
@@ -657,10 +657,10 @@ pub(crate) fn land_repo(
             crate::ops::pr_landing::wait_for_merge(repo_root, options, &pr).map_err(|error| {
                 match error {
                     OpsError::DeliveryHeld(reason) => {
-                        anyhow::Error::new(crate::process::FlowHeld(reason))
+                        anyhow::Error::new(crate::process::GraphHeld(reason))
                     }
                     error @ OpsError::CheckoutBusy(_) => {
-                        anyhow::Error::new(crate::process::FlowHeld(error.to_string()))
+                        anyhow::Error::new(crate::process::GraphHeld(error.to_string()))
                     }
                     error => anyhow::Error::new(error),
                 }
@@ -855,7 +855,7 @@ pub fn connect_wave(
         crate::ops::linear::list_local_waves(repo_root)?
     } else {
         let explicit = wave;
-        // Wave connection is a creation flow: its positional name may select a
+        // Wave connection is a creation graph: its positional name may select a
         // wave not yet registered (it links a wave directory to
         // Linear, not a registry row). Normalize-only for explicit;
         // ambient still uses the shared validating resolver.
@@ -1232,7 +1232,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             let spec = CronSpec {
                 wave,
                 published: *publish,
-                flow: name.clone(),
+                graph: name.clone(),
                 command: command.clone(),
                 schedule: crate::ops::parse_schedule(schedule)?,
                 working_directory: authority.repo,
@@ -1273,7 +1273,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             let installed = crate::ops::list_crons(&launch_agents_dir, &SystemLaunchctl)?;
             let matching: Vec<_> = installed
                 .iter()
-                .filter(|cron| cron.flow == *name && wave.as_ref().is_none_or(|w| *w == cron.wave))
+                .filter(|cron| cron.graph == *name && wave.as_ref().is_none_or(|w| *w == cron.wave))
                 .collect();
             let cron = match matching.as_slice() {
                 [cron] => *cron,
@@ -1311,7 +1311,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                     let spec = CronSpec {
                         wave: String::new(),
                         published: false,
-                        flow: key,
+                        graph: key,
                         command: vec!["task".into(), "reconcile".into(), "--json".into()],
                         schedule: crate::ops::parse_schedule("every-minute")?,
                         working_directory: authority.repo,
@@ -1333,13 +1333,13 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                 println!("no crons installed on this Machine for this repository");
             }
             for cron in &installed {
-                println!("reinstalled {} ({})", cron.label, cron.flow);
+                println!("reinstalled {} ({})", cron.label, cron.graph);
             }
             publish_crons(&launch_agents_dir, &authority.repo);
         }
         CronCommand::Run {
             wave,
-            flow,
+            graph,
             scheduled,
         } => {
             let source = if *scheduled {
@@ -1354,17 +1354,17 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                     return match crate::ops::record_cron_preflight_failure(
                         &launch_agents_dir,
                         wave,
-                        flow,
+                        graph,
                         source,
                         &detail,
                     ) {
                         Ok(receipt) => Err(anyhow!(
-                            "cron {wave}/{flow} failed before launch: {}; log {}",
+                            "cron {wave}/{graph} failed before launch: {}; log {}",
                             receipt.error.as_deref().unwrap_or(&detail),
                             receipt.log_path.display()
                         )),
                         Err(receipt_error) => Err(anyhow!(
-                            "cron {wave}/{flow} failed before launch: {detail}; receipt persistence also failed: {receipt_error}"
+                            "cron {wave}/{graph} failed before launch: {detail}; receipt persistence also failed: {receipt_error}"
                         )),
                     };
                 }
@@ -1372,7 +1372,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             let receipt = crate::ops::run_cron(
                 &launch_agents_dir,
                 wave,
-                flow,
+                graph,
                 &authority.local_machine,
                 &authority.placed_machine,
                 source,
@@ -1380,18 +1380,18 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             println!(
                 "{} {} {}",
                 receipt.id,
-                receipt.flow,
+                receipt.graph,
                 cron_receipt_outcome(&receipt)
             );
         }
         CronCommand::History {
             wave,
-            flow,
+            graph,
             days,
             json,
         } => {
             let root = crate::ops::receipt_root(&crate::store::lf_home_dir());
-            let receipts = crate::ops::list_cron_receipts(&root, wave, flow.as_deref(), *days)?;
+            let receipts = crate::ops::list_cron_receipts(&root, wave, graph.as_deref(), *days)?;
             if *json {
                 println!("{}", serde_json::to_string(&receipts)?);
                 return Ok(());
@@ -1415,7 +1415,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                 println!(
                     "{}  {}  {}  {}  {}  {}  {}",
                     started,
-                    receipt.flow,
+                    receipt.graph,
                     cron_source_name(receipt.source),
                     cron_receipt_outcome(&receipt),
                     duration,
@@ -1426,32 +1426,32 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
         }
         CronCommand::Trigger {
             wave,
-            flow,
+            graph,
             wait,
             timeout,
         } => {
             let authority = cron_authority(wave)?;
             ensure_cron_placement(wave, &authority)?;
             let root = crate::ops::receipt_root(&authority.host.lf_home);
-            let prior = crate::ops::cron_receipt_ids(&root, wave, flow)?;
+            let prior = crate::ops::cron_receipt_ids(&root, wave, graph)?;
             let triggered_at = chrono::Utc::now().timestamp();
-            let request = crate::ops::cron::record_cron_trigger(&launch_agents_dir, wave, flow)?;
-            if let Err(error) = crate::ops::trigger_cron(&SystemLaunchctl, wave, flow) {
+            let request = crate::ops::cron::record_cron_trigger(&launch_agents_dir, wave, graph)?;
+            if let Err(error) = crate::ops::trigger_cron(&SystemLaunchctl, wave, graph) {
                 crate::ops::cron::record_cron_trigger_failure(
                     &launch_agents_dir,
                     wave,
-                    flow,
+                    graph,
                     &request,
                     &error.to_string(),
                 )?;
                 return Err(error.into());
             }
-            println!("triggered {wave}/{flow} through launchd");
+            println!("triggered {wave}/{graph} through launchd");
             if *wait {
                 let receipt = crate::ops::wait_for_cron_receipt(
                     &root,
                     wave,
-                    flow,
+                    graph,
                     &prior,
                     triggered_at,
                     crate::ops::parse_wait_duration(timeout)?,
@@ -1459,14 +1459,14 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                 println!(
                     "{} {} {}",
                     receipt.id,
-                    receipt.flow,
+                    receipt.graph,
                     cron_receipt_outcome(&receipt)
                 );
                 if receipt.outcome == CronOutcome::Failed
                     || crate::ops::receipt_is_stale(&receipt, chrono::Utc::now().timestamp())
                 {
                     return Err(anyhow!(
-                        "cron {wave}/{flow} {}: {}; log {}",
+                        "cron {wave}/{graph} {}: {}; log {}",
                         cron_receipt_outcome(&receipt),
                         receipt
                             .error
@@ -1477,8 +1477,8 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                 }
             }
         }
-        CronCommand::Remove { wave, flow } => {
-            match crate::ops::remove_cron(&launch_agents_dir, wave, flow, &SystemLaunchctl)? {
+        CronCommand::Remove { wave, graph } => {
+            match crate::ops::remove_cron(&launch_agents_dir, wave, graph, &SystemLaunchctl)? {
                 Some(cron) => {
                     println!("removed {}", cron.label);
                     publish_crons(&launch_agents_dir, &cron.repo);
@@ -1650,7 +1650,7 @@ fn print_cron_listing(listing: &crate::ops::cron::CronListing) {
             .unwrap_or("never");
         println!(
             "{}  {}  {}  {}  {}{}",
-            cron.flow,
+            cron.graph,
             cron.schedule,
             if cron.loaded { "loaded" } else { "not-loaded" },
             cron.machine_id,
@@ -2779,7 +2779,7 @@ fn process_skill_agent(
             worktree: Some(repo_root.to_path_buf()),
             skill: Some(skill_name.to_string()),
             subjects: Vec::new(),
-            flow: crate::session_record::SessionFlowMembership::Independent,
+            graph: crate::session_record::SessionGraphMembership::Independent,
             work: None,
         },
         &context,
@@ -2985,7 +2985,7 @@ pub fn run_doctor(brewfile: bool) -> Result<()> {
     // Repo status
     if let Some(ref root) = repo_root {
         let lf_dir = root.join(".lf");
-        if lf_dir.join("skills").is_dir() || lf_dir.join("flows").is_dir() {
+        if lf_dir.join("skills").is_dir() || lf_dir.join("graphs").is_dir() {
             println!("✓ task files found");
         } else {
             println!("- no task files (run: lf init)");

@@ -106,7 +106,7 @@ public enum WorkRequest: Equatable, Sendable {
 public struct StoreRevisions: Decodable, Equatable, Sendable {
     public let planning: Int64
     public let sessions: Int64
-    public let flows: Int64
+    public let graphs: Int64
     public let processes: Int64
     public let usage: Int64
 }
@@ -140,16 +140,16 @@ public struct WorkFrame: Decodable, Sendable {
         }
     }
 
-    /// A Task's work and each of its Flow processes, in the order of `work.flowProcesses`.
+    /// A Task's work and each of its Graph processes, in the order of `work.graphProcesses`.
     public struct TaskPart: Decodable, Sendable {
         public let task: String
         public let work: TaskOverview
-        public let flowProcesses: [FlowProcessDetail]
+        public let graphProcesses: [GraphProcessDetail]
         public let comments: TaskComments
 
         enum CodingKeys: String, CodingKey {
             case task, work, comments
-            case flowProcesses = "flow_processes"
+            case graphProcesses = "graph_processes"
         }
     }
 

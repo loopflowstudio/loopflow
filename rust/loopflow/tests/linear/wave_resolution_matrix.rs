@@ -680,7 +680,7 @@ fn cron_add_rejects_a_development_binary_before_mutation() {
             "--wave",
             "alpha",
             "--batch",
-            "flow",
+            "graph",
             "mutation-test",
         ])
         .current_dir(&repo)

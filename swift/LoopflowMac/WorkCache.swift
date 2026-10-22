@@ -3,7 +3,7 @@
 //
 // It holds the wire text of successful reads, restored through the decoder
 // live reads use, so an incompatible file fails to decode instead of drifting.
-// Saved text carries no Flow execution or Task condition, no Session state and no legal
+// Saved text carries no Graph execution or Task condition, no Session state and no legal
 // action beyond opening: a stale file cannot claim a process is live or
 // authorize a mutation. It is display evidence, never authority; the first
 // successful read of each part replaces it.
@@ -182,7 +182,7 @@ final class WorkCache: @unchecked Sendable {
         return String(decoding: quiet, as: UTF8.self)
     }
 
-    /// Every latest Flow and Task condition becomes `unknown` and every Flow
+    /// Every latest Graph and Task condition becomes `unknown` and every Graph
     /// control unavailable.
     static func quietRoadmap(_ text: String) -> String? {
         func quiet(_ value: Any) -> Any {

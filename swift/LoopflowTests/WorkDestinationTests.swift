@@ -959,7 +959,7 @@ struct WorkDestinationTests {
 
     }
 
-    @Test func historicalTaskWithoutPlanningHasNoDeadEndFlowAction() async throws {
+    @Test func historicalTaskWithoutPlanningHasNoDeadEndGraphAction() async throws {
         var snapshot = try #require(JSONSerialization.jsonObject(with: Data(fixture().utf8)) as? [String: Any])
         var waves = try #require(snapshot["waves"] as? [[String: Any]])
         var unavailable = try #require(waves[0]["unavailable_tasks"] as? [[String: Any]])
@@ -971,7 +971,7 @@ struct WorkDestinationTests {
         let (model, _) = destinationModel(query: RegistryQuery { _, _ in exact })
         await model.openTaskLink(TaskLink(issue: "PRD-52", repo: nil))
         #expect(model.selection == .task(id: "issue-available"))
-        #expect(model.paletteRows.contains { $0.id == .flowLog("issue-available") })
+        #expect(model.paletteRows.contains { $0.id == .graphLog("issue-available") })
     }
 
     @Test func ambiguousAndUnavailableLinksPreserveTheWorkspace() async throws {

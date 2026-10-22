@@ -68,7 +68,7 @@ fn insert_process(store: &SqliteStore, _id: &str, ts: i64) {
             via_agent: Some(false),
             caller_session_id: None,
             caller_agent_process_id: None,
-            command: Some(r#"["lf","flow","telemetry-daily"]"#.into()),
+            command: Some(r#"["lf","graph","telemetry-daily"]"#.into()),
             repo: Some("/src/loopflow".into()),
             cwd: None,
             started_at: ts,
@@ -94,8 +94,8 @@ fn install_current_telemetry_obligation(home: &Path) {
         format!(
             r#"<plist><dict>
 <key>LoopflowWave</key><string>infrastructure</string>
-<key>LoopflowFlow</key><string>telemetry-daily</string>
-<key>LoopflowTargetKind</key><string>flow</string>
+<key>LoopflowGraph</key><string>telemetry-daily</string>
+<key>LoopflowTargetKind</key><string>graph</string>
 <key>LoopflowSchedule</key><string>{schedule}</string>
 <key>LoopflowHomeId</key><string>{machine_id}</string>
 <key>LoopflowActivatedAt</key><string>1787419431</string>
@@ -117,8 +117,8 @@ fn install_current_telemetry_obligation(home: &Path) {
         runner_started_at: None,
         machine_id,
         wave: "infrastructure".to_string(),
-        flow: "telemetry-daily".to_string(),
-        target_kind: CronTargetKind::Flow,
+        graph: "telemetry-daily".to_string(),
+        target_kind: CronTargetKind::Graph,
         source: CronSource::Scheduled,
         schedule,
         repo: home.to_path_buf(),
@@ -194,10 +194,10 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
     }
     let original_events = store.processes_since(0).unwrap();
     install_current_telemetry_obligation(home.path());
-    fs::create_dir_all(home.path().join(".lf/flows")).unwrap();
+    fs::create_dir_all(home.path().join(".lf/graphs")).unwrap();
     fs::create_dir_all(home.path().join("scripts")).unwrap();
     fs::write(
-        home.path().join(".lf/flows/telemetry-daily.yaml"),
+        home.path().join(".lf/graphs/telemetry-daily.yaml"),
         "- cmd: doctor\n- cmd: __telemetry-scorecard\n",
     )
     .unwrap();
@@ -239,7 +239,7 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
     fs::write(&receipt_path, serde_json::to_vec(&recovery).unwrap()).unwrap();
     let missing = run_lf(home.path(), &["doctor", "--json"]);
     assert_eq!(continuity_check(&missing)["status"], "fail");
-    let blocked = run_lf(home.path(), &["--batch", "flow", "telemetry-daily"]);
+    let blocked = run_lf(home.path(), &["--batch", "graph", "telemetry-daily"]);
     assert!(!blocked.status.success());
     assert!(!String::from_utf8_lossy(&blocked.stdout).contains("Lifecycle scorecard"));
     assert_eq!(
@@ -265,7 +265,7 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
         assert!(detail.contains(&format!("2026-08-{day:02}")), "{detail}");
     }
 
-    let telemetry = run_lf(home.path(), &["--batch", "flow", "telemetry-daily"]);
+    let telemetry = run_lf(home.path(), &["--batch", "graph", "telemetry-daily"]);
     assert!(
         telemetry.status.success(),
         "telemetry-daily failed: {}{}",

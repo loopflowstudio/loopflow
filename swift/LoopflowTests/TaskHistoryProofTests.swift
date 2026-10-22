@@ -161,7 +161,7 @@ struct TaskHistoryProofTests {
     }
 
     private func captureIfRequested(_ window: NSWindow, name: String) throws {
-        guard let directory = ProcessInfo.processInfo.environment["LOOPFLOW_FLOW_CAPTURE_DIR"],
+        guard let directory = ProcessInfo.processInfo.environment["LOOPFLOW_GRAPH_CAPTURE_DIR"],
               let content = window.contentView,
               let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
         content.cacheDisplay(in: content.bounds, to: bitmap)
@@ -214,7 +214,7 @@ private actor HistorySource {
         case ("wave", "list"): return "[]"
         case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
-        case ("flow", "list"): return "[]"
+        case ("graph", "list"): return "[]"
         case ("task", "comment"):
             return #"{"identifier":"fixture","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}"#
         case ("usage", "--days"):

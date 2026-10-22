@@ -16,7 +16,7 @@ use crate::work::task::TaskEventKind;
 use super::SqliteStore;
 
 impl SqliteStore {
-    /// A Task may launch a Flow while it is ready, not being abandoned, and
+    /// A Task may launch a Graph while it is ready, not being abandoned, and
     /// planned in its Wave's current chapter.
     pub(crate) fn require_task_launch(&self, task_id: &TaskId) -> StoreResult<()> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
@@ -673,7 +673,7 @@ mod durable_store_tests {
             iterations: None,
             task_id,
             wave_id,
-            flow_lf_process_id: None,
+            graph_lf_process_id: None,
             work_source: Some(WorkSource::Declared),
             bound_at: None,
             interactive: false,
@@ -738,7 +738,7 @@ mod durable_store_tests {
             linear_id: Some(LinearIssueId::new("task-uuid").unwrap()),
             identifier: "PROBE-1".to_string(),
             title: "Probe Task execution".to_string(),
-            description: "Exercise the Task Flow store".to_string(),
+            description: "Exercise the Task Graph store".to_string(),
             pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
             pm_writeback: LinearWritebackState::Current,
@@ -922,7 +922,7 @@ mod durable_store_tests {
     }
 
     fn conversation(
-        flow_lf_process_id: Option<String>,
+        graph_lf_process_id: Option<String>,
         task_id: Option<TaskId>,
         wave_id: Option<WaveId>,
     ) -> crate::session::LfSession {
@@ -940,7 +940,7 @@ mod durable_store_tests {
             iterations: None,
             task_id,
             wave_id,
-            flow_lf_process_id,
+            graph_lf_process_id,
             work_source: Some(WorkSource::Declared),
             bound_at: None,
             interactive: false,
@@ -1106,9 +1106,9 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn chapter_evidence_marks_taskless_flows_started_in_their_checkout() {
+    fn chapter_evidence_marks_taskless_graphs_started_in_their_checkout() {
         let (dir, store, existing) = store_with_task();
-        // A checkout recorded without an ownership entry, so only the Flow is evidence.
+        // A checkout recorded without an ownership entry, so only the Graph is evidence.
         let (task, _) = unregistered_task(&store, &existing, dir.path().join("unclaimed"));
         store.seed_unplaced_task(&task);
         store
@@ -1124,15 +1124,15 @@ mod durable_store_tests {
             )
             .unwrap();
         assert!(!store.chapter_task_evidence(&task.id).unwrap().begun);
-        // A Flow run from the checkout begins its Task without an explicit bind.
-        store.test_flow(
+        // A Graph run from the checkout begins its Task without an explicit bind.
+        store.test_graph(
             "sync",
             &task.worktree.as_ref().unwrap().to_string_lossy(),
             &[("sync --plan", None)],
             None,
         );
         assert!(store.chapter_task_evidence(&task.id).unwrap().begun);
-        // A Flow is evidence of work, not a claim.
+        // A Graph is evidence of work, not a claim.
         assert!(!store.task_owned(&task.id).unwrap());
     }
 
@@ -1573,7 +1573,7 @@ mod durable_store_tests {
                 caller_artifact_key: None,
                 task_id: None,
                 wave_id: wave,
-                flow_lf_process_id: None,
+                graph_lf_process_id: None,
                 work_source: None,
                 bound_at: None,
                 id: id.to_string().into(),

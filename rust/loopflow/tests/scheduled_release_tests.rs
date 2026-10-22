@@ -33,13 +33,13 @@ fn git(repo: &Path, args: &[&str]) -> String {
 }
 
 #[test]
-fn cron_command_failure_stays_nonzero_through_direct_and_flow_entry() {
+fn cron_command_failure_stays_nonzero_through_direct_and_graph_entry() {
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_home(&[("launchctl", "#!/bin/sh\nexit 0\n")], Some(home.path()));
     let repo = TestRepo::new();
     repo.create_file(
-        ".lf/flows/failing.yaml",
-        "- cmd: flow show missing-flow --json\n",
+        ".lf/graphs/failing.yaml",
+        "- cmd: graph show missing-graph --json\n",
     );
     let lf_home = home.path().join(".lf");
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -53,13 +53,13 @@ fn cron_command_failure_stays_nonzero_through_direct_and_flow_entry() {
     });
     let agents = home.path().join("Library/LaunchAgents");
     for (name, command) in [
-        ("direct", vec!["flow", "show", "missing-flow", "--json"]),
-        ("flow", vec!["--batch", "flow", "failing"]),
+        ("direct", vec!["graph", "show", "missing-graph", "--json"]),
+        ("graph", vec!["--batch", "graph", "failing"]),
     ] {
         let spec = CronSpec {
             wave: String::new(),
             published: false,
-            flow: name.into(),
+            graph: name.into(),
             command: command.into_iter().map(str::to_owned).collect(),
             schedule: loopflow::ops::parse_schedule("daily").unwrap(),
             working_directory: repo.path().to_path_buf(),
@@ -72,7 +72,7 @@ fn cron_command_failure_stays_nonzero_through_direct_and_flow_entry() {
         };
         add_cron(&agents, &spec, &SystemLaunchctl).unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-            .args(["cron", "run", "--wave", "", "--flow", name, "--scheduled"])
+            .args(["cron", "run", "--wave", "", "--graph", name, "--scheduled"])
             .current_dir(repo.path())
             .output()
             .unwrap();
@@ -84,12 +84,12 @@ fn cron_command_failure_stays_nonzero_through_direct_and_flow_entry() {
         assert_eq!(receipt.outcome, loopflow::ops::CronOutcome::Failed);
         assert!(receipt.exit_code.is_some_and(|code| code != 0));
         let log = fs::read_to_string(receipt.log_path).unwrap();
-        assert!(log.contains("missing-flow"), "operation must run: {log}");
+        assert!(log.contains("missing-graph"), "operation must run: {log}");
     }
 }
 
 #[test]
-fn scheduled_release_flow_settles_product_results_and_preserves_failures() {
+fn scheduled_release_graph_settles_product_results_and_preserves_failures() {
     run_scenarios(&[
         "published",
         "no-change",
@@ -129,7 +129,7 @@ fn telemetry_history_does_not_imply_release_coverage() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|s| s["flow"] == "telemetry-daily")
+        .find(|s| s["graph"] == "telemetry-daily")
         .unwrap()
         .clone();
     segment["repo"] = serde_json::json!(repo.path().canonicalize().unwrap());
@@ -139,11 +139,11 @@ fn telemetry_history_does_not_imply_release_coverage() {
     }
     let directory = home.path().join("cron/obligations");
     fs::create_dir_all(&directory).unwrap();
-    for flow in ["telemetry-daily", "release-run"] {
-        segment["id"] = flow.into();
-        segment["flow"] = flow.into();
+    for graph in ["telemetry-daily", "release-run"] {
+        segment["id"] = graph.into();
+        segment["graph"] = graph.into();
         fs::write(
-            directory.join(format!("{flow}.json")),
+            directory.join(format!("{graph}.json")),
             serde_json::to_vec(&segment).unwrap(),
         )
         .unwrap();
@@ -157,7 +157,7 @@ fn telemetry_history_does_not_imply_release_coverage() {
         assert!(text.contains("infrastructure/telemetry-daily"));
         assert_eq!(
             text.contains("Opportunity coverage unknown"),
-            flow == "telemetry-daily",
+            graph == "telemetry-daily",
             "{text}"
         );
         let output = command.arg("--json").output().unwrap();
@@ -165,7 +165,7 @@ fn telemetry_history_does_not_imply_release_coverage() {
         let history: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(
             history["observation_frontier"].is_null(),
-            flow == "telemetry-daily"
+            graph == "telemetry-daily"
         );
         assert_eq!(history["summary"]["published"], 0);
         assert_eq!(history["summary"]["no_change"], 0);
@@ -455,7 +455,7 @@ esac
             ),
         );
         repo.create_file(
-            ".lf/flows/release-run.yaml",
+            ".lf/graphs/release-run.yaml",
             "- cmd: repo release run patch\n",
         );
         repo.create_file(".lf/wave/infrastructure/GOAL.md", "# Infrastructure\n");
@@ -571,12 +571,12 @@ exit 0
         let telemetry = CronSpec {
             wave: "infrastructure".into(),
             published: false,
-            flow: "telemetry-daily".into(),
+            graph: "telemetry-daily".into(),
             command: vec![
                 "--wave".into(),
                 "infrastructure".into(),
                 "--batch".into(),
-                "flow".into(),
+                "graph".into(),
                 "telemetry-daily".into(),
             ],
             schedule: schedule.clone(),
@@ -594,7 +594,7 @@ exit 0
                     "run",
                     "--wave",
                     "infrastructure",
-                    "--flow",
+                    "--graph",
                     "telemetry-daily",
                     "--scheduled",
                 ])
@@ -617,7 +617,7 @@ exit 0
             let telemetry_result = run_cron(
                 &agents,
                 &telemetry.wave,
-                &telemetry.flow,
+                &telemetry.graph,
                 &host.machine_id,
                 &host.machine_id,
                 CronSource::Scheduled,
@@ -670,12 +670,12 @@ exit 0
         // Model an already-installed daily obligation in a disposable Machine. No
         // production schedule or clock is changed; these are synthetic due dates.
         let mut release = CronSpec {
-            flow: "release-template".into(),
+            graph: "release-template".into(),
             command: vec![
                 "--wave".into(),
                 "infrastructure".into(),
                 "--batch".into(),
-                "flow".into(),
+                "graph".into(),
                 "release-template".into(),
             ],
             lf_path: PathBuf::from(env!("CARGO_BIN_EXE_lf")),
@@ -697,7 +697,7 @@ exit 0
         );
         fs::rename(installed.path, &path).unwrap();
         fs::write(path, plist).unwrap();
-        release.flow = "release-run".into();
+        release.graph = "release-run".into();
         *release.command.last_mut().unwrap() = "release-run".into();
         if scenario == "telemetry-history" {
             // Seed a previously observed, unchanged schedule and one retained
@@ -706,7 +706,7 @@ exit 0
             let telemetry_path = loopflow::ops::list_crons(&agents, &SystemLaunchctl)
                 .unwrap()
                 .into_iter()
-                .find(|job| job.flow == "telemetry-daily")
+                .find(|job| job.graph == "telemetry-daily")
                 .unwrap();
             let plist = fs::read_to_string(&telemetry_path.path).unwrap().replace(
                 &format!("<string>{}</string>", telemetry_path.activated_at),
@@ -725,7 +725,7 @@ exit 0
                 let mut record: serde_json::Value =
                     serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
                 record["observed_at"] = activation.into();
-                if record["flow"] == "telemetry-daily" {
+                if record["graph"] == "telemetry-daily" {
                     let boundary = activation + 2 * 86400;
                     let mut prior = record.clone();
                     let prior_id = format!("{}-prior", record["id"].as_str().unwrap());
@@ -777,7 +777,7 @@ exit 0
             assert!(run_cron(
                 &agents,
                 &release.wave,
-                &release.flow,
+                &release.graph,
                 &host.machine_id,
                 &host.machine_id,
                 CronSource::Scheduled
@@ -816,7 +816,7 @@ exit 0
             assert!(run_cron(
                 &agents,
                 &release.wave,
-                &release.flow,
+                &release.graph,
                 &host.machine_id,
                 &host.machine_id,
                 CronSource::Scheduled
@@ -914,7 +914,7 @@ exit 0
             assert!(run_cron(
                 &agents,
                 &release.wave,
-                &release.flow,
+                &release.graph,
                 &host.machine_id,
                 &host.machine_id,
                 CronSource::Scheduled
@@ -930,7 +930,7 @@ exit 0
                 }
                 let mut record: serde_json::Value =
                     serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-                if record["flow"] != "release-run" {
+                if record["graph"] != "release-run" {
                     continue;
                 }
                 for opportunity in record["opportunities"].as_array_mut().unwrap() {
@@ -1039,7 +1039,7 @@ exit 0
                     "run",
                     "--wave",
                     "infrastructure",
-                    "--flow",
+                    "--graph",
                     "release-run",
                     "--scheduled",
                 ])
@@ -1133,7 +1133,7 @@ exit 0
         let result = run_cron(
             &agents,
             &release.wave,
-            &release.flow,
+            &release.graph,
             &host.machine_id,
             &host.machine_id,
             CronSource::Scheduled,
@@ -1448,7 +1448,7 @@ exit 0
             );
             for id in segments {
                 let segment = history.obligations.iter().find(|s| &s.id == id).unwrap();
-                assert_eq!(segment.flow, "telemetry-daily");
+                assert_eq!(segment.graph, "telemetry-daily");
                 assert!(segment.opportunities.is_empty());
             }
             assert_eq!(history.summary.failed_verifications, 1);
@@ -1536,7 +1536,7 @@ exit 0
             let result = run_cron(
                 &agents,
                 &release.wave,
-                &release.flow,
+                &release.graph,
                 &host.machine_id,
                 &host.machine_id,
                 CronSource::Scheduled,

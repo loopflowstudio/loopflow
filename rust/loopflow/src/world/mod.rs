@@ -20,8 +20,8 @@ use std::process::Command;
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 
-use crate::flow::graph::FlowGraph;
-use crate::flow::ConcreteStep;
+use crate::graph::compiled::CompiledGraph;
+use crate::graph::ConcreteStep;
 use crate::id::{LfProcessId, TraceId};
 use crate::ops::human_session::provider_conversation;
 use crate::ops::task::TaskRunSelection;
@@ -183,7 +183,7 @@ while IFS= read -r input; do
 done
 "#;
 
-/// How a recorded Flow ended: every step succeeded, or the step at this
+/// How a recorded Graph ended: every step succeeded, or the step at this
 /// index failed and nothing after it ran.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -568,10 +568,10 @@ impl World {
 
     /// Run `requested` for `task` the way `lf task run` does: take up a
     /// Workflow it names (or the Wave or repository default), set out on the
-    /// edge it selects and record that edge's Flow, each step lasting
-    /// `minutes` and the last ending `ended_days_ago`. A Flow that succeeds
+    /// edge it selects and record that edge's Graph, each step lasting
+    /// `minutes` and the last ending `ended_days_ago`. A Graph that succeeds
     /// puts the Task at the edge's target; one that fails leaves it stopped on
-    /// the edge. A requested Flow that is no edge runs off any Workflow.
+    /// the edge. A requested Graph that is no edge runs off any Workflow.
     pub fn task_run(
         &self,
         task: &Task,
@@ -587,25 +587,25 @@ impl World {
         let trace = TraceId::new();
         let issue = task.identifier.as_str();
         let argv = vec!["lf", "task", "run", issue, requested];
-        let (flow, edge) = match selection {
-            TaskRunSelection::Flow(flow) => (flow, None),
+        let (graph, edge) = match selection {
+            TaskRunSelection::Graph(graph) => (graph, None),
             TaskRunSelection::Edge {
                 workflow,
                 index,
                 take_up,
             } => {
-                // Only an edge into `end` may name no Flow.
+                // Only an edge into `end` may name no Graph.
                 let edge = &workflow.definition.edges[index as usize];
-                let flow = match &edge.flow {
-                    Some(flow) if edge.to != END => flow.clone(),
+                let graph = match &edge.graph {
+                    Some(graph) if edge.to != END => graph.clone(),
                     _ => bail!("{requested} enters {END}; complete the Task instead"),
                 };
-                (flow, Some((workflow, index, take_up)))
+                (graph, Some((workflow, index, take_up)))
             }
         };
-        let (name, steps) = crate::ops::task::load_task_flow(&checkout, &flow)?;
+        let (name, steps) = crate::ops::task::load_task_graph(&checkout, &graph)?;
         let (started, ended) = self.span(&steps, ended_days_ago, minutes, outcome)?;
-        // The Task run starts its Flow, which starts the first step.
+        // The Task run starts its Graph, which starts the first step.
         let mut run = self.process(&trace, None, &checkout, argv, started - 2);
         run.completed_at = Some(ended);
         outcome.complete(&mut run);
@@ -620,11 +620,11 @@ impl World {
                 .sqlite
                 .choose_workflow_edge(&task.id, &workflow, index, &run.id, None)?
             {
-                bail!("Task {issue} moved while choosing {flow}");
+                bail!("Task {issue} moved while choosing {graph}");
             }
         }
-        let argv = vec!["lf", "--task", issue, "flow", "--", &name];
-        self.flow(
+        let argv = vec!["lf", "--task", issue, "graph", "--", &name];
+        self.graph(
             &store, &trace, &run.id, &checkout, argv, &name, &steps, started, minutes, outcome,
         )?;
         if outcome == Outcome::Succeeded {
@@ -668,16 +668,16 @@ impl World {
         let recorded = match outcome {
             Outcome::Succeeded => steps.len(),
             Outcome::FailedAt(step) if step < steps.len() => step + 1,
-            Outcome::FailedAt(step) => bail!("the Flow has no step {step}"),
+            Outcome::FailedAt(step) => bail!("the Graph has no step {step}"),
         };
         let ended = self.days_ago(ended_days_ago);
         Ok((ended - minutes * 60 * recorded as i64, ended))
     }
 
-    /// Record one finished pass of a compiled Flow under `parent`: one step
+    /// Record one finished pass of a compiled Graph under `parent`: one step
     /// Process per top-level node, stopping at a failed step.
     #[allow(clippy::too_many_arguments)]
-    fn flow(
+    fn graph(
         &self,
         store: &SharedStore,
         trace: &TraceId,
@@ -690,23 +690,23 @@ impl World {
         minutes: i64,
         outcome: Outcome,
     ) -> Result<()> {
-        let graph = FlowGraph::new(name, steps);
-        let mut flow = self.process(trace, Some(parent), cwd, argv, started - 1);
+        let compiled = CompiledGraph::new(name, steps);
+        let mut graph = self.process(trace, Some(parent), cwd, argv, started - 1);
         let mut begin = started;
         let mut records = Vec::new();
-        for (step, node) in steps.iter().zip(&graph.steps) {
+        for (step, node) in steps.iter().zip(&compiled.steps) {
             let argv = match step {
                 ConcreteStep::Skill(_) => ["lf", "-b", "skill", node.label.as_str()]
                     .map(str::to_string)
                     .to_vec(),
                 ConcreteStep::Command(command) => command.item.argv(),
                 ConcreteStep::Xor(_) => {
-                    bail!("Flow {name} branches; worlds record single-path Flows")
+                    bail!("Graph {name} branches; worlds record single-path Graphs")
                 }
             };
             let mut process = self.process(
                 trace,
-                Some(&flow.id),
+                Some(&graph.id),
                 cwd,
                 argv.iter().map(String::as_str).collect(),
                 begin,
@@ -720,15 +720,15 @@ impl World {
                 break;
             }
         }
-        flow.completed_at = Some(begin);
-        outcome.complete(&mut flow);
-        store.sqlite.record_process(&flow)?;
-        store.sqlite.record_flow_process(&flow.id, &graph)?;
+        graph.completed_at = Some(begin);
+        outcome.complete(&mut graph);
+        store.sqlite.record_process(&graph)?;
+        store.sqlite.record_graph_process(&graph.id, &compiled)?;
         for (process, key) in records {
             store.sqlite.record_process(&process)?;
             store
                 .sqlite
-                .record_flow_step(&flow.id, &process.id, key, &[Vec::new()])?;
+                .record_graph_step(&graph.id, &process.id, key, &[Vec::new()])?;
         }
         Ok(())
     }

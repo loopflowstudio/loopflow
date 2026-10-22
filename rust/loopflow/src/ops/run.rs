@@ -84,16 +84,16 @@ fn render_project_context(project: &crate::work::project::Project) -> String {
 
 fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String {
     // Authored goals and memory enter once through the prompt document gatherer.
-    let flows = match crate::flow::available_flow_names(repo) {
+    let graphs = match crate::graph::available_graph_names(repo) {
         Ok(names) => names
             .iter()
-            .map(|flow| format!("- {flow}"))
+            .map(|graph| format!("- {graph}"))
             .collect::<Vec<_>>()
             .join("\n"),
-        Err(error) => format!("Flow catalog unavailable: {error}"),
+        Err(error) => format!("Graph catalog unavailable: {error}"),
     };
     format!(
-        "Drive the '{wave}' Wave's goal forward using its checkout-local files.\n\n<lf:goal-context>\nAvailable flows:\n{flows}\n</lf:goal-context>\n\n{metric_context}\n\n<lf:wave-executive-loop>\n1. What is most important?\n2. What signals are arriving?\n3. What works?\n4. What does not?\n5. What is the current strategy?\n6. How should strategy adjust?\n\nTreat metrics as evidence, never as automatic KR completion or a composite Wave score.\n</lf:wave-executive-loop>"
+        "Drive the '{wave}' Wave's goal forward using its checkout-local files.\n\n<lf:goal-context>\nAvailable graphs:\n{graphs}\n</lf:goal-context>\n\n{metric_context}\n\n<lf:wave-executive-loop>\n1. What is most important?\n2. What signals are arriving?\n3. What works?\n4. What does not?\n5. What is the current strategy?\n6. How should strategy adjust?\n\nTreat metrics as evidence, never as automatic KR completion or a composite Wave score.\n</lf:wave-executive-loop>"
     )
 }
 
@@ -692,7 +692,7 @@ mod tests {
         let _lock = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let tmp = loopflow_test_support::TestRepo::new();
         std::fs::create_dir_all(tmp.path().join(".lf/wave/release")).unwrap();
         let goal = "---\ncrons: []\n---\n## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
@@ -759,7 +759,7 @@ mod tests {
         let _lock = crate::journal::test_env_lock();
         let (home, store) = test_store().await;
         let _home =
-            crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         for (name, memory) in [
             ("infrastructure", "Parent memory"),
@@ -1018,7 +1018,7 @@ mod tests {
                     subjects: vec![crate::session_record::SubjectAttribution::declared(
                         format!("task:{selector}"),
                     )],
-                    flow: crate::session_record::SessionFlowMembership::Independent,
+                    graph: crate::session_record::SessionGraphMembership::Independent,
                     work: Some(crate::session::SessionWork {
                         task_id: Some(task.id.clone()),
                         wave_id: Some(wave.id().clone()),
@@ -1122,7 +1122,7 @@ mod tests {
                 }),
                 task_id,
                 wave_id: None,
-                flow_lf_process_id: None,
+                graph_lf_process_id: None,
                 bound_at: None,
                 interactive: false,
                 repo: None,
@@ -1280,12 +1280,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_wave_binding_carries_flows_and_shared_metric_context() {
+    async fn direct_wave_binding_carries_graphs_and_shared_metric_context() {
         let (directory, store) = test_store().await;
         let repo = directory.path().join("repo");
         std::fs::create_dir_all(repo.join(".lf/wave/runtime")).unwrap();
-        std::fs::create_dir_all(repo.join(".lf/flows")).unwrap();
-        std::fs::write(repo.join(".lf/flows/local-delivery.yaml"), "- implement\n").unwrap();
+        std::fs::create_dir_all(repo.join(".lf/graphs")).unwrap();
+        std::fs::write(repo.join(".lf/graphs/local-delivery.yaml"), "- implement\n").unwrap();
         let wave = Wave::new(
             WaveId::new(),
             "runtime".to_string(),

@@ -193,7 +193,7 @@ def test_host_publisher_owns_credentialed_release_steps():
 def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
     config = yaml.safe_load((ROOT / ".lf/config.yaml").read_text())
     assert "crons" not in config
-    assert yaml.safe_load((ROOT / ".lf/flows/release-run.yaml").read_text()) == [
+    assert yaml.safe_load((ROOT / ".lf/graphs/release-run.yaml").read_text()) == [
         {"cmd": "repo release run patch"}
     ]
 
@@ -212,11 +212,11 @@ def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
     assert "--git-common-dir" in bootstrap
     assert '"${minimal_env[@]}" lf cron add telemetry-daily --schedule "0 0 9 * * *"' in bootstrap
     assert '"${minimal_env[@]}" lf cron add release-run --schedule "0 0 10 * * *"' in bootstrap
-    assert "-- --wave \"$wave\" --batch flow release-run" in bootstrap
+    assert "-- --wave \"$wave\" --batch graph release-run" in bootstrap
     assert 'lf cron list --wave "$wave" --json' in bootstrap
     assert "lf cron trigger" in bootstrap
-    assert "--flow telemetry-daily --wait --timeout 15m" in bootstrap
-    assert "--flow release-run --wait --timeout 3h" in bootstrap
+    assert "--graph telemetry-daily --wait --timeout 15m" in bootstrap
+    assert "--graph release-run --wait --timeout 3h" in bootstrap
     assert 'lf cron history --wave "$wave" --days 35' in bootstrap
     assert "env -i" in bootstrap
     assert "DOPPLER_TOKEN" not in bootstrap

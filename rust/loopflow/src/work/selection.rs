@@ -203,7 +203,7 @@ mod tests {
             assert!(default_plans(&store, "/unknown-repository").is_err());
         }
         assert_eq!(store.revisions().unwrap(), revisions);
-        for table in ["agent_sessions", "processes", "flow_processes"] {
+        for table in ["agent_sessions", "processes", "graph_processes"] {
             assert_eq!(
                 conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row
                     .get::<_, i64>(0))

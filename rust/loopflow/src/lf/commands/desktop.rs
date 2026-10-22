@@ -128,7 +128,7 @@ pub enum DesktopPaneAction {
     Files {
         task: String,
     },
-    FlowLog {
+    GraphLog {
         task: String,
     },
     Move {
@@ -257,8 +257,8 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         ["desktop", "list"] => Some(schema::<DesktopInspection>()),
         ["open"] => Some(schema::<super::open::OpenReport>()),
         ["desktop", "read"] => Some(schema::<DesktopTextReading>()),
-        ["desktop", "text" | "key" | "hide" | "restore" | "focus" | "shell" | "files" | "flow-log" | "move"
-        | "resize" | "zoom"] => Some(schema::<DesktopPaneReceipt>()),
+        ["desktop", "text" | "key" | "hide" | "restore" | "focus" | "shell" | "files" | "graph-log"
+        | "move" | "resize" | "zoom"] => Some(schema::<DesktopPaneReceipt>()),
         _ => None,
     }
 }
@@ -350,8 +350,8 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
             },
             json,
         ),
-        DesktopCommand::FlowLog { json, .. } => (
-            DesktopPaneAction::FlowLog {
+        DesktopCommand::GraphLog { json, .. } => (
+            DesktopPaneAction::GraphLog {
                 task: bound(&resolution.task, "Task")?.into(),
             },
             json,
@@ -440,7 +440,7 @@ impl DesktopInspection {
             | DesktopCommand::Focus { pane, .. }
             | DesktopCommand::Shell { pane, .. }
             | DesktopCommand::Files { pane, .. }
-            | DesktopCommand::FlowLog { pane, .. }
+            | DesktopCommand::GraphLog { pane, .. }
             | DesktopCommand::Zoom { pane, .. } => (pane, false, None),
             DesktopCommand::List { .. } => {
                 bail!("This command does not address a pane")

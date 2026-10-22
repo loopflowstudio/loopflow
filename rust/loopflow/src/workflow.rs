@@ -1,7 +1,7 @@
 //! A workflow definition: the nodes where a person takes part in the Task
-//! conversation, joined by edges that are operational Flows. `start` and `end`
+//! conversation, joined by edges that are operational Graphs. `start` and `end`
 //! are implicit. A workflow executes nothing; `lf task run` traverses it by
-//! running an edge's Flow like any other.
+//! running an edge's Graph like any other.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::LoadError;
-use crate::flow::{compile_flow, load_flow, load_skill};
+use crate::graph::{compile_graph, load_graph, load_skill};
 use crate::skills::first_prose_line;
 
 pub const START: &str = "start";
@@ -42,9 +42,9 @@ pub struct WorkflowNode {
 pub struct WorkflowEdge {
     pub from: String,
     pub to: String,
-    /// The Flow that carries the Task along this edge. Only an edge into
+    /// The Graph that carries the Task along this edge. Only an edge into
     /// `end` may name none.
-    pub flow: Option<String>,
+    pub graph: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,10 +55,10 @@ pub struct WorkflowDefinition {
 }
 
 impl WorkflowEdge {
-    /// What `lf task run ISSUE <name>` calls this edge: its Flow, or the node
+    /// What `lf task run ISSUE <name>` calls this edge: its Graph, or the node
     /// it enters when it runs none.
     pub fn name(&self) -> &str {
-        self.flow.as_deref().unwrap_or(&self.to)
+        self.graph.as_deref().unwrap_or(&self.to)
     }
 }
 
@@ -89,7 +89,7 @@ pub fn unplanned() -> WorkflowDefinition {
         edges: vec![WorkflowEdge {
             from: START.to_string(),
             to: END.to_string(),
-            flow: None,
+            graph: None,
         }],
     }
 }
@@ -117,7 +117,7 @@ pub fn workflow_path(name: &str, repo: &Path) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-/// The builtin Workflow; Flow definitions occupy a separate namespace.
+/// The builtin Workflow; Graph definitions occupy a separate namespace.
 pub(crate) fn builtin_workflow(name: &str) -> Option<&'static str> {
     BUILTIN_WORKFLOWS
         .iter()
@@ -193,7 +193,7 @@ pub fn load_workflow(name: &str, repo: &Path) -> Result<Option<WorkflowDefinitio
     };
     parse_workflow(name, &content, repo)
         .map(Some)
-        .map_err(|error| LoadError::InvalidFlow(format!("workflow {name}: {error}")))
+        .map_err(|error| LoadError::InvalidGraph(format!("workflow {name}: {error}")))
 }
 
 /// Name the committed file a teammate's Workflow selection needs.
@@ -269,14 +269,14 @@ pub fn parse_workflow(
         if edge.to != END && !known(&edge.to) {
             return Err(format!("{label} enters an unknown node"));
         }
-        match &edge.flow {
-            Some(flow) => {
+        match &edge.graph {
+            Some(graph) => {
                 let definition =
-                    load_flow(flow, repo).map_err(|error| format!("{label}: {error}"))?;
-                compile_flow(&definition, repo).map_err(|error| format!("{label}: {error}"))?;
+                    load_graph(graph, repo).map_err(|error| format!("{label}: {error}"))?;
+                compile_graph(&definition, repo).map_err(|error| format!("{label}: {error}"))?;
             }
             None if edge.to != END => {
-                return Err(format!("{label} names no flow; only an edge into end may"))
+                return Err(format!("{label} names no graph; only an edge into end may"))
             }
             None => {}
         }
@@ -327,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn builtin_workflows_join_conversation_nodes_with_operational_flows() {
+    fn builtin_workflows_join_conversation_nodes_with_operational_graphs() {
         let repo = tempfile::tempdir().unwrap();
         let feature = load_workflow("feature", repo.path()).unwrap().unwrap();
         let nodes: Vec<_> = feature.nodes.iter().map(|s| s.name.as_str()).collect();
@@ -338,7 +338,7 @@ mod tests {
         );
         let from_demo: Vec<_> = feature
             .outgoing("demo")
-            .map(|(_, edge)| (edge.to.as_str(), edge.flow.as_deref()))
+            .map(|(_, edge)| (edge.to.as_str(), edge.graph.as_deref()))
             .collect();
         assert_eq!(from_demo, [("demo", Some("pursue")), (END, Some("ship"))]);
         // A Task with no PR: its last edge runs nothing.
@@ -346,25 +346,25 @@ mod tests {
         assert!(research
             .edges
             .iter()
-            .any(|edge| edge.to == END && edge.flow.is_none()));
+            .any(|edge| edge.to == END && edge.graph.is_none()));
         assert!(load_workflow("code", repo.path()).unwrap().is_some());
         assert!(load_workflow("pursue", repo.path()).unwrap().is_none());
-        // A repository Flow does not hide the same-named builtin Workflow.
-        write(repo.path(), ".lf/flows/feature.yaml", "- implement\n");
+        // A repository Graph does not hide the same-named builtin Workflow.
+        write(repo.path(), ".lf/graphs/feature.yaml", "- implement\n");
         assert!(load_workflow("feature", repo.path()).unwrap().is_some());
         assert!(names_workflow("feature", repo.path()));
         assert!(names_workflow("code", repo.path()));
     }
 
     #[test]
-    fn an_authored_workflow_must_be_a_connected_graph_of_known_flows() {
+    fn an_authored_workflow_must_be_a_connected_graph_of_known_graphs() {
         let repo = tempfile::tempdir().unwrap();
         let load = |content: &str| {
             write(repo.path(), ".lf/workflows/proof.yaml", content);
             load_workflow("proof", repo.path()).map(|workflow| workflow.unwrap())
         };
         let valid = load(
-            "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {from: review, to: end}\n",
+            "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: pursue}\n  - {from: review, to: end}\n",
         )
         .unwrap();
         assert_eq!(valid.outgoing(START).count(), 1);
@@ -372,33 +372,33 @@ mod tests {
         let described = valid.nodes[0].description.clone().unwrap();
         assert!(!described.is_empty() && !described.contains('\n'));
         let authored = load(
-            "nodes:\n  review: {skill: demo, description: you try it}\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {from: review, to: end}\n",
+            "nodes:\n  review: {skill: demo, description: you try it}\nedges:\n  - {from: start, to: review, graph: pursue}\n  - {from: review, to: end}\n",
         )
         .unwrap();
         assert_eq!(authored.nodes[0].description.as_deref(), Some("you try it"));
         for (content, expected) in [
             (
-                "nodes:\n  review: demo\n  lost: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n",
+                "nodes:\n  review: demo\n  lost: demo\nedges:\n  - {from: start, to: review, graph: pursue}\n",
                 "unreachable",
             ),
             (
-                "edges:\n  - {from: start, to: end, flow: no-such-flow}\n",
-                "no-such-flow",
+                "edges:\n  - {from: start, to: end, graph: no-such-graph}\n",
+                "no-such-graph",
             ),
             (
                 "nodes:\n  review: demo\nedges:\n  - {from: start, to: review}\n",
-                "names no flow",
+                "names no graph",
             ),
             (
-                "edges:\n  - {from: start, to: missing, flow: pursue}\n",
+                "edges:\n  - {from: start, to: missing, graph: pursue}\n",
                 "unknown node",
             ),
             (
-                "nodes:\n  review: no-such-skill\nedges:\n  - {from: start, to: review, flow: pursue}\n",
+                "nodes:\n  review: no-such-skill\nedges:\n  - {from: start, to: review, graph: pursue}\n",
                 "no-such-skill",
             ),
             (
-                "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {from: start, to: end, flow: pursue}\n",
+                "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: pursue}\n  - {from: start, to: end, graph: pursue}\n",
                 "two outgoing edges",
             ),
         ] {
@@ -424,7 +424,7 @@ mod tests {
         write(
             repo.path(),
             ".lf/workflows/feature.yaml",
-            "edges:\n  - {from: start, to: end, flow: no-such-flow}\n",
+            "edges:\n  - {from: start, to: end, graph: no-such-graph}\n",
         );
         let invalid = entry("feature").unwrap();
         assert_eq!(
@@ -432,21 +432,21 @@ mod tests {
             Some(".lf/workflows/feature.yaml")
         );
         assert!(invalid.workflow.is_none());
-        assert!(invalid.unavailable.unwrap().contains("no-such-flow"));
+        assert!(invalid.unavailable.unwrap().contains("no-such-graph"));
         assert!(
             std::fs::read_to_string(repo.path().join(".lf/workflows/feature.yaml"))
                 .unwrap()
-                .contains("no-such-flow")
+                .contains("no-such-graph")
         );
 
-        let flow = crate::flow::customize("pursue", repo.path()).unwrap();
-        assert_eq!(flow, repo.path().join(".lf/flows/pursue.yaml"));
-        let pursue = crate::flow::graph::flow_catalog(repo.path())
+        let graph = crate::graph::customize("pursue", repo.path()).unwrap();
+        assert_eq!(graph, repo.path().join(".lf/graphs/pursue.yaml"));
+        let pursue = crate::graph::compiled::graph_catalog(repo.path())
             .unwrap()
             .into_iter()
             .find(|entry| entry.name == "pursue")
             .unwrap();
-        assert_eq!(pursue.source.as_deref(), Some(".lf/flows/pursue.yaml"));
-        assert!(pursue.graph.is_some());
+        assert_eq!(pursue.source.as_deref(), Some(".lf/graphs/pursue.yaml"));
+        assert!(pursue.compiled.is_some());
     }
 }

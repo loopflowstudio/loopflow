@@ -2465,7 +2465,7 @@ esac
             runtime
                 .block_on(fixture.store.seed_task(&task, &pr))
                 .unwrap();
-            fixture.store.sqlite.test_flow(
+            fixture.store.sqlite.test_graph(
                 "review",
                 &task.worktree.as_ref().unwrap().to_string_lossy(),
                 &[("review", Some("failed"))],
@@ -2588,8 +2588,8 @@ esac
             .is_empty());
             assert!(git(&repo, &["branch", "--list", "cancel-me"]).is_empty());
             assert!(repo.join(".git/pr-closed").exists());
-            // The Flow's Processes remain as history; abandonment retires nothing.
-            assert_eq!(fixture.store.sqlite.task_flows(&task.id).unwrap().len(), 1);
+            // The Graph's Processes remain as history; abandonment retires nothing.
+            assert_eq!(fixture.store.sqlite.task_graphs(&task.id).unwrap().len(), 1);
             assert_eq!(
                 runtime
                     .block_on(
@@ -5050,7 +5050,7 @@ fn project_prose_save_delivers_and_settles_without_changing_managed_fields() {
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             conn.execute("UPDATE tasks SET worktree='/retained/task',branch='retained/branch' WHERE id=?1", [task.id.as_str()]).unwrap();
             conn.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
-            conn.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'start',0,'11111111-1111-4111-8111-111111111111',3)", rusqlite::params![task.id.as_str(),json!({"name":"code","nodes":[],"edges":[{"from":"start","to":"end","flow":"implement"}]}).to_string()]).unwrap();
+            conn.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'start',0,'11111111-1111-4111-8111-111111111111',3)", rusqlite::params![task.id.as_str(),json!({"name":"code","nodes":[],"edges":[{"from":"start","to":"end","graph":"implement"}]}).to_string()]).unwrap();
             let workflow_before = fixture.store.sqlite.workflow(&task.id).unwrap();
             let work = crate::durable::WorkRef::Project(task.project_id.clone().unwrap());
             let mut provider = planning_project("project-1", "project-1");

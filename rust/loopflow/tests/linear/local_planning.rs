@@ -910,9 +910,9 @@ fn public_local_planning_survives_restart_with_generated_identity() {
 fn public_local_task_places_and_runs_without_a_planning_provider() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    repo.create_file(".lf/flows/proof.yaml", "- cmd: flow show proof\n");
+    repo.create_file(".lf/graphs/proof.yaml", "- cmd: graph show proof\n");
     let definition = repo.path().join(".lf/workflows/proof.yaml");
-    repo.create_file(".lf/workflows/proof.yaml", "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: end, flow: proof}\n");
+    repo.create_file(".lf/workflows/proof.yaml", "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: proof}\n  - {from: review, to: end, graph: proof}\n");
     repo.stage_all();
     repo.commit("Fixture workflow");
     assert!(Command::new("git")
@@ -2069,8 +2069,8 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             .unwrap()
             .iter()
             .all(|task| task.worktree.is_none()));
-        let (sessions,flows): (i64,i64) = conn.query_row("SELECT (SELECT count(*) FROM agent_sessions),(SELECT count(*) FROM task_workflows)",[],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
-        assert_eq!((sessions, flows), (0, 0));
+        let (sessions,graphs): (i64,i64) = conn.query_row("SELECT (SELECT count(*) FROM agent_sessions),(SELECT count(*) FROM task_workflows)",[],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
+        assert_eq!((sessions, graphs), (0, 0));
         assert!(!repo.path().join(".lf/wave").exists());
     }
 }
@@ -2177,7 +2177,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 .unwrap();
         }
         db.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
-        db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',0,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![active.id.as_str(),serde_json::json!({"name":"review","nodes":[],"edges":[{"from":"review","to":"end","flow":"implement"}]}).to_string()]).unwrap();
+        db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',0,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![active.id.as_str(),serde_json::json!({"name":"review","nodes":[],"edges":[{"from":"review","to":"end","graph":"implement"}]}).to_string()]).unwrap();
         let retained_execution = || {
             [
                 ("task_workflows", "task_id", active.id.as_str()),
@@ -3576,7 +3576,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     )
     .unwrap();
     db.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
-    db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',0,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![id.as_str(),json!({"name":"review","nodes":[],"edges":[{"from":"review","to":"end","flow":"implement"}]}).to_string()]).unwrap();
+    db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',0,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![id.as_str(),json!({"name":"review","nodes":[],"edges":[{"from":"review","to":"end","graph":"implement"}]}).to_string()]).unwrap();
     let saved = store.task(&id).unwrap().unwrap();
     let read = || {
         lf(
@@ -3768,10 +3768,10 @@ fn waveless_task_lifecycle() {
     std::fs::write(repo.path().join(".lf/config.yaml"), "workflow: proof\n").unwrap();
     std::fs::write(
         repo.path().join(".lf/workflows/proof.yaml"),
-        "nodes: {review: demo}\nedges: [{from: start, to: review, flow: proof}, {from: review, to: end}]\n",
+        "nodes: {review: demo}\nedges: [{from: start, to: review, graph: proof}, {from: review, to: end}]\n",
     )
     .unwrap();
-    repo.create_file(".lf/flows/proof.yaml", "- cmd: flow show proof\n");
+    repo.create_file(".lf/graphs/proof.yaml", "- cmd: graph show proof\n");
     repo.stage_all();
     repo.commit("Configure repository workflow");
     repo.push();
@@ -3867,13 +3867,13 @@ fn workflow_defaults_follow_task_wave_and_repository() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     repo.create_file(".lf/config.yaml", "workflow: repository\n");
-    repo.create_file(".lf/flows/proof.yaml", "- cmd: flow show proof\n");
+    repo.create_file(".lf/graphs/proof.yaml", "- cmd: graph show proof\n");
     for (name, node) in [
         ("repository", "repo-review"),
         ("wave", "wave-review"),
         ("explicit", "task-review"),
     ] {
-        repo.create_file(&format!(".lf/workflows/{name}.yaml"), &format!("nodes: {{{node}: demo}}\nedges: [{{from: start, to: {node}, flow: proof}}, {{from: {node}, to: end}}]\n"));
+        repo.create_file(&format!(".lf/workflows/{name}.yaml"), &format!("nodes: {{{node}: demo}}\nedges: [{{from: start, to: {node}, graph: proof}}, {{from: {node}, to: end}}]\n"));
     }
     repo.stage_all();
     repo.commit("Configure selection proof");

@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
-use loopflow::flow::Command as FlowCommand;
+use loopflow::graph::Command as GraphCommand;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 use support::EnvGuard;
@@ -100,7 +100,7 @@ fn ci_remains_a_read_only_home_report_outside_a_checkout() {
 }
 
 #[test]
-fn release_bump_uses_the_same_operation_from_cli_and_captured_flow() {
+fn release_bump_uses_the_same_operation_from_cli_and_captured_graph() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
@@ -117,11 +117,11 @@ fn release_bump_uses_the_same_operation_from_cli_and_captured_flow() {
         .unwrap()
         .contains("version = \"0.9.1\""));
 
-    let captured = FlowCommand {
+    let captured = GraphCommand {
         command: "repo".into(),
         args: ["release", "bump", "0.9.2"].map(str::to_string).to_vec(),
     };
-    // A Flow runs the operation as its own command.
+    // A Graph runs the operation as its own command.
     let argv = captured.argv();
     let argv: Vec<&str> = argv[1..].iter().map(String::as_str).collect();
     success(run(repo.path(), home.path(), &argv));

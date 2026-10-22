@@ -273,18 +273,18 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
     }
 
-    /// Read a Task's captured Flows through its content-owned transport.
-    public func taskFlowProcesses(task: String, cwd: String?) async throws -> [FlowProcessDetail] {
-        struct Page: Decodable { let entries: [FlowProcessInventoryEntry]; let next: String? }
+    /// Read a Task's captured Graphs through its content-owned transport.
+    public func taskGraphProcesses(task: String, cwd: String?) async throws -> [GraphProcessDetail] {
+        struct Page: Decodable { let entries: [GraphProcessInventoryEntry]; let next: String? }
         var after: String?
-        var result: [FlowProcessDetail] = []
+        var result: [GraphProcessDetail] = []
         repeat {
-            var args = ["flow", "list", "--processes", "--for-task", task, "--json"]
+            var args = ["graph", "list", "--processes", "--for-task", task, "--json"]
             if let after { args += ["--after", after] }
             let page = try Self.decode(Page.self, from: await run(args, cwd))
             for entry in page.entries {
-                let detail = try Self.decode(FlowProcessDetail.self,
-                    from: await run(["flow", "show", entry.id, "--processes", "--json"], cwd))
+                let detail = try Self.decode(GraphProcessDetail.self,
+                    from: await run(["graph", "show", entry.id, "--processes", "--json"], cwd))
                 result.append(detail)
             }
             after = page.next
@@ -292,10 +292,10 @@ public struct RegistryQuery: Sendable {
         return result
     }
 
-    /// Every selectable Flow with the topology it would capture, via the shared loader.
-    public func flowCatalog(cwd: String?) async throws -> [FlowCatalogEntry] {
-        let stdout = try await run(["flow", "list", "--json"], cwd)
-        return try Self.decode([FlowCatalogEntry].self, from: stdout)
+    /// Every selectable Graph with the topology it would capture, via the shared loader.
+    public func graphCatalog(cwd: String?) async throws -> [GraphCatalogEntry] {
+        let stdout = try await run(["graph", "list", "--json"], cwd)
+        return try Self.decode([GraphCatalogEntry].self, from: stdout)
     }
 
     public func workflowCatalog(cwd: String?) async throws -> [WorkflowCatalogEntry] {
@@ -307,15 +307,15 @@ public struct RegistryQuery: Sendable {
         try await run(["wave", "workflow", "source", name], cwd)
     }
 
-    public func customizeFlow(_ name: String, cwd: String?) async throws -> String {
-        try await run(["flow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
+    public func customizeGraph(_ name: String, cwd: String?) async throws -> String {
+        try await run(["graph", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Run a fresh Flow for the Task headless, placing it when needed. Without
-    /// `flow`, Rust takes the Task's edge or its Project's workflow.
-    public func runTask(issue: String, flow: String?, cwd: String?) async throws {
+    /// Run a fresh Graph for the Task headless, placing it when needed. Without
+    /// `graph`, Rust takes the Task's edge or its Project's workflow.
+    public func runTask(issue: String, graph: String?, cwd: String?) async throws {
         var args = ["-b", "task", "run", issue]
-        if let flow { args.append(flow) }
+        if let graph { args.append(graph) }
         if let start {
             try await start(args, cwd)
         } else {
@@ -486,7 +486,7 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Give one Session a human-assigned name and return the authoritative
-    /// record. The durable Session ID selects the conversation or Flow boundary.
+    /// record. The durable Session ID selects the conversation or Graph boundary.
     public func renameSession(
         id: String,
         name: String,

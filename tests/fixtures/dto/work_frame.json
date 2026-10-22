@@ -8,7 +8,7 @@
     "revisions": {
       "planning": 911,
       "sessions": 402,
-      "flows": 88,
+      "graphs": 88,
       "processes": 5120,
       "usage": 77
     },
@@ -35,7 +35,7 @@
     "revisions": {
       "planning": 911,
       "sessions": 403,
-      "flows": 88,
+      "graphs": 88,
       "processes": 5120,
       "usage": 77
     },
@@ -55,7 +55,7 @@
     "revisions": {
       "planning": 911,
       "sessions": 403,
-      "flows": 88,
+      "graphs": 88,
       "processes": 5120,
       "usage": 77
     },
@@ -71,7 +71,7 @@
     "revisions": {
       "planning": 911,
       "sessions": 403,
-      "flows": 88,
+      "graphs": 88,
       "processes": 5120,
       "usage": 77
     },
@@ -114,7 +114,7 @@
     "revisions": {
       "planning": 911,
       "sessions": 403,
-      "flows": 88,
+      "graphs": 88,
       "processes": 5120,
       "usage": 77
     },
@@ -135,7 +135,7 @@
     "revisions": {
       "planning": 912,
       "sessions": 403,
-      "flows": 89,
+      "graphs": 89,
       "processes": 5121,
       "usage": 77
     },
@@ -145,9 +145,9 @@
       "work": {
         "sessions": [],
         "workflow": null,
-        "flow_processes": []
+        "graph_processes": []
       },
-      "flow_processes": [],
+      "graph_processes": [],
       "comments": {
         "identifier": "LOO-1",
         "comments": [],
@@ -178,7 +178,7 @@
     "revisions": {
       "planning": 912,
       "sessions": 17,
-      "flows": 3,
+      "graphs": 3,
       "processes": 12,
       "usage": 0
     },
@@ -194,7 +194,7 @@
     "revisions": {
       "planning": 912,
       "sessions": 403,
-      "flows": 89,
+      "graphs": 89,
       "processes": 5121,
       "usage": 77
     },
@@ -208,14 +208,14 @@
             "title": "Checkout conversation",
             "interactive": false,
             "completed_at": null,
-            "flow_lf_process_id": null
+            "graph_lf_process_id": null
           },
           {
             "id": "review",
             "title": "Review",
             "interactive": true,
             "completed_at": null,
-            "flow_lf_process_id": "11111111-1111-4111-8111-111111111111"
+            "graph_lf_process_id": "11111111-1111-4111-8111-111111111111"
           }
         ],
         "processes": [
@@ -280,27 +280,27 @@
             {
               "from": "start",
               "to": "design",
-              "flow": "task-design"
+              "graph": "task-design"
             },
             {
               "from": "design",
               "to": "design",
-              "flow": "task-design"
+              "graph": "task-design"
             },
             {
               "from": "design",
               "to": "demo",
-              "flow": "pursue"
+              "graph": "pursue"
             },
             {
               "from": "demo",
               "to": "demo",
-              "flow": "pursue"
+              "graph": "pursue"
             },
             {
               "from": "demo",
               "to": "end",
-              "flow": "ship"
+              "graph": "ship"
             }
           ],
           "position": {
@@ -373,7 +373,7 @@
             }
           ]
         },
-        "flow_processes": [
+        "graph_processes": [
           {
             "id": "11111111-1111-4111-8111-111111111111",
             "name": "pursue",
@@ -396,7 +396,7 @@
     "revisions": {
       "planning": 911,
       "sessions": 402,
-      "flows": 88,
+      "graphs": 88,
       "processes": 5120,
       "usage": 77
     },

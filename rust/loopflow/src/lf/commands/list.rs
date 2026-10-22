@@ -19,8 +19,8 @@ pub struct Entry {
     pub invocation: String,
 }
 
-fn flow_entry(tree: &Command, repo: &Path, name: String) -> Result<Entry> {
-    let kind = DefinitionKind::Flow;
+fn graph_entry(tree: &Command, repo: &Path, name: String) -> Result<Entry> {
+    let kind = DefinitionKind::Graph;
     let description = match resolve_definition(repo, &name, Some(kind)) {
         Ok(target) => format_target(&target),
         Err(error) => format!("unavailable: {error}"),
@@ -28,7 +28,7 @@ fn flow_entry(tree: &Command, repo: &Path, name: String) -> Result<Entry> {
     Ok(Entry {
         source: definition_source(
             repo,
-            crate::flow::find_flow_source_path(&name, repo)?.as_deref(),
+            crate::graph::find_graph_source_path(&name, repo)?.as_deref(),
         ),
         invocation: definition_invocation(tree, &name, kind),
         name,
@@ -91,9 +91,9 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
             return Ok(entries);
         }
     }
-    if path.is_empty() || path == ["flow"] {
-        for name in crate::flow::available_flow_names(repo)? {
-            entries.push(flow_entry(tree, repo, name)?);
+    if path.is_empty() || path == ["graph"] {
+        for name in crate::graph::available_graph_names(repo)? {
+            entries.push(graph_entry(tree, repo, name)?);
         }
         if !path.is_empty() {
             return Ok(entries);

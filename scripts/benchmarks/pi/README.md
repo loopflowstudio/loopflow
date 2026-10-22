@@ -35,7 +35,7 @@ The JavaScript regression exercises manual and automatic compaction boundaries,
 retained native system/tool declarations, and an unbound child. Rust's focused
 `pi_` tests cover direct RPC steering rejection/uncertainty, frozen turn ownership,
 large Unicode skills, native partial-usage checkpoints and duplicate observations,
-failed-start reopening, and managed Task/Flow routing with a nested `lf` command.
+failed-start reopening, and managed Task/Graph routing with a nested `lf` command.
 
 Evidence dated October 17, 2026: the real Pi scenarios passed against a local model
 (retry 2 requests; empty 2; overflow 5; native 2; PTY 3; steering 2). This establishes

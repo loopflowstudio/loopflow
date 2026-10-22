@@ -745,7 +745,7 @@ pub fn release_publish(
 
 /// Run the full release workflow in one shot.
 ///
-/// Flow:
+/// Graph:
 /// 1) check target-scoped commits since the previous tag
 /// 2) bump manifests, run repo preparation, and generate notes in a worktree
 /// 3) commit, open PR, and enqueue auto-merge
@@ -1694,7 +1694,7 @@ fn verify_scheduled_telemetry(
         .iter()
         .find(|job| {
             job.wave == context.wave
-                && job.flow == "telemetry-daily"
+                && job.graph == "telemetry-daily"
                 && job.machine_id == context.machine_id
                 && job.repo == context.repo
         })
@@ -1703,9 +1703,9 @@ fn verify_scheduled_telemetry(
                 "required telemetry-daily cron is not installed on the release Machine".into(),
             )
         })?;
-    if telemetry.target_kind != CronTargetKind::Flow {
+    if telemetry.target_kind != CronTargetKind::Graph {
         return Err(OpsError::Message(
-            "required telemetry must execute its mechanical verification flow".into(),
+            "required telemetry must execute its mechanical verification graph".into(),
         ));
     }
     let (hour, minute) = crate::ops::daily_time_of(&telemetry.schedule)?;
@@ -1726,7 +1726,7 @@ fn verify_scheduled_telemetry(
         r.machine_id == context.machine_id
             && r.repo == context.repo
             && r.schedule == telemetry.schedule
-            && r.target_kind == CronTargetKind::Flow
+            && r.target_kind == CronTargetKind::Graph
             && r.source == CronSource::Scheduled
             && r.started_at <= now
     });
@@ -1806,7 +1806,7 @@ fn verify_scheduled_telemetry(
                 if receipt.repo != context.repo
                     || receipt.machine_id != context.machine_id
                     || receipt.schedule != observation.schedule
-                    || receipt.target_kind != CronTargetKind::Flow
+                    || receipt.target_kind != CronTargetKind::Graph
                     || receipt.lf_path != telemetry.lf_path
                 {
                     return Err(OpsError::Message("telemetry installation changed before recovery; inspect and retry at the next configured release firing".into()));

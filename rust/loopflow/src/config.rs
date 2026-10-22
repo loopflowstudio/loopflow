@@ -30,7 +30,7 @@ fn load_user_name() -> Result<Option<String>, LoadError> {
     if let Some(config) = load_yaml_file(&global_config_path())? {
         if let Some(user) = config.get("user").filter(|value| !value.is_null()) {
             let user: UserConfig = serde_yaml_ng::from_value(user.clone()).map_err(|error| {
-                LoadError::InvalidFlow(format!("Invalid personal user config: {error}"))
+                LoadError::InvalidGraph(format!("Invalid personal user config: {error}"))
             })?;
             if let Some(name) = user.name.as_deref().and_then(normalize_user_name) {
                 return Ok(Some(name));
@@ -58,7 +58,7 @@ pub fn participant_name() -> Result<Option<String>, LoadError> {
             None => load_user_name(),
         },
         Err(std::env::VarError::NotPresent) => load_user_name(),
-        Err(error) => Err(LoadError::InvalidFlow(format!(
+        Err(error) => Err(LoadError::InvalidGraph(format!(
             "Invalid {USER_NAME_ENV}: {error}"
         ))),
     }
@@ -602,7 +602,7 @@ fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError
         return Ok(None);
     }
     let mut value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).map_err(|e| {
-        LoadError::InvalidFlow(format!("YAML parse error in {}: {}", path.display(), e))
+        LoadError::InvalidGraph(format!("YAML parse error in {}: {}", path.display(), e))
     })?;
     fold_linear_team(&mut value);
     Ok(Some(value))
@@ -700,7 +700,7 @@ pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError
             if let Some(budgets) = data.get("context_budgets") {
                 let budgets: BTreeMap<BudgetKey, usize> =
                     serde_yaml_ng::from_value(budgets.clone()).map_err(|e| {
-                        LoadError::InvalidFlow(format!(
+                        LoadError::InvalidGraph(format!(
                             "Invalid context_budgets in {}: {e}",
                             path.display()
                         ))
@@ -712,7 +712,7 @@ pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError
     let merged = merge_config_values(global_data, repo_data);
 
     let mut config: Config = serde_yaml_ng::from_value(merged)
-        .map_err(|e| LoadError::InvalidFlow(format!("Config validation error: {}", e)))?;
+        .map_err(|e| LoadError::InvalidGraph(format!("Config validation error: {}", e)))?;
 
     config.context_budget_sources = sources;
     Ok(Some(config))
@@ -725,7 +725,7 @@ pub fn load_global_config() -> Result<Option<Config>, LoadError> {
     };
     serde_yaml_ng::from_value(value)
         .map(Some)
-        .map_err(|error| LoadError::InvalidFlow(format!("Config validation error: {error}")))
+        .map_err(|error| LoadError::InvalidGraph(format!("Config validation error: {error}")))
 }
 
 /// Repository lookup belongs to the selected Machine, never repository config.
@@ -736,7 +736,7 @@ pub fn repository_root() -> Result<Option<PathBuf>, LoadError> {
         return Ok(None);
     };
     serde_yaml_ng::from_value(value).map_err(|error| {
-        LoadError::InvalidFlow(format!("Invalid repo_root in {}: {error}", path.display()))
+        LoadError::InvalidGraph(format!("Invalid repo_root in {}: {error}", path.display()))
     })
 }
 
@@ -767,7 +767,7 @@ pub fn load_repo_config(repo_root: &Path) -> Result<Option<Config>, LoadError> {
     };
     serde_yaml_ng::from_value(value)
         .map(Some)
-        .map_err(|error| LoadError::InvalidFlow(format!("Config validation error: {error}")))
+        .map_err(|error| LoadError::InvalidGraph(format!("Config validation error: {error}")))
 }
 
 /// Get config or default if no config files exist.

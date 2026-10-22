@@ -38,8 +38,8 @@ pub const RECIPES: &[Recipe] = &[
     Recipe {
         name: "one-task",
         rung: Rung::Artifacts,
-        demos: "Wave → Task → Session → Flow click-through on one small piece of work; \
-                a Task waiting at a Workflow node; an eight-step Flow exec (LOO-392)",
+        demos: "Wave → Task → Session → Graph click-through on one small piece of work; \
+                a Task waiting at a Workflow node; an eight-step Graph exec (LOO-392)",
         build: one_task,
     },
     Recipe {
@@ -452,10 +452,10 @@ const BACKLOG: &[(&str, &str)] = &[
          when collapsed.",
     ),
     (
-        "Show the last Flow on each Task row",
-        "A Task row says nothing about its last run.\n\nShow the last Flow's \
+        "Show the last Graph on each Task row",
+        "A Task row says nothing about its last run.\n\nShow the last Graph's \
          name, result and age on the row (\"gate failed · 2h\"). Clicking it \
-         opens that Flow's steps.",
+         opens that Graph's steps.",
     ),
     (
         "Archive stale backlog ideas",
@@ -603,7 +603,7 @@ fn wave_backlog(world: &World) -> Result<()> {
     world.task(
         Some("systems"),
         "Compact old Process rows",
-        "Process history grows without bound. Compact finished Flows older than a month.",
+        "Process history grows without bound. Compact finished Graphs older than a month.",
     )?;
     let systems = world.task(
         Some("systems"),
@@ -1054,7 +1054,7 @@ match still competes.
 
 - Should the half-life be configurable per repository? A research repo may
   want months; a busy product repo, days.
-- Do we decay Flow output the same as conversation turns?
+- Do we decay Graph output the same as conversation turns?
 
 ## Out of scope
 

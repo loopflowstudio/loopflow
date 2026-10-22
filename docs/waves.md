@@ -7,7 +7,7 @@ lf wave ensure product --json
 Prepare the Wave's configured Project for work. With no binding, reserve and create
 one ordinary Project; retries reuse its identity. To select an existing Project,
 run `lf wave bind-project product <project-uuid>` first. Ensure activates Backlog
-or Planned status without changing its name, content, Tasks or optional Flow.
+or Planned status without changing its name, content, Tasks or optional Graph.
 
 ```bash
 lf --wave shipper wave-operate "invoices first"
@@ -16,7 +16,7 @@ lf wave status shipper
 
 A Wave keeps an objective, memory, cadence, budget and metrics across Tasks.
 Each `wave-operate` invocation makes one finite pass over existing Tasks. Tasks own implementation and
-Flow execution; each Machine retains command and conversation history.
+Graph execution; each Machine retains command and conversation history.
 
 | Path | Holds |
 |------|-------|
@@ -77,13 +77,13 @@ it finds. It does not check KRs or metric targets, edit the plan, rotate
 chapters, file Tasks or start backlog. `vsm-operate` asks those same
 questions, with the same boundaries (no KRs, plan edits, new Tasks or backlog
 starts), across the current repository's Waves, including from a linked
-worktree or a Task-bound session. Its Flow runs `s1 → s2 → s3 → s4 → s5`,
+worktree or a Task-bound session. Its Graph runs `s1 → s2 → s3 → s4 → s5`,
 with each skill reading earlier findings from one shared working note. Each is
 also directly invokable for a focused question, with no scan/assess split.
 An explicit scope request can narrow VSM to a Wave; otherwise it uses the repository.
 Neither pass requires Discord or a schedule. VSM makes five sequential skill
 invocations, without requiring five reports or five actions. `wave-operate`
-remains a single skill; whether it should use the VSM Flow is still undecided.
+remains a single skill; whether it should use the VSM Graph is still undecided.
 
 Each pass reads dated evidence and replies in the invoking conversation. It
 gives every started Task you own one disposition: moving, acted on and
@@ -92,13 +92,13 @@ another person owns (`runtime.owner` naming someone other than `lf config user`)
 is listed with that person and Machine and left alone; its liveness is not
 judged from your Machine. A Task you own on another Machine is operated there,
 one Task at a time, with `lf --machine <machine> task-operate <issue>`. A started Task
-whose Flow stopped or failed is read and its remaining work run fresh; one at
+whose Graph stopped or failed is read and its remaining work run fresh; one at
 a workflow node waits on you; unstarted backlog is
 listed and left for you to select. A no-action result is valid only when every
 started Task you own already has a disposition. Failed reads and stale provider data remain explicit
 gaps; they cannot justify closing work or treating a Task as idle.
 
-Running Task Flows keep progressing when both operators are absent; review
+Running Task Graphs keep progressing when both operators are absent; review
 happens in the Task conversation. Projects belong to Waves; they have no separate
 operator. Scheduling and connected chat are separate integration work. These
 manual passes neither install jobs nor post replies to a channel.
@@ -413,10 +413,10 @@ to choose membership explicitly, or use `lf task move <task> --wave <wave>` late
 Task Work owns one checkout and zero or one PR. Workflow selection follows
 Task → Wave → repository. Definitions live in `.lf/workflows/` or builtins. The Task moves through its
 nodes: each `lf task run` takes one edge leaving the current node and runs
-that edge's Flow, and at a node the Task waits on you in its conversation.
+that edge's Graph, and at a node the Task waits on you in its conversation.
 See [workflows](authoring.md#workflows).
-Each launch starts a fresh Flow: one Flow process holding the expanded graph
-and the step processes it starts. Every Flow remains history and none is privileged. A finished Flow
+Each launch starts a fresh Graph: one Graph process holding the expanded graph
+and the step processes it starts. Every Graph remains history and none is privileged. A finished Graph
 leaves Task Work open until an explicit completion or delivery operation
 settles it.
 
@@ -434,7 +434,7 @@ an explicit selector overrides it. A later bind can attach a conversation to
 a done or landed Task without reopening Work. Assignment is permanent and
 states the permanent target in CLI; Desktop confirms it. An existing Task cannot change.
 See [Sessions](lf-reference.md#session-conversations-and-reviews)
-for rename, bind, and the distinction between ancestry and Flow membership.
+for rename, bind, and the distinction between ancestry and Graph membership.
 
 Each Task PR keeps its own benefit-focused title. After the opening summary,
 Loopflow adds the canonical Task name, its issue link when one exists, and merge consequence.
@@ -451,7 +451,7 @@ lf task complete INF-124
 
 Task completion is independent of Workflow position. `task complete` changes
 status; `task workflow move end` records the move and requests completion. If completion
-fails, retry it alone without replaying the Flow. Completion and reopening in the planning provider
+fails, retry it alone without replaying the Graph. Completion and reopening in the planning provider
 leave execution intact; reopening supersedes old requests. A Task with a PR needs
 authoritative merge. A PR-less Task may finish with research files and commits;
 unsafe or occupied checkouts are retained. Completion does not settle Session
@@ -460,7 +460,7 @@ turns or process exits. Repeat completion to retry pending planning writeback.
 `ship` runs gate and waits for merge; its Workflow endpoint requests completion.
 Bare landing or a manual merge leaves the Task open. Optional new work uses ordinary
 Task creation before completion, with no required filing or disposition. Inspect
-live Flow processes before retrying completion; no fresh gate or landing is needed.
+live Graph processes before retrying completion; no fresh gate or landing is needed.
 
 An unstarted due follow-up returns on its owning Wave's next operation, listed
 for you to select; operators do not start it. A started one you own takes its

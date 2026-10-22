@@ -19,7 +19,7 @@ fn command(home: &std::path::Path, args: &[&str]) -> Command {
         .env_remove("LF_RUN_DIR")
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
-        .env_remove("LF_FLOW_ID")
+        .env_remove("LF_GRAPH_ID")
         .env_remove("LF_HUMAN_SESSION")
         .env_remove("LF_WAVE_ID")
         .env_remove("LF_TERMINAL_ID")
@@ -77,7 +77,7 @@ fn session_cli_uses_one_truthful_resolution_contract() {
         &["session", "ready", "Feedback"][..],
         &["session", "complete", "missing-session"],
         &["session", "stop-client", "missing-input"],
-        &["session", "serve-flow"],
+        &["session", "serve-graph"],
         &["session", "ensure"],
         &["session", "new", "missing-session"],
     ] {
@@ -138,7 +138,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
             "LF_TRACE_ID",
             "LF_PROCESS_ID",
             "LF_HUMAN_SESSION",
-            "LF_FLOW_ID",
+            "LF_GRAPH_ID",
         ] {
             command.env_remove(name);
         }
@@ -488,7 +488,7 @@ fn prepare_conversation(
                 iterations: None,
                 task_id: None,
                 wave_id: None,
-                flow_lf_process_id: None,
+                graph_lf_process_id: None,
                 work_source: None,
                 bound_at: None,
                 interactive: true,

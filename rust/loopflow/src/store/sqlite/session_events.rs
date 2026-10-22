@@ -165,7 +165,7 @@ impl SqliteStore {
     }
 
     /// Retain a provider observation even when its attachment has
-    /// changed. Observation grants neither native write nor Flow authority.
+    /// changed. Observation grants neither native write nor Graph authority.
     pub(crate) fn record_session_event(
         &self,
         session: &str,

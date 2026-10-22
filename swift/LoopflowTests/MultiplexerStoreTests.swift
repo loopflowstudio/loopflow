@@ -87,7 +87,7 @@ struct MultiplexerStoreTests {
     }
 
     @Test("Reopening a hidden companion reveals its retained occurrence", arguments: [
-        PaneContent.files(taskId: "task"), .flowLog(taskId: "task"),
+        PaneContent.files(taskId: "task"), .graphLog(taskId: "task"),
     ])
     func reopeningHiddenCompanion(content: PaneContent) {
         let store = MultiplexerStore()
@@ -275,7 +275,7 @@ struct MultiplexerStoreTests {
         let main = store.focusedPane
         let shell = try #require(store.newShell(location: location))
         let files = try #require(store.show(.files(taskId: "task", location: location)))
-        let log = try #require(store.show(.flowLog(taskId: "task", location: location)))
+        let log = try #require(store.show(.graphLog(taskId: "task", location: location)))
         guard case .split(.vertical, .leaf(let retained),
             .split(.horizontal, .leaf(let retainedShell),
                 .split(.vertical, .leaf(let retainedFiles), .leaf(let retainedLog), _), _), _) = store.layout else {
@@ -428,7 +428,7 @@ struct MultiplexerStoreTests {
         store.show(.files(taskId: "task"))
         let files = store.focusedPane
         store.updateRatio(between: shell.id, and: files.id, ratio: 0.3)
-        let temporary = try #require(store.show(.flowLog(taskId: "task")))
+        let temporary = try #require(store.show(.graphLog(taskId: "task")))
         store.close(temporary.id)
         store.setCollapsed(paneId: first.id, collapsed: true)
         store.setFocusedPane(files.id)

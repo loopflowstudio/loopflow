@@ -415,7 +415,7 @@ fn check_continuity(events: &[LfProcess], obligations: &[CronObligation], now: i
         let has_receipt = obligation.receipts.iter().any(|receipt| {
             receipt.source == CronSource::Scheduled
                 && receipt.wave == obligation.wave
-                && receipt.flow == obligation.flow
+                && receipt.graph == obligation.graph
                 && receipt.machine_id == obligation.machine_id
                 && receipt.schedule == obligation.schedule.expression()
                 && receipt.started_at >= interval.start
@@ -437,14 +437,14 @@ fn check_continuity(events: &[LfProcess], obligations: &[CronObligation], now: i
         };
         missing.push(format!(
             "{}/{} on Machine {} expected interval {} ({}) has no scheduled receipt; \
-             inspect `lf wave cron history --wave {wave} --flow {} --days 2`; \
+             inspect `lf wave cron history --wave {wave} --graph {} --days 2`; \
              configured executable {}; inspect log {}; reconcile with `{sync}` from repository {}",
             obligation.wave,
-            obligation.flow,
+            obligation.graph,
             obligation.machine_id,
             format_interval(interval),
             obligation.schedule.expression(),
-            obligation.flow,
+            obligation.graph,
             obligation.lf_path.display(),
             obligation.log_path.display(),
             obligation.repo.display(),
@@ -764,9 +764,9 @@ mod tests {
 
     fn obligation(activated_at: i64) -> CronObligation {
         CronObligation {
-            target_kind: CronTargetKind::Flow,
+            target_kind: CronTargetKind::Graph,
             wave: "infrastructure".to_string(),
-            flow: "telemetry-daily".to_string(),
+            graph: "telemetry-daily".to_string(),
             schedule: parse_schedule("0 0 9 * * *").unwrap(),
             machine_id: MachineId::parse("home_11111111111111111111111111111111").unwrap(),
             activated_at,
@@ -785,8 +785,8 @@ mod tests {
             runner_started_at: None,
             machine_id: obligation.machine_id.clone(),
             wave: obligation.wave.clone(),
-            flow: obligation.flow.clone(),
-            target_kind: CronTargetKind::Flow,
+            graph: obligation.graph.clone(),
+            target_kind: CronTargetKind::Graph,
             source,
             schedule: obligation.schedule.expression().to_string(),
             repo: PathBuf::from("/src/loopflow"),
@@ -856,7 +856,7 @@ mod tests {
             "expected interval [",
             "0 0 9 * * *",
             "has no scheduled receipt",
-            "lf wave cron history --wave infrastructure --flow telemetry-daily --days 2",
+            "lf wave cron history --wave infrastructure --graph telemetry-daily --days 2",
             "configured executable /usr/local/bin/lf",
             "inspect log /src/loopflow/.lf/logs/cron.log",
             "lf cron sync",
@@ -880,7 +880,7 @@ mod tests {
         assert!(check.detail.contains("lf cron sync --repo"));
         assert!(check
             .detail
-            .contains("lf wave cron history --wave '' --flow"));
+            .contains("lf wave cron history --wave '' --graph"));
     }
 
     #[test]
@@ -974,7 +974,7 @@ mod tests {
         assert_eq!(status_of(&[event], "identity"), Status::Fail);
     }
     #[test]
-    fn skill_to_flow_cutover_preserves_firing_but_triggered_receipt_does_not_count() {
+    fn skill_to_graph_cutover_preserves_firing_but_triggered_receipt_does_not_count() {
         let now = timestamp("2026-08-23T23:00:00Z");
         let mut cron = obligation(timestamp("2026-08-20T00:00:00Z"));
         let interval = latest_due_interval(&cron, now).unwrap();

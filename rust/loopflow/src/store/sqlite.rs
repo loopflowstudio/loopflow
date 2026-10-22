@@ -24,7 +24,7 @@ mod chapters;
 mod children;
 mod ci_incidents;
 mod durable;
-mod flow_inventory;
+mod graph_inventory;
 #[cfg(test)]
 mod linear_migration_tests;
 

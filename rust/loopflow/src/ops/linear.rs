@@ -2230,7 +2230,7 @@ mod tests {
             "name": name,
             "description": "A measured bet.",
             "status": {"type":"started"},
-            "content": "## Definition\n\nA measured bet.\n\n## Flows\n\n- first: (none)\n- loop: (none)\n- finally: (none)\n\n## KRs\n\n- [ ] Ownership holds",
+            "content": "## Definition\n\nA measured bet.\n\n## Graphs\n\n- first: (none)\n- loop: (none)\n- finally: (none)\n\n## KRs\n\n- [ ] Ownership holds",
             "initiatives": { "nodes": [{ "id": initiative }] },
             "teams": { "nodes": teams.iter().map(|id| json!({ "id": id })).collect::<Vec<_>>() }
         })

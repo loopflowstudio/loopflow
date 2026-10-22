@@ -37,7 +37,7 @@ Use these checks where they help establish what can be cleared:
   before treating a branch as present or gone. Exclude the default branch
   and symbolic refs.
 - Worktree condition: inspect `git -C <path> status --short`, unpushed commits,
-  associated Tasks, and active Sessions/Flows. Run `lf wt prune --dry-run` to
+  associated Tasks, and active Sessions/Graphs. Run `lf wt prune --dry-run` to
   identify merged, squash-merged, closed-PR, remote-gone, terminal, and inactive
   cleanup candidates. Review the preview; inactivity alone is not abandonment.
 - Branch disposition: compare ahead/behind the repository's default branch,
@@ -68,7 +68,7 @@ Use the appropriate operation:
 
 - **Ship / ship-partial:** use the delivery skill appropriate to the requested
   outcome in the owning checkout. Record useful unfinished scope in the punch
-  list. Keep running Flows and review conversations intact.
+  list. Keep running Graphs and review conversations intact.
 - **Abandon:** `lf task abandon <issue>` retires a Task and its delivery state
   together. For a branch without a Task, `lf pr abandon <branch>` closes its PR
   and removes its checkout and branches.
@@ -119,7 +119,7 @@ Sending the user to another conversation is not operating. The repository view
 connects outcomes and dependencies across Waves; the Wave pass owns the
 detailed judgment within each Wave.
 
-Do not create a competing Flow process or require a repository pass before a
+Do not create a competing Graph process or require a repository pass before a
 Task can progress. Follow an intervention through to its observed result, then
 include that result in the repository update.
 
@@ -176,7 +176,7 @@ uses credentials resident on its Machine.
 
 When evidence invalidates an attempt on a Task you own, `lf task interrupt <issue>`
 its live execution and discuss the changed direction in the Task conversation.
-The stopped Flow stays as history; Task, worktree and PR identity are unchanged.
+The stopped Graph stays as history; Task, worktree and PR identity are unchanged.
 
 ## Diagnose execution and auth
 

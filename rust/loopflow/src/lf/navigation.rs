@@ -6,9 +6,9 @@ use anyhow::Result;
 use clap::{Command, CommandFactory, Parser};
 
 use crate::definition::{resolve_definition, DefinitionKind, Target};
-use crate::flow::Step;
-use crate::flow::XorPath;
-use crate::lf::{Cli, Commands, FlowCommand, SkillCommand};
+use crate::graph::Step;
+use crate::graph::XorPath;
+use crate::lf::{Cli, Commands, GraphCommand, SkillCommand};
 
 pub fn command_tree() -> Command {
     let mut command = Cli::command();
@@ -200,7 +200,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             if current.get_name() == "help"
                 && output
                     .last()
-                    .is_some_and(|owner| matches!(owner.as_str(), "skill" | "flow"))
+                    .is_some_and(|owner| matches!(owner.as_str(), "skill" | "graph"))
             {
                 output.push("--".to_string());
             }
@@ -267,11 +267,11 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
 pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     let command = cli.command.as_ref()?;
     if matches!(command,
-        Commands::Flow { cmd: FlowCommand::List { inventory, .. } } if inventory.processes
+        Commands::Graph { cmd: GraphCommand::List { inventory, .. } } if inventory.processes
     ) || matches!(
         command,
-        Commands::Flow {
-            cmd: FlowCommand::Show {
+        Commands::Graph {
+            cmd: GraphCommand::Show {
                 processes: true,
                 ..
             }
@@ -283,10 +283,10 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
         command,
         Commands::Help { .. }
             | Commands::List { .. }
-            | Commands::Flow {
-                cmd: FlowCommand::List { .. }
-                    | FlowCommand::Show { .. }
-                    | FlowCommand::Customize { .. }
+            | Commands::Graph {
+                cmd: GraphCommand::List { .. }
+                    | GraphCommand::Show { .. }
+                    | GraphCommand::Customize { .. }
             }
             | Commands::Skill {
                 cmd: SkillCommand::Customize { .. }
@@ -309,28 +309,28 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 }
             }
             Commands::List { path, json } => crate::lf::commands::list::show(path, &repo, *json)?,
-            Commands::Flow {
-                cmd: FlowCommand::List { json, inventory },
+            Commands::Graph {
+                cmd: GraphCommand::List { json, inventory },
             } => {
                 anyhow::ensure!(
                     inventory.is_empty(),
-                    "filters over Flows that ran require --processes"
+                    "filters over Graphs that ran require --processes"
                 );
-                crate::lf::commands::flow::list(&repo, *json)?;
+                crate::lf::commands::graph::list(&repo, *json)?;
             }
-            Commands::Flow {
-                cmd: FlowCommand::Show { name, json, .. },
+            Commands::Graph {
+                cmd: GraphCommand::Show { name, json, .. },
             } => {
                 if *json {
-                    let entry = crate::flow::graph::flow_catalog_entry(name, &repo)?;
+                    let entry = crate::graph::compiled::graph_catalog_entry(name, &repo)?;
                     println!("{}", serde_json::to_string(&entry)?);
                 } else {
-                    crate::lf::commands::flow::show(name, &repo)?;
+                    crate::lf::commands::graph::show(name, &repo)?;
                 }
             }
-            Commands::Flow {
-                cmd: FlowCommand::Customize { name },
-            } => println!("{}", crate::flow::customize(name, &repo)?.display()),
+            Commands::Graph {
+                cmd: GraphCommand::Customize { name },
+            } => println!("{}", crate::graph::customize(name, &repo)?.display()),
             Commands::Skill {
                 cmd: SkillCommand::Customize { name },
             } => println!("{}", crate::skills::customize(name, &repo)?.display()),
@@ -421,7 +421,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
             .filter(|cmd| !cmd.is_hide_set())
             .map(Command::get_name)
             .collect::<Vec<_>>();
-        let mut output = String::from("Usage: lf <name> [message] | <command>\n\nRun\n  lf pursue [message]        build a change through to a published PR\n  lf flow <name> [message]   select a flow explicitly\n  lf skill <name> [message]  select a skill explicitly\n\nDiscover\n  lf list                   commands, skills, and flows\n  lf help <path>             explain a command or definition\n  lf help --all              show the complete command tree\n\nCommands\n");
+        let mut output = String::from("Usage: lf <name> [message] | <command>\n\nRun\n  lf pursue [message]        build a change through to a published PR\n  lf graph <name> [message]   select a graph explicitly\n  lf skill <name> [message]  select a skill explicitly\n\nDiscover\n  lf list                   commands, skills, and graphs\n  lf help <path>             explain a command or definition\n  lf help --all              show the complete command tree\n\nCommands\n");
         for row in names.chunks(5) {
             output.push_str(&format!(
                 "  {}\n",
@@ -431,8 +431,8 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
                     .trim_end()
             ));
         }
-        output.push_str("\nSelect: --repo <name-or-path>, --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>\n--repo resolves names under repo_root (default ~/src) on the selected Machine.\n--machine otherwise uses its saved remote repository.\nWith --machine: --forward-agent\nAgent selection: -a, --agent <harness[:model]> overrides agents in Tasks, Flows, skills and child commands\n");
-        output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf skill NAME and lf flow NAME select definitions.\n");
+        output.push_str("\nSelect: --repo <name-or-path>, --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>\n--repo resolves names under repo_root (default ~/src) on the selected Machine.\n--machine otherwise uses its saved remote repository.\nWith --machine: --forward-agent\nAgent selection: -a, --agent <harness[:model]> overrides agents in Tasks, Graphs, skills and child commands\n");
+        output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf skill NAME and lf graph NAME select definitions.\n");
         return Ok(output);
     }
     let definition = match path {
@@ -441,7 +441,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
         _ => None,
     };
     if let Some((owner, name, escaped)) =
-        definition.filter(|(owner, _, _)| matches!(owner.as_str(), "skill" | "flow"))
+        definition.filter(|(owner, _, _)| matches!(owner.as_str(), "skill" | "graph"))
     {
         let command = tree
             .find_subcommand(owner)
@@ -450,7 +450,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
         if escaped || resolve_child(command, name, &path[..1])?.is_none() {
             let kind = match owner.as_str() {
                 "skill" => Some(DefinitionKind::Skill),
-                "flow" => Some(DefinitionKind::Flow),
+                "graph" => Some(DefinitionKind::Graph),
                 _ => None,
             };
             return definition_help(&tree, repo, name, kind);
@@ -518,7 +518,7 @@ fn format_written_steps(steps: &[Step]) -> String {
 
 fn format_written_step(step: &Step) -> String {
     match &step.target {
-        Target::Flow(flow) => flow.name.clone(),
+        Target::Graph(graph) => graph.name.clone(),
         target => format_target(target),
     }
 }
@@ -527,7 +527,7 @@ pub(crate) fn format_target(target: &Target) -> String {
     match target {
         Target::Skill(skill) => skill.name.clone(),
         Target::Command(command) => command.to_string(),
-        Target::Flow(flow) => format_written_steps(&flow.items),
+        Target::Graph(graph) => format_written_steps(&graph.items),
         Target::Xor(xor) => format_xor(xor.router.as_deref(), &xor.paths),
     }
 }
@@ -552,25 +552,27 @@ fn definition_help(
 ) -> Result<String> {
     let target = resolve_definition(repo, name, kind)?;
     let (name, kind, description, source) = match &target {
-        Target::Command(_) | Target::Xor(_) => anyhow::bail!("{name} is not a named skill or flow"),
+        Target::Command(_) | Target::Xor(_) => {
+            anyhow::bail!("{name} is not a named skill or graph")
+        }
         Target::Skill(skill) => (
             skill.name.as_str(),
             DefinitionKind::Skill,
             skill.content.clone().unwrap_or_default(),
             skill.source.as_ref().map(|source| source.path.clone()),
         ),
-        Target::Flow(flow) => {
-            let mut reviews = crate::flow::human_occurrence_ids(flow, repo)?;
+        Target::Graph(graph) => {
+            let mut reviews = crate::graph::human_occurrence_ids(graph, repo)?;
             reviews.sort();
-            let mut description = format_written_steps(&flow.items);
+            let mut description = format_written_steps(&graph.items);
             if !reviews.is_empty() {
                 description.push_str(&format!("\nReview steps: {}", reviews.join(", ")));
             }
             (
-                flow.name.as_str(),
-                DefinitionKind::Flow,
+                graph.name.as_str(),
+                DefinitionKind::Graph,
                 description,
-                crate::flow::find_flow_source_path(&flow.name, repo)?,
+                crate::graph::find_graph_source_path(&graph.name, repo)?,
             )
         }
     };
@@ -583,8 +585,8 @@ fn definition_help(
         (_, Err(error)) => {
             output.push_str(&format!("\nUntyped lookup fails: {error}\n"));
         }
-        (DefinitionKind::Skill, Ok(Target::Flow(_))) => {
-            output.push_str("\nUntyped lookup selects the same-named flow.\n");
+        (DefinitionKind::Skill, Ok(Target::Graph(_))) => {
+            output.push_str("\nUntyped lookup selects the same-named graph.\n");
         }
         _ => {
             if matches!(resolve_child(tree, name, &[]), Ok(None)) {
@@ -592,10 +594,10 @@ fn definition_help(
             }
         }
     }
-    if kind == DefinitionKind::Flow {
+    if kind == DefinitionKind::Graph {
         match resolve_definition(repo, name, Some(DefinitionKind::Skill)) {
             Ok(Target::Skill(skill)) => output.push_str(&format!(
-                "\nAlso available: skill {} (flow wins untyped lookup for {name})\n  {} [message]\n",
+                "\nAlso available: skill {} (graph wins untyped lookup for {name})\n  {} [message]\n",
                 skill.name,
                 definition_invocation(tree, &skill.name, DefinitionKind::Skill)
             )),

@@ -72,9 +72,9 @@ step "configured publisher authority"
 
 step "install release schedules"
 "${minimal_env[@]}" lf cron add telemetry-daily --schedule "0 0 9 * * *" \
-  -- --wave "$wave" --batch flow telemetry-daily
+  -- --wave "$wave" --batch graph telemetry-daily
 "${minimal_env[@]}" lf cron add release-run --schedule "0 0 10 * * *" \
-  -- --wave "$wave" --batch flow release-run
+  -- --wave "$wave" --batch graph release-run
 
 step "prove the release schedules are loaded here"
 cron_json="$("${minimal_env[@]}" lf cron list --wave "$wave" --json)"
@@ -89,29 +89,29 @@ import sys
 wave = sys.argv[1]
 expected = [("release-run", "0 0 10 * * *"), ("telemetry-daily", "0 0 9 * * *")]
 installed = json.loads(os.environ["CRON_LIST_JSON"])["installed"]
-actual = [(entry["flow"], entry["schedule"]) for entry in installed]
+actual = [(entry["graph"], entry["schedule"]) for entry in installed]
 if sorted(actual) != expected:
     raise SystemExit(f"cron drift: expected={expected!r} installed={sorted(actual)!r}")
 for entry in installed:
     if entry["wave"] != wave:
-        raise SystemExit(f"wrong Wave in installed cron: {entry['flow']}")
+        raise SystemExit(f"wrong Wave in installed cron: {entry['graph']}")
     if not entry["loaded"]:
-        raise SystemExit(f"cron is not loaded: {entry['flow']}")
+        raise SystemExit(f"cron is not loaded: {entry['graph']}")
     if entry["machine_id"] != os.environ["EXPECTED_MACHINE_ID"]:
-        raise SystemExit(f"wrong Machine in installed cron: {entry['flow']}")
+        raise SystemExit(f"wrong Machine in installed cron: {entry['graph']}")
 print(f"{len(installed)}/{len(expected)} jobs loaded and exact")
 PY
 
 step "configured-path telemetry receipt"
 result=0
 if ! "${minimal_env[@]}" lf cron trigger \
-  --wave "$wave" --flow telemetry-daily --wait --timeout 15m; then
+  --wave "$wave" --graph telemetry-daily --wait --timeout 15m; then
   result=1
 fi
 
 step "configured-path release receipt"
 if ! "${minimal_env[@]}" lf cron trigger \
-  --wave "$wave" --flow release-run --wait --timeout 3h; then
+  --wave "$wave" --graph release-run --wait --timeout 3h; then
   result=1
 fi
 

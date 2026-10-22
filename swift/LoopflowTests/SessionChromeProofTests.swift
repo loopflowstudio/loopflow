@@ -118,12 +118,12 @@ struct SessionChromeProofTests {
             return value
         }
         let sessions = String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
-        let flows = try String(contentsOf: repoRoot.appendingPathComponent("tests/fixtures/dto/flow_catalog.json"), encoding: .utf8)
+        let graphs = try String(contentsOf: repoRoot.appendingPathComponent("tests/fixtures/dto/graph_catalog.json"), encoding: .utf8)
         let inventory = PaletteSessionInventory(sessions)
         let query = RegistryQuery { args, _ in
             if args.prefix(2) == ["wave", "show"] { return roadmap }
             if args.first == "session" { return await inventory.read() }
-            if args.first == "flow" { return flows }
+            if args.first == "graph" { return graphs }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No launch or mutation authorized by palette inspection")
         }
@@ -179,9 +179,9 @@ struct SessionChromeProofTests {
 
     private func latestRoadmap() throws -> (roadmap: String, invocation: String) {
         let fixtures = repoRoot.appendingPathComponent("tests/fixtures/dto")
-        let flows = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
-            fixtures.appendingPathComponent("flow_process_progress.json"))) as? [[String: Any]])
-        let latest = flows[0]
+        let graphs = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
+            fixtures.appendingPathComponent("graph_process_progress.json"))) as? [[String: Any]])
+        let latest = graphs[0]
         let entry = try #require(latest["entry"] as? [String: Any])
         let invocation = try #require(entry["id"] as? String)
         var plan = try #require(JSONSerialization.jsonObject(with: placingTaskWorktrees(in: Data(contentsOf:
@@ -194,7 +194,7 @@ struct SessionChromeProofTests {
         var tasks = try #require(waves[waveIndex]["tasks"] as? [String: Any])
         var items = try #require(tasks["items"] as? [[String: Any]])
         let taskIndex = try #require(items.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-review" })
-        items[taskIndex]["latest_flow_process"] = latest
+        items[taskIndex]["latest_graph_process"] = latest
         items[taskIndex]["execution"] = ["state": "running", "reason": "Running", "step": NSNull(), "captured": NSNull()]
         tasks["items"] = items; waves[waveIndex]["tasks"] = tasks; plan["waves"] = waves
         return (String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self), invocation)

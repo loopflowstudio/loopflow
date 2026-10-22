@@ -3,7 +3,7 @@ requires: objective, current evidence and feedback, and the caller's decision pr
 produces: Advance or Iterate with evidence, or a Blocked outcome for human resolution
 action_style: procedural
 ---
-Decide whether the Flow should advance, iterate, or stop because progress is blocked.
+Decide whether the Graph should advance, iterate, or stop because progress is blocked.
 
 Use the objective, success conditions, and constraints supplied by the caller.
 Do not impose a particular workflow, producer skill, artifact format, or

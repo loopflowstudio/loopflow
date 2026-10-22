@@ -96,6 +96,14 @@ def test_unavailable_github_keeps_full_matrix(
         ("https://github.com/owner/repo/actions/runs/42", {"SCRATCH_CLEAR": "failure"}, 1),
         ("https://github.com/owner/repo/actions/runs/42", {"RUST_TEST": "failure"}, 1),
         ("https://github.com/owner/repo/actions/runs/42", {"SWIFT_TEST": "cancelled"}, 1),
+        (
+            "",
+            {"SWIFT_TEST": "skipped", "LOOPFLOW_UI_TEST": "skipped", "DESKTOP_INPUTS": "false"},
+            0,
+        ),
+        ("", {"SWIFT_TEST": "skipped", "DESKTOP_INPUTS": "true"}, 1),
+        ("", {"SWIFT_TEST": "skipped", "DESKTOP_INPUTS": ""}, 1),
+        ("", {"PYTHON_TEST": "skipped", "DESKTOP_INPUTS": "false"}, 1),
     ],
 )
 def test_actual_workflow_gate_requires_proof_and_successful_warming(
@@ -152,11 +160,17 @@ def test_matrix_only_runs_for_candidates_and_queue_cannot_skip_aggregate(
     _ci_jobs: dict[str, dict],
 ) -> None:
     jobs = _ci_jobs
-    matrix = set(jobs) - {"merge-proof", "scratch-clear", "tests-result"}
-    assert set(jobs["tests-result"]["needs"]) == matrix | {"merge-proof", "scratch-clear"}
+    classifiers = {"merge-proof", "scratch-clear", "desktop-inputs"}
+    matrix = set(jobs) - classifiers - {"tests-result"}
+    assert set(jobs["tests-result"]["needs"]) == matrix | classifiers
     for name in matrix:
         assert {"merge-proof", "scratch-clear"} <= set(jobs[name]["needs"])
         assert "needs.scratch-clear.outputs.candidate == 'true'" in jobs[name]["if"]
+    # Only an explicit "false" skips Desktop; a failed classifier still runs it.
+    desktop = {name for name in matrix if "desktop-inputs" in jobs[name]["needs"]}
+    assert desktop == {"swift-test", "loopflow-ui-test"}
+    for name in desktop:
+        assert "needs.desktop-inputs.outputs.desktop != 'false'" in jobs[name]["if"]
     assert jobs["tests-result"]["if"] == (
         "${{ always() && (github.event_name != 'pull_request' || "
         "needs.scratch-clear.result != 'success' || "

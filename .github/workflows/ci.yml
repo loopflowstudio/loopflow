@@ -31,6 +31,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: uv run python scripts/check_ci_proof.py
 
+  # Desktop jobs run on macOS for most of a PR's wait. A change that cannot
+  # reach Desktop skips them; an unknown diff or a failed classifier runs them.
+  desktop-inputs:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      desktop: ${{ steps.classify.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Classify changed paths
+        id: classify
+        run: uv run python scripts/desktop_inputs.py "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}"
+
   architecture-check:
     needs: [merge-proof, scratch-clear]
     if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.merge-proof.outputs.reuse != 'true' }}
@@ -317,8 +331,8 @@ jobs:
           /usr/bin/time -v uv run --no-sync python scripts/test_network.py tests/e2e/test_smoke.sh
 
   swift-test:
-    needs: [merge-proof, scratch-clear]
-    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
+    needs: [merge-proof, scratch-clear, desktop-inputs]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.desktop-inputs.outputs.desktop != 'false' }}
     runs-on: macos-15
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -370,11 +384,9 @@ jobs:
             --event-stream-output-path "$RUNNER_TEMP/swift-tests/events.jsonl" \
             --event-stream-version 0 \
             2>&1 | tee "$RUNNER_TEMP/swift-tests/output.log"
-        # Bound native test execution, including subprocess cleanup, rather
-        # than holding the PR for GitHub's six-hour default on a hang. A green
-        # run takes ~13 minutes, ~8 of them building the density world; slow
-        # macos-15 runners take 2.5x that.
-        timeout-minutes: 35
+        # test_desktop.sh ends the run when one test outlives its time limit
+        # and names it. This outer bound covers the build and a stuck limiter.
+        timeout-minutes: 20
       - name: Preserve Swift failure evidence
         if: failure()
         uses: actions/upload-artifact@v7
@@ -440,8 +452,8 @@ jobs:
           uv run python scripts/test_network.py cargo test --offline -p loopflow --lib journal::os_process::
 
   loopflow-ui-test:
-    needs: [merge-proof, scratch-clear]
-    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
+    needs: [merge-proof, scratch-clear, desktop-inputs]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.desktop-inputs.outputs.desktop != 'false' }}
     runs-on: macos-15
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -506,6 +518,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - merge-proof
+      - desktop-inputs
       - architecture-check
       - scratch-clear
       - rust-lint
@@ -523,6 +536,7 @@ jobs:
       - name: Aggregate test results
         env:
           REUSED_PROOF: ${{ needs.merge-proof.outputs.proof_url }}
+          DESKTOP_INPUTS: ${{ needs.desktop-inputs.outputs.desktop }}
           ARCHITECTURE_CHECK: ${{ needs.architecture-check.result }}
           SCRATCH_CLEAR: ${{ needs.scratch-clear.result }}
           RUST_LINT: ${{ needs.rust-lint.result }}
@@ -545,12 +559,15 @@ jobs:
           check_result() {
             local name="$1"
             local result="$2"
+            local unaffected="${3:-}"
             case "$result" in
               success)
                 echo "PASS  $name"
                 ;;
               skipped)
-                if [ -n "$REUSED_PROOF" ]; then
+                if [ -n "$unaffected" ] && [ "$DESKTOP_INPUTS" = "false" ]; then
+                  echo "SKIP  $name (no Desktop inputs changed)"
+                elif [ -n "$REUSED_PROOF" ]; then
                   echo "PROVED  $name ($REUSED_PROOF)"
                 else
                   echo "FAIL  $name (skipped without proof)"
@@ -574,8 +591,8 @@ jobs:
           check_result "website-test" "$WEBSITE_TEST"
           check_result "e2e-smoke" "$E2E_SMOKE"
           check_result "task-installation" "$TASK_INSTALLATION"
-          check_result "swift-test" "$SWIFT_TEST"
+          check_result "swift-test" "$SWIFT_TEST" desktop
           check_result "macos-process-test" "$MACOS_PROCESS_TEST"
-          check_result "loopflow-ui-test" "$LOOPFLOW_UI_TEST"
+          check_result "loopflow-ui-test" "$LOOPFLOW_UI_TEST" desktop
 
           exit "$failures"

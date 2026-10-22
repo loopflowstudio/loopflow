@@ -151,6 +151,14 @@ fn every_recipe_builds_a_world_lf_reads() {
             !waves.as_array().unwrap().is_empty(),
             "{recipe} has no Waves"
         );
+        // Building saves locally and publishes once, as `lf` would on reconnecting.
+        let planning = built.lf(&["planning", "status", "--json"]);
+        let destination = &planning["destinations"][0];
+        assert_eq!(
+            destination["publication_state"], "confirmed",
+            "{recipe}: {destination}"
+        );
+        assert_eq!(destination["pending_local"], false, "{recipe}");
         let sessions = built.lf(&["session", "list", "--json", "--all"]);
         assert!(
             !sessions.as_array().unwrap().is_empty(),

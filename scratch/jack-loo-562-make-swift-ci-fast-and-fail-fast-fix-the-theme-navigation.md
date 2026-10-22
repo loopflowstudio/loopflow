@@ -5,7 +5,9 @@ minutes, name the test, and not run when a change cannot affect Desktop.
 
 ## Done in this branch
 
-- Hang: `BuiltWorld` deleted; world suites use `World.shared`/`World.fresh`
+- Hang: misattributed to the theme test (see `questions.md`); the event
+  streams of four failed CI runs show a `BuiltWorld` test never ending, which
+  stands as the CI reproduction. `BuiltWorld` deleted; world suites use `World.shared`/`World.fresh`
   (`terminationHandler`, file output). Lifecycle suites share one build.
 - Slowness: `World` defers planning exchange; density world build 219 s → ~50 s
   locally, lifecycle 34 s → 14 s.
@@ -24,8 +26,11 @@ lifecycle 117 s, Local wave launcher 49 s, CLI→Work sidebar 40 s, world reads 
 
 ## Remaining
 
-- CI proof on the PR: deliberately hung test fails within the limit (temporary
-  commit, then revert); step times after; a docs-only change skipping Desktop.
+- Publish the PR (none exists yet), then CI proof on it: a deliberately hung
+  test fails within the limit (temporary commit, then revert); step times after
+  against the baseline; a docs-only change skipping Desktop.
+- CLI build (84–130 s) is unchanged: already behind `rust-cache` and skipped
+  on merge-proof reuse. Revisit only if post-change step times show it leading.
 
 ## Delete — do not maintain
 

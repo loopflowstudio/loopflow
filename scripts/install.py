@@ -222,7 +222,7 @@ def _looks_like_loopflow(binary: Path) -> bool:
         )
     except (subprocess.SubprocessError, OSError):
         return False
-    return "Run skills and flows with coding agents" in result.stdout
+    return "Run skills and graphs with coding agents" in result.stdout
 
 
 def _resolve_install_dir() -> Path:

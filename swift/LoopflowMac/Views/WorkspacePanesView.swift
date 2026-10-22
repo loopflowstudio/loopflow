@@ -399,7 +399,7 @@ struct SessionPaneView: View {
                 }
             }
             Button("lf process", systemImage: "list.bullet.rectangle") {
-                selectContent(.flowLog(taskId: taskId, location: pane.content.location,
+                selectContent(.graphLog(taskId: taskId, location: pane.content.location,
                     execution: pane.executionLocation))
             }
         }
@@ -423,7 +423,7 @@ struct SessionPaneView: View {
 
     private var paneTaskId: String? {
         switch pane.content {
-        case .files(let task, _, _), .flowLog(let task, _, _): return task
+        case .files(let task, _, _), .graphLog(let task, _, _): return task
         default:
             if let work = primarySession?.record.work, work.kind == .task { return work.id }
             return workspace.key.kind == .task ? workspace.key.id : nil
@@ -560,8 +560,8 @@ struct SessionPaneView: View {
                     Text("Shell location is unavailable. Add a new shell in this Work.")
                 }
             }
-        case .flowLog(let taskId, let location, let execution):
-            FlowProcessLog(model: model, taskId: taskId, location: location, execution: execution,
+        case .graphLog(let taskId, let location, let execution):
+            GraphProcessLog(model: model, taskId: taskId, location: location, execution: execution,
                 query: sessions.query)
                 .id(pane.incarnation)
                 .background(PaneFocusTarget(isFocused: isFocused))
@@ -761,7 +761,7 @@ struct SessionPaneView: View {
         case .empty: "Workspace"
         case .session: item?.record.detail ?? "Workspace"
         case .shell: "Shell"
-        case .flowLog: "Flow processes"
+        case .graphLog: "Graph processes"
         case .files: "Files"
         }
     }
@@ -771,7 +771,7 @@ struct SessionPaneView: View {
         case .empty: "Workspace"
         case .session: "Session"
         case .shell: "Shell"
-        case .flowLog: "Flow processes"
+        case .graphLog: "Graph processes"
         case .files: "Files"
         }
         return PaneProgramHeading(provider: paneSessions.count == 1 ? paneSessions.first?.presentationProvider : nil,
@@ -800,7 +800,7 @@ struct SessionPaneView: View {
             }
         case .shell:
             pane.terminal
-        case .empty, .flowLog, .files:
+        case .empty, .graphLog, .files:
             nil
         }
     }

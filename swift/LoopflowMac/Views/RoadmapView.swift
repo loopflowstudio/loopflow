@@ -24,7 +24,7 @@ func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
     guard task.runtime != nil else { return startable ? .run : nil }
     switch task.actions.recommended {
     case .resume:
-        // Continuing a Task is a fresh Flow launch; Rust's Start legality governs it.
+        // Continuing a Task is a fresh Graph launch; Rust's Start legality governs it.
         if startable { return .run }
     case .openPr:
         if task.pr?.publication?.github != nil { return .openPr }

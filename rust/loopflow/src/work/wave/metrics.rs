@@ -339,7 +339,7 @@ pub fn load_metric_contract(path: &Path, wave_id: &str) -> Result<MetricContract
         message: error.to_string(),
     })?;
     let (frontmatter, markdown) =
-        crate::flow::split_frontmatter(&content).ok_or(MetricError::MissingContractFrontmatter)?;
+        crate::graph::split_frontmatter(&content).ok_or(MetricError::MissingContractFrontmatter)?;
     let frontmatter: MetricContractFrontmatter = serde_yaml_ng::from_str(frontmatter)
         .map_err(|error| MetricError::InvalidContractFrontmatter(error.to_string()))?;
     if frontmatter.schema != 1 {

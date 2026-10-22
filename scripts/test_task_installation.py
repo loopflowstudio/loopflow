@@ -9,13 +9,13 @@ from pathlib import Path
 CANONICAL_IDS = "store::migrations::canonical_ids_tests"
 
 PROOFS = {
-    "running_provider_uses_updated_install_for_commands_hooks_and_flow": (
+    "running_provider_uses_updated_install_for_commands_hooks_and_graph": (
         "os_process::installation_tests"
     ),
     "default_and_nested_commands_use_the_installed_cli_and_main_home": "one_machine_tests",
-    "task_adopts_linear_checkout_and_preserves_flow_history": "task_adoption_tests",
-    "declared_agent_can_start_another_tasks_flow": "session_lifecycle_tests",
-    "task_flow_read_keeps_captured_topology_and_counts_both_returns": "flow_tests",
+    "task_adopts_linear_checkout_and_preserves_graph_history": "task_adoption_tests",
+    "declared_agent_can_start_another_tasks_graph": "session_lifecycle_tests",
+    "task_graph_read_keeps_captured_topology_and_counts_both_returns": "graph_tests",
     "installation_uses_candidate_authority_from_any_checkout": "global_commands",
     "installation_reaches_candidate_verdict_with_an_unreadable_task_registry": "global_commands",
     "early_observation_records_preflight": "process_ownership_tests",
@@ -30,7 +30,7 @@ PROOFS = {
 
 LIB_PROOFS = {
     "task_adoption_tests",
-    "flow_tests",
+    "graph_tests",
     "os_process::installation_tests",
     CANONICAL_IDS,
 }

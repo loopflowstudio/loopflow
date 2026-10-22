@@ -13,26 +13,26 @@ Do not inventory Sessions or search other Tasks to find something to operate.
 
 When the User asks to finish a review, save the agreed design, feedback and
 remaining work. Continue the discussion in the same conversation. Feedback is
-not a command to close a Session or launch a Flow. Inspect work and effect
+not a command to close a Session or launch a Graph. Inspect work and effect
 history before launching explicitly selected next work; ambiguous feedback
 starts nothing.
 
 ## An existing Task needs to continue
 
-Read `lf task status <issue> --json`. Leave a Flow with a live process running.
-A stopped or failed Flow is history: inspect what it finished and the effects it
+Read `lf task status <issue> --json`. Leave a Graph with a live process running.
+A stopped or failed Graph is history: inspect what it finished and the effects it
 recorded; historical review boundaries remain evidence. Launch fresh work with
 `lf task run <issue>` only when the current request identifies the
 next work—for example, implementation after an accepted design. On a
-workflow that is an edge leaving the Task's node; name its Flow when the
+workflow that is an edge leaving the Task's node; name its Graph when the
 node has more than one. A blocker needs
-its stated recovery first, completed work is not repeated, and a finished Flow
+its stated recovery first, completed work is not repeated, and a finished Graph
 alone is not a request to run it again.
 
 ## An approved design has no Task
 
-Continue in the owning checkout. Implement directly or run the selected Flow,
-such as `lf flow pursue`, using the accepted design. No Task, Wave, Linear setup,
+Continue in the owning checkout. Implement directly or run the selected Graph,
+such as `lf graph pursue`, using the accepted design. No Task, Wave, Linear setup,
 or Workflow enrollment is required. Preserve an explicit choice to perform
 implement → compress → refresh in this conversation.
 
@@ -45,7 +45,7 @@ coding alone does not request Task creation.
 Check installed CLI help before mutation when command availability is uncertain.
 If Advance is unavailable, report that limitation and use existing Task/Session
 commands only when they express the same action. Do not claim an old
-finite Flow will repeat automatically. Never upgrade the installation as a hidden
+finite Graph will repeat automatically. Never upgrade the installation as a hidden
 prerequisite.
 
 After launching, inspect the selected execution and, when associated, its Task

@@ -62,7 +62,7 @@ keeps one command/result line, not an evidence ledger.
    - the command, observation, or artifact that proves success.
 
    Build a useful atom before choosing its place in a process. Require the
-   information the task needs, not a preceding skill, named Flow, Task binding,
+   information the task needs, not a preceding skill, named Graph, Task binding,
    branch name, or document layout that happened to supply it once. Keep real
    domain constraints and authority boundaries. Let callers compose synchronization,
    publication, and navigation around the operation.

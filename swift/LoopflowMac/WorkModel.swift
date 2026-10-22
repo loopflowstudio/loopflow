@@ -704,7 +704,7 @@ final class WorkModel {
             path: repoPath, selectionKind: workspaces.selectedWork?.kind.rawValue, selectionId: workspaces.selectedWork?.id,
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
-            supportedOperations: ["list", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files", "flow-log", "read", "text", "key"], workspaces: workspaces.inspect(), opening: taskOpening)
+            supportedOperations: ["list", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files", "graph-log", "read", "text", "key"], workspaces: workspaces.inspect(), opening: taskOpening)
     }
 
     private func inspectSelectedTask() -> DesktopTaskInspection? {
@@ -827,10 +827,10 @@ final class WorkModel {
         set { sessionReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
     }
     private(set) var workActivity: WorkReading<WorkActivitySnapshot> = .loading
-    /// Selectable Flows per repository, read once on demand; never per repaint.
-    private var flowCatalogReadings: [String: WorkReading<[FlowCatalogEntry]>] = [:]
-    var flowCatalog: WorkReading<[FlowCatalogEntry]> {
-        flowCatalogReadings[repoPath ?? ""] ?? .loading
+    /// Selectable Graphs per repository, read once on demand; never per repaint.
+    private var graphCatalogReadings: [String: WorkReading<[GraphCatalogEntry]>] = [:]
+    var graphCatalog: WorkReading<[GraphCatalogEntry]> {
+        graphCatalogReadings[repoPath ?? ""] ?? .loading
     }
     private var workflowCatalogReadings: [String: WorkReading<[WorkflowCatalogEntry]>] = [:]
     @ObservationIgnored private var definitionRevision: Int64?
@@ -847,8 +847,8 @@ final class WorkModel {
     private(set) var taskWork = TaskReadings<TaskOverview>()
     private(set) var taskDiagnostics = TaskReadings<TaskWork>()
     @ObservationIgnored private var diagnosticTask: String?
-    /// That Task's Flow processes keyed by Flow process, from the same part.
-    private(set) var flowProcesses: [String: FlowProcessDetail] = [:]
+    /// That Task's Graph processes keyed by Graph process, from the same part.
+    private(set) var graphProcesses: [String: GraphProcessDetail] = [:]
     /// Conversation history, read only on disclosure.
     private(set) var sessionHistory = TaskReadings<[SessionHistory]>()
     private(set) var taskContext = TaskReadings<ContextReport>()
@@ -1303,8 +1303,8 @@ final class WorkModel {
             comments.receive(body.comments, for: task.id)
             let next = WorkReading.available(body.work)
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
-            let runs = Dictionary(body.flowProcesses.map { ($0.entry.id, $0) }) { _, newer in newer }
-            if flowProcesses != runs { flowProcesses = runs }
+            let runs = Dictionary(body.graphProcesses.map { ($0.entry.id, $0) }) { _, newer in newer }
+            if graphProcesses != runs { graphProcesses = runs }
         case .taskHistory(let body):
             guard answers >= scopeFloor, let shown = selection, shown.kind == .task,
                   let task = task(id: shown.id)?.task else { return }
@@ -1403,7 +1403,7 @@ final class WorkModel {
         taskWork = TaskReadings<TaskOverview>()
         taskDiagnostics = TaskReadings<TaskWork>()
         diagnosticTask = nil
-        flowProcesses = [:]
+        graphProcesses = [:]
     }
 
     /// Explicit Retry/recovery, or a one-shot transport without subscriptions.
@@ -1843,20 +1843,20 @@ final class WorkModel {
     /// File definitions have no store revision. Returning from an editor
     /// rereads only catalogues this window has opened.
     func rereadDefinitions() async {
-        if flowCatalogReadings[repoPath ?? ""] != nil { await loadFlowCatalog(force: true) }
+        if graphCatalogReadings[repoPath ?? ""] != nil { await loadGraphCatalog(force: true) }
         if workflowCatalogReadings[workflowCatalogKey] != nil { await loadWorkflowCatalog(force: true) }
     }
 
-    /// Read the Flow catalogue for the current repository the first time it
+    /// Read the Graph catalogue for the current repository the first time it
     /// is needed, or again after its definitions may have changed (`force`).
-    func loadFlowCatalog(force: Bool = false) async {
+    func loadGraphCatalog(force: Bool = false) async {
         let key = repoPath ?? ""
-        if !force, flowCatalogReadings[key]?.value != nil { return }
-        let previous = flowCatalogReadings[key]?.value
-        let result: Result<[FlowCatalogEntry], Error>
-        do { result = .success(try await query.flowCatalog(cwd: repoPath)) }
+        if !force, graphCatalogReadings[key]?.value != nil { return }
+        let previous = graphCatalogReadings[key]?.value
+        let result: Result<[GraphCatalogEntry], Error>
+        do { result = .success(try await query.graphCatalog(cwd: repoPath)) }
         catch { result = .failure(error) }
-        flowCatalogReadings[key] = reading(from: result, lastGood: previous)
+        graphCatalogReadings[key] = reading(from: result, lastGood: previous)
     }
 
     func loadWorkflowCatalog(force: Bool = false) async {
@@ -1889,19 +1889,19 @@ final class WorkModel {
         if !query.streamsWork { await loadWorkflowCatalog(force: true) }
     }
 
-    func definitionSource(_ entry: FlowCatalogEntry) async throws -> URL {
-        let path = try await query.customizeFlow(entry.name, cwd: repoPath)
-        await loadFlowCatalog(force: true)
+    func definitionSource(_ entry: GraphCatalogEntry) async throws -> URL {
+        let path = try await query.customizeGraph(entry.name, cwd: repoPath)
+        await loadGraphCatalog(force: true)
         return URL(fileURLWithPath: path)
     }
 
-    /// Launch a fresh Flow for the Task, then confirm its subscription update.
-    /// Without `flow`, Rust selects the Task's Workflow through its Wave or repository default.
+    /// Launch a fresh Graph for the Task, then confirm its subscription update.
+    /// Without `graph`, Rust selects the Task's Workflow through its Wave or repository default.
     /// The outcome settles only the Task and repository that started it; a
     /// refusal is kept on that Task's draft and changes nothing else.
-    func startTask(_ flow: String?, task: RoadmapTask) async {
+    func startTask(_ graph: String?, task: RoadmapTask) async {
         await performTaskAction(task.id) {
-            try await query.runTask(issue: task.task.identifier, flow: flow, cwd: WaveOrigin.resolve(task.task.repo))
+            try await query.runTask(issue: task.task.identifier, graph: graph, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 

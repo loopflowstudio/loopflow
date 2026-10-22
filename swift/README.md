@@ -19,7 +19,7 @@ only through the Task Work that owns them.
 
 A returning launch opens on the workspace saved at `<Machine>/desktop-cache/workspace.json`
 and shows **Updating…** until this launch's reads replace it. Saved rows open
-and navigate; Flow state, Task condition, Session state and every action except
+and navigate; Graph process state, Task condition, Session state and every action except
 opening a Session wait for the fresh read. The Portfolio window opens from the
 same saved workspace. A failed refresh keeps what is shown under one
 **Couldn't update** line. Repeated identical Session errors leave the displayed
@@ -279,7 +279,7 @@ explicit **Move here**. An ended Session shows a bounded excerpt of its final
 terminal screen; reopening is explicit and preserves the conversation's history.
 
 Exiting a disposable CLI conversation retires it from navigation while keeping
-its provider history. Ctrl-C interruption is recorded; interrupted Flow reviews,
+its provider history. Ctrl-C interruption is recorded; interrupted Graph reviews,
 Task conversations and repository/Wave primaries remain reachable.
 Stopping a response alone never closes the conversation or completes a review.
 
@@ -316,29 +316,29 @@ The expanded graph scales to the window:
 `start` and `end` as circles, each node a box saying what you do there, one
 labelled arrow per edge, a loop back as an arc over its node. The current node
 or running edge is marked. The labels of the edges leaving the current node
-are buttons; each runs `lf -b task run` as a child of the app. No edge is offered while one runs. An edge whose Flow stopped holds the
+are buttons; each runs `lf -b task run` as a child of the app. No edge is offered while one runs. An edge whose Graph stopped holds the
 Task, is drawn stopped, and is offered again with the others leaving its
 node. **Move to** changes Workflow position; `end` requests completion.
 **Complete** changes Task status independently. **Retry completion** retries a
-failed request without replaying the Flow.
+failed request without replaying the Graph.
 Linear completion leaves the displayed Workflow and live Processes intact.
 Loading or unavailable Workflow readings remain explicit; a failed refresh keeps
 the last recorded graph with its actions disabled. Only a successful Task reading
 with no captured Workflow offers **Start**, which runs `lf -b task run ISSUE`.
 
 Use **⌘T** for a new shell tab and **View → Toggle Files** for Files.
-Choose **Flow processes** in **⌘K** to open the Flow process log. It lists every Flow process in the
+Choose **Graph processes** in **⌘K** to open the Graph process log. It lists every Graph process in the
 Task's checkout, newest first, whether an edge or a person started it; it is
-not the Workflow's history. One line each: Flow, state, when it started and
+not the Workflow's history. One line each: Graph, state, when it started and
 how long it ran. A row opens to its id, graph and steps (the shape of
-`lf flow show ID --processes --json`). A Flow whose process exited early reads
+`lf graph show ID --processes --json`). A Graph whose process exited early reads
 **stopped**. One whose process was killed has no exit record and keeps reading
 as running. **Task details → Debug** lists the Task's raw Sessions and Processes.
 Sessions list **Waiting** first and working ones in a compact group.
 The Wave page's **Workflow** opens its definition in the catalogue inspector.
 **Customize** or **Edit** opens the existing source editor; captured Task
 Workflows stay unchanged.
-**Session history** under the Flow reads nothing until expanded; it then lists that
+**Session history** under the Graph reads nothing until expanded; it then lists that
 Task's complete recorded input history (`lf usage --days 0 --task ID --json`) with each recorded
 outcome. Session rows show the provider recorded on their Run and a ready summary
 only when the Session recorded one.
@@ -354,8 +354,8 @@ Wave → Task → Session: Wave and Task crumbs return to their details; the Tas
 issue ID links to Linear. The Task crumb keeps the exact conversation name
 without a sibling picker. Repository/Wave crumbs can choose among their Sessions. The pencil renames the Session in place through `lf session
 rename`; the shown name is the shared readback, and a rejected name stays in the
-field with its error. A remote Flow Session's name lives on its Machine and is not
-renamed here. Outside Task navigation, the Session shows its Flow membership
+field with its error. A remote Graph Session's name lives on its Machine and is not
+renamed here. Outside Task navigation, the Session shows its Graph membership
 beside the name. Task navigation keeps that provenance in inspection. On the right sit
 the Task's read-only worktree location and the Activity glyph.
 
@@ -388,7 +388,7 @@ cannot guarantee exact hue or separation of nearly identical colors. Faint text
 may not reach the requested ratio. Graphics, images, transparent backdrops and
 custom postprocessing are outside the opaque-text contrast guarantee.
 
-Files and the Flow process log open beside retained Sessions and shells in the
+Files and the Graph process log open beside retained Sessions and shells in the
 same multiplexer. Resize, zoom, close and Reopen preserve each pane’s content.
 Drag any pane divider to resize; it highlights on hover and snaps near 38.2% or
 61.8%. Showing a tool gives 61.8% to the existing pane and 38.2% to the tool.
@@ -396,9 +396,9 @@ Both sides retain usable minimum sizes, including nested splits; small windows
 shrink those minimums together.
 
 Press **⌘K** to search Waves and planned Tasks across repositories, plus Workflows
-and Flows in the selected repository. Empty search shows working Tasks first, then other Tasks, Waves and repositories; arrows select,
-Return opens and Escape returns focus to the previous terminal. Flow entries
-inspect the template. **Flow processes of ISSUE** opens the Task's log pane.
+and Graphs in the selected repository. Empty search shows working Tasks first, then other Tasks, Waves and repositories; arrows select,
+Return opens and Escape returns focus to the previous terminal. Graph entries
+inspect the template. **Graph processes of ISSUE** opens the Task's log pane.
 Each repository retains up to 20 recent
 destinations for the window. Visited historical Tasks remain in recents after
 leaving their pages; opening one reads its exact identity again. This does not
@@ -417,7 +417,7 @@ open 'loopflow://loopflow/task/LOO-303'
 ```
 
 Work links and palette Task entries open retained workspaces, including Tasks
-outside the current chapter, without starting a Task Flow. An incoming address
+outside the current chapter, without starting a Task Graph. An incoming address
 resolves through `lf open --link --json`; the app never repeats repository
 selection. A Task address opens its primary conversation. An ambiguous or
 unknown address changes nothing and reports the qualified links; failed reads
@@ -431,7 +431,7 @@ the selected conversation and pane layout. Loaded repository-qualified links reu
 observed planning; successful opens do not present a Task-finding sheet.
 Add `session` to open an existing Task conversation in its terminal pane. A
 missing or unrelated Session leaves the current workspace intact and offers Retry.
-Opening a conversation does not complete a review or start a Task Flow.
+Opening a conversation does not complete a review or start a Task Graph.
 
 Wave details show the objective, current chapter plan/KRs, the current Project's
 Workflow, current Tasks and chapter history. Completed Tasks start hidden.
@@ -439,12 +439,12 @@ Workflow, current Tasks and chapter history. Completed Tasks start hidden.
 Enter or clicking away applies it, Escape cancels. Enter **0** for **All Tasks**
 (successful completions of any age); click that label to edit again. The checkbox
 hides history and remembers the range. Invalid input keeps the previous range. Canceled and duplicate history stays out of this list. Unresolved
-execution and retained Session access remain available. Templates fold composed Flows;
+execution and retained Session access remain available. Templates fold composed Graphs;
 click a group or its disclosure control to expand it. Repeated uses disclose
 independently, and both return edges remain visible at folded boundaries. Tab to
 a disclosure, then use Right/Left to expand/collapse or Space/Return to toggle;
 this includes nested and empty groups and XOR paths. Inspecting a return names
-its target step even while the containing Flow is folded.
+its target step even while the containing Graph is folded.
 Task previews use the same template view until an invocation exists, including
 Tasks with independent conversations. Captured invocations keep their expanded
 graph. Changing a template resets its disclosure; it does not change a capture.
@@ -459,7 +459,7 @@ partial reads remain visible in the outline.
 Each terminal pane owns one native libghostty surface. A Session without a local
 terminal shows its shared Open or Move here action; opening and failure states
 remain in that pane. Sessions
-include interactive provider Sessions and Task human FlowSteps.
+include interactive provider Sessions and Task human GraphSteps.
 Runs resumed interactively also appear, including those originally launched
 headlessly. Closing their client preserves the Session and its history.
 
@@ -475,7 +475,7 @@ feedback remain inspectable.
 The shared Session projection supplies action labels, unavailable reasons and Work
 paths to both CLI and Mac; local terminal presence only determines which pane to show.
 
-Flow steps run as ordinary `lf -b skill <name>` commands under their Flow process.
+Graph steps run as ordinary `lf -b skill <name>` commands under their Graph process.
 The app lists, opens, and acts on the shared
 Rust `SessionRecord` projection; it owns no parallel queue.
 The Session ID targets conversation actions and history lookup. A prepared
@@ -556,7 +556,7 @@ decisions, deliveries, and actionable failures remain visible. The detail pane
 reads the current chapter plan, Tasks, decisions, PR delivery, and Task conditions
 from `lf wave status <wave> --json`.
 
-Open a Task from the roadmap in its repository window, start its legal Flow,
+Open a Task from the roadmap in its repository window, start its legal Graph,
 or open its PR. **Worktree** opens the recorded checkout in Warp.
 Rows show the shared condition and reason from `lf wave show`; unknown means
 the required evidence could not be read.
@@ -575,7 +575,7 @@ codebase tree, and registry health.
 - **Task workspace presentation** reads `lf diff --files --json`,
   `lf diff --json` and `lf file --json`.
   Lifecycle mutations remain `lf task run` and `lf interrupt`; review nodes use
-  the Task's persisted flow position and provider Run identity.
+  the Task's persisted graph position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
   `lf wave list/show/status`, `lf monitor`, and `lf history` JSON commands; the app does not
   maintain a second roadmap or lifecycle database. Unavailable per-Wave evidence
@@ -701,7 +701,7 @@ lf monitor work --watch --json    # what a window shows, as it changes
 
 Each window keeps one such reader open through `RegistryQuery.watchWork()`.
 Its frames carry planning, the repository's Sessions, the shown Task's work
-with its Workflow and every Flow process, the shown Wave's detail and activity.
+with its Workflow and every Graph process, the shown Wave's detail and activity.
 Mechanical Process history is a separate `task_history` subscription, enabled
 only while the Task's Debug disclosure is open. Closing it stops those queries;
 retained history and cached readings are not deleted. The ordinary header never
@@ -756,7 +756,7 @@ retaining cached planning. Retry appears after failure. An unfinished persisted
 Process without a pending local command remains an unknown outcome.
 The Work stream supplies `project_readiness`: selected Project, dated accepted
 facts, unresolved transition and the exact activation Process's outcome. Empty default
-Flows render no template section. Command transport errors remain scoped to the Wave.
+Graphs render no template section. Command transport errors remain scoped to the Wave.
 
 Work observation and navigation project durable Waves, Projects and Tasks with
 associated Sessions and Processes; they introduce no additional Work kinds.
@@ -767,11 +767,11 @@ associated Sessions and Processes; they introduce no additional Work kinds.
 directory. Terminal workspaces own pane layouts. Saved cache paths, selection keys
 and placement JSON fields retain their existing bytes across these source renames.
 
-Definition search keeps Flow and Workflow destinations separate, even for the
+Definition search keeps Graph and Workflow destinations separate, even for the
 same name. Project selectors list only Workflows. Task reads expose
-`workflow_name`, `latest_flow_process`, `execution`, and `run_control` separately;
-completed Flow processes retain their graph and identity. The Task watch part
-supplies `flow_processes`, using the same execution details as CLI inspection.
+`workflow_name`, `latest_graph_process`, `execution`, and `run_control` separately;
+completed Graph processes retain their graph and identity. The Task watch part
+supplies `graph_processes`, using the same execution details as CLI inspection.
 
 ### Inspect retained workspaces
 
@@ -792,7 +792,7 @@ and app quit still end embedded clients; this is not draft recovery after quit.
 
 Inspection reports each workspace's `work`, title, open state and selection.
 Execution locations live on contents, not workspace keys or pane receipts.
-There is no outer checkout-slot layout or checkout-split menu. Flow logs use their
+There is no outer checkout-slot layout or checkout-split menu. Graph logs use their
 content location: the matching local Work stream, or an owner-pinned read with
 explicit Refresh for other retained locations. They never read a peer path locally.
 Task recommendations/run legality and Session actions retain their separate
@@ -845,9 +845,9 @@ including its content occurrence and surface key; it never closes/reopens a clie
 Shell adds and selects a tab in the Task’s single Shell tool on its recorded execution Machine and checkout. Shell tabs retain their creation location through arrangement and Close/Undo. Session panes capture their recorded location; changed readings invalidate old pane targets without changing focus. Unknown locations never open a local replacement. Move, resize, hide and restore preserve selection;
 zoom does not redirect input to an unselected pane. Window/content replacement
 rejects stale targets, including the second target of a move or resize. Mutation replies
-identify the affected pane directly; they are not native-rendering proof. Files and Flow-log add
+identify the affected pane directly; they are not native-rendering proof. Files and Graph-log add
 companions beside the exact target without changing focus or zoom. Files and
-Flow-log reuse existing panes for the named Task; its recorded checkout must
+Graph-log reuse existing panes for the named Task; its recorded checkout must
 match. Remote shells run on the recorded execution Machine; changed or missing checkouts
 refuse launch without opening a local shell. Disconnects never replay shell commands.
 

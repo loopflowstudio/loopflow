@@ -5,9 +5,9 @@ use serde::Deserialize;
 
 use crate::agent::{run_agent, AgentConfig, ProcessConfig};
 use crate::config::{load_config_or_default, load_repo_config, MergeMethod};
-use crate::flow::load_skill;
 use crate::git::worktrees::{list_worktrees, main_repo_root};
 use crate::git::{current_branch, get_default_branch, rev_parse};
+use crate::graph::load_skill;
 
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};

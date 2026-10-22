@@ -111,7 +111,7 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
         }
         Some(PrPhase::Working) | None => action(
             TaskAction::Resume,
-            "run the next work with `lf task run`; inspect earlier Flows and independent Sessions first",
+            "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first",
         ),
     }
 }

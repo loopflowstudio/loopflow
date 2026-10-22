@@ -76,7 +76,7 @@ config files.
 | Yolo mode (skip permissions) | `--yolo` | `yolo: true` |
 | Account's own provider home | `--isolate` / `--shared` | `isolate: true` |
 | [`~/.lf` disk budget](troubleshooting.md#disk-space) | — | global-only `disk_budget: 20G` |
-| Review FlowStep terminal | — | global-only `session.terminal: Ghostty` |
+| Review GraphStep terminal | — | global-only `session.terminal: Ghostty` |
 | End agents nobody is viewing | — | `session.end_detached_after: 24h` (or `off`) |
 
 ## Scratch lifecycle
@@ -90,7 +90,7 @@ there enters agent context automatically. Scratch follows ordinary Git behavior
 in every checkout. No scratch setting is required.
 
 `lf pr submit` and `lf pr land` invoke this cleanup during preparation, so default
-Flows need no extra step. It is also available on its own. Publishing a draft or
+Graphs need no extra step. It is also available on its own. Publishing a draft or
 ready PR does not run general scratch cleanup; PR-copy handoff artifacts retain
 their existing lifecycle. Cleanup uses the existing Task diff base
 or the branch's merge base with main; it removes only added files, preserving
@@ -175,7 +175,7 @@ For most settings, repo overrides global. For additive settings (`docs`, `contex
 # ~/.lf/config.yaml (global)
 agent: claude:opus
 session:
-  terminal: Ghostty       # presents review FlowStep sessions on this Machine
+  terminal: Ghostty       # presents review GraphStep sessions on this Machine
   end_detached_after: 24h # stop an unviewed Session's agent; `lf resume` reopens it
 
 # .lf/config.yaml (repo)
@@ -206,12 +206,12 @@ exclude:
   - node_modules
 ```
 
-## Flows
+## Graphs
 
-Flows are YAML files in `.lf/flows/`:
+Graphs are YAML files in `.lf/graphs/`:
 
 ```yaml
-# .lf/flows/ship-api.yaml
+# .lf/graphs/ship-api.yaml
 - implement
 - compress
 - gate
@@ -277,7 +277,7 @@ previous target tag.
 Launches receive the small `LOOPFLOW.md` contract. Task- and Wave-associated
 launches also preload Work guidance. Read `lf help skill work` when entering
 Work APIs from an existing conversation. Standalone native skills retain their
-own guidance. Association selects context; a requested skill or Flow selects
+own guidance. Association selects context; a requested skill or Graph selects
 the procedure.
 
 ### Docs
@@ -450,7 +450,7 @@ This list is additive across global and repo config.
 ### Run Mode
 
 Direct named invocations use an interactive session when stdin or stdout is a
-TTY. Automated flow nodes and `-b` invocations run headlessly. Skill
+TTY. Automated graph nodes and `-b` invocations run headlessly. Skill
 frontmatter never changes scheduling.
 
 | | |
@@ -458,8 +458,8 @@ frontmatter never changes scheduling.
 | **CLI** | `-i` (interactive), `-b` (batch/headless) |
 | **Default** | interactive for a direct TTY; headless otherwise |
 
-Flows hold autonomous steps only; a `human: true` step is rejected at launch.
-See [Authoring](authoring.md#flows).
+Graphs hold autonomous steps only; a `human: true` step is rejected at launch.
+See [Authoring](authoring.md#graphs).
 
 ### Chrome
 
@@ -519,7 +519,7 @@ keeps that account's provider home, including when `--shared` is requested.
 Claude turn limits and native JSON schemas require headless mode; terminal
 launches reject them. Other headless providers report unsupported turn limits
 or native schemas and continue with ordinary output; this also preserves
-historical replay. Flow output validation still applies to every provider.
+historical replay. Graph output validation still applies to every provider.
 
 ### Worktree Sandboxes
 
@@ -589,7 +589,7 @@ scope, precedence is `.lf/skills`, `.claude/skills`, `.claude/commands`,
 `.agents/skills`, `.codex/skills`, `.codex/prompts`. Personal Claude and Codex
 folders respect `CLAUDE_CONFIG_DIR` and `CODEX_HOME`. Generated Loopflow exports
 never override the current embedded builtin. Help, listing, execution lookup,
-and retained Flow definitions use the same selection. Listings prefer the authored
+and retained Graph definitions use the same selection. Listings prefer the authored
 `description`, falling back to the first prose line.
 
 Install third-party skills with their own installer, then use their installed
@@ -610,19 +610,19 @@ Standalone native skills use their own instructions with gathered conversation
 context; builtin launches receive the launcher contract and associated Work
 guidance. Memory and scratch
 budgets are authoring targets, not launch gates. LF builtins remain inline in
-the first turn. Captured Flow definitions survive
+the first turn. Captured Graph definitions survive
 source-file changes or removal: Claude uses a captured native definition, while
 Codex uses captured instructions. Both retain the original resource directory;
 resources removed with the bundle are not preserved.
 
 ```bash
-lf sync-skills --yes       # personal skills and builtin skills/Flows → home
-lf sync-skills --repo      # repository skills/Flows → this checkout
+lf sync-skills --yes       # personal skills and builtin skills/Graphs → home
+lf sync-skills --repo      # repository skills/Graphs → this checkout
 ```
 
 Global exports go to `~/.claude/skills` and `~/.agents/skills`; repository exports
 go to the corresponding checkout directories, never home. Release promotion’s
-skill sync includes builtin Flows. Recipes capture Flow topology at sync time;
+skill sync includes builtin Graphs. Recipes capture Graph topology at sync time;
 sync again after adding, editing, removing or overriding repository definitions.
 Headless commands load their skills when launched.
 
@@ -630,18 +630,18 @@ Exact names win: `.lf/skills/wave/session.md` and `.lf/skills/wave-session.md`
 are distinct definitions. `lf skill wave/session` selects the first; `lf skill
 wave-session` selects the second. When no exact name exists, `/` → `-` provides a
 fallback. Multiple fallback candidates produce an ambiguity naming the candidates.
-The same rules apply to Flows. Repository, personal and provider-root precedence
+The same rules apply to Graphs. Repository, personal and provider-root precedence
 apply to identical literal names. Existing unique bare shortcuts remain; hyphen
 suffixes do not create new shortcuts. Untyped lookup checks exact names before
-fallbacks, with Flow-first precedence for the same literal name.
+fallbacks, with Graph-first precedence for the same literal name.
 
 Exports use one portable name per skill in both directories: lowercase letters,
 digits and separating hyphens, at most 64 characters. `repo/operate` exports as
 `repo-operate`. Long names use their final component plus a stable suffix, such as
 `pdf-a1b2c3d4`. Exact literal names keep priority; collisions receive distinct
 suffixes so neither skill is lost. Original `lf` names remain unchanged; native
-slash aliases are replaced by these portable names. Flow exports yield to skills
-at the same projected name and retain their original exact Flow identity.
+slash aliases are replaced by these portable names. Graph exports yield to skills
+at the same projected name and retain their original exact Graph identity.
 Third-party files and bundles are preserved. Sync prunes only generated exports
 after replacements are writable.
 Original native declarations and resource paths remain attached to each source;
@@ -670,7 +670,7 @@ sends no method or commit-message override for queued merging. Personal config
 cannot override this repository policy. Every request retains the observed head
 commit check and GitHub's protection requirements.
 
-Keep procedure in repository instructions and Flows: who should review, when to
+Keep procedure in repository instructions and Graphs: who should review, when to
 run checks, and whether to stop at `publish`, `submit`, or auto-merge. Do not
 replace whole lifecycle commands with scripts whose successful exit could mean
 something different. Release targets already expose `verify`, `prepare`,

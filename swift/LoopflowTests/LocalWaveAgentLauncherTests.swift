@@ -31,13 +31,13 @@ struct LocalWaveAgentLauncherTests {
             "PATH": "/usr/bin:/bin",
             "LF_HOME": "/tmp/loopflow-development-home",
             "LF_WAVE_ID": "launching-wave",
-            "LF_FLOW_ID": "launching-step",
+            "LF_GRAPH_ID": "launching-step",
             "LF_RUN_ID": "launching-run",
         ])
 
         #expect(environment["LF_HOME"] == "/tmp/loopflow-development-home")
         #expect(environment["LF_WAVE_ID"] == nil)
-        #expect(environment["LF_FLOW_ID"] == nil)
+        #expect(environment["LF_GRAPH_ID"] == nil)
         #expect(environment["LF_RUN_ID"] == nil)
     }
 
@@ -84,7 +84,7 @@ struct LocalWaveAgentLauncherTests {
         }
     }
 
-    @Test("New session prepares Task Work without running its Flow and uses the returned checkout")
+    @Test("New session prepares Task Work without running its Graph and uses the returned checkout")
     func taskCheckoutUsesReceiptWorktree() throws {
         #expect(LocalWaveAgentLauncher.taskCheckoutCommand(lfPath: "/bin/lf", issue: "LOO-291")
             == ["/bin/lf", "task", "checkout", "LOO-291", "--json"])

@@ -59,7 +59,7 @@ in `lf planning status`, ready to copy back.
 and describe what was decided; the session drafts the Tasks with you and files them
 in their Waves. Teammates see them on their next command.
 
-Only planning travels: checkouts, Sessions, Flows and processes stay on the
+Only planning travels: checkouts, Sessions, Graphs and processes stay on the
 machine that ran them.
 
 ## With a tracker

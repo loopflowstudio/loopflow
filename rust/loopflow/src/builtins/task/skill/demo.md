@@ -21,11 +21,11 @@ with its proof. Link the current design and supporting evidence. Distinguish
 human statements from your interpretation, and agreed changes from proposals.
 Keep the current account coherent; mark superseded conclusions and preserve
 useful evidence. The note should stand on its own in any later review or work
-step, including when this demo runs outside a Flow.
+step, including when this demo runs outside a Graph.
 
 Discuss the feedback, revised artifact paths and remaining work in the ongoing
 conversation. Save their exact paths and a short takeaway with the review evidence.
-The caller chooses further work; this demo closes no Session and restarts no Flow.
+The caller chooses further work; this demo closes no Session and restarts no Graph.
 
 On a headless surface, run the same demonstration autonomously. If required
 product judgment or absent-user action prevents the proof, explain the exact

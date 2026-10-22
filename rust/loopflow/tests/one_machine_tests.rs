@@ -71,17 +71,21 @@ fn custom_home_initializes_once_and_refuses_schema_repair() {
 }
 
 #[test]
-fn flow_steps_keep_the_explicit_home() {
+fn graph_steps_keep_the_explicit_home() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    repo.create_file(".lf/flows/home-proof.yaml", "- cmd: sync --plan\n");
-    let output = command(home.path(), repo.path(), &["flow", "home-proof", "--batch"])
-        .output()
-        .unwrap();
+    repo.create_file(".lf/graphs/home-proof.yaml", "- cmd: sync --plan\n");
+    let output = command(
+        home.path(),
+        repo.path(),
+        &["graph", "home-proof", "--batch"],
+    )
+    .output()
+    .unwrap();
     success(output);
     let connection = Connection::open(home.path().join("loopflow.db")).unwrap();
     let child_commands: i64 = connection.query_row(
-        "SELECT count(*) FROM processes e JOIN flow_process_steps s ON s.lf_process_id=e.id WHERE e.exit_code=0",
+        "SELECT count(*) FROM processes e JOIN graph_process_steps s ON s.lf_process_id=e.id WHERE e.exit_code=0",
         [], |row| row.get(0)
     ).unwrap();
     assert_eq!(child_commands, 1);

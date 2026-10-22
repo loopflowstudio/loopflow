@@ -86,7 +86,7 @@ produces: scratch/something.md | code changes | verdict
 
 Skill frontmatter configures the work, not its launch surface. Direct TTY
 invocations run interactively; automated and `--batch` invocations are
-headless. Put interactive review on the exact Flow occurrence instead:
+headless. Put interactive review on the exact Graph occurrence instead:
 
 ```yaml
 - step:
@@ -286,7 +286,7 @@ needed; authored prose should read like something its readers would write.
 
 ## Goals
 
-Goals shape judgment and intent—how an agent approaches work. They're different from steps (which define tasks) and flows (which chain steps).
+Goals shape judgment and intent—how an agent approaches work. They're different from steps (which define tasks) and graphs (which chain steps).
 
 ### Structure
 
@@ -389,7 +389,7 @@ output comes down to five marks.
 
 ```markdown
 # Thin — technically valid, but it can't steer a loop
-Read the live tasks, pick the next useful move, dispatch the appropriate flow, and
+Read the live tasks, pick the next useful move, dispatch the appropriate graph, and
 leave loopflow closer to done.
 
 # Makeover — identity, verbs, and a north the loop can be held to
@@ -408,15 +408,15 @@ remains, record the blocker instead of inventing work.
 
 ### Principles over process
 
-Goals primarily provide judgment, not workflow. Detailed process belongs in flows and steps.
+Goals primarily provide judgment, not workflow. Detailed process belongs in graphs and steps.
 
-"Where's the biggest gap between vision and implementation?" is a goal. "1. Read the wave plan. 2. Pick an item. 3. Update status to in-progress. 4. Build it. 5. Update status to done." is process—that belongs in a flow.
+"Where's the biggest gap between vision and implementation?" is a goal. "1. Read the wave plan. 2. Pick an item. 3. Update status to in-progress. 4. Build it. 5. Update status to done." is process—that belongs in a graph.
 
 Action goals can include light process for system navigation. Perspective goals should be almost purely principles.
 
 ### Abstraction level
 
-**Loopflow system concepts are fine:** `.lf/wave/`, `scratch/`, frontmatter, areas, flows—these are part of how loopflow works and belong in goals.
+**Loopflow system concepts are fine:** `.lf/wave/`, `scratch/`, frontmatter, areas, graphs—these are part of how loopflow works and belong in goals.
 
 **Product-specific details should be abstracted:** Don't write "use `.monospacedDigit()` for numbers"—write "ensure numeric data is readable." Don't write "44pt tap targets"—write "touch targets big enough for people on mobile and agents using browser tools."
 
@@ -430,9 +430,9 @@ Use direct statements and sharp questions. Avoid hedging ("consider whether...",
 
 ## Build atoms before processes
 
-Define a useful operation first, then compose operations into a Flow. A skill
+Define a useful operation first, then compose operations into a Graph. A skill
 should name the information it needs and the change it leaves behind. Do not
-derive its contract from one place in a process: a previous skill, named Flow,
+derive its contract from one place in a process: a previous skill, named Graph,
 branch convention, Task binding, or report filename is usually incidental.
 
 For example, realign needs intent and work to reconcile. It edits the plan,
@@ -591,7 +591,7 @@ Before committing a prompt:
 - [ ] Rendered output, including tool-added text, preserves the reading order
 - [ ] Output format is specified if the prompt produces artifacts
 - [ ] The skill works standalone, midstream, and on a repeated invocation
-- [ ] Required inputs describe real needs, not an assumed producer or Flow
+- [ ] Required inputs describe real needs, not an assumed producer or Graph
 - [ ] Clear corrections update their owner; separate reports have a distinct use
 - [ ] Pruning stale prose preserves unresolved evidence and accepted constraints
 - [ ] Publication and navigation remain explicit responsibilities of their callers

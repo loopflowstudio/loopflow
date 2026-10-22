@@ -1,5 +1,5 @@
 //! Provider observations survive the client that happened to receive them.
-//! These receipts confer no conversational or Flow mutation authority.
+//! These receipts confer no conversational or Graph mutation authority.
 
 use crate::id::AgentSessionId;
 use std::collections::HashMap;

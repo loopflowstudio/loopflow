@@ -31,7 +31,7 @@ fn process() -> LfProcess {
         via_agent: Some(false),
         caller_session_id: None,
         caller_agent_process_id: None,
-        command: Some(r#"["lf","flow","telemetry-daily"]"#.into()),
+        command: Some(r#"["lf","graph","telemetry-daily"]"#.into()),
         repo: Some("/src/loopflow".into()),
         cwd: None,
         started_at: ts,

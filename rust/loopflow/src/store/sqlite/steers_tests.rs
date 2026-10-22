@@ -276,7 +276,7 @@ fn source_revisions_supersede_only_pending_and_keep_complete_sources() {
 }
 
 #[test]
-fn scopes_flow_downward_and_idle_peers_keep_independent_pending_receipts() {
+fn scopes_graph_downward_and_idle_peers_keep_independent_pending_receipts() {
     let (_home, store, adapter) = fixture();
     for name in ["peer", "sibling", "parent", "taskless"] {
         store.test_session(name, &crate::session_record::new_artifact_key());

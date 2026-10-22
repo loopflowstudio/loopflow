@@ -214,7 +214,7 @@ pub(crate) enum ProcessIdentityEvidence {
 pub enum LfNode {
     #[serde(alias = "exec")] // Historical trace events remain readable.
     Process,
-    Flow,
+    Graph,
     Skill,
 }
 
@@ -232,7 +232,7 @@ pub struct LfEventFields {
     pub wave_name: Option<String>,
     pub worktree: Option<String>,
     pub command: Option<Vec<String>>,
-    pub flow: Option<String>,
+    pub graph: Option<String>,
     pub skill: Option<String>,
     pub index: Option<u32>,
     pub error: Option<String>,
@@ -254,7 +254,7 @@ pub struct LfEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub flow: Option<String>,
+    pub graph: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -337,7 +337,7 @@ pub fn observe_process(command: &[String]) {
 pub fn command_exit_code<T>(result: &anyhow::Result<T>) -> u8 {
     match result {
         Ok(_) => 0,
-        Err(error) if error.is::<crate::process::FlowHeld>() => crate::process::FlowHeld::EXIT,
+        Err(error) if error.is::<crate::process::GraphHeld>() => crate::process::GraphHeld::EXIT,
         Err(error) => error
             .downcast_ref::<crate::process::CommandExit>()
             .map_or(1, |exit| exit.0),
@@ -485,7 +485,7 @@ fn try_emit(
         wave_name: fields.wave_name,
         worktree: fields.worktree,
         command: fields.command,
-        flow: fields.flow,
+        graph: fields.graph,
         skill: fields.skill,
         index: fields.index,
         error: fields.error,
@@ -523,7 +523,7 @@ fn record_process_interruption(context: &ProcessContext) {
         wave_name: context.wave.clone(),
         worktree: Some(context.cwd.display().to_string()),
         command: None,
-        flow: None,
+        graph: None,
         skill: None,
         index: None,
         error: None,
@@ -1621,7 +1621,7 @@ mod tests {
                 wave_name: Some("meta".to_string()),
                 worktree: Some(trace_dir.display().to_string()),
                 command: None,
-                flow: Some("garden".to_string()),
+                graph: Some("garden".to_string()),
                 skill: Some(format!("writer-{writer}-{index}")),
                 index: Some(index as u32),
                 error: Some(format!(
@@ -1793,7 +1793,7 @@ mod tests {
     }
 
     #[test]
-    fn journal_writes_process_flow_and_skill_events_in_wave_worktree() {
+    fn journal_writes_process_graph_and_skill_events_in_wave_worktree() {
         let _guard = journal_test_guard();
         let repo = TestRepo::new();
         let worktree = repo.create_named_worktree("runtime");
@@ -1807,10 +1807,10 @@ mod tests {
         );
         emit(
             &worktree,
-            LfNode::Flow,
+            LfNode::Graph,
             LfEventType::Started,
             LfEventFields {
-                flow: Some("build".to_string()),
+                graph: Some("build".to_string()),
                 ..LfEventFields::default()
             },
         );
@@ -1836,7 +1836,7 @@ mod tests {
         );
         emit(
             &worktree,
-            LfNode::Flow,
+            LfNode::Graph,
             LfEventType::Completed,
             LfEventFields::default(),
         );
@@ -1853,13 +1853,13 @@ mod tests {
         assert_eq!(events[0].node, LfNode::Process);
         assert_eq!(events[0].event, LfEventType::Started);
         assert_eq!(events[0].wave_name.as_deref(), Some("runtime"));
-        assert_eq!(events[1].node, LfNode::Flow);
-        assert_eq!(events[1].flow.as_deref(), Some("build"));
+        assert_eq!(events[1].node, LfNode::Graph);
+        assert_eq!(events[1].graph.as_deref(), Some("build"));
         assert_eq!(events[2].node, LfNode::Skill);
         assert_eq!(events[2].skill.as_deref(), Some("implement"));
         assert_eq!(events[2].index, Some(0));
         assert_eq!(events[3].event, LfEventType::Completed);
-        assert_eq!(events[4].node, LfNode::Flow);
+        assert_eq!(events[4].node, LfNode::Graph);
         assert_eq!(events[5].node, LfNode::Process);
         assert_eq!(events[5].event, LfEventType::Completed);
     }

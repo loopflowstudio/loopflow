@@ -74,7 +74,7 @@ pub(crate) async fn ensure_task(
     let _lock = lock_scope(&scope).await?;
     if task.worktree.as_deref().is_some_and(|path| !path.exists()) {
         // Reuse Task preparation's recorded placement and restoration checks.
-        // Opening a conversation does not invent a checkout or start a Flow.
+        // Opening a conversation does not invent a checkout or start a Graph.
         let repo = repo.to_path_buf();
         let id = task.id.to_string();
         tokio::task::spawn_blocking(move || {
@@ -286,7 +286,7 @@ async fn prepare(store: &SharedStore, id: &str) -> Result<SessionRecord> {
         publish_prepared_input(
             &store.sqlite,
             &session,
-            crate::session_record::SessionFlowMembership::Independent,
+            crate::session_record::SessionGraphMembership::Independent,
         )?
     };
     surface(store, &session).await

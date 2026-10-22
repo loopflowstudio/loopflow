@@ -722,7 +722,7 @@ pub(super) async fn fresh_linear_login(
         .first()
         .ok_or_else(|| anyhow!("no browser profile available"))?;
     let chrome = verified_chrome_profile(profile)?;
-    let broker = crate::provider_auth::LinearOAuthBroker::new();
+    let broker = crate::provider_auth::PmOAuthBroker::new(Provider::Linear);
     let handle = broker.start_auth().await?;
     let flow = handle.response.clone();
     let url = flow

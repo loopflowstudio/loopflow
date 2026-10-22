@@ -1,5 +1,6 @@
 //! Stable provider hook declarations and separately saved launch context. No user files
-//! or trust decisions are replaced. Saved sources survive driver replacement.
+//! or hook trust decisions are replaced; Claude folder trust is granted only by
+//! `claude_trust`, for lf-created worktrees. Saved sources survive driver replacement.
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;

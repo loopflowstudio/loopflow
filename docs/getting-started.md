@@ -179,15 +179,16 @@ Chain skills manually, or use a named graph (a graph is a sequence of steps; eac
 lf incident                            # unbreak → 5whys → launch-plan
 lf code                                # pursue: implement until it holds, publish the PR
 lf feature                             # kickoff → pursue; ends at a published PR
-lf graph ship                           # gate → land and complete the Task
+lf deliver                             # gate → land --wait-and-fix
 ```
 
 Use bare names for both skills and Graphs: `lf debug`, `lf code`, `lf incident`.
 `lf graph incident` explicitly selects the Graph when a name also names a skill
 or CLI command; the prefix is otherwise optional.
 
-Graph YAML owns step order and explicit backward edges. Every step is
-autonomous; design review and the demo happen in the Task conversation. A Graph
+Graph YAML owns step order and explicit backward edges. An `interactive: <skill>`
+step is a Workflow stage where a person takes part in the Task conversation;
+`lf ship` runs it headless instead. A Graph
 with backward edges is a loopflow; it runs with or without a Task. `deliver`
 gates the branch and lands it.
 

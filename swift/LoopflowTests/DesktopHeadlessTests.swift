@@ -393,7 +393,12 @@ struct DesktopHeadlessTests {
         #expect(throws: (any Error).self) {
             try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-4")
         }
-        try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-ship").button().tap()
+        // Ship it sits on the Task heading, not in the Workflow header.
+        #expect(throws: (any Error).self) {
+            try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
+        }
+        let control = TaskShipControl(model: model, task: task, revealed: true) { _ in }
+        try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship").button().tap()
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls == [["-b", "--task", task.task.identifier, "ship"]])
 
@@ -415,14 +420,27 @@ struct DesktopHeadlessTests {
 
         // A shipping Task offers Stop shipping in place of Ship it.
         let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
-        let shipped = TaskWorkflowHeader(model: model, task: shipping, work: .available(
-            try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))))
+        let shipped = TaskShipControl(model: model, task: shipping, revealed: true) { _ in }
+        #expect(try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-shipping").text().string()
+            .hasPrefix(shipping.shipping!.label))
         #expect(throws: (any Error).self) {
             try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
         }
         try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop").button().tap()
         for _ in 0..<200 where await started.calls.last?.last != "--stop" { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["--task", shipping.task.identifier, "ship", "--stop"])
+
+        // The toast after Ship it offers Undo; after Stop shipping it only reports.
+        var undone = false
+        let toast = ShipNoticeToast(notice: ShipNotice(task: task, shipped: true)) { undone = true }
+        #expect(try toast.inspect().find(viewWithAccessibilityIdentifier: "task-ship-notice").text().string()
+            == "\(task.task.identifier) is shipping")
+        try toast.inspect().find(viewWithAccessibilityIdentifier: "task-ship-undo").button().tap()
+        #expect(undone)
+        let back = ShipNoticeToast(notice: ShipNotice(task: task, shipped: false)) {}
+        #expect(throws: (any Error).self) {
+            try back.inspect().find(viewWithAccessibilityIdentifier: "task-ship-undo")
+        }
     }
 
     @Test("Task lifecycle controls remain available without a Workflow", arguments: ["unstarted", "completed", "canceled"])

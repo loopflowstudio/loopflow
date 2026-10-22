@@ -142,7 +142,8 @@ their source values. Personal non-color Ghostty settings still load; its `theme 
 Source and license notices ship offline with the catalogue.
 
 **Ship it** hands a Task off; it leaves Working tasks and its ship process lands it.
-Open a Dashboard with `state:shipping` to watch it.
+Hover the Task heading to reveal it; while shipping, the same spot holds Stop shipping,
+and the toast's Undo is Stop shipping. Open a Dashboard with `state:shipping` to watch it.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool

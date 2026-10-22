@@ -928,3 +928,131 @@ fn planning_status_reads_retained_journal_without_inventing_recovery_records() {
         "Later title"
     );
 }
+
+#[test]
+fn personal_plan_moves_to_shared_default_with_identity() {
+    let repo = TestRepo::new();
+    repo.push();
+    let other = TestRepo::new();
+    let left = tempfile::tempdir().unwrap();
+    let right = tempfile::tempdir().unwrap();
+    let source = repo.path().canonicalize().unwrap();
+    let target = other.path().canonicalize().unwrap();
+    fs::write(left.path().join("config.yaml"), "user:\n  name: Maya\n").unwrap();
+    fs::write(right.path().join("config.yaml"), "user:\n  name: Lee\n").unwrap();
+    let origin = repo.bare_path().to_str().unwrap();
+    for checkout in [&source, &target] {
+        assert!(Command::new("git")
+            .current_dir(checkout)
+            .args(["config", "remote.origin.url", origin])
+            .status()
+            .unwrap()
+            .success());
+    }
+    let refs = |pattern: &str| {
+        let output = Command::new("git")
+            .current_dir(&source)
+            .args(["ls-remote", "origin", pattern])
+            .output()
+            .unwrap();
+        String::from_utf8(output.stdout).unwrap()
+    };
+
+    // An earlier build published this plan to Maya's personal ref.
+    fs::create_dir_all(source.join(".lf")).unwrap();
+    fs::write(
+        source.join(".lf/config.yaml"),
+        "planning:\n  provider: git\n  personal: true\n",
+    )
+    .unwrap();
+    let task = create(&source, left.path(), "");
+    run(&source, left.path(), &["task", "claim", &task, "--json"]);
+    run(
+        &source,
+        left.path(),
+        &[
+            "task",
+            "comment",
+            &task,
+            "Start with the CPU path",
+            "--json",
+        ],
+    );
+    assert!(!refs("refs/loopflow/planning/users/*").is_empty());
+    assert!(refs("refs/loopflow/planning/shared/*").is_empty());
+    let conn = Connection::open(left.path().join("loopflow.db")).unwrap();
+    let before = execution(&conn, &task);
+
+    // The upgrade drops the personal default; the next save publishes everything.
+    fs::remove_file(source.join(".lf/config.yaml")).unwrap();
+    run(
+        &source,
+        left.path(),
+        &[
+            "task",
+            "comment",
+            &task,
+            "Moved to the shared plan",
+            "--json",
+        ],
+    );
+    assert!(!refs("refs/loopflow/planning/shared/main").is_empty());
+    assert_eq!(execution(&conn, &task), before);
+
+    // Lee's fresh Home, with no planning config, reads the same plan.
+    let comments = |repo: &Path, home: &Path| -> Vec<String> {
+        let listed: serde_json::Value =
+            serde_json::from_str(&run(repo, home, &["task", "comment", &task, "--json"])).unwrap();
+        listed["comments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|comment| comment["body"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let theirs = comments(&target, right.path());
+    assert_eq!(theirs, comments(&source, left.path()));
+    assert!(
+        theirs
+            .iter()
+            .any(|body| body.starts_with("Start with the CPU path")),
+        "{theirs:?}"
+    );
+    let open =
+        |home: &Path| loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let id: loopflow::work::task::TaskId = task.parse().unwrap();
+    let (mine, theirs) = (open(left.path()), open(right.path()));
+    let (left_task, right_task) = (
+        mine.task(&id).unwrap().unwrap(),
+        theirs.task(&id).unwrap().unwrap(),
+    );
+    assert_eq!(right_task.identifier, left_task.identifier);
+    assert_eq!(right_task.title, left_task.title);
+    let people = |store: &loopflow::store::sqlite::SqliteStore| {
+        store
+            .task_ownership(&id)
+            .unwrap()
+            .log
+            .into_iter()
+            .map(|entry| (entry.kind, entry.person))
+            .collect::<Vec<_>>()
+    };
+    assert!(!people(&mine).is_empty());
+    assert_eq!(people(&theirs), people(&mine));
+
+    let status: serde_json::Value = serde_json::from_str(&run(
+        &source,
+        left.path(),
+        &["planning", "status", "--json"],
+    ))
+    .unwrap();
+    let destinations: Vec<PeerPlanningStatus> =
+        serde_json::from_value(status["destinations"].clone()).unwrap();
+    let active = destinations.iter().find(|d| d.active).unwrap();
+    assert_eq!(active.reference, "refs/loopflow/planning/shared/main");
+    let personal = destinations.iter().find(|d| !d.active).unwrap();
+    assert!(personal
+        .reference
+        .starts_with("refs/loopflow/planning/users/"));
+    assert!(!personal.changes.is_empty());
+}

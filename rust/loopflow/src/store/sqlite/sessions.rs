@@ -26,6 +26,26 @@ macro_rules! session_step {
     };
 }
 pub(super) const SESSION_FLOW: &str = session_flow!();
+/// Session `s`'s current AgentProcess last reported work in progress rather
+/// than waiting for a person.
+const TURN_RUNNING: &str = "EXISTS(SELECT 1 FROM session_activity act
+    WHERE act.session_id=s.id AND act.agent_process_id IS s.agent_process_id
+    AND NOT CASE WHEN act.program_status IS NOT NULL THEN
+        EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
+            WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done'))
+    ELSE act.pending_input>0 OR (act.open_tools=0 AND act.yielded=1) END)";
+
+/// An execution owner the detached-Session policy may end.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct IdleSessionOwner {
+    pub id: crate::id::LfProcessId,
+    pub repo: Option<String>,
+    pub started_at: i64,
+    /// `None` from builds that never reported viewers.
+    pub viewed: Option<bool>,
+    /// When the last viewer left, or the owner started without one.
+    pub detached_at: Option<i64>,
+}
 
 const SESSION_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
     (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.created_at,s.request,s.interactive,s.repo,
@@ -472,6 +492,21 @@ impl SqliteStore {
             .transpose()
     }
 
+    /// The Session an execution owner runs, for its viewers.
+    pub(crate) fn transport_session(
+        &self,
+        owner: &crate::id::LfProcessId,
+    ) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT id FROM agent_sessions WHERE transport_lf_process_id=?1",
+                [owner.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     /// Unfinished interactive Sessions whose execution owner never recorded an
     /// exit, with that owner. Leaving or detaching records one; a restart,
     /// crash or kill does not. Liveness is the caller's observation.
@@ -505,16 +540,66 @@ impl SqliteStore {
     pub(crate) fn session_turn_was_running(&self, session: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM session_activity act
-                JOIN agent_sessions s ON s.id=act.session_id
-                WHERE act.session_id=?1 AND act.agent_process_id IS s.agent_process_id
-                AND NOT CASE WHEN act.program_status IS NOT NULL THEN
-                    EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
-                        WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done'))
-                ELSE act.pending_input>0 OR (act.open_tools=0 AND act.yielded=1) END)",
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM agent_sessions s WHERE s.id=?1 AND {TURN_RUNNING})"
+            ),
             [session],
             |row| row.get(0),
         )?)
+    }
+
+    /// Record whether a viewer is attached to execution owner `owner`, and
+    /// when its last one left.
+    pub(crate) fn record_owner_viewers(
+        &self,
+        owner: &crate::id::LfProcessId,
+        viewed: bool,
+        at: i64,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE processes SET viewed=?2, detached_at=CASE WHEN ?2 THEN NULL ELSE ?3 END
+             WHERE id=?1",
+            params![owner.as_str(), viewed, at],
+        )?;
+        Ok(())
+    }
+
+    /// Running execution owners whose every Session is a standalone interactive
+    /// conversation waiting for a person. A Flow step, a headless Run, or a turn
+    /// in progress keeps its owner off this list.
+    pub(crate) fn idle_session_owners(&self) -> StoreResult<Vec<IdleSessionOwner>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        // A Flow started inside an owner, as from a terminal, holds its steps there.
+        let mut query = conn.prepare(&format!(
+            "WITH RECURSIVE flow_ancestors(id) AS (
+                 SELECT p.parent_lf_process_id FROM flow_processes f
+                     JOIN processes p ON p.id=f.lf_process_id
+                 UNION SELECT p.parent_lf_process_id FROM processes p
+                     JOIN flow_ancestors a ON p.id=a.id)
+             SELECT o.id, o.repo, o.started_at, o.viewed, o.detached_at FROM processes o
+             WHERE o.completed_at IS NULL AND o.kind='lf'
+             AND o.id NOT IN (SELECT id FROM flow_ancestors WHERE id IS NOT NULL)
+             AND EXISTS(SELECT 1 FROM agent_sessions s
+                 WHERE s.transport_lf_process_id=o.id AND s.completed_at IS NULL)
+             AND NOT EXISTS(SELECT 1 FROM agent_sessions s
+                 WHERE s.transport_lf_process_id=o.id
+                 AND (s.interactive=0 OR {SESSION_FLOW} IS NOT NULL
+                     OR (s.completed_at IS NULL AND {TURN_RUNNING})))
+             ORDER BY o.started_at, o.id"
+        ))?;
+        let owners = query
+            .query_map([], |row| {
+                Ok(IdleSessionOwner {
+                    id: row.get(0)?,
+                    repo: row.get(1)?,
+                    started_at: row.get(2)?,
+                    viewed: row.get(3)?,
+                    detached_at: row.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(owners)
     }
 
     /// A Task's unfinished interactive conversations, each with its last opening.

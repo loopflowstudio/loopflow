@@ -16,16 +16,18 @@ final class TaskFileObservation {
 
     init(path: String, changed: @escaping @MainActor ([String]) -> Void) throws {
         self.changed = changed
-        let root = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        // Events name the real path; `resolvingSymlinksInPath` drops `/private`.
+        func real(_ path: String) -> String? {
+            guard let real = realpath(path, nil) else { return nil }
+            defer { free(real) }
+            return String(cString: real)
+        }
+        let root = real(path) ?? URL(fileURLWithPath: path).resolvingSymlinksInPath().path
         self.root = root
         metadata = (try? String(contentsOfFile: root + "/.git", encoding: .utf8)).flatMap { pointer in
             guard pointer.hasPrefix("gitdir:") else { return nil }
             let target = pointer.dropFirst("gitdir:".count).trimmingCharacters(in: .whitespacesAndNewlines)
-            // Events name the real path; `resolvingSymlinksInPath` drops `/private`.
-            guard let real = realpath(URL(fileURLWithPath: target, relativeTo: URL(fileURLWithPath: root)).path, nil)
-            else { return nil }
-            defer { free(real) }
-            return String(cString: real)
+            return real(URL(fileURLWithPath: target, relativeTo: URL(fileURLWithPath: root)).path)
         }
         let callback = Callback(observation: self)
         defer { withExtendedLifetime(callback) {} }

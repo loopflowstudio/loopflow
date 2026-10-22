@@ -69,6 +69,8 @@ pub struct HomeUsage {
     pub bytes: u64,
     pub budget_bytes: u64,
     pub categories: Vec<CategoryUsage>,
+    /// Process receipt files, dead ones included, counted without reading them.
+    pub process_receipts: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -247,11 +249,17 @@ pub fn measure_home(home: &Path, budget_bytes: u64) -> Result<HomeUsage> {
         .into_iter()
         .map(|(category, bytes)| CategoryUsage { category, bytes })
         .collect();
+    let process_receipts = match fs::read_dir(home.join(crate::journal::PROCESS_RECEIPT_ROOT)) {
+        Ok(entries) => entries.count() as u64,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(error) => return Err(error).context("read Process receipts"),
+    };
     Ok(HomeUsage {
         home: home.to_path_buf(),
         bytes: categories.iter().map(|usage| usage.bytes).sum(),
         budget_bytes,
         categories,
+        process_receipts,
     })
 }
 
@@ -557,6 +565,11 @@ pub(crate) fn rotate_when_due(home: &Path) {
         if let Err(error) = rotated {
             tracing::warn!(error = %format!("{error:#}"), "automatic Home rotation failed");
         }
+        // Receipts are tiny but unbounded in number; a burst of unrecorded runs
+        // must not leave them for `lf disk clean` to parse forever.
+        if let Err(error) = crate::lf::commands::top::prune_dead_process_receipts(&home, false) {
+            tracing::warn!(error = %format!("{error:#}"), "automatic Process receipt prune failed");
+        }
     });
 }
 
@@ -579,6 +592,21 @@ mod tests {
                     .set_modified(SystemTime::now() - Duration::from_secs(age_days * 86400)),
             )
             .unwrap();
+    }
+
+    #[test]
+    fn footprint_counts_process_receipts_without_reading_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        assert_eq!(super::measure_home(home, 0).unwrap().process_receipts, 0);
+        let receipts = home.join(crate::journal::PROCESS_RECEIPT_ROOT);
+        fs::create_dir_all(&receipts).unwrap();
+        for name in ["a.json", "b.json", "not-json-at-all.json"] {
+            fs::write(receipts.join(name), b"{").unwrap();
+        }
+        let usage = super::measure_home(home, 0).unwrap();
+        assert_eq!(usage.process_receipts, 3);
+        assert_eq!(serde_json::to_value(&usage).unwrap()["process_receipts"], 3);
     }
 
     #[test]

@@ -19,10 +19,9 @@ use crate::store::{
 use crate::work::wave::{Wave, WaveLocator};
 
 mod admission;
-pub(crate) mod automation;
 mod chapters;
 mod children;
-mod ci_incidents;
+pub(crate) mod ci_incidents;
 mod durable;
 mod graph_inventory;
 #[cfg(test)]

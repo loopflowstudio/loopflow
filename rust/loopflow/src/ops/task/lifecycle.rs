@@ -31,7 +31,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         );
         return Ok(());
     }
-    let blockers = crate::ops::task_automation::task_execution_blockers(&store.sqlite, &task.id)?;
+    let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;
     if !blockers.is_empty() {
         eprintln!(
             "Task {} is complete; retained checkout: {}",
@@ -100,7 +100,7 @@ async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore
 }
 
 fn require_idle(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    let blockers = crate::ops::task_automation::task_execution_blockers(&store.sqlite, &task.id)?;
+    let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;
     if !blockers.is_empty() {
         return Err(task_error(blockers.join("; ")));
     }

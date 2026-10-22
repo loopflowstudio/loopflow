@@ -20,7 +20,7 @@ use crate::pr_landing::{
 use crate::session_record::{
     AgentProcessRequest, CaptureHandle, SessionCaptureSpec, SessionGraphMembership,
 };
-use crate::store::sqlite::automation::RepairAttempt;
+use crate::store::sqlite::ci_incidents::RepairAttempt;
 use crate::store::{open_store, storage_config_from_env, SharedStore};
 use crate::work::task::{CiCheck, CiIncident, TaskEventKind};
 
@@ -330,7 +330,7 @@ fn admit_ci_fix(
                 )));
             }
             if let Some(reason) =
-                super::task_automation::task_execution_blockers(&store.sqlite, &task.id)?
+                super::task_execution::task_execution_blockers(&store.sqlite, &task.id)?
                     .into_iter()
                     .next()
             {
@@ -473,7 +473,7 @@ fn checkout_execution_blockers(store: &SharedStore, worktree: &Path) -> OpsResul
         .into_iter()
         .filter(|process| process.cwd.as_deref() == worktree.to_str())
         .collect();
-    super::task_automation::execution_blockers(&store.sqlite, &processes)
+    super::task_execution::execution_blockers(&store.sqlite, &processes)
 }
 
 pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
@@ -1744,12 +1744,31 @@ async fn reconcile_repository_async(
             }
         }
     }
-    for mut task in super::task_automation::repository_tasks(store, &repo).await? {
+    for mut task in repository_tasks(store, &repo).await? {
         if let Err(error) = super::task::reconcile_delivered_task(store, &mut task).await {
             errors.push(format!("{}: {error}", task.identifier));
         }
     }
     Ok(())
+}
+
+/// The Tasks whose repository is `repo`.
+async fn repository_tasks(
+    store: &SharedStore,
+    repo: &crate::repository::RepoId,
+) -> OpsResult<Vec<crate::work::task::Task>> {
+    let mut tasks = Vec::new();
+    for task in store.list_tasks(None).await.map_err(repair_error)? {
+        let task_repo = super::task::repository_for_task(store, &task)?;
+        if crate::repository::RepoId::discover(&task_repo)
+            .ok()
+            .as_ref()
+            == Some(repo)
+        {
+            tasks.push(task);
+        }
+    }
+    Ok(tasks)
 }
 
 #[cfg(test)]

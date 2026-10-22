@@ -86,5 +86,3 @@ pub use sync::{
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
 pub use util::normalize_wave_name;
-
-pub mod task_automation;

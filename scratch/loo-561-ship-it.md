@@ -4,7 +4,7 @@ Status (2026-10-22, implement pass): design accepted (Jack Heart, 2026-10-21/22)
 with `interactive:` stages, the landing engine fixes, `lf ship` with stand-ins, Shipping lifecycle
 with Stop, #1580 taken (Shipping is `state:shipping`), one landing engine with lazy recovery,
 completion on merge while shipping, blocked backoff, Ship it on the Task heading. Remaining: the
-rest of the state-model cleanup (item 3). Drafts beside this Task's `ship_it.sql`: #1643's
+rest of the state-model cleanup (item 3); commit the uncommitted `task_automation` fold. Drafts beside this Task's `ship_it.sql`: #1643's
 `rename_flow_to_graph.sql`, main's `detached_owner_viewers.sql`, `saved_selections.sql`,
 `two_person_gaps.sql`.
 
@@ -99,6 +99,10 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
   `task status/list`, `wave status/list/show`, `history`, `monitor`.
 - `lf ship` completes on merge (`ship_complete_if_merged`), backs off blocked stand-ins
   (`blocked_backoff`, 1→30 min, rechecking Pause/Stop).
+- `ops/task_automation.rs` and `store/sqlite/automation.rs` deleted (uncommitted at realign,
+  2026-10-22): execution blockers live in `ops/task_execution.rs`, repair admission
+  (`RepairAttempt`, `RepairReservation`) in `store/sqlite/ci_incidents.rs`, `repository_tasks`
+  in `pr_landing.rs`; the stand-in decision in `lf/commands/ship.rs` reads as one match.
 
 ## Remaining
 
@@ -160,6 +164,8 @@ The hosted merge-queue run is left to demo.
 - World Tasks that ran a Graph read `unstarted` on the branch; main's builder says a Graph in a
   checkout starts its Task. Possible regression, unverified.
 
+Check (2026-10-22 realign): clippy clean; `cargo test --lib -- pr_landing ship task_execution
+task_work` 103 pass, 3 `planning_lookup_tests` fail only under that mix (22/22 pass alone) — gate.
 Check (2026-10-22 second implement pass): lib cron/pr_landing/ship/doctor/task_work/migrations/
 canonical_ids/planning, task_graph_launch ship tests (5), integration documented_commands/
 cli_reference/dto_fixtures, Swift DesktopHeadless/DTOFixture/WorkModel/WorkNavigation 137 pass,

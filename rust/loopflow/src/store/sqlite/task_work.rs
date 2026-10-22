@@ -394,25 +394,26 @@ pub(super) fn shipping_in(
     task: &TaskId,
 ) -> StoreResult<Option<TaskShipping>> {
     use rusqlite::OptionalExtension;
-    let row: Option<(i64, Option<String>)> = conn
-        .query_row(
-            "SELECT shipped_at,ship_lf_process_id FROM tasks WHERE id=?1 AND shipped_at IS NOT NULL",
-            [task.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    row.map(|(shipped_at, process)| {
-        Ok(TaskShipping {
-            shipped_at,
-            process: process
-                .map(|id| {
-                    LfProcessId::parse(&id)
-                        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
-                })
-                .transpose()?,
-        })
-    })
+    conn.query_row(
+        "SELECT shipped_at,ship_lf_process_id FROM tasks WHERE id=?1 AND shipped_at IS NOT NULL",
+        [task.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()?
+    .map(|(shipped_at, process)| shipping(shipped_at, process))
     .transpose()
+}
+
+fn shipping(shipped_at: i64, process: Option<String>) -> StoreResult<TaskShipping> {
+    Ok(TaskShipping {
+        shipped_at,
+        process: process
+            .map(|id| {
+                LfProcessId::parse(&id)
+                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
+            })
+            .transpose()?,
+    })
 }
 
 /// End the Task's handoff, returning what it was, when it was shipping.
@@ -958,25 +959,19 @@ impl SqliteStore {
     pub(crate) fn local_shipping_tasks(&self) -> StoreResult<Vec<(TaskId, TaskShipping)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
-            "SELECT id FROM tasks WHERE shipped_at IS NOT NULL
+            "SELECT id,shipped_at,ship_lf_process_id FROM tasks WHERE shipped_at IS NOT NULL
              AND checkout_machine_id=(SELECT id FROM machines WHERE route='local')",
         )?;
-        let ids = query
-            .query_map([], |row| row.get::<_, String>(0))?
+        let rows = query
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get(1)?, row.get(2)?))
+            })?
             .collect::<Result<Vec<_>, _>>()?;
-        ids.into_iter()
-            .filter_map(|id| {
-                let id = match TaskId::parse(&id) {
-                    Ok(id) => id,
-                    Err(error) => {
-                        return Some(Err(crate::store::StoreError::InvalidData(
-                            error.to_string(),
-                        )))
-                    }
-                };
-                shipping_in(&conn, &id)
-                    .transpose()
-                    .map(|shipping| shipping.map(|shipping| (id, shipping)))
+        rows.into_iter()
+            .map(|(id, shipped_at, process)| {
+                let id = TaskId::parse(&id)
+                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+                Ok((id, shipping(shipped_at, process)?))
             })
             .collect()
     }

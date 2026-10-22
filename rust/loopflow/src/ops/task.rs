@@ -1131,7 +1131,7 @@ fn validate_checkout_restoration(store: &SharedStore, task: &Task, repo: &Path) 
             )));
         }
     }
-    let blockers = crate::ops::task_automation::task_execution_blockers(&store.sqlite, &task.id)?;
+    let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;
     if !blockers.is_empty() {
         return Err(task_error(blockers.join("; ")));
     }
@@ -4693,7 +4693,7 @@ mod tests {
         let before = fixture.store.sqlite.session(&session.id).unwrap();
         // A reserved input and an unanswered turn are history; only the
         // Process with unknown evidence blocks.
-        let blockers = crate::ops::task_automation::task_execution_blockers(
+        let blockers = crate::ops::task_execution::task_execution_blockers(
             &fixture.store.sqlite,
             &fixture.task.id,
         )
@@ -4760,7 +4760,7 @@ mod tests {
         );
         assert_eq!(fixture.store.sqlite.session(&session.id).unwrap(), before);
         assert_eq!(std::fs::read(receipt_path).unwrap(), receipt_bytes);
-        assert!(crate::ops::task_automation::task_execution_blockers(
+        assert!(crate::ops::task_execution::task_execution_blockers(
             &fixture.store.sqlite,
             &fixture.task.id,
         )
@@ -4989,7 +4989,7 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         let blockers = || {
-            crate::ops::task_automation::task_execution_blockers(
+            crate::ops::task_execution::task_execution_blockers(
                 &fixture.store.sqlite,
                 &fixture.task.id,
             )

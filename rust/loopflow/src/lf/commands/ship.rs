@@ -75,32 +75,28 @@ pub fn run(
                 if matches!(step, ShipStep::Paused | ShipStep::Stopped) {
                     return halt(&issue, &step);
                 }
-                let verdict = match outcome {
-                    Some(SkillOutcome::Decided(verdict)) => Some(verdict),
-                    _ => None,
+                let (decision, summary) = match outcome {
+                    Some(SkillOutcome::Decided(GraphVerdict { decision, summary })) => {
+                        (decision, Some(summary))
+                    }
+                    _ => (GraphDecision::Advance, None),
                 };
-                let (edge, choice) = match (verdict, repeat) {
-                    (Some(GraphVerdict { decision, summary }), Some(repeat))
-                        if decision != GraphDecision::Advance =>
-                    {
-                        if decision == GraphDecision::Blocked {
-                            blocked += 1;
-                            (repeat, format!("repeat, blocked: {summary}"))
-                        } else {
-                            blocked = 0;
-                            (repeat, format!("repeat: {summary}"))
-                        }
-                    }
-                    (Some(GraphVerdict { summary, .. }), _) => {
-                        blocked = 0;
-                        (advance, format!("advance: {summary}"))
-                    }
-                    (None, _) => {
-                        blocked = 0;
-                        (advance, "advance".to_string())
-                    }
+                // Without a loop behind the stage, every decision advances.
+                let repeat = repeat.filter(|_| decision != GraphDecision::Advance);
+                blocked = match &repeat {
+                    Some(_) if decision == GraphDecision::Blocked => blocked + 1,
+                    _ => 0,
                 };
-                let note = format!("{stage} (stand-in) → {choice}");
+                let choice = match (&repeat, blocked) {
+                    (None, _) => "advance",
+                    (Some(_), 0) => "repeat",
+                    (Some(_), _) => "repeat, blocked",
+                };
+                let edge = repeat.unwrap_or(advance);
+                let note = match summary {
+                    Some(summary) => format!("{stage} (stand-in) → {choice}: {summary}"),
+                    None => format!("{stage} (stand-in) → {choice}"),
+                };
                 eprintln!("{issue}: {note}");
                 if blocked > 0 {
                     let wait = blocked_backoff(blocked);

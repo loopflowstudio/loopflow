@@ -655,6 +655,15 @@ pub fn open_ledger() -> Result<SqliteStore, crate::store::StoreError> {
     SqliteStore::new(&ledger_db_path()?)
 }
 
+/// This Process's retained ledger connection, opening one only when no receipt
+/// has yet; every open revalidates the schema.
+pub(crate) fn process_ledger() -> Result<SqliteStore, crate::store::StoreError> {
+    match current_context().and_then(|context| context.ledger.get().cloned()) {
+        Some(store) => Ok(store),
+        None => open_ledger(),
+    }
+}
+
 #[cfg(not(test))]
 fn ledger_db_path() -> Result<PathBuf, crate::store::StoreError> {
     crate::store::database_path_from_env()
@@ -1033,20 +1042,28 @@ pub(crate) fn process_evidence(
     let Ok(Some(record)) = store.process(process) else {
         return ProcessIdentityEvidence::Unknown;
     };
-    let receipt = if record.kind == crate::process::ProcessKind::Agent {
-        Some(None)
-    } else {
-        store
-            .process_receipt_path(process)
-            .ok()
-            .flatten()
-            .and_then(|path| read_process_receipt(&path).ok())
-    };
     recorded_process_evidence(
         &record,
-        receipt.as_ref().map(Option::as_slice),
+        &recorded_process_receipt(store, &record),
         process_identity_evidence,
     )
+}
+
+/// The recorded Process's own receipt, read by its locator without listing others.
+pub(crate) fn recorded_process_receipt(
+    store: &SqliteStore,
+    record: &crate::process::LfProcess,
+) -> Result<Option<ProcessReceipt>, std::io::Error> {
+    if record.kind == crate::process::ProcessKind::Agent {
+        return Ok(None);
+    }
+    match store
+        .process_receipt_path(&record.id)
+        .map_err(std::io::Error::other)?
+    {
+        Some(path) => read_process_receipt(&path),
+        None => Ok(None),
+    }
 }
 
 pub(crate) fn process_receipt_path(lf_home: &Path, locator: &str) -> PathBuf {
@@ -1087,11 +1104,11 @@ pub(crate) fn agent_process_evidence(
     }
 }
 
-/// One identity rule for control readers and sampled activity. An unavailable
-/// receipt inventory is not an empty one; neither permits invented OS identity.
+/// One identity rule for control readers and sampled activity. An unreadable
+/// receipt is not an absent one; neither permits invented OS identity.
 pub(crate) fn recorded_process_evidence(
     record: &crate::process::LfProcess,
-    receipts: Option<&[ProcessReceipt]>,
+    receipt: &Result<Option<ProcessReceipt>, std::io::Error>,
     mut observe: impl FnMut(u32, i64) -> ProcessIdentityEvidence,
 ) -> ProcessIdentityEvidence {
     if record.kind == crate::process::ProcessKind::Agent {
@@ -1102,12 +1119,12 @@ pub(crate) fn recorded_process_evidence(
             observe,
         );
     }
-    let Some(receipts) = receipts else {
+    let Ok(receipt) = receipt else {
         return ProcessIdentityEvidence::Unknown;
     };
-    if let Some(receipt) = receipts
-        .iter()
-        .find(|receipt| receipt.matches_process(record.id.as_str(), record.trace_id.as_str()))
+    if let Some(receipt) = receipt
+        .as_ref()
+        .filter(|receipt| receipt.matches_process(record.id.as_str(), record.trace_id.as_str()))
     {
         return observe(receipt.pid, receipt.started_at);
     }
@@ -1259,13 +1276,15 @@ pub(crate) fn prune_process_receipts_at(
                 Err(_) => None,
             },
         };
-        if !record.is_some_and(|record| {
+        // An unfinished row's receipt is the only evidence of its exit. Only a
+        // Process writes its own row, so a dead one without a row never gets one.
+        let removable = record.is_none_or(|record| {
             receipt.matches_process(record.id.as_str(), record.trace_id.as_str())
                 && record.completed_at.is_some()
-        }) {
+        });
+        if !removable {
             continue;
         }
-        // Unfinished or unrecorded Processes retain the only evidence of their exit.
         match fs::remove_file(path) {
             Ok(()) => removed += 1,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -1984,6 +2003,51 @@ mod tests {
             super::process_evidence(&store, &context.lf_process_id),
             ProcessIdentityEvidence::Dead
         );
+    }
+
+    #[test]
+    fn prune_removes_dead_receipts_unless_an_unfinished_row_needs_them() {
+        let guard = journal_test_guard();
+        super::open_ledger().unwrap();
+        let sql = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
+        let pid = std::process::id();
+        let born = super::process_started_at(pid).unwrap().unwrap();
+        let root = guard.home().join(super::PROCESS_RECEIPT_ROOT);
+        std::fs::create_dir_all(&root).unwrap();
+        let receipt = |started_at: i64, row: Option<Option<i64>>| {
+            let id = LfProcessId::new();
+            if let Some(completed_at) = row {
+                sql.execute(
+                    "INSERT INTO processes(id,trace_id,started_at,completed_at) VALUES(?1,?1,1,?2)",
+                    rusqlite::params![id, completed_at],
+                )
+                .unwrap();
+            }
+            let path = root.join(format!("{id}.json"));
+            let receipt = super::ProcessReceipt {
+                schema_version: 1,
+                trace_id: id.to_string(),
+                lf_process_id: id.to_string(),
+                pid,
+                started_at,
+            };
+            std::fs::write(&path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+            path
+        };
+        // A different birth time under this PID is affirmative death.
+        let completed = receipt(born - 60, Some(Some(2)));
+        let unrecorded = receipt(born - 60, None);
+        let unfinished = receipt(born - 60, Some(None));
+        let live = receipt(born, None);
+
+        assert_eq!(
+            super::prune_process_receipts_at(guard.home(), &[pid]).unwrap(),
+            2
+        );
+        assert!(!completed.exists());
+        assert!(!unrecorded.exists());
+        assert!(unfinished.exists());
+        assert!(live.exists());
     }
 
     #[test]

@@ -135,11 +135,6 @@ impl OpenCodeHarness {
         } else {
             tempfile::tempfile()?
         };
-        if self.interactive {
-            if let Some(path) = &diagnostic_path {
-                eprintln!("OpenCode diagnostics: {}", path.display());
-            }
-        }
         command.stderr(diagnostics.try_clone()?);
         self.child = Some(super::agent_process::spawn(command, None, &owner)?);
         let child = self.child.as_mut().expect("server was spawned");
@@ -816,7 +811,7 @@ mod tests {
             .claim_session_attachment("stop", Some(&first), &process, false)
             .unwrap();
         assert!(harness.stop().await.is_err());
-        assert!(crate::journal::OsProcess::group_is_alive(pid).unwrap());
+        assert!(!crate::journal::OsProcess::group(pid).unwrap().is_empty());
         harness.history = Arc::new(Mutex::new(opencode_history::History::new(Some((
             store,
             "stop".into(),

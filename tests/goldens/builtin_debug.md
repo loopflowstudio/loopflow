@@ -8,7 +8,8 @@ of steps; it runs with or without a Task.
 Work in the supplied checkout. Read its agent guide and existing work, preserve
 other contributions, and carry out the request here. Do not launch another
 agent or create a worktree merely to do the work already assigned to this one.
-Follow a supplied Flow's steps and boundaries; finishing it selects no next work.
+Follow a supplied Flow's steps and boundaries; finishing it selects no next work,
+but steps a stopped Flow never reached remain yours.
 
 Use the requested tools and repository conventions. Read
 `lf help <command-or-skill>` for instructions on Sessions, Skills, Flows,

@@ -354,24 +354,24 @@ fn close_agent_process(pid: u32, started: i64) -> Result<()> {
     }
     // The leader may exit before its helpers. Use the same group-wide death
     // judgment as scheduled settlement rather than ending on leader death.
-    if terminate_process_group(pid) {
-        Ok(())
-    } else {
-        Err(anyhow!("AgentProcess group {pid} death is unresolved"))
-    }
+    terminate_process_group(pid)
+        .map_err(|error| anyhow!("AgentProcess group {pid} death is unresolved: {error}"))
 }
 
 // Leader death alone neither proves group death nor authorizes signaling helpers.
 fn confirmed_group_death(pid: u32) -> Result<()> {
+    let mut survivors = OsProcess::group(pid)?;
     if crate::os_process::release_agent_lifeline(pid) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        while OsProcess::group_is_alive(pid)? && std::time::Instant::now() < deadline {
+        while !survivors.is_empty() && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(25));
+            survivors = OsProcess::group(pid)?;
         }
     }
-    if OsProcess::group_is_alive(pid)? {
+    if !survivors.is_empty() {
         return Err(anyhow!(
-            "AgentProcess group {pid} survives its recorded leader"
+            "AgentProcess group {pid} survives its recorded leader: {}",
+            OsProcess::describe(&survivors)
         ));
     }
     Ok(())
@@ -605,21 +605,21 @@ fn terminate_agent_process(pid: u32, started_at: i64, provider: Option<&str>) ->
     {
         return Err(refused("is no longer the recorded process"));
     }
-    if !terminate_process_group(pid) {
-        return Err(refused("did not exit"));
-    }
+    terminate_process_group(pid).map_err(|error| refused(&format!("did not exit: {error}")))?;
     for (leader, leader_started_at) in descendants {
         // Most exit with the AgentProcess. One that survives is still the process
         // sampled above only if its start time is unchanged.
         if OsProcess::read(leader)?.is_some_and(|process| {
             process.pgid == leader && process.matches_start(leader, leader_started_at)
-        }) && !terminate_process_group(leader)
-        {
-            tracing::warn!(
-                pid,
-                leader,
-                "AgentProcess descendant group outlived its AgentProcess"
-            );
+        }) {
+            if let Err(error) = terminate_process_group(leader) {
+                tracing::warn!(
+                    pid,
+                    leader,
+                    %error,
+                    "AgentProcess descendant group outlived its AgentProcess"
+                );
+            }
         }
     }
     Ok(())
@@ -1203,7 +1203,7 @@ mod tests {
             .unwrap();
         let report = super::reap_in(&store, false).unwrap();
         // Always clean up this fixture's own group before assertions.
-        crate::os_process::terminate_process_group(pid);
+        let _ = crate::os_process::terminate_process_group(pid);
         let _ = child.wait();
         assert!(report.errors.is_empty(), "{provider}: {:?}", report.errors);
         assert_eq!(report.orphaned, [pid], "{provider}");
@@ -1222,7 +1222,7 @@ mod close_tests {
 
     impl Drop for Group {
         fn drop(&mut self) {
-            crate::os_process::terminate_process_group(self.0.id());
+            let _ = crate::os_process::terminate_process_group(self.0.id());
             let _ = self.0.wait();
         }
     }
@@ -1246,8 +1246,57 @@ mod close_tests {
         // Closing stdin lets the leader exit after it has spawned its helper.
         drop(group.0.stdin.take());
         group.0.wait().unwrap();
-        assert!(super::close_agent_process(leader.pid, leader.started_at).is_err());
-        assert!(crate::journal::OsProcess::group_is_alive(leader.pid).unwrap());
+        let survivors = crate::journal::OsProcess::group(leader.pid).unwrap();
+        let [helper] = survivors.as_slice() else {
+            panic!("expected one helper, found {survivors:?}");
+        };
+        let error = super::close_agent_process(leader.pid, leader.started_at).unwrap_err();
+        assert!(
+            error.to_string().contains(&format!("pid {} (", helper.pid)),
+            "{error}"
+        );
+        assert!(!crate::journal::OsProcess::group(leader.pid)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn close_settles_a_group_with_a_lingering_zombie() {
+        let group = Group(
+            Command::new("/bin/sleep")
+                .env_clear()
+                .arg("60")
+                .process_group(0)
+                .spawn()
+                .unwrap(),
+        );
+        // A second member this test never waits stays a zombie in the group.
+        let mut zombie = Command::new("/usr/bin/true")
+            .env_clear()
+            .process_group(group.0.id() as i32)
+            .spawn()
+            .unwrap();
+        // SAFETY: waitid inspects only this fixture's child; WNOWAIT leaves
+        // the zombie unreaped.
+        let result = unsafe {
+            let mut info = std::mem::zeroed::<libc::siginfo_t>();
+            libc::waitid(
+                libc::P_PID,
+                zombie.id(),
+                &mut info,
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        assert_eq!(result, 0, "{}", std::io::Error::last_os_error());
+        let leader = crate::journal::OsProcess::read(group.0.id())
+            .unwrap()
+            .unwrap();
+        super::close_agent_process(leader.pid, leader.started_at).unwrap();
+        assert!(crate::journal::OsProcess::read(zombie.id())
+            .unwrap()
+            .unwrap()
+            .has_exited());
+        zombie.wait().unwrap();
     }
 
     #[test]
@@ -1277,7 +1326,9 @@ mod close_tests {
             .unwrap();
         let child = crate::journal::OsProcess::read(helper).unwrap().unwrap();
         super::close_agent_process(leader.pid, leader.started_at).unwrap();
-        assert!(!crate::journal::OsProcess::group_is_alive(leader.pid).unwrap());
+        assert!(crate::journal::OsProcess::group(leader.pid)
+            .unwrap()
+            .is_empty());
         assert_eq!(
             crate::journal::process_identity_evidence(helper, child.started_at),
             crate::journal::ProcessIdentityEvidence::Dead

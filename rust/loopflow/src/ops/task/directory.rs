@@ -1,7 +1,4 @@
-use std::collections::HashSet;
-use std::io::{Seek, Write};
 use std::path::Path;
-use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -118,26 +115,10 @@ fn directory_snapshot(
         entries.push(TaskFileEntry { path, kind });
     }
     if !show_ignored && !entries.is_empty() {
-        // File-backed input avoids a pipe deadlock for directories larger than a pipe buffer.
-        let mut input = tempfile::tempfile()?;
-        for entry in &entries {
-            input.write_all(entry.path.as_bytes())?;
-            input.write_all(b"\0")?;
-        }
-        input.rewind()?;
-        let output = Command::new("git")
-            .current_dir(&root)
-            .args(["check-ignore", "--stdin", "-z"])
-            .stdin(input)
-            .output()?;
-        if !output.status.success() && output.status.code() != Some(1) {
-            return Err(task_error(format!(
-                "cannot read ignored paths: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            )));
-        }
-        let ignored: HashSet<&[u8]> = output.stdout.split(|byte| *byte == 0).collect();
-        entries.retain(|entry| !ignored.contains(entry.path.as_bytes()));
+        let ignored =
+            crate::git::ignored_paths(&root, entries.iter().map(|entry| entry.path.as_str()))
+                .map_err(task_error)?;
+        entries.retain(|entry| !ignored.contains(&entry.path));
     }
     entries.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
     if let Some(cursor) = &cursor {

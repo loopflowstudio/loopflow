@@ -199,8 +199,9 @@ Flow process for a Task is equally its work.
 same normalization as `lf wt create`; single words and longer names are accepted.
 
 Flow output shows each step's position and name followed by the agent's messages.
-Use `lf -v -b task run EXP-12 pursue` for context token accounting and INFO
-diagnostics. Codex Sessions start through the provider protocol and attach the
+Diagnostics go to `logs/lf.log` in the Loopflow home, not the terminal. Use
+`lf -v -b task run EXP-12 pursue` to see them, with context token accounting and
+INFO detail, on stderr. Codex Sessions start through the provider protocol and attach the
 native terminal. Prompts and instructions stay off the command line. Conversation
 capture requires no hook approval; context refresh uses stable launch hooks.
 Review new or changed declarations with Codex’s `/hooks`; headless runs skip
@@ -244,10 +245,9 @@ its protocol after the terminal connects.
 Claude reads its first turn from stdin, then uses the terminal for keyboard input.
 OpenCode first turns still use argv; a first turn exceeding its argument cap is
 refused before spawning the provider.
-OpenCode launches and resumes print an `OpenCode diagnostics:` path before opening
-the terminal. Full stderr is retained in that private `opencode.stderr.log` file
-beside the Session's capture. Read or tail it from another terminal; native
-errors and retries remain visible in OpenCode without raw logs covering input.
+OpenCode's full stderr is retained in a private `opencode.stderr.log` beside the
+Session's capture. Read or tail it from another terminal; native errors and
+retries remain visible in OpenCode without raw logs covering input.
 
 Interactive startup shows the current preparation stage and elapsed seconds.
 The indicator clears before the native terminal opens; redirected output stays clean.
@@ -361,14 +361,22 @@ or treating missing local evidence as completion.
 
 ## Choose planning synchronization
 
-Planning defaults to your Git ref on `origin`. Select a shared ref or Linear in
-`.lf/config.yaml`, or set a personal default in `~/.lf/config.yaml`:
+Planning defaults to `refs/loopflow/planning/shared/main` on `origin`: everyone
+who clones the repository reads and writes the same plan. Select another shared
+ref, a personal ref or Linear in `.lf/config.yaml`, or set a personal default in
+`~/.lf/config.yaml`:
 
 ```yaml
 planning:
   provider: git
   remote: origin
-  shared: team
+  shared: team        # refs/loopflow/planning/shared/team
+```
+
+```yaml
+planning:
+  provider: git
+  personal: true      # refs/loopflow/planning/users/<user-key>
 ```
 
 ```yaml
@@ -378,13 +386,16 @@ linear:
   team: <team-id>
 ```
 
-Repository `planning` replaces the personal selection as a whole. Omit `shared`
-for `refs/loopflow/planning/users/<user-key>`; shared names use
-`refs/loopflow/planning/shared/<name>`. Existing `linear.team` selects Linear
-when `planning` is omitted. Every machine uses the selected transport independently.
-Linear unavailability leaves saves buffered locally; it never switches to Git. All Tasks in a Linear
-repository are queued for publication, including Tasks created offline. Retry a
-specific Task with `lf task sync <task>`: it publishes the saved Project/Task
+Repository `planning` replaces the personal selection as a whole. `shared` and
+`personal` are exclusive. Existing `linear.team` selects Linear when `planning`
+is omitted. A plan published by an older build to an unconfigured personal ref
+moves to `shared/main` on the first save after upgrade, with its identifiers,
+comments and ownership; the old ref stays on the remote until you delete it with
+`git push origin :<ref>`. Machines still on an older build keep publishing to
+their personal ref until they upgrade. Every machine uses the selected transport
+independently. Linear unavailability leaves saves buffered locally; it never
+switches to Git. All Tasks in a Linear repository are queued for publication,
+including Tasks created offline. Retry a specific Task with `lf task sync <task>`: it publishes the saved Project/Task
 identity before synchronizing state, fields, and comments. An uncertain creation remains
 pending instead of silently creating a duplicate. To deliberately retry an
 uncertain issue creation, use `lf task sync <task> --retry-creation`. This reuses
@@ -394,7 +405,7 @@ For an uncertain saved state or field update, `lf task sync <task> --retry-updat
 retries that saved intention after reading Linear again. Observed conflicts still
 win; this flag does not retry deletion or allocate another issue.
 `lf repo connect <wave>` saves the repository Team and selects Linear, overriding
-a personal Git preference.
+a Git preference in `~/.lf/config.yaml`.
 
 This build implements the enrollment baseline below. LOO-412 replaces it with one
 configured transport per repository; that unmerged configuration path is not
@@ -407,7 +418,7 @@ lf planning key                    # show this machine's personal planning key
 lf planning key --recover <uuid>   # reuse it on a fresh second machine
 ```
 
-The first personal Git connection creates the key. Recover the same key before
+The first `personal: true` connection creates the key. Recover the same key before
 starting personal synchronization on another machine. Shared refs require no key.
 Ref separation is not access control; choose a remote appropriate for the plan.
 Configuration selects the repository's entire plan, including retained history.
@@ -882,19 +893,20 @@ one folder name need `?repository=<id>`; an unqualified link to them changes
 nothing and lists the qualified links. Emitted links add the qualifier when needed.
 
 `--host auto` opens where you are: a new workspace in this Herdr pane or cmux
-workspace, then Loopflow Desktop when installed (macOS), then a plain terminal:
-this terminal for a person at a prompt, otherwise a new Terminal window on macOS
-or the desktop's terminal launcher on Linux. A host is current only through its
-own caller context (`HERDR_*`, `CMUX_*`, Desktop's `LF_DESKTOP`); nothing scans
+workspace, or a new window right after this one in tmux, then Loopflow Desktop
+when installed (macOS), then a plain terminal: this terminal for a person at a
+prompt, otherwise a new Terminal window on macOS or the desktop's terminal
+launcher on Linux. A host is current only through its own caller context
+(`HERDR_*`, `TMUX`/`TMUX_PANE`, `CMUX_*`, Desktop's `LF_DESKTOP`); nothing scans
 running applications. A clicked link carries no caller, so it opens in Desktop.
-Use `--host desktop` from a cmux or Herdr shell to open in Desktop anyway. An
+Use `--host desktop` from a cmux, tmux or Herdr shell to open in Desktop anyway. An
 explicit `--host` wins. A destination that refuses lets the next one try; an
 unanswered request is reported and never repeated elsewhere.
 
 Terminal destinations run `lf session connect` for the resolved Work, so its
 primary conversation, admission and attachment fences decide what opens. A
-conversation already live in a cmux or Herdr workspace is focused there, draft
-intact, when this caller is in that host. Live in any other client, it is
+conversation already live in a cmux or Herdr workspace or a tmux pane is
+focused there, draft intact, when this caller is in that host. Live in any other client, it is
 reported as `elsewhere` with its `--takeover` command; ordinary opening never
 moves it. Openings of one Work are serialized: a repeat while its new workspace
 is still starting focuses that workspace instead of creating another. `--available` opens

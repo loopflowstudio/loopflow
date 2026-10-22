@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 
+use crate::engine::process::shell_escape;
+
 const BEGIN: &str = "# >>> Loopflow PATH >>>";
 const END: &str = "# <<< Loopflow PATH <<<";
 
@@ -23,11 +25,6 @@ fn zsh_startup_file() -> Result<PathBuf> {
         None => dirs::home_dir().context("cannot determine the home directory for zsh")?,
     };
     Ok(directory.join(".zshrc"))
-}
-
-/// A POSIX single-quoted literal: no expansion of spaces, `$`, or backquotes.
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', r"'\''"))
 }
 
 fn utf8(directory: &Path) -> Result<&str> {
@@ -43,12 +40,12 @@ fn utf8(directory: &Path) -> Result<&str> {
 pub fn export_command(directory: &Path) -> Result<String> {
     Ok(format!(
         "export PATH={}:\"$PATH\"",
-        shell_quote(utf8(directory)?)
+        shell_escape(utf8(directory)?)
     ))
 }
 
 fn render_block(directory: &Path) -> Result<String> {
-    let quoted = shell_quote(utf8(directory)?);
+    let quoted = shell_escape(utf8(directory)?);
     Ok(format!(
         "{BEGIN}\n\
          # Added by the Loopflow installer; reinstalling replaces this block.\n\

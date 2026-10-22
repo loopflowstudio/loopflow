@@ -1239,6 +1239,9 @@ fn main() -> anyhow::Result<()> {
             Some(InstallCommand::Schedule { frequency }) => {
                 loopflow::lf::commands::install::schedule(*frequency)
             }
+            Some(InstallCommand::Agent { agent }) => {
+                loopflow::lf::commands::install::install_agent(agent)
+            }
             Some(InstallCommand::ActivateApp { bundle }) => {
                 loopflow::lf::commands::install::activate_app(bundle)
             }

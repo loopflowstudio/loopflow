@@ -2433,7 +2433,7 @@ const SYSTEM_DEPS: &[SystemDep] = &[
         required: false,
         macos_only: false,
         brew: None,
-        fallback: "npm install -g @anthropic-ai/claude-code",
+        fallback: "lf install agent claude",
     },
     SystemDep {
         name: "codex",
@@ -2441,7 +2441,7 @@ const SYSTEM_DEPS: &[SystemDep] = &[
         required: false,
         macos_only: false,
         brew: None,
-        fallback: "npm install -g @openai/codex",
+        fallback: "lf install agent codex",
     },
     SystemDep {
         name: "warp",

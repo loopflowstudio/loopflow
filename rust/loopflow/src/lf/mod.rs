@@ -1119,6 +1119,11 @@ pub enum InstallCommand {
         #[arg(value_enum, default_value = "weekly")]
         frequency: InstallFrequency,
     },
+    /// Install Codex or Claude Code with its official installer
+    Agent {
+        /// codex or claude
+        agent: String,
+    },
     /// Activate a Loopflow.app the person copied, from its bundled helper.
     #[command(hide = true)]
     ActivateApp {

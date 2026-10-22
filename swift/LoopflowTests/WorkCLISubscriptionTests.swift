@@ -44,7 +44,8 @@ struct WorkCLISubscriptionTests {
         let created = try await fixture.json(["task", "create", "--wave", waveName, "--title", "Arrives through CLI", "--json"])
         let id = try #require(created["id"] as? String)
         try await eventually { model.task(id: id) != nil }
-        #expect(selectedPlanMembers(model).allSatisfy { $0.work.kind != .task }) // Unstarted backlog stays hidden.
+        // A Wave lists its unstarted Tasks so each can offer Start.
+        try await eventually { selectedPlanMembers(model).first { $0.work.id == id }?.states == [.backlog] }
         _ = try await fixture.run(["-b", "task", "run", id])
         // Membership and checkout details arrive in separate observation frames.
         try await eventually {

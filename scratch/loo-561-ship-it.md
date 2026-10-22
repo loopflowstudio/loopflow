@@ -4,7 +4,7 @@ Status (2026-10-22, implement pass): design accepted (Jack Heart, 2026-10-21/22)
 with `interactive:` stages, the landing engine fixes, `lf ship` with stand-ins, Shipping lifecycle
 with Stop, #1580 taken (Shipping is `state:shipping`), one landing engine with lazy recovery,
 completion on merge while shipping, blocked backoff, Ship it on the Task heading, the
-`task_automation` fold (63f13b3805). Remaining: item 3's Linear In Review↔shipping mapping.
+`task_automation` fold (63f13b3805). Item 3 closed (In Review↔shipping is its own Task).
 Drafts beside this Task's `ship_it.sql`: #1643's
 `rename_flow_to_graph.sql`, main's `detached_owner_viewers.sql`, `saved_selections.sql`,
 `two_person_gaps.sql`.
@@ -116,10 +116,12 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
      change with its own Task, not a cleanup here.
    - `completion_request/error` is read: `task_completion_pending`/`fail_task_completion` carry
      "a failed completion request retries without replaying the route".
-   Left: In Review↔shipping. The one writer (`task_state_delivery::queue_in`) speaks Linear state
-   *types* (`unstarted|started|completed|canceled`); In Review is a named `started` state, so
-   shipping needs a per-team state lookup by name. Backlog/Todo↔unstarted, In Progress↔working,
-   Done↔done, Canceled↔abandoned already hold through that writer.
+   Out of this Task (2026-10-22): In Review↔shipping. Deliveries and observations both carry
+   Linear state *types*, and In Review is a named `started` state. A shipping write to an
+   already-`started` issue would settle on read without moving, and inbound In Review would have
+   to decide whether a Linear edit starts a ship process. That is new sync behavior with its own
+   Task, not a cleanup. Backlog/Todo↔unstarted, In Progress↔working, Done↔done and
+   Canceled↔abandoned hold through `task_state_delivery::queue_in`. Item 3 is closed.
 
 Check (2026-10-22): clippy, fmt, `dto_fixtures` 42 ok; lib groups pr_landing/chapter/children/
 waves/task_execution ok; `ship`, `task_work`, `ops::linear` mixes each fail 1–2 planning/store

@@ -153,8 +153,8 @@ Out:
   missing file is created; invalid JSON is left as-is; legacy `.config.json` wins;
   an isolated `CLAUDE_CONFIG_DIR` receives the entry in its own `.claude.json`;
   already-trusted config is not rewritten (mtime unchanged).
-- Unit, `git`: `worktree_add` leaves the marker; `lf_created_worktree` is `None`
-  for the main checkout and an unmarked worktree.
+- Unit, `git`: `worktree_add` leaves the marker outside the working tree. The
+  unmarked cases are proven once, through the config, in `claude_trust`.
 - Integration, `tests/context_launch_tests.rs`
   `claude_opens_lf_created_worktree_already_trusted`: stand-in
   `claude` copies `$CLAUDE_CONFIG_DIR/.claude.json` at startup; launching through `lf` in an
@@ -173,3 +173,4 @@ Out:
 
 - Kickoff: real-Claude pty probes of the four trust cases and of accept-in-worktree → findings above.
 - Implement: `cargo test -p loopflow --lib -- claude_trust lf_created git_worktree_add` (8) and `--test integration -- claude_opens_lf_created_worktree_already_trusted` → pass; clippy `--all-targets -D warnings` clean. Gate owns broader suites.
+- Compress: dropped the duplicate git unmarked-worktree test and a redundant `create_dir_all`; `cargo test -p loopflow --lib -- claude_trust git_worktree_add` → 7 pass.

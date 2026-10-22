@@ -1843,30 +1843,4 @@ mod tests {
         // Clean up
         worktree_remove(repo.path(), &wt_path).expect("remove worktree");
     }
-
-    #[test]
-    fn main_checkout_and_hand_made_worktrees_are_not_lf_created() {
-        let repo = init_repo();
-        commit_file(repo.path(), "README.md", "hello");
-        let hand_made = repo.path().parent().unwrap().join(format!(
-            "{}.mine",
-            repo.path().file_name().unwrap().to_string_lossy()
-        ));
-        git_stdout(
-            repo.path(),
-            &[
-                "worktree",
-                "add",
-                "-b",
-                "mine",
-                &hand_made.to_string_lossy(),
-            ],
-        )
-        .expect("hand-made worktree");
-
-        assert_eq!(lf_created_worktree(repo.path()), None);
-        assert_eq!(lf_created_worktree(&hand_made), None);
-
-        worktree_remove(repo.path(), &hand_made).expect("remove worktree");
-    }
 }

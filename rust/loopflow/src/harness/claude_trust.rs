@@ -111,8 +111,8 @@ fn _trusted(root: &Map<String, Value>, key: &str) -> Result<bool> {
 }
 
 fn _write(config: &Path, root: &Value) -> Result<()> {
+    // The held lock already created this directory.
     let dir = config.parent().context("config has no directory")?;
-    fs::create_dir_all(dir)?;
     let mut temp = tempfile::NamedTempFile::new_in(dir)?;
     temp.write_all(&serde_json::to_vec_pretty(root)?)?;
     temp.as_file()
@@ -170,7 +170,7 @@ fn _stale(lock: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::process::Command;
 
     use serde_json::{json, Value};
@@ -181,8 +181,8 @@ mod tests {
 
     struct Fixture {
         _root: TempDir,
-        repo: std::path::PathBuf,
-        home: std::path::PathBuf,
+        repo: PathBuf,
+        home: PathBuf,
     }
 
     impl Fixture {
@@ -214,7 +214,7 @@ mod tests {
             }
         }
 
-        fn lf_worktree(&self) -> std::path::PathBuf {
+        fn lf_worktree(&self) -> PathBuf {
             let path = self.repo.with_file_name("kata.agent-1");
             worktree_add(
                 &self.repo,
@@ -238,7 +238,7 @@ mod tests {
             accept_created_worktree(&command);
         }
 
-        fn config(&self) -> std::path::PathBuf {
+        fn config(&self) -> PathBuf {
             self.home.join(".claude.json")
         }
     }

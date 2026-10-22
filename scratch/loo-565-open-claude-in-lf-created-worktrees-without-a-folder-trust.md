@@ -175,3 +175,4 @@ Out:
 - Implement: `cargo test -p loopflow --lib -- claude_trust lf_created git_worktree_add` (8) and `--test integration -- claude_opens_lf_created_worktree_already_trusted` → pass; clippy `--all-targets -D warnings` clean. Gate owns broader suites.
 - Compress: dropped the duplicate git unmarked-worktree test and a redundant `create_dir_all`; `cargo test -p loopflow --lib -- claude_trust git_worktree_add` → 7 pass.
 - Realign: plan matches the diff and origin/main (54da279a8b) adds nothing; no rerun. Demo/review owns the real-Claude pty probes.
+- Concept review: one provenance record (the admin-dir marker; no prior lf-worktree notion to merge) and one trust writer at both interactive Claude launch sites; names match Jack's accepted "lf-created worktree" wording. No change, no open choice.

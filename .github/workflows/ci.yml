@@ -197,6 +197,7 @@ jobs:
         if: matrix.shard != 0
         run: |
           LOOPFLOW_TEST_LF="$PWD/target/debug/lf" /usr/bin/time -v cargo --config "target.\"cfg(all())\".runner = [\"uv\", \"run\", \"--no-sync\", \"python\", \"$PWD/scripts/test_network.py\"]" nextest run \
+            --profile ${{ github.event_name == 'pull_request' && 'pr' || 'default' }} \
             --binaries-metadata target/nextest/binaries-metadata.json \
             --cargo-metadata target/nextest/cargo-metadata.json \
             -E 'not test(native_runner_is_quiet_until_its_turn_ends)' \
@@ -210,6 +211,7 @@ jobs:
           checkout_pid=$!
           status=0
           /usr/bin/time -v cargo --config "target.\"cfg(all())\".runner = [\"uv\", \"run\", \"--no-sync\", \"python\", \"$PWD/scripts/test_network.py\"]" nextest run \
+            --profile ${{ github.event_name == 'pull_request' && 'pr' || 'default' }} \
             --binaries-metadata target/nextest/binaries-metadata.json \
             --cargo-metadata target/nextest/cargo-metadata.json \
             -E 'test(native_runner_is_quiet_until_its_turn_ends)' --test-threads 4 --no-tests fail --no-fail-fast || status=$?
@@ -357,12 +359,16 @@ jobs:
       - name: Test checkout observation's read-only sandbox
         if: needs.merge-proof.outputs.reuse != 'true'
         run: uv run pytest python/tests/test_desktop_performance.py::test_checkout_observation_preserves_read_boundary_and_detects_changes
-      - name: Build Desktop and run headless model and view tests
+      - name: Build Desktop and its tests
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
+        # Failure locations come from #file/#line, so debug info is unnecessary.
+        run: /usr/bin/time -l swift build --build-tests --package-path swift -Xswiftc -gnone
+        timeout-minutes: 30
+      - name: Run headless model and view tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
         shell: bash
-        # Failure locations come from #file/#line, so debug info is unnecessary.
-        # swift test builds LoopflowMac. Display-session diagnostics are opt-in;
-        # production view inspection and control actions need no app launch.
+        # Display-session diagnostics are opt-in; production view inspection
+        # and control actions need no app launch. The build above is reused.
         run: |
           mkdir -p "$RUNNER_TEMP/swift-tests"
           swift --version > "$RUNNER_TEMP/swift-tests/toolchain.txt"
@@ -370,11 +376,14 @@ jobs:
             --event-stream-output-path "$RUNNER_TEMP/swift-tests/events.jsonl" \
             --event-stream-version 0 \
             2>&1 | tee "$RUNNER_TEMP/swift-tests/output.log"
-        # Bound native test execution, including subprocess cleanup, rather
-        # than holding the PR for GitHub's six-hour default on a hang. A green
-        # run takes ~13 minutes, ~8 of them building the density world; slow
-        # macos-15 runners take 2.5x that.
-        timeout-minutes: 35
+        # A pull request that makes the suite slower fails here, on its own PR,
+        # naming its slow tests below. The queue and main keep a hang guard so
+        # runner variance never ejects ready work. The suite took 161 s on
+        # 2026-10-22; raise this only together with a measured reason.
+        timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 20 }}
+      - name: Name unfinished and slowest Swift tests
+        if: failure()
+        run: python3 scripts/swift_test_report.py "$RUNNER_TEMP/swift-tests/events.jsonl" >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve Swift failure evidence
         if: failure()
         uses: actions/upload-artifact@v7

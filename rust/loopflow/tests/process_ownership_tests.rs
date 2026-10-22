@@ -884,7 +884,8 @@ name = os.environ['LF_TEST_ATTACHED']
 subprocess.run([os.environ['LF_TEST_BINARY'], 'session', 'list', '--all', '--json'],
                check=True, stdout=subprocess.DEVNULL)
 (home / (name + '.pid')).write_text(str(os.getpid()))
-(home / (name + '.ready')).write_text(os.environ['LF_PROCESS_ID'])
+(home / (name + '.ready.tmp')).write_text(os.environ['LF_PROCESS_ID'])
+os.replace(home / (name + '.ready.tmp'), home / (name + '.ready'))
 while not (home / (name + '.stop')).exists():
     time.sleep(.02)
 print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}))

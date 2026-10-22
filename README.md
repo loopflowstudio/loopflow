@@ -6,12 +6,17 @@ lf init
 lf debug -c
 ```
 
-A software instrument. Give an agent a task, keep its conversation, and inspect
-captured work after a command stops. Loopflow keeps the command's result, the
-agent's history and the Graph's progress separate, so each answers one question.
+Build software with other people and their coding agents. Each task has one
+owner, its own working copy and one pull request, so several people's agents can
+work in one project without colliding. The plan is shared through Linear or a shared
+Git ref; a comment on a Linear task reaches its agents before their next step;
+and each task's workflow stops for a person where judgment counts. Skills, Graphs
+and workflows are files in the project, reviewed like code. Conversations stay on
+your computer; only the plan travels.
 
-Free and open source. Needs [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-or [Codex](https://github.com/openai/codex), which have their own cost.
+Free and open source. Needs [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
+[Codex](https://github.com/openai/codex), [OpenCode](https://github.com/anomalyco/opencode)
+or [Pi](https://github.com/earendil-works/pi), which have their own cost.
 
 ## More install options
 
@@ -81,7 +86,7 @@ Use `--repo ./path` for an explicit checkout; with `--machine`, lookup happens t
 ```bash
 lf list                    # commands, skills, and graphs
 lf help debug              # inspect a definition without launching it
-lf graph pursue            # select a graph explicitly
+lf graph pursue             # select a graph explicitly
 lf skill release-run       # explicitly select the skill
 lf land --help           # inspect the landing command
 lf pr-review               # build an HTML walkthrough of the important code in this PR
@@ -114,7 +119,7 @@ Graph exports yield to existing skills with the same name. See
 
 ```bash
 lf : "fix the failing test"  # launcher; no Task or Linear required
-lf graph pursue              # run a Graph in this checkout
+lf graph pursue               # run a Graph in this checkout
 lf help skill work          # read the Task/Wave API contract
 lf --task INF-123 design     # continue an existing Task with work guidance
 ```
@@ -138,13 +143,13 @@ Author a Wave in the repo and open its conversation:
 
 Keep the design system coherent. Each wake: read the chapter plan and
 Tasks, pursue the highest-leverage open KR, start a concrete
-Task only after it has a Linear issue, and fold what changed into memory.
+Task only after it is filed, and fold what changed into memory.
 ```
 
 ```bash
 lf --wave designer wave-operate        # one finite pass: keep started Tasks moving
 lf --wave designer wave-operate "ship the button audit first"
-lf connect --wave designer             # the Wave's ongoing conversation, applying that pass on every return
+lf connect --wave designer             # your ongoing conversation for the Wave, applying that pass on every return
 ```
 
 Edit `.lf/wave/designer/MEMORY.md` directly when durable context changes; it is a
@@ -193,6 +198,8 @@ off while nothing changes; idle agents do not poll. Teams without live Tasks mak
 no acquisition requests. A rate limit pauses requests across repositories in the
 same Home until reset, retaining pending writes. Acquired Task comments become steers for each associated
 Session, with independent delivery at its next supported provider boundary.
+With Git planning, `lf comment` steers this Machine's Sessions; comments imported
+from another Machine join the plan without becoming steers.
 Steering leaves idle Sessions idle. A stopped Graph is history: `task run` never
 continues it, so inspect `lf task status` first.
 
@@ -334,9 +341,9 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | **Graph** | Composes agent work and mechanical operations; a run is one lf process and the step processes it starts | `.lf/graphs/*.yaml` |
 | **Workflow** | Gives a Task nodes, where you take part in its conversation, joined by the Graphs between them | `.lf/workflows/*.yaml` |
 | **Wave** | Keeps the objective, memory, cadence, budget and instruments | `.lf/wave/<name>/` |
-| **Project** | Holds one Wave's plan, Tasks, KRs and targets | Linear |
-| **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
-| **Task** | Owns concrete work, its checkout, optional PR and every Graph process for it | Linear and local SQLite |
+| **Project** | Holds one Wave's plan, Tasks, KRs and targets | Local SQLite, shared through the planning provider (Git ref or Linear) |
+| **Chapter** | Names the repository's current group of In Progress Projects | Project names and statuses |
+| **Task** | Owns concrete work, its checkout, optional PR and every Graph process for it | Local SQLite, shared through the planning provider |
 | **Process** | Records one actual lf process and its observed command outcome | Machine-local SQLite |
 | **LfSession** | Keeps a continuable interactive or headless conversation and native history | Machine-local SQLite and provider-native storage |
 | **Machine** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |

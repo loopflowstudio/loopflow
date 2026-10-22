@@ -338,7 +338,7 @@ body is the prompt the wave runs each wake.
 
 ## Objective
 
-Keep the runtime architecture legible. Each loop: read Linear tasks and
+Keep the runtime architecture legible. Each loop: read the Wave's Tasks and
 memory, pick the next useful move, resolve its local blocker, spin off
 independent work only when parallelism earns it, and fold what shipped into
 memory.
@@ -351,7 +351,7 @@ blast radius crosses storage, auth, or public APIs.
 
 The two sections carry different weight. **Objective** is identity — what this
 wave is for and how it moves. **Process** is constraint — when to design first,
-what never to touch. Project definitions and KRs live in Linear. Official live
+what never to touch. Project definitions and KRs live in the plan. Official live
 measurement lives in reviewed `.lf/wave/<wave>/metrics/*.md` contracts, not a
 `GOAL.md` Measures section.
 
@@ -365,7 +365,7 @@ measurement lives in reviewed `.lf/wave/<wave>/metrics/*.md` contracts, not a
 Schedules live in the repository configuration as ordinary command arguments;
 see [Schedule ordinary commands](lf.md#schedule-ordinary-commands).
 
-Bind the repository to a Linear Team in `.lf/config.yaml`:
+Planning syncs through Git by default. To plan in Linear, bind the repository to a Linear Team in `.lf/config.yaml`:
 
 ```yaml
 linear:
@@ -389,7 +389,7 @@ Machine and leaves existing Tasks where they are.
 
 ### Writing KRs
 
-Project KRs live in Linear, but writing them begins one level above the
+Project KRs live in the plan, but writing them begins one level above the
 measurement. State who the Project serves and what becomes easier, safer,
 faster, clearer, or newly possible in their real work. For internal Projects,
 the beneficiary may be an operator, maintainer, or agent; still name the

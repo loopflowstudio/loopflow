@@ -92,7 +92,7 @@ lf task run INF-123 --reason "provider credentials repaired"
 `task run` runs a fresh Graph in the Task checkout with its Steers and
 active PR. It never continues an earlier Graph; a stopped one leaves its
 Processes as history. Unknown liveness stays
-unknown. A Task Steer is a Linear Task comment; the running Graph receives new
+unknown. A Task Steer is a Task comment; the running Graph receives new
 comments when possible and the next Skill seed always reads them. `task interrupt` ends the
 active boundary so the next one re-reads direction. Neither command's receipt
 proves that the provider applied the direction.
@@ -211,10 +211,10 @@ until it lands, then merge the default branch using their recorded fork.
 ## Status says `ready`, but the Task is waiting
 
 **Symptom:** Project or Task Work is `ready`, while its condition says it is
-waiting on a child, review GraphStep, CI, or merge.
+waiting on a child, review FlowStep, CI, or merge.
 
 Work status is deliberately small: `ready`, `done`, or `abandoned`. Task
-condition summarizes process liveness, review GraphStep, child progress, CI, and
+condition summarizes process liveness, review FlowStep, child progress, CI, and
 merge evidence; unresolved conversations appear under Sessions.
 Inspect the focused projection instead of inferring a control state from one
 field:

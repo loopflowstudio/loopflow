@@ -284,6 +284,12 @@ commands prepare no CLI unless `--prepare-cli` is supplied:
 uv run python scripts/materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow -E 'test(local_planning::public_local_task_places_and_runs_without_a_planning_provider)' --no-tests fail
 ```
 
+On a pull request, CI runs nextest with the `pr` profile (`.config/nextest.toml`):
+a test that runs past 2 minutes fails on that PR and names itself. The merge
+queue and main use `default`, which only reports slow tests. Tests that were
+already slower are listed there with their own allowance; make one fast, then
+delete its entry. Reproduce locally with `cargo nextest run --profile pr`.
+
 Fixtures still create their own disposable Homes. Source and materialized schema
 frontiers stay separate; a version/schema mismatch is invalid verification
 evidence, never permission to alter an installed database.
@@ -526,11 +532,17 @@ shell output for prompt headers, command boundaries and exit status.
 `scripts/prove_wave_surface_states.sh` is an optional demo capture: it launches
 windows and therefore needs a display session. It is not in gate or CI.
 
-Failed Swift CI runs retain a `swift-tests-<run>-<attempt>` artifact for seven
-days with the toolchain, output log, and Swift Testing event stream. When console
-output stops after compilation, inspect `events.jsonl` for the last started test
-without a matching end event. SwiftPM buffers console output, so silence alone
-does not establish that test execution never began.
+On a pull request the Swift tests get 5 minutes after the build (161 s on
+2026-10-22); the merge queue and main keep a 20-minute hang guard. A PR that makes
+the suite slower fails on its own PR: make the slow test fast or share its setup,
+and raise the budget only with a measured reason.
+
+Failed Swift CI runs write the unfinished and slowest tests to the job summary
+(`scripts/swift_test_report.py`) and retain a `swift-tests-<run>-<attempt>`
+artifact for seven days with the toolchain, output log, and Swift Testing event
+stream. Tests run in parallel, so the last test the log shows starting is not
+necessarily the stuck one. SwiftPM buffers console output, so silence alone does
+not establish that test execution never began.
 
 The Swift transport suite launches `target/debug/lf` against a temporary Machine.
 Build it before running the suite; an existing developer build can hide a missing

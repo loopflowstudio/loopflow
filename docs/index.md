@@ -6,12 +6,17 @@ lf init
 lf debug -c
 ```
 
-A software instrument. Give an agent a task, keep its conversation, and inspect
-captured work after a command stops. Loopflow keeps the command's result, the
-agent's history and the Graph's progress separate, so each answers one question.
+Build software with other people and their coding agents. Each task has one
+owner, its own working copy and one pull request, so several people's agents can
+work in one project without colliding. The plan is shared through Linear or a shared
+Git ref; a comment on a Linear task reaches its agents before their next step;
+and each task's workflow stops for a person where judgment counts. Skills, Graphs
+and workflows are files in the project, reviewed like code. Conversations stay on
+your computer; only the plan travels.
 
-Free and open source. Needs [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-or [Codex](https://github.com/openai/codex), which have their own cost.
+Free and open source. Needs [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
+[Codex](https://github.com/openai/codex), [OpenCode](https://github.com/anomalyco/opencode)
+or [Pi](https://github.com/earendil-works/pi), which have their own cost.
 
 ## The pieces
 
@@ -24,7 +29,7 @@ lf task run INF-123
 
 A Skill supplies instructions; a Graph composes skills and mechanical operations.
 A Task owns one change, its checkout and PRs. A Wave keeps the objective
-and memory; its current Linear Project holds the plan; the Wave owns its default Workflow.
+and memory; its current Project holds the plan; the Wave owns its default Workflow.
 
 Process records an actual lf command process. LfSession keeps the conversation,
 including headless work. A running Graph is one lf process and the step processes
@@ -106,7 +111,7 @@ Do not take the first N commits and call that the history.
 .lf/                      # Repo config and extensions
   config.yaml             # Model, context defaults
   skills/                 # Skill prompts
-  graphs/                 # Graph definitions
+  graphs/                  # Graph definitions
   wave/                   # Wave goals and memory (persists)
 scratch/                  # working notes; default delivery clears added files
 ~/.lf/                    # Global config, skills, and the local store

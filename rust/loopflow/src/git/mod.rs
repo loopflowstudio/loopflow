@@ -1048,7 +1048,8 @@ fn _mark_lf_created(path: &Path, inherit: &impl Fn(&mut Command)) -> Result<(), 
     Ok(())
 }
 
-/// The canonical root of the worktree containing `cwd`, when lf created it.
+/// The real-path root of the worktree containing `cwd`, when lf created it.
+/// Git resolves symlinks in `--show-toplevel`, matching Claude's config keys.
 pub(crate) fn lf_created_worktree(cwd: &Path) -> Option<PathBuf> {
     let output = git_stdout(
         cwd,
@@ -1062,10 +1063,9 @@ pub(crate) fn lf_created_worktree(cwd: &Path) -> Option<PathBuf> {
     .ok()?;
     let mut lines = output.lines();
     let root = lines.next()?;
-    if !cwd.join(lines.next()?).is_file() {
-        return None;
-    }
-    Path::new(root).canonicalize().ok()
+    cwd.join(lines.next()?)
+        .is_file()
+        .then(|| PathBuf::from(root))
 }
 
 /// Read a file's contents at a given revision.

@@ -1,8 +1,9 @@
 use time::OffsetDateTime;
 
 use super::SqliteStore;
-use crate::durable::MachineId;
+use crate::durable::{MachineId, OwnershipKind, TaskId};
 use crate::rental::{Hardware, OnDemand, Ownership, Provider, Quote, RentalState, Template, Usd};
+use crate::work::task::{LinearWritebackState, Observation, Task};
 
 fn store() -> (tempfile::TempDir, SqliteStore) {
     let dir = tempfile::tempdir().unwrap();
@@ -121,9 +122,8 @@ fn a_rental_moves_from_confirmed_to_running_to_ended() {
 
     assert!(store.remove_ondemand("code").is_err());
     store.set_rental_cost(&rental.id, usd("0.25")).unwrap();
-    let ended = store
-        .set_rental_state(&rental.id, RentalState::Ended)
-        .unwrap();
+    let (ended, returned) = store.set_rental_ended(&rental.id).unwrap();
+    assert!(returned.is_empty());
     assert!(ended.ended_at.is_some());
     store.remove_ondemand("code").unwrap();
     assert_eq!(store.rentals(None).unwrap()[0].cost_usd, Some(usd("0.25")));
@@ -152,4 +152,84 @@ fn an_owned_machine_joins_a_pool_with_its_cost_and_leaves_when_the_pool_goes() {
     let left = super::ownership_in(&store.conn.lock().unwrap(), &mini).unwrap();
     assert_eq!(left.pool, None);
     assert_eq!(left.cost_usd, usd("599"));
+}
+
+fn open_task(store: &SqliteStore) -> TaskId {
+    let now = OffsetDateTime::now_utc();
+    let task = Task {
+        id: TaskId::new(),
+        revision: 0,
+        identifier: "LOO-570".into(),
+        title: "Rent a machine".into(),
+        description: String::new(),
+        rank: 0,
+        assignee: None,
+        due_date: None,
+        state: None,
+        completed: false,
+        completed_at: None,
+        linear_id: None,
+        pm_snapshot_synced_at: None,
+        pm_writeback: LinearWritebackState::Current,
+        wave_id: None,
+        repository_id: store.ensure_repository("/repo").unwrap(),
+        project_id: None,
+        worktree: None,
+        workspace_slug: String::new(),
+        branch: "jack/rent".into(),
+        base_commit: "deadbeef".into(),
+        parent_pr_id: None,
+        agent: None,
+        abandon_intent: None,
+        created_at: now,
+        updated_at: now,
+        observation: Observation::NotRequired,
+    };
+    store.seed_unplaced_task(&task);
+    task.id
+}
+
+#[test]
+fn an_ended_rental_hands_its_open_tasks_back_here() {
+    let (_dir, store) = store();
+    store.add_ondemand(&code(1)).unwrap();
+    let rental = store
+        .admit_rental("code", &quote(), None, None, false)
+        .unwrap();
+    store
+        .confirm_rental(&rental.id, "pod1", usd("0.24"))
+        .unwrap();
+    let code_1 = MachineId::new();
+    store
+        .add_machine(&code_1, "ssh://lf@203.0.113.7:40022", "code-1")
+        .unwrap();
+    store.attach_rental(&rental.id, &code_1).unwrap();
+    let task = open_task(&store);
+    store.claim_task(&task).unwrap();
+    store.handoff_task(&task, &code_1).unwrap();
+    let person = store.task_ownership(&task).unwrap().owner.unwrap().person;
+
+    let (_, returned) = store.set_rental_ended(&rental.id).unwrap();
+
+    assert_eq!(returned, std::slice::from_ref(&task));
+    let ownership = store.task_ownership(&task).unwrap();
+    let owner = ownership.owner.unwrap();
+    let local = store.local_machine().unwrap().id;
+    assert_eq!(owner.machine.id, Some(local.clone()));
+    assert_eq!(owner.person, person);
+    let history: Vec<_> = ownership
+        .log
+        .iter()
+        .map(|entry| (entry.kind, entry.machine_id.clone().unwrap()))
+        .collect();
+    assert_eq!(
+        history,
+        [
+            (OwnershipKind::Claim, local.clone()),
+            (OwnershipKind::Handoff, code_1),
+            (OwnershipKind::Handoff, local),
+        ]
+    );
+    // This Machine writes the Task again: `lf task run` stays here.
+    store.unclaim_task(&task).unwrap();
 }

@@ -502,6 +502,21 @@ pub(super) fn reassert_in(
     .map(Some)
 }
 
+/// Hand each open Task an ended Machine still owns to this Machine, in its
+/// owner's name: the claim survives and the log keeps the Machine as history.
+pub(super) fn hand_back_in(conn: &Connection, machine: &MachineId) -> StoreResult<Vec<TaskId>> {
+    let local = local_machine_in(conn)?;
+    let held = super::rentals::tasks_held_in(conn, machine)?;
+    for task in &held {
+        let person = reading_in(conn, task)?
+            .1
+            .owner
+            .and_then(|(person, _)| person);
+        append_in(conn, task, OwnershipKind::Handoff, person, &local)?;
+    }
+    Ok(held)
+}
+
 impl SqliteStore {
     pub fn task_ownership(&self, task: &TaskId) -> StoreResult<TaskOwnership> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");

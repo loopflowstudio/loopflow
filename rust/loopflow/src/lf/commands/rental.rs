@@ -814,7 +814,7 @@ fn refresh(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Resul
             Some(pod) if !pod.is_gone() => pod,
             // Its guardian, or someone, already deleted it.
             _ => {
-                sqlite.set_rental_state(&rental.id, RentalState::Ended)?;
+                mark_ended(sqlite, rental)?;
                 return Ok(None);
             }
         },
@@ -933,7 +933,20 @@ fn delete_pod(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Re
     if let Some(pod) = api.delete(pod_id, &rental.provider_name)? {
         sqlite.set_rental_cost(&rental.id, api.billed(&pod, now())?)?;
     }
-    sqlite.set_rental_state(&rental.id, RentalState::Ended)?;
+    mark_ended(sqlite, rental)
+}
+
+/// Every path to `ended` comes here: the Tasks the Machine still owns come
+/// back to this one, so the next `lf task run` runs here, not on a gone pod.
+fn mark_ended(sqlite: &SqliteStore, rental: &Rental) -> anyhow::Result<()> {
+    let (_, returned) = sqlite.set_rental_ended(&rental.id)?;
+    let here = crate::store::sqlite::task_ownership::local_label();
+    for task in returned {
+        let name = sqlite
+            .task(&task)?
+            .map_or_else(|| task.to_string(), |task| task.identifier);
+        println!("{name} back on {here}");
+    }
     Ok(())
 }
 

@@ -326,26 +326,11 @@ under `-b` (Q7), logins left on a deleted pod (Q8).
 
 ## Concept review (2026-10-22, headless)
 
-The model still maps one-to-one; one lifecycle gap. A rented Machine can end
-while it owns an uncompleted Task: `lf machine end`, the soft deadline, or its
-guardian (refresh then marks the rental `ended`). Drain alone never does this,
-because it waits for completion. Today nothing changes the Task's ownership, so
-the next `lf task run X` forwards to a deleted pod and fails on SSH. The only
-recovery is a manual `lf machine use`, which nothing points to. A deleted Machine
-cannot own work.
-
-Direction for implement, settled by the brief's allocation record (Task owned on
-a Machine) and the repository's Flexibility rule: when a rental reaches `ended`
-on any path, the pass hands each Task the Machine still owns back to the Machine
-running the pass. The pass uses an ordinary `Handoff`, so the log keeps "Jack on
-code-1" as history, and the person's claim survives. The pass says so:
-"LOO-570 back on <this machine>". Then `lf task run X` runs here, and
-`--rent code` rents again. The branch is safe because unpushed work already
-refuses the end unless `--force`, which names what it discards. Test: end a
-rental that owns an open Task, then check the owner is local and the ownership
-history still names code-1.
-
-No open product choice was added. Q7, Q8 and Q9 stand as recorded.
+The model still maps one-to-one. Found one lifecycle gap: a rental could end
+(`lf machine end`, soft deadline, guardian) while its Machine still owned an
+open Task, so the next `lf task run` forwarded to a deleted pod. Settled: an
+ordinary `Handoff` back to the Machine running the pass, keeping the person's
+claim and the code-1 history (built; see Status). Q7–Q9 stand as recorded.
 
 ## Status and remaining work
 
@@ -363,7 +348,10 @@ machine end`, the end of a forwarded `lf task run` (`rental::settle`) and the
 scheduled `lf task reconcile` (`rental::check`; `lf task automation` only
 inspects); `lf ondemand list` refreshes provider state and ends nothing; `lf
 history show <id>` opens a copied Session from `machine_records` and its
-copied captures.
+copied captures. Built 2026-10-22: every path to `ended` goes through
+`SqliteStore::set_rental_ended`, which hands the Machine's open Tasks back to
+this Machine in the same write (`set_rental_state` refuses `Ended`), and the
+pass prints "LOO-570 back on <host>".
 
 Deviations from the first draft of this design, recorded in
 `scratch/questions.md`: copies live in `machine_records` rather than stamped
@@ -372,8 +360,6 @@ copy re-exports from an hour before the rental's start and upserts).
 
 Remaining:
 
-0. Hand back Tasks still owned by a rented Machine when its rental ends
-   (concept review 2026-10-22).
 1. `lf session list --json` still omits copies (DTO unchanged by choice).
 2. **Live probe (~$0.10) and demo**, with the demo step: both spend money. The
    quote path was verified live (cpu3c×8 at $0.24/h; stock image pinned).
@@ -383,4 +369,4 @@ Remaining:
    SSH (the pod needs a build with the command). The scheduled reconcile only
    gives back when its environment carries `RUNPOD_API_KEY` (Q9).
 
-Last check (realign 2026-10-22): `cargo clippy -p loopflow --all-targets -D warnings` and `cargo fmt --check` clean; `cargo test -p loopflow --lib -- machine_records rental history` 111 passed, 1 ignored.
+Last check (implement 2026-10-22): `cargo clippy -p loopflow --all-targets -D warnings` and `cargo fmt --check` clean; `cargo test -p loopflow --lib -- rentals rental` 29 passed (incl. `an_ended_rental_hands_its_open_tasks_back_here`).

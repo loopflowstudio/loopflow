@@ -6,6 +6,7 @@ mod auth_input;
 use std::fs;
 use std::future::Future;
 use std::io::IsTerminal;
+use std::io::Read as _;
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(all(target_os = "macos", not(test)))]
@@ -36,8 +37,8 @@ use crate::provider_auth::{
     ProviderAuthService,
 };
 use crate::store::{
-    open_store, CredentialState, CredentialType, ProviderAccount, ProviderAccountId, ProviderToken,
-    RoutingState, SharedStore, StoreError,
+    open_store, CredentialState, CredentialType, LongLivedToken, ProviderAccount,
+    ProviderAccountId, ProviderToken, RoutingState, SharedStore, StoreError,
 };
 use crate::subscription::SubscriptionUsage;
 
@@ -737,7 +738,7 @@ pub(super) async fn mint_long_lived_token(
     store: &SharedStore,
     account: &ProviderAccount,
     chrome_profile: Option<&str>,
-) -> Result<SecretString> {
+) -> Result<LongLivedToken> {
     let (profiles, _) =
         browser_profiles(store, Provider::Claude, Some(account), chrome_profile).await?;
     let profile = profiles
@@ -754,8 +755,7 @@ pub(super) async fn mint_long_lived_token(
     let token = minted.take().ok_or_else(|| {
         anyhow!("claude setup-token finished without printing a subscription token")
     })?;
-    store_long_lived_token(store, account, &token).await?;
-    Ok(token)
+    store_long_lived_token(store, account, token).await
 }
 
 /// Refuse anything but a subscription token: an API key bills per token.
@@ -770,12 +770,17 @@ pub(super) fn require_subscription_token(token: &str) -> Result<()> {
 async fn store_long_lived_token(
     store: &SharedStore,
     account: &ProviderAccount,
-    token: &SecretString,
-) -> Result<()> {
+    token: SecretString,
+) -> Result<LongLivedToken> {
     require_subscription_token(token.expose_secret())?;
-    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let minted_at = OffsetDateTime::now_utc().unix_timestamp();
     if !store
-        .set_long_lived_token(Provider::Claude.as_str(), &account.account_id, token, now)
+        .set_long_lived_token(
+            Provider::Claude.as_str(),
+            &account.account_id,
+            &token,
+            minted_at,
+        )
         .await?
     {
         bail!(
@@ -784,7 +789,7 @@ async fn store_long_lived_token(
             account_login(account)
         );
     }
-    Ok(())
+    Ok(LongLivedToken { token, minted_at })
 }
 
 /// `lf account token claude <email> [--file F]`
@@ -812,15 +817,12 @@ async fn token_account(
         Some(path) => {
             let raw = if path == Path::new("-") {
                 let mut raw = String::new();
-                std::io::Read::read_to_string(
-                    &mut std::io::Read::take(std::io::stdin(), 4096),
-                    &mut raw,
-                )?;
+                std::io::stdin().take(4096).read_to_string(&mut raw)?;
                 raw
             } else {
                 fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?
             };
-            store_long_lived_token(&store, &account, &SecretString::new(raw.trim().to_string()))
+            store_long_lived_token(&store, &account, SecretString::new(raw.trim().to_string()))
                 .await?;
         }
         None => {

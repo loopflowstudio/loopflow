@@ -82,11 +82,7 @@ pub(super) async fn connect(
                         bail!("Claude account {login} has no long-lived token; `lf account token claude {login}` mints one in a foreground terminal");
                     }
                     eprintln!("Minting a long-lived Claude token for {login}; approve once, renew in a year");
-                    super::account::mint_long_lived_token(&store, &account, chrome_profile).await?;
-                    store
-                        .long_lived_token(provider.as_str(), &account.account_id)
-                        .await?
-                        .expect("a minted token was just stored")
+                    super::account::mint_long_lived_token(&store, &account, chrome_profile).await?
                 }
             };
             Credential::Claude {
@@ -189,23 +185,22 @@ pub(super) async fn connect_claude_accounts(machine: &Machine, batch: bool) -> R
     let accounts = store
         .list_provider_accounts(Some(Provider::Claude.as_str()))
         .await?;
-    let mut minted = Vec::new();
+    let (mut minted, mut unminted) = (Vec::new(), Vec::new());
     for account in &accounts {
-        if store
+        let token = store
             .long_lived_token(Provider::Claude.as_str(), &account.account_id)
-            .await?
-            .is_some()
-        {
+            .await?;
+        if token.is_some() {
             minted.push(account);
+        } else {
+            unminted.push(account);
         }
     }
-    let chosen: Vec<&ProviderAccount> = if minted.is_empty() {
-        accounts
-            .iter()
-            .filter(|account| account.credential_state == CredentialState::Connected)
-            .collect()
+    let chosen = if minted.is_empty() {
+        unminted.retain(|account| account.credential_state == CredentialState::Connected);
+        unminted
     } else {
-        for account in accounts.iter().filter(|a| !minted.contains(a)) {
+        for account in unminted {
             let login = account_login(account);
             eprintln!(
                 "Skipping Claude {login}: no long-lived token (`lf account token claude {login}`)"

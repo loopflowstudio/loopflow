@@ -1479,6 +1479,7 @@ pub struct ClaudeAuthBroker {
     config_dir: PathBuf,
     keychain_fallback: bool,
     login_hint: Option<String>,
+    program: PathBuf,
 }
 
 impl Default for ClaudeAuthBroker {
@@ -1487,6 +1488,7 @@ impl Default for ClaudeAuthBroker {
             config_dir: home_dir_or_cwd().join(".claude"),
             keychain_fallback: true,
             login_hint: None,
+            program: PathBuf::from("claude"),
         }
     }
 }
@@ -1497,12 +1499,18 @@ impl ClaudeAuthBroker {
             config_dir,
             keychain_fallback: false,
             login_hint,
+            program: PathBuf::from("claude"),
         }
     }
 
+    /// The ordinary login is the one plain `claude` reads. Naming its home in
+    /// `CLAUDE_CONFIG_DIR` would move Claude to a home-scoped Keychain item, so
+    /// only a managed profile sets it.
     fn command(&self) -> Command {
-        let mut command = Command::new("claude");
-        command.env("CLAUDE_CONFIG_DIR", &self.config_dir);
+        let mut command = Command::new(&self.program);
+        if !self.keychain_fallback {
+            command.env("CLAUDE_CONFIG_DIR", &self.config_dir);
+        }
         command
     }
 
@@ -1537,7 +1545,7 @@ impl AuthBroker for ClaudeAuthBroker {
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
         let mut command = self.command();
-        command.args(["auth", "status"]);
+        command.args(["auth", "status"]).kill_on_drop(true);
 
         match command.output().await {
             Ok(output) if output.status.success() => {
@@ -1595,6 +1603,7 @@ impl ClaudeAuthBroker {
 pub struct CodexAuthBroker {
     codex_home: PathBuf,
     force_file_store: bool,
+    program: PathBuf,
 }
 
 impl Default for CodexAuthBroker {
@@ -1602,6 +1611,7 @@ impl Default for CodexAuthBroker {
         Self {
             codex_home: home_dir_or_cwd().join(".codex"),
             force_file_store: false,
+            program: PathBuf::from("codex"),
         }
     }
 }
@@ -1611,11 +1621,12 @@ impl CodexAuthBroker {
         Self {
             codex_home,
             force_file_store: true,
+            program: PathBuf::from("codex"),
         }
     }
 
     fn command(&self, subcommand: &str) -> Command {
-        let mut command = Command::new("codex");
+        let mut command = Command::new(&self.program);
         command.env("CODEX_HOME", &self.codex_home);
         command
             .env_remove("CODEX_ACCESS_TOKEN")
@@ -1632,6 +1643,22 @@ impl CodexAuthBroker {
             .await
             .map(|_| ())
     }
+
+    /// `codex login status` also sees a login Codex keeps in the Keychain,
+    /// which leaves no `auth.json` to read.
+    async fn native_login_status(&self) -> Result<AuthStatus, AuthError> {
+        let mut command = self.command("login");
+        command.arg("status").kill_on_drop(true);
+        match command.output().await {
+            Ok(output) if output.status.success() => Ok(AuthStatus::Active { login: None }),
+            Ok(_) => Ok(AuthStatus::None),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(AuthStatus::None),
+            Err(err) => Err(AuthError::CommandIo {
+                provider: Provider::Codex,
+                source: err,
+            }),
+        }
+    }
 }
 
 #[async_trait]
@@ -1646,7 +1673,11 @@ impl AuthBroker for CodexAuthBroker {
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
         let Some(mut token) = extract_codex_token_from_home(&self.codex_home) else {
-            return Ok(AuthStatus::None);
+            return if self.force_file_store {
+                Ok(AuthStatus::None)
+            } else {
+                self.native_login_status().await
+            };
         };
         if provider_token_refresh_due(&token, now_unix()) {
             if self.refresh_access_token().await.is_err() {
@@ -1678,6 +1709,61 @@ impl AuthBroker for CodexAuthBroker {
 
     async fn extract_token(&self) -> Option<ProviderToken> {
         extract_codex_token_from_home(&self.codex_home)
+    }
+}
+
+/// The CLI whose ordinary login Loopflow reads natively for this provider.
+pub fn native_cli(provider: Provider) -> Option<&'static str> {
+    match provider {
+        Provider::GitHub => Some("gh"),
+        Provider::Claude => Some("claude"),
+        Provider::Codex => Some("codex"),
+        _ => None,
+    }
+}
+
+/// What `program`, the provider's own CLI, reports about its ordinary login.
+/// Each observation asks the CLI afresh; nothing here is cached or stored.
+pub async fn native_login_status(
+    provider: Provider,
+    program: PathBuf,
+) -> Result<AuthStatus, AuthError> {
+    match provider {
+        // Unlike the broker, a failed `gh auth status` is no login here: its
+        // hosts file outlives a revoked or unreachable token.
+        Provider::GitHub => {
+            let output = Command::new(&program)
+                .args(["auth", "status", "--hostname", "github.com"])
+                .kill_on_drop(true)
+                .output()
+                .await
+                .map_err(|source| AuthError::CommandIo { provider, source })?;
+            if !output.status.success() {
+                return Ok(AuthStatus::None);
+            }
+            let combined = String::from_utf8_lossy(&output.stdout).to_string()
+                + &String::from_utf8_lossy(&output.stderr);
+            Ok(AuthStatus::Active {
+                login: parse_github_login(&combined),
+            })
+        }
+        Provider::Claude => {
+            ClaudeAuthBroker {
+                program,
+                ..ClaudeAuthBroker::default()
+            }
+            .check_status()
+            .await
+        }
+        Provider::Codex => {
+            CodexAuthBroker {
+                program,
+                ..CodexAuthBroker::default()
+            }
+            .check_status()
+            .await
+        }
+        _ => Err(AuthError::UnsupportedProvider(provider.to_string())),
     }
 }
 
@@ -4432,6 +4518,46 @@ mod tests {
             "not logged in to any hosts"
         ));
         assert!(!gh_logout_is_already_disconnected("fatal: unknown host"));
+    }
+
+    #[tokio::test]
+    async fn ambient_codex_reads_a_keychain_login_through_its_cli() {
+        let temp = tempdir().expect("tempdir");
+        let codex = temp.path().join("codex");
+        fs::write(
+            &codex,
+            "#!/bin/sh\n[ \"$1 $2\" = \"login status\" ] && [ ! -e \"$CODEX_HOME/auth.json\" ]\n",
+        )
+        .expect("stub");
+        fs::set_permissions(&codex, fs::Permissions::from_mode(0o755)).expect("chmod");
+        let ambient = CodexAuthBroker {
+            codex_home: temp.path().join("home"),
+            force_file_store: false,
+            program: codex.clone(),
+        };
+        assert_eq!(
+            ambient.check_status().await.unwrap(),
+            AuthStatus::Active { login: None }
+        );
+        let managed = CodexAuthBroker {
+            program: codex,
+            ..CodexAuthBroker::for_profile(temp.path().join("home"))
+        };
+        assert_eq!(managed.check_status().await.unwrap(), AuthStatus::None);
+    }
+
+    #[test]
+    fn ambient_claude_keeps_the_ordinary_keychain_item() {
+        let ambient = ClaudeAuthBroker::default().command();
+        assert!(!ambient
+            .as_std()
+            .get_envs()
+            .any(|(name, _)| name == "CLAUDE_CONFIG_DIR"));
+        let managed = ClaudeAuthBroker::for_profile(PathBuf::from("/tmp/managed"), None).command();
+        assert!(managed
+            .as_std()
+            .get_envs()
+            .any(|(name, _)| name == "CLAUDE_CONFIG_DIR"));
     }
 
     #[test]

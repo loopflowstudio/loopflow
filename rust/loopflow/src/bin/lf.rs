@@ -1790,6 +1790,7 @@ fn run() -> anyhow::Result<()> {
             Some(InstallCommand::Agent { agent }) => {
                 loopflow::lf::commands::install::install_agent(agent)
             }
+            Some(InstallCommand::Gh) => loopflow::lf::commands::install::install_gh(),
             Some(InstallCommand::ActivateApp { bundle }) => {
                 loopflow::lf::commands::install::activate_app(bundle)
             }

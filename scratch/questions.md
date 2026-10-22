@@ -27,8 +27,18 @@
   work; determine the boundary with LOO-316.
 - Jack confirmed GitHub sign-in during initial setup: "make sure theyre signed
   in asap". Require verified sign-in before **Open project…**, reusing an
-  existing connection. The `gh` installation mechanism is unresolved, with no
-  package-manager prerequisite. See `account-requirements-review.md`.
+  existing connection. See `account-requirements-review.md`.
+- 2026-10-22 choice (reversible): `gh` comes from GitHub's own release
+  archive (`gh_<v>_macOS_<arch>.zip`, checksum-verified) into `~/.local/bin`,
+  not the admin-only `.pkg`. No quarantine is applied by an lf download; the
+  binary's notarization was not checked. An existing `gh` is left alone;
+  nothing updates it automatically.
+- 2026-10-22 assumptions (reversible): codex/claude/github sign-in without a
+  remembered Chrome profile uses the default browser (Linear and managed
+  logins still require one). Status reports `executable` from PATH only, so a
+  fresh `~/.local/bin` install shows missing in a shell that lacks it (the app
+  adds it). Claude scoping its Keychain item by `CLAUDE_CONFIG_DIR` is
+  inferred from `claude_keychain_service`, not checked against a live login.
 - Jack prefers scoped sessions and is content to avoid init here: app actions,
   no onboarding conversation or required init. See `init-setup-review.md`.
 - The Task ends at an open Loopflow with one obvious action (Open project);

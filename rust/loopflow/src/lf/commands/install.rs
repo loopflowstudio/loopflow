@@ -38,10 +38,12 @@ use crate::store::migrations;
 
 mod agent;
 mod bundle;
+mod gh;
 mod published;
 mod shell_path;
 pub use agent::install_agent;
 pub use bundle::{activate_app, app_destination};
+pub use gh::install_gh;
 pub use published::{latest, schedule};
 pub use shell_path::configure as configure_shell_path;
 

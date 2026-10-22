@@ -1,3 +1,6 @@
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -5,7 +8,9 @@ use time::OffsetDateTime;
 use super::format_relative_delta;
 use crate::profile::{AccessProfile, AuthBrowserBinding, LocalChromeProfile};
 use crate::provider_account::{account_login, acquire_managed_login_lock, open_account_store};
-use crate::provider_auth::{Provider, ProviderAuthService};
+use crate::provider_auth::{
+    native_cli, native_login_status, AuthStatus, Provider, ProviderAuthService,
+};
 use crate::store::{AccountLimitRow, CredentialState, ProviderAccountId, SharedStore};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -15,6 +20,14 @@ enum Verification {
     Rejected,
     Unavailable,
     NotChecked,
+}
+
+/// Whether the provider's own CLI runs from PATH, as a launch would find it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum Executable {
+    Installed,
+    Missing,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -38,6 +51,9 @@ struct AccountRow {
     login: Option<String>,
     scope: Scope,
     source: String,
+    /// Observed for local rows of a provider with a native CLI; null for
+    /// managed rows, other providers and `--cached` reads.
+    executable: Option<Executable>,
     cached_credential_state: String,
     verification: Verification,
     diagnostic: Option<String>,
@@ -118,25 +134,132 @@ pub(super) async fn run(
     Ok(())
 }
 
+const NATIVE_STATUS_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// One fresh reading of a provider CLI's ordinary login.
+#[derive(Debug, PartialEq, Eq)]
+struct NativeReading {
+    executable: Executable,
+    verification: Verification,
+    login: Option<String>,
+    diagnostic: Option<String>,
+    recovery: Option<String>,
+}
+
+/// Ask `program` (absent when nothing runs from PATH) whether its ordinary
+/// login is active. A failed or slow reading is unavailable, never signed out.
+async fn native_reading(
+    provider: Provider,
+    program: Option<PathBuf>,
+    timeout: Duration,
+) -> NativeReading {
+    let connect = Some(format!("lf account connect {provider}"));
+    let Some(program) = program else {
+        return NativeReading {
+            executable: Executable::Missing,
+            verification: Verification::Unavailable,
+            login: None,
+            diagnostic: Some(format!(
+                "{} is not installed",
+                native_cli(provider).expect("native provider")
+            )),
+            recovery: Some(match provider {
+                Provider::GitHub => "lf install gh".into(),
+                _ => format!("lf install agent {provider}"),
+            }),
+        };
+    };
+    let (verification, login, diagnostic, recovery) =
+        match tokio::time::timeout(timeout, native_login_status(provider, program)).await {
+            Ok(Ok(AuthStatus::Active { login })) => (Verification::Accepted, login, None, None),
+            Ok(Ok(AuthStatus::Pending)) => (
+                Verification::Unavailable,
+                None,
+                Some("sign-in in progress".into()),
+                None,
+            ),
+            Ok(Ok(AuthStatus::None | AuthStatus::Expired)) => {
+                (Verification::Rejected, None, None, connect)
+            }
+            Ok(Err(error)) => (
+                Verification::Unavailable,
+                None,
+                Some(format!("login status unavailable: {error}")),
+                None,
+            ),
+            Err(_) => (
+                Verification::Unavailable,
+                None,
+                Some(format!(
+                    "login status did not answer within {}s",
+                    timeout.as_secs()
+                )),
+                None,
+            ),
+        };
+    NativeReading {
+        executable: Executable::Installed,
+        verification,
+        login,
+        diagnostic,
+        recovery,
+    }
+}
+
 async fn local_rows(
     service: Option<&ProviderAuthService>,
     filter: Option<Provider>,
     verify: bool,
 ) -> Result<Vec<AccountRow>> {
-    let mut rows = Vec::new();
-    for provider in Provider::all()
+    let providers: Vec<Provider> = Provider::all()
         .into_iter()
         .filter(|p| filter.is_none_or(|f| f == *p))
-    {
+        .collect();
+    let readings = futures_util::future::join_all(providers.iter().map(|provider| async move {
+        let cli = native_cli(*provider).filter(|_| verify)?;
+        let program = crate::os_process::which_on_path(Path::new(cli));
+        Some(native_reading(*provider, program, NATIVE_STATUS_TIMEOUT).await)
+    }))
+    .await;
+    let mut rows = Vec::new();
+    for (provider, reading) in providers.into_iter().zip(readings) {
         let snapshot = match service {
             Some(service) => service.cached_status(provider).await?,
             None => None,
         };
+        if let Some(reading) = reading {
+            rows.push(AccountRow {
+                provider,
+                account_id: None,
+                login: reading.login,
+                scope: Scope::Local,
+                source: "native_cli".into(),
+                executable: Some(reading.executable),
+                cached_credential_state: snapshot
+                    .as_ref()
+                    .map(|s| s.status.as_str())
+                    .unwrap_or("uninspected")
+                    .into(),
+                verification: reading.verification,
+                diagnostic: reading.diagnostic,
+                recovery: reading.recovery,
+                observed_plan: None,
+                configured_plan: None,
+                routing: None,
+                cooldown_until: None,
+                expires_at: snapshot.and_then(|s| s.expires_at),
+                windows: vec![],
+                verified_windows: vec![],
+                reset_credits: None,
+            });
+            continue;
+        }
         rows.push(AccountRow {
             provider,
             account_id: None,
             login: snapshot.as_ref().and_then(|s| s.status.login()),
             scope: Scope::Local,
+            executable: None,
             source: if snapshot.is_some() {
                 "stored_token"
             } else {
@@ -350,6 +473,7 @@ async fn managed_rows(
             login: observed_login.or_else(|| account.login_email.as_ref().map(ToString::to_string)),
             scope: Scope::Managed,
             source: "managed_home".into(),
+            executable: None,
             cached_credential_state: cached.into(),
             verification: auth,
             diagnostic,
@@ -385,6 +509,9 @@ async fn managed_rows(
 fn next_action(row: &AccountRow, now: i64) -> String {
     let provider = row.provider.as_str();
 
+    if row.scope == Scope::Local && row.verification == Verification::Accepted {
+        return "use the service; launch checks required access".into();
+    }
     if row.scope == Scope::Local {
         return if row.cached_credential_state == "active"
             && row.expires_at.is_none_or(|expires| expires > now)
@@ -436,6 +563,15 @@ fn render(report: &AccountReport, width: usize, now: i64) -> String {
                 }
             };
             lines.push(format!("  auth: {evidence}"));
+            if let Some(executable) = row.executable {
+                lines.push(format!(
+                    "  cli: {}",
+                    match executable {
+                        Executable::Installed => "installed",
+                        Executable::Missing => "not installed",
+                    }
+                ));
+            }
 
             if let Some(plan) = &row.observed_plan {
                 lines.push(format!("  observed plan: {plan}"));
@@ -773,6 +909,66 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("share login"));
+    }
+
+    fn stub(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    #[tokio::test]
+    async fn native_reading_moves_from_missing_to_installed_to_connected() {
+        use super::{native_reading, Executable, Verification};
+        use crate::provider_auth::Provider;
+        let bin = tempfile::tempdir().unwrap();
+        let wait = std::time::Duration::from_secs(10);
+
+        let missing = native_reading(Provider::Claude, None, wait).await;
+        assert_eq!(missing.executable, Executable::Missing);
+        assert_eq!(missing.recovery.as_deref(), Some("lf install agent claude"));
+
+        let signed_out = stub(
+            bin.path(),
+            "signed-out",
+            r#"echo '{"loggedIn":false}'; exit 1"#,
+        );
+        let signed_out = native_reading(Provider::Claude, Some(signed_out), wait).await;
+        assert_eq!(signed_out.executable, Executable::Installed);
+        assert_eq!(signed_out.verification, Verification::Rejected);
+        assert_eq!(
+            signed_out.recovery.as_deref(),
+            Some("lf account connect claude")
+        );
+
+        let connected = stub(
+            bin.path(),
+            "connected",
+            r#"echo '{"loggedIn":true,"email":"kim@example.com"}'"#,
+        );
+        let connected = native_reading(Provider::Claude, Some(connected), wait).await;
+        assert_eq!(connected.verification, Verification::Accepted);
+        assert_eq!(connected.login.as_deref(), Some("kim@example.com"));
+        assert_eq!(connected.recovery, None);
+    }
+
+    #[tokio::test]
+    async fn slow_native_status_is_unavailable_not_signed_out() {
+        use super::{native_reading, Verification};
+        use crate::provider_auth::Provider;
+        let bin = tempfile::tempdir().unwrap();
+        let slow = stub(bin.path(), "slow", "sleep 5");
+        let reading = native_reading(
+            Provider::GitHub,
+            Some(slow),
+            std::time::Duration::from_millis(200),
+        )
+        .await;
+        assert_eq!(reading.verification, Verification::Unavailable);
+        assert!(reading.diagnostic.unwrap().contains("did not answer"));
+        assert_eq!(reading.recovery, None);
     }
 
     #[test]

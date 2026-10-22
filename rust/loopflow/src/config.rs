@@ -9,6 +9,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
 
 #[cfg(not(test))]
@@ -755,6 +756,57 @@ pub(crate) fn write_global_config_at(
 
 fn global_config_path() -> PathBuf {
     crate::store::lf_home_dir().join("config.yaml")
+}
+
+/// Read a Machine-local configuration file; absent or empty is an empty mapping.
+pub(crate) fn read_global_config_at(path: &Path) -> anyhow::Result<serde_yaml_ng::Value> {
+    match fs::read_to_string(path) {
+        Ok(text) => {
+            let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&text)
+                .with_context(|| format!("{} is not valid YAML", path.display()))?;
+            if value.is_null() {
+                Ok(serde_yaml_ng::Value::Mapping(Default::default()))
+            } else if value.is_mapping() {
+                Ok(value)
+            } else {
+                anyhow::bail!("{} must contain a configuration mapping", path.display())
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(serde_yaml_ng::Value::Mapping(Default::default()))
+        }
+        Err(error) => Err(error).with_context(|| format!("Read {}", path.display())),
+    }
+}
+
+/// Change `home`'s configuration under its lock, preserving every other value.
+/// A malformed file is reported and left as it is.
+pub(crate) fn update_global_config_at<T>(
+    home: &Path,
+    change: impl FnOnce(&mut serde_yaml_ng::Value) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    fs::create_dir_all(home)?;
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(home.join("config.lock"))?;
+    fs2::FileExt::lock_exclusive(&lock)?;
+    let path = home.join("config.yaml");
+    let mut config = read_global_config_at(&path)?;
+    let changed = change(&mut config)?;
+    write_global_config_at(&path, &config)?;
+    Ok(changed)
+}
+
+/// Make `agent` the Machine default for launches that name none. Repository,
+/// skill and explicit choices keep their precedence.
+pub fn set_default_agent(agent: &str) -> anyhow::Result<()> {
+    update_global_config_at(&crate::store::lf_home_dir(), |config| {
+        config["agent"] = agent.into();
+        Ok(())
+    })
 }
 
 /// Load only the repository-owned config, without inheriting user-global values.

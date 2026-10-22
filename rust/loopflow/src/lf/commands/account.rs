@@ -31,9 +31,9 @@ use crate::provider_account::{
 use crate::provider_auth::codex::{daemon_has_running_turn, daemon_login, restart_daemon};
 use crate::provider_auth::{
     capture_claude_profile_credentials, disconnect_provider_account_auth,
-    import_ambient_claude_profile_credentials, prepare_provider_account_access_token,
-    start_provider_account_auth, AuthBroker, AuthCompletion, AuthFlowResponse, Provider,
-    ProviderAuthService,
+    import_ambient_claude_profile_credentials, native_cli, native_login_status,
+    prepare_provider_account_access_token, start_provider_account_auth, AuthBroker, AuthCompletion,
+    AuthFlowResponse, AuthStatus, Provider, ProviderAuthService,
 };
 use crate::store::{
     open_store, CredentialState, CredentialType, ProviderAccount, ProviderAccountId, ProviderToken,
@@ -94,6 +94,7 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
             chrome_profile,
             import,
             api_key,
+            default_agent,
         } => {
             if *api_key {
                 return configure(provider).await;
@@ -104,7 +105,7 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
             }
             match email.as_deref() {
                 Some(email) => connect_account(provider, email, chrome_profile.as_deref()).await,
-                None => connect(provider, chrome_profile.as_deref()).await,
+                None => connect(provider, chrome_profile.as_deref(), *default_agent).await,
             }
         }
         AccountCommand::RedeemReset {
@@ -265,10 +266,91 @@ async fn restart_stale_codex_daemon(native: &Path, login: &str) -> Result<()> {
     Ok(())
 }
 
-async fn connect(raw_provider: &str, selection: Option<&str>) -> Result<()> {
+/// Sign the provider's ordinary login in. A coding tool or `gh` with no
+/// remembered Chrome profile signs in through the default browser; its own CLI
+/// must then report the login. `default_agent` makes a guided coding tool the
+/// Home config's `agent` once that reading succeeds, signing in only if needed.
+async fn connect(raw_provider: &str, selection: Option<&str>, default_agent: bool) -> Result<()> {
     let provider = parse_provider(raw_provider)?;
+    let agent = default_agent
+        .then(|| {
+            crate::agent::guided_agent(provider.as_str())
+                .ok_or_else(|| anyhow!("--default-agent chooses codex or claude, not {provider}"))
+        })
+        .transpose()?;
+    if let Some(agent) = agent {
+        if let Some(login) = native_login(provider).await? {
+            return choose_default_agent(agent, login.as_deref());
+        }
+    }
     let store = open_account_store().await?;
-    let (profiles, remember) = browser_profiles(&store, provider, None, selection).await?;
+    let remembered = !store
+        .list_auth_browser_profiles(Some(provider), None)
+        .await?
+        .into_iter()
+        .all(|binding| binding.account_id.is_some());
+    if selection.is_none() && !remembered && native_cli(provider).is_some() {
+        println!(
+            "Connecting local {} in your browser...",
+            provider.display_name()
+        );
+        sign_in(provider, &AuthBrowser::Default).await?;
+    } else {
+        connect_through_chrome(&store, provider, selection).await?;
+    }
+    let Some(login) = native_login(provider).await? else {
+        return match native_cli(provider) {
+            Some(cli) => Err(anyhow!(
+                "sign-in finished, but `{cli}` reports no login; retry lf account connect {provider}"
+            )),
+            None => {
+                println!("Connected local {}", provider.display_name());
+                Ok(())
+            }
+        };
+    };
+    match agent {
+        Some(agent) => choose_default_agent(agent, login.as_deref()),
+        None => {
+            println!("Connected local {}", provider.display_name());
+            Ok(())
+        }
+    }
+}
+
+/// The provider CLI's own reading of its ordinary login: `Some(login)` when
+/// active, `None` when signed out or without a native CLI.
+async fn native_login(provider: Provider) -> Result<Option<Option<String>>> {
+    let Some(cli) = native_cli(provider) else {
+        return Ok(None);
+    };
+    let Some(program) = crate::os_process::which_on_path(Path::new(cli)) else {
+        return Err(anyhow!("{}", crate::agent::missing_agent_message(cli)));
+    };
+    Ok(match native_login_status(provider, program).await? {
+        AuthStatus::Active { login } => Some(login),
+        AuthStatus::Pending | AuthStatus::None | AuthStatus::Expired => None,
+    })
+}
+
+fn choose_default_agent(agent: crate::agent::GuidedAgent, login: Option<&str>) -> Result<()> {
+    crate::config::set_default_agent(agent.name)?;
+    let login = login
+        .map(|login| format!(" as {login}"))
+        .unwrap_or_default();
+    println!(
+        "Connected local {}{login}; it is now the default agent",
+        agent.display_name
+    );
+    Ok(())
+}
+
+async fn connect_through_chrome(
+    store: &SharedStore,
+    provider: Provider,
+    selection: Option<&str>,
+) -> Result<()> {
+    let (profiles, remember) = browser_profiles(store, provider, None, selection).await?;
     let mut failures = Vec::new();
     for profile in profiles {
         let chrome = match verified_chrome_profile(&profile) {
@@ -278,43 +360,66 @@ async fn connect(raw_provider: &str, selection: Option<&str>) -> Result<()> {
                 continue;
             }
         };
-        let service = local_auth_service().await?;
-        let flow = service
-            .start_auth(provider)
-            .await
-            .context("provider launch / URL discovery")?;
-        let result = async {
-            let url = flow.verification_uri_complete.as_deref().unwrap_or(&flow.verification_uri);
-            println!("Connecting local {} through profile '{}'...", provider.display_name(), profile.id);
-            if matches!(flow.completion, AuthCompletion::Manual) { println!("Manual authorization is required."); }
-            open_chrome_profile(&chrome, url).context("browser launch")?;
-            let manual = async {
-                if service.pending_supports_authorization_code(provider).await {
-                    let code = manual_authorization(&flow, &chrome).await?;
-                    service.complete_auth(provider, code.expose_secret()).await?;
-                }
-                std::future::pending::<Result<()>>().await
-            };
-            tokio::select! {
-                biased;
-                result = service.wait_for_auth(provider) => result.map_err(anyhow::Error::from),
-                result = manual => result,
-                _ = tokio::time::sleep(Duration::from_secs(flow.expires_in.unwrap_or(AUTH_CODE_FLOW_TIMEOUT_SECS))) => Err(anyhow!("authorization wait timed out")),
-                _ = tokio::signal::ctrl_c() => Err(anyhow!("authorization cancelled")),
-            }
-        }.await;
-        service.abort_pending(provider).await;
-        result?;
+        println!(
+            "Connecting local {} through profile '{}'...",
+            provider.display_name(),
+            profile.id
+        );
+        sign_in(provider, &AuthBrowser::Chrome(chrome)).await?;
         if remember {
-            remember_browser_profile(&store, provider, None, &profile).await?;
+            remember_browser_profile(store, provider, None, &profile).await?;
         }
-        println!("Connected local {}", provider.display_name());
         return Ok(());
     }
     Err(anyhow!(
         "Chrome profile discovery: {}. Run lf account connect {provider} --chrome-profile <profile>",
         failures.join("; ")
     ))
+}
+
+/// Where a local sign-in page opens.
+#[derive(Debug)]
+enum AuthBrowser {
+    Chrome(LocalChromeProfile),
+    Default,
+}
+
+impl AuthBrowser {
+    fn open(&self, url: &str) -> Result<()> {
+        match self {
+            Self::Chrome(profile) => open_chrome_profile(profile, url),
+            Self::Default => open_default_browser(url),
+        }
+    }
+}
+
+async fn sign_in(provider: Provider, browser: &AuthBrowser) -> Result<()> {
+    let service = local_auth_service().await?;
+    let flow = service
+        .start_auth(provider)
+        .await
+        .context("provider launch / URL discovery")?;
+    let result = async {
+        let url = flow.verification_uri_complete.as_deref().unwrap_or(&flow.verification_uri);
+        if matches!(flow.completion, AuthCompletion::Manual) { println!("Manual authorization is required."); }
+        browser.open(url).context("browser launch")?;
+        let manual = async {
+            if service.pending_supports_authorization_code(provider).await {
+                let code = manual_authorization(&flow, browser).await?;
+                service.complete_auth(provider, code.expose_secret()).await?;
+            }
+            std::future::pending::<Result<()>>().await
+        };
+        tokio::select! {
+            biased;
+            result = service.wait_for_auth(provider) => result.map_err(anyhow::Error::from),
+            result = manual => result,
+            _ = tokio::time::sleep(Duration::from_secs(flow.expires_in.unwrap_or(AUTH_CODE_FLOW_TIMEOUT_SECS))) => Err(anyhow!("authorization wait timed out")),
+            _ = tokio::signal::ctrl_c() => Err(anyhow!("authorization cancelled")),
+        }
+    }.await;
+    service.abort_pending(provider).await;
+    result
 }
 
 async fn browser_profiles(
@@ -646,7 +751,8 @@ async fn authorize_managed_login(
     let input = handle.code_input();
     let manual = async {
         if let Some(input) = input {
-            let code = manual_authorization(&flow, &chrome_profile).await?;
+            let code =
+                manual_authorization(&flow, &AuthBrowser::Chrome(chrome_profile.clone())).await?;
             input.submit(code.expose_secret()).await?;
         }
         std::future::pending::<Result<()>>().await
@@ -1119,7 +1225,7 @@ fn open_chrome_profile(profile: &LocalChromeProfile, url: &str) -> Result<()> {
 
 async fn manual_authorization(
     flow: &AuthFlowResponse,
-    profile: &LocalChromeProfile,
+    browser: &AuthBrowser,
 ) -> Result<SecretString> {
     let Some(mut terminal) = auth_input::AuthInput::open()? else {
         return std::future::pending().await;
@@ -1133,7 +1239,7 @@ async fn manual_authorization(
         );
         loop {
             if terminal.line().await?.expose_secret().trim() == "m" {
-                open_chrome_profile(profile, url).context("manual browser launch")?;
+                browser.open(url).context("manual browser launch")?;
                 break;
             }
         }
@@ -1145,6 +1251,20 @@ async fn manual_authorization(
             return Ok(code);
         }
     }
+}
+
+#[cfg(not(test))]
+fn open_default_browser(url: &str) -> Result<()> {
+    crate::platform::open_url_checked(url).context("open the default browser")
+}
+
+#[cfg(test)]
+fn open_default_browser(_url: &str) -> Result<()> {
+    TEST_OPENED_CHROME_PROFILES
+        .lock()
+        .expect("test Chrome profile log should not be poisoned")
+        .push("default browser".into());
+    Ok(())
 }
 
 #[cfg(all(not(target_os = "macos"), not(test)))]

@@ -1,8 +1,8 @@
 # From install to an open Loopflow
 
-Status: accepted direction; Rust installer activation, PATH, destination and
-native agent install implemented (see This slice). Auth/GitHub actions, Swift
-setup and live Mac acceptance remain outstanding.
+Status: accepted direction; Rust installer activation, PATH, destination,
+native agent/gh install and provider/GitHub status and sign-in implemented
+(see This slice). Swift setup and live Mac acceptance remain outstanding.
 Baseline: synced onto main `98dab5ea8e` (v0.14.15).
 Research performed 2026-09-26 (run-local date).
 
@@ -213,53 +213,18 @@ Do not continuously launch auth commands on the existing two-second refresh.
 
 ### Reuse installation and authentication owners
 
-Add `lf install agent <codex|claude>` as a narrow installer operation. It invokes
-the provider's official native installer only after the explicit UI/CLI action,
-streams progress to the terminal, returns failures, and verifies the resulting
-executable. Download the script to a temporary file before executing it so a
-failed curl cannot become an apparently successful empty pipeline. Provider
-updates remain provider-owned. It neither downloads a hand-selected provider
-binary nor changes Loopflow's active release. Run this repo-independent branch
-without invoking Loopflow release promotion or requiring Git.
+`lf install agent <codex|claude>` runs the provider's official installer only
+on explicit request, from a downloaded file, and verifies the executable
+uncached; provider updates stay provider-owned and no Loopflow promotion or Git
+is involved. `GUIDED_AGENTS` is the single definition; Swift duplicates no
+download command or OAuth.
 
-Use a small Rust definition for each supported guided tool (executable,
-installer URL, shell, documentation URL). Reuse it for missing-tool hints and
-the setup status response; Swift must not duplicate download commands or
-implement OAuth. Explicitly refresh availability after install: the existing
-`check_cli_available` caches negative results for the process lifetime. Prefer
-a bounded uncached probe for setup over adding a global cache invalidation bus.
-
-Extend `lf auth status <provider> --json` with a dedicated setup projection:
-provider, executable availability, native authentication state
-(`active|none|expired|unknown`), and optional error. Existing text output remains
-useful to CLI users. Define a Rust/Swift DTO and shared fixture with every field
-required or explicitly optional; do not parse prose or silently default absent
-fields. This is an observation, not another credential store or a promise of
-remaining quota.
-
-Build this observation inside `provider_auth` using the native CLI's status
-contract and existing broker code. A cached token alone must not make the UI
-claim the executable is installed or usable. Codex currently checks file tokens;
-extend its ambient status path to support native `codex login status`, including
-Keychain-backed login. Keep token extraction and managed account routing with
-their existing owners. Never print credentials or probe real local accounts in
-tests. Test signed-out, absent, timeout, and native-auth-without-token-file cases.
-
-Sign-in reuses `lf auth connect <provider>` and its existing browser handoff,
-including its fallback for a one-time code. Do not require Chrome profiles,
-managed account email routing, API keys, or developer OAuth credentials for the
-ordinary ambient login. After sign-in, re-observe native status.
-
-Add an explicit `--default-agent` option to this connect operation for the
-setup action. On verified success only, update the existing Home config's
-`agent` field, preserving unrelated YAML values and reporting malformed config
-without replacing it. This makes a chosen Claude login govern future launches
-even when an unsigned-in Codex is also installed. No Swift preference or second
-default-selection store. Repository/skill/explicit model precedence remains as
-defined by the current configuration resolver; choosing a default cannot
-silently override a repository's deliberate setting. Installing alone never
-changes the default. Choosing an already connected tool performs the same
-verification and config update without forcing logout/re-authentication.
+Status, sign-in and the default-agent choice are implemented in the existing
+`lf account` owners (see This slice): a typed native reading, never parsed
+prose or a cached token; sign-in through the provider's own login; and
+`--default-agent` writing Home `agent` only after verified success, so
+repository/skill/explicit precedence is unchanged and installing alone never
+changes the default. No second credential store or Swift preference.
 
 For an implicit launch with no available coding tool, replace the misleading
 Codex-only error with both supported setup choices and a link to the setup
@@ -449,19 +414,39 @@ Implemented in the existing installer owner:
   definition; missing-tool errors and doctor fallbacks name these installers
   and offer both tools.
 
-Remaining, in the order Jack set on 2026-10-22 (installer first, then
-provider/GitHub setup actions):
+Provider/GitHub setup actions (2026-10-22, second pass). `lf auth` is now
+`lf account`; the design's `lf auth status <provider> --json` is
+`lf account [provider] --json`:
 
-1. `lf auth status <provider> --json` native-status DTO with Rust/Swift
-   fixture, and Codex native `login status` (Keychain logins).
-2. `lf auth connect --default-agent` writing Home config `agent` on verified
-   success only.
-3. `gh` acquisition without a package manager (mechanism unresolved) and a
-   GitHub status/sign-in observation through `lf auth github`.
-4. Swift first-launch call to activate-app (progress, failure, retry; app is
+- Local rows for codex, claude and github carry a fresh native reading:
+  `executable` (`installed|missing`, PATH as a launch sees it; null for
+  managed rows, other providers and `--cached`), `verification` accepted /
+  rejected / unavailable (failed or 20 s timeout, never signed out), the CLI's
+  login, and `recovery` (`lf install agent <tool>`, `lf install gh`,
+  `lf account connect <provider>`). `auth_status.json` pins it; Rust
+  round-trips it and Swift decodes `ProviderAccountReport.setupState`.
+- Ambient Codex without `auth.json` asks `codex login status` (Keychain
+  logins). Ambient Claude no longer sets `CLAUDE_CONFIG_DIR`, which moved its
+  login to a home-scoped Keychain item plain `claude` never reads.
+- `lf account connect <provider>` for codex/claude/github with no remembered
+  Chrome profile signs in through the default browser, then requires the CLI
+  to report the login. `--default-agent` (codex/claude) writes Home `agent`
+  only after that reading, skipping sign-in when already connected; malformed
+  config is reported and left as is (shared `config::update_global_config_at`,
+  also used by portfolio).
+- `lf install gh` installs GitHub's release archive for this machine into
+  `~/.local/bin` after checking the release's SHA-256 list; an existing `gh`
+  on PATH is left alone.
+
+Remaining:
+
+1. Swift first-launch call to activate-app (progress, failure, retry; app is
    quiesced/reopened by promotion when source == target — unproven live).
-5. Primary-window setup view, only after the running-app baseline is recorded.
-6. Docs, then the clean-account Done-when trials.
+2. Primary-window setup view reading `lf account --json` and running the
+   recovery commands in its shell, only after the running-app baseline is
+   recorded.
+3. Docs, then the clean-account Done-when trials (incl. real installer,
+   browser sign-in and `gh` download, none exercised here).
 
 The live baseline and clean-account acceptance are open gaps; Jack directed
 that fixtures not substitute for them. The retained-helper
@@ -480,6 +465,7 @@ open findings are folded into Remaining above.
 | Lifecycle + completion fixtures (2026-09-26) | `app_activation_tests` 7 passed; `machine_install::tests` 23 passed; fmt/clippy passed. | Native sleep stand-ins; no real promotion, keeper or GUI. |
 | Installer/agent slice (2026-10-22) | `cargo test -p loopflow --lib` for install::{shell_path,bundle,published,agent}, machine_install, app_activation_tests, engine::agent: all passed (38 + 64 + 16 in focused runs). Fresh `zsh -ic` resolves a path with spaces/quotes/`$`/backquotes. Built `lf install shell-path` with `env -i` HOME/ZDOTDIR twice: one block, `command -v lf` resolves. `activate-app` on a non-bundle and on a mismatched helper refuses before any state read. `test_shell_installer.py` 19 passed. clippy/fmt/ruff clean. | No real signed bundle, promotion, provider installer download, or clean account. Affected-suite gate not run. |
 | After main sync + recovery fix `257ed79113` (2026-10-22) | `cargo test -p loopflow --lib -- lf::commands::install machine_install app_activation_tests`: 37 passed, 2 ignored. | Same fixture limits. |
+| Setup actions (2026-10-22) | `cargo test --lib -- lf::commands::account provider_auth`: 120 passed; integration `auth_tests` 11 passed (missing→installed→connected without a repo; default agent written only on success; malformed config kept); `install::gh` 2 passed; Swift `DTOFixtureTests` 50 passed; clippy/fmt clean; CLI reference regenerated. | Stub CLIs; no real provider, browser, Keychain or GitHub download. |
 
 Proposed Wave memory update after landing (memory is read-only here): items 1,
 3 and 7 of "What stands between a newcomer and a first task" are addressed in

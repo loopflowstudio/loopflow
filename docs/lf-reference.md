@@ -617,6 +617,7 @@ Connect local credentials or a managed login using a remembered browser
 | `--chrome-profile` | chrome profile |
 | `--import` | Adopt an existing Claude login Default: false. |
 | `--api-key` | Read the provider's API key environment variable Default: false. |
+| `--default-agent` | Once codex or claude reports the login, make it the default agent Default: false. |
 | `--help / -h` | Print help |
 
 ## lf account set
@@ -942,6 +943,23 @@ Install the latest Loopflow at login and weekly by default (macOS launchd)
 | Argument | What it does |
 |---|---|
 | `<frequency>` | Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time) Default: weekly. |
+| `--help / -h` | Print help |
+
+## lf self install agent
+
+Install Codex or Claude Code with its official installer
+
+| Argument | What it does |
+|---|---|
+| `<agent>` | codex or claude |
+| `--help / -h` | Print help |
+
+## lf self install gh
+
+Install the GitHub CLI from GitHub's checksummed release into ~/.local/bin
+
+| Argument | What it does |
+|---|---|
 | `--help / -h` | Print help |
 
 ## lf portfolio

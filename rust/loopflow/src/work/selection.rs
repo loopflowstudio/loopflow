@@ -423,6 +423,14 @@ pub struct Arrangement {
     pub mode: ArrangementMode,
 }
 
+/// An authored arrangement: what `lf desktop arrange` reads. The writer decides `mode`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ArrangementEdit {
+    pub order: Vec<MemberRef>,
+    pub hidden: BTreeSet<MemberRef>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ArrangementProjection {
     pub visible: Vec<MemberRef>,
@@ -441,6 +449,13 @@ impl Arrangement {
             order: members.to_vec(),
             hidden: BTreeSet::new(),
             mode: ArrangementMode::Auto,
+        }
+    }
+
+    pub fn to_edit(&self) -> ArrangementEdit {
+        ArrangementEdit {
+            order: self.order.clone(),
+            hidden: self.hidden.clone(),
         }
     }
 

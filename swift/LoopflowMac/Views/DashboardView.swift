@@ -228,8 +228,7 @@ struct DashboardView: View {
         guard let id = plan.dashboardID, let revision = plan.savedRevision else {
             model.dashboardError = "Save this Dashboard before arranging its Work."; return
         }
-        let arrangement = WorkArrangement(order: plan.arrangement.order, hidden: hidden, mode: plan.arrangement.mode)
-        Task { await model.arrangeDashboard(id, arrangement: arrangement, revision: revision) }
+        Task { await model.arrangeDashboard(id, order: plan.arrangement.order, hidden: hidden, revision: revision) }
     }
 }
 

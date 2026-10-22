@@ -44,7 +44,7 @@ let selection = Selection {
 let resolution = store.resolve_selection(&repository_id, &selection)?;
 let arrangement = Arrangement::automatic(&resolution.members);
 let saved = store.save_dashboard(
-    &repository_id, &DashboardId::new(), None, &selection, &arrangement,
+    &repository_id, &DashboardId::new(), None, &selection, &arrangement.to_edit(),
 )?;
 ```
 
@@ -100,8 +100,8 @@ Pin/unpin and Dashboard rename require the current Dashboard revision. Task rena
 `task:ID` and the Task's revision, writing through the existing Task edit owner.
 Wave renaming remains `lf wave rename`. All saved-intent commands work headless.
 
-`arrange` accepts a complete `Arrangement` JSON record, including hidden members;
-its `mode` is ignored. `order --query` applies the repository order's move (the
+`arrange` accepts `{"order": [...], "hidden": [...]}`; the writer decides `mode`
+and rejects input naming it. `order --query` applies the repository order's move (the
 dragged member takes the target's place) to a Dashboard's visible occurrences.
 `layout --save` accepts `WorkPaneLayout` JSON with revision zero on creation or the last returned revision on update. It preserves pane IDs,
 content locations, focus, zoom, hidden panes and file drafts together. A draft

@@ -69,8 +69,9 @@ public struct RegistryQuery: Sendable {
         try Self.decode(Dashboard.self, from: await run(["desktop", "rename", "query:" + id, name, "--revision", String(revision)], repoPath))
     }
 
-    public func saveDashboardArrangement(id: String, arrangement: WorkArrangement, revision: Int64, repoPath: String) async throws -> Dashboard {
-        let input = String(decoding: try JSONEncoder().encode(arrangement), as: UTF8.self)
+    /// Rust decides the arrangement's mode from the order it receives.
+    public func saveDashboardArrangement(id: String, order: [WorkMemberRef], hidden: [WorkMemberRef], revision: Int64, repoPath: String) async throws -> Dashboard {
+        let input = String(decoding: try JSONEncoder().encode(["order": order, "hidden": hidden]), as: UTF8.self)
         return try Self.decode(Dashboard.self, from: await runWithInput(["desktop", "arrange", id, "--revision", String(revision)], repoPath, input))
     }
 

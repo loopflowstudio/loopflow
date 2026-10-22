@@ -2483,13 +2483,13 @@ extension WorkModel {
         }
     }
 
-    func arrangeDashboard(_ id: String, arrangement: WorkArrangement, revision: Int64) async {
+    func arrangeDashboard(_ id: String, order: [WorkMemberRef], hidden: [WorkMemberRef], revision: Int64) async {
         guard !dashboardSaving, let repoPath else { return }
         dashboardSaving = true
         dashboardError = nil
         defer { dashboardSaving = false }
         do {
-            _ = try await query.saveDashboardArrangement(id: id, arrangement: arrangement, revision: revision, repoPath: repoPath)
+            _ = try await query.saveDashboardArrangement(id: id, order: order, hidden: hidden, revision: revision, repoPath: repoPath)
             try await refreshDashboard(id, repoPath: repoPath)
         } catch { dashboardError = error.localizedDescription }
     }

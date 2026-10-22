@@ -238,8 +238,8 @@ lf ci watch ──60 s, jitter──> REST, If-None-Match (304 costs no quota)
 
 `lf ci watch` is one repository-wide program with one job. It reads the gate
 with the same required-check projection as the landing check, then hands a
-failing landing to that check, which confirms the failure against GitHub, stays
-silent for a queued PR, and reserves the incident's one repair. The landing
+failing landing to that check, which confirms the failure against GitHub and
+reserves the incident's current repair attempt. The landing
 lock, landing generation and incident reservation are the claim, so waited
 landing, a watcher and a release cannot repeat a fix. Scheduled checks only
 observe. The watcher fills the
@@ -264,8 +264,10 @@ A check never transfers green checks from one head to another. A failure is
 confirmed by a second observation before repair. One incident (head, failed check set and provider check URLs) owns one repair
 Session. Admission reserves that Session and launcher Process atomically before
 starting its detached worker. A dead launch may retry once using the same
-conversation and native history; a completed blocked repair retains its outcome.
-The same incident failing again waits until the head or evidence changes.
+conversation and native history; a completed repair retains its outcome. When
+the same incident still fails, its next attempt (`<identity>#n`) starts after a
+backoff of 1, 2, 4… minutes, at most 30, and its prompt carries the earlier
+attempts' summaries. Nothing hands the landing back to a person.
 Required integration is actionable even with green checks. Pending and missing
 checks keep waiting without synthetic failures or elapsed-time reruns. A failed
 read is never evidence of CI failure or merge. GitHub remains the final merge authority.
@@ -274,9 +276,23 @@ An auto-merge request targeting a merge queue keeps waiting when its base
 advances, including before queue entry. Its original-head CI still receives
 repair, and a real conflict still requires integration. Once GitHub queues the
 PR, landing and release wait for the queue's integrated-commit proof instead
-of interpreting the original head's mergeability or checks. Removing the
-request restores ordinary handling; only an authoritative GitHub merge
-finishes the landing.
+of interpreting the original head's mergeability or checks. Only an
+authoritative GitHub merge finishes the landing.
+
+GitHub can drop a merge request, sometimes leaving auto-merge on so the PR
+never re-enters the queue. The newest queue-removal or auto-merge-disable event
+says why:
+
+| Why | Landing does |
+| --- | --- |
+| `failed_checks` | Re-enters the queue once, then repairs the same failure with backoff |
+| `merge_conflict`, or a conflicting head | Repairs `required-integration` |
+| a head nobody armed | Repairs `auto-merge`: verify, then `lf arm` |
+| anything else, or no event | Re-enters the queue (`enqueuePullRequest`) or re-arms the requested head |
+
+A missing request with no event is read again after five seconds, so a check
+racing a fresh arm never acts on the stale read. Pause holds these actions;
+resume continues them.
 
 Landing and release read PR state, head, merge commit, auto-merge request, and
 queue membership in one GitHub response. A merge therefore takes precedence
@@ -293,29 +309,28 @@ checks unknown until the caller reobserves; an unreadable page cannot supply a
 partial success. Repeated jobs retain their newest result within each workflow
 and event, while legacy status contexts keep their own identities.
 
-A blocked landing stays observable: later checks still settle its merge, and
-checks that stop failing clear the block. Rerun `lf arm` or `lf land`
-after resolving a blocker to resume under a fresh generation, including when
-the SHA has not changed. Use `lf history show SESSION --final` to inspect a repair's
-conclusion.
+A blocked landing stays observable: later checks still settle its merge,
+checks that stop failing clear the block, and a waited landing keeps checking.
+Use `lf history show SESSION --final` to inspect a repair's conclusion.
 
 Repairs return `published` or `blocked` with a summary in their final answer.
-A blocked result names the required action. Provider exit code zero alone does
-not mean the repair succeeded.
+A blocked result ends that attempt; the next one starts after its backoff.
+Provider exit code zero alone does not mean the repair succeeded.
 
 A PR closed without merging ends its landing unsettled. Merge evidence is
 recorded before Task settlement; a failed local or Linear settlement keeps the
 landing pending and the next check retries it.
 
 `ship` runs gate and `land --wait-and-fix`. Waited landing uses the existing
-observation and CI repair path every 15 seconds until verified merge, closure,
-a concrete blocker or interruption, releasing its lock between reads. Repair
+observation and CI repair path every 15 seconds until verified merge, closure
+or interruption, releasing its lock between reads. A blocked check or failed
+read is printed once and checked again. Repair
 admission exempts the calling command and recorded ancestors waiting for it;
 unrelated live or unresolved Processes still prevent
 editing. Unanswered turns alone are history, not execution. The same incident
 reservation deduplicates a concurrent watcher. Elapsed time never terminates
-observation, repair admission or a live repair. A concrete blocker returns held
-(exit 3); interruption retains intent and returns stopped (exit 130).
+observation, repair admission or a live repair. A PR closed without merging
+returns held (exit 3); interruption retains intent and returns stopped (exit 130).
 Neither ordinary reconciliation nor a manual GitHub merge invents a verdict.
 
 Independently accepted later work is an ordinary Task plus a linking comment.

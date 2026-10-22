@@ -4512,7 +4512,9 @@ mod tests {
     use crate::child::ChildRef;
     use crate::durable::{TaskState, WorkRef, WorkStatus};
     use crate::linear::{LinearIssueId, LinearProjectId};
-    use crate::ops::pr_landing::{reconcile_pr_landing, wait_with_io, LandingObservation};
+    use crate::ops::pr_landing::{
+        reconcile_pr_landing, wait_with_io, LandingIo, LandingObservation,
+    };
     use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::{SharedStore, StorageConfig};
     use crate::test_linear_input::SeedLinear;
@@ -5840,7 +5842,7 @@ mod tests {
             let id = landing.id.clone();
             let observe = observe.clone();
             let repair = repair.clone();
-            async move { wait_with_io(&store, &id, observe, repair).await }
+            async move { wait_with_io(&store, &id, LandingIo::scripted(observe, Some(repair))).await }
         });
 
         assert_eq!(
@@ -5874,9 +5876,13 @@ mod tests {
         }
         tokio::time::advance(Duration::from_secs(24 * 60 * 60)).await;
         assert!(!waiter.is_finished());
-        let competing = reconcile_pr_landing(store.clone(), landing.clone(), observe, Some(repair))
-            .await
-            .unwrap();
+        let competing = reconcile_pr_landing(
+            store.clone(),
+            landing.clone(),
+            LandingIo::scripted(observe, Some(repair)),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             competing, landing,
             "the competing observer cannot claim the landing"

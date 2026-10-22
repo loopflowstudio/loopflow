@@ -19,7 +19,7 @@ use crate::store::{
 use crate::work::wave::{Wave, WaveLocator};
 
 mod admission;
-mod automation;
+pub(crate) mod automation;
 mod chapters;
 mod children;
 mod ci_incidents;

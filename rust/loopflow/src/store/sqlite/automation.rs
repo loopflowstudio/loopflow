@@ -19,10 +19,50 @@ pub(crate) struct RepairReservation {
     pub error: Option<String>,
 }
 
+/// One repair attempt for a CI incident, as its row records it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RepairAttempt {
+    /// No repair responded yet, or one is still starting or running.
+    Open,
+    /// The attempt concluded, or its startup exhausted its retries.
+    Finished {
+        /// Unix seconds.
+        ended_at: i64,
+        conclusion: Option<String>,
+        error: Option<String>,
+    },
+}
+
 impl SqliteStore {
-    pub(crate) fn ci_response_complete(&self, identity: &str) -> StoreResult<bool> {
-        Ok(self.conn.lock().expect("store mutex poisoned").query_row(
-            "SELECT repair_conclusion IS NOT NULL OR (responded_at IS NOT NULL AND repair_lf_process_id IS NULL) FROM ci_incidents WHERE identity=?1", [identity], |row| row.get(0))?)
+    /// `None` when no incident row has this identity yet.
+    pub(crate) fn repair_attempt(
+        &self,
+        identity: &str,
+        startup_retries: u32,
+    ) -> StoreResult<Option<RepairAttempt>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT repair_conclusion IS NOT NULL
+                     OR (responded_at IS NOT NULL AND repair_lf_process_id IS NULL)
+                     OR (repair_finished_at IS NOT NULL AND repair_retries >= ?2),
+                     COALESCE(repair_finished_at, responded_at / 1000000000, updated_at / 1000000000),
+                     repair_conclusion, repair_error
+                 FROM ci_incidents WHERE identity=?1",
+                params![identity, startup_retries],
+                |row| {
+                    Ok(if row.get::<_, bool>(0)? {
+                        RepairAttempt::Finished {
+                            ended_at: row.get(1)?,
+                            conclusion: row.get(2)?,
+                            error: row.get(3)?,
+                        }
+                    } else {
+                        RepairAttempt::Open
+                    })
+                },
+            )
+            .optional()?)
     }
 
     pub(crate) fn task_automation(&self, task: &TaskId) -> StoreResult<TaskAutomation> {

@@ -4001,7 +4001,9 @@ mod tests {
     async fn retired_home_landings_remain_readable_and_fence_old_supervisors() {
         use std::sync::Arc;
 
-        use crate::ops::pr_landing::{reconcile_pr_landing, LandingObservation, ObservePr};
+        use crate::ops::pr_landing::{
+            reconcile_pr_landing, LandingIo, LandingObservation, ObservePr,
+        };
         use crate::pr_landing::{LandingPlacement, LandingSupervisor, PrLandingId, PrLandingState};
         use crate::store::sqlite::SqliteStore;
         use time::OffsetDateTime;
@@ -4162,15 +4164,22 @@ mod tests {
         );
         let id = PrLandingId::from_raw("home_taskless");
         let landing = store.get_pr_landing(&id).await.unwrap().unwrap();
-        let merged = reconcile_pr_landing(store.clone(), landing, merged_observation.clone(), None)
-            .await
-            .unwrap();
+        let merged = reconcile_pr_landing(
+            store.clone(),
+            landing,
+            LandingIo::scripted(merged_observation.clone(), None),
+        )
+        .await
+        .unwrap();
         assert_eq!(merged.state, PrLandingState::Merged);
         assert_eq!(merged.merge_commit.as_deref(), Some("merge"));
-        let repeated =
-            reconcile_pr_landing(store.clone(), merged.clone(), merged_observation, None)
-                .await
-                .unwrap();
+        let repeated = reconcile_pr_landing(
+            store.clone(),
+            merged.clone(),
+            LandingIo::scripted(merged_observation, None),
+        )
+        .await
+        .unwrap();
         assert_eq!(repeated, merged);
         assert_eq!(
             store.pending_pr_landings("owner/repo").await.unwrap().len(),

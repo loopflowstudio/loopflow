@@ -638,6 +638,12 @@ pub(crate) fn merge_needs_integration(state: Option<&str>, request: Option<&Merg
 pub(crate) struct PrMergeObservation {
     pub pr: PrInfo,
     pub request: Option<MergeRequest>,
+    /// Why GitHub last dropped the merge request: a queue removal reason or an
+    /// auto-merge disable code, lower-cased. `None` once it was armed or queued
+    /// again, or when it merged.
+    pub merge_exit: Option<String>,
+    /// The pull request's GraphQL node id.
+    pub node_id: String,
     merge_queue_enabled: bool,
     methods: MergeMethods,
 }
@@ -691,10 +697,29 @@ struct GhPrMerge {
     // Value requires the fields to exist while allowing GitHub's null values.
     auto_merge_request: serde_json::Value,
     merge_queue_entry: serde_json::Value,
+    timeline_items: GhMergeTimeline,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhMergeTimeline {
+    nodes: Vec<GhMergeEvent>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "__typename", rename_all_fields = "camelCase")]
+enum GhMergeEvent {
+    #[serde(rename = "RemovedFromMergeQueueEvent")]
+    RemovedFromQueue { reason: Option<String> },
+    #[serde(rename = "AutoMergeDisabledEvent")]
+    AutoMergeDisabled { reason_code: Option<String> },
+    #[serde(rename = "AutoMergeEnabledEvent")]
+    AutoMergeEnabled {},
+    #[serde(rename = "AddedToMergeQueueEvent")]
+    AddedToQueue {},
 }
 
 pub(crate) fn observe_pr_merge(repo: &Path, number: u64) -> OpsResult<PrMergeObservation> {
-    let query = "query LoopflowPrMerge($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed pullRequest(number:$number){id number url state isDraft headRefName headRefOid mergedAt mergeCommit{oid} mergeStateStatus isMergeQueueEnabled autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}";
+    let query = "query LoopflowPrMerge($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed pullRequest(number:$number){id number url state isDraft headRefName headRefOid mergedAt mergeCommit{oid} mergeStateStatus isMergeQueueEnabled autoMergeRequest{enabledAt} mergeQueueEntry{id} timelineItems(last:1,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT,AUTO_MERGE_DISABLED_EVENT,AUTO_MERGE_ENABLED_EVENT,ADDED_TO_MERGE_QUEUE_EVENT]){nodes{__typename ...on RemovedFromMergeQueueEvent{reason} ...on AutoMergeDisabledEvent{reasonCode}}}}}}";
     let observation = Command::new("gh")
         .args([
             "api",
@@ -749,7 +774,7 @@ fn parse_pr_merge(output: &[u8]) -> OpsResult<PrMergeObservation> {
         state => return Err(OpsError::Parse(format!("unknown PR state: {state}"))),
     };
     let request = if !pr.merge_queue_entry.is_null() {
-        Some(MergeRequest::Queued(pr.id))
+        Some(MergeRequest::Queued(pr.id.clone()))
     } else if pr.auto_merge_request.is_null() {
         None
     } else if pr.is_merge_queue_enabled {
@@ -757,7 +782,19 @@ fn parse_pr_merge(output: &[u8]) -> OpsResult<PrMergeObservation> {
     } else {
         Some(MergeRequest::Auto)
     };
+    let merge_exit = match pr.timeline_items.nodes.into_iter().last() {
+        Some(GhMergeEvent::RemovedFromQueue { reason }) => {
+            Some(reason.unwrap_or_default().to_ascii_lowercase())
+                .filter(|reason| reason != "merged")
+        }
+        Some(GhMergeEvent::AutoMergeDisabled { reason_code }) => {
+            Some(reason_code.unwrap_or_default().to_ascii_lowercase())
+        }
+        Some(GhMergeEvent::AutoMergeEnabled {} | GhMergeEvent::AddedToQueue {}) | None => None,
+    };
     Ok(PrMergeObservation {
+        merge_exit,
+        node_id: pr.id,
         merge_queue_enabled: pr.is_merge_queue_enabled,
         methods: serde_json::from_value(response["data"]["repository"].clone()).map_err(
             |error| OpsError::Parse(format!("failed to read repository merge methods: {error}")),
@@ -816,6 +853,31 @@ pub(crate) fn disable_auto_merge(
     }
     Err(OpsError::CommandFailed {
         command: description,
+        stderr: stderr_from_output(&output),
+    })
+}
+
+/// Put an armed pull request back in its merge queue at exactly `head_sha`.
+/// GitHub leaves auto-merge on after some queue removals and never re-enters.
+pub(crate) fn enqueue_pr(repo: &Path, node_id: &str, head_sha: &str) -> OpsResult<()> {
+    let output = Command::new("gh")
+        .args([
+            "api",
+            "graphql",
+            "-f",
+            "query=mutation($id:ID!,$head:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head}){clientMutationId}}",
+            "-f",
+            &format!("id={node_id}"),
+            "-f",
+            &format!("head={head_sha}"),
+        ])
+        .current_dir(repo)
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(OpsError::CommandFailed {
+        command: format!("gh api graphql [enqueue pull request at {head_sha}]"),
         stderr: stderr_from_output(&output),
     })
 }
@@ -2039,7 +2101,8 @@ mod tests {
                 "id":"pr", "number":1, "url":"https://example.test/pr/1", "state":"OPEN", "isDraft":false,
                 "headRefName":"release", "headRefOid":"exact-head", "mergedAt":null, "mergeCommit":null,
                 "mergeStateStatus":"BEHIND", "isMergeQueueEnabled":queue_enabled,
-                "autoMergeRequest":auto, "mergeQueueEntry":entry
+                "autoMergeRequest":auto, "mergeQueueEntry":entry,
+                "timelineItems":{"nodes":[]}
             }}}});
             let observation = super::parse_pr_merge(&serde_json::to_vec(&value).unwrap()).unwrap();
             assert_eq!(
@@ -2181,7 +2244,8 @@ esac
             "state":state, "isDraft":false, "headRefName":"feature", "headRefOid":"head-1",
             "mergedAt":"2026-09-29T05:02:15Z", "mergeCommit":{"oid":"merge-1"},
             "mergeStateStatus":"BEHIND", "isMergeQueueEnabled":true,
-            "autoMergeRequest":request, "mergeQueueEntry":queue
+            "autoMergeRequest":request, "mergeQueueEntry":queue,
+            "timelineItems":{"nodes":[]}
         }}}})
     }
 

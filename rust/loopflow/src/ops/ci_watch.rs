@@ -492,8 +492,6 @@ struct Watcher {
     repo_id: String,
     cache: RestCache,
     required: HashMap<String, (Instant, BTreeSet<String>)>,
-    /// Failures whose repair already finished; unchanged evidence is not rechecked.
-    surfaced: HashSet<(u32, String, Vec<String>)>,
     /// When each landing was last checked, and what that check said.
     landing_checked: HashMap<u32, (Instant, Option<String>)>,
     state: CiWatchState,
@@ -517,7 +515,6 @@ impl Watcher {
             repo_id,
             cache: RestCache::default(),
             required: HashMap::new(),
-            surfaced: HashSet::new(),
             landing_checked: HashMap::new(),
         }
     }
@@ -670,7 +667,6 @@ impl Watcher {
             }
         }
         let open: HashSet<u32> = watched.iter().map(|pr| pr.number).collect();
-        self.surfaced.retain(|(number, _, _)| open.contains(number));
         self.landing_checked
             .retain(|number, _| open.contains(number));
         self.state.prs = watched;
@@ -695,15 +691,6 @@ impl Watcher {
             } => Some((names, *completed_at)),
             _ => None,
         };
-        let key = failure
-            .as_ref()
-            .map(|(names, _)| (pull.number, pull.head.sha.clone(), (*names).clone()));
-        if key.as_ref().is_some_and(|key| self.surfaced.contains(key)) {
-            return (
-                true,
-                Some("repair finished; waiting for changed evidence".to_string()),
-            );
-        }
         let running = |store: &SharedStore| {
             super::pr_landing::repair_running(store, landing).unwrap_or(false)
         };
@@ -758,9 +745,6 @@ impl Watcher {
                         saved.state == PrLandingState::Blocked
                             && saved.blocked_reason.as_deref() == Some(cause.as_str())
                     });
-                if blocked && cause.contains("already completed a repair") {
-                    self.surfaced.extend(key);
-                }
                 // A recorded block is an answer; anything else was a failed read.
                 (blocked, Some(cause))
             }

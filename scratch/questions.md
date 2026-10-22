@@ -38,3 +38,5 @@
   working. No provider cost, entitlement, quota or purchase is assumed.
 - Default Mac zsh gets automatic PATH persistence; other shells get the
   explicit `export` line.
+
+- Sync onto main (v0.14.15): main bounds retention to the target's fallback plus the one it replaced, and prunes the rest. The branch had accumulated every recorded set. The merge keeps main's bound and the branch's reuse of an already-written active record. The `failed_reopen…` fixture now expects two retained sets, not three.

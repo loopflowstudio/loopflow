@@ -60,6 +60,155 @@ Decisions (2026-10-21). Jack confirmed 1 and 2. The operator took 3–6 under th
 - **Completion on any merge.** #1619 and #1614 merged while their Flows were paused or running. The
   Task completes when its PR merges, whoever merged it.
 
+## Concept review (2026-10-22) — supersedes "approval is a `Shipped` move"
+
+Jack Heart: "I am concerned that we are not modeling the state correctly so that we can track
+(or undo) which tasks have been marked for 'ship it'" … "yeah no it should be live state, not
+somethign in the history log".
+
+Accepted (Jack): ship intent is live state on the Task, not derived from Workflow history.
+
+- `Task.ship_intent: Option<{by, at, graph, note}>` on the Task row (one SQLite owner), the same
+  shape as the existing `abandon_intent`. The DTO carries it; no default.
+- `lf ship [GRAPH]` sets it; an explicit stop (`lf ship --stop` and a Desktop "Stop shipping")
+  clears it and stops the ship process; complete and abandon clear it. Each set/clear is also
+  logged in Task history for audit only.
+- Shipping view = `ship_intent` set, plus derived progress (stage, landing, process liveness).
+  `restart_ships` = `ship_intent` set and ship process dead. Pause holds the process and keeps
+  the intent.
+- Delete: the `Shipped` move kind, `shipped_moves` (history scan "since the last `Set`"), and
+  `Set`-as-implicit-undo.
+
+Unresolved (asked of Jack, not yet answered): when a ship is stopped after it armed auto-merge,
+does stopping also disarm the merge, or only halt future steps?
+
+## Task state model (2026-10-22) — supersedes `ship_intent` above
+
+Jack Heart: "we can make state like Working / Human / Active / Developing ? Shipping Paused
+Unstarted ...Abandoned?" … "we may need to clean up other asspects of task workflow state
+especially now that we omved to supporting other providers, sharing work models in git" …
+"Let's make sure to simplify and align all the model here."
+
+Accepted (Jack): Shipping is a Task lifecycle state, not history and not a side field; LOO-561
+simplifies and aligns the whole Task state model rather than adding Shipping beside it.
+
+Today's facts this replaces: `planning_state`, `planning_completed(_at)`, `abandoned_at`,
+`abandon_requested_at/reason` (no writer since the supervisors were deleted), `completion_request/
+error`, derived `TaskState` (`not_ready`/`ready`/`active`/…), the DTO's `task.state` + `task.completed`
++ `execution.status`, and this branch's `Shipped`-move scan. "Done" has two sources today.
+
+Proposed model (operator draft; items marked "open" need Jack):
+
+- **Shared lifecycle**, one stored value with one writer, synced through Git or Linear:
+  `unstarted → working → shipping → done`, plus `abandoned`. Reopen returns to `working`.
+  Ship it: working → shipping. Stop shipping: shipping → working. Merge settles shipping → done.
+  Name `working` matches the *Working tasks* sidebar (open: Jack floated Active/Developing).
+  Name for `shipping` open: operator offered `cleared` ("cleared to land": approved, finishing on
+  its own); button stays **Ship it**.
+- **`paused` is a hold over the lifecycle** (already a `paused` column). Pause keeps
+  working/shipping underneath; resume clears the hold only.
+- **Provider state is mapped, not mirrored**: Linear Backlog/Todo ↔ unstarted, In Progress ↔
+  working, In Review ↔ shipping, Done ↔ done, Canceled ↔ abandoned, through the same writer and
+  its writeback retry. No separate `planning_state`/`planning_completed`.
+- **Machine-local execution stays derived and unsynced**: processes, ship-process liveness,
+  attention (Available). Only the Machine holding the checkout (`checkout_machine_id`) restarts a
+  dead ship process; others just read `shipping`.
+- **Delete**: `abandon_intent` and its columns/DTO field, `TaskState`'s Workflow-derived
+  `not_ready`/`ready`, the `Shipped` move kind and history scan, duplicate DTO state fields. Fold
+  `completion_request` into the done transition plus writeback state if nothing else needs it.
+- **Accepted (Jack: "yes, workflow should travel")**: the Task's captured Workflow and its position
+  (the stage) travel with the shared Work model, so another Machine can continue a Task at its stage.
+- **Open**: stopping a ship after it armed auto-merge — operator lean: Stop disarms what the ship
+  armed (stop means nothing merges), recorded in history.
+
+### Repair and watching: one owner (2026-10-22)
+
+Found: three drivers start ci-fix through `pr_landing::run_repair` — the `land --wait-and-fix`
+waiter, `lf ci watch` (running on Jack's Machine, repairing PRs with no waiter), and the periodic
+Task check's `reconcile_repository` (disabled here). All are gated by `tasks.automation_enabled AND
+NOT paused`; `lf task interrupt` turns that flag off as a side effect.
+
+Jack Heart: "land --wait-and-fix can basically use ci watch as subtask if we want. no strong opinion
+as long as its reliable and fast to determie things".
+
+Accepted (Jack): one repair owner; detection must be reliable and fast. Operator decisions:
+
+- `land --wait-and-fix` (the end of `deliver`, run by the ship process) is the only thing that
+  starts a repair, and only while the Task is in the handed-off lifecycle state and not paused.
+- `lf ci watch`'s observation (poll, gate reading, early leaf failure) is the shared subroutine the
+  waiter uses; `ci watch` itself stops starting repairs. It keeps one job besides observing:
+  restarting a dead ship process on the Machine that holds the checkout.
+- Delete the periodic Task check (Jack: "remove the periodic task check i think"): its schedule,
+  `reconcile_repository` as a scheduled job, and the schedule line of `lf task automation`.
+  Inventory its other duties first; anything still needed moves to `lf ci watch` or is deleted.
+- Delete `automation_enabled` (column, `lf task automate`, the interrupt side effect, the
+  per-Task lines of `lf task automation`). `paused` is the only hold.
+
+Jack Heart on AgentProcess cleanup: "lazy cleanup can work, or a cron?" … "but should be universal
+and not turno ff able". Jack: "there hsouldnt be two methods between ci watch and land and fix".
+
+Accepted (Jack): recovery duties must be universal and impossible to switch off; one landing method.
+Operator reading: a cron is an installed schedule and can be off (this Machine's periodic check is
+off today), so recovery is lazy, on lf's own read paths. AgentProcess reaping only settles
+bookkeeping from OS exit evidence (`settle_agent_process`; it kills nothing), so it runs wherever lf
+reads processes. Open: whether the same lazy rule restarts a dead ship process (shape A: the ship
+process is the only landing engine, `lf ci watch` deleted) or a per-Machine watcher owns landing
+(shape B, a resident process).
+
+Accepted (Jack: "that works for me", 2026-10-22) — shape A, one landing method:
+
+- The ship process is the only landing engine: remaining steps, then `deliver`'s
+  `land --wait-and-fix`, which observes, repairs, re-arms, re-queues, merges and completes.
+- The waiter adopts `ci watch`'s cheap reading: REST with `If-None-Match` while checks run (a 304
+  costs no rate limit), GraphQL only to confirm a change or read the merge queue. ~15 s cadence;
+  back off while waiting on the queue; respect the returned rate-limit budget. The GitHub limit is
+  per account (5,000/h GraphQL points, separate 5,000/h REST), shared by all Machines and repos.
+- Lazy, universal recovery (no schedule, no setting): any lf read of the checkout Machine's Tasks
+  or processes — CLI, `lf ps`, Desktop — settles dead AgentProcess records and restarts a handed-off
+  Task whose ship process is dead. Merge completes the Task through the same path.
+- Delete: `lf ci watch` (and `--install`, `--parent-pid`, launchd service), Desktop's
+  `CIWatchers.swift`, the periodic Task check (`lf task reconcile` schedule) and `lf pr reconcile`'s
+  repair path, `automation_enabled`. `lf ci` stays as read-only status.
+- Known gap accepted: a Machine where nothing reads lf (asleep, closed) recovers on next read.
+
+### Decisions closing the concept review (Jack Heart, 2026-10-22)
+
+> 1. Working
+> 2. Shipping for, now
+> 3. yes, disarm
+> 4. didnt mention this, but if something hits a stage in a workflow where its auto from here on
+>    out, then it should be marked as shipping. for now only the task apis, not a direct land invocation
+
+- Lifecycle names: `unstarted → working → shipping → done`, plus `abandoned`; `paused` is the hold.
+- Stop shipping (shipping → working) stops the ship process and disarms any auto-merge the ship armed;
+  history records it.
+- A Task becomes `shipping` whenever it enters the part of its graph from which no `interactive:`
+  stage remains before `end` — not only through Ship it. Example: choosing `deliver` from `demo`
+  on `code`, or running `autonomous` from `start`. Ship it reaches the same state from anywhere by
+  standing in at the remaining stages. Only Task APIs (`lf task run`, `lf ship`, Desktop's Task
+  actions) set it; a direct `lf land` / `lf pr land` on a branch does not.
+  Jack: "auto tasks become auto shipping" — a Task on a Workflow with no `interactive:` stage
+  (e.g. `autonomous`) is `shipping` from its first Task run.
+- These supersede the open name/disarm items above. Next: `pursue` implements the aligned state
+  model, single landing engine, lazy recovery, the visible Workflow header (Ship it / Stop), and
+  the gate blocker (branch `lf` must open stores holding `flow_finished` events).
+
+## Demo findings (2026-10-22, branch build on lf-world `portfolio`)
+
+- Jack accepted the naming: `deliver` is the final `gate → land --wait-and-fix` graph; `lf ship`
+  runs a Task's remaining steps (including `deliver`) with stand-ins ("ok that works").
+- Failed: the Ship it button the design places in `TaskWorkflowHeader` is not visible. That
+  header is mounted by no production view (only tests construct it; also true on main), so the
+  routes and Ship it are unreachable. Only the sidebar context menu (`TaskActionItems`) offers
+  Ship it. Next implement: mount the Workflow header in the Task view, or delete it.
+- Dev harness: `loopflow://` links opened in the dev app resolve against the real `~/.lf`, not
+  the world's `LF_HOME` (30 s timeout while copying the real store). Not checked against main.
+- Gate blocker: the branch `lf` refuses Jack's real store: semantic migration check fails on
+  `task_events.kind_json` rows with `flow_finished` (the Flow → Graph rename did not migrate
+  them). Only a copy was read; the real store is untouched.
+- World Tasks that ran a Flow read as `unstarted` on the branch; main's world builder says "a
+  Flow in a checkout starts its Task". Possible regression, unverified.
+
 ## Problem
 
 When Jack decides a Task is good to go, he wants to say so once and stop thinking about it.

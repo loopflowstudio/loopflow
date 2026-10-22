@@ -40,3 +40,8 @@
   the command refuses non-release builds (compile-time provenance). Publish,
   list and the public-name label run through the real CLI. The `lf cron add
   --publish` line itself is left to a release-build demo.
+- Out of scope, found at gate: main's Flow→Graph rename (#1643) made
+  `CronObligation.graph` required, so obligation files the released lf wrote
+  with `flow` fail to parse ("missing field `graph`") after upgrade. Two
+  `release_tests` also read the real `~/.lf` instead of a fixture home. Both
+  belong to a separate Task.

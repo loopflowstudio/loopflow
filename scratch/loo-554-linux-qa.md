@@ -176,3 +176,4 @@ forwarded logins, and OpenCode Zen forwarding stay open product calls in
 ## Check results
 
 Check (2026-10-21, compress): `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- platform::clipboard machine::tests` passed; full suites → gate/CI.
+Check (2026-10-21, publish): cargo fmt --check, gate lib tests (5), golden_prompt, clippy -D warnings → pass; full matrix → CI.

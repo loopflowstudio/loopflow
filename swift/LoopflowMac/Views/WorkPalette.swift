@@ -45,6 +45,11 @@ extension WorkModel {
                 rows.append(recent)
             }
         }
+        for dashboard in dashboards {
+            guard let id = dashboard.dashboardID else { continue }
+            rows.append(.init(id: .dashboard(id), title: dashboard.name ?? id,
+                detail: "Dashboard · " + id, key: id))
+        }
         for graph in graphCatalog.value ?? [] {
             rows.append(.init(id: .graph(graph.name), title: graph.name,
                               detail: "Graph definition", key: graph.name))
@@ -102,6 +107,65 @@ extension WorkModel {
     }
 }
 
+/// What a breadcrumb's › lists: the level inside that crumb.
+enum WorkJumpScope: Hashable {
+    case repository
+    case wave(String)
+}
+
+extension WorkModel {
+    /// The jump bar's menu rows. Without text a level lists its direct contents;
+    /// typing searches everything inside it. Repository scope stays implicit.
+    func jumpRows(_ scope: WorkJumpScope, filter text: String) -> [WorkPaletteRow] {
+        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rows: [WorkPaletteRow]
+        switch scope {
+        case .repository:
+            let waves = visibleRoadmaps.map { WorkPaletteRow(id: .wave($0.wave.id), title: $0.wave.displayName, detail: "Wave", key: $0.wave.name) }
+            let dashboards = dashboards.compactMap { plan in
+                plan.dashboardID.map { WorkPaletteRow(id: .dashboard($0), title: plan.name ?? $0, detail: "Dashboard", key: $0) }
+            }
+            guard !query.isEmpty else { return waves + dashboards }
+            let tasks = visibleTasks.map { task in
+                let home = visibleRoadmaps.first { $0.wave.id == task.task.waveId }?.wave.displayName ?? "No Wave"
+                return WorkPaletteRow(id: .task(task.id), title: task.task.name,
+                    detail: "Task · \(home) · \(task.task.identifier)", key: task.task.identifier)
+            }
+            rows = waves + dashboards + tasks
+        case .wave(let id):
+            rows = (wave(id: id)?.tasks.items ?? []).sorted { $0.task.rank < $1.task.rank }.map { task in
+                WorkPaletteRow(id: .task(task.id), title: task.task.name,
+                    detail: task.task.identifier + (task.runtime?.owner != nil ? "" : " · Not started"), key: task.task.identifier)
+            }
+        }
+        guard !query.isEmpty else { return rows }
+        return rows.filter { [$0.title, $0.detail, $0.key].contains { $0.localizedCaseInsensitiveContains(query) } }
+    }
+
+    /// Go to a Work destination from search or the jump bar. Another
+    /// repository's Work opens in that repository's own window.
+    func jump(to destination: WorkDestination, source: String) {
+        navigation.palette = nil
+        switch destination {
+        case .repository:
+            select(nil)
+            navigation.content = .terminals
+        case .openRepository(let path): openRepository?(path, nil)
+        case .dashboard(let id): selectDashboard(id)
+        case .wave(let id): openPaletteWave(id)
+        case .task(let id):
+            Perf.$inputTrace.withValue(UUID().uuidString) {
+                Perf.agentInput("task_click", task: id, detail: "source=" + source)
+                Task { await openPaletteTask(id) }
+            }
+            // Opening the Task records it as recent once it resolves.
+            return
+        default: return
+        }
+        remember(destination)
+    }
+}
+
 struct WorkPalette: View {
     @Bindable var model: WorkModel
     var sidebarOnly = false
@@ -116,6 +180,7 @@ struct WorkPalette: View {
         switch row.id {
         case .task(let id): working.contains(id) ? "Working Tasks" : "Other Tasks"
         case .wave: "Waves"
+        case .dashboard: "Dashboards"
         case .repository, .openRepository: "Repositories"
         default: "Definitions and Session actions"
         }

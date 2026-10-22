@@ -41,8 +41,6 @@ struct TerminalPaneLayoutTests {
             sessions.adoptPreparation(record)
             workspace.multiplexer.replace(pane.id, with: .session(id: record.id, location: record.workspace?.identity))
         }
-        registry.open(WorkWorkspaceKey(repository: "repo", kind: .wave, id: "companion"),
-                      title: "Companion", location: fixtureWorkspace("/repo"), besideFocused: true)
         let inspection = try view.inspect()
         let layout = try inspection.find(viewWithAccessibilityIdentifier: "work-layout")
         #expect(try layout.padding(.bottom) == 10)
@@ -56,13 +54,9 @@ struct TerminalPaneLayoutTests {
         #expect(radius - gap == PaneGeometry.cornerRadius)
         let outerStroke = try outer.overlay().find(ViewType.Shape.self)
         #expect(try outerStroke.strokeStyle().lineWidth == 1)
-        let inactive = try inspection.find(viewWithAccessibilityIdentifier: "work-workspace-companion")
-        let inactiveStroke = try inactive.overlay().find(ViewType.Shape.self)
-        #expect(try inactiveStroke.strokeStyle().lineWidth == 1)
         let panes = outer.findAll(where: { (try? $0.accessibilityIdentifier())?.hasPrefix("session-pane-") == true })
         #expect(panes.count == 2)
         let bounds = CGRect(x: 0, y: 0, width: 500, height: 400)
-        #expect(try inactiveStroke.path(in: bounds) == outerStroke.path(in: bounds))
         let outerPath = try outerStroke.path(in: bounds).strokedPath(outerStroke.strokeStyle())
         for pane in panes {
             let innerStroke = try pane.overlay().find(ViewType.Shape.self)

@@ -156,6 +156,8 @@ When changing the SQLite schema:
 - Keep one draft per Task: `uv run python scripts/new_migration.py <name>` creates it or prints the one the branch already has
 - Edit that draft in place until landing; never add a draft that alters or drops what an unreleased draft created
 - Test the released frontier against the finished draft, not the steps between
+- Tables read by Work projections use `store_revision_<table>_<insert|update|delete>`
+  triggers to advance their domain in `store_revisions` inside the write.
 - Runtime migration preflights recognize draft markers inside release batches and
   retain external lock guards through commit or rollback. Upgrade fixtures start
   before the whole release batch, not before a draft within it.
@@ -195,6 +197,8 @@ When editing Rust tests:
 - From an lf-launched shell, run `cargo test` with inherited `LF_*` unset and `< /dev/null`: capture fixtures follow `LF_HOME`, and `lf task create` reads a piped report from open stdin.
 - Claims name their person by the Task repository's Git `user.email` and fail without one; fixtures set a repository-local identity (`TestRepo` does), and CI test jobs set only a global fallback.
 - Library and integration fixtures that mutate process environment share `loopflow_test_support::env_lock`; per-suite locks cannot isolate library modules.
+- `SqliteStore::open_ephemeral` includes the build's draft migrations; do not replay
+  those drafts with `apply_migration_for_test`.
 - Tests that redirect process-wide stdout/stderr descriptors run in isolated child processes, never in the shared test runner.
 - Native library fixtures use `TestLedgerGuard` so invocation and capture share a store. Pin blocking workers with `journal::with_test_ledger`; thread-local fixture selection does not follow `LF_HOME`.
 

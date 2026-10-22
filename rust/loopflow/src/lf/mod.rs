@@ -529,7 +529,7 @@ pub enum Commands {
     },
     /// Open Work's conversation in Desktop, this cmux/Herdr host or a terminal
     Open(commands::open::OpenArgs),
-    /// Inspect and control Loopflow Desktop panes (macOS only)
+    /// Select Work and control Loopflow Desktop panes
     Desktop {
         #[command(subcommand)]
         cmd: DesktopCommand,
@@ -612,6 +612,93 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
+    /// Show a Work selection, or derive a passive plan for external hosts
+    View {
+        /// wave/task/query/kind/state expression; omitted uses the repository default
+        expression: Option<String>,
+        /// Print the derived plan as JSON without opening Desktop or starting a provider
+        #[arg(long)]
+        plan: bool,
+        /// Print the opening receipt as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create or edit a Dashboard query with revision checking; prints the Dashboard as JSON
+    Query {
+        /// Dashboard name or query:ID
+        container: String,
+        /// Selection expression, as for `lf desktop view`
+        expression: String,
+        /// Last observed revision; omit only when creating a new Dashboard
+        #[arg(long)]
+        revision: Option<i64>,
+    },
+
+    /// Pin a Dashboard in repository discovery; prints the Dashboard as JSON
+    Pin {
+        /// Dashboard name or query:ID
+        query: String,
+        /// The Dashboard's last read revision; a stale one writes nothing
+        #[arg(long)]
+        revision: i64,
+    },
+    /// Unpin a Dashboard without changing its membership or arrangement; prints the Dashboard as JSON
+    Unpin {
+        /// Dashboard name or query:ID
+        query: String,
+        /// The Dashboard's last read revision; a stale one writes nothing
+        #[arg(long)]
+        revision: i64,
+    },
+    /// Rename a Dashboard or Task through its shared owner; prints the owner's record as JSON
+    Rename {
+        /// query:ID or task:<durable-id>
+        target: String,
+        /// The new name, written to the shared owner so labels and crumbs follow
+        name: String,
+        /// The target's last read revision; a stale one writes nothing
+        #[arg(long)]
+        revision: u64,
+    },
+    /// Replace a Dashboard's occurrence order and hidden members from JSON on stdin; prints the Dashboard as JSON
+    Arrange {
+        /// Dashboard name or query:ID
+        query: String,
+        /// The Dashboard's last read revision; a stale one writes nothing
+        #[arg(long)]
+        revision: i64,
+    },
+    /// Replace a Dashboard's slot layout from JSON on stdin; `null` restores the default
+    Slots {
+        /// Dashboard name or query:ID
+        query: String,
+        /// The Dashboard's last read revision; a stale one writes nothing
+        #[arg(long)]
+        revision: i64,
+    },
+    /// Move a member into another's place: the repository's Task order, or a Dashboard's with --query; prints the result as JSON
+    Order {
+        /// Member to move: task:<durable-id>, or wave:<durable-id> on a Dashboard
+        member: String,
+        /// Member whose place it takes
+        #[arg(long)]
+        to: String,
+        /// Dashboard whose order to edit instead of the repository's Task order
+        #[arg(long, requires = "revision")]
+        query: Option<String>,
+        /// The Dashboard's last read revision; a stale one writes nothing
+        #[arg(long, requires = "query")]
+        revision: Option<i64>,
+    },
+    /// Read portable pane intent as JSON, or save a complete revision-checked record from stdin
+    Layout {
+        /// repository, wave:<durable-id> or task:<durable-id>
+        work: String,
+        /// Replace the record from JSON on stdin instead of reading it
+        #[arg(long)]
+        save: bool,
+    },
+
     /// Insert literal text at an exact surface's cursor; never submits or clears a draft
     Text {
         #[arg(long)]
@@ -656,14 +743,14 @@ pub enum DesktopCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Focus an exact pane in its retained workspace (does not select Work)
+    /// Focus an exact pane, opening its retained workspace when needed
     Focus {
         #[arg(long)]
         pane: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Add a shell tab on the Task’s recorded Machine
+    /// Add and select a shell tab at the Task’s recorded location
     Shell {
         #[arg(long)]
         pane: Option<String>,
@@ -716,7 +803,7 @@ pub enum DesktopCommand {
         json: bool,
     },
     /// Read actual windows and panes without launching, focusing, or acquiring clients
-    List {
+    State {
         #[arg(long)]
         json: bool,
     },

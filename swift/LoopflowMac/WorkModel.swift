@@ -111,24 +111,38 @@ final class WorkModel {
     @ObservationIgnored private var workspaceRegistry: SessionsWorkspaceRegistry?
     @ObservationIgnored private var workspaceRepository: String?
 
-    private var selectionReadings: [RepositoryReadingKey: WorkReading<[ViewPlan]>] = [:]
-    private(set) var selectionPlans: WorkReading<[ViewPlan]> {
+    private var viewOpening: UUID?
+    private var selectionOpening: DesktopOpening?
+    var dashboardError: String?
+    private(set) var dashboardSaving = false
+
+    private var selectionReadings: [RepositoryReadingKey: WorkReading<[WorkViewPlan]>] = [:]
+    private(set) var selectionPlans: WorkReading<[WorkViewPlan]> {
         get { selectionReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
         set { selectionReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
     }
 
-    func applySelectionPlans(_ plans: [ViewPlan]?, reason: String) {
+    func applySelectionPlans(_ plans: [WorkViewPlan]?, reason: String) {
         guard let plans else {
             selectionPlans = .unavailable(lastGood: selectionPlans.value, reason: reason)
             return
         }
-        selectionPlans = .available(plans)
+        let previous = selectionPlans.value ?? []
+        selectionPlans = .available(plans.map { plan in
+            guard let id = plan.dashboardID, let old = previous.first(where: { $0.dashboardID == id }),
+                  (old.savedRevision ?? 0) > (plan.savedRevision ?? 0) else { return plan }
+            return old
+        })
         reconcileSelectionRepository()
+        switch navigation.destination {
+        case .dashboard, .workingTasks: if let plan = selectedViewPlan { presentView(plan) }
+        case .work, .view, .zoomed: break
+        }
     }
 
     private func reconcileSelectionRepository() {
         guard let registry = workspaceRegistry else { return }
-        if let repository = selectionPlans.value?.first?.owner.repository,
+        if let repository = selectionPlans.value?.first?.repository,
            let previous = workspaceRepository, previous != repository {
             registry.reassociateRepository(from: previous, to: repository)
             workspaceRepository = repository
@@ -150,7 +164,7 @@ final class WorkModel {
     }
 
     func workspaceTitle(_ key: WorkWorkspaceKey) -> String {
-        let memberTitle = selectionPlans.value?.lazy.flatMap(\.members).first { $0.work == key }?.title
+        let memberTitle = selectionPlans.value?.lazy.flatMap(\.contents).first { $0.work == key }?.title
         switch key.kind {
         case .repository: return repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository unavailable"
         case .wave: return visibleRoadmaps.first { $0.wave.id == key.id }?.wave.name ?? memberTitle ?? workspaceRegistry?.retained(key)?.title ?? "Wave unavailable"
@@ -164,9 +178,6 @@ final class WorkModel {
         let retainedRepository = registry.keys.first?.repository
         workspaceRepository = retainedRepository ?? repository
         reconcileSelectionRepository()
-        for key in registry.openWork where key.kind == .task {
-            retainWorkingTask(key.reference)
-        }
         guard retainedRepository != nil, taskOpening?.status != .opening else {
             openSelectedWorkspace()
             return
@@ -179,7 +190,8 @@ final class WorkModel {
         }
     }
 
-    func openSelectedWorkspace(besideFocused: Bool = false) {
+    func openSelectedWorkspace() {
+        if let plan = selectedViewPlan { presentView(plan); return }
         guard let registry = workspaceRegistry, let repository = workspaceRepository else { return }
         let key = workspaceKey(for: selection, repository: repository)
         let location: WorkspaceIdentity?
@@ -188,7 +200,8 @@ final class WorkModel {
         } else if key.kind != .task, let machine = registry.localMachineId, let repoPath {
             location = WorkspaceIdentity(machineId: machine, worktree: repoPath)
         } else { location = nil }
-        let workspace = registry.open(key, title: workspaceTitle(key), location: location, besideFocused: besideFocused)
+        let workspace = registry.open(key, title: workspaceTitle(key), location: location)
+        workspace.startPersistence(query: query, repoPath: repoPath)
         navigation.workspacePresentation = workspace.presentation
         navigation.selectedSessionId = workspace.presentation.selectedSessionId
         revealPrimaryConversation()
@@ -471,19 +484,19 @@ final class WorkModel {
     }
 
     /// Exact contextual links share the same synchronous pane placement as Task entry.
-    func openSession(_ record: SessionRecord, store: SessionsStore, besideFocused: Bool = false) {
+    func openSession(_ record: SessionRecord, store: SessionsStore) {
         guard let registry = workspaceRegistry, let repository = workspaceRepository else { return }
         if let retained = registry.key(containingSession: record.id) {
-            select(retained.reference, besideFocused: besideFocused)
+            select(retained.reference)
         } else {
             let selectedKey = workspaceKey(for: selection, repository: repository)
             if selection?.kind == .task,
                record.taskIds.contains(selectedKey.id) || record.workspace?.taskId == selectedKey.id {
-                select(selection, besideFocused: besideFocused)
+                select(selection)
             } else if selection?.kind == .wave, record.waveId == selectedKey.id {
-                select(selection, besideFocused: besideFocused)
+                select(selection)
             } else {
-                select(store.taskSubject(for: record) ?? projection.subject(for: record.id), besideFocused: besideFocused)
+                select(store.taskSubject(for: record) ?? projection.subject(for: record.id))
             }
         }
         let key = workspaceKey(for: selection, repository: repository)
@@ -494,16 +507,16 @@ final class WorkModel {
     }
 
     private func placeSession(_ record: SessionRecord, in target: SessionsWorkspace,
-                              store: SessionsStore, registry: SessionsWorkspaceRegistry) -> SessionsWorkspace {
+                              store: SessionsStore, registry: SessionsWorkspaceRegistry,
+                              navigating: Bool = true) -> SessionsWorkspace {
         Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id)
         let workspace: SessionsWorkspace
         if case .shell(let id, let machine) = store.localTerminal(for: record),
            let key = registry.key(containingShell: id, machineId: machine),
            let retained = registry.retained(key) {
             workspace = retained
-            select(key.reference, preservingOpening: true)
-            workspace.multiplexer.setCollapsed(paneId: id, collapsed: false)
-            workspace.multiplexer.setFocusedPane(id)
+            if navigating { select(key.reference, preservingOpening: true) }
+            workspace.multiplexer.selectShell(id)
             store.surfaces.focus(.shell(id, machineId: machine))
         } else {
             workspace = target
@@ -538,7 +551,7 @@ final class WorkModel {
         let layout = workspace.multiplexer.layout
         let sessionPane: PaneState?
         if case .shell(let id, _) = store.localTerminal(for: destination.record) {
-            sessionPane = layout.pane(for: id)
+            sessionPane = workspace.multiplexer.shell(id) == nil ? nil : workspace.multiplexer.shellPane
         } else { sessionPane = layout.allPanes.first { $0.sessionId == destination.record.id } }
         var panes = [PaneState]()
         if let sessionPane { panes.append(sessionPane) }
@@ -651,6 +664,23 @@ final class WorkModel {
         }
     }
 
+    /// Attach a Task's primary conversation in its retained workspace without
+    /// navigating: a Dashboard tile shows it in place and the Dashboard stays.
+    func attachTaskConversation(_ id: String, in workspace: SessionsWorkspace) async {
+        guard let found = task(id: id), let registry = workspaceRegistry, let repository = workspaceRepository else { return }
+        await workspace.openConversation {
+            let record = try await query.prepareTaskSession(issue: found.task.runtime?.workId ?? found.task.id,
+                                                            cwd: found.task.task.repo)
+            // One opened Session updates its own reading; an unrelated inventory failure stays.
+            let records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
+            sessions = sessions.errorMessage.map { .unavailable(lastGood: records, reason: $0) } ?? .available(records)
+            let store = registry.sessionStore(repository: repository, repoPath: found.task.task.repo, query: query)
+            store.reconcile([record])
+            store.adoptPreparation(record)
+            _ = placeSession(record, in: workspace, store: store, registry: registry, navigating: false)
+        }
+    }
+
     func openPaletteWave(_ id: String) {
         guard let wave = wave(id: id)?.wave else { return }
         if let openRepository, repoPath?.normalizedFilePath != wave.repo.normalizedFilePath {
@@ -664,6 +694,7 @@ final class WorkModel {
         case .wave(let id, _):
             if wave(id: id) == nil { await refresh() }
             select(.wave(id: id))
+        case .view(let expression, let address): await openView(expression: expression, url: URL(string: address))
         }
     }
 
@@ -701,10 +732,11 @@ final class WorkModel {
         case .failed: reading = "unavailable"
         }
         return DesktopWindowInspection(repository: repository, window: window.uuidString,
-            path: repoPath, selectionKind: workspaces.selectedWork?.kind.rawValue, selectionId: workspaces.selectedWork?.id,
+            path: repoPath, selectionKind: navigation.showsSelection ? "dashboard" : workspaces.selectedWork?.kind.rawValue,
+            selectionId: navigation.showsSelection ? navigation.dashboardID : workspaces.selectedWork?.id,
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
-            supportedOperations: ["list", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files", "graph-log", "read", "text", "key"], workspaces: workspaces.inspect(), opening: taskOpening)
+            supportedOperations: ["state", "view", "query", "arrange", "layout", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files", "graph-log", "read", "text", "key"], workspaces: workspaces.inspect(), openWork: workspaces.openWork, view: selectedViewPlan, opening: selectionOpening ?? taskOpening)
     }
 
     private func inspectSelectedTask() -> DesktopTaskInspection? {
@@ -768,6 +800,8 @@ final class WorkModel {
         WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: sessions.value ?? [])
     }
     var breadcrumb: WorkBreadcrumb? {
+        // A Dashboard heads its own trail; no member Task or Session does.
+        if navigation.showsSelection { return nil }
         if let current = projection.breadcrumb(selection: selection, sessionId: navigation.selectedSessionId) {
             return current
         }
@@ -798,10 +832,6 @@ final class WorkModel {
                 guard let selection = navigation.selection, selection.kind == .task else { continue }
                 if let task = roadmap.value?.tasks.items.first(where: { $0.id == selection.id || $0.runtime?.workId == selection.id }) {
                     navigation.selectedTaskEvidence = (roadmap.value?.waves.first { $0.wave.id == task.task.waveId }, task)
-                    if task.runtime?.owner != nil, task.runtime?.status != .paused {
-                        navigation.retainWorkingTask(task.id, aliases: [task.runtime?.workId].compactMap { $0 })
-                        cache?.saveWorkingTasks(navigation.workingTaskIDs, repo: repo)
-                    }
                 }
             }
         }
@@ -968,9 +998,6 @@ final class WorkModel {
             waves = .available(value.map { $0.toWave() })
         }
         for (repo, entry) in saved.repositories {
-            let state = navigationByRepo[repo] ?? WorkNavigation()
-            for id in entry.workingTaskIDs ?? [] { state.retainWorkingTask(id) }
-            navigationByRepo[repo] = state
             if let pages = entry.sessionPages,
                let records = try? pages.flatMap({ try RegistryQuery.decode(SessionPage.self, from: $0).entries }) {
                 sessionReadings[RepositoryReadingKey(machineId: saved.machineId, repository: repo)] = .available(records)
@@ -1251,7 +1278,9 @@ final class WorkModel {
         switch frame.content {
         case .planning(let body):
             guard answers >= planningFloor else { return }
+            if answers >= scopeFloor { applySelectionPlans(body?.selections, reason: reason) }
             await applyPlanning(body, wire: frame.wire, reason: reason)
+            if body != nil, answers >= scopeFloor { await refreshSelectedView() }
             planningSequence = frame.sequence
             resumePlanningWaiters(through: answers)
         case .peerPlanning(let body):
@@ -1264,12 +1293,6 @@ final class WorkModel {
             peerPlanningGeneration &+= 1
             let next = WorkReading.available(body.destinations)
             if peerPlanning != next { peerPlanning = next }
-        case .selections(let body):
-            guard answers >= scopeFloor, let repoPath else { return }
-            if let body {
-                guard body.repo.normalizedFilePath == repoPath.normalizedFilePath else { return }
-                applySelectionPlans(body.plans, reason: reason)
-            } else { applySelectionPlans(nil, reason: reason) }
         case .sessions(let body):
             guard answers >= max(sessionsFloor, scopeFloor), let repoPath else { return }
             guard let body else {
@@ -1575,31 +1598,42 @@ final class WorkModel {
         }
     }
 
-    func select(_ requested: WorkReference?, besideFocused: Bool = false) {
-        select(requested, preservingOpening: false, besideFocused: besideFocused)
+    func select(_ requested: WorkReference?) {
+        select(requested, preservingOpening: false)
     }
 
-    /// Unknown retained Work stays reachable; explicit pause and shipping only
-    /// hide its slot. A shipped Task's conversation stays open.
-    var workingTaskIDs: [String] {
-        navigation.workingTaskIDs.filter {
-            guard let task = task(id: $0)?.task else { return true }
-            return task.runtime?.status != .paused && task.runtime?.status != .shipping
-        }
+    /// Working Tasks: the repository plan's started, uncompleted Tasks, in plan order.
+    var workingTaskIDs: [String] { taskIDs(in: builtInPlan(.repository)) }
+
+    /// The Wave the sidebar lists, while its planning is current.
+    var sidebarWave: WaveRoadmap? {
+        navigation.sidebarWaveID.flatMap { id in visibleRoadmaps.first { $0.wave.id == id } }
     }
 
-    /// Every Task of this repository that Rust reads as shipping, until it lands.
-    var shippingTaskIDs: [String] {
-        (roadmap.value?.tasks.items ?? []).filter { task in
-            task.shipping != nil && task.task.repo.normalizedFilePath == repoPath?.normalizedFilePath
-        }.map(\.id)
+    /// Every Wave at the repository; a scoped Wave's child Waves from its built-in plan.
+    var sidebarWaves: [WaveRoadmap] {
+        guard let id = navigation.sidebarWaveID else { return visibleRoadmaps }
+        return (builtInPlan(.wave(id))?.resolution.members ?? []).filter { $0.work.kind == .wave }
+            .compactMap { member in visibleRoadmaps.first { $0.wave.id == member.work.id } }
+    }
+
+    private func builtInPlan(_ expression: WorkSelection.Expression) -> WorkViewPlan? {
+        selectionPlans.value?.first { $0.dashboardID == nil && $0.selection.expression == expression }
+    }
+
+    /// Plan members name Tasks by Work ID; rows use the planning ID when it is known.
+    private func taskIDs(in plan: WorkViewPlan?) -> [String] {
+        var seen = Set<String>()
+        return (plan?.resolution.members ?? []).filter { $0.work.kind == .task }
+            .map { task(id: $0.work.id)?.task.id ?? $0.work.id }
+            .filter { seen.insert($0).inserted }
     }
 
     var sidebarTaskIDs: [String] {
-        if navigation.sidebarFilter == .shipping { return shippingTaskIDs }
-        return workingTaskIDs.filter { id in
+        let scoped = navigation.sidebarWaveID.map { taskIDs(in: builtInPlan(.wave($0))) } ?? workingTaskIDs
+        return scoped.filter { id in
             switch navigation.sidebarFilter {
-            case .working, .shipping: return true
+            case .working: return true
             case .available:
                 guard sessions.errorMessage == nil else { return false }
                 return taskSessions(id).contains { $0.availability == .available && $0.state != .closed }
@@ -1635,35 +1669,16 @@ final class WorkModel {
         select(.task(id: ids[next]))
     }
 
-    private func retainWorkingTask(_ reference: WorkReference?) {
-        guard let reference, reference.kind == .task else { return }
-        let found = task(id: reference.id)?.task
-        let started = found?.runtime.map { $0.owner != nil } ?? selectionPlans.value?.contains { plan in
-            plan.members.contains { $0.work.reference == reference }
-        } ?? false
-        guard started, found?.runtime?.status != .paused else { return }
-        navigation.retainWorkingTask(found?.id ?? reference.id,
-                                     aliases: [reference.id, found?.runtime?.workId].compactMap { $0 })
-        cache?.saveWorkingTasks(navigation.workingTaskIDs, repo: repoPath ?? "")
-    }
-
     func goBack() {
         guard let previous = navigation.backStack.popLast() else { return }
-        navigation.forwardStack.append(selection)
-        select(previous, preservingOpening: false, recordingHistory: false)
+        navigation.forwardStack.append(navigation.destination)
+        selectDestination(previous)
     }
 
     func goForward() {
         guard let next = navigation.forwardStack.popLast() else { return }
-        navigation.backStack.append(selection)
-        select(next, preservingOpening: false, recordingHistory: false)
-    }
-
-    func hideWorkspace(_ key: WorkWorkspaceKey) {
-        guard let registry = workspaceRegistry else { return }
-        let wasSelected = registry.selectedWork == key
-        registry.hide(key)
-        if wasSelected, let next = registry.selectedWork { select(next.reference) }
+        navigation.backStack.append(navigation.destination)
+        selectDestination(next)
     }
 
     func isSelected(_ reference: WorkReference) -> Bool {
@@ -1673,7 +1688,7 @@ final class WorkModel {
             && task(id: selection.id) != nil
     }
 
-    private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true, besideFocused: Bool = false) {
+    private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true) {
         if navigation.palette == .search || navigation.palette == .sidebarSearch { navigation.palette = nil }
         if !preservingOpening { dismissTaskLink() }
         historyLookup?.cancel()
@@ -1693,18 +1708,20 @@ final class WorkModel {
                 return
             }
         } else { selection = requested }
-        if recordingHistory, self.selection != selection {
-            navigation.backStack.append(self.selection)
+        if recordingHistory, navigation.destination != .work(selection) {
+            navigation.backStack.append(navigation.destination)
             navigation.forwardStack = []
         }
         if workspaceRegistry == nil {
             navigation.selectedSessionId = nil
             navigation.content = selection == nil ? .overview : .details
         }
+        if navigation.showsSelection { workspaceRegistry?.clearPresentation() }
         setSelection(selection)
-        retainWorkingTask(selection)
+        if selection == nil { navigation.sidebarWaveID = nil }
+        if let selection, selection.kind == .wave { navigation.sidebarWaveID = selection.id }
         clearSelectionIfOutsideScope()
-        openSelectedWorkspace(besideFocused: besideFocused)
+        openSelectedWorkspace()
     }
 
     private func openHistoricalReference(_ reference: String) async {
@@ -1932,6 +1949,48 @@ final class WorkModel {
         }
     }
 
+    /// The Work the Machine control describes: the current started Task, else the
+    /// selected Wave. Repository and Dashboard views, and unstarted Tasks, have none.
+    var machineTarget: WorkMachineTarget? {
+        if let task = breadcrumb?.task?.task {
+            return task.runtime?.owner == nil ? nil : .task(issue: task.task.identifier)
+        }
+        if let work = selection, work.kind == .wave, navigation.dashboardID == nil { return .wave(id: work.id) }
+        return nil
+    }
+
+    var localMachineId: String? { workspaceRegistry?.localMachineId }
+
+    /// The Machine the target runs on, from planning. A Wave without its own
+    /// default runs here; a started Task without one is unknown.
+    func machine(of target: WorkMachineTarget) -> (id: String?, label: String?) {
+        switch target {
+        case .task:
+            let machine = breadcrumb?.task?.task.runtime?.owner?.machine
+            return (machine?.id, machine?.label)
+        case .wave(let id):
+            guard let machine = wave(id: id)?.wave.machine else { return (localMachineId, nil) }
+            return (machine.id, machine.label)
+        }
+    }
+
+    func machines(for target: WorkMachineTarget) async throws -> [Machine] {
+        try await query.machines(cwd: machineCwd(target))
+    }
+
+    /// Hand off the Task or set the Wave's default, then confirm the Work update
+    /// so planning and other windows read the same Machine.
+    func useMachine(_ machine: String, for target: WorkMachineTarget) async throws {
+        let home = workDataDirectory
+        try await query.useMachine(machine, for: target, cwd: machineCwd(target))
+        try await confirmWorkUpdate(after: home)
+    }
+
+    private func machineCwd(_ target: WorkMachineTarget) -> String? {
+        if case .task = target, let task = breadcrumb?.task { return WaveOrigin.resolve(task.task.task.repo) }
+        return repoPath
+    }
+
     /// Put the Task at a node of its Workflow, then confirm its subscription
     /// update. A refusal is kept on that Task's draft.
     func moveTask(to node: String, task: RoadmapTask) async {
@@ -2132,9 +2191,9 @@ final class WorkModel {
     }
 
     func clearSelectionIfOutsideScope() {
-        guard let selection else { return }
+        guard navigation.dashboardID == nil, let selection else { return }
         if selectionPlans.value?.contains(where: { plan in
-            plan.owner.reference == selection || plan.members.contains { $0.work.reference == selection }
+            plan.contents.contains { $0.work.reference == selection }
         }) == true { return }
         if let repository = workspaceRepository,
            workspaceRegistry?.retained(workspaceKey(for: selection, repository: repository)) != nil { return }
@@ -2252,7 +2311,9 @@ final class WorkModel {
     }
 
     private func setSelection(_ selection: WorkReference?) {
-        guard self.selection != selection else { return }
+        viewOpening = nil
+        selectionOpening = nil
+        guard navigation.destination != .work(selection) else { return }
         workActivityGeneration &+= 1
         navigation.selectedTaskEvidence = selection.flatMap { $0.kind == .task ? task(id: $0.id) : nil }
         navigation.selection = selection
@@ -2348,5 +2409,216 @@ final class WorkModel {
         case .failure(let error):
             .unavailable(lastGood: lastGood, reason: error.localizedDescription)
         }
+    }
+}
+
+extension WorkModel {
+    var dashboards: [WorkViewPlan] { selectionPlans.value?.filter { $0.dashboardID != nil } ?? [] }
+    func dashboard(_ id: String) -> WorkViewPlan? { selectionPlans.value?.first { $0.dashboardID == id } }
+
+    private func selectDestination(_ destination: WorkNavigation.Destination, recordingHistory: Bool = false) {
+        switch destination {
+        case .work(let work): select(work, preservingOpening: false, recordingHistory: recordingHistory)
+        case .zoomed(let dashboard, let work):
+            select(work, preservingOpening: false, recordingHistory: recordingHistory)
+            navigation.destination = .zoomed(dashboard: dashboard, work: work)
+        case .dashboard, .view, .workingTasks:
+            if recordingHistory, navigation.destination != destination {
+                navigation.backStack.append(navigation.destination)
+                navigation.forwardStack = []
+            }
+            dismissTaskLink()
+            viewOpening = nil
+            selectionOpening = nil
+            navigation.destination = destination
+            navigation.palette = nil
+            navigation.selectedSessionId = nil
+            if let plan = selectedViewPlan { presentView(plan) }
+        }
+    }
+
+    func selectDashboard(_ id: String) {
+        selectDestination(.dashboard(id), recordingHistory: true)
+    }
+
+    func selectWorkingTasksDashboard() {
+        selectDestination(.workingTasks, recordingHistory: true)
+    }
+
+    /// The Working Tasks Dashboard's Tasks, in the sidebar's order.
+    var workingTaskMembers: [WorkMemberRef] {
+        var seen = Set<WorkWorkspaceKey>()
+        return (builtInPlan(.repository)?.resolution.members ?? [])
+            .filter { $0.work.kind == .task && seen.insert($0.work).inserted }
+    }
+
+    func zoom(into work: WorkReference, from dashboard: String) {
+        selectDestination(.zoomed(dashboard: dashboard, work: work), recordingHistory: true)
+    }
+
+    private func presentView(_ plan: WorkViewPlan) {
+        guard let registry = workspaceRegistry else { return }
+        // Working Tasks renders the repository plan's Tasks; its Waves stay in the sidebar.
+        let open: [WorkWorkspaceKey] = if case .workingTasks = navigation.destination {
+            workingTaskMembers.map(\.work)
+        } else {
+            plan.projection.visible.map(\.work)
+        }
+        for content in plan.contents where open.contains(content.work) {
+            let entry = registry.workspace(for: content.work, title: content.title,
+                location: content.location.map { WorkspaceIdentity(machineId: $0.machineID, worktree: $0.cwd) })
+            if let primary = content.primarySession, entry.multiplexer.pane(forSessionId: primary) == nil {
+                entry.multiplexer.show(.session(id: primary, location: entry.location), focus: false)
+            }
+            entry.startPersistence(query: query, repoPath: repoPath)
+        }
+        registry.present(open: open)
+    }
+
+    func saveDashboard(id: String, expression: String, name: String, pinned: Bool, revision: Int64?) async {
+        guard !dashboardSaving, let repoPath else { return }
+        dashboardSaving = true
+        dashboardError = nil
+        defer { dashboardSaving = false }
+        do {
+            var saved = try await query.editDashboardQuery(id: id, expression: expression, revision: revision, repoPath: repoPath)
+            if saved.name != name {
+                saved = try await query.renameDashboard(id: id, name: name, revision: saved.revision, repoPath: repoPath)
+            }
+            if saved.pinned != pinned {
+                _ = try await query.pinDashboard(id: id, pinned: pinned, revision: saved.revision, repoPath: repoPath)
+            }
+            try await refreshDashboard(id, repoPath: repoPath)
+            if self.repoPath == repoPath { selectDashboard(id) }
+        } catch {
+            dashboardError = error.localizedDescription
+            // A preceding metadata write may have succeeded; read effects, never replay writes.
+            try? await refreshDashboard(id, repoPath: repoPath)
+        }
+    }
+
+    func arrangeDashboard(_ id: String, arrangement: WorkArrangement, revision: Int64) async {
+        guard !dashboardSaving, let repoPath else { return }
+        dashboardSaving = true
+        dashboardError = nil
+        defer { dashboardSaving = false }
+        do {
+            _ = try await query.saveDashboardArrangement(id: id, arrangement: arrangement, revision: revision, repoPath: repoPath)
+            try await refreshDashboard(id, repoPath: repoPath)
+        } catch { dashboardError = error.localizedDescription }
+    }
+
+    /// A tile drop: the dragged Work takes the target's place in the Dashboard's order.
+    func reorderDashboard(_ id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey, revision: Int64) async {
+        guard member != target, !dashboardSaving, let repoPath else { return }
+        dashboardSaving = true
+        dashboardError = nil
+        defer { dashboardSaving = false }
+        do {
+            _ = try await query.reorderDashboard(id: id, member: member, to: target, revision: revision, repoPath: repoPath)
+            try await refreshDashboard(id, repoPath: repoPath)
+        } catch { dashboardError = error.localizedDescription }
+    }
+
+    func setDashboardSlots(_ id: String, slots: DashboardSlotLayout?, revision: Int64) async {
+        guard !dashboardSaving, let repoPath else { return }
+        dashboardSaving = true
+        dashboardError = nil
+        defer { dashboardSaving = false }
+        do {
+            _ = try await query.saveDashboardSlots(id: id, slots: slots, revision: revision, repoPath: repoPath)
+            try await refreshDashboard(id, repoPath: repoPath)
+        } catch { dashboardError = error.localizedDescription }
+    }
+
+    /// The sidebar and the Working Tasks grid write the same order; both read the
+    /// repository plan, so each shows the other's move.
+    func reorderWorkingTask(_ task: String, to target: String) async {
+        guard task != target, let repoPath else { return }
+        dashboardError = nil
+        do {
+            _ = try await query.reorderTask(task, to: target, repoPath: repoPath)
+            try await refreshPlan(nil, repoPath: repoPath)
+        } catch { dashboardError = error.localizedDescription }
+    }
+
+    /// The Working Tasks member a sidebar row shows; rows may use the planning ID.
+    func workingTaskWorkID(row id: String) -> String? {
+        workingTaskMembers.first { (task(id: $0.work.id)?.task.id ?? $0.work.id) == id }?.work.id
+    }
+
+    private func refreshDashboard(_ id: String, repoPath: String) async throws {
+        try await refreshPlan("query:" + id, repoPath: repoPath)
+    }
+
+    /// Re-read one plan after a write; nil reads the repository's built-in plan.
+    private func refreshPlan(_ expression: String?, repoPath: String) async throws {
+        let plan = try await query.viewPlan(expression: expression, repoPath: repoPath)
+        guard self.repoPath == repoPath else { return }
+        replacePlan(plan)
+    }
+
+    /// A Dashboard plan replaces its Dashboard's; a built-in plan replaces its expression's.
+    private func replacePlan(_ plan: WorkViewPlan) {
+        var plans = selectionPlans.value ?? []
+        plans.removeAll { other in
+            other.dashboardID == plan.dashboardID
+                && (plan.dashboardID != nil || other.selection.expression == plan.selection.expression)
+        }
+        plans.append(plan)
+        applySelectionPlans(plans, reason: "")
+    }
+}
+
+
+extension WorkModel {
+    var selectedViewPlan: WorkViewPlan? {
+        switch navigation.destination {
+        case .work, .zoomed: nil
+        case .dashboard(let id): dashboard(id)
+        case .view(let plan): plan
+        case .workingTasks: builtInPlan(.repository)
+        }
+    }
+
+    private func refreshSelectedView() async {
+        guard case .view(let previous) = navigation.destination, let repoPath else { return }
+        do {
+            let plan = try await query.viewPlan(expression: previous.selection.queryText, repoPath: repoPath)
+            guard self.repoPath == repoPath, navigation.destination == .view(previous) else { return }
+            navigation.destination = .view(plan)
+            presentView(plan)
+        } catch {
+            guard self.repoPath == repoPath, navigation.destination == .view(previous) else { return }
+            dashboardError = error.localizedDescription
+        }
+    }
+
+    func openView(expression: String, url: URL? = nil) async {
+        guard let repoPath else { return }
+        let request = UUID()
+        viewOpening = request
+        let link = url?.absoluteString ?? "loopflow://open"
+        selectionOpening = DesktopOpening(url: link, status: .opening, reason: nil)
+        do {
+            let plan = try await query.viewPlan(expression: expression, repoPath: repoPath)
+            guard viewOpening == request, self.repoPath == repoPath else { return }
+            if plan.dashboardID != nil { replacePlan(plan) }
+            selectDestination(plan.dashboardID.map { .dashboard($0) } ?? .view(plan), recordingHistory: true)
+            selectionOpening = DesktopOpening(url: link, status: .usable, reason: nil)
+        } catch {
+            guard viewOpening == request else { return }
+            viewOpening = nil
+            dashboardError = error.localizedDescription
+            selectionOpening = DesktopOpening(url: link, status: .failed, reason: error.localizedDescription)
+        }
+    }
+}
+
+/// Drag payload for moving a Task in the shared Working Tasks order.
+enum TaskOrderDrag {
+    static func token(_ workID: String) -> String { "task-order:" + workID }
+    static func taskID(_ token: String) -> String? {
+        token.hasPrefix("task-order:") ? String(token.dropFirst("task-order:".count)) : nil
     }
 }

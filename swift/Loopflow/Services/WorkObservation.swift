@@ -115,6 +115,7 @@ public struct StoreRevisions: Decodable, Equatable, Sendable {
 /// wire type the one-shot `--json` read prints.
 public struct WorkFrame: Decodable, Sendable {
     public struct Planning: Decodable, Sendable {
+        public let selections: [WorkViewPlan]?
         public let roadmap: RoadmapSnapshot
         public let waves: [WaveSnapshot]
     }
@@ -122,11 +123,6 @@ public struct WorkFrame: Decodable, Sendable {
     public struct PeerPlanning: Decodable, Sendable {
         public let repo: String
         public let destinations: [PeerPlanningStatus]
-    }
-
-    public struct Selections: Decodable, Sendable {
-        public let repo: String
-        public let plans: [ViewPlan]
     }
 
     public struct Sessions: Decodable, Sendable {
@@ -178,7 +174,6 @@ public struct WorkFrame: Decodable, Sendable {
         case planning(Planning?)
         case peerPlanning(PeerPlanning?)
         case sessions(Sessions?)
-        case selections(Selections?)
         case task(TaskPart?)
         case taskHistory(TaskHistoryPart?)
         case wave(WavePart?)
@@ -192,7 +187,6 @@ public struct WorkFrame: Decodable, Sendable {
             case .planning: "planning"
             case .peerPlanning: "peer_planning"
             case .sessions: "sessions"
-            case .selections: "selections"
             case .task: "task"
             case .taskHistory: "task_history"
             case .wave: "wave"
@@ -251,7 +245,6 @@ public struct WorkFrame: Decodable, Sendable {
         switch part {
         case "planning": content = .planning(try container.decode(Planning?.self, forKey: .body))
         case "peer_planning": content = .peerPlanning(try container.decode(PeerPlanning?.self, forKey: .body))
-        case "selections": content = .selections(try container.decode(Selections?.self, forKey: .body))
         case "sessions": content = .sessions(try container.decode(Sessions?.self, forKey: .body))
         case "task_history": content = .taskHistory(try container.decode(TaskHistoryPart?.self, forKey: .body))
         case "task": content = .task(try container.decode(TaskPart?.self, forKey: .body))

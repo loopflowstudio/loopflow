@@ -111,6 +111,13 @@ public struct TaskFileSnapshot: Decodable, Sendable, Hashable {
     public let readOnlyReason: String?
     public let sizeBytes: UInt64
 
+    public init(recoveries: [TaskFileRecovery], issueIdentifier: String, taskId: String, path: String,
+                content: String?, state: TaskFileState, revision: String?, readOnlyReason: String?, sizeBytes: UInt64) {
+        self.recoveries = recoveries; self.issueIdentifier = issueIdentifier; self.taskId = taskId
+        self.path = path; self.content = content; self.state = state; self.revision = revision
+        self.readOnlyReason = readOnlyReason; self.sizeBytes = sizeBytes
+    }
+
     enum CodingKeys: String, CodingKey {
         case path, content, state, revision, recoveries
         case issueIdentifier = "issue_identifier"

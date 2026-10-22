@@ -299,6 +299,68 @@ public final class MultiplexerStore {
         return layout.pane(for: insertedId)
     }
 
+    public func paneLayout(work: WorkWorkspaceKey, revision: Int64,
+                           files: WorkPaneIntent?, drafts: [WorkFileDraft]) -> WorkPaneLayout {
+        func tree(_ node: LayoutNode) -> WorkPaneTree {
+            switch node {
+            case .split(let axis, let first, let second, let ratio):
+                return .split(axis: axis, ratio: ratio,
+                              first: tree(first), second: tree(second))
+            case .leaf(let pane):
+                let location = pane.content.location.map { WorkViewPlan.Location(machineID: $0.machineId, cwd: $0.worktree) }
+                let intent: WorkPaneIntent
+                switch pane.content {
+                case .empty: intent = .empty
+                case .session(let id, _, _): intent = .session(id: id, location: location)
+                case .shell(let tabs, let selected):
+                    intent = .shell(tabs: tabs.map { tab in
+                        WorkShellTab(id: tab.id,
+                            location: tab.location.map { WorkViewPlan.Location(machineID: $0.machineId, cwd: $0.worktree) },
+                            lfProcessID: tab.lfProcessID)
+                    }, selected: selected)
+                case .files: intent = files ?? .files(location: location, tabs: [], selected: nil)
+                case .graphLog: intent = .log(location: location)
+                }
+                return .pane(id: pane.id, content: intent)
+            }
+        }
+        return WorkPaneLayout(work: work, revision: revision, tree: tree(layout), focused: focusedPaneId,
+                              zoomed: zoomedPaneId, hidden: collapsedPaneIds.sorted(), drafts: drafts)
+    }
+
+    /// Restore portable identity with fresh native occurrences. No command is replayed.
+    public func restore(_ saved: WorkPaneLayout) {
+        func location(_ value: WorkViewPlan.Location?) -> WorkspaceIdentity? {
+            value.map { WorkspaceIdentity(machineId: $0.machineID, worktree: $0.cwd) }
+        }
+        func tree(_ node: WorkPaneTree) -> LayoutNode {
+            switch node {
+            case .split(let axis, let ratio, let first, let second):
+                return .split(axis,
+                              first: tree(first), second: tree(second), ratio: ratio)
+            case .pane(let id, let intent):
+                let content: PaneContent
+                switch intent {
+                case .empty: content = .empty
+                case .session(let session, let place): content = .session(id: session, location: location(place))
+                case .shell(let tabs, let selected):
+                    content = .shell(tabs: tabs.map { tab in
+                        self.shell(tab.id) ?? ShellTab(id: tab.id, location: location(tab.location), command: nil, lfProcessID: tab.lfProcessID)
+                    }, selected: selected)
+                case .files(let place, _, _): content = .files(taskId: saved.work.id, location: location(place))
+                case .log(let place): content = .graphLog(taskId: saved.work.id, location: location(place))
+                }
+                if let retained = layout.pane(for: id), retained.content == content { return .leaf(retained) }
+                return .leaf(PaneState(id: id, content: content))
+            }
+        }
+        layout = saved.tree.map(tree) ?? .defaultLayout()
+        focusedPaneId = saved.focused ?? layout.firstPane.id
+        zoomedPaneId = saved.zoomed
+        collapsedPaneIds = Set(saved.hidden)
+        closedState = nil
+    }
+
     /// Explicit arrangement changes visibility without selecting another Session.
     public func setZoom(_ paneId: String, enabled: Bool) {
         guard layout.pane(for: paneId) != nil else { return }

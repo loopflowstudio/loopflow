@@ -1293,7 +1293,7 @@ pub(crate) fn resume_native_session(
     Ok(true)
 }
 
-fn human_session_argv(id: &str, command: &str) -> Result<Vec<String>> {
+pub(crate) fn human_session_argv(id: &str, command: &str) -> Result<Vec<String>> {
     crate::data_clone::require_writable_session(id)?;
     let context = crate::os_process::execution_context()?;
     // A fresh terminal does not inherit the listing process's data selection.

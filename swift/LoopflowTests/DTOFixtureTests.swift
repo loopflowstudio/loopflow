@@ -245,6 +245,7 @@ struct DTOFixtureTests {
         }
         let window = try #require(report.windows.first)
         #expect(window.reading == "unavailable")
+        #expect(window.openWork == [try #require(window.workspaces.first).work])
         #expect(window.task?.actions == nil)
         #expect(window.task?.roadmapGeneratedAt == "2026-10-08T19:00:00Z")
         #expect(window.task?.conditionObservedAt == "2026-10-08T18:59:58Z")
@@ -673,7 +674,9 @@ struct DTOFixtureTests {
         #expect(tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
         // Start evidence is required: a prepared checkout is not started work.
         #expect(tasks.map { $0.runtime.map { $0.owner != nil } } == [false, true, nil, true])
-        #expect(roadmap.waves[1].tasks.unavailableReason?.contains("lf repo refresh") == true)
+        // The wire carries each Task once; Waves share them by the Task's Wave.
+        #expect(roadmap.tasks.items.count == 4)
+        #expect(roadmap.waves[1].tasks.items.isEmpty)
 
     }
 
@@ -906,8 +909,8 @@ struct DTOFixtureTests {
         let lines = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         let frames = try lines.map { try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: $0)) }
 
-        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task", "peer_planning", "checkpoint", "task_history", "selections"])
-        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task", "peer_planning", "checkpoint", "task_history"])
+        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
         guard case .taskHistory(let history?) = frames[9].content else {
             Issue.record("diagnostic history frame missing")
             return
@@ -919,10 +922,6 @@ struct DTOFixtureTests {
         }
         #expect(peers.repo == "/src/loopflow")
         #expect(peers.destinations.isEmpty)
-        guard case .selections(let selections?) = frames[10].content else {
-            Issue.record("selection plans frame missing"); return
-        }
-        #expect(selections.plans[0].members[0].title == "Retained work")
         #expect(frames[0].answers == nil)
         #expect(frames[0].copy == nil)
         #expect(frames[6].copy == "/Users/fixture/.lf/copies/3f2a9c1b")
@@ -1006,23 +1005,22 @@ struct DTOFixtureTests {
         }
     }
 
-    private func loadFixture(_ name: String, sourceFile: String = #filePath) throws -> [String: Any] {
-        let data = try loadFixtureData(name, sourceFile: sourceFile)
+    private func loadFixture(_ name: String) throws -> [String: Any] {
+        let data = try loadFixtureData(name)
         let json = try JSONSerialization.jsonObject(with: data)
         return try #require(json as? [String: Any])
     }
+}
 
-
-    private func loadFixtureData(_ name: String, sourceFile: String = #filePath) throws -> Data {
-        let testFile = URL(fileURLWithPath: sourceFile)
-        let fixtures = testFile
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto")
-            .appendingPathComponent(name)
-        return try Data(contentsOf: fixtures)
-    }
+func loadFixtureData(_ name: String) throws -> Data {
+    let testFile = URL(fileURLWithPath: #filePath)
+    let fixtures = testFile
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("tests/fixtures/dto")
+        .appendingPathComponent(name)
+    return try Data(contentsOf: fixtures)
 }
 
 @Test("Session input history retains distinct native results and unknown Process")

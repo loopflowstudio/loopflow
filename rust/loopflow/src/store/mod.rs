@@ -77,6 +77,8 @@ pub(crate) struct WaveLocatorUpdate {
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error(transparent)]
+    Selection(#[from] crate::work::selection::SelectionError),
+    #[error(transparent)]
     Planning(#[from] crate::linear::LinearBindingError),
     #[error(transparent)]
     TaskData(#[from] crate::work::task::TaskDataError),

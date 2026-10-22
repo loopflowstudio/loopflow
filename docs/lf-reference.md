@@ -1042,10 +1042,105 @@ Open Work's conversation in Desktop, this cmux/Herdr host or a terminal
 
 ## lf desktop
 
-Inspect and control Loopflow Desktop panes (macOS only)
+Select Work and control Loopflow Desktop panes
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf desktop view
+
+Show a Work selection, or derive a passive plan for external hosts
+
+| Argument | What it does |
+|---|---|
+| `<expression>` | wave/task/query/kind/state expression; omitted uses the repository default |
+| `--plan` | Print the derived plan as JSON without opening Desktop or starting a provider Default: false. |
+| `--json` | Print the opening receipt as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop query
+
+Create or edit a Dashboard query with revision checking; prints the Dashboard as JSON
+
+| Argument | What it does |
+|---|---|
+| `<container>` | Dashboard name or query:ID |
+| `<expression>` | Selection expression, as for `lf desktop view` |
+| `--revision` | Last observed revision; omit only when creating a new Dashboard |
+| `--help / -h` | Print help |
+
+## lf desktop pin
+
+Pin a Dashboard in repository discovery; prints the Dashboard as JSON
+
+| Argument | What it does |
+|---|---|
+| `<query>` | Dashboard name or query:ID |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop unpin
+
+Unpin a Dashboard without changing its membership or arrangement; prints the Dashboard as JSON
+
+| Argument | What it does |
+|---|---|
+| `<query>` | Dashboard name or query:ID |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop rename
+
+Rename a Dashboard or Task through its shared owner; prints the owner's record as JSON
+
+| Argument | What it does |
+|---|---|
+| `<target>` | query:ID or task:<durable-id> |
+| `<name>` | The new name, written to the shared owner so labels and crumbs follow |
+| `--revision` | The target's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop arrange
+
+Replace a Dashboard's occurrence order and hidden members from JSON on stdin; prints the Dashboard as JSON
+
+| Argument | What it does |
+|---|---|
+| `<query>` | Dashboard name or query:ID |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop slots
+
+Replace a Dashboard's slot layout from JSON on stdin; `null` restores the default
+
+| Argument | What it does |
+|---|---|
+| `<query>` | Dashboard name or query:ID |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop order
+
+Move a member into another's place: the repository's Task order, or a Dashboard's with --query; prints the result as JSON
+
+| Argument | What it does |
+|---|---|
+| `<member>` | Member to move: task:<durable-id>, or wave:<durable-id> on a Dashboard |
+| `--to` | Member whose place it takes |
+| `--query` | Dashboard whose order to edit instead of the repository's Task order |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop layout
+
+Read portable pane intent as JSON, or save a complete revision-checked record from stdin
+
+| Argument | What it does |
+|---|---|
+| `<work>` | repository, wave:<durable-id> or task:<durable-id> |
+| `--save` | Replace the record from JSON on stdin instead of reading it Default: false. |
 | `--help / -h` | Print help |
 
 ## lf desktop text
@@ -1104,7 +1199,7 @@ Restore an exact hidden pane without selecting Work or acquiring a client
 
 ## lf desktop focus
 
-Focus an exact pane in its retained workspace (does not select Work)
+Focus an exact pane, opening its retained workspace when needed
 
 | Argument | What it does |
 |---|---|
@@ -1114,7 +1209,7 @@ Focus an exact pane in its retained workspace (does not select Work)
 
 ## lf desktop shell
 
-Add a shell tab on the Task’s recorded Machine
+Add and select a shell tab at the Task’s recorded location
 
 | Argument | What it does |
 |---|---|
@@ -1177,7 +1272,7 @@ Zoom an exact retained pane without changing selection; --off unzooms it
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf desktop list
+## lf desktop state
 
 Read actual windows and panes without launching, focusing, or acquiring clients
 

@@ -1926,7 +1926,7 @@ fn adding_a_graph_changes_an_untyped_reference_but_not_an_explicit_skill() {
 }
 
 fn roadmap_task(repo: &Path, home: &Path) -> serde_json::Value {
-    lf_json(repo, home, &["wave", "show", "--json"])["waves"][0]["tasks"]["items"][0].clone()
+    lf_json(repo, home, &["wave", "show", "--json"])["tasks"]["items"][0].clone()
 }
 
 fn labels(compiled: &serde_json::Value) -> Vec<&str> {

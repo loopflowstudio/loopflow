@@ -82,8 +82,9 @@ struct WorktreeWorkspaceTests {
             WorkWorkspaceKey(repository: "repo", kind: .wave, id: "wave"),
             WorkWorkspaceKey(repository: "repo", kind: .task, id: "one"),
             WorkWorkspaceKey(repository: "repo", kind: .task, id: "two")]
-        for key in keys { registry.open(key, title: key.id, location: location, besideFocused: true) }
-        #expect(registry.openWork == keys)
+        for key in keys { registry.open(key, title: key.id, location: location) }
+        #expect(registry.openWork == [keys[3]])
+        #expect(Set(registry.keys) == Set(keys))
         let first = try #require(registry.retained(keys[2]))
         let shell = try #require(try first.newShell())
         let document = first.files(issue: "ONE", cwd: "/repo").document("draft.md")
@@ -92,22 +93,21 @@ struct WorktreeWorkspaceTests {
         let layout = first.multiplexer.layout
         let selected = first.multiplexer.focusedPaneId
         #if GHOSTTY_ENABLED
-        let view = registry.surfaces.view(for: shell.terminal!)
+        let view = registry.surfaces.view(for: try #require(shell.terminal))
         #endif
-        registry.hide(keys[2])
         #expect(!registry.openWork.contains(keys[2]))
         #expect(registry.retained(keys[2]) === first)
-        #expect(registry.open(keys[2], title: "Renamed Task", location: nil, besideFocused: true) === first)
-        #expect(registry.openWork.count == 4)
+        #expect(registry.open(keys[2], title: "Renamed Task", location: nil) === first)
+        #expect(registry.openWork == [keys[2]])
         #expect(first.title == "Renamed Task")
         #expect(first.multiplexer.layout == layout)
         #expect(first.multiplexer.focusedPaneId == selected)
         #expect(first.multiplexer.zoomedPaneId == shell.id)
         #expect(document.editor.string == "unfinished draft")
         #if GHOSTTY_ENABLED
-        #expect(registry.surfaces.view(for: shell.terminal!) === view)
+        #expect(registry.surfaces.view(for: try #require(shell.terminal)) === view)
         #endif
-        for key in keys { registry.hide(key) }
+        registry.clearPresentation()
         #expect(registry.selectedWork == nil)
         #expect(registry.openWork.isEmpty)
         #expect(first.multiplexer.layout == layout)
@@ -181,22 +181,24 @@ struct WorktreeWorkspaceTests {
         #expect(fixtureWork(registry, fixtureWorkspace("/repo.design")) === design)
         #expect(design.multiplexer.layout == original)
         #expect(design.multiplexer.focusedPaneId == focus)
-        #expect(registry.key(containingShell: design.multiplexer.focusedPane.content.selectedShell!.id, machineId: fixtureMachineId) == fixtureWorkKey(fixtureWorkspace("/repo.design")))
+        #expect(registry.key(containingShell: design.multiplexer.focusedPane.content.selectedShell?.id ?? "", machineId: fixtureMachineId) == fixtureWorkKey(fixtureWorkspace("/repo.design")))
     }
 
     @Test("Conversation launch adds a tab and undo never replays its command")
     func launchingPreservesExistingPanes() throws {
         let store = MultiplexerStore()
         store.newShell()
-        let original = try #require(store.focusedPane.content.selectedShell)
+        let shell = store.focusedPaneId
+        let first = store.focusedPane.content.selectedShell!
         store.newShell(command: ["lf", "--interactive", ":", "hello"])
         #expect(store.layout.allPanes.count == 1)
-        #expect(store.shell(original.id) == original)
-        #expect(store.focusedPane.content.selectedShell?.command?.last == "hello")
-        let pane = store.focusedPaneId
-        store.close(pane)
+        #expect(store.shell(first.id) == first)
+        #expect(store.layout.pane(for: shell)?.content.selectedShell != nil)
+        #expect(store.shell(first.id)?.command == [])
+        #expect(store.layout.pane(for: store.focusedPaneId)?.content.selectedShell?.command?.last == "hello")
+        store.close(store.focusedPaneId)
         store.undoClose()
-        #expect(store.focusedPane.content.selectedShell?.command == nil)
+        #expect(store.layout.pane(for: store.focusedPaneId)?.content.selectedShell?.command == nil)
     }
 
 }

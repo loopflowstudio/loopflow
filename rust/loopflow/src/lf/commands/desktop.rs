@@ -1,5 +1,5 @@
-//! Retained pane arrangement, explicit input and passive reads use Desktop's existing Apple event boundary.
-//! No file-backed layout cache, socket server, or Work mutation participates.
+//! Shared selection and saved intent use lfdb; live pane control uses Desktop's Apple events.
+use crate::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +27,10 @@ pub struct DesktopWindowInspection {
     pub session: Option<DesktopSessionInspection>,
     pub supported_operations: Vec<String>,
     pub workspaces: Vec<DesktopWorkspaceInspection>,
+    /// Work shown in this window, in slot fill order; retained workspaces outside it
+    /// remain inspectable.
+    pub open_work: Vec<WorkWorkspaceKey>,
+    pub view: Option<crate::work::selection::ViewPlan>,
     pub opening: Option<DesktopOpening>,
 }
 
@@ -50,8 +54,6 @@ pub struct DesktopSessionInspection {
     pub observed_at: Option<String>,
     pub actions: Option<Vec<SessionAction>>,
 }
-
-pub use crate::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopContentLocation {
@@ -82,6 +84,16 @@ pub struct DesktopLayoutInspection {
     pub ratio: Option<f64>,
     pub children: Vec<DesktopLayoutInspection>,
     pub location: Option<DesktopContentLocation>,
+    pub tabs: Vec<DesktopShellInspection>,
+    pub selected_tab: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DesktopShellInspection {
+    pub id: String,
+    pub incarnation: String,
+    pub surface: Option<String>,
+    pub location: Option<DesktopContentLocation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -91,6 +103,7 @@ pub struct DesktopPaneTarget {
     pub work: WorkWorkspaceKey,
     pub pane: String,
     pub incarnation: String,
+    pub tab: Option<String>,
 }
 
 /// Identifies the affected pane without implying a rendered or ready terminal.
@@ -100,6 +113,7 @@ pub struct DesktopPaneReceipt {
     pub window: String,
     pub work: WorkWorkspaceKey,
     pub pane: String,
+    pub tab: Option<String>,
     pub observed_at: i64,
 }
 
@@ -254,7 +268,13 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         .collect::<Vec<_>>()
         .as_slice()
     {
-        ["desktop", "list"] => Some(schema::<DesktopInspection>()),
+        ["desktop", "state"] => Some(schema::<DesktopInspection>()),
+        ["desktop", "view"] => Some(schema::<DesktopViewResult<'_>>()),
+        ["desktop", "query" | "pin" | "unpin" | "arrange" | "slots"] => {
+            Some(schema::<crate::work::selection::Dashboard>())
+        }
+        ["desktop", "order"] => Some(schema::<DesktopOrderResult>()),
+        ["desktop", "layout"] => Some(schema::<Option<crate::work::selection::WorkPaneLayout>>()),
         ["open"] => Some(schema::<super::open::OpenReport>()),
         ["desktop", "read"] => Some(schema::<DesktopTextReading>()),
         ["desktop", "text" | "key" | "hide" | "restore" | "focus" | "shell" | "files" | "graph-log"
@@ -287,10 +307,372 @@ pub enum DesktopOpeningStatus {
     Failed,
 }
 
+/// A passive plan or the acceptance receipt for opening its native destination.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum DesktopViewResult<'a> {
+    Plan(&'a crate::work::selection::ViewPlan),
+    Opening(&'a DesktopOpening),
+}
+
+/// The repository's Task order after a move, or the Dashboard edited with --query.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum DesktopOrderResult {
+    Tasks(Vec<String>),
+    Dashboard(Box<crate::work::selection::Dashboard>),
+}
+
+fn open_url(mut url: reqwest::Url, json: bool) -> Result<()> {
+    // URLComponents treats '+' literally; retain spaces across the native link.
+    let query = url.query().map(|query| query.replace('+', "%20"));
+    url.set_query(query.as_deref());
+    let status = std::process::Command::new("open")
+        .args(["-b", super::open::DESKTOP_BUNDLE, url.as_str()])
+        .status()
+        .context("launch Loopflow.app with the macOS `open` command")?;
+    if !status.success() {
+        bail!("cannot open Work in Loopflow.app: macOS open exited with {status}");
+    }
+    let opening = DesktopOpening {
+        url: url.into(),
+        status: DesktopOpeningStatus::Opening,
+        reason: None,
+    };
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&DesktopViewResult::Opening(&opening))?
+        );
+    } else {
+        println!("Opening {}\nInspect with `lf desktop state --json`; launch acceptance does not establish usability.", opening.url);
+    }
+    Ok(())
+}
+
+fn selection_failure(error: anyhow::Error) -> anyhow::Error {
+    use crate::work::selection::SelectionError;
+    let selection = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<SelectionError>())
+        .or_else(|| match error.downcast_ref::<crate::store::StoreError>() {
+            Some(crate::store::StoreError::Selection(selection)) => Some(selection),
+            _ => None,
+        });
+    let code = match selection {
+        Some(SelectionError::Ambiguous(_)) => Some(3),
+        Some(SelectionError::Query(_)) => Some(2),
+        _ if error.downcast_ref::<serde_json::Error>().is_some() => Some(2),
+        _ if matches!(
+            error.downcast_ref::<crate::store::StoreError>(),
+            Some(crate::store::StoreError::NotFound)
+        ) =>
+        {
+            Some(3)
+        }
+        _ => None,
+    };
+    if let Some(code) = code {
+        eprintln!("Error: {error}");
+        crate::process::CommandExit(code).into()
+    } else {
+        error
+    }
+}
+
+fn selection_repository(
+    cli: &crate::lf::Cli,
+    store: &crate::store::sqlite::SqliteStore,
+) -> Result<crate::durable::RepositoryId> {
+    if let Some(repository) = &cli.repository {
+        return Ok(repository.clone());
+    }
+    let repo = crate::repository::CanonicalRepo::current()?
+        .context("select a repository with --repo or --repository")?;
+    store
+        .repository_id(&repo.to_string())?
+        .ok_or(crate::store::StoreError::NotFound)
+        .context("repository has no recorded Work identity")
+}
+
+fn view_plan(
+    cli: &crate::lf::Cli,
+    expression: Option<&str>,
+    passive: bool,
+    json: bool,
+) -> Result<()> {
+    if let Some(expression) = expression {
+        crate::work::selection::Selection::parse(expression, None)?;
+    }
+    let store = crate::store::read_existing_registry()?
+        .ok_or(crate::store::StoreError::NotFound)
+        .context("Work registry is unavailable")?;
+    let repository = selection_repository(cli, &store.sqlite)?;
+    // Explicit Work context selects the same default model without preparing a checkout.
+    let plan = if expression.is_none() && (cli.task.is_some() || cli.wave.is_some()) {
+        use crate::work::selection::{Selection, SelectionExpression, SelectionId};
+        let resolution =
+            super::context::explain(cli.wave.as_deref(), cli.task.as_deref(), None, None)?;
+        let expression = if cli.task.is_some() {
+            SelectionExpression::Work {
+                work: WorkWorkspaceKey {
+                    repository: repository.to_string(),
+                    kind: WorkWorkspaceKind::Task,
+                    id: bound(&resolution.task, "Task")?.into(),
+                },
+            }
+        } else {
+            SelectionExpression::Wave {
+                wave: crate::id::WaveId::parse(bound(&resolution.wave, "Wave")?)?,
+            }
+        };
+        store.sqlite.plan_selection(
+            &repository,
+            Selection {
+                id: SelectionId("work-default".into()),
+                expression,
+            },
+        )?
+    } else {
+        store.sqlite.view_plan(&repository, expression)?
+    };
+    if passive {
+        println!(
+            "{}",
+            serde_json::to_string(&DesktopViewResult::Plan(&plan))?
+        );
+    }
+    if plan.resolution.members.is_empty() && !plan.resolution.unavailable.is_empty() {
+        return Err(crate::process::CommandExit(3).into());
+    }
+    if !passive {
+        require_supported()?;
+        let Some(expression) = expression else {
+            // Default Work opens through its public address, like `lf open`.
+            return super::open::run(
+                cli,
+                &super::open::OpenArgs {
+                    url: None,
+                    host: super::open::OpenHost::Desktop,
+                    available: false,
+                    session: None,
+                    diff: false,
+                    link: false,
+                    format: None,
+                    json,
+                },
+            );
+        };
+        let resolution = super::open::selected_context(cli, None)?;
+        let repo = bound(&resolution.repository_path, "repository path")?;
+        let mut url = reqwest::Url::parse("loopflow://open")?;
+        url.query_pairs_mut()
+            .append_pair("repo", repo)
+            .append_pair("view", expression);
+        return open_url(url, json);
+    }
+    Ok(())
+}
+
+fn work_key(repository: &crate::durable::RepositoryId, selector: &str) -> Result<WorkWorkspaceKey> {
+    let (kind, id) = if selector == "repository" {
+        (WorkWorkspaceKind::Repository, repository.as_str())
+    } else if let Some(id) = selector.strip_prefix("task:") {
+        (WorkWorkspaceKind::Task, id)
+    } else if let Some(id) = selector.strip_prefix("wave:") {
+        (WorkWorkspaceKind::Wave, id)
+    } else {
+        return Err(crate::work::selection::SelectionError::Query(
+            "expected repository, task:<durable-id>, or wave:<durable-id>".into(),
+        )
+        .into());
+    };
+    Ok(WorkWorkspaceKey {
+        repository: repository.to_string(),
+        kind,
+        id: id.into(),
+    })
+}
+
+fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
+    use crate::lf::DesktopCommand;
+    use crate::work::selection::{Arrangement, DashboardId, WorkPaneLayout};
+    if let DesktopCommand::Query { expression, .. } = command {
+        crate::work::selection::Selection::parse(expression, None)?;
+    }
+    let reader = crate::store::read_existing_registry()?
+        .ok_or(crate::store::StoreError::NotFound)
+        .context("Work registry is unavailable")?;
+    let repository = selection_repository(cli, &reader.sqlite)?;
+    if let DesktopCommand::Layout {
+        work, save: false, ..
+    } = command
+    {
+        println!(
+            "{}",
+            serde_json::to_string(&reader.sqlite.pane_layout(&work_key(&repository, work)?)?)?
+        );
+        return Ok(());
+    }
+    drop(reader);
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let dashboard_id = |id: &str| DashboardId(id.strip_prefix("query:").unwrap_or(id).into());
+    let result = match command {
+        DesktopCommand::Query {
+            container,
+            expression,
+            revision,
+            ..
+        } => serde_json::to_value(store.edit_dashboard(
+            &repository,
+            &dashboard_id(container),
+            expression,
+            *revision,
+        )?)?,
+        DesktopCommand::Pin {
+            query, revision, ..
+        }
+        | DesktopCommand::Unpin {
+            query, revision, ..
+        } => serde_json::to_value(store.set_dashboard_metadata(
+            &repository,
+            &dashboard_id(query),
+            *revision,
+            None,
+            Some(matches!(command, DesktopCommand::Pin { .. })),
+        )?)?,
+        DesktopCommand::Rename {
+            target,
+            name,
+            revision,
+            ..
+        } => {
+            if let Some(task) = target.strip_prefix("task:") {
+                let key = work_key(&repository, target)?;
+                // The shared reader checks repository ownership before the Task writer runs.
+                let resolved = store.resolve_selection(
+                    &repository,
+                    &crate::work::selection::Selection {
+                        id: crate::work::selection::SelectionId("rename-target".into()),
+                        expression: crate::work::selection::SelectionExpression::Work { work: key },
+                    },
+                )?;
+                if resolved.members.is_empty() {
+                    return Err(crate::store::StoreError::NotFound.into());
+                }
+                serde_json::to_value(store.edit_task(
+                    &crate::durable::TaskId::parse(task)?,
+                    *revision,
+                    &crate::work::task::TaskUpdate {
+                        title: Some(name.clone()),
+                        ..Default::default()
+                    },
+                )?)?
+            } else {
+                serde_json::to_value(store.set_dashboard_metadata(
+                    &repository,
+                    &dashboard_id(target),
+                    i64::try_from(*revision)?,
+                    Some(name),
+                    None,
+                )?)?
+            }
+        }
+        DesktopCommand::Arrange {
+            query, revision, ..
+        } => {
+            let id = dashboard_id(query);
+            let reading = store
+                .read_dashboard(&repository, &id)?
+                .ok_or(crate::store::StoreError::NotFound)?;
+            // The shared writer validates the order against current membership and decides mode.
+            let arrangement: Arrangement = serde_json::from_reader(std::io::stdin().lock())?;
+            serde_json::to_value(store.save_dashboard(
+                &repository,
+                &id,
+                Some(*revision),
+                &reading.saved.selection,
+                &arrangement,
+            )?)?
+        }
+        DesktopCommand::Slots {
+            query, revision, ..
+        } => {
+            let slots: Option<crate::work::selection::SlotLayout> =
+                serde_json::from_reader(std::io::stdin().lock())?;
+            serde_json::to_value(store.set_dashboard_slots(
+                &repository,
+                &dashboard_id(query),
+                *revision,
+                slots.as_ref(),
+            )?)?
+        }
+        DesktopCommand::Order {
+            member,
+            to,
+            query: Some(query),
+            revision: Some(revision),
+            ..
+        } => serde_json::to_value(DesktopOrderResult::Dashboard(Box::new(
+            store.reorder_dashboard(
+                &repository,
+                &dashboard_id(query),
+                *revision,
+                &work_key(&repository, member)?,
+                &work_key(&repository, to)?,
+            )?,
+        )))?,
+        DesktopCommand::Order { member, to, .. } => {
+            let (member, to) = (work_key(&repository, member)?, work_key(&repository, to)?);
+            if member.kind != WorkWorkspaceKind::Task || to.kind != WorkWorkspaceKind::Task {
+                bail!("the repository order holds Tasks; pass --query to order a Dashboard");
+            }
+            serde_json::to_value(DesktopOrderResult::Tasks(store.reorder_task(
+                &repository,
+                &member.id,
+                &to.id,
+            )?))?
+        }
+        DesktopCommand::Layout {
+            work, save: true, ..
+        } => {
+            let layout: WorkPaneLayout = serde_json::from_reader(std::io::stdin().lock())?;
+            if layout.work != work_key(&repository, work)? {
+                bail!("layout belongs to different Work");
+            }
+            serde_json::to_value(store.save_pane_layout(&layout)?)?
+        }
+        _ => unreachable!("saved intent command"),
+    };
+    println!("{}", serde_json::to_string(&result)?);
+    Ok(())
+}
+
 pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
+    match command {
+        DesktopCommand::Query { .. }
+        | DesktopCommand::Pin { .. }
+        | DesktopCommand::Unpin { .. }
+        | DesktopCommand::Rename { .. }
+        | DesktopCommand::Arrange { .. }
+        | DesktopCommand::Slots { .. }
+        | DesktopCommand::Order { .. }
+        | DesktopCommand::Layout { .. } => {
+            return saved_intent(cli, command).map_err(selection_failure)
+        }
+        DesktopCommand::View {
+            expression,
+            plan,
+            json,
+        } => {
+            return view_plan(cli, expression.as_deref(), *plan, *json || cli.json)
+                .map_err(selection_failure)
+        }
+        _ => {}
+    }
     require_supported()?;
-    if let DesktopCommand::List { json } = command {
+    if let DesktopCommand::State { json } = command {
         return inspect(*json || cli.json);
     }
     // Work selects the repository/checkout. One live reading supplies every
@@ -302,7 +684,16 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
     let selected = inspection.resolve_pane(&resolution, command, caller.as_deref())?;
     let target = selected.target()?;
     let (action, json) = match command {
-        DesktopCommand::List { .. } => unreachable!("handled above"),
+        DesktopCommand::Pin { .. }
+        | DesktopCommand::Unpin { .. }
+        | DesktopCommand::Rename { .. }
+        | DesktopCommand::Arrange { .. }
+        | DesktopCommand::Slots { .. }
+        | DesktopCommand::Order { .. }
+        | DesktopCommand::Layout { .. }
+        | DesktopCommand::View { .. }
+        | DesktopCommand::Query { .. }
+        | DesktopCommand::State { .. } => unreachable!("handled above"),
         DesktopCommand::Text { text, json, .. } => {
             validate_literal_text(text)?;
             (
@@ -442,7 +833,16 @@ impl DesktopInspection {
             | DesktopCommand::Files { pane, .. }
             | DesktopCommand::GraphLog { pane, .. }
             | DesktopCommand::Zoom { pane, .. } => (pane, false, None),
-            DesktopCommand::List { .. } => {
+            DesktopCommand::Pin { .. }
+            | DesktopCommand::Unpin { .. }
+            | DesktopCommand::Rename { .. }
+            | DesktopCommand::Arrange { .. }
+            | DesktopCommand::Slots { .. }
+            | DesktopCommand::Order { .. }
+            | DesktopCommand::Layout { .. }
+            | DesktopCommand::View { .. }
+            | DesktopCommand::Query { .. }
+            | DesktopCommand::State { .. } => {
                 bail!("This command does not address a pane")
             }
         };
@@ -466,6 +866,11 @@ impl DesktopInspection {
             (ContextFact::Unbound, ContextFact::Unbound) => None,
             _ => bail!("Work identity is unavailable; no pane was changed"),
         };
+        if matches!(command, DesktopCommand::Shell { .. })
+            && !matches!(subject, Some((WorkWorkspaceKind::Task, _)))
+        {
+            bail!("Shells require an explicit Task; no shell was opened");
+        }
         let mut candidates = Vec::new();
         for workspace in &window.workspaces {
             if workspace.work.repository != repository
@@ -479,15 +884,21 @@ impl DesktopInspection {
                 if leaf.pane.as_deref() == peer && peer.is_some() {
                     continue;
                 }
+                let exact_tab = pane.as_ref().and_then(|id| {
+                    leaf.tabs
+                        .iter()
+                        .find(|tab| tab.id == id.strip_prefix("shell:").unwrap_or(id))
+                });
                 if pane
                     .as_ref()
                     .is_some_and(|id| leaf.pane.as_ref() != Some(id))
+                    && exact_tab.is_none()
                 {
                     continue;
                 }
-                if terminal
-                    && (!matches!(leaf.content.as_deref(), Some("shell" | "session"))
-                        || leaf.surface.is_none())
+                if pane.is_none()
+                    && matches!(command, DesktopCommand::Shell { .. })
+                    && leaf.pane.as_deref() != Some(&workspace.focused_pane)
                 {
                     continue;
                 }
@@ -500,48 +911,63 @@ impl DesktopInspection {
                 {
                     continue;
                 }
-                candidates.push((workspace, leaf));
-            }
-        }
-        // Caller identity comes from the existing PTY-validated attachment,
-        // never from focus or a marker inherited across SSH/background handoff.
-        // Explicit Work still bounds the candidate set; an explicit pane wins.
-        if pane.is_none() {
-            if let Some(caller) = caller {
-                let own = candidates.iter().filter(|(_, leaf)| {
-                    matches!((&work.machine, &leaf.location), (ContextFact::Bound { value, .. }, Some(location)) if value == &location.machine_id)
-                        && match leaf.content.as_deref() {
-                            Some("shell") => leaf.pane.as_deref() == Some(caller),
-                            Some("session") => leaf.surface.as_deref() == Some(caller),
-                            _ => false,
+                if terminal && leaf.content.as_deref() == Some("shell") {
+                    // A tool pane is not a terminal target. Enumerate retained shells,
+                    // including background tabs, without consulting tab selection.
+                    for tab in &leaf.tabs {
+                        if exact_tab.is_some_and(|exact| exact.id != tab.id)
+                            || tab.surface.is_none()
+                        {
+                            continue;
                         }
-                }).collect::<Vec<_>>();
-                if let [(workspace, leaf)] = own.as_slice() {
-                    return Ok(ResolvedPane {
+                        candidates.push(ResolvedPane {
+                            window,
+                            workspace,
+                            leaf,
+                            tab: Some(tab),
+                        });
+                    }
+                } else {
+                    if terminal
+                        && (leaf.content.as_deref() != Some("session") || leaf.surface.is_none())
+                    {
+                        continue;
+                    }
+                    candidates.push(ResolvedPane {
                         window,
                         workspace,
                         leaf,
+                        tab: exact_tab,
                     });
                 }
             }
         }
+        if pane.is_none() {
+            if let Some(caller) = caller {
+                let own = candidates.iter().filter(|candidate| {
+                    let location = candidate.tab.map_or(&candidate.leaf.location, |tab| &tab.location);
+                    matches!((&work.machine, location), (ContextFact::Bound { value, .. }, Some(location)) if value == &location.machine_id)
+                        && candidate.tab.map_or_else(|| candidate.leaf.surface.as_deref() == Some(caller), |tab| tab.id == caller)
+                }).collect::<Vec<_>>();
+                if let [candidate] = own.as_slice() {
+                    return Ok(**candidate);
+                }
+            }
+        }
         match candidates.as_slice() {
-            [(workspace, leaf)] => Ok(ResolvedPane {
-                window,
-                workspace,
-                leaf,
-            }),
+            [candidate] => Ok(*candidate),
             [] => bail!(
-                "No eligible pane{} in the selected Work. Inspect with `lf desktop list`; no pane was changed.",
+                "No eligible pane{} in the selected Work. Inspect with `lf desktop state`; no pane was changed.",
                 pane.as_ref().map(|id| format!(" {id}")).unwrap_or_default()
             ),
             _ => {
                 let choices = candidates
                     .iter()
-                    .map(|(_, leaf)| {
+                    .map(|candidate| {
+                        let leaf = candidate.leaf;
                         format!(
                             "{} ({})",
-                            leaf.pane.as_deref().unwrap_or("unavailable"),
+                            candidate.tab.map(|tab| tab.id.as_str()).or(leaf.pane.as_deref()).unwrap_or("unavailable"),
                             leaf.content.as_deref().unwrap_or("empty")
                         )
                     })
@@ -555,17 +981,18 @@ impl DesktopInspection {
 
 /// A selection borrows one inspection, including the workspace for a move/resize
 /// peer. Wire targets are captured here, never re-resolved from focus at dispatch.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct ResolvedPane<'a> {
     window: &'a DesktopWindowInspection,
     workspace: &'a DesktopWorkspaceInspection,
     leaf: &'a DesktopLayoutInspection,
+    tab: Option<&'a DesktopShellInspection>,
 }
 
 impl ResolvedPane<'_> {
     fn surface(&self) -> Result<String> {
-        self.leaf
-            .surface
+        self.tab
+            .map_or(&self.leaf.surface, |tab| &tab.surface)
             .clone()
             .context("Terminal surface unavailable")
     }
@@ -585,6 +1012,7 @@ impl ResolvedPane<'_> {
         anyhow::ensure!(panes.len() == 1, "Destination pane {selector} is unavailable in the same workspace; no pane was changed.");
         Ok(Self {
             leaf: panes[0],
+            tab: None,
             ..*self
         })
     }
@@ -600,10 +1028,11 @@ impl ResolvedPane<'_> {
                 .clone()
                 .context("Pane identity unavailable")?,
             incarnation: self
-                .leaf
-                .incarnation
-                .clone()
+                .tab
+                .map(|tab| tab.incarnation.clone())
+                .or_else(|| self.leaf.incarnation.clone())
                 .context("Pane content identity unavailable")?,
+            tab: self.tab.map(|tab| tab.id.clone()),
         })
     }
 }
@@ -931,6 +1360,13 @@ mod tests {
         shell.pane = Some("caller-shell".into());
         shell.content = Some("shell".into());
         shell.surface = Some("shell-surface".into());
+        shell.tabs = vec![super::DesktopShellInspection {
+            id: "caller-shell".into(),
+            incarnation: "shell-tab-occurrence".into(),
+            surface: shell.surface.clone(),
+            location: shell.location.clone(),
+        }];
+        shell.selected_tab = Some("caller-shell".into());
         workspace.layout.children.push(shell);
         workspace.focused_pane = "caller-shell".into();
         let text = DesktopCommand::Text {
@@ -972,6 +1408,40 @@ mod tests {
         assert!(inspection
             .resolve_pane(&work, &text, Some("caller-shell"))
             .is_err());
+    }
+
+    #[test]
+    fn shell_targets_ignore_selected_tabs_and_creation_requires_a_task() {
+        use crate::lf::DesktopCommand;
+        let (mut inspection, mut work) = pane_fixture();
+        let shell = &mut inspection.windows[0].workspaces[0].layout.children[0];
+        shell.content = Some("shell".into());
+        shell.tabs = ["first", "second"]
+            .into_iter()
+            .map(|id| super::DesktopShellInspection {
+                id: id.into(),
+                incarnation: format!("{id}-occurrence"),
+                surface: Some(format!("{id}-surface")),
+                location: shell.location.clone(),
+            })
+            .collect();
+        shell.selected_tab = Some("second".into());
+        let command = DesktopCommand::Text {
+            pane: Some("shell:first".into()),
+            text: "draft".into(),
+            json: true,
+        };
+        let selected = inspection.resolve_pane(&work, &command, None).unwrap();
+        assert_eq!(selected.target().unwrap().tab.as_deref(), Some("first"));
+        assert_eq!(selected.target().unwrap().incarnation, "first-occurrence");
+        assert_eq!(selected.surface().unwrap(), "first-surface");
+        let create = DesktopCommand::Shell {
+            pane: None,
+            json: true,
+        };
+        assert!(inspection.resolve_pane(&work, &create, None).is_ok());
+        work.task = ContextFact::Unbound;
+        assert!(inspection.resolve_pane(&work, &create, None).is_err());
     }
 
     #[test]

@@ -27,6 +27,12 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn task_started_or_published(&self, task: &TaskId) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        task_started_or_published_in(&snapshot, task)
+    }
+
     pub fn chapter_task_evidence(&self, task: &TaskId) -> StoreResult<TaskStartEvidence> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
@@ -61,4 +67,19 @@ impl SqliteStore {
             completed,
         })
     }
+}
+
+/// The one definition of a started Task that Work surfaces show: a current
+/// owner, or a published PR on its current delivery.
+pub(super) fn task_started_or_published_in(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+) -> StoreResult<bool> {
+    Ok(super::task_ownership::owned_in(conn, task)?
+        || conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1 AND historical=0
+                AND publication_requested_at IS NOT NULL)",
+            [task.as_str()],
+            |row| row.get(0),
+        )?)
 }

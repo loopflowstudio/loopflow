@@ -1089,16 +1089,20 @@ pub(crate) fn read_process_receipt(path: &Path) -> Result<Option<ProcessReceipt>
 
 /// Completion is final. Otherwise only the recorded OS identity proves liveness;
 /// unknown evidence never ages into permission to replace or clean up a process.
+/// A restart since `began_at` (the Process record's start) still proves exit.
 pub(crate) fn agent_process_evidence(
     completed_at: Option<i64>,
     pid: Option<u32>,
     started_at: Option<i64>,
+    began_at: Option<i64>,
     mut observe: impl FnMut(u32, i64) -> ProcessIdentityEvidence,
 ) -> ProcessIdentityEvidence {
     if completed_at.is_some() {
         ProcessIdentityEvidence::Dead
     } else if let Some((pid, start)) = pid.zip(started_at) {
         observe(pid, start)
+    } else if began_at.is_some_and(began_before_boot) {
+        ProcessIdentityEvidence::Dead
     } else {
         ProcessIdentityEvidence::Unknown
     }
@@ -1116,6 +1120,7 @@ pub(crate) fn recorded_process_evidence(
             record.completed_at,
             record.pid,
             record.os_started_at,
+            Some(record.started_at),
             observe,
         );
     }
@@ -1382,6 +1387,19 @@ mod tests {
     use loopflow_test_support::TestRepo;
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
+
+    #[test]
+    fn agent_without_os_identity_is_dead_only_after_a_restart() {
+        let unobserved = |_: u32, _: i64| -> ProcessIdentityEvidence { unreachable!() };
+        super::set_test_machine_booted_at(Some(1_000));
+        let before = super::agent_process_evidence(None, None, None, Some(999), unobserved);
+        let since = super::agent_process_evidence(None, None, None, Some(1_001), unobserved);
+        let unrecorded = super::agent_process_evidence(None, None, None, None, unobserved);
+        super::set_test_machine_booted_at(None);
+        assert_eq!(before, ProcessIdentityEvidence::Dead);
+        assert_eq!(since, ProcessIdentityEvidence::Unknown);
+        assert_eq!(unrecorded, ProcessIdentityEvidence::Unknown);
+    }
 
     #[test]
     fn boot_time_parses_and_bounds_what_can_still_run() {

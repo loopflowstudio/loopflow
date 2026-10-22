@@ -53,6 +53,9 @@ public struct LoopflowPalette: Sendable {
     public init(_ definition: PaletteDefinition) { self.definition = definition }
     public var isDark: Bool { definition.isDark }
     public var titlebarColorScheme: ColorScheme { definition.accent.prefersLightText ? .dark : .light }
+    /// Titlebar text follows the titlebar, not the window's palette.
+    public var titlebarText: Color { titlebarColorScheme == .dark ? .white : .black }
+    public var titlebarSecondaryText: Color { titlebarText.opacity(0.72) }
     public var titlebarBackground: Color {
         (isDark ? definition.accent.mixed(with: definition.background, amount: 0.65) : definition.accent).color
     }

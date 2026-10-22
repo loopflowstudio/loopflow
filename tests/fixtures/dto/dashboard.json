@@ -1,0 +1,84 @@
+{
+  "repository": "repo_11111111111111111111111111111111",
+  "name": "Picked",
+  "pinned": false,
+  "slots": {
+    "root": {
+      "kind": "split",
+      "axis": "vertical",
+      "weights": [
+        2.0,
+        1.0
+      ],
+      "children": [
+        {
+          "kind": "slot",
+          "slot": 1
+        },
+        {
+          "kind": "slot",
+          "slot": 0
+        }
+      ]
+    }
+  },
+  "selection": {
+    "id": "root",
+    "expression": {
+      "kind": "compose",
+      "items": [
+        {
+          "id": "first",
+          "expression": {
+            "kind": "filter",
+            "filter": {
+              "field": "state",
+              "value": "backlog"
+            }
+          }
+        },
+        {
+          "id": "second",
+          "expression": {
+            "kind": "work",
+            "work": {
+              "repository": "repo_11111111111111111111111111111111",
+              "kind": "task",
+              "id": "task_33333333333333333333333333333333"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "arrangement": {
+    "order": [
+      {
+        "source": [
+          "root",
+          "first"
+        ],
+        "work": {
+          "repository": "repo_11111111111111111111111111111111",
+          "kind": "task",
+          "id": "task_33333333333333333333333333333333"
+        }
+      },
+      {
+        "source": [
+          "root",
+          "second"
+        ],
+        "work": {
+          "repository": "repo_11111111111111111111111111111111",
+          "kind": "task",
+          "id": "task_33333333333333333333333333333333"
+        }
+      }
+    ],
+    "hidden": [],
+    "mode": "touched"
+  },
+  "id": "picked",
+  "revision": 3
+}

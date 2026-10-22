@@ -596,19 +596,19 @@ fn open_is_one_root_command_and_keeps_pr_open_explicit() {
 }
 
 #[test]
-fn desktop_list_uses_the_retained_reader_without_an_inspect_alias() {
+fn desktop_state_uses_the_retained_reader_without_an_inspect_alias() {
     use loopflow::lf::DesktopCommand;
 
     for args in [
-        vec!["lf", "desktop", "list", "--json"],
-        vec!["lf", "desktop", "li", "--json"],
+        vec!["lf", "desktop", "state", "--json"],
+        vec!["lf", "desktop", "sta", "--json"],
     ] {
         let args = normalize_args(args.into_iter().map(str::to_owned).collect()).unwrap();
         let cli = Cli::try_parse_from(args).unwrap();
         assert!(matches!(
             cli.command,
             Some(Commands::Desktop {
-                cmd: DesktopCommand::List { json: true }
+                cmd: DesktopCommand::State { json: true }
             })
         ));
     }
@@ -617,11 +617,11 @@ fn desktop_list_uses_the_retained_reader_without_an_inspect_alias() {
     let help = success(run(
         repo.path(),
         home.path(),
-        &["desktop", "list", "--help"],
+        &["desktop", "state", "--help"],
     ));
     assert_eq!(
         help,
-        success(run(repo.path(), home.path(), &["help", "desktop", "list"]))
+        success(run(repo.path(), home.path(), &["help", "desktop", "state"]))
     );
     let retired = run(repo.path(), home.path(), &["desktop", "inspect", "--json"]);
     assert_eq!(retired.status.code(), Some(2));
@@ -1174,6 +1174,7 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
     let definition = &shell["definition"];
     let args = definition["arguments"].as_array().unwrap();
     assert!(!args.iter().any(|arg| arg["name"] == "axis"));
+    assert!(definition["result_schema"]["properties"]["tab"].is_object());
     assert!(args
         .iter()
         .any(|arg| arg["name"] == "pane" && arg["required"] == false));
@@ -1186,6 +1187,11 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
         definition["result_schema"]["properties"]["work"]["$ref"],
         "#/$defs/WorkWorkspaceKey"
     );
+    let view = describe_command(&["desktop".into(), "view".into()], false).unwrap();
+    let schema = &view["definition"]["result_schema"];
+    assert_eq!(schema["anyOf"].as_array().unwrap().len(), 2);
+    assert!(schema["$defs"]["ViewPlan"].is_object());
+    assert!(schema["$defs"]["DesktopOpening"].is_object());
     let read = describe_command(&["desktop".into(), "read".into()], false).unwrap();
     let region = read["definition"]["arguments"]
         .as_array()
@@ -1204,5 +1210,286 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
         .as_array()
         .unwrap()
         .iter()
+        .filter(|command| command["command"] != "lf desktop rename")
         .all(|command| command["result_schema"].is_object()));
+}
+
+#[test]
+fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
+    let repo = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    assert!(Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(repo.path())
+        .status()
+        .unwrap()
+        .success());
+    let database = home.path().join("loopflow.db");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let store = runtime
+        .block_on(loopflow::store::open_ephemeral_store(
+            &loopflow::store::StorageConfig::sqlite(database.clone()),
+        ))
+        .unwrap();
+    let conn = rusqlite::Connection::open(&database).unwrap();
+    conn.execute_batch(include_str!("fixtures/saved_selection_work.sql"))
+        .unwrap();
+    let path = repo.path().canonicalize().unwrap().display().to_string();
+    conn.execute("UPDATE repository_plans SET repo=?1", [&path])
+        .unwrap();
+    conn.execute("UPDATE waves SET repo=?1", [&path]).unwrap();
+    let counts = || -> (i64, i64, i64) {
+        conn.query_row("SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM task_ownership), (SELECT count(*) FROM processes)", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap()
+    };
+    let before = counts();
+    let command = |args: &[&str]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        command
+            .env_clear()
+            .env("HOME", home.path())
+            .env("LF_HOME", home.path())
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("PATH", "/usr/bin:/bin")
+            .current_dir(repo.path())
+            .args(args);
+        command
+    };
+    let invoke = |args: &[&str]| command(args).output().unwrap();
+    let output = invoke(&["desktop", "view", "state:backlog", "--plan", "--json"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let plan: loopflow::work::selection::ViewPlan = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(plan.contents.len(), 1);
+    assert_eq!(plan.contents[0].title, "Backlog");
+    assert!(plan.contents[0].primary_session.is_none());
+    assert!(plan.contents[0].argv.is_none());
+    assert_eq!(counts(), before);
+    let missing = invoke(&["desktop", "view", "query:missing", "--plan"]);
+    assert_eq!(
+        missing.status.code(),
+        Some(3),
+        "{}",
+        String::from_utf8_lossy(&missing.stderr)
+    );
+    let invalid = invoke(&["desktop", "view", "repo:other", "--plan"]);
+    assert_eq!(
+        invalid.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&invalid.stderr)
+    );
+    assert_eq!(counts(), before);
+    let saved = invoke(&["desktop", "query", "query:backlog", "state:backlog"]);
+    assert!(
+        saved.status.success(),
+        "{}",
+        String::from_utf8_lossy(&saved.stderr)
+    );
+    let saved: loopflow::work::selection::Dashboard =
+        serde_json::from_slice(&saved.stdout).unwrap();
+    let after_save = counts();
+    assert_eq!((after_save.0, after_save.1), (before.0, before.1));
+    let reopened = invoke(&["desktop", "view", "query:backlog", "--plan"]);
+    assert!(
+        reopened.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reopened.stderr)
+    );
+    let reopened: loopflow::work::selection::ViewPlan =
+        serde_json::from_slice(&reopened.stdout).unwrap();
+    assert_eq!(reopened.saved_revision, Some(saved.revision));
+    assert_eq!(reopened.arrangement, saved.arrangement);
+    assert_eq!(counts(), after_save);
+    let task_id =
+        loopflow::durable::TaskId::parse("task_33333333333333333333333333333333").unwrap();
+    let revision = runtime
+        .block_on(store.get_task(&task_id))
+        .unwrap()
+        .unwrap()
+        .revision
+        .to_string();
+    let renamed = invoke(&[
+        "desktop",
+        "rename",
+        "task:task_33333333333333333333333333333333",
+        "Later task",
+        "--revision",
+        &revision,
+    ]);
+    assert!(
+        renamed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&renamed.stderr)
+    );
+    assert_eq!(
+        runtime
+            .block_on(store.get_task(&task_id))
+            .unwrap()
+            .unwrap()
+            .title,
+        "Later task"
+    );
+    let stale_name = invoke(&[
+        "desktop",
+        "rename",
+        "task:task_33333333333333333333333333333333",
+        "stale",
+        "--revision",
+        &revision,
+    ]);
+    assert!(!stale_name.status.success());
+    assert_eq!(
+        runtime
+            .block_on(store.get_task(&task_id))
+            .unwrap()
+            .unwrap()
+            .title,
+        "Later task"
+    );
+    let pinned = invoke(&["desktop", "pin", "backlog", "--revision", "1"]);
+    assert!(
+        pinned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pinned.stderr)
+    );
+    let named = invoke(&[
+        "desktop",
+        "rename",
+        "query:backlog",
+        "Later",
+        "--revision",
+        "2",
+    ]);
+    assert!(
+        named.status.success(),
+        "{}",
+        String::from_utf8_lossy(&named.stderr)
+    );
+    let removed = invoke(&["desktop", "bind", "repository", "backlog"]);
+    assert_eq!(removed.status.code(), Some(2));
+    let before_reads = counts();
+    let defaults = invoke(&["desktop", "view", "--plan"]);
+    let defaults: loopflow::work::selection::ViewPlan =
+        serde_json::from_slice(&defaults.stdout).unwrap();
+    assert!(defaults.dashboard_id.is_none());
+    assert_eq!(defaults.contents.len(), 4);
+    let plan = invoke(&["desktop", "view", "query:backlog", "--plan"]);
+    let plan: loopflow::work::selection::ViewPlan = serde_json::from_slice(&plan.stdout).unwrap();
+    assert_eq!(plan.name.as_deref(), Some("Later"));
+    assert!(plan.pinned);
+    assert_eq!(plan.contents.len(), 1);
+    let layout = invoke(&["desktop", "layout", "repository"]);
+    assert!(layout.status.success());
+    assert_eq!(String::from_utf8_lossy(&layout.stdout).trim(), "null");
+    assert_eq!(counts(), before_reads);
+    let stale = invoke(&["desktop", "unpin", "backlog", "--revision", "1"]);
+    assert!(!stale.status.success());
+    let plan = invoke(&["desktop", "view", "query:backlog", "--plan"]);
+    let plan: loopflow::work::selection::ViewPlan = serde_json::from_slice(&plan.stdout).unwrap();
+    assert!(plan.pinned);
+    assert_eq!(plan.saved_revision, Some(3));
+    let invoke_input = |args: &[&str], input: &str| {
+        use std::io::Write;
+        let mut child = command(args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        child.wait_with_output().unwrap()
+    };
+    let mut arrangement = plan.arrangement.clone();
+    arrangement
+        .hide(&arrangement.order[0].clone(), true)
+        .unwrap();
+    let arranged = invoke_input(
+        &["desktop", "arrange", "backlog", "--revision", "3"],
+        &serde_json::to_string(&arrangement).unwrap(),
+    );
+    assert!(
+        arranged.status.success(),
+        "{}",
+        String::from_utf8_lossy(&arranged.stderr)
+    );
+    let arranged: loopflow::work::selection::Dashboard =
+        serde_json::from_slice(&arranged.stdout).unwrap();
+    assert!(arranged.arrangement.project().visible.is_empty());
+    assert_eq!(arranged.arrangement.order.len(), 1);
+    // Hiding never changes whether the order is automatic.
+    assert_eq!(arranged.arrangement.mode, plan.arrangement.mode);
+    let invalid = loopflow::work::selection::Arrangement::automatic(&[]);
+    assert!(!invoke_input(
+        &["desktop", "arrange", "backlog", "--revision", "4"],
+        &serde_json::to_string(&invalid).unwrap(),
+    )
+    .status
+    .success());
+    let reopened = invoke(&["desktop", "view", "query:backlog", "--plan"]);
+    let reopened: loopflow::work::selection::ViewPlan =
+        serde_json::from_slice(&reopened.stdout).unwrap();
+    assert_eq!(reopened.arrangement, arranged.arrangement);
+    assert_eq!(reopened.saved_revision, Some(arranged.revision));
+    let mut layout: loopflow::work::selection::WorkPaneLayout =
+        serde_json::from_str(include_str!("../../../tests/fixtures/dto/pane_layout.json")).unwrap();
+    layout.revision = 0;
+    layout.tree = None;
+    layout.focused = None;
+    layout.zoomed = None;
+    layout.hidden.clear();
+    let input = serde_json::to_string(&layout).unwrap();
+    let saved = invoke_input(
+        &[
+            "desktop",
+            "layout",
+            "task:task_22222222222222222222222222222222",
+            "--save",
+        ],
+        &input,
+    );
+    assert!(
+        saved.status.success(),
+        "{}",
+        String::from_utf8_lossy(&saved.stderr)
+    );
+    let saved: loopflow::work::selection::WorkPaneLayout =
+        serde_json::from_slice(&saved.stdout).unwrap();
+    assert_eq!(saved.drafts, layout.drafts);
+    assert_eq!(saved.revision, 1);
+    assert!(!invoke_input(
+        &[
+            "desktop",
+            "layout",
+            "task:task_22222222222222222222222222222222",
+            "--save"
+        ],
+        &input
+    )
+    .status
+    .success());
+    let before_read = counts();
+    let reopened = invoke(&[
+        "desktop",
+        "layout",
+        "task:task_22222222222222222222222222222222",
+    ]);
+    let reopened: loopflow::work::selection::WorkPaneLayout =
+        serde_json::from_slice(&reopened.stdout).unwrap();
+    assert_eq!(reopened, saved);
+    assert_eq!(counts(), before_read);
+    assert_eq!((counts().0, counts().1), (before.0, before.1));
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM dashboards", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
 }

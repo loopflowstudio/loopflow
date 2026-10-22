@@ -433,8 +433,7 @@ struct DesktopHeadlessTests {
         let original = try #require(wave.tasks.items.first)
         let root = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))) as? [String: Any])
-        let waves = try #require(root["waves"] as? [[String: Any]])
-        let tasks = try #require(waves.first?["tasks"] as? [String: Any])
+        let tasks = try #require(root["tasks"] as? [String: Any])
         var row = try #require((tasks["items"] as? [[String: Any]])?.first)
         var planning = try #require(row["task"] as? [String: Any])
         planning["state"] = state
@@ -455,20 +454,12 @@ struct DesktopHeadlessTests {
         }
     }
 
-    @Test("A shipped Task leaves Working tasks for Shipping, which says what it is doing")
-    func shippingFilter() throws {
+    @Test("A shipping Task says what shipping is doing and cannot be shipped again")
+    func shippingRow() throws {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
-        let wave = try #require(snapshot.waves.first)
-        let shipped = try #require(wave.tasks.items.first { $0.shipping != nil })
-        let other = try #require(wave.tasks.items.first { $0.shipping == nil && $0.runtime?.status != .paused })
-        let model = WorkModel(query: RegistryQuery { _, _ in "{}" }, repoPath: wave.wave.repo)
-        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
-        model.navigation.retainWorkingTask(shipped.id)
-        model.navigation.retainWorkingTask(other.id)
-        #expect(model.workingTaskIDs == [other.id])
-        model.navigation.sidebarFilter = .shipping
-        #expect(model.sidebarTaskIDs == [shipped.id])
+        let shipped = try #require(snapshot.waves.first?.tasks.items.first { $0.shipping != nil })
+        #expect(shipped.runtime?.status == .shipping)
         #expect(shipped.shipping?.label == "Landing")
         #expect(shipped.shipControl.unavailable == "Task is already shipping")
     }
@@ -592,8 +583,7 @@ struct DesktopHeadlessTests {
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-empty")
 
         var saved = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var waves = try #require(saved["waves"] as? [[String: Any]])
-        var tasks = try #require(waves[0]["tasks"] as? [String: Any])
+        var tasks = try #require(saved["tasks"] as? [String: Any])
         var items = try #require(tasks["items"] as? [[String: Any]])
         var planning = try #require(items[0]["task"] as? [String: Any])
         planning["sync"] = ["connected": true, "changes": [[
@@ -602,15 +592,13 @@ struct DesktopHeadlessTests {
         ]]]
         items[0]["task"] = planning
         tasks["items"] = items
-        waves[0]["tasks"] = tasks
-        saved["waves"] = waves
         saved["tasks"] = tasks
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: saved))
         let wave = try #require(roadmap.waves.first).wave
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.toWave()]),
                            workActivity: .loading, repos: [])
-        model.applySelectionPlans([ViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [
-            ViewMember(work: .init(repository: "repo", kind: .wave, id: wave.id), title: wave.displayName)
+        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [
+            fixtureViewContent(work: .init(repository: "repo", kind: .wave, id: wave.id), title: wave.displayName)
         ])], reason: "")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         try navigator.inspect()

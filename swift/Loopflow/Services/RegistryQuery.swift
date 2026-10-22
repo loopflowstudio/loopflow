@@ -51,6 +51,56 @@ public struct RegistryQuery: Sendable {
         self.observeWork = watchWork
     }
 
+    public func viewPlan(expression: String?, repoPath: String) async throws -> WorkViewPlan {
+        let args = ["desktop", "view"] + (expression.map { [$0] } ?? []) + ["--plan", "--json"]
+        return try Self.decode(WorkViewPlan.self, from: await run(args, repoPath))
+    }
+
+    public func editDashboardQuery(id: String, expression: String, revision: Int64?, repoPath: String) async throws -> Dashboard {
+        let args = ["desktop", "query", id, expression] + (revision.map { ["--revision", String($0)] } ?? [])
+        return try Self.decode(Dashboard.self, from: await run(args, repoPath))
+    }
+
+    public func pinDashboard(id: String, pinned: Bool, revision: Int64, repoPath: String) async throws -> Dashboard {
+        try Self.decode(Dashboard.self, from: await run(["desktop", pinned ? "pin" : "unpin", id, "--revision", String(revision), "--json"], repoPath))
+    }
+
+    public func renameDashboard(id: String, name: String, revision: Int64, repoPath: String) async throws -> Dashboard {
+        try Self.decode(Dashboard.self, from: await run(["desktop", "rename", "query:" + id, name, "--revision", String(revision)], repoPath))
+    }
+
+    public func saveDashboardArrangement(id: String, arrangement: WorkArrangement, revision: Int64, repoPath: String) async throws -> Dashboard {
+        let input = String(decoding: try JSONEncoder().encode(arrangement), as: UTF8.self)
+        return try Self.decode(Dashboard.self, from: await runWithInput(["desktop", "arrange", id, "--revision", String(revision)], repoPath, input))
+    }
+
+    /// Nil restores the default slot layout.
+    public func saveDashboardSlots(id: String, slots: DashboardSlotLayout?, revision: Int64, repoPath: String) async throws -> Dashboard {
+        let input = String(decoding: try JSONEncoder().encode(slots), as: UTF8.self)
+        return try Self.decode(Dashboard.self, from: await runWithInput(["desktop", "slots", id, "--revision", String(revision)], repoPath, input))
+    }
+
+    /// Move `member`'s tile into `target`'s place in a Dashboard's order, as the
+    /// repository order's drop does; Rust applies the move and decides the mode.
+    public func reorderDashboard(id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey, revision: Int64, repoPath: String) async throws -> Dashboard {
+        try Self.decode(Dashboard.self, from: await run(["desktop", "order", member.selector, "--to", target.selector,
+            "--query", id, "--revision", String(revision)], repoPath))
+    }
+
+    /// Move a Working Tasks member into `target`'s place in the repository's one Task order.
+    public func reorderTask(_ task: String, to target: String, repoPath: String) async throws -> [String] {
+        try Self.decode([String].self, from: await run(["desktop", "order", "task:" + task, "--to", "task:" + target], repoPath))
+    }
+
+    public func paneLayout(work: String, repoPath: String) async throws -> WorkPaneLayout? {
+        try Self.decode(WorkPaneLayout?.self, from: await run(["desktop", "layout", work], repoPath))
+    }
+
+    public func savePaneLayout(_ layout: WorkPaneLayout, repoPath: String) async throws -> WorkPaneLayout {
+        let input = String(decoding: try JSONEncoder().encode(layout), as: UTF8.self)
+        return try Self.decode(WorkPaneLayout.self, from: await runWithInput(["desktop", "layout", layout.work.selector, "--save", "--json"], repoPath, input))
+    }
+
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {
         try Self.decode(Portfolio.self, from: await run(["portfolio"] + arguments + ["--json"], nil))
     }
@@ -360,6 +410,19 @@ public struct RegistryQuery: Sendable {
         _ = try await run(["task", "move", issue] + destination, cwd)
     }
 
+    /// Your registered Machines. This Machine appears only when a default names it.
+    public func machines(cwd: String?) async throws -> [Machine] {
+        try Self.decode([Machine].self, from: await run(["machine", "list", "--json"], cwd))
+    }
+
+    /// Hand a Task to `machine`, or set a Wave's default Machine, through `lf machine use`.
+    public func useMachine(_ machine: String, for target: WorkMachineTarget, cwd: String?) async throws {
+        switch target {
+        case .task(let issue): _ = try await run(["machine", "use", machine, "--task", issue, "--json"], cwd)
+        case .wave(let id): _ = try await run(["machine", "use", machine, id, "--json"], cwd)
+        }
+    }
+
     public func pauseTask(issue: String, paused: Bool, cwd: String?) async throws {
         _ = try await run(["task", paused ? "pause" : "resume", issue], cwd)
     }
@@ -624,6 +687,12 @@ public struct Machine: Decodable, Sendable, Hashable {
     }
 }
 
+/// The Work a Machine control reads and sets: a started Task or a Wave.
+public enum WorkMachineTarget: Sendable, Hashable {
+    case task(issue: String)
+    case wave(id: String)
+}
+
 /// `WaveSnapshot` (`lf/commands/waves.rs`) — every field present, Optionals
 /// explicit (no serde defaults on the wire).
 public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
@@ -672,29 +741,56 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
 public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
     public let generatedAt: String
     public let waves: [WaveRoadmap]
+    /// Every Task once; each names its Wave.
     public let tasks: WorkEvidence<RoadmapTask>
 
     enum CodingKeys: String, CodingKey {
         case waves, tasks
         case generatedAt = "generated_at"
     }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        generatedAt = try container.decode(String.self, forKey: .generatedAt)
+        let tasks = try container.decode(WorkEvidence<RoadmapTask>.self, forKey: .tasks)
+        self.tasks = tasks
+        var list = try container.nestedUnkeyedContainer(forKey: .waves)
+        var waves: [WaveRoadmap] = []
+        while !list.isAtEnd {
+            waves.append(try WaveRoadmap(from: list.superDecoder(), roadmapTasks: tasks))
+        }
+        self.waves = waves
+    }
 }
 
-public struct WaveRoadmap: Decodable, Sendable, Hashable {
+public struct WaveRoadmap: Sendable, Hashable {
     public let workflow: String?
     public let projectReadiness: ProjectReadiness
     public let wave: WaveSnapshot
     public let metricPortfolio: MetricPortfolio
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
     public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
+    /// This Wave's share of the roadmap's Tasks, which the wire sends once.
     public let tasks: WorkEvidence<RoadmapTask>
     public let unavailableTasks: [UnavailableTaskEvidence]
 
     enum CodingKeys: String, CodingKey {
         case projectReadiness = "project_readiness"
-        case wave, projects, tasks, workflow
+        case wave, projects, workflow
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
+    }
+
+    init(from decoder: Decoder, roadmapTasks: WorkEvidence<RoadmapTask>) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        workflow = try container.decode(String?.self, forKey: .workflow)
+        projectReadiness = try container.decode(ProjectReadiness.self, forKey: .projectReadiness)
+        let wave = try container.decode(WaveSnapshot.self, forKey: .wave)
+        self.wave = wave
+        metricPortfolio = try container.decode(MetricPortfolio.self, forKey: .metricPortfolio)
+        projects = try container.decode(WorkEvidence<ProjectPlanningSnapshot>.self, forKey: .projects)
+        tasks = roadmapTasks.filter { $0.task.waveId == wave.id }
+        unavailableTasks = try container.decode([UnavailableTaskEvidence].self, forKey: .unavailableTasks)
     }
 }
 

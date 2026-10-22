@@ -1430,6 +1430,16 @@ fn init_tracing(verbose: bool) {
         .init();
 }
 
+fn desktop_intent_read(cli: &Cli) -> bool {
+    use loopflow::lf::DesktopCommand;
+    matches!(
+        cli.command,
+        Some(Commands::Desktop {
+            cmd: DesktopCommand::View { .. } | DesktopCommand::Layout { save: false, .. }
+        })
+    )
+}
+
 /// Opened per event, so a command that logs nothing creates no home.
 struct DiagnosticLog;
 
@@ -1456,8 +1466,25 @@ impl std::io::Write for DiagnosticLog {
 }
 
 fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {
+    // Reads and saved-layout edits run on any platform.
     // Desktop pane control refuses before repository lookup or preparation.
     // Opening chooses its destination per platform in `lf open`.
+    if matches!(
+        cli.command,
+        Some(Commands::Desktop {
+            cmd: loopflow::lf::DesktopCommand::View { .. }
+                | loopflow::lf::DesktopCommand::Query { .. }
+                | loopflow::lf::DesktopCommand::Pin { .. }
+                | loopflow::lf::DesktopCommand::Unpin { .. }
+                | loopflow::lf::DesktopCommand::Rename { .. }
+                | loopflow::lf::DesktopCommand::Arrange { .. }
+                | loopflow::lf::DesktopCommand::Slots { .. }
+                | loopflow::lf::DesktopCommand::Order { .. }
+                | loopflow::lf::DesktopCommand::Layout { .. }
+        })
+    ) {
+        return Ok(());
+    }
     if matches!(cli.command, Some(Commands::Desktop { .. })) && !cli.context {
         loopflow::lf::commands::desktop::require_supported().inspect_err(|_| {
             journal::mark_effect_free_read();
@@ -1493,7 +1520,8 @@ fn run() -> anyhow::Result<()> {
         let args = reorder_args(std::iter::once("lf".to_string()).chain(command).collect());
         let cli = loopflow::lf::commands::ssh::parse_remote_command(&args[1..])?;
         validate_desktop_platform(&cli)?;
-        let preview = cli.context
+        let preview = desktop_intent_read(&cli)
+            || cli.context
             || cli.explain
             || matches!(
                 cli.command,
@@ -1608,7 +1636,8 @@ fn run() -> anyhow::Result<()> {
             cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
         })
     );
-    if cli.context || cli.explain || planning_read || location_read {
+    let desktop_read = desktop_intent_read(&cli);
+    if cli.context || cli.explain || planning_read || location_read || desktop_read {
         journal::mark_effect_free_read();
     }
     init_tracing(cli.verbose);
@@ -1642,6 +1671,7 @@ fn run() -> anyhow::Result<()> {
         && !cli.explain
         && !planning_read
         && !location_read
+        && !desktop_read
         && !matches!(
             cli.command,
             Some(Commands::Repo {
@@ -1654,6 +1684,9 @@ fn run() -> anyhow::Result<()> {
     loopflow::lf::commands::work_route::resolve_repository_selection(&mut cli)?;
     if cli.context || cli.explain {
         return preview_invocation(&cli, &args);
+    }
+    if desktop_read {
+        return dispatch(cli, &args);
     }
     if let Some(Commands::Task {
         cmd:

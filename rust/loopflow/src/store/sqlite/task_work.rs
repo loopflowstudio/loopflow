@@ -1,6 +1,8 @@
 //! One association rule for CLI and Desktop. Membership is additive to binding;
 //! it never rewrites event attribution or follows causal parent Processes.
 
+use std::collections::HashMap;
+
 use crate::durable::TaskId;
 use crate::id::LfProcessId;
 use crate::ops::workflow::{
@@ -62,27 +64,14 @@ pub(super) fn session_tasks(session: &str) -> String {
 }
 
 pub(super) fn lf_process_ids(conn: &rusqlite::Connection, selector: &str) -> StoreResult<String> {
-    lf_process_ids_in(conn, selector, None)
-}
-
-fn lf_process_ids_in(
-    conn: &rusqlite::Connection,
-    selector: &str,
-    candidates: Option<&str>,
-) -> StoreResult<String> {
-    let within = |column: &str| match candidates {
-        Some(query) => format!(" AND {column} IN ({query})"),
-        None => String::new(),
-    };
     // History and attachments share one query-local membership; the partial
     // index skips retained events that name no Process.
     Ok(format!("WITH members AS MATERIALIZED ({})
-        SELECT ae.id FROM processes ae JOIN ({}) tw ON ({}) WHERE 1{}
-        UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL{}
-        UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL{}
-        UNION SELECT p.id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members){}",
-        session_ids(selector), tasks(selector), process_membership(conn, "ae")?,
-        within("ae.id"), within("se.lf_process_id"), within("p.attached_lf_process_id"), within("p.id")))
+        SELECT ae.id FROM processes ae JOIN ({}) tw ON ({})
+        UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL
+        UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL
+        UNION SELECT p.id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members)",
+        session_ids(selector), tasks(selector), process_membership(conn, "ae")?))
 }
 
 /// Prefer the deepest checkout when membership names more than one Task.
@@ -112,6 +101,45 @@ pub(super) fn task_of_process(
         .optional()?)
 }
 
+/// Each Task in `tasks` paired with each Graph among its work. Membership is
+/// driven from the Graphs, so asking for every Task costs one reading: a Graph
+/// joins the checkout that is its directory or one of its ancestors, the same
+/// containment `checkout` tests from the other side.
+fn task_graph_pairs(conn: &rusqlite::Connection, tasks: &str) -> StoreResult<String> {
+    let relocations: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='relocated_task_processes' AND type='table')",
+        [], |row| row.get(0),
+    )?;
+    let (unmoved, relocated) = if relocations {
+        (
+            "WHERE NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id=f.id)",
+            "UNION SELECT r.task_id, r.process_id FROM relocated_task_processes r JOIN tw ON tw.id=r.task_id
+                WHERE r.process_id IN (SELECT id FROM f)",
+        )
+    } else {
+        ("", "")
+    };
+    Ok(format!(
+        "WITH RECURSIVE tw AS MATERIALIZED ({tasks}),
+            f AS MATERIALIZED (SELECT e.id, e.cwd FROM graph_processes fp JOIN processes e ON e.id=fp.lf_process_id),
+            up(id, path) AS (SELECT id, cwd FROM f {unmoved}
+                UNION ALL SELECT id, rtrim(rtrim(path, replace(path,'/','')),'/') FROM up WHERE path!=''),
+            checkouts AS MATERIALIZED (SELECT id, rtrim(worktree,'/') AS root FROM tw
+                WHERE checkout_machine_id=(SELECT id FROM machines WHERE route='local') AND worktree!=''),
+            links(session_id, graph) AS (
+                SELECT se.session_id, se.lf_process_id FROM session_events se INDEXED BY session_events_process
+                    WHERE se.lf_process_id IN (SELECT id FROM f)
+                UNION SELECT p.agent_session_id, p.attached_lf_process_id FROM processes p
+                    WHERE p.kind='agent' AND p.attached_lf_process_id IN (SELECT id FROM f) AND p.agent_session_id IS NOT NULL
+                UNION SELECT p.agent_session_id, p.id FROM processes p
+                    WHERE p.kind='agent' AND p.id IN (SELECT id FROM f) AND p.agent_session_id IS NOT NULL)
+         SELECT c.id AS task_id, up.id AS graph FROM up JOIN checkouts c ON c.root=up.path
+         {relocated}
+         UNION SELECT tw.id, l.graph FROM links l JOIN agent_sessions a ON a.id=l.session_id JOIN tw ON ({})",
+        session_membership("a"),
+    ))
+}
+
 pub(super) fn graphs_of_task(
     conn: &rusqlite::Connection,
     task: &TaskId,
@@ -119,15 +147,49 @@ pub(super) fn graphs_of_task(
     super::graph_inventory::graphs_in(
         conn,
         &format!(
-            "e.id IN ({})",
-            lf_process_ids_in(
-                conn,
-                "?1",
-                Some("SELECT lf_process_id FROM graph_processes")
-            )?
+            "e.id IN (SELECT graph FROM ({}))",
+            task_graph_pairs(conn, &tasks("?1"))?
         ),
         &[&task.as_str()],
     )
+}
+
+/// Each Task's most recently launched Graph, for every Task in one reading.
+fn latest_task_graphs(
+    conn: &rusqlite::Connection,
+) -> StoreResult<HashMap<TaskId, crate::ops::graph_process::GraphProcess>> {
+    let mut latest = HashMap::new();
+    let mut query = conn.prepare(&format!(
+        "SELECT task_id, graph FROM ({}) pairs
+         ORDER BY (SELECT e.rowid FROM processes e WHERE e.id=pairs.graph)",
+        task_graph_pairs(conn, "SELECT id,worktree,checkout_machine_id FROM tasks")?
+    ))?;
+    for row in query.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })? {
+        let (task, graph) = row?;
+        latest.insert(task, graph);
+    }
+    let ids = serde_json::to_string(&latest.values().collect::<Vec<_>>())?;
+    let graphs: HashMap<_, _> = super::graph_inventory::graphs_in(
+        conn,
+        "e.id IN (SELECT value FROM json_each(?1))",
+        &[&ids],
+    )?
+    .into_iter()
+    .map(|graph| (graph.process.id.to_string(), graph))
+    .collect();
+    latest
+        .into_iter()
+        .map(|(task, graph)| {
+            let task = TaskId::parse(&task)
+                .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+            let graph = graphs.get(&graph).cloned().ok_or_else(|| {
+                crate::store::StoreError::InvalidData(format!("Graph {graph} has no Graph process"))
+            })?;
+            Ok((task, graph))
+        })
+        .collect()
 }
 
 /// The Task's workflow row: the graph it took up and its projection, the
@@ -327,7 +389,10 @@ pub(crate) struct TaskShipping {
     pub process: Option<LfProcessId>,
 }
 
-fn shipping_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<TaskShipping>> {
+pub(super) fn shipping_in(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+) -> StoreResult<Option<TaskShipping>> {
     use rusqlite::OptionalExtension;
     let row: Option<(i64, Option<String>)> = conn
         .query_row(
@@ -906,6 +971,14 @@ impl SqliteStore {
         })
     }
 
+    /// Each Task's most recently launched Graph, read for every Task at once.
+    pub(crate) fn latest_task_graphs(
+        &self,
+    ) -> StoreResult<HashMap<TaskId, crate::ops::graph_process::GraphProcess>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        latest_task_graphs(&conn)
+    }
+
     /// Every Graph among the Task's work, oldest first.
     pub(crate) fn task_graphs(
         &self,
@@ -1117,6 +1190,74 @@ mod tests {
     }
 
     #[test]
+    fn every_task_latest_graph_matches_its_own_graphs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        let (task, sibling, idle) = (TaskId::new(), TaskId::new(), TaskId::new());
+        let mut graphs = Vec::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
+            conn.execute(
+                "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_proof','/repo',1)",
+                [],
+            )
+            .unwrap();
+            // A sibling whose path extends the Task's is not inside it.
+            for (id, n, worktree) in [
+                (&task, 1, "/repo/task/"),
+                (&sibling, 2, "/repo/task-other"),
+                (&idle, 3, "/repo/idle"),
+            ] {
+                conn.execute("INSERT INTO tasks(repository_id,id,project_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES('repo_proof',?1,?2,?3,?4,1,(SELECT id FROM machines WHERE route='local'))", params![id.as_str(), project.as_str(), format!("PROOF-{n}"), worktree]).unwrap();
+            }
+            for cwd in [
+                "/repo/task",
+                "/repo/task-other",
+                "/repo/task/deep/er",
+                "/repo/task-other/x",
+                "/elsewhere",
+            ] {
+                let id = LfProcessId::new();
+                conn.execute(
+                    "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,?3,1)",
+                    params![id, TraceId::new(), cwd],
+                )
+                .unwrap();
+                graphs.push(id);
+            }
+        }
+        let graph = crate::graph::compiled::CompiledGraph::new("proof", &[]);
+        for id in &graphs {
+            store.record_graph_process(id, &graph).unwrap();
+        }
+        let latest = store.latest_task_graphs().unwrap();
+        for id in [&task, &sibling, &idle] {
+            assert_eq!(
+                latest.get(id),
+                store.task_graphs(id).unwrap().last(),
+                "{id}"
+            );
+        }
+        assert_eq!(
+            latest[&task].process.cwd.as_deref(),
+            Some("/repo/task/deep/er")
+        );
+        assert_eq!(
+            latest[&sibling].process.cwd.as_deref(),
+            Some("/repo/task-other/x")
+        );
+        assert!(!latest.contains_key(&idle));
+    }
+
+    #[test]
     fn process_membership_does_not_read_events_that_name_no_process() {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
@@ -1225,22 +1366,25 @@ mod tests {
             after_cleanup.0 <= before_cleanup.0 * 2 && after_cleanup.1 <= before_cleanup.1 * 2,
             "Unrelated history increased cleanup scans: {before_cleanup:?} → {after_cleanup:?}"
         );
-        // Graph reads restrict candidates without losing historical association
-        // when the candidate ran outside the Task's checkout.
-        let candidates = super::lf_process_ids_in(&conn, "?1", Some("SELECT ?2")).unwrap();
-        let read_candidates = || {
-            let mut statement = conn.prepare(&candidates).unwrap();
+        // Graph reads start from the Graphs without losing historical association
+        // when the Graph ran outside the Task's checkout.
+        conn.execute(
+            "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'proof','{}')",
+            [&finished],
+        )
+        .unwrap();
+        let pairs = super::task_graph_pairs(&conn, &super::tasks("?1")).unwrap();
+        let read_graphs = || {
+            let mut statement = conn.prepare(&pairs).unwrap();
             let selected = statement
-                .query_map(params![task.as_str(), finished.as_str()], |row| {
-                    row.get::<_, String>(0)
-                })
+                .query_map([task.as_str()], |row| row.get::<_, String>(1))
                 .unwrap()
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap();
             assert_eq!(selected, vec![finished.to_string()]);
             statement.get_status(rusqlite::StatementStatus::VmStep)
         };
-        let before = read_candidates();
+        let before = read_graphs();
         for _ in 0..2_000 {
             conn.execute(
                 "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/unrelated',1)",
@@ -1248,10 +1392,39 @@ mod tests {
             )
             .unwrap();
         }
-        let after = read_candidates();
+        let after = read_graphs();
         assert!(
             after <= before * 2,
             "Unrelated commands increased Graph membership work: {before} → {after}"
+        );
+        // Every Task's Graphs are one reading driven from the Graphs, so Sessions
+        // that reach no Graph cost nothing however many Tasks are read. On
+        // October 18, 2026 each Task rescanned all 4,246 of Jack Heart's
+        // Sessions: 2.3 s for 622 Tasks.
+        let every_task =
+            super::task_graph_pairs(&conn, "SELECT id,worktree,checkout_machine_id FROM tasks")
+                .unwrap();
+        let read_every_task = || {
+            let mut statement = conn.prepare(&every_task).unwrap();
+            let pairs = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(pairs, vec![(task.to_string(), finished.to_string())]);
+            statement.get_status(rusqlite::StatementStatus::VmStep)
+        };
+        let before = read_every_task();
+        for n in 0..2_000 {
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,task_id,wave_id,cwd)
+                VALUES(?1,'quiet','human',1,0,?2,?3,'/repo/task')", params![format!("quiet-{n}"), task.as_str(), wave]).unwrap();
+        }
+        let after = read_every_task();
+        assert!(
+            after <= before * 2,
+            "Sessions reaching no Graph increased every Task's Graph reading: {before} → {after}"
         );
     }
 

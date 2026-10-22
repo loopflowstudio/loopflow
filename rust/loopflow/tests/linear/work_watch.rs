@@ -117,21 +117,26 @@ impl Machine {
             rusqlite::params![self.wave.id(),PROJECT]).unwrap();
     }
 
-    /// Start FIX-1 in a real Git checkout with one commit, and return it.
+    /// Start `FIX-<index>` in a real Git checkout with one commit, and return it.
     #[cfg(target_os = "macos")]
-    fn checkout(&self) -> std::path::PathBuf {
-        let worktree = repository(&self.path().join("checkout"));
+    fn start(&self, index: usize) -> std::path::PathBuf {
+        let worktree = repository(&self.path().join(format!("checkout-{index}")));
         let head = git(&worktree, &["rev-parse", "HEAD"]);
         let now = time::OffsetDateTime::now_utc();
-        let mut task = self.store.task_by_issue("issue-1").unwrap().unwrap();
+        let mut task = self
+            .store
+            .task_by_issue(&format!("issue-{index}"))
+            .unwrap()
+            .unwrap();
         task.worktree = Some(worktree.clone());
-        task.workspace_slug = "fix-one".into();
+        task.workspace_slug = format!("fix-{index}");
+        git(&worktree, &["branch", "--move", &task.workspace_slug]);
         let pr = TaskPr {
             id: TaskPrId::new(),
             task_id: task.id.clone(),
             sequence: 1,
             slug: task.workspace_slug.clone(),
-            branch: "fix-one".into(),
+            branch: task.workspace_slug.clone(),
             base_commit: head,
             parent_pr_id: None,
             publication: None,
@@ -247,7 +252,7 @@ fn identifiers(roadmap: &RoadmapSnapshot) -> Vec<String> {
     roadmap
         .waves
         .iter()
-        .flat_map(|wave| match &wave.tasks {
+        .flat_map(|wave| match roadmap.wave_tasks(wave) {
             Evidence::Ok { items, .. } => items
                 .iter()
                 .map(|task| task.task.identifier.clone())
@@ -341,7 +346,7 @@ impl Watch {
             let WorkContent::Planning(Some(part)) = frame.content else {
                 continue;
             };
-            let Evidence::Ok { items, .. } = &part.roadmap.waves[0].tasks else {
+            let Evidence::Ok { items, .. } = part.roadmap.wave_tasks(&part.roadmap.waves[0]) else {
                 continue;
             };
             let progress = &items[0].condition.local_progress;
@@ -1008,7 +1013,7 @@ fn scope_selects_sessions_and_idle_sends_nothing() {
 fn a_checkout_changed_on_disk_is_shown() {
     let home = Machine::at(tempfile::tempdir().unwrap());
     home.plan(1);
-    let worktree = home.checkout();
+    let worktree = home.start(1);
     let watch = home.watch();
     watch.checkout((false, false));
 
@@ -1137,8 +1142,8 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
             }
             if let WorkContent::Planning(Some(part)) = frame.content {
                 last = Some(format!("{part:?}"));
-                for wave in part.roadmap.waves {
-                    if let Evidence::Ok { items, .. } = wave.tasks {
+                {
+                    if let Evidence::Ok { items, .. } = part.roadmap.tasks {
                         for task in items {
                             if let Some(runtime) = task.runtime {
                                 if runtime.status == expected
@@ -1355,5 +1360,101 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
     assert_eq!(
         statuses[0].publication_state.as_deref(),
         Some("unconfirmed")
+    );
+}
+
+/// The `git` commands one planning reading runs, recorded by a shim ahead of
+/// the real `git` on PATH.
+fn planning_git_commands(home: &Path) -> Vec<String> {
+    let shim = tempfile::tempdir().unwrap();
+    let log = shim.path().join("calls");
+    let path = std::env::var_os("PATH").unwrap();
+    let git = std::env::split_paths(&path)
+        .map(|dir| dir.join("git"))
+        .find(|candidate| candidate.is_file())
+        .unwrap();
+    let script = shim.path().join("git");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{}'\nexec '{}' \"$@\"\n",
+            log.display(),
+            git.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let mut search = vec![shim.path().to_path_buf()];
+    search.extend(std::env::split_paths(&path));
+    let output = lf(home, &["monitor", "work", "--json"])
+        .env("PATH", std::env::join_paths(search).unwrap())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let planning = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<WorkFrame>(line).unwrap())
+        .any(|frame| matches!(frame.content, WorkContent::Planning(Some(_))));
+    assert!(planning, "no planning frame");
+    std::fs::read_to_string(&log)
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Every Desktop window waits on this reading. On October 18, 2026 Jack Heart's
+/// Machine took over a minute to produce it, mostly spawning `git` for Waves
+/// whose repositories were deleted test directories, so the window stayed on
+/// “Updating…” with no working Tasks.
+#[test]
+fn planning_runs_git_per_repository_not_per_wave() {
+    let home = Machine::new();
+    home.plan(3);
+    let baseline = planning_git_commands(home.path());
+
+    for index in 0..8 {
+        let gone = home.path().join(format!("deleted-{index}"));
+        let wave = Wave::new(
+            WaveId::new(),
+            format!("gone-{index}"),
+            gone.display().to_string(),
+        );
+        home.store.create_wave(&wave).unwrap();
+        let sibling = Wave::new(
+            WaveId::new(),
+            format!("sibling-{index}"),
+            home.wave.repo().into(),
+        );
+        home.store.create_wave(&sibling).unwrap();
+    }
+    let grown = planning_git_commands(home.path());
+
+    assert!(
+        grown.len() <= baseline.len(),
+        "baseline: {baseline:#?}\ngrown: {grown:#?}"
+    );
+}
+
+/// A planning reading asks Git only whether each live checkout is dirty; its
+/// HEAD and Git layout are read from disk. On October 18, 2026 Jack Heart's
+/// 55 live checkouts cost three commands each.
+#[cfg(target_os = "macos")]
+#[test]
+fn planning_asks_git_once_per_live_checkout() {
+    let home = Machine::new();
+    home.plan(4);
+    home.start(1);
+    let one = planning_git_commands(home.path());
+    for index in 2..=4 {
+        home.start(index);
+    }
+    let four = planning_git_commands(home.path());
+
+    assert!(
+        four.len() <= one.len() + 3,
+        "one checkout: {one:#?}\nfour checkouts: {four:#?}"
     );
 }

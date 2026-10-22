@@ -246,6 +246,67 @@ struct TaskWorkflowHeader: View {
     }
 }
 
+/// A Task's identity wherever it heads Work: the window trail and Dashboard tiles.
+/// Its container sets the primary and secondary text styles.
+struct TaskHeading: View {
+    let task: RoadmapTask
+
+    /// Started is durable Task evidence, the definition Working Tasks lists by;
+    /// Linear's planning state never overrides it.
+    var state: String {
+        if let label = task.task.terminalLabel { return label }
+        if task.runtime?.status == .paused { return "Paused" }
+        return task.runtime?.owner != nil ? "Started" : "Unstarted"
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(task.task.identifier).font(.system(.body, design: .monospaced)).fixedSize()
+            // The title truncates first; identifier and state keep their width.
+            Text(task.task.name).lineLimit(1).truncationMode(.tail)
+                .frame(minWidth: 0, alignment: .leading).help(task.task.name)
+            Text(state).foregroundStyle(.secondary).fixedSize()
+                .accessibilityIdentifier("task-heading-state")
+        }
+    }
+}
+
+extension RoadmapTask {
+    /// Not yet started and still open: its Session slot offers Start.
+    var awaitsStart: Bool { runtime?.owner == nil && !task.isTerminal }
+}
+
+/// An unstarted Task's Session slot. Showing it starts nothing; Start runs the
+/// Task's Workflow through the same path as `lf task run`.
+struct TaskStartOffer: View {
+    let model: WorkModel
+    let task: RoadmapTask
+
+    private var unavailable: String? {
+        if let draft = model.navigation.taskRunDrafts[task.id], draft.acting { return draft.progress ?? "Updating Task…" }
+        if let error = model.roadmap.errorMessage { return error }
+        if model.showsSavedPlanning { return WorkCache.savedReason }
+        return task.runControl.unavailable
+    }
+
+    var body: some View {
+        SessionSlotOffer(
+            title: "Not started", systemImage: "play.circle",
+            action: "Start", actionImage: "play.fill",
+            note: model.navigation.taskRunDrafts[task.id]?.error
+                ?? "Starts this Task’s Workflow and its first conversation.",
+            unavailable: unavailable, help: "lf task run \(task.task.identifier)",
+            accessibilityLabel: "Start \(task.task.identifier)",
+            actionIdentifier: "task-start-\(task.id)",
+            perform: { Task { await model.startTask(nil, task: task) } }
+        ) {
+            Text(task.task.description.isEmpty ? "No description recorded." : task.task.description)
+                .lineLimit(8)
+        }
+        .accessibilityIdentifier("task-start-offer-\(task.id)")
+    }
+}
+
 /// Shared Task actions for keyboard access and sidebar context menus.
 struct TaskActionItems: View {
     let model: WorkModel

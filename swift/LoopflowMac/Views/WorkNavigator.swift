@@ -13,8 +13,15 @@ struct WorkNavigator: View {
     @FocusState private var focusedWork: WorkReference?
     @State private var focusMemory = SidebarResponderMemory()
 
+    private var listTitle: String {
+        let filter = model.navigation.sidebarFilter
+        guard model.navigation.sidebarWaveID != nil else { return filter.rawValue }
+        let wave = model.sidebarWave?.wave.displayName ?? "Wave unavailable"
+        return filter == .working ? wave : "\(wave) · \(filter.rawValue)"
+    }
+
     private var rowOrder: [WorkReference] {
-        model.sidebarTaskIDs.map { .task(id: $0) } + model.visibleRoadmaps.map { .wave(id: $0.wave.id) }
+        model.sidebarTaskIDs.map { .task(id: $0) } + model.sidebarWaves.map { .wave(id: $0.wave.id) }
     }
 
     private func moveFocus(_ direction: MoveCommandDirection) {
@@ -31,33 +38,46 @@ struct WorkNavigator: View {
                 Text(status).font(Typography.body(11)).foregroundStyle(palette.textSecondary).padding(10)
                     .accessibilityIdentifier("work-status")
             }
-            if let error = model.selectionPlans.errorMessage {
+            if let error = model.dashboardError ?? model.selectionPlans.errorMessage {
                 Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
             }
             WorkTaskList(navigation: model.navigation) {
                 VStack(alignment: .leading, spacing: 5) {
+                    if model.navigation.sidebarWaveID != nil {
+                        Button { model.select(nil) } label: {
+                            Label(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository",
+                                  systemImage: "chevron.left")
+                        }.buttonStyle(.plain).font(Typography.body(12)).foregroundStyle(palette.textSecondary)
+                            .padding(.horizontal, 10).padding(.top, 6)
+                            .help("Back to Working Tasks")
+                            .accessibilityIdentifier("work-sidebar-back")
+                    }
                     HStack {
-                        Text(model.navigation.sidebarFilter.rawValue.uppercased())
+                        Text(listTitle.uppercased()).lineLimit(1)
                         Spacer()
                         Text("\(model.sidebarTaskIDs.count)")
                     }.font(Typography.code(10)).foregroundStyle(palette.textSecondary).padding(10)
                     ForEach(model.sidebarTaskIDs, id: \.self) { id in taskRow(id) }
                     if model.sidebarTaskIDs.isEmpty {
-                        Text("No working Tasks in this list").font(Typography.body(12))
+                        Text(model.navigation.sidebarWaveID == nil ? "No working Tasks in this list" : "No open Tasks in this Wave")
+                            .font(Typography.body(12))
                             .foregroundStyle(palette.textSecondary).padding(10)
                     }
                     if let selection = model.selection, selection.kind == .task,
                        !model.sidebarTaskIDs.contains(where: { model.isSelected(.task(id: $0)) }) {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Open Task is outside this list")
-                            Button("Show working tasks") { model.navigation.sidebarFilter = .working }
+                            Button("Show working tasks") {
+                                model.navigation.sidebarFilter = .working
+                                model.navigation.sidebarWaveID = nil
+                            }
                         }.font(Typography.body(11)).padding(10)
                     }
-                    if !model.visibleRoadmaps.isEmpty {
-                        Text("WAVES").font(Typography.code(10)).foregroundStyle(palette.textSecondary)
-                            .padding(10).padding(.top, 8)
+                    if !model.sidebarWaves.isEmpty {
+                        Text(model.navigation.sidebarWaveID == nil ? "WAVES" : "SUBWAVES").font(Typography.code(10))
+                            .foregroundStyle(palette.textSecondary).padding(10).padding(.top, 8)
                     }
-                    ForEach(model.visibleRoadmaps, id: \.wave.id) { wave in
+                    ForEach(model.sidebarWaves, id: \.wave.id) { wave in
                         Button { model.select(.wave(id: wave.wave.id)) } label: {
                             HStack {
                                 Image(systemName: "water.waves")
@@ -78,6 +98,7 @@ struct WorkNavigator: View {
                             .accessibilityLabel("\(wave.wave.displayName), \(wave.tasks.items.count) Tasks")
                             .accessibilityIdentifier("work-wave-\(wave.wave.id)")
                     }
+                    if model.navigation.sidebarWaveID == nil { DashboardSidebar(model: model) }
                 }.padding(8)
             }
         }
@@ -164,6 +185,7 @@ struct WorkNavigator: View {
                 .allowsHitTesting(false)
         }
         .onHover { hoveredTask = $0 ? id : nil }
+        .modifier(TaskOrderDragging(model: model, workID: model.navigation.sidebarWaveID == nil ? model.workingTaskWorkID(row: id) : nil))
         .contextMenu {
             actions(for: id)
         }
@@ -185,6 +207,7 @@ struct WorkNavigator: View {
 
 struct WorkBreadcrumbs: View {
     @Bindable var model: WorkModel
+    @Environment(\.palette) private var palette
 
     var body: some View {
         HStack(spacing: 8) {
@@ -201,6 +224,7 @@ struct WorkBreadcrumbs: View {
         }
         .buttonStyle(.plain)
         .font(Typography.strong(13))
+        .foregroundStyle(palette.titlebarText, palette.titlebarSecondaryText)
         .accessibilityIdentifier("work-breadcrumbs")
     }
 
@@ -215,29 +239,162 @@ struct WorkBreadcrumbs: View {
             Button { model.goForward() } label: { Image(systemName: "chevron.right") }
                 .frame(width: 24, height: 28).contentShape(Rectangle())
                 .disabled(model.navigation.forwardStack.isEmpty).help("Forward")
-            HStack(spacing: 2) {
-                Button(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Work") {
-                    model.select(nil)
-                    model.navigation.content = .terminals
-                }.lineLimit(1)
-                Button { model.navigation.palette = .search } label: {
-                    Image(systemName: "chevron.down").frame(width: 24, height: 28).contentShape(Rectangle())
-                }
-                    .help("Navigate (⌘K)").accessibilityLabel("Navigate Tasks, Waves and repositories")
-            }.fixedSize()
-            if showWave, let wave = model.breadcrumb?.wave {
-                Text("/")
+            Button(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Work") {
+                model.select(nil)
+                model.navigation.content = .terminals
+            }.lineLimit(1).fixedSize()
+            WorkJumpSeparator(model: model, scope: .repository, label: "Waves and Dashboards")
+            if showWave, model.navigation.trailDashboardID == nil, let wave = model.breadcrumb?.wave {
                 Button(wave.roadmap.wave.displayName) {
                     model.select(.wave(id: wave.roadmap.wave.id))
                     model.navigation.content = .terminals
                 }.lineLimit(1).fixedSize()
+                WorkJumpSeparator(model: model, scope: .wave(wave.roadmap.wave.id), label: "Tasks in \(wave.roadmap.wave.displayName)")
+            }
+            if model.navigation.destination == .workingTasks {
+                Text(WorkNavigation.workingTasksTitle).lineLimit(1).fixedSize()
+            }
+            if let id = model.navigation.trailDashboardID {
+                Button(model.dashboard(id)?.name ?? id) { model.selectDashboard(id) }
+                    .lineLimit(1).fixedSize().disabled(model.navigation.dashboardID == id)
+                if model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
             }
             if let task = model.breadcrumb?.task {
-                Text("/")
-                Text(task.task.task.identifier).font(.system(.body, design: .monospaced)).fixedSize()
-                Text(task.task.task.name).lineLimit(1).truncationMode(.tail)
-                    .frame(minWidth: 60).help(task.task.task.name)
+                TaskHeading(task: task.task)
             }
+            if let target = model.machineTarget {
+                WorkMachineControl(model: model, target: target).padding(.leading, 6)
+            }
+        }
+    }
+}
+
+/// Where the current Task or Wave runs, and the Machines it can run on instead.
+/// Planning supplies the reading; `lf machine use` writes. A Task handoff keeps
+/// its person, so each choice reads “Run on”.
+struct WorkMachineControl: View {
+    let model: WorkModel
+    let target: WorkMachineTarget
+    @State private var machines: [Machine] = []
+    @State private var error: String?
+
+    var body: some View {
+        let current = model.machine(of: target)
+        Menu {
+            ForEach(choices, id: \.self) { id in
+                Button("Run on \(name(id))") { Task { await use(id) } }
+                    .disabled(id == current.id)
+                    .accessibilityIdentifier("work-machine-" + id)
+            }
+            if let error { Text(error) }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: error == nil ? "desktopcomputer" : "exclamationmark.triangle")
+                Text(current.id.map(name) ?? current.label ?? "Machine unknown").lineLimit(1)
+            }
+            .font(Typography.caption())
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Machine this Work runs on")
+        .accessibilityIdentifier("work-machine")
+        .task(id: target) { await load() }
+    }
+
+    /// This Machine first, then your registered Machines.
+    private var choices: [String] {
+        var ids = model.localMachineId.map { [$0] } ?? []
+        for machine in machines where !ids.contains(machine.id) { ids.append(machine.id) }
+        return ids
+    }
+
+    private func name(_ id: String) -> String {
+        if id == model.localMachineId { return "This Mac" }
+        let current = model.machine(of: target)
+        return machines.first { $0.id == id }?.label ?? (current.id == id ? current.label : nil) ?? id
+    }
+
+    private func load() async {
+        error = nil
+        do { machines = try await model.machines(for: target) } catch { self.error = error.localizedDescription }
+    }
+
+    private func use(_ id: String) async {
+        error = nil
+        do { try await model.useMachine(id, for: target) } catch { self.error = error.localizedDescription }
+    }
+}
+
+/// A jump-bar separator: the › after a crumb lists what is inside it, and
+/// typing searches that scope. Find Work stays on ⌘K.
+struct WorkJumpSeparator: View {
+    let model: WorkModel
+    let scope: WorkJumpScope
+    let label: String
+    @State private var open = false
+
+    var body: some View {
+        Button { open.toggle() } label: {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .rotationEffect(.degrees(open ? 90 : 0))
+                .frame(width: 18, height: 28).contentShape(Rectangle())
+        }
+        .help(label).accessibilityLabel(label)
+        .accessibilityIdentifier("work-jump-" + scope.identifier)
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            WorkJumpMenu(model: model, scope: scope, title: label) { open = false }
+        }
+    }
+}
+
+struct WorkJumpMenu: View {
+    let model: WorkModel
+    let scope: WorkJumpScope
+    let title: String
+    let dismiss: () -> Void
+    @State private var filter = ""
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let rows = model.jumpRows(scope, filter: filter)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased()).font(Typography.code(10)).foregroundStyle(palette.textSecondary)
+            TextField("Search \(title.lowercased())", text: $filter)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { if let first = rows.first { choose(first.id) } }
+                .accessibilityIdentifier("work-jump-filter")
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(rows) { row in
+                        Button { choose(row.id) } label: {
+                            HStack {
+                                Text(row.title).lineLimit(1)
+                                Spacer()
+                                Text(row.detail).font(Typography.caption()).foregroundStyle(palette.textSecondary).lineLimit(1)
+                            }.padding(6).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                    }
+                    if rows.isEmpty { Text("No matches").font(Typography.caption()).foregroundStyle(palette.textSecondary).padding(6) }
+                }
+            }.frame(maxHeight: 320)
+        }
+        .padding(10).frame(width: 380)
+        .onExitCommand(perform: dismiss)
+        .accessibilityIdentifier("work-jump-menu")
+    }
+
+    private func choose(_ destination: WorkDestination) {
+        dismiss()
+        model.jump(to: destination, source: "jump_bar")
+    }
+}
+
+extension WorkJumpScope {
+    fileprivate var identifier: String {
+        switch self {
+        case .repository: "repository"
+        case .wave(let id): "wave-" + id
         }
     }
 }
@@ -302,5 +459,25 @@ private struct SidebarResponderCapture: NSViewRepresentable {
         weak var view: NSView?
         var monitor: Any?
         init(memory: SidebarResponderMemory) { self.memory = memory }
+    }
+}
+
+/// Working Tasks rows reorder the repository's one Task order by drag; Wave lists don't.
+private struct TaskOrderDragging: ViewModifier {
+    let model: WorkModel
+    let workID: String?
+
+    func body(content: Content) -> some View {
+        if let workID {
+            content
+                .draggable(TaskOrderDrag.token(workID))
+                .dropDestination(for: String.self) { values, _ in
+                    guard let task = values.first.flatMap(TaskOrderDrag.taskID), task != workID else { return false }
+                    Task { await model.reorderWorkingTask(task, to: workID) }
+                    return true
+                }
+        } else {
+            content
+        }
     }
 }

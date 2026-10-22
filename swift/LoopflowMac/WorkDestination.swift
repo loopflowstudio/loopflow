@@ -6,6 +6,7 @@ import SwiftUI
 /// Work destinations and scoped actions; navigation preserves the retained workspace.
 enum WorkDestination: Hashable {
     case repository
+    case dashboard(String)
     case openRepository(String)
     case wave(String)
     case task(String)
@@ -77,6 +78,8 @@ enum LinkedWork: Equatable, Sendable {
     case task(TaskLink)
     /// `address` is the public Work address when the Wave arrived as one.
     case wave(id: String, address: String?)
+    /// A selection expression from `lf desktop view`, shown in the repository window.
+    case view(expression: String, address: String)
 
     /// An external Work link resolved by Rust; a repository root delivers nothing.
     init?(_ link: WorkLink) {
@@ -91,13 +94,14 @@ enum LinkedWork: Equatable, Sendable {
         switch self {
         case .task(let link): link.address
         case .wave(_, let address): address
+        case .view(_, let address): address
         }
     }
 
     func with(repo: String) -> LinkedWork {
         switch self {
         case .task(let link): .task(link.with(repo: repo))
-        case .wave: self
+        case .wave, .view: self
         }
     }
 }
@@ -107,7 +111,7 @@ struct WorkLinkReceiver: NSViewRepresentable {
     let repository: String
     let openingRequests: Set<UUID>
     let inspect: (String, UUID) -> DesktopWindowInspection
-    let controlPane: (DesktopPaneCommand) throws -> String
+    let controlPane: (DesktopPaneCommand) throws -> (pane: String, tab: String?)
     let readText: (DesktopTextRequest) throws -> DesktopTextReading
     let receive: (LinkedWork) async -> Void
 
@@ -130,12 +134,12 @@ struct WorkLinkReceiver: NSViewRepresentable {
         let repository: String
         let openingRequests: Set<UUID>
         var inspect: (String, UUID) -> DesktopWindowInspection
-        var controlPane: (DesktopPaneCommand) throws -> String
+        var controlPane: (DesktopPaneCommand) throws -> (pane: String, tab: String?)
         var readText: (DesktopTextRequest) throws -> DesktopTextReading
         var receive: (LinkedWork) async -> Void
 
         init(router: WorkLinkRouter, repository: String, openingRequests: Set<UUID>, inspect: @escaping (String, UUID) -> DesktopWindowInspection,
-             controlPane: @escaping (DesktopPaneCommand) throws -> String,
+             controlPane: @escaping (DesktopPaneCommand) throws -> (pane: String, tab: String?),
              readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
              receive: @escaping (LinkedWork) async -> Void) {
             self.router = router

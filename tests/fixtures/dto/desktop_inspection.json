@@ -17,7 +17,7 @@
       "reading": "unavailable",
       "reason": "Registry read failed; retained views remain available",
       "supported_operations": [
-        "list",
+        "state",
         "hide",
         "restore",
         "focus",
@@ -51,7 +51,9 @@
                 "location": {
                   "machine_id": "home_11111111111111111111111111111111",
                   "worktree": "/repo.task"
-                }
+                },
+                "tabs": [],
+                "selected_tab": null
               },
               {
                 "pane": "files-pane",
@@ -65,12 +67,16 @@
                 "location": {
                   "machine_id": "home_11111111111111111111111111111111",
                   "worktree": "/repo.task"
-                }
+                },
+                "tabs": [],
+                "selected_tab": null
               }
             ],
             "incarnation": null,
             "surface": null,
-            "location": null
+            "location": null,
+            "tabs": [],
+            "selected_tab": null
           },
           "work": {
             "repository": "repo_22222222222222222222222222222222",
@@ -112,7 +118,15 @@
           }
         ]
       },
-      "opening": null
+      "opening": null,
+      "view": null,
+      "open_work": [
+        {
+          "repository": "repo_22222222222222222222222222222222",
+          "kind": "task",
+          "id": "task_44444444444444444444444444444444"
+        }
+      ]
     },
     {
       "repository": "repo_other",
@@ -147,7 +161,9 @@
         }
       },
       "session": null,
-      "opening": null
+      "opening": null,
+      "view": null,
+      "open_work": []
     }
   ]
 }

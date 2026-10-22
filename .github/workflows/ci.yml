@@ -351,9 +351,9 @@ jobs:
           restore-keys: ${{ steps.swift-inputs.outputs.restore-prefix }}
       - name: Restore unchanged Swift source timestamps
         run: uv run python scripts/swift_cache.py restore
-      - name: Build CLI and worlds for Swift transport tests
+      - name: Build CLI for Swift transport tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
-        run: /usr/bin/time -l cargo build -p loopflow --bin lf --bin lf-world
+        run: /usr/bin/time -l cargo build -p loopflow --bin lf
       - name: Test checkout observation's read-only sandbox
         if: needs.merge-proof.outputs.reuse != 'true'
         run: uv run pytest python/tests/test_desktop_performance.py::test_checkout_observation_preserves_read_boundary_and_detects_changes
@@ -371,10 +371,8 @@ jobs:
             --event-stream-version 0 \
             2>&1 | tee "$RUNNER_TEMP/swift-tests/output.log"
         # Bound native test execution, including subprocess cleanup, rather
-        # than holding the PR for GitHub's six-hour default on a hang. Each
-        # lf-world test builds its own world (minutes on these runners), which
-        # took this step from ~5 to 13-14 minutes; LOO-562 owns making that fast.
-        timeout-minutes: 35
+        # than holding the PR for GitHub's six-hour default on a hang.
+        timeout-minutes: 20
       - name: Preserve Swift failure evidence
         if: failure()
         uses: actions/upload-artifact@v7

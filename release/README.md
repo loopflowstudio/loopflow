@@ -59,9 +59,10 @@ lf install shell-path          # one marked PATH block in ${ZDOTDIR:-$HOME}/.zsh
 
 A copied app activates from its own bundled helper, in place, before the app
 reads anything; the app shows setup progress and a retry on failure.
-Development builds (validation-only helper) leave the installation unchanged. It refuses a
-disk image or translocated copy and an older copy than the installed release;
+Activation refuses a disk image or translocated copy and an older copy than the
+installed release;
 published promotion verifies the app signature before any target changes.
+Development builds (validation-only helper) leave the installation unchanged.
 The active record keeps the activation targets, so updates without
 `LF_APPLICATIONS_DIR` replace that copy (default `/Applications`, or
 `~/Applications` when unwritable). Both install routes write the same zsh block;

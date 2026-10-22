@@ -481,6 +481,7 @@ open findings are folded into Remaining above.
 | Compress (2026-10-22) | One local `AccountRow` path, `connect` split into sign-in/verify, config write inlined in `update_global_config_at`; clippy clean; account_status/portfolio lib tests and 3 integration auth tests passed. Unrelated `session_record::manifest_round_trips…` fails on missing `graph_process_steps` (untouched by branch). | Same stub limits. |
 | Realign (2026-10-22) | Plan matched code; origin/main unchanged since `98dab5ea8e`; no tests rerun. | Reuses results above. |
 | Swift activation (2026-10-22) | `swift test --filter AppActivationTests` 2 passed (progress → refusal → Retry → open; settled launches skip the helper); `swift build` passed; `install::bundle` 4 passed; documented_commands 4 passed; fmt/clippy clean. | Held closure stands in for the helper; no app bundle, xcodebuild or GUI. |
+| Compress (Swift activation) | Release README activation paragraph untangled; folding `.failed` into the view's own error broke `AppActivationTests` (unhosted `@State` is invisible), so the state stays. `AppActivationTests` 2 passed. | Same limits. |
 
 Proposed Wave memory update after landing (memory is read-only here): items 1,
 3 and 7 of "What stands between a newcomer and a first task" are addressed in

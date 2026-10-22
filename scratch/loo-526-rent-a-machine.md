@@ -412,8 +412,8 @@ Settled and built 2026-10-22: `LongLivedToken::is_current` (a year from
 when lf stored it, `--file` included) gates `claude_accounts_by_token` and
 `connect`; an expired account is skipped with "long-lived token expired
 <date>", `-b --rent` refuses before renting, foreground mints. `lf account`
-(there is no `lf account list`) shows "rental token until/expired <date>" and
-JSON `rental_token_expires_at`. Renewal is `lf account token` again.
+(there is no `lf account list`) shows "long-lived token until/expired <date>"
+and JSON `long_lived_token_expires_at`. Renewal is `lf account token` again.
 
 ## Concept review (2026-10-22, after token expiry, headless)
 
@@ -426,10 +426,11 @@ connecting `mini.local` from a pool reads that the token is for rentals. The
 same thing is "long-lived token" in the command's message, the store column
 and this design: three names for one credential.
 
-Next implement: `lf account` prints `long-lived token until/expired <date>`;
-the JSON field becomes `long_lived_token_expires_at` (account_status.rs, the
-`auth_status.json` fixture (no Swift or Python mirror reads it),
-docs/subscriptions.md). No compatibility: the field is unreleased.
+Built 2026-10-22: `lf account` prints `long-lived token until/expired <date>`;
+the JSON field is `long_lived_token_expires_at` (account_status.rs, the
+`auth_status.json` fixture, docs/subscriptions.md), with no compatibility since
+the field is unreleased. Check: account_status + dto tests and
+`cargo clippy --all-targets -- -D warnings` pass.
 
 ## Status and remaining work
 

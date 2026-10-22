@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 
-use super::{PrSurface, Threshold, World};
+use super::{Outcome, PrSurface, Threshold, World};
 
 /// Rows: store records through production writers. Artifacts: also files a
 /// reader opens, such as provider transcripts. Providers: also answers from
@@ -38,13 +38,15 @@ pub const RECIPES: &[Recipe] = &[
     Recipe {
         name: "one-task",
         rung: Rung::Artifacts,
-        demos: "Wave → Task → Session → Flow click-through on one small piece of work",
+        demos: "Wave → Task → Session → Flow click-through on one small piece of work; \
+                a Task waiting at a Workflow node; an eight-step Flow exec (LOO-392)",
         build: one_task,
     },
     Recipe {
         name: "portfolio",
         rung: Rung::Artifacts,
-        demos: "dashboards and Portfolio: several Waves with KRs and Tasks in every state",
+        demos: "dashboards and Portfolio: several Waves with KRs and Tasks in every state, \
+                including a stopped Workflow edge and a hand-moved Workflow",
         build: portfolio,
     },
     Recipe {
@@ -107,14 +109,8 @@ fn one_task(world: &World) -> Result<()> {
         ],
         0.2,
     )?;
-    world.flow(
-        Some(&task),
-        "implement",
-        &["implement", "gate"],
-        0.1,
-        12,
-        "succeeded",
-    )?;
+    world.task_run(&task, "feature", 0.03, 8, Outcome::Succeeded)?;
+    world.task_run(&task, "pursue", 0.01, 4, Outcome::Succeeded)?;
     Ok(())
 }
 
@@ -184,14 +180,7 @@ fn portfolio(world: &World) -> Result<()> {
         ],
         4.0,
     )?;
-    world.flow(
-        Some(&shipped),
-        "implement",
-        &["implement", "gate"],
-        3.5,
-        20,
-        "succeeded",
-    )?;
+    world.task_run(&shipped, "pursue", 3.5, 20, Outcome::Succeeded)?;
     world.complete(&shipped, "Landed", 3.0)?;
 
     let running = world.task(
@@ -210,14 +199,8 @@ fn portfolio(world: &World) -> Result<()> {
         ],
         0.5,
     )?;
-    world.flow(
-        Some(&running),
-        "implement",
-        &["implement"],
-        0.05,
-        15,
-        "succeeded",
-    )?;
+    world.task_run(&running, "feature", 0.03, 5, Outcome::Succeeded)?;
+    world.move_to(&running, "demo", "Built in the Session")?;
     world.uncommitted(
         &running,
         &[(
@@ -236,14 +219,8 @@ fn portfolio(world: &World) -> Result<()> {
         "Additive migrations should not lock out older lf.",
     )?;
     let failed = world.checkout(&failed)?;
-    world.flow(
-        Some(&failed),
-        "implement",
-        &["implement", "gate"],
-        1.0,
-        25,
-        "failed",
-    )?;
+    // `code` sets out on `pursue`, which fails at `sync` (its third step).
+    world.task_run(&failed, "code", 0.02, 6, Outcome::FailedAt(2))?;
 
     world.task(
         Some("systems"),
@@ -294,14 +271,7 @@ fn lifecycle(world: &World) -> Result<()> {
                 days + 0.2,
             )?;
         }
-        world.flow(
-            Some(&task),
-            "implement",
-            &["implement", "gate"],
-            days + 0.1,
-            15,
-            "succeeded",
-        )?;
+        world.task_run(&task, "pursue", days + 0.1, 15, Outcome::Succeeded)?;
         world.complete(&task, "Landed", days)?;
         if removed {
             world.remove_checkout(&task)?;
@@ -325,14 +295,7 @@ fn lifecycle(world: &World) -> Result<()> {
         ],
         2.0,
     )?;
-    world.flow(
-        Some(&paused),
-        "implement",
-        &["implement"],
-        1.8,
-        20,
-        "succeeded",
-    )?;
+    world.task_run(&paused, "pursue", 1.8, 20, Outcome::Succeeded)?;
     world.pause(&paused)?;
 
     let abandoned = world.task(
@@ -341,14 +304,7 @@ fn lifecycle(world: &World) -> Result<()> {
         "Publish nightly builds to a second channel.",
     )?;
     let abandoned = world.checkout(&abandoned)?;
-    world.flow(
-        Some(&abandoned),
-        "implement",
-        &["implement", "gate"],
-        3.0,
-        25,
-        "failed",
-    )?;
+    world.task_run(&abandoned, "pursue", 3.0, 25, Outcome::FailedAt(0))?;
     world.abandon(&abandoned)?;
 
     let canceled = world.task(
@@ -357,14 +313,7 @@ fn lifecycle(world: &World) -> Result<()> {
         "Mirror releases to a second registry.",
     )?;
     let canceled = world.checkout(&canceled)?;
-    world.flow(
-        Some(&canceled),
-        "implement",
-        &["implement"],
-        2.5,
-        15,
-        "succeeded",
-    )?;
+    world.task_run(&canceled, "pursue", 2.5, 15, Outcome::Succeeded)?;
     world.cancel_upstream(&canceled)?;
 
     let lost = world.task(wave, "Lost checkout", "Retry a failed notarization once.")?;
@@ -395,14 +344,7 @@ fn lifecycle(world: &World) -> Result<()> {
         ],
         0.2,
     )?;
-    world.flow(
-        Some(&running),
-        "implement",
-        &["implement"],
-        0.05,
-        15,
-        "succeeded",
-    )?;
+    world.task_run(&running, "pursue", 0.05, 15, Outcome::Succeeded)?;
 
     world.task(wave, "Not started", "Announce releases in Discord.")?;
 
@@ -558,14 +500,7 @@ fn wave_backlog(world: &World) -> Result<()> {
         ],
         0.1,
     )?;
-    world.flow(
-        Some(&recent),
-        "implement",
-        &["implement", "gate"],
-        0.002,
-        9,
-        "succeeded",
-    )?;
+    world.task_run(&recent, "pursue", 0.002, 9, Outcome::Succeeded)?;
 
     let failed = world.task(
         Some("desktop"),
@@ -573,14 +508,7 @@ fn wave_backlog(world: &World) -> Result<()> {
         "Switching Tasks resets the conversation to the top.",
     )?;
     let failed = world.checkout(&failed)?;
-    world.flow(
-        Some(&failed),
-        "implement",
-        &["implement", "gate"],
-        0.3,
-        18,
-        "failed",
-    )?;
+    world.task_run(&failed, "pursue", 0.3, 18, Outcome::FailedAt(0))?;
 
     let idle = world.task(
         Some("desktop"),
@@ -612,14 +540,7 @@ fn wave_backlog(world: &World) -> Result<()> {
         )],
         "Show PR state on Task rows",
     )?;
-    world.flow(
-        Some(&merged),
-        "implement",
-        &["implement", "gate"],
-        1.0,
-        14,
-        "succeeded",
-    )?;
+    world.task_run(&merged, "pursue", 1.0, 14, Outcome::Succeeded)?;
     world.pr(
         &merged,
         21,
@@ -639,14 +560,7 @@ fn wave_backlog(world: &World) -> Result<()> {
             "Small polish from the last chapter.",
         )?;
         let done = world.checkout(&done)?;
-        world.flow(
-            Some(&done),
-            "implement",
-            &["implement", "gate"],
-            days,
-            12,
-            "succeeded",
-        )?;
+        world.task_run(&done, "pursue", days, 12, Outcome::Succeeded)?;
         world.complete(&done, "Landed", 0.0)?;
     }
 
@@ -690,14 +604,7 @@ fn wave_backlog(world: &World) -> Result<()> {
         "A busy store fails the write. Retry with backoff before failing.",
     )?;
     let systems = world.checkout(&systems)?;
-    world.flow(
-        Some(&systems),
-        "implement",
-        &["implement"],
-        0.5,
-        20,
-        "succeeded",
-    )?;
+    world.task_run(&systems, "pursue", 0.5, 20, Outcome::Succeeded)?;
     Ok(())
 }
 
@@ -936,28 +843,14 @@ fn wave_lifecycle(world: &World) -> Result<()> {
         ],
         0.5,
     )?;
-    world.flow(
-        Some(&open),
-        "implement",
-        &["implement"],
-        0.4,
-        15,
-        "succeeded",
-    )?;
+    world.task_run(&open, "pursue", 0.4, 15, Outcome::Succeeded)?;
     let done = world.task(
         Some("desktop"),
         "List Waves alphabetically",
         "Waves list in creation order.",
     )?;
     let done = world.checkout(&done)?;
-    world.flow(
-        Some(&done),
-        "implement",
-        &["implement", "gate"],
-        2.0,
-        10,
-        "succeeded",
-    )?;
+    world.task_run(&done, "pursue", 2.0, 10, Outcome::Succeeded)?;
     world.complete(&done, "Landed", 0.0)?;
     world.wave_conversation(
         "desktop",
@@ -974,14 +867,7 @@ fn wave_lifecycle(world: &World) -> Result<()> {
     ] {
         let done = world.task(Some("archive"), title, "Finished last chapter.")?;
         let done = world.checkout(&done)?;
-        world.flow(
-            Some(&done),
-            "implement",
-            &["implement", "gate"],
-            days,
-            15,
-            "succeeded",
-        )?;
+        world.task_run(&done, "pursue", days, 15, Outcome::Succeeded)?;
         world.complete(&done, "Landed", days)?;
     }
     Ok(())

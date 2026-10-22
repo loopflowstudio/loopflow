@@ -284,6 +284,12 @@ commands prepare no CLI unless `--prepare-cli` is supplied:
 uv run python scripts/materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow -E 'test(local_planning::public_local_task_places_and_runs_without_a_planning_provider)' --no-tests fail
 ```
 
+On a pull request, CI runs nextest with the `pr` profile (`.config/nextest.toml`):
+a test that runs past 2 minutes fails on that PR and names itself. The merge
+queue and main use `default`, which only reports slow tests. Tests that were
+already slower are listed there with their own allowance; make one fast, then
+delete its entry. Reproduce locally with `cargo nextest run --profile pr`.
+
 Fixtures still create their own disposable Homes. Source and materialized schema
 frontiers stay separate; a version/schema mismatch is invalid verification
 evidence, never permission to alter an installed database.

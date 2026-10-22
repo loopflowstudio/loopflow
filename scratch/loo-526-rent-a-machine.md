@@ -1,7 +1,7 @@
 # LOO-526: Rent a machine from a pool and give it back
 
-Status: design, 2026-10-21, revised after Jack Heart's review in the Task
-conversation. Jack's brief (Task description) is the problem statement; this
+Status: implemented except the live probe, demo and periodic pass caller
+(2026-10-21); design revised after Jack Heart's review in the Task conversation. Jack's brief (Task description) is the problem statement; this
 doc chooses mechanisms. Decided in conversation: records are pulled by the
 laptop, not pushed (Q1); routing lives on `lf task run --pool | --rent` (Q2;
 `--machine` already exists as the root forwarding flag); vocabulary follows Etude's 2026-10-21 split (#23, #19) of
@@ -44,8 +44,8 @@ lf machine end code-2                              # give it back now
   over SSH (`work_route::dispatch` → `ssh::run`), which allocates the checkout
   there. Logins arrive with `lf machine connect <m> <provider>` (LOO-413),
   approved once in Jack's Chrome per machine.
-- **Upward copies are planned, not built**: no origin stamping on Process/Session
-  rows, no export command, and `lf machine remove` forgets a worker's records.
+- **Before this Task, no upward copies**: no export command, and `lf machine
+  remove` forgot a worker's records. Copy-up below adds both sides.
 - **Etude at HEAD (5c18aca)**. #23: a *pool* is only machines you own, each with
   a committed cost and an expiry, and it knows no provider; an *on-demand* is a
   `MachineTemplate` (provider, gpu, vcpus, memory_gb, disk_gb, image,
@@ -315,39 +315,33 @@ Nothing: no earlier renting code exists (LOO-554's procedure was never checked i
 
 ## Status and remaining work
 
-Implemented 2026-10-21 (implement pass): draft `pools_and_rentals`; `rental`
-module (Usd, Hardware, Template, admission, CPU quote, unconfirmed resolution,
-free-machine selection, give-back judgment); RunPod adapter behind a send
-closure; guardian + pod boot; store for pools/on-demands/rentals/ownership;
-`lf pool`, `lf ondemand` (add pins the image digest via Docker Hub), `lf machine
-add --pool/--cost-usd/--expires-at`, `lf machine end [--force]`; `lf task run
---pool/--rent/--quote` (rent → SSH ready marker → `machine add` → connect
-GitHub and Claude → clone + `repo identity --bind` → handoff → ordinary forward).
-The reconciliation pass (adopt/lose unconfirmed creates, notice guardian
-deletes, bill, give back drained or soft-deadlined rentals) runs in `lf ondemand
-list`; `lf machine end` gives back one rental. Compress dropped the unbuilt
-copy watermark column; copy-up adds its own.
+Built 2026-10-21 (implement, compress, copy-up implement, compress): the draft
+`pools_and_rentals` (pools, ondemands, machine columns, rentals,
+machine_records); the `rental` module (admission, CPU quote, unconfirmed
+resolution, free-machine selection, give-back judgment); the RunPod adapter
+behind a send closure; guardian and pod boot; `lf pool`, `lf ondemand`, `lf
+machine add --pool/--cost-usd/--expires-at`, `lf machine end [--force]`, `lf
+task run --pool/--rent/--quote`; `lf history export --since`; copy-up into
+`machine_records` before every delete (a failed copy keeps the machine unless
+`--force`); copied Sessions in `lf session list`, `lf task status` and `lf
+ondemand list`; `lf machine status` "rental ended"; the give-back pass in `lf
+ondemand list`, `lf machine end` and the end of a forwarded `lf task run`.
 
-Copy-up implemented 2026-10-21 (second implement pass): `lf history export`,
-`machine_records` import with origin check, captures copied,
-copy before every delete (give-back pass and `lf machine end`; a failed copy
-keeps the machine unless `--force`), copied Sessions in `lf session list`,
-`lf task status` and `lf ondemand list`, `lf machine status` "rental ended",
-pass at the end of a forwarded `lf task run`.
+Deviations from the first draft of this design, recorded in
+`scratch/questions.md`: copies live in `machine_records` rather than stamped
+rows in `processes`/`agent_sessions`; `rentals` has no copy watermark (each
+copy re-exports from an hour before the rental's start and upserts).
 
 Remaining:
 
-1. **Pass caller** `lf task automation` (periodic check).
+1. **Pass caller** `lf task automation` (periodic check); the soft deadline
+   only acts when some pass runs.
 2. `lf history show <id>` and `lf session list --json` do not read copies.
-3. **Live probe (~$0.10) and demo** — not run: both spend money. The quote path
-   was verified live (cpu3c×8 at $0.24/h; stock image pinned). Unverified on a
-   real pod: boot script (apt, sshd, nodesource, installer as `lf`), RunPod's
-   `portMappings`/`publicIp` field names, `RUNPOD_POD_ID` injection, the
-   pod-scoped key deleting itself, and `lf history export` over SSH from the
-   published lf (the pod needs a build with the command).
-
-Compress 2026-10-21 (after copy-up): dropped `rentals.copied_at` (duplicated
-`machine_records.observed_at`; nothing read it as a watermark), the export's
-unread `exported_at`, and unread `CopiedSession` fields.
+3. **Live probe (~$0.10) and demo**, with the demo step: both spend money. The
+   quote path was verified live (cpu3c×8 at $0.24/h; stock image pinned).
+   Unverified on a real pod: boot script (apt, sshd, nodesource, installer as
+   `lf`), RunPod's `portMappings`/`publicIp` field names, `RUNPOD_POD_ID`
+   injection, the pod-scoped key deleting itself, and `lf history export` over
+   SSH (the pod needs a build with the command).
 
 Last check (implement 2026-10-21): clippy clean; `cargo test --lib` machine_records 4, rental give-back 2, store revisions/rentals 11 passed; check_migrations ok; CLI reference regenerated.

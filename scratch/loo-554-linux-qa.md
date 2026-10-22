@@ -379,3 +379,4 @@ an open product call in `questions.md`.
 Check (2026-10-21, compress): `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- platform::clipboard machine::tests` passed; full suites → gate/CI.
 Check (2026-10-21, publish): cargo fmt --check, gate lib tests (5), golden_prompt, clippy -D warnings → pass; full matrix → CI.
 Check (2026-10-21, kickoff round two): laptop probes of OpenCode 2.0.32 export/import/device login and Zen `/zen/v1/models` → findings above; plan only, no build.
+Check (2026-10-22, implement round two): `cargo test -p loopflow --lib -- machine_credentials` 13 pass; `cargo clippy --all-targets -- -D warnings` clean; machine run → ledger.

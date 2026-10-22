@@ -65,13 +65,7 @@ pub(crate) fn shipping_process(workflow: &Workflow) -> Option<&LfProcessId> {
     if matches!(&workflow.position, WorkflowPosition::Node { node } if node == END) {
         return None;
     }
-    workflow
-        .history
-        .iter()
-        .rev()
-        .take_while(|entry| entry.kind != WorkflowMoveKind::Set)
-        .find(|entry| entry.kind == WorkflowMoveKind::Shipped)
-        .and_then(|entry| entry.lf_process_id.as_ref())
+    shipped_moves(workflow).last()?.lf_process_id.as_ref()
 }
 
 /// What a shipped Task is doing, derived from its moves, its ship process,
@@ -367,23 +361,19 @@ fn next_step(workflow: &Workflow, issue: &str) -> OpsResult<ShipStep> {
 /// (toward `end` when one goes there, else the one edge for another stage)
 /// and the one that repeats the stage's loop.
 fn routes_from(workflow: &Workflow, node: &str) -> Option<(String, Option<String>)> {
-    let mut onward = workflow
-        .definition
-        .outgoing(node)
-        .filter(|(_, edge)| edge.to != node)
-        .map(|(_, edge)| edge);
-    let first = onward.next()?;
-    let advance = std::iter::once(first)
-        .chain(onward)
-        .find(|edge| edge.to == END)
-        .unwrap_or(first);
-    let repeat = workflow
+    let (repeat, onward): (Vec<_>, Vec<_>) = workflow
         .definition
         .outgoing(node)
         .map(|(_, edge)| edge)
-        .find(|edge| edge.to == node)
-        .map(|edge| edge.name.clone());
-    Some((advance.name.clone(), repeat))
+        .partition(|edge| edge.to == node);
+    let advance = onward
+        .iter()
+        .find(|edge| edge.to == END)
+        .or(onward.first())?;
+    Some((
+        advance.name.clone(),
+        repeat.first().map(|edge| edge.name.clone()),
+    ))
 }
 
 /// The instruction a headless stand-in receives at a stage. With a loop behind

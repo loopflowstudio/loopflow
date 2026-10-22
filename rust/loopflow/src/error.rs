@@ -12,8 +12,6 @@ pub enum LoadError {
     SkillNotFound(String),
     #[error("invalid graph: {0}")]
     InvalidGraph(String),
-    #[error("{0} is a workflow, not a Graph. Traverse it with `lf task run <issue> {0}`")]
-    Workflow(String),
     #[error("invalid skill: {0}")]
     InvalidSkill(String),
     #[error("io error: {0}")]

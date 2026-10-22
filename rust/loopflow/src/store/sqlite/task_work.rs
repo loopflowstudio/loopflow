@@ -628,7 +628,7 @@ impl SqliteStore {
         definition: &WorkflowDefinition,
     ) -> StoreResult<String> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(placement_in(&conn, task, definition)?)
+        placement_in(&conn, task, definition)
     }
 
     /// Take up `graph` for the Task as it is defined now, placed by its

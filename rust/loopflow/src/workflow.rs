@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::LoadError;
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
-use crate::graph::{compile_graph, load_authored_graph, parse_flow_source, ConcreteStep};
+use crate::graph::{compile_graph, load_authored_graph, parse_graph_source, ConcreteStep};
 use crate::skills::first_prose_line;
 
 pub const START: &str = "start";
@@ -191,7 +191,7 @@ impl CapturedGraph {
 
     /// Compile authored text kept outside the repository, such as a Wave's stored graph.
     pub fn from_source(name: &str, content: &str, repo: &Path) -> Result<Self, LoadError> {
-        let graph = parse_flow_source(name, content, repo)?;
+        let graph = parse_graph_source(name, content, repo)?;
         let steps = compile_graph(&graph, repo)?;
         Ok(Self {
             name: graph.name,

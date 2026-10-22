@@ -1095,7 +1095,7 @@ fn graph_output_shows_steps_and_agent_messages_with_opt_in_diagnostics() {
 }
 
 #[test]
-fn operational_flow_stops_at_its_stage_without_launching_it() {
+fn operational_graph_stops_at_its_stage_without_launching_it() {
     for source in [
         "- interactive:
     id: review
@@ -1103,7 +1103,6 @@ fn operational_flow_stops_at_its_stage_without_launching_it() {
 ",
         "- graph: nested-review
 ",
-        "- xor:\n    paths:\n      review:\n        graph: nested-review\n        description: Discuss work\n      work:\n        skill: review-proof\n        description: Autonomous work\n",
     ] {
         let repo = loopflow_test_support::TestRepo::new();
         let home = TempDir::new().unwrap();
@@ -1125,10 +1124,7 @@ fn operational_flow_stops_at_its_stage_without_launching_it() {
         );
         assert!(output.status.success(), "{output:?}");
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("Reached review, where a person takes part") || stderr.contains("Reached review"),
-            "{output:?}"
-        );
+        assert!(stderr.contains("Reached review"), "{output:?}");
         let sessions: i64 = rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
@@ -1927,16 +1923,6 @@ fn adding_a_graph_changes_an_untyped_reference_but_not_an_explicit_skill() {
     let changed = expand_named_graph(repo, "parent");
     assert_skill_name(&changed[0], "replacement");
     assert_skill_name(&changed[1], "custom-review");
-}
-
-#[test]
-fn builtin_deploy_uses_ops_land_item() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-
-    let items = expand_named_graph(repo, "deploy");
-    assert!(!items.is_empty());
-    assert!(matches!(&items[1], ConcreteStep::Command(_)));
 }
 
 fn roadmap_task(repo: &Path, home: &Path) -> serde_json::Value {

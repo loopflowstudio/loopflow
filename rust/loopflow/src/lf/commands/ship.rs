@@ -70,33 +70,27 @@ pub fn run(
                 if ship_next(&issue)? == ShipStep::Paused {
                     return paused(&issue);
                 }
-                let (edge, note) = match (outcome, repeat) {
-                    (
-                        Some(SkillOutcome::Decided(GraphVerdict {
-                            decision: GraphDecision::Iterate,
-                            summary,
-                        })),
-                        Some(repeat),
-                    ) => (repeat, format!("{stage} (stand-in) → repeat: {summary}")),
-                    (
-                        Some(SkillOutcome::Decided(GraphVerdict {
-                            decision: GraphDecision::Blocked,
-                            summary,
-                        })),
-                        Some(repeat),
-                    ) => (
-                        repeat,
-                        format!("{stage} (stand-in) → repeat, blocked: {summary}"),
-                    ),
-                    (
-                        Some(SkillOutcome::Decided(GraphVerdict {
-                            decision: GraphDecision::Advance,
-                            summary,
-                        })),
-                        _,
-                    ) => (advance, format!("{stage} (stand-in) → advance: {summary}")),
-                    (_, _) => (advance, format!("{stage} (stand-in) → advance")),
+                let verdict = match outcome {
+                    Some(SkillOutcome::Decided(verdict)) => Some(verdict),
+                    _ => None,
                 };
+                let (edge, choice) = match (verdict, repeat) {
+                    (Some(GraphVerdict { decision, summary }), Some(repeat))
+                        if decision != GraphDecision::Advance =>
+                    {
+                        let blocked = if decision == GraphDecision::Blocked {
+                            ", blocked"
+                        } else {
+                            ""
+                        };
+                        (repeat, format!("repeat{blocked}: {summary}"))
+                    }
+                    (Some(GraphVerdict { summary, .. }), _) => {
+                        (advance, format!("advance: {summary}"))
+                    }
+                    (None, _) => (advance, "advance".to_string()),
+                };
+                let note = format!("{stage} (stand-in) → {choice}");
                 eprintln!("{issue}: {note}");
                 (edge, Some(note))
             }

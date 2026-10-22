@@ -452,7 +452,7 @@ impl<'a> DefinitionLoader<'a> {
 
 /// Parse Graph text that lives outside the repository, such as a Wave's stored
 /// graph, resolving its steps against the repository's definitions.
-pub fn parse_flow_source(
+pub fn parse_graph_source(
     name: &str,
     content: &str,
     repo: &Path,
@@ -2272,7 +2272,7 @@ Design the feature.
     }
 
     #[test]
-    fn deliver_flow_gates_then_lands_and_waits() {
+    fn deliver_graph_gates_then_lands_and_waits() {
         let tmp = TempDir::new().unwrap();
         let graph = load_graph("deliver", tmp.path()).unwrap();
         let items = compile_graph(&graph, tmp.path()).unwrap();

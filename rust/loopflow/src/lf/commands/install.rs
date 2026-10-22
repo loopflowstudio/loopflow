@@ -2345,11 +2345,17 @@ fn active_install_from_switch(
     receipt: &crate::installation::SwitchReceipt,
 ) -> Result<crate::installation::ActiveInstall> {
     // A replacement coordinator keeps the record an earlier one already wrote.
-    if let Some(active) = crate::installation::active_install(root)? {
+    // Until then, the recorded install names the fallback being replaced; the
+    // receipt's own copy becomes the target's once the selection commits.
+    let recorded = crate::installation::active_install(root)?;
+    if let Some(active) = recorded.as_ref() {
         if active.selection == receipt.target {
-            return Ok(active);
+            return Ok(active.clone());
         }
     }
+    let prior_fallback = recorded
+        .map(|active| active.published_fallback)
+        .or_else(|| receipt.published_fallback.clone());
     let published_fallback = match receipt.target.source {
         crate::installation::InstallSource::Published => receipt
             .target_published_fallback
@@ -2365,7 +2371,7 @@ fn active_install_from_switch(
         selection: receipt.target.clone(),
         retained_published_sets: retained_published_sets(
             &published_fallback,
-            receipt.published_fallback.as_ref(),
+            prior_fallback.as_ref(),
         ),
         published_fallback,
         activation: Some(receipt.activation.clone()),

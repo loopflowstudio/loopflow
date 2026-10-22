@@ -79,19 +79,26 @@ impl Built {
         self.lf(&["task", "status", issue, "--json"])["execution"]["work"]["workflow"].clone()
     }
 
-    /// The steps of the Task's latest Flow `name`.
-    fn flow_steps(&self, issue: &str, name: &str) -> Vec<Value> {
-        let flows = self.lf(&["flow", "list", "--processes", "--for-task", issue, "--json"]);
-        let id = flows["entries"]
+    /// The steps of the Task's latest Graph `name`.
+    fn graph_steps(&self, issue: &str, name: &str) -> Vec<Value> {
+        let graphs = self.lf(&[
+            "graph",
+            "list",
+            "--processes",
+            "--for-task",
+            issue,
+            "--json",
+        ]);
+        let id = graphs["entries"]
             .as_array()
             .unwrap()
             .iter()
-            .rfind(|flow| flow["name"] == name)
+            .rfind(|graph| graph["name"] == name)
             .unwrap_or_else(|| panic!("{issue} ran no {name}"))["id"]
             .as_str()
             .unwrap()
             .to_string();
-        self.lf(&["flow", "show", "--processes", &id, "--json"])["steps"]
+        self.lf(&["graph", "show", "--processes", &id, "--json"])["steps"]
             .as_array()
             .unwrap()
             .clone()
@@ -188,7 +195,7 @@ fn one_task_waits_at_demo_after_an_eight_step_pursue() {
         .collect();
     assert_eq!(moves, ["took_up", "chose", "arrived", "chose", "arrived"]);
 
-    let steps = built.flow_steps(&issue, "pursue");
+    let steps = built.graph_steps(&issue, "pursue");
     let nodes: Vec<(u64, &str)> = steps
         .iter()
         .map(|step| {
@@ -221,7 +228,7 @@ fn portfolio_has_a_stopped_edge_and_a_hand_moved_workflow() {
     let workflow = built.workflow(&stopped);
     assert_eq!(workflow["position"]["kind"], "edge");
     assert_eq!(workflow["position"]["running"], false);
-    let steps = built.flow_steps(&stopped, "pursue");
+    let steps = built.graph_steps(&stopped, "pursue");
     let outcomes: Vec<&str> = steps
         .iter()
         .map(|step| step["outcome"].as_str().unwrap())

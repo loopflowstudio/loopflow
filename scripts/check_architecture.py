@@ -30,7 +30,7 @@ MIGRATIONS_RS = Path("rust/loopflow/src/store/migration_catalog.rs")
 LF_MOD = Path("rust/loopflow/src/lf/mod.rs")
 CRATE_MANIFEST = Path("rust/loopflow/Cargo.toml")
 PROVIDERS = Path("rust/loopflow/src/provider_auth/mod.rs")
-FLOWS = Path(".lf/flows")
+GRAPHS = Path(".lf/graphs")
 
 CODE_TOKEN = re.compile(r"`([^`]+)`")
 MARKDOWN_LINK = re.compile(r"\[([^]]+)]\(([^)]+)\)")
@@ -39,7 +39,7 @@ COMMAND_EDGE = re.compile(r"(?:std::process::|tokio::process::)?Command::new\(\s
 SHIM_MARKER = re.compile(r"architecture-shim:\s*([a-z0-9-]+)")
 HEADER_LINE = re.compile(r"^--[ \t]*depends_on:")
 DRAFT_DEPENDS = re.compile(r"^--[ \t]*depends_on:[ \t]*(.*)$", re.MULTILINE)
-FLOW_COMMAND = re.compile(r"^\s*-\s*cmd:\s*([a-z0-9_-]+)\s*$", re.MULTILINE)
+GRAPH_COMMAND = re.compile(r"^\s*-\s*cmd:\s*([a-z0-9_-]+)\s*$", re.MULTILINE)
 
 TEXT_SUFFIXES = {".md", ".py", ".rs", ".sh", ".sql", ".swift", ".toml", ".yaml", ".yml"}
 SCAN_ROOTS = (
@@ -188,13 +188,13 @@ def _discover_commands(root: Path) -> tuple[set[str], set[str]]:
     return commands, internal
 
 
-def _discover_internal_flow_commands(root: Path, internal: set[str]) -> Counter[str]:
+def _discover_internal_graph_commands(root: Path, internal: set[str]) -> Counter[str]:
     commands: set[str] = set()
-    flows = root / FLOWS
-    if not flows.is_dir():
+    graphs = root / GRAPHS
+    if not graphs.is_dir():
         return Counter()
-    for path in sorted((*flows.glob("*.yaml"), *flows.glob("*.yml"))):
-        for name in FLOW_COMMAND.findall(path.read_text()):
+    for path in sorted((*graphs.glob("*.yaml"), *graphs.glob("*.yml"))):
+        for name in GRAPH_COMMAND.findall(path.read_text()):
             command = f"lf {name}"
             if command in internal:
                 commands.add(command)
@@ -542,7 +542,7 @@ def check_repository(root: Path = REPO_ROOT) -> Report:
             _cover(
                 "process boundary",
                 _discover_binaries(root) | internal_commands,
-                processes + _discover_internal_flow_commands(root, internal_commands),
+                processes + _discover_internal_graph_commands(root, internal_commands),
                 errors,
             )
         )

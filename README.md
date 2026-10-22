@@ -10,7 +10,7 @@ Build software with other people and their coding agents. Each task has one
 owner, its own working copy and one pull request, so several people's agents can
 work in one project without colliding. The plan is shared through Linear or a shared
 Git ref; a comment on a Linear task reaches its agents before their next step;
-and each task's workflow stops for a person where judgment counts. Skills, Flows
+and each task's workflow stops for a person where judgment counts. Skills, Graphs
 and workflows are files in the project, reviewed like code. Conversations stay on
 your computer; only the plan travels.
 
@@ -84,9 +84,9 @@ Set `repo_root: ~/projects` in `~/.lf/config.yaml` to change the search root.
 Use `--repo ./path` for an explicit checkout; with `--machine`, lookup happens there.
 
 ```bash
-lf list                    # commands, skills, and flows
+lf list                    # commands, skills, and graphs
 lf help debug              # inspect a definition without launching it
-lf flow pursue             # select a flow explicitly
+lf graph pursue             # select a graph explicitly
 lf skill release-run       # explicitly select the skill
 lf land --help           # inspect the landing command
 lf pr-review               # build an HTML walkthrough of the important code in this PR
@@ -94,32 +94,32 @@ lf pr-review               # build an HTML walkthrough of the important code in 
 
 Omit owners or abbreviate commands when the result is unique. Commands take precedence over definitions; help
 and list stay local.
-A same-named flow takes precedence in untyped execution; invalid flows report
+A same-named graph takes precedence in untyped execution; invalid graphs report
 an error. Use `lf skill NAME` to select the skill explicitly.
 Skills resolve from repository and personal Claude, Codex, and Loopflow folders.
 Help names the selected source; bundled reference files stay inside their skill.
 See [skill sources](docs/config.md#skill-sources) for precedence and export behavior.
 
-Flows invoke builtin commands with `cmd:`, for example `- cmd: pr land`.
+Graphs invoke builtin commands with `cmd:`, for example `- cmd: pr land`.
 See [Authoring](docs/authoring.md) for composition and review boundaries.
 
-## Run a Flow in chat
+## Run a Graph in chat
 
 ```bash
-lf sync-skills --yes        # export personal skills and builtin Flows
-lf sync-skills --repo       # export this repository’s skills and Flows locally
+lf sync-skills --yes        # export personal skills and builtin Graphs
+lf sync-skills --repo       # export this repository’s skills and Graphs locally
 ```
 
 Select `/pursue` in Claude Code or `pursue` in Codex’s skill picker to follow
 its generated checklist: headless commands, conversational reviews, and loops.
-Flow exports yield to existing skills with the same name. See
-[chat Flows](docs/authoring.md#flows-in-chat) for boundaries.
+Graph exports yield to existing skills with the same name. See
+[chat Graphs](docs/authoring.md#graphs-in-chat) for boundaries.
 
 ## Use only what you need
 
 ```bash
 lf : "fix the failing test"  # launcher; no Task or Linear required
-lf flow pursue               # run a Flow in this checkout
+lf graph pursue               # run a Graph in this checkout
 lf help skill work          # read the Task/Wave API contract
 lf --task INF-123 design     # continue an existing Task with work guidance
 ```
@@ -141,13 +141,13 @@ Author a Wave in the repo and open its conversation:
 <!-- .lf/wave/designer/GOAL.md -->
 ## Objective
 
-Keep the design system coherent. Each wake: read the chapter plan and
-Tasks, pursue the highest-leverage open KR, start a concrete
-Task only after it is filed, and fold what changed into memory.
+Keep the design system coherent. Each wake: read the chapter's Tasks,
+keep your started ones moving, leave teammates' Tasks to them, and fold
+what changed into memory.
 ```
 
 ```bash
-lf --wave designer wave-operate        # one finite pass: keep started Tasks moving
+lf --wave designer wave-operate        # one finite pass: keep your started Tasks moving
 lf --wave designer wave-operate "ship the button audit first"
 lf connect --wave designer             # your ongoing conversation for the Wave, applying that pass on every return
 ```
@@ -159,7 +159,7 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 
 ```bash
 lf checkout INF-123                               # durable Task Work + worktree, no controller
-lf -b task run INF-123                            # place the Task, then run its Flow here until it ends
+lf -b task run INF-123                            # place the Task, then run its Graph here until it ends
 lf task run INF-123 pursue                        # on a workflow: take the edge that runs pursue
 lf comment INF-123 "take the smaller approach"   # save a steer for the Task's Sessions
 lf interrupt INF-123                             # end the active turn
@@ -204,7 +204,7 @@ rented machine's own guardian deletes it at its deadline or when its budget runs
 out; `lf ondemand list` adopts uncertain creates and gives back drained ones.
 Unpushed work on a rented machine refuses every give-back but `--force`.
 
-Task comments in Linear reach the Task's next useful boundary: before a Flow step,
+Task comments in Linear reach the Task's next useful boundary: before a Graph step,
 after an agent turn, when showing planning, and before a Linear write. Team checks
 share ten-second freshness. Only Desktop and `--watch` keep a slow clock, backing
 off while nothing changes; idle agents do not poll. Teams without live Tasks make
@@ -213,7 +213,7 @@ same Home until reset, retaining pending writes. Acquired Task comments become s
 Session, with independent delivery at its next supported provider boundary.
 With Git planning, `lf comment` steers this Machine's Sessions; comments imported
 from another Machine join the plan without becoming steers.
-Steering leaves idle Sessions idle. A stopped Flow is history: `task run` never
+Steering leaves idle Sessions idle. A stopped Graph is history: `task run` never
 continues it, so inspect `lf task status` first.
 
 Turn a reviewed design into work without another planning subsystem:
@@ -237,7 +237,7 @@ lf context             # context budgets, configuration sources and current usag
 lf task run LOO-427 --explain --json # intended action and impediments; no launch
 lf task edit LOO-427 --title "Retain drafts" --explain # validate without saving
 lf --machine mini --repo project debug --context # read remote input without launching
-lf flow pursue --context # graph and initial input; future inputs stay unavailable
+lf graph pursue --context # graph and initial input; future inputs stay unavailable
 lf usage --days 30      # recorded provider usage
 lf usage --task LOO-265 # usage attributed to one Task
 lf usage --task LOO-265 --context # each step's input by source, flagged over budget
@@ -260,7 +260,7 @@ lf session rename SESSION "Release notes"
 lf session bind SESSION --task INF-123
 ```
 
-Sessions, Flows and Task shells survive closing their terminal. Reattach to a
+Sessions, Graphs and Task shells survive closing their terminal. Reattach to a
 Session with `lf session attach SESSION`;
 `--observe` leaves input control unchanged. `lf resume` opens the retained native
 terminal, or explicitly transitions a structured Run to native UI without replaying
@@ -299,6 +299,11 @@ Claude interactive hooks also require workspace trust, potentially once per
 folder; `claude -p` treats the workspace as trusted. Loopflow follows the providers’ [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks)
 and [Claude workspace trust](https://code.claude.com/docs/en/hooks#workspace-trust)
 policies. Unchanged declarations cannot remove Claude’s folder trust requirement.
+Loopflow pre-accepts Claude's folder trust only for the exact worktrees it
+created (`lf`, Task checkouts, `lf wt create`) by writing that path's
+`hasTrustDialogAccepted` entry in the config the launched child reads; hook
+trust, the main checkout, hand-made worktrees and every other setting are
+untouched.
 
 New Session names use a short excerpt of the request, or the invoked skill when
 no request was supplied. Task conversations use the Task title when no specific
@@ -351,12 +356,12 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | Object | What it does | Where it lives |
 | --- | --- | --- |
 | **Skill** | Gives the agent reusable instructions and context | `.lf/skills/*.md` |
-| **Flow** | Composes agent work and mechanical operations; a run is one lf process and the step processes it starts | `.lf/flows/*.yaml` |
-| **Workflow** | Gives a Task nodes, where you take part in its conversation, joined by the Flows between them | `.lf/workflows/*.yaml` |
+| **Graph** | Composes agent work and mechanical operations; a run is one lf process and the step processes it starts | `.lf/graphs/*.yaml` |
+| **Workflow** | Gives a Task nodes, where you take part in its conversation, joined by the Graphs between them | `.lf/workflows/*.yaml` |
 | **Wave** | Keeps the objective, memory, cadence, budget and instruments | `.lf/wave/<name>/` |
 | **Project** | Holds one Wave's plan, Tasks, KRs and targets | Local SQLite, shared through the planning provider (Git ref or Linear) |
 | **Chapter** | Names the repository's current group of In Progress Projects | Project names and statuses |
-| **Task** | Owns concrete work, its checkout, optional PR and every Flow process for it | Local SQLite, shared through the planning provider |
+| **Task** | Owns concrete work, its checkout, optional PR and every Graph process for it | Local SQLite, shared through the planning provider |
 | **Process** | Records one actual lf process and its observed command outcome | Machine-local SQLite |
 | **LfSession** | Keeps a continuable interactive or headless conversation and native history | Machine-local SQLite and provider-native storage |
 | **Machine** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |
@@ -383,9 +388,10 @@ each `.md` URL, use the curated
 |------|--------|
 | [Get Started](docs/getting-started.md) | Install, first commands, building features, going remote |
 | [Waves](docs/waves.md) | The planning model, goals, memory, KRs, Linear, crons |
+| [Plan and share Tasks](docs/planning.md) | Share and capture Tasks with or without Linear, Asana or Notion |
 | [The Agent API](docs/agent-api.md) | How agents launch, steer, and prove control of other agents |
 | [Conducting](docs/conducting.md) | Seeing what got done, what you can pick up, and how to step in |
-| [Authoring](docs/authoring.md) | Writing skills, flows, and goals |
+| [Authoring](docs/authoring.md) | Writing skills, graphs, and goals |
 | [Security](docs/security.md) | Execution boundaries, permissions, credentials, and account authority |
 | [`lf` reference](docs/lf.md) | Every command, PR/planning/release operations, the builtin catalog |
 | [Glossary](docs/glossary.md) · [Configuration](docs/config.md) · [Troubleshooting](docs/troubleshooting.md) | Reference |

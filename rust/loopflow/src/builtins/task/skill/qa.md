@@ -34,4 +34,4 @@ prerequisite to assessing the change.
 
 Finish with the experienced result, checks and their limits, and remaining issues
 ordered by consequence. Passing checks do not prove missing behavior or configured
-acceptance. Do not publish, land or select Flow navigation from an assessment.
+acceptance. Do not publish, land or select Graph navigation from an assessment.

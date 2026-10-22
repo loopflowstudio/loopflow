@@ -33,7 +33,7 @@ impl Drop for ReadSnapshot<'_> {
 pub struct StoreRevisions {
     pub planning: i64,
     pub sessions: i64,
-    pub flows: i64,
+    pub graphs: i64,
     pub processes: i64,
     /// Token counts. Moves every few seconds while agents work.
     pub usage: i64,
@@ -53,7 +53,7 @@ impl SqliteStore {
         let mut revisions = StoreRevisions {
             planning: 0,
             sessions: 0,
-            flows: 0,
+            graphs: 0,
             processes: 0,
             usage: 0,
         };
@@ -64,7 +64,7 @@ impl SqliteStore {
             match row.get::<_, String>(0)?.as_str() {
                 "planning" => revisions.planning = revision,
                 "sessions" => revisions.sessions = revision,
-                "flows" => revisions.flows = revision,
+                "graphs" => revisions.graphs = revision,
                 "processes" => revisions.processes = revision,
                 "usage" => revisions.usage = revision,
                 _ => {}
@@ -243,12 +243,12 @@ mod tests {
     /// The tables the Task conversation work adds, each with the one domain
     /// its three triggers move.
     #[test]
-    fn workflow_flow_process_and_activity_tables_move_their_domains() {
+    fn workflow_graph_process_and_activity_tables_move_their_domains() {
         let (_dir, store) = store();
         let conn = store.conn.lock().unwrap();
         for (table, domain) in [
-            ("flow_processes", "flows"),
-            ("flow_process_steps", "flows"),
+            ("graph_processes", "graphs"),
+            ("graph_process_steps", "graphs"),
             ("task_workflows", "planning"),
             ("task_workflow_moves", "planning"),
             ("session_activity", "sessions"),

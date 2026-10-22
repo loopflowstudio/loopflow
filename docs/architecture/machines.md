@@ -252,11 +252,11 @@ shell / automation / Loopflow.app
                |
         store + repository
                |
-          Flow process --> step Process --> LfSession <--> AgentProcess
+          Graph process --> step Process --> LfSession <--> AgentProcess
 ```
 
-Wave operations are finite attributed conversations. Each Task Flow
-runs through the common Flow runner. Cron invokes commands on schedule;
+Wave operations are finite attributed conversations. Each Task Graph
+runs through the common Graph runner. Cron invokes commands on schedule;
 local PR supervision watches and repairs delivery in the invoking process.
 
 The process that directly spawns a child owns its child handle. Cross-process
@@ -314,7 +314,7 @@ uv run python scripts/install.py local # build an experimental CLI
 LF_HOME="$(mktemp -d)" local-bin/lf wave list --json
 ```
 
-Ordinary commands, provider children, hooks, Session connections and Flow steps
+Ordinary commands, provider children, hooks, Session connections and Graph steps
 use the stable installed entry. Each new execution selects the current installed
 CLI; main-Machine dispatch ignores inherited `LF_BIN` selections. The caller's
 Machine selection and Session attribution stay intact. Installation does not

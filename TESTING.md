@@ -8,7 +8,7 @@ Implement/compress only build changed code and run its focused test. Gate owns
 affected suites and automated acceptance once; see the verification cadence in
 [AGENTS.md](AGENTS.md#verification-cadence). Scratch keeps one check-result line.
 Required checks run unattended; defer unavailable checks to capable CI and
-leave people's judgment to demo/review. Neither blocks earlier Flow steps.
+leave people's judgment to demo/review. Neither blocks earlier Graph steps.
 
 For checkpoint PRs, `scratch-clear` reports deferred tests and `tests-result`
 and the matrix jobs skip. That is not a passing test result. The required merge
@@ -21,7 +21,13 @@ a failing required check by name. Delivery cleanup preserves existing scratch
 content, so repositories retaining it must define their own candidate policy.
 
 A new PR update cancels the previous CI run for that PR. Main and merge-group
-runs remain independent.
+runs remain independent, except that a merge-queue entry's earlier runs are
+cancelled when GitHub rebuilds it (`cancel-superseded`) or when its PR leaves
+the queue (`merge-queue-cleanup.yml`). PRs and queue entries that touch only
+docs, the website, scratch, Wave memory or Python skip the macOS jobs
+(`scripts/macos_inputs.py`); anything the Swift tests can reach, including
+Rust, fixtures and scripts, runs them. A push to main whose exact tree the
+queue already proved builds the macOS tests only to warm their caches.
 
 After changing `Cargo.lock`, including a release version bump, run
 `uv run python scripts/third_party.py refresh` and
@@ -77,16 +83,16 @@ Git locator enrollment, retained identity, historical paths, unpublished edits
 and promotion retry without external network access during the proof. Native
 provider resume and macOS Desktop installation require separate acceptance.
 
-`uv run python scripts/test_task_installation.py --test running_provider_uses_updated_install_for_commands_hooks_and_flow`
+`uv run python scripts/test_task_installation.py --test running_provider_uses_updated_install_for_commands_hooks_and_graph`
 starts a fixture provider, observes a controlled command failure, switches the
 installed CLI, and retries the same command in the same provider and checkout.
-Saved hooks and later Flow children also use the replacement. The proof preserves
+Saved hooks and later Graph children also use the replacement. The proof preserves
 Session history, pending steers and caller attribution, and checks stale inherited
 `LF_BIN` selections through the real installation gate.
 The initial CLI is a failing script and the replacement is the source build;
 this does not prove released-version migration or configured native-provider
-behavior. The Flow starts after the switch, so it does not prove survival of an
-already-running Flow.
+behavior. The Graph starts after the switch, so it does not prove survival of an
+already-running Graph.
 
 The disposable installation job caches its Cargo target and registry on
 the Linux runner, keyed by image identity, architecture, lockfile, profiles and
@@ -139,14 +145,14 @@ Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These
 cover startup cost and release retries that share the same Git operations.
 
-Changes to builtin Flows affect the parser, graph, Task controller and CLI fixtures.
+Changes to builtin Graphs affect the parser, graph, Task controller and CLI fixtures.
 Run the affected controller progression and CLI behavior tests as well as graph
-checks; use authored fixture Flows when a test needs a fixed sequence independent
+checks; use authored fixture Graphs when a test needs a fixed sequence independent
 of product defaults.
 
 Changes to interactive/headless selection also run `default_conversation_tests`
-and `context_launch_tests` alongside `flow_tests`: bare `lf`, explicit `-b`, and a
-Flow invoking the `default` skill must preserve their distinct launch modes.
+and `context_launch_tests` alongside `graph_tests`: bare `lf`, explicit `-b`, and a
+Graph invoking the `default` skill must preserve their distinct launch modes.
 Prompt fixtures read the harness's actual inputs, including context files and
 stdin, rather than assuming everything remains in argv.
 
@@ -154,12 +160,12 @@ Context byte-budget fixtures must reach their boundary with short temporary
 paths too. Run `TMPDIR=/tmp cargo test -p loopflow --lib context_block` when
 changing them; macOS's longer default paths can hide an undersized fixture.
 
-The composed delivery fixture runs a real CLI/Flow against an isolated Home and
+The composed delivery fixture runs a real CLI/Graph against an isolated Home and
 simulated provider observations, ordinary Task/comment saves and independent completion,
 then checks its captured CLI and monitor population in Rust
 and Swift. It builds the CLI with Cargo so a unit-test binary cannot accidentally
 launch an installed version. Regenerate its wire capture with
-`LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE=1 cargo test -p loopflow --lib ordinary_task_comments_and_completion_preserve_live_flow_and_arrival`,
+`LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE=1 cargo test -p loopflow --lib ordinary_task_comments_and_completion_preserve_live_graph_and_arrival`,
 then run `cargo test -p loopflow --test integration dto_fixtures::composed_lifecycle` and
 `swift test --package-path swift --filter 'composedTaskLifecycle|dueDate'`.
 
@@ -188,7 +194,7 @@ public live steering. It uses a local model and disposable homes; configured-acc
 and rendered acceptance remain separate.
 Claude stream fixtures must acknowledge the input's UUID before completing its
 result, and stay alive until the harness closes stdin. Include
-`explicit_launch_policy_survives_task_workflow_nested_flows_and_provider_children` when
+`explicit_launch_policy_survives_task_workflow_nested_graphs_and_provider_children` when
 integrating Claude transport changes; bound the test so missing acknowledgements
 fail locally instead of exhausting the merge queue's deadline.
 Cross-provider replay fixtures must install stand-ins for both the recorded and
@@ -407,7 +413,7 @@ growth. A product assertion remains a product failure; a stopped phase under
 sustained macOS `syspolicyd`/`trustd`/`amfid`/`taskgated` pressure is reported as
 host-security pressure with the product result explicitly unproven.
 
-Read the same gate evidence through the daily operator flow:
+Read the same gate evidence through the daily operator graph:
 
 ```bash
 lf telemetry-daily
@@ -438,7 +444,7 @@ LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --no-parallel
 uv run python scripts/test.py --ui-host  # optional XCUITest diagnostic
 ```
 
-They are never acceptance prerequisites for a headless Flow. See
+They are never acceptance prerequisites for a headless Graph. See
 `release/UI_HOST_GATE.md` for optional hosted execution and cleanup.
 
 Path → suite mapping:
@@ -520,7 +526,7 @@ isolated repository while the production Work reader is already open. It checks
 sidebar updates, completion/cancellation, Back and retained workspace identity.
 It launches no provider and proves no rendered native behavior.
 After integrating Session kind changes, run `scripts/test_desktop.sh --filter
-'TaskFlowTests|WorkspaceNavigationTests'` to compile Desktop consumers and exercise
+'TaskGraphTests|WorkspaceNavigationTests'` to compile Desktop consumers and exercise
 participation and navigation fixtures together.
 Window and terminal integration suites opt in with `LOOPFLOW_NATIVE_TESTS=1`;
 they are reported as skipped in headless runs, not counted as passing.
@@ -531,6 +537,11 @@ shell output for prompt headers, command boundaries and exit status.
 
 `scripts/prove_wave_surface_states.sh` is an optional demo capture: it launches
 windows and therefore needs a display session. It is not in gate or CI.
+
+`scripts/test_desktop.sh` runs `swift test` under `scripts/swift_test_limit.py`,
+which reads the event stream and ends the whole run, naming the test, when one
+test function outlives 300 s. Swift Testing's `.timeLimit` only records an
+issue; a test blocked on a child process still holds the run.
 
 On a pull request the Swift tests get 5 minutes after the build (161 s on
 2026-10-22); the merge queue and main keep a 20-minute hang guard. A PR that makes
@@ -723,20 +734,20 @@ directory without Git metadata; Work operations still enforce repository ownersh
 cargo nextest run -p loopflow --lib -E 'test(status_tests::) | test(wave_repository_ownership::)' --no-fail-fast
 ```
 
-Task decision feedback has a focused store-and-Flow-runner check:
+Task decision feedback has a focused store-and-Graph-runner check:
 
 ```bash
 cargo test -p loopflow --lib task_decision_live_unblock_returns_feedback_without_navigation -- --test-threads=1
 ```
 
 It completes a keyed Ask while the decision is active and verifies that feedback
-returns to the same captured conversation without choosing Flow navigation.
+returns to the same captured conversation without choosing Graph navigation.
 Provider effects are simulated. The name's `live` refers to the active local
 decision, not configured-provider acceptance. Structured decision output owns
 Advance, Iterate, or Blocked with a required reason; feedback alone is no verdict.
 
 Task stall check uses `session_record::activity::tests`, `task_live_unblock`, and
-Swift `TaskFlowProofTests`. The sampler retains PID/start identity and cumulative
+Swift `TaskGraphProofTests`. The sampler retains PID/start identity and cumulative
 CPU for the body and descendants in Session events. Five quiet minutes
 requires samples no more than 45 seconds apart; the worker samples every 15
 seconds. Unit tests advance a simulated clock; the CLI/desktop check samples a
@@ -763,11 +774,11 @@ Responses fixture:
 
 ```bash
 uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
-  --lf target/debug/lf --launch --flow-decision-retry replace \
-  --output .lf/tmp/native-flow-decision
+  --lf target/debug/lf --launch --graph-decision-retry replace \
+  --output .lf/tmp/native-graph-decision
 ```
 
-`--flow-decision-retry missing` exhausts the corrections of an invalid answer;
+`--graph-decision-retry missing` exhausts the corrections of an invalid answer;
 `replace` proves a failed turn decides nothing. `--public-connect` covers a
 live headless-to-terminal handoff.
 `--shared-provider-home` proves Loopflow and plain Codex share one home signed
@@ -785,10 +796,10 @@ accounts or installed data. Ordinary retry, usage, binding and review behavior
 belong in `session_lifecycle_tests`; Chapter convergence belongs in
 `ops::chapter::tests`, including interrupted rotation and second-Machine sync.
 
-`planning_reconnect_tests` runs public work-watch and Flow-boundary recovery against
+`planning_reconnect_tests` runs public work-watch and Graph-boundary recovery against
 synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
 independent acquisition during failed delivery, local buffering and retained execution.
-The peer implements team deltas with current revision timestamps. Flow acquisition
+The peer implements team deltas with current revision timestamps. Graph acquisition
 waits for a turn/step boundary; only watchers retry on the 30–240-second clock.
 Run these Linux fixtures when changing Linear acquisition, even if macOS checks pass.
 Linear and Git planning run separately; no provider receipt crosses Git.
@@ -855,7 +866,7 @@ When editing the repeated Task body, exercise every step on two passes and
 saved-decision recovery. Keep loop-or-next after work and review so navigation
 cannot skip a later review.
 
-Include the CLI/desktop unblock projection when changing builtin Flow composition:
+Include the CLI/desktop unblock projection when changing builtin Graph composition:
 
 ```bash
 cargo test -p loopflow --test integration task_initialization_tests::task_live_unblock
@@ -863,7 +874,7 @@ cargo test -p loopflow --test integration task_initialization_tests::task_live_u
 
 Fixtures targeting a named boundary should resolve its node ID in the expanded
 graph. A hard-coded step index can silently select a different skill when
-a nested Flow gains a step.
+a nested Graph gains a step.
 
 For worktree creation or checkout-refresh changes, build the current CLI before
 running its Python behavior tests:
@@ -892,9 +903,9 @@ match the intended contract instead of restoring retired commands in the prose.
 cargo test -p loopflow --lib builtins::tests
 ```
 
-When changing the builtin catalog or Flow composition, also exercise discovery.
-Listings keep effective skills and authored flows separate and show their sources
-and invocations; `lf flow show` expands a flow's steps.
+When changing the builtin catalog or Graph composition, also exercise discovery.
+Listings keep effective skills and authored graphs separate and show their sources
+and invocations; `lf graph show` expands a graph's steps.
 
 ```bash
 cargo test -p loopflow --test integration cli_discovery::list_preserves_kinds_overrides_sources_and_reserved_invocations
@@ -902,15 +913,15 @@ cargo test -p loopflow --test integration cli_discovery::list_preserves_kinds_ov
 
 Catalog retirement also affects historical migration tests. Keep their persisted
 names and data-preservation assertions at the migration boundary; current catalog
-resolution belongs in skill catalog tests. Include the legacy Flow repair check:
+resolution belongs in skill catalog tests. Include the legacy Graph repair check:
 
 ```bash
-cargo test -p loopflow --lib legacy_task_flow_repair
+cargo test -p loopflow --lib legacy_task_graph_repair
 ```
 
 Skill export tests use isolated homes and cover builtin/global definitions,
 personal agent directories and pruning. `sync-skills --repo` exports repository
-skills and Flow recipes into the checkout; default sync exports globally.
+skills and Graph recipes into the checkout; default sync exports globally.
 
 ```bash
 cargo test -p loopflow --lib skills::tests
@@ -922,7 +933,7 @@ reflects the intended prompt change, regenerate the snapshots, review their
 diff, and rerun the check before gate.
 Terminology-only replacements count as prompt changes; include the golden
 check in their focused verification even when no prompt assembly code changed.
-Skill/Flow naming changes also update architecture command examples: check both
+Skill/Graph naming changes also update architecture command examples: check both
 the prompt goldens and portable architecture HTML before arming, even when the
 focused discovery and export suites pass.
 
@@ -1028,12 +1039,12 @@ Run the Task CLI proofs with isolated installation authority:
 ```bash
 uv run python scripts/test_task_installation.py
 # One changed Task adoption proof:
-uv run python scripts/test_task_installation.py --test task_adopts_linear_checkout_and_preserves_flow_history
+uv run python scripts/test_task_installation.py --test task_adopts_linear_checkout_and_preserves_graph_history
 ```
 
 Pass several names after `--test` to share one disposable build across related proofs.
 Agent-selection changes also require the container-only
-`declared_agent_can_start_another_tasks_flow` proof: saved Task defaults remain
+`declared_agent_can_start_another_tasks_graph` proof: saved Task defaults remain
 local, while explicit `-a` overrides child Tasks too. Ordinary Rust suites skip
 this installation-boundary proof.
 Every ordinary installation run first upgrades populated released planning and
@@ -1052,10 +1063,10 @@ on a development machine. Cold pulls retry registry throttling with bounded
 backoff within a five-minute download budget. Exhausted acquisition reports an
 infrastructure failure before any installation tests run.
 
-CLI owner-tree changes must include `cargo test -p loopflow --lib flow::graph::tests`
+CLI owner-tree changes must include `cargo test -p loopflow --lib graph::compiled::tests`
 to verify builtin operation labels, plus the affected proofs above. The regular
 Rust suite skips those installation proofs; a skipped case is not verification.
-Task status reads a Flow from recorded command outcomes and OS liveness. Run
+Task status reads a Graph from recorded command outcomes and OS liveness. Run
 `cargo test -p loopflow --lib ops::task_execution::tests` for running, between
 steps, stopped and failed.
 Managed Task fixtures must bind the checkout's Team and Initiative before
@@ -1078,7 +1089,7 @@ product contract; its two cross-store promotion/continuation cases were removed.
 
 The adoption case starts with planning and no Task row. Public checkout/run
 reuse a dirty existing Git worktree or fetch an open PR's unseen remote branch,
-retain the PR identity, and leave an earlier Flow's Processes untouched after source
+retain the PR identity, and leave an earlier Graph's Processes untouched after source
 changes. Linear planning and GitHub reads are fixtures; Git and CLI paths are real.
 
 The disposable OS account authors fixture installation records for routing proofs;
@@ -1095,13 +1106,13 @@ That CLI case exercises cached planning; `ops::linear::planning_lookup_tests` co
 acquisition with simulated Linear responses, including missing Projects, partial
 responses, absence, and provider failure. Neither is configured live-provider proof.
 
-The mechanical Flow proof uses that disposable account without an installation
+The mechanical Graph proof uses that disposable account without an installation
 selection. A work reservation that fails before allocation leaves the Task unowned;
 the real worker records operation history and its ownership claim together. It retains the
-captured Flow after the template disappears and records an ordinary child Process without creating an LfSession.
+captured Graph after the template disappears and records an ordinary child Process without creating an LfSession.
 The default-Machine proof sends two nested source CLI processes through a simulated
 installed executable and checks that both select the main Machine despite stale
-control pins. The explicit-Machine Flow proof runs locally in `one_machine_tests`. The declaration proof starts Task Y
+control pins. The explicit-Machine Graph proof runs locally in `one_machine_tests`. The declaration proof starts Task Y
 from Task X's agent and checks Y attribution while retaining X as the causal parent.
 
 The harness keeps Docker build/registry caches, serializes use of its build
@@ -1140,7 +1151,7 @@ tests/e2e/test_full_cycle.sh
 tests/e2e/test_sync_safety.sh
 ```
 
-Exercise repository planning reconnect through real work-watch and Flow commands on Linux:
+Exercise repository planning reconnect through real work-watch and Graph commands on Linux:
 
 ```bash
 cargo test -p loopflow --test planning_reconnect_tests
@@ -1317,21 +1328,21 @@ release-materialized source tree:
 
 ```bash
 cargo test -p loopflow --lib ownership_cutover_keeps_current_task_review_without_importing_history
-cargo test -p loopflow --lib project_status_adoption_preserves_current_identity_and_custom_flow
+cargo test -p loopflow --lib project_status_adoption_preserves_current_identity_and_custom_graph
 ```
 
-They check retained review identity/capture and the current Project's custom Flow
+They check retained review identity/capture and the current Project's custom Graph
 default. Synthetic migration success does not authorize conversion of an installed
 Machine or prove configured-provider resumption.
 
-When changing how a Flow step is described or read back, include the step
+When changing how a Graph step is described or read back, include the step
 argument and Process inventory tests and the public Session lifecycle proofs. A
-Flow is its Flow process and step Processes; assert on those Processes and on the Session
+Graph is its Graph process and step Processes; assert on those Processes and on the Session
 turn a step Process captured.
 
 ```bash
-cargo test -p loopflow --lib ops::flow_run
-cargo test -p loopflow --lib store::sqlite::flow_inventory
+cargo test -p loopflow --lib ops::graph_run
+cargo test -p loopflow --lib store::sqlite::graph_inventory
 cargo nextest run -p loopflow --test session_lifecycle_tests --no-fail-fast
 ```
 
@@ -1429,7 +1440,7 @@ them through the wrapper while that source exists.
 
 Default-runtime selection reads the OS account's installation records. Use the
 installation harness for default-runtime proofs; never replace the machine's
-selection to make tests pass. Flow/Session tests with an explicit experimental
+selection to make tests pass. Graph/Session tests with an explicit experimental
 `LF_HOME` and source `LF_BIN` stay within that experiment.
 
 `lf install preflight` and `promote` read the OS account's store and take
@@ -1505,11 +1516,11 @@ print-mode result can race the seed write and fail with a broken pipe.
 
 Headless shutdown checks run on Linux as well as macOS: fast provider exit must
 settle its owned lifeline watchdog without mistaking it for foreign work. Include
-`launch_nonzero_exit`, bare/default launch, mixed-provider Flow and headless resume;
+`launch_nonzero_exit`, bare/default launch, mixed-provider Graph and headless resume;
 Session interactivity must not select an individual launch’s process-group policy.
 Retained terminal changes also run Linux Clippy, `transport_tests`,
-`interactive_flow_keeps_input_and_advances_only_after_each_provider_exits`, and
-the disposable installation proof `declared_agent_can_start_another_tasks_flow`.
+`interactive_graph_keeps_input_and_advances_only_after_each_provider_exits`, and
+the disposable installation proof `declared_agent_can_start_another_tasks_graph`.
 Assert that attachment returns after execution exits, as well as checking its
 output: a spare slave descriptor can keep Linux PTY readers open indefinitely.
 Process ancestry assertions follow the recorded chain through transport owners
@@ -1533,7 +1544,7 @@ The prompt and CLI checks verify recorded inclusion, exclusion and explanation.
 The Python tests verify evaluation scoring, not agent behavior. Render and run
 [the decision cases](scripts/evals/README.md) in a capable provider evaluation
 environment; retain model/version, inputs, replies and failures. These cases cover
-launcher work, taskless Flows, custom Work clients, guided memory maintenance,
+launcher work, taskless Graphs, custom Work clients, guided memory maintenance,
 explicit Task adoption, scratch ownership and instruction opt-out. They score
 proposed actions; lifecycle integration tests remain the proof of tool effects.
 

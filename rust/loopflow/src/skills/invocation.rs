@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
-use crate::flow::Skill;
+use crate::graph::Skill;
 use crate::skills::catalog::SkillDialect;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -349,7 +349,7 @@ impl SkillInvocation {
         }
     }
 
-    /// Keep the Flow's captured text and resolve resources at their original directory.
+    /// Keep the Graph's captured text and resolve resources at their original directory.
     fn materialize_claude(&self, directory: &Path, context: Option<&str>) -> anyhow::Result<()> {
         std::fs::create_dir_all(directory)?;
         let target = directory.join("SKILL.md");
@@ -384,7 +384,7 @@ impl SkillInvocation {
 #[cfg(test)]
 mod tests {
     use super::SkillInvocation;
-    use crate::flow::Skill;
+    use crate::graph::Skill;
     use crate::skills::catalog::SkillCatalog;
     use crate::skills::catalog::{SkillDialect, SkillOrigin};
 

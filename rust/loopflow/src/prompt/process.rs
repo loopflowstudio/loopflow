@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::agent::AgentConfig;
 use crate::config::{default_agent, parse_agent, Config};
 use crate::error::CoreError;
-use crate::flow::Skill;
+use crate::graph::Skill;
 use crate::prompt::structured_reply::{structured_replies_for_context, ClientContext};
 use crate::prompt::{
     drop_duplicate_docs, format_first_turn, gather_context, Document, DocumentSource,
@@ -320,14 +320,14 @@ Test skill body.
         let _lock = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::flow::EnvVarGuard::set("HOME", home.path().to_str().unwrap());
-        let _lf_home = crate::lf::commands::flow::EnvVarGuard::set(
+            crate::lf::commands::graph::EnvVarGuard::set("HOME", home.path().to_str().unwrap());
+        let _lf_home = crate::lf::commands::graph::EnvVarGuard::set(
             "LF_HOME",
             home.path().join(".lf").to_str().unwrap(),
         );
         let repo = loopflow_test_support::TestRepo::new();
         let source = crate::builtins::get_builtin_skill("work").unwrap();
-        let (_, body) = crate::flow::split_frontmatter(source).unwrap();
+        let (_, body) = crate::graph::split_frontmatter(source).unwrap();
         let help = crate::lf::navigation::render_help(
             &["skill".to_owned(), "work".to_owned()],
             repo.path(),
@@ -647,7 +647,7 @@ Test skill body.
     fn preferred_name_reaches_provider_prompts_on_every_surface() {
         let _lock = crate::journal::test_env_lock();
         let _name =
-            crate::lf::commands::flow::EnvVarGuard::set(crate::config::USER_NAME_ENV, "  Jack  ");
+            crate::lf::commands::graph::EnvVarGuard::set(crate::config::USER_NAME_ENV, "  Jack  ");
         let tmp = create_repo_fixture();
         for agent in ["claude", "codex", "opencode", "pi"] {
             for surface in [

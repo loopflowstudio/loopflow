@@ -16,10 +16,10 @@ Generated from the compiled Clap tree. Canonical command paths are shown; unique
 `--task` selects a Task checkout; `--wt` selects an existing worktree.
 `--wave` adds context without moving directories and must match a Task's
 owning Wave. `task run` places a Task's worktree and then runs like
-`lf --task ISSUE flow FLOW`; every Flow naming a Task is equally its work.
+`lf --task ISSUE graph GRAPH`; every Graph naming a Task is equally its work.
 
 A preference (`--account`) permits fallback. A restriction (`--only-account`)
-limits this launch and its children. A Flow retains its provider selections;
+limits this launch and its children. A Graph retains its provider selections;
 children check their destination's access before starting a provider.
 Account observations distinguish unavailable, expired and measured capacity.
 
@@ -28,18 +28,18 @@ until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
 operation succeeded; 1 denotes an operational failure, 2 a syntax or lookup
 failure, and 130 interruption. A successful auto-merge request is not a merge.
 
-## Flow decisions and recovery
+## Graph decisions and recovery
 
 ```bash
 lf task run EXP-12 pursue
-lf flow show FLOW_ID --processes --json
+lf graph show GRAPH_ID --processes --json
 lf task interrupt EXP-12
 ```
 
-Each start is a new Flow: one lf process and the step processes it starts. Its ID
-is the Flow process's. `--state` selects `current` (the Flow process has no recorded
+Each start is a new Graph: one lf process and the step processes it starts. Its ID
+is the Graph process's. `--state` selects `current` (the Graph process has no recorded
 exit), `completed` (it succeeded) or `stopped` (it exited before the last
-step). A stopped Flow's Processes are its history; nothing resumes it. Inspect
+step). A stopped Graph's Processes are its history; nothing resumes it. Inspect
 them, then launch the work that remains.
 
 ## lf
@@ -53,7 +53,7 @@ Open Loopflow or run its CLI
 | `--json` | Emit invocation previews as JSON Default: false. |
 | `--docs` | Docs paths, globs, or directories to include in context |
 | `--clipboard / -c` | Include clipboard content in prompt Default: false. |
-| `--agent / -a` | Override agents named in Tasks, Flows and skills, including child commands (claude, codex, opencode, pi; harness[:model]) Applies everywhere. |
+| `--agent / -a` | Override agents named in Tasks, Graphs and skills, including child commands (claude, codex, opencode, pi; harness[:model]) Applies everywhere. |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
@@ -1121,9 +1121,9 @@ Show the recorded Task's files beside an exact pane, retaining drafts
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf desktop flow-log
+## lf desktop graph-log
 
-Show the recorded Task's Flow processes beside an exact pane
+Show the recorded Task's Graph processes beside an exact pane
 
 | Argument | What it does |
 |---|---|
@@ -1653,7 +1653,7 @@ Show durable cron receipts
 | Argument | What it does |
 |---|---|
 | `--wave / -w` | Wave whose receipts are shown |
-| `--flow` | Only receipts for this flow or skill |
+| `--graph` | Only receipts for this graph or skill |
 | `--days` | Receipt window in days Default: 35. |
 | `--json` | Emit machine-readable receipts Default: false. |
 | `--help / -h` | Print help |
@@ -1665,7 +1665,7 @@ Ask launchd to fire an installed job
 | Argument | What it does |
 |---|---|
 | `--wave / -w` | Wave whose installed job is fired |
-| `--flow` | Flow or skill name to run |
+| `--graph` | Graph or skill name to run |
 | `--wait` | Wait for and return the scheduled receipt Default: false. |
 | `--timeout` | Maximum wait for a receipt Default: 15m. |
 | `--help / -h` | Print help |
@@ -1676,8 +1676,8 @@ Uninstall a scheduled lf invocation
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | Wave name passed to `lf <flow> --wave <wave>` |
-| `--flow` | Flow or skill name to remove |
+| `--wave / -w` | Wave name passed to `lf <graph> --wave <wave>` |
+| `--graph` | Graph or skill name to remove |
 | `--help / -h` | Print help |
 
 ## lf wave list
@@ -1763,7 +1763,7 @@ Clear a Task pause without starting execution
 
 ## lf task sync
 
-Synchronize a Task; observed planning conflicts adopt Linear
+Synchronize a Task with its tracker; the change sent last wins
 
 | Argument | What it does |
 |---|---|
@@ -1840,7 +1840,7 @@ Enable or hold CI repair for a Task without interrupting running work
 
 ## lf task checkout
 
-Ensure tracked Task Work and its worktree without launching a Flow
+Ensure tracked Task Work and its worktree without launching a Graph
 
 | Argument | What it does |
 |---|---|
@@ -1855,12 +1855,12 @@ Ensure tracked Task Work and its worktree without launching a Flow
 
 ## lf task run
 
-Place a Task's worktree, then run a Flow there like `lf --task ISSUE flow FLOW`
+Place a Task's worktree, then run a Graph there like `lf --task ISSUE graph GRAPH`
 
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `<flow>` | The edge's Flow, or a workflow to take up; the Task's only edge or its Wave or repository default when omitted |
+| `<graph>` | The edge's Graph, or a workflow to take up; the Task's only edge or its Wave or repository default when omitted |
 | `--name` | name |
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
@@ -2117,7 +2117,7 @@ Show memory and scratch size targets, their sources, and current usage
 
 ## lf list
 
-Discover commands, skills, and flows
+Discover commands, skills, and graphs
 
 | Argument | What it does |
 |---|---|
@@ -2127,7 +2127,7 @@ Discover commands, skills, and flows
 
 ## lf help
 
-Explain a command, skill, or flow without launching it
+Explain a command, skill, or graph without launching it
 
 | Argument | What it does |
 |---|---|
@@ -2209,23 +2209,23 @@ Launch a new execution from an immutable captured provider request
 | `<run>` | Captured input identity or an unambiguous displayed prefix |
 | `--help / -h` | Print help |
 
-## lf flow
+## lf graph
 
-Run or inspect authored flows
+Run or inspect authored graphs
 
 | Argument | What it does |
 |---|---|
 | `--help / -h` | Print help |
 
-## lf flow list
+## lf graph list
 
-List authored flows, or Flows that ran
+List authored graphs, or Graphs that ran
 
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--processes` | List or show Flows that ran, from their Processes, instead of reusable templates Default: false. |
-| `--all` | Include every repository and flows with unknown repository evidence Default: false. |
+| `--processes` | List or show Graphs that ran, from their Processes, instead of reusable templates Default: false. |
+| `--all` | Include every repository and graphs with unknown repository evidence Default: false. |
 | `--limit` | Page size (default 100) |
 | `--after` | Previous page's next identity; retain the same filters |
 | `--search` | Literal name or identity containment |
@@ -2235,9 +2235,9 @@ List authored flows, or Flows that ran
 | `--taskless` | taskless Default: false. |
 | `--help / -h` | Print help |
 
-## lf flow show
+## lf graph show
 
-Inspect an authored flow, or one that ran
+Inspect an authored graph, or one that ran
 
 | Argument | What it does |
 |---|---|
@@ -2246,9 +2246,9 @@ Inspect an authored flow, or one that ran
 | `--processes` | processes Default: false. |
 | `--help / -h` | Print help |
 
-## lf flow customize
+## lf graph customize
 
-Print the repository file that defines a Flow, creating it from the builtin when the repository has none
+Print the repository file that defines a Graph, creating it from the builtin when the repository has none
 
 | Argument | What it does |
 |---|---|

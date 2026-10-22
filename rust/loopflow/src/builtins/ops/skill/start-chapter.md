@@ -27,7 +27,7 @@ return proposals, never mutate planning. Reconcile them into one retained
 
 Allocate each new successor UUID v4 once and retain it. For an explicitly selected
 existing destination, use its exact UUID with `create:false`. Names never select
-Projects. Every destination needs authored nonempty KRs before creation; Flow
+Projects. Every destination needs authored nonempty KRs before creation; Graph
 may be empty. Preserve existing names and unrelated content. Targets belong to
 Projects; instruments and observations stay on Waves.
 
@@ -54,7 +54,7 @@ lf repo new-chapter <name> --plan scratch/chapter-plan.json --json
 
 The operation preflights every participating Wave and reserves exact destinations
 before provider writes. It owns Task classification and recovery. Started work
-keeps Task, checkout, PR, Session and Flow identity. Unreviewed backlog stays in
+keeps Task, checkout, PR, Session and Graph identity. Unreviewed backlog stays in
 its predecessor until explicit disposition. Unknown evidence never authorizes
 retirement. Rotation neither launches workers nor completes Tasks or KRs.
 

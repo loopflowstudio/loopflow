@@ -1710,7 +1710,7 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
 
 #[test]
 fn lf_pr_land_returns_before_later_checks_repair_and_observe_merge() {
-    for (repair, blocked, awaiting_queue, merge_race, flow, fail_start) in [
+    for (repair, blocked, awaiting_queue, merge_race, graph, fail_start) in [
         (false, false, false, true, false, false),
         (false, false, false, false, false, false),
         (true, false, false, false, false, false),
@@ -1775,10 +1775,10 @@ fi"#;
         fs::write(worktree.join("feature.txt"), "feature").unwrap();
         fs::create_dir_all(worktree.join(".lf")).unwrap();
         fs::write(worktree.join(".lf/config.yaml"), "agent: codex\n").unwrap();
-        if flow {
-            fs::create_dir_all(worktree.join(".lf/flows")).unwrap();
+        if graph {
+            fs::create_dir_all(worktree.join(".lf/graphs")).unwrap();
             fs::write(
-                worktree.join(".lf/flows/repair-proof.yaml"),
+                worktree.join(".lf/graphs/repair-proof.yaml"),
                 "- cmd: pr land --strict --title watched-landing --body Observe-GitHub-before-returning.\n",
             )
             .unwrap();
@@ -1824,9 +1824,9 @@ fi"#;
                 );
             command
         };
-        let handed_off = if flow {
+        let handed_off = if graph {
             command()
-                .args(["flow", "repair-proof", "--batch"])
+                .args(["graph", "repair-proof", "--batch"])
                 .output()
                 .unwrap()
         } else {
@@ -1845,11 +1845,11 @@ fi"#;
         };
         assert_eq!(
             handed_off.status.success(),
-            !flow,
+            !graph,
             "{}",
             String::from_utf8_lossy(&handed_off.stderr)
         );
-        if flow {
+        if graph {
             assert!(String::from_utf8_lossy(&handed_off.stderr).contains("still being watched"));
         }
         assert!(!repair_launches.exists());
@@ -1861,8 +1861,8 @@ fi"#;
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        // A Flow stopped short of its end exits 3, which no caller retries.
-        assert_eq!(initial.1, if flow { 3 } else { 0 });
+        // A Graph stopped short of its end exits 3, which no caller retries.
+        assert_eq!(initial.1, if graph { 3 } else { 0 });
         let state: String = conn
             .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
             .unwrap();
@@ -2071,24 +2071,24 @@ fi"#;
             .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
             .unwrap();
         assert_eq!(state, "merged");
-        if flow {
-            // The Flow stopped at its watched landing: the step's command
-            // handed off and returned, and its Flow process exited without running
+        if graph {
+            // The Graph stopped at its watched landing: the step's command
+            // handed off and returned, and its Graph process exited without running
             // further steps. The merge resumes nothing.
-            let (step, flow_process): (i64, String) = conn
+            let (step, graph_process): (i64, String) = conn
                 .query_row(
-                    "SELECT step.exit_code,flow_process.outcome FROM processes step
-                     JOIN flow_process_steps recorded ON recorded.lf_process_id=step.id
-                     JOIN processes flow_process ON flow_process.id=recorded.flow_lf_process_id",
+                    "SELECT step.exit_code,graph_process.outcome FROM processes step
+                     JOIN graph_process_steps recorded ON recorded.lf_process_id=step.id
+                     JOIN processes graph_process ON graph_process.id=recorded.graph_lf_process_id",
                     [],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .unwrap();
-            assert_eq!((step, flow_process.as_str()), (0, "failed"));
+            assert_eq!((step, graph_process.as_str()), (0, "failed"));
         }
         assert!(
             !worktree.exists(),
-            "repair={repair}, flow={flow}, merge_race={merge_race}: {}",
+            "repair={repair}, graph={graph}, merge_race={merge_race}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
         assert!(!local_branch_exists(&repo, "watched-land"));
@@ -2199,15 +2199,15 @@ fn waited_task_landing(destination: &str, failed_startup: bool) {
     repo.create_branch("waited-repair");
     let worktree = repo.path().canonicalize().unwrap();
     let workflow = if destination == "end" {
-        "nodes: {}\nedges:\n  - {from: start, to: end, flow: delivery-proof}\n"
+        "nodes: {}\nedges:\n  - {from: start, to: end, graph: delivery-proof}\n"
     } else {
-        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: delivery-proof}\n  - {from: review, to: end}\n"
+        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: delivery-proof}\n  - {from: review, to: end}\n"
     };
     for (path, contents) in [
         ("feature.txt", "keep the feature"),
-        (".lf/config.yaml", "agent: codex\nlinear:\n  team: team-task-pr-tests\n"),
+        (".lf/config.yaml", "agent: codex\nplanning:\n  provider: linear\n  team: team-task-pr-tests\n"),
         (".lf/workflows/delivery-proof.yaml", workflow),
-        (".lf/flows/delivery-proof.yaml", "- cmd: flow show ship\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n"),
+        (".lf/graphs/delivery-proof.yaml", "- cmd: graph show ship\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n"),
     ] {
         let path = worktree.join(path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -2315,7 +2315,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     assert!(error.contains(unrelated.as_str()), "{error}");
     assert!(!launches.exists(), "unrelated work must prevent repair");
     assert_eq!(
-        support::recorded_flows(home.path()).len(),
+        support::recorded_graphs(home.path()).len(),
         1,
         "held land must not replay gate"
     );
@@ -2334,7 +2334,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     assert_eq!(landing_state, "watching");
     db.execute("UPDATE processes SET completed_at=started_at+1,outcome='succeeded',exit_code=0 WHERE id=?1", [&unrelated]).unwrap();
     // Even a later observation of this old request cannot turn the next
-    // Flow's read-only first command into a landing handoff.
+    // Graph's read-only first command into a landing handoff.
     db.execute(
         "UPDATE pr_landings SET updated_at=?1",
         [time::OffsetDateTime::now_utc().unix_timestamp() + 60],
@@ -2409,7 +2409,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     assert_eq!(
         state == loopflow::durable::TaskState::Done,
         destination == "end",
-        "the Flow must settle completion before returning, without a status command"
+        "the Graph must settle completion before returning, without a status command"
     );
     let status = command()
         .args(["task", "status", "INF-123", "--json"])
@@ -2425,7 +2425,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         status["execution"]["status"], expected_state,
         "only an edge reaching end authorizes Task completion"
     );
-    assert_eq!(support::recorded_flows(home.path()).len(), 2);
+    assert_eq!(support::recorded_graphs(home.path()).len(), 2);
 }
 
 #[test]
@@ -2775,7 +2775,7 @@ esac
     );
     // Check the interruption contract after recovery, so a bad exit code does
     // not hide lost intent, a removed checkout, or duplicate remote requests.
-    // SIGINT uses the process-wide handler; the Flow process treats 130 as stopped.
+    // SIGINT uses the process-wide handler; the Graph process treats 130 as stopped.
     if interrupted.code() != Some(130) {
         failures.push(format!(
             "SIGINT exited {:?}, expected stopped (130): {interrupted_stderr}",

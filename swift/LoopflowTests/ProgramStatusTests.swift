@@ -16,10 +16,10 @@ struct ProgramStatusTests {
 
     @Test func replacementAndChildLifetime() {
         var reducer = ProgramStatusReducer()
-        reducer.apply(.report(report(.blocked, id: "flow/step", msg: "Proceed?")))
-        reducer.apply(.report(report(.working, id: "flow")))
+        reducer.apply(.report(report(.blocked, id: "graph/step", msg: "Proceed?")))
+        reducer.apply(.report(report(.working, id: "graph")))
         #expect(reducer.snapshot.summary?.state == .blocked)
-        reducer.apply(.report(report(.working, id: "flow/step")))
+        reducer.apply(.report(report(.working, id: "graph/step")))
         #expect(reducer.snapshot.records.count == 2)
         #expect(reducer.snapshot.summary?.msg == nil)
         #expect(reducer.snapshot.summary?.kind == nil)

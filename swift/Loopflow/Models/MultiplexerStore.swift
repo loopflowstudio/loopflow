@@ -176,7 +176,7 @@ public final class MultiplexerStore {
         }
 
         switch focusedPane.content {
-        case .shell, .flowLog, .files:
+        case .shell, .graphLog, .files:
             _insert(.session(id: sessionId, location: location), beside: focusedPaneId)
             return
         case .empty, .session:
@@ -239,7 +239,7 @@ public final class MultiplexerStore {
         closedState = nil
     }
 
-    /// Reveal a Task's Flow process log or files beside existing terminals,
+    /// Reveal a Task's Graph process log or files beside existing terminals,
     /// never replacing them. Explicit targets do not follow later focus.
     @discardableResult
     public func show(_ content: PaneContent, beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
@@ -248,7 +248,7 @@ public final class MultiplexerStore {
             switch (pane.content, content) {
             case (.files, .files): return true
             case (.shell, .shell): return true
-            case (.flowLog(let current, _, _), .flowLog(let requested, _, _)):
+            case (.graphLog(let current, _, _), .graphLog(let requested, _, _)):
                 return current == requested
             default: return pane.content == content
             }

@@ -80,7 +80,7 @@ struct MonitorOverview {
     active: crate::session_record::active::ActiveSessionsSnapshot,
     recent_commands: crate::process::LfProcessPage,
     sessions_next: Option<String>,
-    flows_next: Option<String>,
+    graphs_next: Option<String>,
     gaps: Vec<String>,
 }
 
@@ -154,9 +154,9 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
                 next_action: next,
             });
         }
-        let flows = store
-            .flow_inventory(
-                &crate::durable::FlowProcessFilter {
+        let graphs = store
+            .graph_inventory(
+                &crate::durable::GraphProcessFilter {
                     repo: repo.clone(),
                     ..Default::default()
                 },
@@ -164,48 +164,48 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
                 NonZeroU32::new(100).expect("100 is nonzero"),
             )
             .await?;
-        for entry in flows.entries {
+        for entry in graphs.entries {
             let summary = &entry.summary;
-            let detail = match store.flow_detail(&summary.id).await {
+            let detail = match store.graph_detail(&summary.id).await {
                 Ok(detail) => detail,
                 Err(error) => {
-                    gaps.push(format!("Flow {} detail unavailable: {error}", summary.id));
+                    gaps.push(format!("Graph {} detail unavailable: {error}", summary.id));
                     None
                 }
             };
             let at = detail
                 .as_ref()
                 .and_then(|detail| detail.steps.last())
-                .map(crate::durable::FlowStepProcess::position)
+                .map(crate::durable::GraphStepProcess::position)
                 .unwrap_or_else(|| "an unreadable step".into());
             let (state, reason) = match summary.state {
-                crate::session::FlowProcessSummaryState::Completed => {
-                    ("finished", "Flow completed".to_string())
+                crate::session::GraphProcessSummaryState::Completed => {
+                    ("finished", "Graph completed".to_string())
                 }
-                crate::session::FlowProcessSummaryState::Stopped => {
-                    ("stopped", format!("Flow process exited at {at}"))
+                crate::session::GraphProcessSummaryState::Stopped => {
+                    ("stopped", format!("Graph process exited at {at}"))
                 }
-                crate::session::FlowProcessSummaryState::Current => {
+                crate::session::GraphProcessSummaryState::Current => {
                     match crate::id::LfProcessId::parse(&summary.id)
                         .map(|id| crate::journal::process_evidence(&store.sqlite, &id))
                     {
                         Ok(crate::journal::ProcessIdentityEvidence::Live) => {
-                            ("running", format!("Flow process is at {at}"))
+                            ("running", format!("Graph process is at {at}"))
                         }
                         Ok(crate::journal::ProcessIdentityEvidence::Dead) => (
                             "stopped",
-                            format!("Flow process left no exit record; it stopped at {at}"),
+                            format!("Graph process left no exit record; it stopped at {at}"),
                         ),
                         _ => (
                             "unknown",
-                            format!("Flow process identity is unknown at {at}"),
+                            format!("Graph process identity is unknown at {at}"),
                         ),
                     }
                 }
             };
-            let next = format!("lf flow show {} --processes", summary.id);
+            let next = format!("lf graph show {} --processes", summary.id);
             items.push(MonitorItem {
-                kind: "flow",
+                kind: "graph",
                 id: summary.id.clone(),
                 title: summary.name.clone(),
                 state,
@@ -229,7 +229,7 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
             active,
             recent_commands,
             sessions_next,
-            flows_next: flows.next,
+            graphs_next: graphs.next,
             gaps,
         })
     })?;
@@ -249,15 +249,15 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
             println!("Unavailable: {gap}");
         }
         if report.items.is_empty() {
-            println!("No recorded conversations or Flows in this scope.");
+            println!("No recorded conversations or Graphs in this scope.");
         }
         if report.sessions_next.is_some() {
             println!(
                 "More conversations: lf session list --interactive all --history --page --json"
             );
         }
-        if report.flows_next.is_some() {
-            println!("More Flows: lf flow list --processes --json");
+        if report.graphs_next.is_some() {
+            println!("More Graphs: lf graph list --processes --json");
         }
         if report.recent_commands.next.is_some() {
             println!("More commands: lf history list");

@@ -4,17 +4,17 @@ use std::process::{Command, Output};
 
 use clap::{CommandFactory, Parser};
 use loopflow::definition::{resolve_definition, DefinitionKind, Target};
-use loopflow::flow::compile_flow;
-use loopflow::flow::load_flow;
-use loopflow::flow::ConcreteStep;
+use loopflow::graph::compile_graph;
+use loopflow::graph::load_graph;
+use loopflow::graph::ConcreteStep;
 use loopflow::lf::navigation::normalize_args;
-use loopflow::lf::{Cli, Commands, FlowCommand, SkillCommand};
+use loopflow::lf::{Cli, Commands, GraphCommand, SkillCommand};
 use tempfile::TempDir;
 
 fn fixture() -> TempDir {
     let repo = tempfile::tempdir().unwrap();
     fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
-    fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
+    fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
     for name in ["solo", "paired", "rename", "land", "release-run"] {
         fs::write(
             repo.path().join(format!(".lf/skills/{name}.md")),
@@ -22,9 +22,9 @@ fn fixture() -> TempDir {
         )
         .unwrap();
     }
-    for name in ["paired", "only-flow", "release-run", "list"] {
+    for name in ["paired", "only-graph", "release-run", "list"] {
         fs::write(
-            repo.path().join(format!(".lf/flows/{name}.yaml")),
+            repo.path().join(format!(".lf/graphs/{name}.yaml")),
             "- step: solo\n",
         )
         .unwrap();
@@ -40,9 +40,26 @@ fn global_agent_help_and_no_agent_diagnostic() {
     assert!(output.status.success());
     let help = String::from_utf8(output.stdout).unwrap();
     assert_eq!(help.matches("--agent").count(), 1);
-    assert!(help.contains("overrides agents in Tasks, Flows, skills and child commands"));
+    assert!(help.contains("overrides agents in Tasks, Graphs, skills and child commands"));
     assert!(String::from_utf8_lossy(&output.stderr).contains("does not start an agent"));
     assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
+fn config_user_reports_the_forwarded_participant() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path().join(".lf"))
+        .env("LF_USER_NAME", "Dustin")
+        .env("PATH", home.path().join("no-tools"))
+        .current_dir(repo.path())
+        .args(["config", "user"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8(success(output)).unwrap(), "Dustin\n");
 }
 
 fn run(repo: &Path, home: &Path, args: &[&str]) -> Output {
@@ -83,7 +100,10 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
             vec!["debug", "--help"],
             vec!["skill", "debug", "--help"],
         ],
-        vec![vec!["help", "flow", "list"], vec!["flow", "list", "--help"]],
+        vec![
+            vec!["help", "graph", "list"],
+            vec!["graph", "list", "--help"],
+        ],
         vec![vec!["help", "wt", "create"], vec!["wt", "create", "--help"]],
         vec![vec!["sync", "--help"], vec!["help", "sync"]],
         vec![vec!["help", "pr", "land"], vec!["pr", "land", "--help"]],
@@ -111,7 +131,7 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
         vec![
             vec!["help", "paired"],
             vec!["paired", "--help"],
-            vec!["flow", "paired", "-a", "unused", "--help"],
+            vec!["graph", "paired", "-a", "unused", "--help"],
         ],
     ] {
         let expected = success(run(repo.path(), home.path(), &forms[0]));
@@ -138,9 +158,9 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
     assert_eq!(unknown.stderr, unknown_flag.stderr);
     let collision = success(run(repo.path(), home.path(), &["help", "release-run"]));
     let collision = String::from_utf8(collision).unwrap();
-    assert!(collision.contains("flow (.lf/flows/release-run.yaml)"));
+    assert!(collision.contains("graph (.lf/graphs/release-run.yaml)"));
     assert!(collision.contains("lf skill release-run"));
-    assert!(collision.contains("flow wins untyped lookup"));
+    assert!(collision.contains("graph wins untyped lookup"));
     let skill = success(run(repo.path(), home.path(), &["help", "skill", "paired"]));
     assert!(String::from_utf8_lossy(&skill).contains("Skill paired body."));
     let overview = success(run(repo.path(), home.path(), &["--help"]));
@@ -158,7 +178,7 @@ fn retired_launch_flags_are_rejected() {
     for args in [
         vec!["lf", "--max-turns", "2", "skill", "debug"],
         vec!["lf", "--no-loopflow", "skill", "debug"],
-        vec!["lf", "--steers-after", "42", "flow", "proof"],
+        vec!["lf", "--steers-after", "42", "graph", "proof"],
     ] {
         assert!(Cli::try_parse_from(args).is_err());
     }
@@ -177,36 +197,36 @@ fn removed_run_dispatch_reports_owners_without_launching() {
         assert!(result.stdout.is_empty());
     }
     let overview = String::from_utf8(success(run(repo.path(), home.path(), &["help"]))).unwrap();
-    assert!(overview.contains("lf flow <name>"), "{overview}");
+    assert!(overview.contains("lf graph <name>"), "{overview}");
     assert!(!overview.contains("lf run "), "{overview}");
     assert!(!home.path().join(".lf").exists());
 }
 
 #[test]
-fn skill_help_does_not_offer_untyped_execution_when_the_flow_is_invalid() {
+fn skill_help_does_not_offer_untyped_execution_when_the_graph_is_invalid() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
-    fs::write(repo.path().join(".lf/flows/paired.yaml"), "- [invalid\n").unwrap();
+    fs::write(repo.path().join(".lf/graphs/paired.yaml"), "- [invalid\n").unwrap();
 
     let help = success(run(repo.path(), home.path(), &["help", "skill", "paired"]));
     let help = String::from_utf8(help).unwrap();
     assert!(help.contains("lf skill paired [message]"), "{help}");
     assert!(
-        help.contains("Untyped lookup fails: invalid flow"),
+        help.contains("Untyped lookup fails: invalid graph"),
         "{help}"
     );
     assert!(!help.contains("lf run paired"), "{help}");
     assert!(!help.contains("lf paired [message]"), "{help}");
     let untyped = run(repo.path(), home.path(), &["paired", "--help"]);
     assert_eq!(untyped.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&untyped.stderr).contains("invalid flow"));
+    assert!(String::from_utf8_lossy(&untyped.stderr).contains("invalid graph"));
 }
 
 #[test]
 fn typed_help_inspects_reserved_definitions_without_launching() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
-    // The removed verb no longer lists anything or falls back to the list Flow.
+    // The removed verb no longer lists anything or falls back to the list Graph.
     let retired = run(repo.path(), home.path(), &["skill", "list"]);
     assert_eq!(retired.status.code(), Some(2));
     assert!(retired.stdout.is_empty());
@@ -242,13 +262,13 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
     let skill = String::from_utf8(skill).unwrap();
     assert!(skill.contains("Reserved skill body."), "{skill}");
     assert!(skill.contains("lf skill list"), "{skill}");
-    let flow = success(run(
+    let graph = success(run(
         repo.path(),
         home.path(),
-        &["help", "flow", "--", "list"],
+        &["help", "graph", "--", "list"],
     ));
-    let flow = String::from_utf8(flow).unwrap();
-    assert!(flow.contains("flow (.lf/flows/list.yaml)"), "{flow}");
+    let graph = String::from_utf8(graph).unwrap();
+    assert!(graph.contains("graph (.lf/graphs/list.yaml)"), "{graph}");
     for args in [["help", "skill", "list"], ["skill", "list", "--help"]] {
         assert_eq!(
             success(run(repo.path(), home.path(), &args)),
@@ -335,17 +355,17 @@ fn list_preserves_kinds_overrides_sources_and_reserved_invocations() {
         .filter(|row| row["name"] == "release-run")
         .collect();
     assert_eq!(pair.len(), 2);
-    assert_eq!(pair[0]["kind"], "flow");
+    assert_eq!(pair[0]["kind"], "graph");
     assert_eq!(pair[1]["kind"], "skill");
     assert_eq!(pair[1]["source"], ".lf/skills/release-run.md");
     let reserved = entries
         .iter()
-        .find(|row| row["kind"] == "flow" && row["name"] == "list")
+        .find(|row| row["kind"] == "graph" && row["name"] == "list")
         .unwrap();
-    assert_eq!(reserved["invocation"], "lf flow -- list");
+    assert_eq!(reserved["invocation"], "lf graph -- list");
     assert!(!entries
         .iter()
-        .any(|row| row["name"] == "solo" && row["kind"] == "flow"));
+        .any(|row| row["name"] == "solo" && row["kind"] == "graph"));
 }
 
 #[test]
@@ -416,37 +436,37 @@ fn dual_kind_clients_share_selection_and_explicit_skill_steps_keep_review_metada
         resolve_definition(repo.path(), "solo", None).unwrap(),
         Target::Skill(_)
     ));
-    for name in ["paired", "only-flow"] {
+    for name in ["paired", "only-graph"] {
         assert!(matches!(
             resolve_definition(repo.path(), name, None).unwrap(),
-            Target::Flow(_)
+            Target::Graph(_)
         ));
-        let expanded = compile_flow(&load_flow(name, repo.path()).unwrap(), repo.path()).unwrap();
+        let expanded = compile_graph(&load_graph(name, repo.path()).unwrap(), repo.path()).unwrap();
         assert!(matches!(&expanded[0], ConcreteStep::Skill(step) if step.skill.name == "solo"));
     }
     assert!(matches!(
         resolve_definition(repo.path(), "paired", Some(DefinitionKind::Skill)).unwrap(),
         Target::Skill(_)
     ));
-    assert!(resolve_definition(repo.path(), "solo", Some(DefinitionKind::Flow)).is_err());
+    assert!(resolve_definition(repo.path(), "solo", Some(DefinitionKind::Graph)).is_err());
     fs::write(
-        repo.path().join(".lf/flows/outer.yaml"),
-        "- paired\n- flow: paired\n- step:\n    name: paired\n    id: review\n    human: true\n",
+        repo.path().join(".lf/graphs/outer.yaml"),
+        "- paired\n- graph: paired\n- step:\n    name: paired\n    id: review\n    human: true\n",
     )
     .unwrap();
-    let expanded = compile_flow(&load_flow("outer", repo.path()).unwrap(), repo.path()).unwrap();
+    let expanded = compile_graph(&load_graph("outer", repo.path()).unwrap(), repo.path()).unwrap();
     assert_eq!(expanded.len(), 3);
     assert!(matches!(&expanded[0], ConcreteStep::Skill(step) if step.skill.name == "solo"));
     assert!(matches!(&expanded[1], ConcreteStep::Skill(step) if step.skill.name == "solo"));
     assert!(
         matches!(&expanded[2], ConcreteStep::Skill(step) if step.skill.name == "paired" && step.human)
     );
-    fs::write(repo.path().join(".lf/flows/paired.yaml"), "malformed: [").unwrap();
+    fs::write(repo.path().join(".lf/graphs/paired.yaml"), "malformed: [").unwrap();
     assert!(resolve_definition(repo.path(), "paired", None)
         .unwrap_err()
         .to_string()
-        .contains("invalid flow"));
-    assert!(load_flow("paired", repo.path()).is_err());
+        .contains("invalid graph"));
+    assert!(load_graph("paired", repo.path()).is_err());
     assert!(matches!(
         resolve_definition(repo.path(), "paired", Some(DefinitionKind::Skill)).unwrap(),
         Target::Skill(_)
@@ -457,18 +477,18 @@ fn dual_kind_clients_share_selection_and_explicit_skill_steps_keep_review_metada
 fn command_targets_compose_and_captured_operations_remain_readable() {
     let repo = fixture();
     fs::write(
-        repo.path().join(".lf/flows/commands.yaml"),
+        repo.path().join(".lf/graphs/commands.yaml"),
         "- cmd: pr land --local\n",
     )
     .unwrap();
-    let flow = load_flow("commands", repo.path()).unwrap();
-    let steps = compile_flow(&flow, repo.path()).unwrap();
+    let graph = load_graph("commands", repo.path()).unwrap();
+    let steps = compile_graph(&graph, repo.path()).unwrap();
     let ConcreteStep::Command(step) = &steps[0] else {
         panic!("expected command")
     };
     assert_eq!(step.item.argv(), ["lf", "pr", "land", "--local"]);
-    let adapted = Target::Command(step.item.clone()).into_flow();
-    assert_eq!(adapted.items, flow.items);
+    let adapted = Target::Command(step.item.clone()).into_graph();
+    assert_eq!(adapted.items, graph.items);
 
     let saved = serde_json::json!({"Command": {
         "item": {"command": "pr", "args": ["land", "--local"]},
@@ -490,11 +510,11 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
     assert_eq!(serde_json::to_value(restored).unwrap(), saved);
 
     fs::write(
-        repo.path().join(".lf/flows/commands.yaml"),
+        repo.path().join(".lf/graphs/commands.yaml"),
         "- op: pr land\n",
     )
     .unwrap();
-    assert!(load_flow("commands", repo.path())
+    assert!(load_graph("commands", repo.path())
         .unwrap_err()
         .to_string()
         .contains("cmd"));
@@ -517,12 +537,12 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
         ["lf", "task", "comment", "status"]
     );
     assert_eq!(
-        normalized(&["lf", "flow", "land", "--", "--help"]),
-        ["lf", "flow", "land", "--", "--help"]
+        normalized(&["lf", "graph", "land", "--", "--help"]),
+        ["lf", "graph", "land", "--", "--help"]
     );
-    let parsed = Cli::try_parse_from(normalized(&["lf", "flow", "--", "list"])).unwrap();
+    let parsed = Cli::try_parse_from(normalized(&["lf", "graph", "--", "list"])).unwrap();
     assert!(
-        matches!(parsed.command, Some(Commands::Flow { cmd: FlowCommand::External(args) }) if args == ["list"])
+        matches!(parsed.command, Some(Commands::Graph { cmd: GraphCommand::External(args) }) if args == ["list"])
     );
 }
 
@@ -568,7 +588,7 @@ fn open_is_one_root_command_and_keeps_pr_open_explicit() {
         .unwrap()
         .find_subcommand("open")
         .is_none());
-    let saved: loopflow::flow::Command =
+    let saved: loopflow::graph::Command =
         serde_json::from_value(serde_json::json!({"command": "open", "args": []})).unwrap();
     assert_eq!(saved.clone().current().argv(), ["lf", "open"]);
     assert!(Cli::try_parse_from(["lf", "pr", "open", "--help"])
@@ -695,7 +715,7 @@ fn history_help_is_passive_and_saved_commands_keep_their_evidence_selectors() {
         ("usage", vec!["--days", "0"], vec!["usage", "--days", "0"]),
     ] {
         let saved = serde_json::json!({"command": command, "args": args});
-        let restored: loopflow::flow::Command = serde_json::from_value(saved).unwrap();
+        let restored: loopflow::graph::Command = serde_json::from_value(saved).unwrap();
         assert_eq!(restored.command, "history");
         assert_eq!(restored.args, expected);
     }
@@ -896,28 +916,28 @@ fn command_tree_only_aliases_resume_to_connect() {
 }
 
 #[test]
-fn flow_help_validates_expansion_and_review_boundaries_without_effects() {
+fn graph_help_validates_expansion_and_review_boundaries_without_effects() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
-    let flow = repo.path().join(".lf/flows/inspection.yaml");
+    let graph = repo.path().join(".lf/graphs/inspection.yaml");
     fs::write(
-        &flow,
+        &graph,
         "- step:\n    name: solo\n    id: review\n    human: true\n",
     )
     .unwrap();
     let output = success(run(
         repo.path(),
         home.path(),
-        &["help", "flow", "inspection"],
+        &["help", "graph", "inspection"],
     ));
     assert!(String::from_utf8_lossy(&output).contains("Review steps: review"));
     for (definition, expected) in [
-        ("- flow: absent-flow\n", "absent-flow"),
+        ("- graph: absent-graph\n", "absent-graph"),
         ("- step:\n    name: solo\n    human: true\n", "stable id"),
         ("- step:\n    name: solo\n    id: review\n    human: true\n- step:\n    name: solo\n    id: review\n    human: true\n", "not unique"),
     ] {
-        fs::write(&flow, definition).unwrap();
-        let output = run(repo.path(), home.path(), &["help", "flow", "inspection"]);
+        fs::write(&graph, definition).unwrap();
+        let output = run(repo.path(), home.path(), &["help", "graph", "inspection"]);
         assert!(!output.status.success());
         assert!(output.stdout.is_empty());
         let error = String::from_utf8_lossy(&output.stderr);
@@ -929,11 +949,15 @@ fn flow_help_validates_expansion_and_review_boundaries_without_effects() {
         assert!(output.stdout.is_empty());
     }
     fs::write(
-        repo.path().join(".lf/flows/validate.yaml"),
+        repo.path().join(".lf/graphs/validate.yaml"),
         "- step: solo\n",
     )
     .unwrap();
-    let output = success(run(repo.path(), home.path(), &["help", "flow", "validate"]));
+    let output = success(run(
+        repo.path(),
+        home.path(),
+        &["help", "graph", "validate"],
+    ));
     assert!(String::from_utf8_lossy(&output).contains("solo"));
     assert!(!home.path().join(".lf").exists());
 }
@@ -1018,7 +1042,7 @@ fn remote_selection_preserves_command_arguments_and_literal_boundaries() {
 }
 
 #[test]
-fn native_skill_help_and_flow_capture_keep_the_selected_source_and_declarations() {
+fn native_skill_help_and_graph_capture_keep_the_selected_source_and_declarations() {
     let repo = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
     let native = repo.path().join(".claude/skills/audit/SKILL.md");
@@ -1046,13 +1070,13 @@ fn native_skill_help_and_flow_capture_keep_the_selected_source_and_declarations(
     assert_eq!(audit["description"], "Audit a project");
     assert!(!entries.iter().any(|entry| entry["name"] == "audit/rules"));
 
-    fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
-    fs::write(repo.path().join(".lf/flows/check.yaml"), "- audit\n").unwrap();
-    let flow = load_flow("check", repo.path()).unwrap();
-    let captured = serde_json::to_string(&flow).unwrap();
+    fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
+    fs::write(repo.path().join(".lf/graphs/check.yaml"), "- audit\n").unwrap();
+    let graph = load_graph("check", repo.path()).unwrap();
+    let captured = serde_json::to_string(&graph).unwrap();
     fs::remove_file(&native).unwrap();
     let retained = serde_json::from_str(&captured).unwrap();
-    let compiled = compile_flow(&retained, repo.path()).unwrap();
+    let compiled = compile_graph(&retained, repo.path()).unwrap();
     let ConcreteStep::Skill(step) = &compiled[0] else {
         panic!("expected skill")
     };
@@ -1112,8 +1136,8 @@ fn desktop_input_uses_work_and_pane_selectors_without_public_lifetime_tokens() {
 fn portable_help_describes_exact_kind_selection() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
-    fs::create_dir_all(repo.path().join(".lf/flows/team")).unwrap();
-    fs::write(repo.path().join(".lf/flows/team/check.yaml"), "- solo\n").unwrap();
+    fs::create_dir_all(repo.path().join(".lf/graphs/team")).unwrap();
+    fs::write(repo.path().join(".lf/graphs/team/check.yaml"), "- solo\n").unwrap();
     fs::write(
         repo.path().join(".lf/skills/team-check.md"),
         "Explicit skill body",
@@ -1121,17 +1145,17 @@ fn portable_help_describes_exact_kind_selection() {
     .unwrap();
     let help =
         |args: &[&str]| String::from_utf8(success(run(repo.path(), home.path(), args))).unwrap();
-    let flow = help(&["help", "team/check"]);
-    assert!(flow.contains("team/check — flow"));
-    assert!(flow.contains("team-check"));
+    let graph = help(&["help", "team/check"]);
+    assert!(graph.contains("team/check — graph"));
+    assert!(graph.contains("team-check"));
     let skill = help(&["help", "team-check"]);
     assert!(skill.contains("team-check — skill"));
-    assert!(!skill.contains("flow wins untyped lookup"));
+    assert!(!skill.contains("graph wins untyped lookup"));
     assert!(!skill.contains("Untyped lookup selects"));
-    fs::write(repo.path().join(".lf/flows/team-check.yaml"), "- solo\n").unwrap();
-    assert!(help(&["help", "team-check"]).contains("team-check — flow"));
+    fs::write(repo.path().join(".lf/graphs/team-check.yaml"), "- solo\n").unwrap();
+    assert!(help(&["help", "team-check"]).contains("team-check — graph"));
     assert!(help(&["help", "skill", "team-check"])
-        .contains("Untyped lookup selects the same-named flow"));
+        .contains("Untyped lookup selects the same-named graph"));
 }
 
 #[test]

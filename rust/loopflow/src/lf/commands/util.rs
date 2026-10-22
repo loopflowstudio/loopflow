@@ -296,7 +296,7 @@ fn session_command_status_with_env(
                         worktree: Some(command.cwd.clone()),
                         skill: None,
                         subjects: Vec::new(),
-                        flow: crate::session_record::SessionFlowMembership::Independent,
+                        graph: crate::session_record::SessionGraphMembership::Independent,
                         work: None,
                     },
                     &context,
@@ -454,6 +454,9 @@ fn run_native_session(
             route.account_id().as_str(),
         );
         route.pin_session_blocking(agent_session.cloned())?;
+    }
+    if command.program == "claude" {
+        crate::harness::claude_trust::accept_created_worktree(&process);
     }
     process.env_remove(crate::context_block::CONTEXT_DELIVERY_ENV);
     if let Some(context) = &command.context {
@@ -1014,7 +1017,7 @@ mod tests {
                 worktree: None,
                 skill: None,
                 subjects: Vec::new(),
-                flow: crate::session_record::SessionFlowMembership::Independent,
+                graph: crate::session_record::SessionGraphMembership::Independent,
                 work: None,
             },
         )
@@ -1108,7 +1111,7 @@ mod tests {
                 worktree: None,
                 skill: None,
                 subjects: Vec::new(),
-                flow: crate::session_record::SessionFlowMembership::Independent,
+                graph: crate::session_record::SessionGraphMembership::Independent,
                 work: None,
             },
         )
@@ -1404,7 +1407,7 @@ mod tests {
                     worktree: None,
                     skill: None,
                     subjects: Vec::new(),
-                    flow: crate::session_record::SessionFlowMembership::Independent,
+                    graph: crate::session_record::SessionGraphMembership::Independent,
                     work: None,
                 },
             )?;

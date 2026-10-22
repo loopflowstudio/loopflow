@@ -617,7 +617,7 @@ struct WavesView: View {
     }
 }
 
-/// Minimal create-wave flow: pick a target repo, name the wave, submit. Creates
+/// Minimal create-wave graph: pick a target repo, name the wave, submit. Creates
 /// the Wave files through `PortfolioRepoState.createWave`.
 private struct CreateWaveSheet: View {
     let repos: [PortfolioRepo]

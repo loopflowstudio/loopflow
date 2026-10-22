@@ -2,6 +2,6 @@
 nodes:
   demo: { skill: demo, description: you try the change }
 edges:
-  - { from: start, to: demo, flow: pursue }
-  - { from: demo, to: demo, flow: pursue }
-  - { from: demo, to: end, flow: ship }
+  - { from: start, to: demo, graph: pursue }
+  - { from: demo, to: demo, graph: pursue }
+  - { from: demo, to: end, graph: ship }

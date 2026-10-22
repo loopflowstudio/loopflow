@@ -386,7 +386,7 @@ struct DesktopPaneControlTests {
         let document = workspace.files(issue: task.id, cwd: identity.worktree).document("note.txt")
         document.editor.string = "unfinished draft"
         document.editor.setSelectedRange(NSRange(location: 2, length: 4))
-        for action in [DesktopPaneAction.files(task: task.id), .flowLog(task: task.id)] {
+        for action in [DesktopPaneAction.files(task: task.id), .graphLog(task: task.id)] {
             let created = try router.controlPane(.init(target: source, action: action))
             let reused = try router.controlPane(.init(target: source, action: action))
             #expect(created.pane == reused.pane)
@@ -411,7 +411,7 @@ struct DesktopPaneControlTests {
         #expect(model.selection == nil)
         let before = store.layout
         model.navigation.preparedTaskWorktrees[task.id] = WorkspaceIdentity(machineId: "other", worktree: identity.worktree)
-        for action in [DesktopPaneAction.files(task: task.id), .flowLog(task: task.id)] {
+        for action in [DesktopPaneAction.files(task: task.id), .graphLog(task: task.id)] {
             #expect(throws: RegistryQueryError.self) { try router.controlPane(.init(target: source, action: action)) }
             #expect(store.layout == before)
         }
@@ -520,7 +520,7 @@ struct DesktopPaneControlTests {
         register(router, window: window, registry: registry)
         let before = store.layout, focus = store.focusedPaneId
         let actions: [DesktopPaneAction] = [.hide, .restore, .focus, .shell,
-            .move(destination: peer, axis: .vertical), .resize(toward: peer, ratio: 0.6), .zoom(enabled: true), .files(task: "task"), .flowLog(task: "task"),
+            .move(destination: peer, axis: .vertical), .resize(toward: peer, ratio: 0.6), .zoom(enabled: true), .files(task: "task"), .graphLog(task: "task"),
             .text(surface: "stale", text: "draft"), .key(surface: "stale", key: .enter)]
         for action in actions {
             #expect(throws: RegistryQueryError.self) { try router.controlPane(.init(target: old, action: action)) }

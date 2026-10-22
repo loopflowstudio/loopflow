@@ -22,7 +22,7 @@ use sha2::{Digest, Sha256};
 use super::activity::WorkActivitySnapshot;
 use super::top::ActivitySnapshot;
 use super::waves::{RoadmapSnapshot, WaveDetailSnapshot, WaveSnapshot};
-use crate::durable::FlowProcessDetail;
+use crate::durable::GraphProcessDetail;
 use crate::ops::human_session::SessionRecord;
 use crate::repository::CanonicalRepo;
 use crate::store::changes::StoreChanges;
@@ -117,13 +117,13 @@ pub struct SelectionsPart {
     pub plans: Vec<crate::work::selection::ViewPlan>,
 }
 
-/// Selected workspace facts and `lf flow show --processes` for each of its Flows,
+/// Selected workspace facts and `lf graph show --processes` for each of its Graphs,
 /// in the same order.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskPart {
     pub task: String,
     pub work: TaskOverview,
-    pub flow_processes: Vec<FlowProcessDetail>,
+    pub graph_processes: Vec<GraphProcessDetail>,
     pub comments: crate::work::task::comment::TaskComments,
 }
 
@@ -249,7 +249,7 @@ impl Part {
     }
 
     /// Whether a commit that moved revisions from `old` to `new` can change
-    /// this part. Planning conditions read Sessions, Flows and unfinished
+    /// this part. Planning conditions read Sessions, Graphs and unfinished
     /// Processes. Sessions read their AgentProcess; only Wave history shows
     /// token totals.
     fn changed(self, mut old: StoreRevisions, new: StoreRevisions) -> bool {
@@ -260,9 +260,9 @@ impl Part {
             return old.processes != new.processes;
         }
         // History reads Work labels/PRs, captured inputs and their Processes;
-        // it never reads Flow graphs or steps (activity::build_snapshot).
+        // it never reads compiled graphs or steps (activity::build_snapshot).
         if self == Part::WorkActivity {
-            old.flows = new.flows;
+            old.graphs = new.graphs;
         }
         if self != Part::Wave {
             old.usage = new.usage;
@@ -745,21 +745,21 @@ impl Reader {
                         .resolve_task_id(&selector, None)?
                         .ok_or_else(|| anyhow!("Task {selector} is not registered"))?;
                     let work = store.sqlite.task_overview(&task)?;
-                    let mut flow_processes = Vec::with_capacity(work.flow_processes.len());
-                    for flow in &work.flow_processes {
-                        let id = flow.summary.id.as_str();
+                    let mut graph_processes = Vec::with_capacity(work.graph_processes.len());
+                    for graph in &work.graph_processes {
+                        let id = graph.summary.id.as_str();
                         let (process, entry) = store
                             .sqlite
-                            .flow_process(id)?
-                            .ok_or_else(|| anyhow!("Flow {id} has no Flow process record"))?;
-                        flow_processes.push(process.detail(entry));
+                            .graph_process(id)?
+                            .ok_or_else(|| anyhow!("Graph {id} has no Graph process record"))?;
+                        graph_processes.push(process.detail(entry));
                     }
                     let comments = store.sqlite.task_comments(&task)?;
                     WorkContent::Task(Some(Box::new(TaskPart {
                         comments,
                         task: selector,
                         work,
-                        flow_processes,
+                        graph_processes,
                     })))
                 }
                 Part::TaskHistory => {
@@ -1240,11 +1240,11 @@ mod tests {
         );
     }
 
-    fn revisions(planning: i64, sessions: i64, flows: i64, processes: i64) -> StoreRevisions {
+    fn revisions(planning: i64, sessions: i64, graphs: i64, processes: i64) -> StoreRevisions {
         StoreRevisions {
             planning,
             sessions,
-            flows,
+            graphs,
             processes,
             usage: 0,
         }

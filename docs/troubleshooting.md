@@ -8,7 +8,7 @@ written.
 ```bash
 lf doctor
 lf cron list
-lf cron history --wave infrastructure --flow telemetry-daily --days 2
+lf cron history --wave infrastructure --graph telemetry-daily --days 2
 lf cron sync --wave infrastructure
 ```
 
@@ -16,7 +16,7 @@ Doctor checks installation selection, store compatibility, Process integrity and
 scheduled receipts separately. Installation commands can have no repository; a
 recorded repository must be an absolute path. Missing scheduled receipts remain
 failures even when ordinary commands work. A receipt proves invocation, not
-successful completion of its Flow or Skill.
+successful completion of its Graph or Skill.
 
 For a missing receipt, inspect the executable and log path Doctor prints. Jobs
 installed before the stable entry gate may pin a superseded binary, which a
@@ -63,12 +63,12 @@ lf session list
 
 `ready` means the Task is nonterminal. Status reports `execution` separately:
 starting, running, stalled, blocked, idle, or unknown. It observes the Task's
-most recently launched Flow. Read its reason before recovery. Wave status and
+most recently launched Graph. Read its reason before recovery. Wave status and
 roadmap use that same execution evidence for their recommendations. Dirty files
-under a live Flow are ongoing progress.
+under a live Graph are ongoing progress.
 
 Task execution history includes independent helpers, whether recorded with the public
-issue identifier or internal Task ID. An idle Task Flow does not prove those
+issue identifier or internal Task ID. An idle Task Graph does not prove those
 helpers are idle; a completed launcher does not prove its interactive Session
 is closed. Inspect Sessions separately. Reserve bound helper conversations
 for distinct contributions.
@@ -76,7 +76,7 @@ for distinct contributions.
 Wave status shows up to 50 recent Session inputs from the last seven days.
 Read complete Task history with `lf usage --days 0 --task <task> --json`, or inspect
 one input with `lf history show <session> --input <capture>`. An empty recent list
-does not prove that no Flow or Session remains active.
+does not prove that no Graph or Session remains active.
 
 Answer an exact pending question, send durable direction through Steer, or
 launch fresh work for the same Task:
@@ -89,10 +89,10 @@ lf task run INF-123
 lf task run INF-123 --reason "provider credentials repaired"
 ```
 
-`task run` runs a fresh Flow in the Task checkout with its Steers and
-active PR. It never continues an earlier Flow; a stopped one leaves its
+`task run` runs a fresh Graph in the Task checkout with its Steers and
+active PR. It never continues an earlier Graph; a stopped one leaves its
 Processes as history. Unknown liveness stays
-unknown. A Task Steer is a Task comment; the running Flow receives new
+unknown. A Task Steer is a Task comment; the running Graph receives new
 comments when possible and the next Skill seed always reads them. `task interrupt` ends the
 active boundary so the next one re-reads direction. Neither command's receipt
 proves that the provider applied the direction.
@@ -120,14 +120,14 @@ After repairing provider access, launch the Task or Project operation again:
 lf task run INF-123 --reason "provider credentials repaired"
 ```
 
-Wave planning uses finite conversations. Invoke `lf --wave <wave> wave-operate`
-for another planning pass; there is no long-running Project process to resume.
+Wave operation uses finite conversations. Invoke `lf --wave <wave> wave-operate`
+for another pass; there is no long-running Project process to resume.
 
 Other options:
 
 - Wait and retry
 - Reduce parallel waves
-- Switch a one-shot flow to a different model: `lf gate -a codex`
+- Switch a one-shot run to a different model: `lf gate -a codex`
 
 ## Disk space
 

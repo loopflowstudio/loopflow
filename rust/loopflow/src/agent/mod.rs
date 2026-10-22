@@ -210,7 +210,7 @@ pub struct AgentConfig {
     pub execution_boundary: Option<AgentExecutionBoundary>,
     /// Skip permission prompts
     pub skip_permissions: bool,
-    /// Flow-runner-injected structured replies (rendered via harness prompt guidance).
+    /// Graph-runner-injected structured replies (rendered via harness prompt guidance).
     pub structured_replies: Vec<StructuredReply>,
     /// Temp file for relaying shell directives back to the invoking shell.
     /// When set, the agent subprocess gets `LOOPFLOW_DIRECTIVE_FILE` pointing
@@ -869,7 +869,7 @@ fn run_admitted_agent(
             eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");
         }
         if launch.output_schema.is_some() {
-            eprintln!("warning: Loopflow native response-schema enforcement is Claude-specific; using ordinary provider output (Flow output validation still applies)");
+            eprintln!("warning: Loopflow native response-schema enforcement is Claude-specific; using ordinary provider output (Graph output validation still applies)");
         }
     }
     if launch.resume_token.is_none() {
@@ -1159,7 +1159,7 @@ fn _begin_implicit_capture(
         worktree: Some(cwd),
         skill: None,
         subjects: Vec::new(),
-        flow: crate::session_record::SessionFlowMembership::Independent,
+        graph: crate::session_record::SessionGraphMembership::Independent,
         work: None,
     };
     let capture = if process.auto {
@@ -1530,6 +1530,9 @@ fn _run_agent_once(
                 ));
             }
         };
+    }
+    if harness == "claude" {
+        crate::harness::claude_trust::accept_created_worktree(&cmd);
     }
     cmd.args(hooks).args(&command.args);
     let capture = process.capture.as_ref().map(|capture| &capture.0);

@@ -92,33 +92,33 @@ wave = sys.argv[1]
 goal = Path("wave") / wave / "GOAL.md"
 frontmatter = yaml.safe_load(goal.read_text().split("---", 2)[1])
 expected = [
-    (entry["flow"], entry["schedule"])
+    (entry["graph"], entry["schedule"])
     for entry in frontmatter.get("crons", [])
 ]
 installed = json.loads(os.environ["CRON_LIST_JSON"])
-actual = [(entry["flow"], entry["schedule"]) for entry in installed]
+actual = [(entry["graph"], entry["schedule"]) for entry in installed]
 if sorted(actual) != sorted(expected):
     raise SystemExit(f"cron drift: GOAL.md={sorted(expected)!r} installed={sorted(actual)!r}")
 for entry in installed:
     if entry["wave"] != wave:
-        raise SystemExit(f"wrong Wave in installed cron: {entry['flow']}")
+        raise SystemExit(f"wrong Wave in installed cron: {entry['graph']}")
     if not entry["loaded"]:
-        raise SystemExit(f"cron is not loaded: {entry['flow']}")
+        raise SystemExit(f"cron is not loaded: {entry['graph']}")
     if entry["machine_id"] != os.environ["EXPECTED_MACHINE_ID"]:
-        raise SystemExit(f"wrong Machine in installed cron: {entry['flow']}")
+        raise SystemExit(f"wrong Machine in installed cron: {entry['graph']}")
 print(f"{len(installed)}/{len(expected)} jobs loaded and exact")
 PY
 
 step "configured-path telemetry receipt"
 result=0
 if ! "${minimal_env[@]}" lf cron trigger \
-  --wave "$wave" --flow telemetry-daily --wait --timeout 15m; then
+  --wave "$wave" --graph telemetry-daily --wait --timeout 15m; then
   result=1
 fi
 
 step "configured-path release receipt"
 if ! "${minimal_env[@]}" lf cron trigger \
-  --wave "$wave" --flow release-run --wait --timeout 3h; then
+  --wave "$wave" --graph release-run --wait --timeout 3h; then
   result=1
 fi
 

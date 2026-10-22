@@ -2487,7 +2487,7 @@ esac
             runtime
                 .block_on(fixture.store.seed_task(&task, &pr))
                 .unwrap();
-            fixture.store.sqlite.test_flow(
+            fixture.store.sqlite.test_graph(
                 "review",
                 &task.worktree.as_ref().unwrap().to_string_lossy(),
                 &[("review", Some("failed"))],
@@ -2610,8 +2610,8 @@ esac
             .is_empty());
             assert!(git(&repo, &["branch", "--list", "cancel-me"]).is_empty());
             assert!(repo.join(".git/pr-closed").exists());
-            // The Flow's Processes remain as history; abandonment retires nothing.
-            assert_eq!(fixture.store.sqlite.task_flows(&task.id).unwrap().len(), 1);
+            // The Graph's Processes remain as history; abandonment retires nothing.
+            assert_eq!(fixture.store.sqlite.task_graphs(&task.id).unwrap().len(), 1);
             assert_eq!(
                 runtime
                     .block_on(
@@ -3154,11 +3154,11 @@ fn field_receipts(
 }
 
 #[test]
-fn planning_fields_observed_conflicts_adopt_linear_without_writing_or_moving_workflow() {
+fn planning_fields_unsent_save_replaces_a_concurrent_linear_edit_without_moving_workflow() {
     for project in [false, true] {
         with_planning_task(|runtime, fixture, repo, task, state| {
             runtime.block_on(async {
-                let work = save_field_name(fixture, task, project, "Losing local name");
+                let work = save_field_name(fixture, task, project, "Local name");
                 let receipt = field_receipts(fixture, task, project)[0].clone();
                 {
                     let mut provider = state.lock().await;
@@ -3172,6 +3172,7 @@ fn planning_fields_observed_conflicts_adopt_linear_without_writing_or_moving_wor
                         mark_issue_updated(&mut provider.issues[0]);
                     }
                 }
+                // The local save is sent after Linear's edit, so it wins.
                 crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
                     .await
                     .unwrap();
@@ -3187,29 +3188,31 @@ fn planning_fields_observed_conflicts_adopt_linear_without_writing_or_moving_wor
                 } else {
                     fixture.store.sqlite.task(&task.id).unwrap().unwrap().title
                 };
-                assert_eq!(saved_name, "Linear name");
-                assert_eq!(state.lock().await.field_writes, 0);
+                assert_eq!(saved_name, "Local name");
+                {
+                    let provider = state.lock().await;
+                    assert_eq!(provider.field_writes, 1);
+                    let name = if project {
+                        &provider.project_fields.as_ref().unwrap()["name"]
+                    } else {
+                        &provider.issues[0]["title"]
+                    };
+                    assert_eq!(name, "Local name");
+                }
                 let conn = rusqlite::Connection::open(&fixture.database).unwrap();
                 let table = if project {
                     "project_changes"
                 } else {
                     "task_changes"
                 };
-                let (value, conflict): (String, String) = conn
+                let conflict: Option<String> = conn
                     .query_row(
-                        &format!("SELECT value_json,conflict_json FROM {table} WHERE id=?1"),
+                        &format!("SELECT conflict_json FROM {table} WHERE id=?1"),
                         [&receipt.id],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
+                        |row| row.get(0),
                     )
                     .unwrap();
-                assert_eq!(
-                    serde_json::from_str::<serde_json::Value>(&value).unwrap()["value"],
-                    "Losing local name"
-                );
-                assert_eq!(
-                    serde_json::from_str::<serde_json::Value>(&conflict).unwrap()["value"]["value"],
-                    "Linear name"
-                );
+                assert!(conflict.is_none());
                 assert_eq!(
                     fixture
                         .store
@@ -4078,7 +4081,8 @@ fn planning_export_late_readback_preserves_newer_edits_and_inventory_identity() 
                 .len(),
             1
         );
-        // A later Linear edit conflicts with the captured baseline and wins.
+        // A Linear edit before the pending save is sent loses to it: the save
+        // goes out last and replaces it.
         runtime.block_on(async {
             {
                 let mut state = state.lock().await;
@@ -4091,8 +4095,9 @@ fn planning_export_late_readback_preserves_newer_edits_and_inventory_identity() 
         });
         assert_eq!(
             fixture.store.sqlite.task(&task.id).unwrap().unwrap().title,
-            "Linear decision"
+            "Later task"
         );
+        assert_eq!(state.blocking_lock().issues[0]["title"], "Later task");
         assert!(fixture
             .store
             .sqlite
@@ -5022,8 +5027,8 @@ fn project_prose_omission_is_not_empty_or_receipt_settlement() {
                     .unwrap(),
                 pending
             );
-            // An explicit null is an observed empty document. Linear wins this
-            // conflicting edit; retain both values rather than replaying the save.
+            // An explicit null is an observed empty document. The unsent save is
+            // sent after it, so the save wins and replaces it in Linear.
             provider["content"] = json!(null);
             mark_issue_updated(&mut provider);
             state.lock().await.project_fields = Some(provider);
@@ -5038,25 +5043,24 @@ fn project_prose_omission_is_not_empty_or_receipt_settlement() {
                     .unwrap()
                     .unwrap()
                     .description,
-                ""
-            );
-            let conn = rusqlite::Connection::open(&fixture.database).unwrap();
-            let (value, conflict, acknowledged): (String, String, bool) = conn
-                .query_row(
-                    "SELECT value_json,conflict_json,acknowledged FROM project_changes WHERE id=?1",
-                    [&pending[0].id],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-                )
-                .unwrap();
-            assert_eq!(
-                serde_json::from_str::<serde_json::Value>(&value).unwrap()["value"],
                 "Saved prose"
             );
-            assert_eq!(
-                serde_json::from_str::<serde_json::Value>(&conflict).unwrap()["value"]["value"],
-                ""
+            assert!(
+                state.lock().await.project_fields.as_ref().unwrap()["content"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Saved prose")
             );
-            assert!(!acknowledged);
+            let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+            let (conflict, acknowledged): (Option<String>, bool) = conn
+                .query_row(
+                    "SELECT conflict_json,acknowledged FROM project_changes WHERE id=?1",
+                    [&pending[0].id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            assert!(conflict.is_none());
+            assert!(acknowledged);
         });
     });
 }
@@ -5068,7 +5072,7 @@ fn project_prose_save_delivers_and_settles_without_changing_managed_fields() {
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             conn.execute("UPDATE tasks SET worktree='/retained/task',branch='retained/branch' WHERE id=?1", [task.id.as_str()]).unwrap();
             conn.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
-            conn.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'start',0,'11111111-1111-4111-8111-111111111111',3)", rusqlite::params![task.id.as_str(),json!({"name":"code","nodes":[],"edges":[{"from":"start","to":"end","flow":"implement"}]}).to_string()]).unwrap();
+            conn.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'start',0,'11111111-1111-4111-8111-111111111111',3)", rusqlite::params![task.id.as_str(),json!({"name":"code","nodes":[],"edges":[{"from":"start","to":"end","graph":"implement"}]}).to_string()]).unwrap();
             let workflow_before = fixture.store.sqlite.workflow(&task.id).unwrap();
             let work = crate::durable::WorkRef::Project(task.project_id.clone().unwrap());
             let mut provider = planning_project("project-1", "project-1");

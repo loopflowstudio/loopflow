@@ -171,7 +171,7 @@ struct DesktopHeadlessTests {
         let roadmap = try object("roadmap_snapshot.json")
         let waves = try #require(roadmap["waves"] as? [[String: Any]]).map { try #require($0["wave"]) }
         var work = try object("task_work.json")
-        let run = try object("flow_detail.json")
+        let run = try object("graph_detail.json")
         let planning: [String: Any] = ["roadmap": roadmap, "waves": waves]
 
         let calls = Recorder()
@@ -208,7 +208,7 @@ struct DesktopHeadlessTests {
         #expect(scope.task == task.task.identifier)
 
         feed.send(try frame("task", sequence: 2, answers: 2,
-                            body: ["task": task.task.identifier, "work": work, "flow_processes": [run], "comments": ["identifier": task.task.identifier, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]))
+                            body: ["task": task.task.identifier, "work": work, "graph_processes": [run], "comments": ["identifier": task.task.identifier, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]))
         try await eventually { model.taskWork[task.id].value != nil }
         let shown = try #require(model.taskWork[task.id].value)
         #expect(model.taskDiagnostics[task.id].value == nil)
@@ -222,21 +222,21 @@ struct DesktopHeadlessTests {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(id)")
         }
 
-        // Any Flow process is one line that opens to its id, its launched graph,
+        // Any Graph process is one line that opens to its id, its launched graph,
         // where it stands and every step it started.
-        let log = FlowProcessLog(model: model, taskId: task.id, location: task.reference.workspace?.identity)
-        let flow = try #require(shown.flowProcesses.first)
+        let log = GraphProcessLog(model: model, taskId: task.id, location: task.reference.workspace?.identity)
+        let graph = try #require(shown.graphProcesses.first)
         #expect(throws: (any Error).self) {
-            try log.inspect().find(viewWithAccessibilityIdentifier: "flow-process-status-\(flow.id)")
+            try log.inspect().find(viewWithAccessibilityIdentifier: "graph-process-status-\(graph.id)")
         }
-        #expect(throws: (any Error).self) { try log.inspect().find(text: flow.id) }
-        model.navigation.expandedFlowProcesses.insert(flow.id)
-        _ = try log.inspect().find(viewWithAccessibilityIdentifier: "flow-process-id-\(flow.id)")
-        let detail = try #require(model.flowProcesses[flow.id])
-        let status = try log.inspect().find(viewWithAccessibilityIdentifier: "flow-process-status-\(flow.id)").text().string()
+        #expect(throws: (any Error).self) { try log.inspect().find(text: graph.id) }
+        model.navigation.expandedGraphProcesses.insert(graph.id)
+        _ = try log.inspect().find(viewWithAccessibilityIdentifier: "graph-process-id-\(graph.id)")
+        let detail = try #require(model.graphProcesses[graph.id])
+        let status = try log.inspect().find(viewWithAccessibilityIdentifier: "graph-process-status-\(graph.id)").text().string()
         #expect(status == "Running implement · pass 2")
         for step in detail.steps {
-            _ = try log.inspect().find(viewWithAccessibilityIdentifier: "flow-process-step-\(step.lfProcessId)")
+            _ = try log.inspect().find(viewWithAccessibilityIdentifier: "graph-process-step-\(step.lfProcessId)")
         }
         #expect(detail.presentation.execution == .running)
         #expect(detail.current == 0)
@@ -250,7 +250,7 @@ struct DesktopHeadlessTests {
         var workflow = try #require(work["workflow"] as? [String: Any])
         workflow["position"] = ["kind": "node", "node": "demo"]
         work["workflow"] = workflow
-        var second = try #require((work["flow_processes"] as? [[String: Any]])?.first)
+        var second = try #require((work["graph_processes"] as? [[String: Any]])?.first)
         second["id"] = "44444444-4444-4444-8444-444444444444"
         second["name"] = "pursue"
         var secondRun = run
@@ -260,19 +260,19 @@ struct DesktopHeadlessTests {
         incomingComments["pending_sync"] = ["c-1"]
         let moved: [String: Any] = [
             "task": task.task.identifier,
-            "work": work.merging(["flow_processes": [try #require((work["flow_processes"] as? [[String: Any]])?.first), second]]) { $1 },
-            "flow_processes": [run, secondRun],
+            "work": work.merging(["graph_processes": [try #require((work["graph_processes"] as? [[String: Any]])?.first), second]]) { $1 },
+            "graph_processes": [run, secondRun],
             "comments": incomingComments,
         ]
         // A frame read before the write cannot stand for it.
         feed.send(try frame("task", sequence: 4, answers: 2, body: moved))
-        try await eventually { model.taskWork[task.id].value?.flowProcesses.count == 2 }
+        try await eventually { model.taskWork[task.id].value?.graphProcesses.count == 2 }
         #expect(model.navigation.taskRunDrafts[task.id]?.acting == true)
         feed.send(try frame("task", sequence: 5, answers: 4, body: moved))
         feed.send(try frame("planning", sequence: 6, answers: 4, body: planning))
         feed.send(try frame("checkpoint", sequence: 7, answers: 4, body: [:]))
         await moving.value
-        try await eventually { model.taskWork[task.id].value?.flowProcesses.count == 2 }
+        try await eventually { model.taskWork[task.id].value?.graphProcesses.count == 2 }
         #expect(model.taskWork[task.id].value?.workflow?.position == .node("demo"))
         releaseOldReads.finish()
         await oldRead.value
@@ -282,7 +282,7 @@ struct DesktopHeadlessTests {
         let comments = TaskCommentsView(model: model, task: task)
         _ = try comments.inspect().find(text: "Pending sync")
         _ = try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-44444444-4444-4444-8444-444444444444")
-        #expect(model.flowProcesses["44444444-4444-4444-8444-444444444444"]?.entry.name == "pursue")
+        #expect(model.graphProcesses["44444444-4444-4444-8444-444444444444"]?.entry.name == "pursue")
         #expect(await calls.calls == [
             ["task", "comment", task.id, "--json"],
             ["task", "workflow", "move", task.task.identifier, "demo"],
@@ -291,28 +291,28 @@ struct DesktopHeadlessTests {
 
     @Test("Same-name definitions keep separate destinations and a failed refresh retains visible stale data")
     func definitionKindsStayDistinct() async throws {
-        let flows = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("flow_catalog.json")), as: UTF8.self)
+        let graphs = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("graph_catalog.json")), as: UTF8.self)
         var workflows = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             fixtures.appendingPathComponent("workflow_catalog.json"))) as? [[String: Any]])
         workflows[0]["name"] = "feature"
         let text = String(decoding: try JSONSerialization.data(withJSONObject: workflows), as: UTF8.self)
         actor Source {
             var failed = false
-            let flows: String
+            let graphs: String
             let workflows: String
-            init(flows: String, workflows: String) { self.flows = flows; self.workflows = workflows }
+            init(graphs: String, workflows: String) { self.graphs = graphs; self.workflows = workflows }
             func fail() { failed = true }
             func read(_ args: [String]) throws -> String {
                 if failed { throw RegistryQueryError("catalog unreadable") }
-                return args.prefix(2) == ["wave", "workflow"] ? workflows : flows
+                return args.prefix(2) == ["wave", "workflow"] ? workflows : graphs
             }
         }
-        let source = Source(flows: flows, workflows: text)
+        let source = Source(graphs: graphs, workflows: text)
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) })
-        await model.loadFlowCatalog()
+        await model.loadGraphCatalog()
         await model.loadWorkflowCatalog()
         let rows = model.paletteRows.filter { $0.title == "feature" }
-        #expect(Set(rows.map(\.id)) == [.flow("feature"), .workflow("feature")])
+        #expect(Set(rows.map(\.id)) == [.graph("feature"), .workflow("feature")])
         model.navigation.palette = .workflow("feature")
         let retained = model.workflowCatalog.value
         await source.fail()
@@ -433,7 +433,7 @@ struct DesktopHeadlessTests {
         #expect(task.id == original.id)
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering must not mutate") })
         let view = TaskWorkflowHeader(model: model, task: task,
-            work: .available(TaskOverview(sessions: [], flowProcesses: [], workflow: nil)))
+            work: .available(TaskOverview(sessions: [], graphProcesses: [], workflow: nil)))
         if state == "unstarted" {
             _ = try view.inspect().find(button: "Complete")
             _ = try view.inspect().find(button: "Pause")
@@ -477,7 +477,7 @@ struct DesktopHeadlessTests {
         _ = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-edge-0")
         _ = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-edge-3")
         let workflow = try #require(drawnWorkflow)
-        let drawn = WorkflowGraphLayout(nodes: workflow.nodes, edges: workflow.edges)
+        let drawn = WorkflowDiagramLayout(nodes: workflow.nodes, edges: workflow.edges)
         #expect(drawn.arrows.map(\.route) == [.straight, .loop(level: 0), .straight, .loop(level: 0), .straight])
         #expect(drawn.boxes.map(\.terminal) == [true, false, false, true])
         // Each revise loop arcs over its own node, above the row.
@@ -505,8 +505,8 @@ struct DesktopHeadlessTests {
 
         // An edge that goes back, or passes over a node, takes its own lane below the row.
         let node = { Workflow.Node(name: $0, skill: "demo", description: nil) }
-        let edge = { Workflow.Edge(from: $0, to: $1, flow: $2) }
-        let lanes = WorkflowGraphLayout(nodes: [node("a"), node("b")], edges: [
+        let edge = { Workflow.Edge(from: $0, to: $1, graph: $2) }
+        let lanes = WorkflowDiagramLayout(nodes: [node("a"), node("b")], edges: [
             edge("start", "a", "one"), edge("a", "b", "two"), edge("b", "a", "back"), edge("start", "b", "skip"),
         ])
         #expect(lanes.arrows.map(\.route) == [.straight, .straight, .lane(level: 0), .lane(level: 1)])
@@ -592,7 +592,7 @@ struct DesktopHeadlessTests {
         let task = try #require(roadmap.waves.first?.tasks.items.first)
         model.select(.task(id: task.id))
         let pending = try view.inspect().find(viewWithAccessibilityIdentifier: "planning-sync-pending-title").text().string()
-        #expect(pending == "Saved locally; pending Linear sync · title")
+        #expect(pending == "Saved locally; pending planning sync · title")
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-loading")
         }

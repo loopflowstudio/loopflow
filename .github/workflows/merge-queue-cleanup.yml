@@ -1,0 +1,24 @@
+name: Merge queue cleanup
+
+# A pull request that leaves the merge queue keeps its queue CI run holding
+# runners. CI's cancel-superseded job covers the entries rebuilt behind it.
+on:
+  pull_request:
+    types: [dequeued]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel-queue-runs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: astral-sh/setup-uv@v7
+      - name: Cancel the dequeued pull request's merge-queue runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run python scripts/cancel_merge_queue_runs.py "${{ github.event.pull_request.number }}"

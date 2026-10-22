@@ -11,7 +11,7 @@ remains valid.
 
 Name the beneficiary and experienced improvement. Author nonempty KRs before
 chapter creation, with targets and evidence windows where useful. Never carry
-forward checked verdicts. Flow is optional; an empty string is valid. Ordinary
+forward checked verdicts. Graph is optional; an empty string is valid. Ordinary
 Project ensure has no chapter or KR requirement.
 
 Return one entry for the retained chapter plan:

@@ -8,9 +8,9 @@ first, then the engineering words it borrows.
 | Term | What it means |
 |---|---|
 | **Skill** | One step: instructions for the AI, written as a text file in `.lf/skills/`. |
-| **Flow** | Steps in order, written as a file in `.lf/flows/`. |
-| **Workflow** | A Task's nodes, where you take part in its conversation, joined by the flows that run between them. Written as a file in `.lf/workflows/`. |
-| **Loopflow** | A flow that can go back and try again. Exactly: a flow with at least one backward edge. |
+| **Graph** | Steps in order, written as a file in `.lf/graphs/`. |
+| **Workflow** | A Task's nodes, where you take part in its conversation, joined by the graphs that run between them. Written as a file in `.lf/workflows/`. |
+| **Loopflow** | A graph that can go back and try again. Exactly: a graph with at least one backward edge. |
 | **Deciding step** | The step that chooses between moving on and going back. |
 | **Task** | One piece of work with a finish line. |
 | **Wave** | A goal Loopflow keeps working on. It has a written objective, a memory, and a schedule. |
@@ -52,7 +52,7 @@ execution owner in the accepted model.
 | **Test** | A small program that checks another program does what it should. |
 | **Lint** | An automatic check for mistakes and style, without running the code. |
 | **GitHub** | A website that stores repositories and hosts pull requests. |
-| **Planning provider** | Where your Tasks and Projects are shared: a Git ref by default, or Linear. Asana and Notion are planned. |
+| **Planning provider** | Where your Tasks and Projects are shared: a Git ref by default, or Linear, Asana or Notion. |
 | **Linear** | A planning tool. Loopflow can keep Tasks and Projects there instead of in Git. |
 | **Token** | The unit AI tools count text in, and charge by. Roughly three quarters of a word. |
-| **YAML**, **Markdown** | Two plain text formats. Flows are written in YAML; skills and docs in Markdown. |
+| **YAML**, **Markdown** | Two plain text formats. Graphs are written in YAML; skills and docs in Markdown. |

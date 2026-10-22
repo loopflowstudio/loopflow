@@ -171,9 +171,9 @@ lf wait <issue-id> --until terminal
 | gate | code, tests | code, docs and proof |
 | qa | code | findings and fixes on branch |
 
-### Named flows
+### Named graphs
 
-Chain skills manually, or use a named flow (a flow is a sequence of steps; each step names a skill, an op, or a subflow):
+Chain skills manually, or use a named graph (a graph is a sequence of steps; each step names a skill, an op, or a subgraph):
 
 ```bash
 lf incident                            # unbreak → 5whys → launch-plan
@@ -182,12 +182,12 @@ lf feature                             # kickoff → pursue; ends at a published
 lf ship                                # gate → land and complete the Task
 ```
 
-Use bare names for both skills and Flows: `lf debug`, `lf code`, `lf incident`.
-`lf flow incident` explicitly selects the Flow when a name also names a skill
+Use bare names for both skills and Graphs: `lf debug`, `lf code`, `lf incident`.
+`lf graph incident` explicitly selects the Graph when a name also names a skill
 or CLI command; the prefix is otherwise optional.
 
-Flow YAML owns step order and explicit backward edges. Every step is
-autonomous; design review and the demo happen in the Task conversation. A Flow
+Graph YAML owns step order and explicit backward edges. Every step is
+autonomous; design review and the demo happen in the Task conversation. A Graph
 with backward edges is a loopflow; it runs with or without a Task. `ship` and
 `deploy` supply explicitly selected delivery steps.
 
@@ -227,7 +227,7 @@ lf ci watch     # watch PR checks; start a ci-fix when a landing fails
 ```
 
 Use the same delivery verbs for Task and non-Task branches. They act on the
-branch and Task PR record when present; they do not require a running Task Flow.
+branch and Task PR record when present; they do not require a running Task Graph.
 
 ---
 
@@ -241,13 +241,13 @@ lf ps --json
 
 Author `.lf/wave/shipper/GOAL.md` with an objective and operating guidance. Optional
 `crons:` schedules recurring commands; `pm:` connects shared planning. Each
-`wave-operate` invocation reviews the plan and keeps every started Task moving.
+`wave-operate` invocation keeps your started Tasks moving and leaves the plan alone.
 Tasks own implementation in stable worktrees; `lf land` hands off delivery and
 `lf pr reconcile` settles verified merges; `lf ci watch` repairs failed CI
 while it runs.
 
 Open the repository in Loopflow on macOS to read Waves, Tasks and conversations.
-`lf session list` finds conversations and Flow reviews; open one with
+`lf session list` finds conversations and Graph reviews; open one with
 `lf session connect <session-id>`. Completing it returns its saved feedback.
 
 [Waves →](waves.md) · [Conducting →](conducting.md)
@@ -294,6 +294,8 @@ Auth connects your providers locally:
 lf account connect github    # connect GitHub
 lf account connect claude    # connect Claude
 lf account connect linear    # connect Linear with OAuth; needs LINEAR_CLIENT_ID/SECRET or Doppler
+lf account connect asana     # or plan in Asana; needs ASANA_CLIENT_ID/SECRET or Doppler
+lf account connect notion    # or plan in Notion; needs NOTION_CLIENT_ID/SECRET or Doppler
 lf account    # refresh managed identity and usage
 ```
 

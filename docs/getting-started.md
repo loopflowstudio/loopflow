@@ -29,6 +29,7 @@ A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 | Run autonomous waves | Author `.lf/wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
 | Steer and inspect from terminal | `lf --wave <name> wave-operate` → `lf wave status` |
 | Run on another machine | `lf --machine <machine-id> --wave <name> wave-operate` ([Go Remote](#go-remote)) |
+| Join a repository a teammate already runs | `lf user`, then `lf planning status` ([Work with another person](lf.md#work-with-another-person)) |
 
 ---
 
@@ -140,7 +141,7 @@ remote; a fetch failure remains an error.
 
 ## Build Features
 
-Start from a Linear task; Loopflow creates and retains its worktree.
+Start from a Task; Loopflow creates and retains its worktree.
 
 ```bash
 lf task create --wave <wave> --title "add OAuth login"
@@ -292,7 +293,7 @@ Auth connects your providers locally:
 ```bash
 lf account connect github    # connect GitHub
 lf account connect claude    # connect Claude
-lf account connect linear    # connect Linear with OAuth
+lf account connect linear    # connect Linear with OAuth; needs LINEAR_CLIENT_ID/SECRET or Doppler
 lf account    # refresh managed identity and usage
 ```
 

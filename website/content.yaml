@@ -4,8 +4,6 @@ navigation:
 - label: For you
   href: /#mac
   optional: true
-- label: CLI
-  href: /cli
 - label: Docs
   href: /docs
 - label: Company
@@ -83,93 +81,10 @@ studio:
     label: About · Loopflow Studio
     heading: Jack Heart
     lede: Founder of Loopflow Studio.
-# The page for engineers, at /cli. Direction from Jack Heart on 2026-10-08: "Loopflow
-# is the CLI for software engineering". Plain lists in a narrow column; written for
-# people who already use cmux or another terminal, not selling the Mac app here.
-# List copy is draft.
-cli:
-  hero:
-    title: The CLI for agent workflows
-    heading:
-      before: lf is the CLI for
-      verbs: [writing, running, sharing, studying]
-      after: agent workflows.
-    cost: >-
-      Free and open source. The coding agent it drives (Claude Code, Codex, or OpenCode) runs on
-      your own account and has its own cost.
-  agents:
-    commands: |-
-      $ lf -a codex : "fix the failing test"   # launch an agent with a prompt
-      $ lf skill design "Add CSV export"       # a saved prompt: a Skill
-      $ lf flow pursue                          # Skills in sequence: a Flow
-      $ lf flow show pursue                    # print its steps
-      $ lf flow customize pursue               # copy it into your repo
-      $ lf -b -a claude:opus flow pursue        # headless, on a model you pick
-      $ lf connect                             # this scope's ongoing conversation
-      $ lf account                             # logins and remaining capacity
-      $ lf history usage                               # tokens and cost per Session
-      $ lf task create --wave exports --title "Add CSV export"
-      $ lf task run EXP-12                     # its own worktree, then its Flow
-      $ lf connect --task EXP-12               # back to that Task's conversation
-      $ lf history usage --task EXP-12                 # what that Task cost
-      $ lf land                                # merge when checks pass
-    items:
-    - name: Launcher
-      text: At its most basic, `lf` is an agent launcher and session manager. Use it anywhere you
-        would launch Claude Code, Codex, or OpenCode, so every agent starts the same way.
-    - name: Skills
-      text: A Skill is a prompt saved as a Markdown file, so you stop retyping it. `lf skill NAME`
-        runs one.
-    - name: Flows
-      text: '`lf` runs Flows. A Flow is a (looping) sequence of Skills: a habit turned into a
-        process you can run again.'
-    - name: Built-ins
-      text: '`lf` provides lots of reasonable built-in Flows for software engineering, but you are
-        encouraged to build your own and share them with others. They are files in your repository.'
-    - name: Interactive or headless
-      text: Run any Skill or Flow as a conversation or headless. Each step can use a different
-        agent or model.
-    - name: Sessions
-      text: '`lf` keeps every conversation it starts, whichever agent ran it, so you never lose one
-        and can always pick it back up.'
-    - name: Accounts and usage
-      text: '`lf` manages your logins, so you can use more than one account and move to the next
-        when one runs out. It also shows what the work cost, by Task or by Wave.'
-    - name: Waves and Tasks
-      text: '`lf` is also a project manager. It organizes your work into Waves (long-lived streams)
-        and Tasks (concrete outcomes, i.e. PRs), and files each conversation under the one it
-        belongs to.'
-    - name: Task = worktree = branch
-      text: Each Task gets its own working copy, its own branch, and one pull request, so many
-        agents can work without colliding.
-    - name: Workflows
-      text: '`lf` encodes the stages a Task goes through to become a shipped and validated PR, and
-        lets you customize, Wave by Wave, how and when you get involved.'
-    links:
-    - label: Skills and Flows ↗
-      href: /docs/authoring#flows
-    - label: Tasks and Waves ↗
-      href: /docs/waves
-    - label: Worktrees and delivery ↗
-      href: /architecture/delivery
-  where:
-    heading: It works wherever you work.
-    items:
-    - name: Your terminal
-      text: '`lf` is free, open-source, and can be used inside any terminal, or alongside tools like
-        cmux and herdr.'
-    - name: Use as much as you want
-      text: Use what you like and skip what you don't. The launcher needs no Task and no Linear.
-        Flows run without Tasks, and a Task can run any Flow.
-    - name: Change whatever you want
-      text: Skills are Markdown and Flows are YAML. Edit them or use the built-ins. MIT licensed.
-    - name: Linear
-      text: Your Tasks are Linear issues, so the plan your agents work from is the one your team
-        already reads.
 # The homepage's body is home.html. This block holds what other pages share with
 # it: the install command, the download, and the footer.
 homepage:
-  title: how you design, implement, demo, release and study software with agents
+  title: how you design, implement, demo, release and study software in harmony
   install:
     label: Install
     install_command: curl -fsSL https://loopflow.studio/install.sh | sh

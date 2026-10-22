@@ -954,6 +954,33 @@ impl SqliteStore {
         shipping_in(&conn, task)
     }
 
+    /// Handed-off Tasks whose checkout is on this Machine, with their handoffs.
+    pub(crate) fn local_shipping_tasks(&self) -> StoreResult<Vec<(TaskId, TaskShipping)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT id FROM tasks WHERE shipped_at IS NOT NULL
+             AND checkout_machine_id=(SELECT id FROM machines WHERE route='local')",
+        )?;
+        let ids = query
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        ids.into_iter()
+            .filter_map(|id| {
+                let id = match TaskId::parse(&id) {
+                    Ok(id) => id,
+                    Err(error) => {
+                        return Some(Err(crate::store::StoreError::InvalidData(
+                            error.to_string(),
+                        )))
+                    }
+                };
+                shipping_in(&conn, &id)
+                    .transpose()
+                    .map(|shipping| shipping.map(|shipping| (id, shipping)))
+            })
+            .collect()
+    }
+
     /// The node `by`'s edge enters, while the Task is still on that edge.
     pub(crate) fn workflow_edge_target(
         &self,
@@ -1112,6 +1139,21 @@ mod tests {
         assert_eq!(state(), crate::durable::TaskState::Shipping);
         let shipping = store.task_shipping(&task).unwrap().unwrap();
         assert_eq!(shipping.process, Some(by.clone()));
+        // Only the checkout's Machine restarts its ship process.
+        assert!(store.local_shipping_tasks().unwrap().is_empty());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET checkout_machine_id=(SELECT id FROM machines WHERE route='local') WHERE id=?1",
+                [task.as_str()],
+            )
+            .unwrap();
+        assert_eq!(
+            store.local_shipping_tasks().unwrap(),
+            [(task.clone(), shipping.clone())]
+        );
         // Pause holds shipping without ending it.
         store.set_task_paused(&task, true).unwrap();
         assert_eq!(state(), crate::durable::TaskState::Paused);

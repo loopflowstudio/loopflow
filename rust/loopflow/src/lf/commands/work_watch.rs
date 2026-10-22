@@ -702,6 +702,10 @@ impl Reader {
                 _ => self.absent(part),
             };
         };
+        // Reading the Machine's planning recovers its work first.
+        if part == Part::Planning {
+            crate::ops::recovery::recover();
+        }
         self.runtime.block_on(async {
             Ok(match part {
                 Part::Planning => {

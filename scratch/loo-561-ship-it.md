@@ -114,6 +114,16 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
 4. **Completion on any merge** while a Graph is paused or running: verify, then fix if needed.
 5. **Stand-in `blocked` backoff**: it repeats at once; give it the landing's 1→30 min backoff.
 
+6. **Ship it placement (Jack Heart, 2026-10-22, prototypes in `scratch/ship-it-placement.html`).**
+   Jack: "i think i like B best, but only in the main pane, not the sidebar" (he corrected
+   "left" to "best") and "with maybe something C like eventually, but still havent quite nailed
+   the workflow presentation or handling". Build variant B in the main pane: hovering the Task
+   heading fades in a green **Ship it** at its right end, after the state; while shipping the
+   same spot holds **Stop shipping**; a toast offers Undo (= Stop shipping). No ship control in
+   sidebar rows. Operator reading, reversible: the sidebar context menu (`TaskActionItems`)
+   drops Ship it too. The Workflow rail (variant C) is later and unsettled: do not grow
+   `TaskWorkflowHeader` here; Ship it no longer lives in it.
+
 ## Done when
 
 - Ship it or `lf ship` on a `feature` Task at `review-design` runs to merge and completion with

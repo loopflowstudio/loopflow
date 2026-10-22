@@ -932,22 +932,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             Ok(())
         }
         TaskCommand::Reconcile { json } => {
-            // The schedule runs this check every minute; an AgentProcess whose attached lf
-            // was killed is reaped here before delivery is observed.
-            let agents = loopflow::harness::agent_process::reap_agent_processes(false);
-            // A shipping Task whose ship process died is started again, ahead of
-            // delivery observation.
-            let restarts = loopflow::ops::task::ship::restart_ships(repo);
-            let mut result = loopflow::ops::pr_landing::reconcile_repository(repo)?;
-            if let Err(error) = restarts {
-                result.errors.push(format!("Ship restart: {error}"));
-            }
-            match agents {
-                Ok(agents) => result.errors.extend(agents.errors),
-                Err(error) => result
-                    .errors
-                    .push(format!("AgentProcess settlement: {error}")),
-            }
+            let result = loopflow::ops::pr_landing::reconcile_repository(repo)?;
             if *json {
                 println!("{}", serde_json::to_string(&result)?);
             }
@@ -2282,6 +2267,20 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 anyhow::bail!("No Task selected; name a Task or run from its checkout")
             }
         });
+    }
+    // Reading this Machine's Tasks or processes recovers them first.
+    if matches!(
+        &cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Status { .. } | TaskCommand::List { .. }
+        }) | Some(Commands::Wave {
+            cmd: WaveCommand::Status { .. } | WaveCommand::List { .. } | WaveCommand::Show { .. }
+        }) | Some(Commands::History {
+            cmd: None | Some(loopflow::lf::commands::history::HistoryCommand::List { .. }),
+            ..
+        })
+    ) {
+        loopflow::ops::recovery::recover();
     }
     if loopflow::lf::commands::work_route::dispatch(&cli, args)? {
         return Ok(());

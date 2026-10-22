@@ -430,28 +430,23 @@ pub fn stand_in_message(stage: &str, repeats: bool) -> String {
     message
 }
 
-/// Start `lf --task ISSUE ship` again for each of the repository's shipping
-/// Tasks whose ship process has exited. Paused and finished Tasks wait.
-pub fn restart_ships(repo: &std::path::Path) -> OpsResult<()> {
+/// Start `lf --task ISSUE ship` again for each shipping Task checked out on
+/// this Machine whose ship process has exited. Paused and finished Tasks wait.
+pub(crate) fn restart_ships() -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;
-        let repo_id = crate::repository::RepoId::discover(repo).map_err(task_error)?;
-        for task in crate::ops::task_automation::repository_tasks(&store, &repo_id).await? {
-            if store.sqlite.task_state(&task.id).map_err(task_error)? != TaskState::Shipping {
+        for (id, shipping) in store.sqlite.local_shipping_tasks().map_err(task_error)? {
+            if store.sqlite.task_state(&id).map_err(task_error)? != TaskState::Shipping
+                || carrier_evidence(&store.sqlite, &shipping) != ProcessIdentityEvidence::Dead
+            {
                 continue;
             }
-            let Some(shipping) = store.sqlite.task_shipping(&task.id).map_err(task_error)? else {
+            let Some(task) = store.get_task(&id).await.map_err(task_error)? else {
                 continue;
             };
-            if carrier_evidence(&store.sqlite, &shipping) != ProcessIdentityEvidence::Dead {
-                continue;
-            }
-            let Ok(worktree) = task.worktree() else {
+            let Some(worktree) = task.worktree.as_ref().filter(|path| path.is_dir()) else {
                 continue;
             };
-            if !worktree.is_dir() {
-                continue;
-            }
             let context = crate::os_process::execution_context().map_err(task_error)?;
             let argv = [
                 context.lf_bin.to_string_lossy().to_string(),
@@ -461,6 +456,7 @@ pub fn restart_ships(repo: &std::path::Path) -> OpsResult<()> {
             ];
             crate::os_process::start_lf_session(worktree, &argv, &[], &|_| {})
                 .map_err(task_error)?;
+            tracing::info!("restarted the ship process for {}", task.identifier);
         }
         Ok(())
     })

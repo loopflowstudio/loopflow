@@ -123,12 +123,10 @@ struct PaneEmptyState<Description: View, Actions: View>: View {
 
     var body: some View {
         if compact {
-            HStack(spacing: Spacing.sm) {
-                Label(title, systemImage: systemImage)
-                    .lineLimit(1).truncationMode(.tail)
-                    .foregroundStyle(theme.palette.text)
-                    .help(summary ?? title)
-                actions.controlSize(.small).fixedSize()
+            // A narrow slot keeps the action and the state's icon rather than a clipped title.
+            ViewThatFits(in: .horizontal) {
+                compactRow(Label(title, systemImage: systemImage).fixedSize())
+                compactRow(Label(title, systemImage: systemImage).labelStyle(.iconOnly))
             }
             .font(Typography.body(12))
             .padding(Spacing.sm)
@@ -139,6 +137,15 @@ struct PaneEmptyState<Description: View, Actions: View>: View {
             } description: {
                 description.foregroundStyle(theme.palette.textSecondary)
             } actions: { actions }
+        }
+    }
+}
+
+extension PaneEmptyState {
+    fileprivate func compactRow(_ label: some View) -> some View {
+        HStack(spacing: Spacing.sm) {
+            label.foregroundStyle(theme.palette.text).help(summary ?? title)
+            actions.controlSize(.small).fixedSize()
         }
     }
 }

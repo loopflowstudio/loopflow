@@ -200,8 +200,9 @@ struct DashboardView: View {
                             entry.multiplexer.setFocusedPane(pane)
                         }, face: pane)
                 } else if let task = task?.task {
-                    // A Task with a recorded conversation opens it; one with nothing to open offers Start.
-                    if model.taskSessions(task.id).isEmpty, !task.task.isTerminal {
+                    // Only an unstarted Task offers Start. A started one opens its conversation,
+                    // which `lf session connect --task` creates when only headless Runs exist.
+                    if task.awaitsStart {
                         TaskStartOffer(model: model, task: task)
                     } else {
                         DashboardConversationOffer(model: model, task: task, workspace: entry)
@@ -244,7 +245,7 @@ struct DashboardConversationOffer: View {
             ProgressView("Opening conversation…").frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             PaneEmptyState(title: "No conversation open", systemImage: "bubble.left",
-                           description: workspace.conversationError ?? "Open this Task’s recorded conversation here.") {
+                           description: workspace.conversationError ?? "Open this Task’s conversation here.") {
                 Button("Open conversation") { Task { await model.attachTaskConversation(task.id, in: workspace) } }
                     .accessibilityIdentifier("dashboard-open-conversation-\(task.id)")
             }

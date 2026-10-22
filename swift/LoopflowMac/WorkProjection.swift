@@ -310,7 +310,9 @@ final class WorkNavigation {
         showsNavigator.toggle()
     }
     var sidebarWidth: CGFloat = 240
-    var sidebarScrollOffset: CGFloat = 0
+    /// Restores the sidebar when it is rebuilt. Written every scrolled frame, so
+    /// unobserved: tracking it re-rendered every sidebar row per frame.
+    @ObservationIgnored var sidebarScrollOffset: CGFloat = 0
 
     func resizeSidebar(_ width: CGFloat, availableWidth: CGFloat) {
         sidebarWidth = min(600, max(240, min(width, availableWidth - 360)))

@@ -15,7 +15,7 @@ lf wave status shipper
 ```
 
 A Wave keeps an objective, memory, cadence, budget and metrics across Tasks.
-Each invocation makes one finite planning pass. Tasks own implementation and
+Each `wave-operate` invocation makes one finite pass over existing Tasks. Tasks own implementation and
 Flow execution; each Machine retains command and conversation history.
 
 | Path | Holds |
@@ -60,7 +60,7 @@ A fresh Machine uses the same authored IDs. Copying an ID into two Wave director
 is a conflict, not a second Wave.
 
 Release declares its schedule in `.lf/config.yaml`, retaining Infrastructure as
-the installed job owner. Connecting its Linear Initiative, moving release plans
+the installed job owner. Connecting its planning (a Linear Initiative, for example), moving release plans
 and Tasks, and syncing the installed schedule are separate operations.
 
 ## Operate manually
@@ -72,8 +72,11 @@ lf --wave shipper s2 : "Investigate the repeated checkout conflict"
 ```
 
 `wave-operate` considers delivery, coordination, present capacity, adaptation
-and identity (S1–S5) within the selected Wave. `vsm-operate` applies those same
-questions across the current repository's Waves, including from a linked
+and identity (S1–S5) over the selected Wave's existing Tasks and reports what
+it finds. It does not check KRs or metric targets, edit the plan, rotate
+chapters, file Tasks or start backlog. `vsm-operate` asks those same
+questions, with the same boundaries (no KRs, plan edits, new Tasks or backlog
+starts), across the current repository's Waves, including from a linked
 worktree or a Task-bound session. Its Flow runs `s1 → s2 → s3 → s4 → s5`,
 with each skill reading earlier findings from one shared working note. Each is
 also directly invokable for a focused question, with no scan/assess split.
@@ -83,19 +86,17 @@ invocations, without requiring five reports or five actions. `wave-operate`
 remains a single skill; whether it should use the VSM Flow is still undecided.
 
 Each pass reads dated evidence and replies in the invoking conversation. It
-gives every started Task one disposition: moving, acted on and verified,
-waiting on a named person or dependency, paused, or unknown. A started Task
+gives every started Task you own one disposition: moving, acted on and
+verified, waiting on a named person or dependency, paused, or unknown. A Task
+another person owns (`runtime.owner` naming someone other than `lf config user`)
+is listed with that person and Machine and left alone; its liveness is not
+judged from your Machine. A Task you own on another Machine is operated there,
+one Task at a time, with `lf --machine <machine> task-operate <issue>`. A started Task
 whose Flow stopped or failed is read and its remaining work run fresh; one at
 a workflow node waits on you; unstarted backlog is
 listed and left for you to select. A no-action result is valid only when every
-started Task already has a disposition. Failed reads and stale provider data remain explicit
+started Task you own already has a disposition. Failed reads and stale provider data remain explicit
 gaps; they cannot justify closing work or treating a Task as idle.
-
-Task findings can challenge Wave purpose; Wave findings can challenge shared
-repository direction. Preserve the source and disagreement with the affected
-Wave or Task. Return accepted decisions to those owners with their practical
-consequence. Changes beyond accepted direction stay proposals for review.
-Repository synthesis does not own identity alone.
 
 Running Task Flows keep progressing when both operators are absent; review
 happens in the Task conversation. Projects belong to Waves; they have no separate
@@ -179,7 +180,7 @@ home: build-vm.example.com
 
 ## Objective
 
-Keep the runtime architecture legible. Each loop: read Linear tasks and
+Keep the runtime architecture legible. Each loop: read the Wave's Tasks and
 memory, pick the next useful move, resolve its local blocker, spin off
 independent work only when parallelism earns it, and fold what shipped into
 memory.
@@ -232,10 +233,10 @@ Set targets in the chapter plan, not the instrument contract:
 
 Apply this complete Wave plan with
 `lf update-plan --wave <wave> --plan plan.json`. For the next chapter,
-edit the Planned Project in Linear.
+edit the Planned Project, in Linear when the repository plans there.
 An omitted metric has no target in that chapter; its observations remain visible
 without a pass/fail verdict. Changing a target preserves instrument identity,
-revision, and measurement history. Completed Projects retain their targets and KRs in Linear. Metric observations
+revision, and measurement history. Completed Projects retain their targets and KRs. Metric observations
 remain owned by the Wave; rotation does not freeze another copy of those readings.
 The Wave objective stays in `GOAL.md`; Project plans have no second objective.
 
@@ -283,7 +284,8 @@ Use Sessions for native conversations and `lf history list --wave product` for h
 
 `MEMORY.md` is durable working context agents curate as Wave work moves —
 decisions, dead ends, what a downstream task should know. It is an ordinary
-reviewed repository file:
+reviewed repository file. With two contributors, keep it as short, independent
+sections so their pull requests merge:
 
 ```bash
 $EDITOR .lf/wave/shipper/MEMORY.md
@@ -361,12 +363,18 @@ The Wave objective names who benefits and what improves. Chapter KRs prove obser
 across a stated window. Update the current plan explicitly; a new chapter copies only
 the workflow, retaining any explicitly prepared successor plan.
 
-## Linear
+## Planning providers
 
-Tasks live in Linear; there are no local task lists. A Wave maps to an
-Initiative, its Project for each Chapter maps to a Linear Project, and each
-Task maps to an Issue. The chapter name groups the current Projects. Connect
-once — `lf repo connect` links or creates the Wave Initiative and establishes one
+Tasks, Projects, KRs and comments save locally and travel through the
+repository's planning provider. Git is the default: the plan rides a ref on
+`origin`, with no account to connect. Linear is optional, and Asana and Notion
+are planned. See [Choose planning synchronization](lf.md#choose-planning-synchronization).
+
+### Linear
+
+With Linear, a Wave maps to an Initiative, its Project for each Chapter maps to
+a Linear Project, and each Task maps to an Issue. The chapter name groups the
+current Projects. Connect once — `lf repo connect` links or creates the Wave Initiative and establishes one
 repository Team in `.lf/config.yaml`. Every Wave reuses that Team and issue-key
 namespace. Don't paste ids by hand.
 
@@ -386,7 +394,7 @@ stable IDs and Project membership resolve Work.
 
 ## Tasks
 
-Every concrete file-writing change begins with a Linear task and runs as a
+Every concrete file-writing change begins with a Task and runs as a
 durable Task Work in its own stable sibling worktree:
 
 ```bash
@@ -429,7 +437,7 @@ See [Sessions](lf-reference.md#session-conversations-and-reviews)
 for rename, bind, and the distinction between ancestry and Flow membership.
 
 Each Task PR keeps its own benefit-focused title. After the opening summary,
-Loopflow adds the canonical Task name, Linear link, and merge consequence.
+Loopflow adds the canonical Task name, its issue link when one exists, and merge consequence.
 Publication refreshes that context without replacing the title or summary.
 
 Task events remain durable evidence for the next finite Wave pass. Status,
@@ -443,7 +451,7 @@ lf task complete INF-124
 
 Task completion is independent of Workflow position. `task complete` changes
 status; `task workflow move end` records the move and requests completion. If completion
-fails, retry it alone without replaying the Flow. Linear completion and reopening
+fails, retry it alone without replaying the Flow. Completion and reopening in the planning provider
 leave execution intact; reopening supersedes old requests. A Task with a PR needs
 authoritative merge. A PR-less Task may finish with research files and commits;
 unsafe or occupied checkouts are retained. Completion does not settle Session
@@ -454,13 +462,13 @@ Bare landing or a manual merge leaves the Task open. Optional new work uses ordi
 Task creation before completion, with no required filing or disposition. Inspect
 live Flow processes before retrying completion; no fresh gate or landing is needed.
 
-A due follow-up returns on its owning Wave's next operation, even if unstarted.
-Surface it for selection unless its brief already authorizes a concrete unattended
-check. Filing installs no schedule; an open conversation schedules no next turn.
-Without an installed Wave schedule, report no automatic check scheduled. Missing
-installation or provider evidence stays unknown, and time is never proof of success.
+An unstarted due follow-up returns on its owning Wave's next operation, listed
+for you to select; operators do not start it. A started one you own takes its
+ordinary disposition, dependency on the named date until that date arrives. Filing installs no
+schedule; an open conversation schedules no next turn. Missing provider
+evidence stays unknown, and time is never proof of success.
 
-An early Linear completion cannot supply local merge evidence.
+An early completion in the planning provider cannot supply local merge evidence.
 Canceled and duplicate issues cannot become successful completion. Each additional
 PR belongs to another Task, stacked where dependent; a reopened Task keeps its
 same PR.
@@ -482,7 +490,7 @@ holds the proof claims. Reviewed contracts under `.lf/wave/billing/metrics/` def
 live evidence such as usage-event latency and invoice correctness; the Wave
 re-judges strategy from their current readings each iteration.
 
-The backing Linear project holds the concrete Tasks:
+The chapter's Project holds the concrete Tasks:
 
 ```text
 Usage events       → Event capture and storage

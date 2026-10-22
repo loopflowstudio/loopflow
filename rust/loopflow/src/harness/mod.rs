@@ -3,6 +3,7 @@ pub mod agent_process;
 pub mod claude;
 mod claude_history;
 mod claude_mapping;
+pub(crate) mod claude_trust;
 pub mod codex;
 #[cfg(unix)]
 pub mod codex_connection;

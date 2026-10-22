@@ -92,7 +92,7 @@ lf task run INF-123 --reason "provider credentials repaired"
 `task run` runs a fresh Flow in the Task checkout with its Steers and
 active PR. It never continues an earlier Flow; a stopped one leaves its
 Processes as history. Unknown liveness stays
-unknown. A Task Steer is a Linear Task comment; the running Flow receives new
+unknown. A Task Steer is a Task comment; the running Flow receives new
 comments when possible and the next Skill seed always reads them. `task interrupt` ends the
 active boundary so the next one re-reads direction. Neither command's receipt
 proves that the provider applied the direction.
@@ -120,8 +120,8 @@ After repairing provider access, launch the Task or Project operation again:
 lf task run INF-123 --reason "provider credentials repaired"
 ```
 
-Wave planning uses finite conversations. Invoke `lf --wave <wave> wave-operate`
-for another planning pass; there is no long-running Project process to resume.
+Wave operation uses finite conversations. Invoke `lf --wave <wave> wave-operate`
+for another pass; there is no long-running Project process to resume.
 
 Other options:
 

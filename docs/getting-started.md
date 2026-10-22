@@ -29,6 +29,7 @@ A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 | Run autonomous waves | Author `.lf/wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
 | Steer and inspect from terminal | `lf --wave <name> wave-operate` → `lf wave status` |
 | Run on another machine | `lf --machine <machine-id> --wave <name> wave-operate` ([Go Remote](#go-remote)) |
+| Join a repository a teammate already runs | `lf user`, then `lf planning status` ([Work with another person](lf.md#work-with-another-person)) |
 
 ---
 
@@ -140,7 +141,7 @@ remote; a fetch failure remains an error.
 
 ## Build Features
 
-Start from a Linear task; Loopflow creates and retains its worktree.
+Start from a Task; Loopflow creates and retains its worktree.
 
 ```bash
 lf task create --wave <wave> --title "add OAuth login"
@@ -240,7 +241,7 @@ lf ps --json
 
 Author `.lf/wave/shipper/GOAL.md` with an objective and operating guidance.
 `lf cron add` schedules recurring commands on your Machine; `pm:` connects shared planning. Each
-`wave-operate` invocation reviews the plan and keeps every started Task moving.
+`wave-operate` invocation keeps your started Tasks moving and leaves the plan alone.
 Tasks own implementation in stable worktrees; `lf land` hands off delivery and
 `lf pr reconcile` settles verified merges; `lf ci watch` repairs failed CI
 while it runs.
@@ -292,7 +293,9 @@ Auth connects your providers locally:
 ```bash
 lf account connect github    # connect GitHub
 lf account connect claude    # connect Claude
-lf account connect linear    # connect Linear with OAuth
+lf account connect linear    # connect Linear with OAuth; needs LINEAR_CLIENT_ID/SECRET or Doppler
+lf account connect asana     # or plan in Asana; needs ASANA_CLIENT_ID/SECRET or Doppler
+lf account connect notion    # or plan in Notion; needs NOTION_CLIENT_ID/SECRET or Doppler
 lf account    # refresh managed identity and usage
 ```
 

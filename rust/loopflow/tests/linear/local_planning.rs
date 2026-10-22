@@ -1091,7 +1091,10 @@ fn project_creation_binding_and_activation_save_offline() {
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
         if connected {
-            repo.create_file(".lf/config.yaml", "linear:\n  team: fixture-team\n");
+            repo.create_file(
+                ".lf/config.yaml",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
+            );
         }
         let path = home.path().join("loopflow.db");
         let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
@@ -1213,26 +1216,21 @@ fn project_creation_binding_and_activation_save_offline() {
                     20,
                 )
                 .unwrap();
+                // The unsent activation is sent last, so it stays pending and
+                // replaces Linear's completion.
                 assert!(store
                     .pending_project_changes(&id)
                     .unwrap()
                     .iter()
-                    .all(|change| change.value.field() != "project_status"));
-                let losing: (String, String) = db
+                    .any(|change| change.id == state.id));
+                let conflict: Option<String> = db
                     .query_row(
-                        "SELECT value_json,conflict_json FROM project_changes WHERE id=?1",
+                        "SELECT conflict_json FROM project_changes WHERE id=?1",
                         [&state.id],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
+                        |row| row.get(0),
                     )
                     .unwrap();
-                assert_eq!(
-                    serde_json::from_str::<Value>(&losing.0).unwrap()["value"],
-                    "started"
-                );
-                assert_eq!(
-                    serde_json::from_str::<Value>(&losing.1).unwrap()["value"]["value"],
-                    "completed"
-                );
+                assert!(conflict.is_none());
                 assert_eq!(
                     db.query_row(
                         "SELECT status FROM projects WHERE id=?1",
@@ -1240,7 +1238,7 @@ fn project_creation_binding_and_activation_save_offline() {
                         |row| row.get::<_, String>(0)
                     )
                     .unwrap(),
-                    "completed"
+                    "started"
                 );
             }
         }
@@ -1300,7 +1298,7 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
             std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
             std::fs::write(
                 repo.path().join(".lf/config.yaml"),
-                "planning:\n  provider: linear\nlinear:\n  team: team\n",
+                "planning:\n  provider: linear\n  team: team\n",
             )
             .unwrap();
         }
@@ -1467,7 +1465,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
             std::fs::write(
                 repo.path().join(".lf/config.yaml"),
-                "linear:\n  team: fixture-team\n",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
             )
             .unwrap();
         }
@@ -1620,7 +1618,8 @@ fn project_edits_save_offline_in_both_connection_modes() {
             )
             .unwrap();
             let read = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
-            assert_eq!(read["project"]["name"], "Remote name");
+            // The unsent rename is sent last and wins; unsaved fields follow Linear.
+            assert_eq!(read["project"]["name"], "Saved");
             assert_eq!(read["project"]["krs"][0]["holds"], true);
             assert_eq!(read["project"]["pm_snapshot_synced_at"], 18);
             let revision: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -1635,14 +1634,12 @@ fn project_edits_save_offline_in_both_connection_modes() {
             let pending = store.pending_project_changes(&id).unwrap();
             assert!(pending
                 .iter()
-                .all(|change| change.value.field() != "project_name"
-                    && change.value.field() != "workflow"));
+                .any(|change| change.value.field() == "project_name"));
             let conflicts = read["sync"]["changes"].as_array().unwrap();
             assert!(conflicts
                 .iter()
-                .any(|change| change["field"] == "project_name"
-                    && change["state"] == "adopted_linear"));
-            // Later provider edits advance; superseded intentions never become pending again.
+                .all(|change| change["state"] != "adopted_linear"));
+            // A provider edit matching the save neither settles nor duplicates it.
             incoming.name = "Saved".into();
             incoming.revision = Some("2026-10-08T12:00:00Z".into());
             loopflow::linear::acceptance::accept_linear_project_in(
@@ -1678,7 +1675,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&output.stderr).contains("pending Linear sync"),
+            String::from_utf8_lossy(&output.stderr).contains("pending planning sync"),
             connected
         );
         let saved = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
@@ -1695,10 +1692,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
         assert_eq!(saved["project"]["description"], authored.description.trim());
         assert_eq!(saved["project"]["name"], "Saved");
         assert_eq!(saved["project"]["summary"], "");
-        assert_eq!(
-            store.pending_project_changes(&id).unwrap().len(),
-            if mapped { 3 } else { 4 }
-        );
+        assert_eq!(store.pending_project_changes(&id).unwrap().len(), 4);
         lf(repo.path(), home.path(), &args);
         let repeated = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
         assert_eq!(repeated, saved);
@@ -1715,20 +1709,21 @@ fn project_edits_save_offline_in_both_connection_modes() {
             )
             .unwrap();
             let read = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
+            // The unsent plan is sent after the concurrent provider plan and wins.
             assert_eq!(
                 read["project"]["krs"][0]["text"],
-                "Keep the concurrent provider plan"
+                "Save the complete plan offline"
             );
             assert!(store
                 .pending_project_changes(&id)
                 .unwrap()
                 .iter()
-                .all(|change| change.value.field() != "krs"));
+                .any(|change| change.value.field() == "krs"));
             assert!(read["sync"]["changes"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|change| change["field"] == "krs" && change["state"] == "adopted_linear"));
+                .all(|change| change["state"] != "adopted_linear"));
         }
         assert!(store.list_tasks(None).unwrap().is_empty());
         assert!(!repo.path().join(".lf/wave").exists());
@@ -1747,7 +1742,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
             std::fs::write(
                 repo.path().join(".lf/config.yaml"),
-                "linear:\n  team: fixture-team\n",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
             )
             .unwrap();
         }
@@ -1896,7 +1891,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&output.stderr).contains("pending Linear sync"),
+            String::from_utf8_lossy(&output.stderr).contains("pending planning sync"),
             connected
         );
         let pending = store.pending_task_changes(&second).unwrap();
@@ -2019,46 +2014,30 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                     Some((wave.id(), "initiative")),
                 )
                 .unwrap();
+            // Unsent title and assignee saves are sent last and win; status
+            // follows Linear.
             let sync = store.task_planning_sync(&second).unwrap();
-            let conflict = sync
-                .changes
-                .iter()
-                .find(|c| c.field == "task_title")
-                .unwrap();
-            assert_eq!(
-                conflict.state,
-                loopflow::store::planning_sync::PlanningSyncState::AdoptedLinear
-            );
-            assert_eq!(conflict.local_value, "Saved offline");
-            assert_eq!(
-                conflict.linear_value,
-                Some(serde_json::json!("Concurrent title"))
-            );
+            assert!(sync.changes.iter().all(
+                |c| c.state != loopflow::store::planning_sync::PlanningSyncState::AdoptedLinear
+            ));
             let retained = store.task(&second).unwrap().unwrap();
-            assert_eq!(retained.title, "Concurrent title");
+            assert_eq!(retained.title, "Saved offline");
             assert_eq!(retained.description, "");
             assert_eq!(retained.rank, 0);
-            assert_eq!(retained.assignee.as_deref(), Some("remote-person"));
+            assert_eq!(retained.assignee.as_deref(), Some("person-id"));
             assert!(retained.completed);
             let changes = store.pending_task_changes(&second).unwrap();
-            assert!(changes
-                .iter()
-                .all(|change| !matches!(change.value.field(), "task_title" | "task_assignee")));
-            let losing: (String, String) = conn
+            for field in ["task_title", "task_assignee"] {
+                assert!(changes.iter().any(|change| change.value.field() == field));
+            }
+            let conflict: Option<String> = conn
                 .query_row(
-                    "SELECT value_json,conflict_json FROM task_changes WHERE id=?1",
+                    "SELECT conflict_json FROM task_changes WHERE id=?1",
                     [&pending[0].id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| row.get(0),
                 )
                 .unwrap();
-            assert_eq!(
-                serde_json::from_str::<Value>(&losing.0).unwrap()["value"],
-                "Saved offline"
-            );
-            assert_eq!(
-                serde_json::from_str::<Value>(&losing.1).unwrap()["value"]["value"],
-                "Concurrent title"
-            );
+            assert!(conflict.is_none());
             incoming.name = "Saved offline".into();
             incoming.assignee = Some("person-id".into());
             incoming.description.clear();
@@ -2106,7 +2085,10 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
         if connected {
-            repo.create_file(".lf/config.yaml", "linear:\n  team: fixture-team\n");
+            repo.create_file(
+                ".lf/config.yaml",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
+            );
         }
         let path = home.path().join("loopflow.db");
         let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
@@ -2467,6 +2449,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             remote.item.project_id = Some(project.id.clone());
             remote.item.revision = Some("2026-10-08T13:00:00Z".into());
             remote.observed_at = 22;
+            let moved = store.task(&active.id).unwrap().unwrap().project_id;
             store
                 .seed_issue(
                     &canonical.to_string(),
@@ -2475,17 +2458,9 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                     Some((wave.id(), "initiative")),
                 )
                 .unwrap();
-            assert_eq!(
-                store.task(&active.id).unwrap().unwrap().project_id,
-                Some(
-                    store
-                        .project_by_project("third-provider-project")
-                        .unwrap()
-                        .unwrap()
-                        .id
-                )
-            );
-            assert!(store.pending_task_changes(&active.id).unwrap().is_empty());
+            // The unsent move is sent after Linear's and wins.
+            assert_eq!(store.task(&active.id).unwrap().unwrap().project_id, moved);
+            assert!(!store.pending_task_changes(&active.id).unwrap().is_empty());
             assert_eq!(
                 store.task_acquisition(&active.id).unwrap().state,
                 loopflow::store::PlanningState::Available
@@ -2505,7 +2480,10 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
         if connected {
-            repo.create_file(".lf/config.yaml", "linear:\n  team: fixture-team\n");
+            repo.create_file(
+                ".lf/config.yaml",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
+            );
         }
         let path = home.path().join("loopflow.db");
         let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
@@ -2616,7 +2594,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&output.stderr).contains("pending Linear sync"),
+            String::from_utf8_lossy(&output.stderr).contains("pending planning sync"),
             connected
         );
         let moved = store.task(&task.id).unwrap().unwrap();
@@ -2675,10 +2653,17 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                     Some((&projects[2].wave_id, "competing")),
                 )
                 .unwrap();
-            assert!(store.pending_task_changes(&task.id).unwrap().is_empty());
+            // The unsent refiling is sent after Linear's move and wins, rebased
+            // onto the move it replaces.
+            let rebased = store.pending_task_changes(&task.id).unwrap();
+            assert_eq!(rebased.len(), 1);
+            assert_eq!(
+                (&rebased[0].id, &rebased[0].value),
+                (&changes[0].id, &changes[0].value)
+            );
             assert_eq!(
                 store.task(&task.id).unwrap().unwrap().project_id,
-                Some(projects[2].id.clone())
+                Some(projects[1].id.clone())
             );
             assert_eq!(
                 store.task_acquisition(&task.id).unwrap().state,
@@ -2693,7 +2678,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
         let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
         assert_eq!(
             reopened.task(&task.id).unwrap().unwrap().project_id,
-            Some(projects[if mapped { 2 } else { 1 }].id.clone())
+            Some(projects[1].id.clone())
         );
         assert_eq!(
             reopened.pending_task_changes(&task.id).unwrap(),
@@ -2747,7 +2732,7 @@ fn wave_documents_and_workflows_follow_files() {
         if connected {
             std::fs::write(
                 repo.path().join(".lf/config.yaml"),
-                "linear:\n  team: fixture-team\n",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
             )
             .unwrap();
         }
@@ -2887,7 +2872,7 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
             std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
             std::fs::write(
                 repo.path().join(".lf/config.yaml"),
-                "linear:\n  team: fixture-team\n",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
             )
             .unwrap();
         }
@@ -3097,7 +3082,7 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
     std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
     std::fs::write(
         repo.path().join(".lf/config.yaml"),
-        "linear:\n  team: fixture-team\n",
+        "planning:\n  provider: linear\n  team: fixture-team\n",
     )
     .unwrap();
     lf(

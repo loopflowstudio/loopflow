@@ -54,7 +54,7 @@ targets or freshness.
 
 `lf wave show` buckets this repository's work by what it needs: **Now** (live
 and advancing), **Waiting**, **Available**, **Later**. It overlays live evidence
-on the Linear-backed plan. Each Task carries one semantic condition — clear,
+on the shared plan. Each Task carries one semantic condition — clear,
 waiting, blocked, or unknown — while `lf session list` is the separate list of
 unresolved conversations. Add `--all` for the machine-wide projection.
 

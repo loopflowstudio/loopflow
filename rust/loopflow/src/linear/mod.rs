@@ -320,6 +320,14 @@ pub(crate) struct LinearIssue {
     pub assignee: Option<String>,
 }
 
+/// Asana and Notion have no short identifiers; their Tasks keep the local
+/// `lf-` identifier Loopflow assigned.
+pub(crate) fn local_identifier(id: &str) -> String {
+    uuid::Uuid::parse_str(id)
+        .map(|uuid| format!("lf-{}", uuid.simple()))
+        .unwrap_or_else(|_| id.to_string())
+}
+
 impl LinearIssue {
     /// Linear calls the item complete, not canceled or duplicate.
     pub fn is_complete(&self) -> bool {
@@ -888,7 +896,7 @@ impl LinearClient {
     fn require_team_id(&self) -> LinearResult<String> {
         self.team_id.clone().ok_or_else(|| {
             LinearError::Message(
-                "Linear write requires repository `linear.team` in .lf/config.yaml; \
+                "Linear write requires `planning.team` in .lf/config.yaml; \
                  run `lf repo connect <wave> --team-key <KEY>`"
                     .to_string(),
             )
@@ -945,7 +953,7 @@ impl LinearClient {
 
     /// Resolve before reserving a write: failed reads leave delivery retryable.
     pub(crate) async fn item_state_id(&self, item_id: &str, target: &str) -> LinearResult<String> {
-        if !matches!(target, "completed" | "unstarted" | "started" | "canceled") {
+        if !matches!(target, "completed" | "started" | "unstarted" | "canceled") {
             return Err(LinearError::Message(format!(
                 "unsupported Task state {target}"
             )));

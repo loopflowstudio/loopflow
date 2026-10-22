@@ -896,13 +896,19 @@ fn prepare_task(
                 .unwrap_or_default()
                 .planning_transport()
             {
-                crate::config::PlanningConfig::Linear {} => {
+                crate::config::PlanningConfig::Linear { .. } => {
                     super::linear::acquire_task(&main, issue, super::linear::LinearRefresh::Auto)
                         .await?
                 }
                 crate::config::PlanningConfig::Git { .. } => {
                     return Err(task_error(format!(
                         "Task {issue:?} not found in selected Git planning"
+                    )));
+                }
+                remote => {
+                    return Err(task_error(format!(
+                        "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
+                        remote.remote_name().unwrap_or("provider")
                     )));
                 }
             },
@@ -2636,7 +2642,7 @@ pub(crate) fn attach_task_github_pr(
         }
         // Linear linkage is idempotent. A failed or interrupted writeback cannot
         // erase the GitHub identity already committed above.
-        link_pr_to_linear(&store, &task, &mut pr).await;
+        link_pr_to_planning(&store, &task, &mut pr).await;
         pr.updated_at = time::OffsetDateTime::now_utc();
         store
             .update_task_pr(&pr)
@@ -3085,7 +3091,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
             }
         }
         let inspection =
-            if task.is_none() && super::linear_observe::connected(&repo.to_string_lossy()) {
+            if task.is_none() && super::planning_client::is_linear(&repo.to_string_lossy()) {
                 let selector = issue.ok_or_else(|| task_error("this checkout has no Task"))?;
                 let read = super::linear::inspect_task_planning_async(
                     repo,
@@ -3214,9 +3220,11 @@ pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsR
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
         let repository = repository_for_task(&store, &task)?;
         let repo = repository.as_path();
-        if !super::linear_observe::connected(&repo.to_string_lossy()) {
-            return Err(task_error("Task repository does not use Linear"));
-        }
+        let Some(provider) = super::planning_client::remote_name(repo) else {
+            return Err(task_error(
+                "Task repository has no remote planning provider",
+            ));
+        };
         if task.linear_id.is_none() {
             if let Some(project) = &task.project_id {
                 super::planning_export::sync_export(
@@ -3243,7 +3251,9 @@ pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsR
             .map_err(task_error)?
             .ok_or_else(|| task_error("Task is missing"))?;
         if task.linear_id.is_none() {
-            return Err(task_error("Task publication to Linear remains pending"));
+            return Err(task_error(format!(
+                "Task publication to {provider} remains pending"
+            )));
         }
         // State and field writes share Linear's issue revision. Finish the
         // state attempt first so our own field acknowledgement cannot make its
@@ -3389,11 +3399,12 @@ fn pr_link_state_label(pr: &TaskPr) -> String {
     }
 }
 
-/// Idempotently refresh the PR's Linear linkage (attachment + managed comment) and
-/// record the outcome on the PR. Best-effort: a degraded writeback lands in
+/// Idempotently show the PR on the Task's planning item and record the outcome
+/// on the PR: a Linear attachment and managed comment, or for Asana and Notion one
+/// comment per PR state. Best-effort: a degraded writeback lands in
 /// `linear_link_error` and leaves the GitHub result intact; the next publication
 /// command retries. Does nothing for a PR with no GitHub URL yet.
-async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
+pub(super) async fn link_pr_to_planning(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
     let Some(issue_id) = task.linear_id.as_ref() else {
         return;
     };
@@ -3410,6 +3421,25 @@ async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
             return;
         }
     };
+    if !super::planning_client::is_linear(&repo.to_string_lossy()) {
+        let posted = async {
+            super::planning_client::PlanningClient::for_items(&repo)
+                .await?
+                .sync_comment("", issue_id.as_str(), &body)
+                .await
+                .map_err(|error| task_error(error.to_string()))
+        }
+        .await;
+        if let Err(error) = &posted {
+            tracing::warn!(
+                issue = task.identifier,
+                pr = github.number,
+                "planning link degraded; the GitHub PR is published and the next publish retries: {error}"
+            );
+        }
+        pr.linear_link_error = posted.err().map(|error| error.to_string());
+        return;
+    }
     let prior = crate::ops::linear::PrLinkageIds {
         attachment_id: pr.linear_attachment_id.clone(),
         comment_id: pr.linear_comment_id.clone(),
@@ -4453,7 +4483,7 @@ pub(crate) async fn resolve_saved_task(
                 .unwrap_or_default()
                 .planning_transport()
             {
-                crate::config::PlanningConfig::Linear {} => {
+                crate::config::PlanningConfig::Linear { .. } => {
                     super::linear::acquire_task(repo, issue, super::linear::LinearRefresh::Force)
                         .await?
                 }
@@ -4461,6 +4491,12 @@ pub(crate) async fn resolve_saved_task(
                     return Err(task_error(format!(
                         "Task {issue:?} not found in selected Git planning"
                     )))
+                }
+                remote => {
+                    return Err(task_error(format!(
+                    "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
+                    remote.remote_name().unwrap_or("provider")
+                )))
                 }
             }
         }

@@ -194,23 +194,23 @@ mod tests {
             2,
         )
         .unwrap();
-        assert_eq!(store.project(&project.id).unwrap().unwrap().description, "");
+        // The unsent save is sent after the observed prose, so it wins and
+        // rebases onto the value it will replace.
+        assert_eq!(
+            store.project(&project.id).unwrap().unwrap().description,
+            "Saved without a baseline"
+        );
         let conn = store.conn.lock().unwrap();
-        let (value, conflict): (String, String) = conn
+        let (conflict, base): (Option<String>, String) = conn
             .query_row(
-                "SELECT value_json,conflict_json FROM project_changes WHERE id=?1",
+                "SELECT conflict_json,base_json FROM project_changes WHERE id=?1",
                 [&change.id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
+        assert!(conflict.is_none());
         assert_eq!(
-            serde_json::from_str::<crate::work::edit::WorkValue>(&value).unwrap(),
-            crate::work::edit::WorkValue::ProjectDescription(Some(
-                "Saved without a baseline".into()
-            ))
-        );
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&conflict).unwrap()["value"]["value"],
+            serde_json::from_str::<serde_json::Value>(&base).unwrap()["value"]["value"],
             ""
         );
     }

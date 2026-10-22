@@ -1635,7 +1635,7 @@ Clear a Task pause without starting execution
 
 ## lf task sync
 
-Synchronize a Task; observed planning conflicts adopt Linear
+Synchronize a Task with its tracker; the change sent last wins
 
 | Argument | What it does |
 |---|---|

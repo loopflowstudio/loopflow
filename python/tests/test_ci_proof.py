@@ -96,6 +96,19 @@ def test_unavailable_github_keeps_full_matrix(
         ("https://github.com/owner/repo/actions/runs/42", {"SCRATCH_CLEAR": "failure"}, 1),
         ("https://github.com/owner/repo/actions/runs/42", {"RUST_TEST": "failure"}, 1),
         ("https://github.com/owner/repo/actions/runs/42", {"SWIFT_TEST": "cancelled"}, 1),
+        (
+            "",
+            {
+                "SWIFT_TEST": "skipped",
+                "LOOPFLOW_UI_TEST": "skipped",
+                "MACOS_PROCESS_TEST": "skipped",
+                "MACOS_INPUTS": "false",
+            },
+            0,
+        ),
+        ("", {"SWIFT_TEST": "skipped", "MACOS_INPUTS": "true"}, 1),
+        ("", {"SWIFT_TEST": "skipped", "MACOS_INPUTS": ""}, 1),
+        ("", {"PYTHON_TEST": "skipped", "MACOS_INPUTS": "false"}, 1),
     ],
 )
 def test_actual_workflow_gate_requires_proof_and_successful_warming(
@@ -152,11 +165,17 @@ def test_matrix_only_runs_for_candidates_and_queue_cannot_skip_aggregate(
     _ci_jobs: dict[str, dict],
 ) -> None:
     jobs = _ci_jobs
-    matrix = set(jobs) - {"merge-proof", "scratch-clear", "tests-result"}
-    assert set(jobs["tests-result"]["needs"]) == matrix | {"merge-proof", "scratch-clear"}
+    classifiers = {"merge-proof", "scratch-clear", "macos-inputs"}
+    matrix = set(jobs) - classifiers - {"tests-result", "cancel-superseded"}
+    assert set(jobs["tests-result"]["needs"]) == matrix | classifiers
     for name in matrix:
         assert {"merge-proof", "scratch-clear"} <= set(jobs[name]["needs"])
         assert "needs.scratch-clear.outputs.candidate == 'true'" in jobs[name]["if"]
+    # Only an explicit "false" skips the macOS jobs; a failed classifier still runs them.
+    macos = {name for name in matrix if "macos-inputs" in jobs[name]["needs"]}
+    assert macos == {"swift-test", "loopflow-ui-test", "macos-process-test"}
+    for name in macos:
+        assert "needs.macos-inputs.outputs.macos != 'false'" in jobs[name]["if"]
     assert jobs["tests-result"]["if"] == (
         "${{ always() && (github.event_name != 'pull_request' || "
         "needs.scratch-clear.result != 'success' || "

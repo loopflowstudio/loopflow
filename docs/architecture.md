@@ -145,7 +145,7 @@ data flow, and ends with the contracts that neighboring areas may rely on.
 
 ```text
                                       shared truth
-                              Linear     GitHub     providers
+                              planning   GitHub     providers
                                  ^          ^           ^
                                  |          |           |
 user / agent --> lf CLI --------+----------+-----------+
@@ -154,7 +154,7 @@ user / agent --> lf CLI --------+----------+-----------+
           |                    |
           v                    v
   authored definitions    tracked Work
-  Skills / Flows /       Wave -> Linear Project -> Task
+  Skills / Flows /       Wave -> Project -> Task
   goals / memory                  |
           |                       +---------> Task delivery
           |                       |                ^
@@ -177,8 +177,8 @@ another machine is another Machine; cross it explicitly with `lf --machine`
 
 There is no central Loopflow server. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
-definitions and memory. Linear and GitHub keep shared planning and delivery
-truth. Readers join those sources; they do not replace them with a universal
+definitions and memory. The planning provider (a Git ref or Linear) and GitHub
+keep shared planning and delivery truth. Readers join those sources; they do not replace them with a universal
 ledger.
 
 ## Core models
@@ -186,7 +186,7 @@ ledger.
 ```text
 Repository
   `-- Wave                    enduring objective, memory and cadence
-        `-- Linear Project    status + shared chapter name + Flow + KRs
+        `-- Project           status + shared chapter name + Flow + KRs
               `-- Task        identity, worktree, PR and every Flow process for it
 
 Process                          one actual lf process; immutable causal parent
@@ -203,10 +203,10 @@ Flow                          one lf process; cursor in its memory, graph in Flo
 | Process | One actual lf process, its caller and command completion | `processes` |
 | LfSession | An interactive or headless conversation across attachments and native reconnection | `agent_sessions`, subordinate history and provider-native conversation |
 | Running Flow | One Flow process and the steps it starts, including taskless execution | The Flow process and its child step processes in `processes` |
-| Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and Linear Initiative membership |
-| Chapter | Shared name of each Wave's In Progress Project | Linear Project statuses; no Chapter row or packet |
-| Project | A Wave's plan, KRs and targets | Linear Project and its synchronized `projects` row |
-| Task | A concrete change, investigation or document | `tasks`, Linear Issue, Git and GitHub |
+| Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and, with Linear, Initiative membership |
+| Chapter | Shared name of each Wave's In Progress Project | Project statuses; no Chapter row or packet |
+| Project | A Wave's plan, KRs and targets | `projects` row, shared through the planning provider |
+| Task | A concrete change, investigation or document | `tasks`, the planning provider, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
 | Machine | A machine's store, credentials and exact process authority | Machine identity and observed route |
 | Task ownership | Who works on a Task, on which Machine, or unowned | Append-only `task_ownership` log; each person's Machine-local Wave → Machine default places their unowned Work |
@@ -253,7 +253,7 @@ Reserving actual Task work (`lf task run` or `lf task checkout` allocating a
 checkout) claims an unowned Task in its append-only ownership log. Recording an
 inspection command's Process does not claim a Task. Chapter retirement
 also checks authored work, PRs and Flows; missing history alone cannot
-prove untouched backlog. Rotation converges from fresh Linear facts using the
+prove untouched backlog. Rotation converges from fresh provider facts using the
 explicit target name and stable Project identities. A partially rotated repository
 must be retryable; unrelated competing plans remain unresolved.
 
@@ -295,7 +295,7 @@ Task Flow, piecemeal helper LfSessions, or another system.
 ### Task Flows
 
 ```bash
-lf --wave product wave-operate        # one finite planning pass
+lf --wave product wave-operate        # one finite pass over your started Tasks
 lf task run INF-123
 lf --wave <wave> wave-operate "ship invoices first"
 lf wave status product

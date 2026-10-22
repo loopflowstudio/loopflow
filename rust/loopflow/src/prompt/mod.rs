@@ -1955,7 +1955,9 @@ mod tests {
 
             let scope = name.split_once('/').map(|(scope, _)| scope);
             let orchestrates = scope.is_some();
-            assert_eq!(prompt.contains("lf task run"), orchestrates, "{name}");
+            let advances_tasks =
+                prompt.contains("lf task run") || prompt.contains("lf task-operate");
+            assert_eq!(advances_tasks, orchestrates, "{name}");
             assert_eq!(
                 prompt.contains("lf machine use"),
                 scope == Some("repo"),

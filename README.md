@@ -6,12 +6,17 @@ lf init
 lf debug -c
 ```
 
-A software instrument. Give an agent a task, keep its conversation, and inspect
-captured work after a command stops. Loopflow keeps the command's result, the
-agent's history and the Flow's progress separate, so each answers one question.
+Build software with other people and their coding agents. Each task has one
+owner, its own working copy and one pull request, so several people's agents can
+work in one project without colliding. The plan is shared through Linear or a shared
+Git ref; a comment on a Linear task reaches its agents before their next step;
+and each task's workflow stops for a person where judgment counts. Skills, Flows
+and workflows are files in the project, reviewed like code. Conversations stay on
+your computer; only the plan travels.
 
-Free and open source. Needs [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-or [Codex](https://github.com/openai/codex), which have their own cost.
+Free and open source. Needs [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
+[Codex](https://github.com/openai/codex), [OpenCode](https://github.com/anomalyco/opencode)
+or [Pi](https://github.com/earendil-works/pi), which have their own cost.
 
 ## More install options
 
@@ -136,15 +141,15 @@ Author a Wave in the repo and open its conversation:
 <!-- .lf/wave/designer/GOAL.md -->
 ## Objective
 
-Keep the design system coherent. Each wake: read the chapter plan and
-Tasks, pursue the highest-leverage open KR, start a concrete
-Task only after it has a Linear issue, and fold what changed into memory.
+Keep the design system coherent. Each wake: read the chapter's Tasks,
+keep your started ones moving, leave teammates' Tasks to them, and fold
+what changed into memory.
 ```
 
 ```bash
-lf --wave designer wave-operate        # one finite pass: keep started Tasks moving
+lf --wave designer wave-operate        # one finite pass: keep your started Tasks moving
 lf --wave designer wave-operate "ship the button audit first"
-lf connect --wave designer             # the Wave's ongoing conversation, applying that pass on every return
+lf connect --wave designer             # your ongoing conversation for the Wave, applying that pass on every return
 ```
 
 Edit `.lf/wave/designer/MEMORY.md` directly when durable context changes; it is a
@@ -193,6 +198,8 @@ off while nothing changes; idle agents do not poll. Teams without live Tasks mak
 no acquisition requests. A rate limit pauses requests across repositories in the
 same Home until reset, retaining pending writes. Acquired Task comments, through Linear or Git planning, become steers for each associated
 Session, with independent delivery at its next supported provider boundary.
+With Git planning, `lf comment` steers this Machine's Sessions; comments imported
+from another Machine join the plan without becoming steers.
 Steering leaves idle Sessions idle. A stopped Flow is history: `task run` never
 continues it, so inspect `lf task status` first.
 
@@ -279,6 +286,11 @@ Claude interactive hooks also require workspace trust, potentially once per
 folder; `claude -p` treats the workspace as trusted. Loopflow follows the providers’ [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks)
 and [Claude workspace trust](https://code.claude.com/docs/en/hooks#workspace-trust)
 policies. Unchanged declarations cannot remove Claude’s folder trust requirement.
+Loopflow pre-accepts Claude's folder trust only for the exact worktrees it
+created (`lf`, Task checkouts, `lf wt create`) by writing that path's
+`hasTrustDialogAccepted` entry in the config the launched child reads; hook
+trust, the main checkout, hand-made worktrees and every other setting are
+untouched.
 
 New Session names use a short excerpt of the request, or the invoked skill when
 no request was supplied. Task conversations use the Task title when no specific
@@ -334,9 +346,9 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | **Flow** | Composes agent work and mechanical operations; a run is one lf process and the step processes it starts | `.lf/flows/*.yaml` |
 | **Workflow** | Gives a Task nodes, where you take part in its conversation, joined by the Flows between them | `.lf/workflows/*.yaml` |
 | **Wave** | Keeps the objective, memory, cadence, budget and instruments | `.lf/wave/<name>/` |
-| **Project** | Holds one Wave's plan, Tasks, KRs and targets | Linear |
-| **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
-| **Task** | Owns concrete work, its checkout, optional PR and every Flow process for it | Linear and local SQLite |
+| **Project** | Holds one Wave's plan, Tasks, KRs and targets | Local SQLite, shared through the planning provider (Git ref or Linear) |
+| **Chapter** | Names the repository's current group of In Progress Projects | Project names and statuses |
+| **Task** | Owns concrete work, its checkout, optional PR and every Flow process for it | Local SQLite, shared through the planning provider |
 | **Process** | Records one actual lf process and its observed command outcome | Machine-local SQLite |
 | **LfSession** | Keeps a continuable interactive or headless conversation and native history | Machine-local SQLite and provider-native storage |
 | **Machine** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |
@@ -363,6 +375,7 @@ each `.md` URL, use the curated
 |------|--------|
 | [Get Started](docs/getting-started.md) | Install, first commands, building features, going remote |
 | [Waves](docs/waves.md) | The planning model, goals, memory, KRs, Linear, crons |
+| [Plan and share Tasks](docs/planning.md) | Share and capture Tasks with or without Linear, Asana or Notion |
 | [The Agent API](docs/agent-api.md) | How agents launch, steer, and prove control of other agents |
 | [Conducting](docs/conducting.md) | Seeing what got done, what you can pick up, and how to step in |
 | [Authoring](docs/authoring.md) | Writing skills, flows, and goals |

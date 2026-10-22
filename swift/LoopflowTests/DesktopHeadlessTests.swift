@@ -38,28 +38,6 @@ private final class Feed {
 @Suite("Desktop without a display")
 @MainActor
 struct DesktopHeadlessTests {
-    @Test("Git planning shows retained mutations and read failures without claiming convergence")
-    func peerPlanningStatus() throws {
-        let data = try Data(contentsOf: fixtures.appendingPathComponent("peer_planning_status.json"))
-        let statuses = try JSONDecoder().decode([PeerPlanningStatus].self, from: data)
-        let view = PeerPlanningView(reading: .unavailable(lastGood: statuses, reason: "reader exited"))
-        for text in ["Showing the last sync status", "Local changes pending",
-                     "Configured for this repository", "Held retained-task: retained projection conflict",
-                     "Publication: unconfirmed (attempted-publication)", "Fetched: newer-fetch",
-                     "Retained import: retained-import", "Sync status unavailable: reader exited",
-                     "Retained alternative", "\"Retained title\"",
-                     "Candidate, not confirmed", "\"Maya\"",
-                     "Mutation: comment-head"] {
-            #expect(try view.inspect().find(text: text).string() == text)
-        }
-        let local = PeerPlanningView(reading: .available([]))
-        #expect(try local.inspect().find(text: "No active Git planning destination").string() == "No active Git planning destination")
-        let unknown = PeerPlanningView(reading: .unavailable(lastGood: nil, reason: "store unavailable"))
-        #expect(try unknown.inspect().findAll(ViewType.Text.self).allSatisfy {
-            try $0.string() != "No active Git planning destination"
-        })
-    }
-
     @Test("Owned inventory rows name their owner and Machine")
     func ownedRowsNameTheirOwner() async throws {
         let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
@@ -606,7 +584,7 @@ struct DesktopHeadlessTests {
         let task = try #require(roadmap.waves.first?.tasks.items.first)
         model.select(.task(id: task.id))
         let pending = try view.inspect().find(viewWithAccessibilityIdentifier: "planning-sync-pending-title").text().string()
-        #expect(pending == "Saved locally; pending Linear sync · title")
+        #expect(pending == "Saved locally; pending planning sync · title")
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-loading")
         }

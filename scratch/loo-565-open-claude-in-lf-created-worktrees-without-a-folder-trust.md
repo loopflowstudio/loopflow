@@ -198,3 +198,4 @@ Out:
 - Realign (post-merge tree, HEAD 7c1054e): `env -u LF_* cargo test -p loopflow --lib -- claude_trust git_worktree_add < /dev/null` → 7 pass; no repair needed. Second realign (HEAD ca86724, docs item 4 committed, main 845e8b7 merged): prose and CI-policy changes only, pass still applies, no rerun.
 - Compress (2026-10-21, second pass): dropped the redundant `canonicalize` in `git::lf_created_worktree` (git's `--show-toplevel` already returns the realpath); same 7 unit tests pass, clippy clean. Nothing else left to reduce.
 - Land owns CI: PR checks show SKIPPED while scratch is committed; the full matrix runs once `lf pr land` clears scratch. Demo/review owns the real-Claude pty probes.
+- Publish (2026-10-21, HEAD b6e6fe1): `lf pr publish` pushed the two scratch-only commits and refreshed PR #1648 copy; claims match the diff, real-Claude probe still named as unperformed. Gate and land follow.

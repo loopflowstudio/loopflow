@@ -1,10 +1,8 @@
 # LOO-563 — Verify the schema once per schema version, not once per open
 
-Status: implemented (2026-10-21, commit 3e2e6d84b9); pursue verifies, ship
-remains. Jack Heart filed the Task while landing LOO-497 and asked for the run
-in auto mode. The Flow restarted at kickoff after a missing managed Claude
-credential; kickoff (2026-10-21, second run) re-read the commit against this
-plan and found no gap, so the plan stands unchanged except for the notes below.
+Status: implemented (2026-10-21, commit 3e2e6d84b9, plus the `user_tables`
+deletion in step 3); gate and ship remain. Jack Heart filed the Task while
+landing LOO-497 and asked for the run in auto mode.
 
 ## Problem
 
@@ -65,8 +63,9 @@ served from memory.
 1. **One choke point: `product_schema`** (`store/migration_schema.rs`). It
    returns `Arc<[ProductSchemaObject]>` and consults
    `static LIVE_SCHEMAS: OnceLock<Mutex<HashMap<PathBuf, LiveSchema>>>`,
-   `LiveSchema { dev: u64, ino: u64, schema_version: i64, schema:
-   Arc<[ProductSchemaObject]> }`. A hit needs the same path (`conn.path()`),
+   `LiveSchema { cookie: SchemaCookie { dev, ino, schema_version }, schema:
+   Arc<[ProductSchemaObject]> }`; `_committed_cookie` returns `None` for
+   uncacheable connections. A hit needs the same path (`conn.path()`),
    the same `(dev, ino)` from `std::os::unix::fs::MetadataExt` and the same
    cookie. A miss reads `sqlite_master` and the FK pragmas as today and
    replaces the path's entry. The lock is held for lookup and insert only.
@@ -88,8 +87,10 @@ served from memory.
    `latest_applied_version_sqlite`) with single-row `EXISTS` queries over
    `sqlite_master`. The budget counts rows *returned* (`TraceEvent::Row` in
    `performance.rs`), so each probe costs one row. `apply_set` and
-   `requires_migration_sqlite` keep `user_tables`: they need the list and run
-   only when migrating or at the promotion boundary.
+   `requires_migration_sqlite` only ever asked "is the ledger there" and "how
+   many tables", so they use the same probes (`has_ledger`,
+   `user_table_count`) and `user_tables` is deleted outright; tests use
+   `has_table(conn, name)`.
 4. **Ledger stays per open.** Applied versions, checksums and reader floors
    are data, not schema; an `UPDATE schema_migrations SET checksum` leaves
    the cookie unchanged. They are still read and checked on every open
@@ -184,7 +185,7 @@ read, or a failed schema read means no entry and today's error.
 
 ## Delete — do not maintain
 
-- Every `user_tables` call on the open paths listed in step 3.
+- `user_tables` and every caller (step 3); `has_user_tables` folds into `user_table_count`.
 - The "contains no database validity results" promise in `expected_schema`'s
   doc comment and in `MIGRATIONS.md`.
 
@@ -226,9 +227,7 @@ write transaction leaves the next validation passing.
 Check results:
 - 2026-10-21 baseline: `cargo test --test integration agent_startup` → pass, 24,638 / 20,878 rows.
 - 2026-10-21 implement: `agent_startup` (budget `< 18_000`) → pass, 15,740 / 13,825 rows; `cached_schema_is_reread_after_ddl_from_another_connection` → pass, fails with the cookie dropped from the key; `loopflow` lib `store::` → 342 pass (run from the built test binary; cargo rebuilt on each invocation under load); `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` → clean.
-
-- 2026-10-21 kickoff (second run): read-only verification of HEAD against this plan; no build or test rerun, nothing changed since the implement checks above.
-- 2026-10-21 implement (second run): `cargo test -p loopflow --lib cached_schema_is_reread_after_ddl_from_another_connection` → pass (fresh build of HEAD, no source change); affected suites, clippy and fmt left to gate.
+- 2026-10-21 compress: `user_tables` deleted, cookie folded into `SchemaCookie`; `store::migrations` lib tests → 127 pass; `cargo fmt --check` → clean; clippy and affected suites left to gate.
 
 Implementation notes: `build.rs` includes `migration_schema.rs`, so it now
 serializes `&*schema`. The cookie is read before `sqlite_master`, so a DDL

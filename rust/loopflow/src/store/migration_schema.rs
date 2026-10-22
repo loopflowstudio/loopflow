@@ -26,12 +26,19 @@ pub(super) struct ForeignKeyDefinition {
     pub(super) match_clause: String,
 }
 
-/// The last committed schema this process read from one database file.
-#[derive(Debug)]
-struct LiveSchema {
+/// One committed schema of one database file: the file's identity plus
+/// SQLite's schema cookie at the time of the read.
+#[derive(Debug, PartialEq, Eq)]
+struct SchemaCookie {
     dev: u64,
     ino: u64,
     schema_version: i64,
+}
+
+/// The last committed schema this process read from one database file.
+#[derive(Debug)]
+struct LiveSchema {
+    cookie: SchemaCookie,
     schema: Arc<[ProductSchemaObject]>,
 }
 
@@ -47,20 +54,15 @@ pub(crate) fn product_schema(
     conn: &rusqlite::Connection,
 ) -> rusqlite::Result<Arc<[ProductSchemaObject]>> {
     static LIVE_SCHEMAS: OnceLock<Mutex<HashMap<PathBuf, LiveSchema>>> = OnceLock::new();
-    let Some(file) = _cacheable_file(conn)? else {
+    let Some((path, cookie)) = _committed_cookie(conn)? else {
         return Ok(_read_product_schema(conn)?.into());
     };
-    // Read the cookie first: a concurrent DDL commit between the two reads
-    // then stores a newer schema under an older cookie the file never returns to.
-    let schema_version: i64 = conn.pragma_query_value(None, "schema_version", |row| row.get(0))?;
     let live_schemas = LIVE_SCHEMAS.get_or_init(Mutex::default);
     if let Some(live) = live_schemas
         .lock()
         .expect("live schema cache poisoned")
-        .get(&file.path)
-        .filter(|live| {
-            live.dev == file.dev && live.ino == file.ino && live.schema_version == schema_version
-        })
+        .get(&path)
+        .filter(|live| live.cookie == cookie)
     {
         return Ok(Arc::clone(&live.schema));
     }
@@ -69,25 +71,20 @@ pub(crate) fn product_schema(
         .lock()
         .expect("live schema cache poisoned")
         .insert(
-            file.path,
+            path,
             LiveSchema {
-                dev: file.dev,
-                ino: file.ino,
-                schema_version,
+                cookie,
                 schema: Arc::clone(&schema),
             },
         );
     Ok(schema)
 }
 
-#[derive(Debug)]
-struct CacheableFile {
-    path: PathBuf,
-    dev: u64,
-    ino: u64,
-}
-
-fn _cacheable_file(conn: &rusqlite::Connection) -> rusqlite::Result<Option<CacheableFile>> {
+/// `None` when the schema is not a committed file state: in-memory databases
+/// and reads inside a write transaction.
+fn _committed_cookie(
+    conn: &rusqlite::Connection,
+) -> rusqlite::Result<Option<(PathBuf, SchemaCookie)>> {
     let Some(path) = conn.path().filter(|path| !path.is_empty()) else {
         return Ok(None);
     };
@@ -97,11 +94,15 @@ fn _cacheable_file(conn: &rusqlite::Connection) -> rusqlite::Result<Option<Cache
     let Ok(metadata) = std::fs::metadata(path) else {
         return Ok(None);
     };
-    Ok(Some(CacheableFile {
-        path: PathBuf::from(path),
+    // Read the cookie before `sqlite_master`: a DDL commit between the two reads
+    // then stores a newer schema under an older cookie the file never returns to.
+    let schema_version = conn.pragma_query_value(None, "schema_version", |row| row.get(0))?;
+    let cookie = SchemaCookie {
         dev: metadata.dev(),
         ino: metadata.ino(),
-    }))
+        schema_version,
+    };
+    Ok(Some((PathBuf::from(path), cookie)))
 }
 
 fn _read_product_schema(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<ProductSchemaObject>> {

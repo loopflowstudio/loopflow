@@ -185,7 +185,7 @@ pub(crate) fn initialize_experimental_sqlite(
     drafts: &[crate::build_info::MigrationDraft],
 ) -> StoreResult<()> {
     if _read_snapshot(conn, |conn| {
-        if !has_user_tables(conn)? {
+        if user_table_count(conn)? == 0 {
             return Ok(false);
         }
         validate_experimental_schema(conn, drafts)?;
@@ -203,7 +203,7 @@ fn _initialize_experiment_in(
     drafts: &[crate::build_info::MigrationDraft],
     guards: &mut Vec<File>,
 ) -> StoreResult<()> {
-    if has_user_tables(conn)? {
+    if user_table_count(conn)? > 0 {
         return validate_experimental_schema(conn, drafts);
     }
     apply_set(conn, MIGRATIONS, guards)?;
@@ -783,10 +783,9 @@ fn apply_set(
 ) -> StoreResult<()> {
     validate_set(set).map_err(StoreError::InvalidData)?;
 
-    let tables = user_tables(conn)?;
-    if !tables.iter().any(|table| table == "schema_migrations") {
+    if !has_ledger(conn)? {
         // Product tables with no ledger were never written by us.
-        if !tables.is_empty() {
+        if user_table_count(conn)? > 0 {
             return Err(incompatible());
         }
         conn.execute_batch(
@@ -1395,34 +1394,24 @@ fn raised_floor_over(
 }
 
 /// One row, however many tables: every open asks this, so it never lists them.
-fn has_user_tables(conn: &rusqlite::Connection) -> StoreResult<bool> {
+fn user_table_count(conn: &rusqlite::Connection) -> StoreResult<i64> {
     Ok(conn.query_row(
-        "SELECT EXISTS (
-            SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-        )",
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
         [],
+        |row| row.get(0),
+    )?)
+}
+
+fn has_table(conn: &rusqlite::Connection, name: &str) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [name],
         |row| row.get(0),
     )?)
 }
 
 fn has_ledger(conn: &rusqlite::Connection) -> StoreResult<bool> {
-    Ok(conn.query_row(
-        "SELECT EXISTS (
-            SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'
-        )",
-        [],
-        |row| row.get(0),
-    )?)
-}
-
-fn user_tables(conn: &rusqlite::Connection) -> StoreResult<Vec<String>> {
-    let mut statement = conn.prepare(
-        "SELECT name FROM sqlite_master
-         WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-         ORDER BY name",
-    )?;
-    let rows = statement.query_map([], |row| row.get(0))?;
-    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    has_table(conn, "schema_migrations")
 }
 
 /// Applied versions in the order they were applied. Sorting by the version string
@@ -1682,16 +1671,15 @@ pub fn latest_applied_version_sqlite(conn: &rusqlite::Connection) -> StoreResult
 /// current schema is.
 pub(crate) fn requires_migration_sqlite(conn: &rusqlite::Connection) -> StoreResult<bool> {
     _read_snapshot(conn, |conn| {
-        let tables = user_tables(conn)?;
-        if !tables.iter().any(|table| table == "schema_migrations") {
-            return if tables.is_empty() {
+        if !has_ledger(conn)? {
+            return if user_table_count(conn)? == 0 {
                 Ok(true)
             } else {
                 Err(incompatible())
             };
         }
         let applied = applied_versions(conn)?;
-        if applied.is_empty() && tables.len() == 1 {
+        if applied.is_empty() && user_table_count(conn)? == 1 {
             return Ok(true);
         }
         if applied.as_slice() == [LEGACY_BASELINE_VERSION] {
@@ -1717,7 +1705,7 @@ mod tests {
     use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
     use std::time::Duration;
 
-    use super::{_initialize_experiment_in, _read_snapshot, user_tables};
+    use super::{_initialize_experiment_in, _read_snapshot, has_table, user_table_count};
     use rusqlite::OptionalExtension;
 
     use super::apply_newer_release;
@@ -2958,7 +2946,7 @@ mod tests {
             "CREATE TABLE unfinished (id TEXT); INSERT INTO missing_table VALUES (1);",
         )];
         assert!(initialize_experimental_sqlite(&conn, &drafts).is_err());
-        assert!(user_tables(&conn).unwrap().is_empty());
+        assert_eq!(user_table_count(&conn).unwrap(), 0);
         assert!(conn.is_autocommit());
         assert!(conn
             .pragma_query_value(None, "foreign_keys", |row| row.get::<_, bool>(0))
@@ -6905,10 +6893,7 @@ mod tests {
             "run_events",
             "task_flow_positions",
         ] {
-            assert!(
-                !user_tables(&conn).unwrap().iter().any(|name| name == table),
-                "{table}"
-            );
+            assert!(!has_table(&conn, table).unwrap(), "{table}");
         }
         validate_foreign_keys(&conn).unwrap();
     }
@@ -6972,10 +6957,7 @@ mod tests {
         assert_eq!(snapshot["projects"][0]["flow"], "custom");
         assert_eq!(snapshot["projects"][0]["status"], "started");
         assert_eq!(snapshot["projects"][1]["status"], "planned");
-        assert!(!user_tables(&conn)
-            .unwrap()
-            .iter()
-            .any(|table| table == "wave_chapters"));
+        assert!(!has_table(&conn, "wave_chapters").unwrap());
         validate_foreign_keys(&conn).unwrap();
     }
 

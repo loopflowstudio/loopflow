@@ -207,7 +207,11 @@ INFO detail, on stderr. Codex Sessions start through the provider protocol and a
 native terminal. Prompts and instructions stay off the command line. Conversation
 capture requires no hook approval; context refresh uses stable launch hooks.
 Review new or changed declarations with Codex’s `/hooks`; headless runs skip
-untrusted hooks. Loopflow never writes provider trust decisions.
+untrusted hooks. Loopflow writes no hook trust. It pre-accepts Claude's folder
+trust only for the exact worktrees it created (`lf`, Task checkouts,
+`lf wt create`) by writing that path's `hasTrustDialogAccepted` entry in the
+config the launched child reads; the main checkout, hand-made worktrees and
+every other setting are untouched.
 
 A Task takes up its Wave's workflow or repository default and moves through its nodes.
 Each `task run` takes one edge leaving the current node: the only one, or the
@@ -568,7 +572,9 @@ operating instructions. Reopening keeps those instructions and native history.
 client and history survive. Each explicit fresh request creates another; ordinary
 connect recovers the current primary after an uncertain reply. Fresh accepts scope
 selection, not a Session ID. First-use trust or sign-in prompts stay open until
-answered or canceled.
+answered or canceled; Claude's folder trust prompt does not appear in
+worktrees lf created, because lf wrote that path's `hasTrustDialogAccepted`
+entry at launch.
 
 `connect --prepare` and `resume --prepare` print a terminal command without
 launching the provider. Add `--json` for connection data. Remote preparation

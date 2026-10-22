@@ -137,7 +137,7 @@ from the first release cut after this lands).
   `opencode auth export opencode --standalone` and takes the active entry.
   No OpenCode, or a 1.x `opencode` without `auth export` → "OpenCode 2 is not
   installed on this laptop; install it with `npm install -g @opencode/cli`"
-  (one `opencode_missing(host)` message serves the laptop and the machine).
+  (`opencode_export` raises that one message, naming the laptop or the machine).
   No active entry → "OpenCode has no active login on this laptop; run
   `opencode auth login`".
 - Active entry is an **API key** → validate it with Zen and send it as is.
@@ -459,3 +459,4 @@ Check (2026-10-22, implement round three): connect lines use `display_name()`; `
 Check (2026-10-22, realign round three b): HEAD a87e518b67 (merge of main 91b21dc508); `cargo test -p loopflow --lib -- machine_credentials` 13 pass; `cargo clippy --all-targets -- -D warnings` clean; full matrix → gate/CI.
 Check (2026-10-22, kickoff round four): HEAD 83d6c8e453 (plan-only commit over a87e518b67); `git merge-tree HEAD origin/main` → 0 conflicts, 0 commits behind; no build, the round-three-b checks still apply.
 Check (2026-10-22, implement round four): HEAD c71dfd5127 differs from 83d6c8e453 only in this plan; `git merge-tree HEAD origin/main` → 0 conflicts, 0 behind; `lf context` scratch 10736/12000 tokens; no code change, the round-three-b checks still apply.
+Check (2026-10-22, compress round four): `opencode_export` now owns the missing-OpenCode error (no `Option` layer, `opencode_missing` deleted); `cargo test -p loopflow --lib -- machine_credentials platform::clipboard` 15 pass; `cargo clippy --all-targets -- -D warnings` clean; `lf context` scratch under budget.

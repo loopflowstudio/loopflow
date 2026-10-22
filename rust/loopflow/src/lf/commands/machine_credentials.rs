@@ -53,10 +53,6 @@ enum Credential {
     },
 }
 
-fn opencode_missing(host: &str) -> anyhow::Error {
-    anyhow!("OpenCode 2 is not installed on this {host}; install it with `npm install -g @opencode/cli`")
-}
-
 pub(super) async fn connect(
     machine: &Machine,
     provider: Provider,
@@ -142,7 +138,7 @@ pub(super) async fn connect(
             }
         }
         Provider::OpenCodeZen => {
-            let entries = opencode_export(None)?.ok_or_else(|| opencode_missing("laptop"))?;
+            let entries = opencode_export(None, "laptop")?;
             let active = opencode_active(&entries).ok_or_else(|| {
                 anyhow!("OpenCode has no active login on this laptop; run `opencode auth login`")
             })?;
@@ -175,8 +171,8 @@ pub(super) async fn connect(
                     .tempdir()?;
                 super::account::fresh_opencode_login(&store, chrome_profile, staging.path())
                     .await?;
-                let fresh = opencode_export(Some(staging.path()))?
-                    .and_then(|entries| opencode_active(&entries).cloned())
+                let fresh = opencode_active(&opencode_export(Some(staging.path()), "laptop")?)
+                    .cloned()
                     .ok_or_else(|| {
                         anyhow!("OpenCode device login completed without a credential")
                     })?;
@@ -412,7 +408,7 @@ async fn installed(store: &SharedStore, provider: Provider, login: &str) -> Resu
             None => Ok(false),
         },
         Provider::OpenCodeZen => {
-            let entries = opencode_export(None)?.ok_or_else(|| opencode_missing("machine"))?;
+            let entries = opencode_export(None, "machine")?;
             let Some(active) = opencode_active(&entries) else {
                 return Ok(false);
             };
@@ -536,7 +532,7 @@ async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
                 .as_str()
                 .ok_or_else(|| anyhow!("OpenCode credential has no id"))?;
             // A same-id entry here is one Zen no longer accepts; the received one replaces it.
-            let entries = opencode_export(None)?.ok_or_else(|| opencode_missing("machine"))?;
+            let entries = opencode_export(None, "machine")?;
             if entries.iter().any(|existing| existing["id"] == id) {
                 opencode_run(&["auth", "logout", "opencode", id])?;
             }
@@ -596,29 +592,28 @@ fn opencode_run(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Stored OpenCode Zen credentials, or `None` without an OpenCode that has `auth export` (2.x).
-fn opencode_export(home: Option<&Path>) -> Result<Option<Vec<serde_json::Value>>> {
+/// Stored OpenCode Zen credentials on this `host`; an OpenCode without `auth export` is 1.x.
+fn opencode_export(home: Option<&Path>, host: &str) -> Result<Vec<serde_json::Value>> {
+    let missing = || {
+        anyhow!("OpenCode 2 is not installed on this {host}; install it with `npm install -g @opencode/cli`")
+    };
     // `auth export opencode` waits for input when that integration has no entry.
     let output = match opencode(home, &["auth", "export"])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()
     {
-        Ok(output) => output,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Ok(output) if output.status.success() => output,
+        Ok(_) => return Err(missing()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err(missing()),
         Err(error) => return Err(error.into()),
     };
-    if !output.status.success() {
-        return Ok(None);
-    }
     let entries: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout)
         .map_err(|_| anyhow!("OpenCode returned an unreadable credential export"))?;
-    Ok(Some(
-        entries
-            .into_iter()
-            .filter(|entry| entry["integrationID"] == "opencode")
-            .collect(),
-    ))
+    Ok(entries
+        .into_iter()
+        .filter(|entry| entry["integrationID"] == "opencode")
+        .collect())
 }
 
 fn opencode_active(entries: &[serde_json::Value]) -> Option<&serde_json::Value> {

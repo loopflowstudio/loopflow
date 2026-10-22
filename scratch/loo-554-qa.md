@@ -40,7 +40,8 @@ Format: `<harness> <check> | command | result | evidence`
 - opencode headless | `lf -b -a opencode : …` | PASS (3/4; one Big Pickle step ended without text and lf named the failure) | —
 - pi paste in | tmux bracketed paste | PASS composer holds `[paste #1 +41 lines]`; byte check UNKNOWN (no Pi key, turn refused before persisting) | pi-paste-branch.txt
 - pi headless | `lf -b -a pi : …` | PASS: stderr names Pi's "No API key" | —
-- codex account, paste, tools, resume, model | — | UNKNOWN: no Codex login reached the machine (four requests; one failed on remote PATH, fixed) |
+- codex account | round two: `lf machine connect m codex jack@loopflow.studio`, then `lf -b -a codex : "Reply with exactly PONG"` on m | PASS: stdout `PONG`, stderr empty; `lf account codex` there lists jack@loopflow.studio active (verified), pro | r2-codex-proof.txt
+- codex paste, tools, resume, model | — | UNKNOWN: round two proved the account only |
 - claude paste in, copy out with OSC 52 | — | UNKNOWN: not run; time went to the Pi/Codex/transport defects |
 
 ## `lf -c`
@@ -51,15 +52,30 @@ Format: `<harness> <check> | command | result | evidence`
 
 ## Newcomer path
 
-- install | `curl … install.sh \| sh` | PASS, but prints a maintainer-level "Promotion preflight … VERDICT" block (recorded, not fixed) | install.txt
-- github forward | `lf machine connect m github` without `gh` | FAIL, recorded: "machine credential command failed … inspect its account status"; installing gh fixed it |
+- install | `curl … install.sh \| sh` | FAIL→fixed in code: the published promotion renders the preflight block only for `--preview`; visible from the next release's install.sh (a dev build cannot promote) | install.txt
+- github forward | `lf machine connect m github` without `gh` | FAIL→PASS (round two): names "GitHub CLI (gh) is not installed on this machine; install it (https://cli.github.com)…"; after `apt install gh`, "Connected github on m" | r2-gh-missing.txt
 - version skew | `lf machine add` laptop 0.14.12 → remote 0.14.14 | FAIL→fixed: advice told you to update the newer remote |
 - free-text message | `lf -b -a opencode "message"` | FAIL→fixed: not-found error names `lf : <message>` |
 - remote -a pi | P5 | fixed in code, unit test; not exercised on the machine |
 - OpenCode hint | P9 | fixed: hint names `@opencode/cli` (2.1.2) |
+
+## OpenCode forwarding (round two)
+
+- paid model before connect | `lf -b -a opencode:opencode/gpt-5.4-nano : …` on m | FAIL as expected, but lf's text is "execution failed: invalid data: OpenCode native request: error sending request for url (…/prompt)", not OpenCode's reason (follow-up in questions.md) | —
+- connect | `lf machine connect m opencode --chrome-profile 'Profile 7'` | PASS: fresh device login approved in the jack@loopflow.studio profile; "Connected opencodezen on m: Zen accepted a fresh login for the same OpenCode account as this laptop" | r2-opencode-connect.txt
+- paid model after connect | same command | PASS: stdout `PONG`, stderr empty | —
+- second connect | same connect again | PASS: 1.9 s, no browser, nothing transferred | —
+- laptop login | `opencode auth list` before/after | PASS: unchanged | —
+- secrets | access/refresh bytes grepped under m's `~/.lf-qa` (non-db) and `logs` for oauth/bearer | PASS: 0 files | —
+- found on the machine: `opencode auth export opencode` waits forever when that integration has no entry; lf now exports all and filters `integrationID` (fixed, re-run above)
 
 ## Spend
 
 Pod `tmyi9kd0pyjt68` 2026-10-21T22:53Z → deleted 2026-10-22T00:34Z (HTTP 204;
 pod listing shows only the unrelated manabot pod). 1h41m at $0.06/h ≈ $0.10,
 well under the $4.30 left of Jack's $5 cap.
+
+Round two: pod `oou1q5x1h8tccw` 2026-10-22T02:22Z → deleted 02:44Z (HTTP 204,
+then 404 "pod not found"); 22 min at $0.06/h ≈ $0.02. Total ≈ $0.12.
+The Codex and OpenCode grants minted for that pod went with it; neither
+provider was asked to revoke them.

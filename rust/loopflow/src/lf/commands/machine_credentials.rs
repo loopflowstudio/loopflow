@@ -304,9 +304,13 @@ fn remote_command(machine: &Machine, args: &[&str], input: Option<&[u8]>) -> Res
             .map(|line| format!(": {}", line.trim()))
             .unwrap_or_else(|| crate::os_process::exit_reason(&stderr));
         bail!(
-            "machine credential command failed on {} (exit {:?}){reason}",
+            "machine credential command failed on {}{}",
             machine.label.as_deref().unwrap_or(&machine.route),
-            output.status.code()
+            if reason.is_empty() {
+                format!(" ({})", output.status)
+            } else {
+                reason
+            }
         );
     }
     Ok(output.stdout)
@@ -588,9 +592,10 @@ fn opencode_run(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Stored OpenCode credentials, or `None` without an OpenCode that has `auth export` (2.x).
+/// Stored OpenCode Zen credentials, or `None` without an OpenCode that has `auth export` (2.x).
 fn opencode_export(home: Option<&Path>) -> Result<Option<Vec<serde_json::Value>>> {
-    let output = match opencode(home, &["auth", "export", "opencode"])
+    // `auth export opencode` waits for input when that integration has no entry.
+    let output = match opencode(home, &["auth", "export"])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()
@@ -602,9 +607,14 @@ fn opencode_export(home: Option<&Path>) -> Result<Option<Vec<serde_json::Value>>
     if !output.status.success() {
         return Ok(None);
     }
-    serde_json::from_slice(&output.stdout)
-        .map(Some)
-        .map_err(|_| anyhow!("OpenCode returned an unreadable credential export"))
+    let entries: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout)
+        .map_err(|_| anyhow!("OpenCode returned an unreadable credential export"))?;
+    Ok(Some(
+        entries
+            .into_iter()
+            .filter(|entry| entry["integrationID"] == "opencode")
+            .collect(),
+    ))
 }
 
 fn opencode_active(entries: &[serde_json::Value]) -> Option<&serde_json::Value> {

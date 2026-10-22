@@ -1,0 +1,8 @@
+exit 0
+stdout: PONG
+stderr:
+Managed accounts
+codex        jack-42d1021d3f2d · jack@loopflow.studio
+  auth: active (verified)
+  observed plan: pro
+  next: lf account codex (refresh credential and capacity evidence)

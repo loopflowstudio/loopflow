@@ -2,7 +2,8 @@
 
 Status: first round implemented and QA'd on a rented machine, 2026-10-21
 (ledger `scratch/loo-554-qa.md`). Jack Heart added scope the same day before
-publishing (below); that round is planned, not built. Jack Heart directed a
+publishing (below); that round is built (34d866b5c3) and its machine run
+is recorded in the ledger. Jack Heart directed a
 fully autonomous run (plan, implement, land), so assumptions in
 `questions.md` stand. Jack Heart requested QA, not testing: run lf as a
 newcomer on a rented Linux machine with Jack's real logins forwarded through
@@ -31,7 +32,7 @@ lf account                      # forwarded claude and codex logins listed
 Jack's eyes are needed only for: approving Claude's browser login once, and
 judging the captured screens (`scratch/loo-554-qa/*.txt`) as the experience.
 
-## Round two: added scope (Jack Heart, October 21; planned)
+## Round two: added scope (Jack Heart, October 21; implemented 34d866b5c3)
 
 Jack Heart added four items before publishing: OpenCode credential forwarding
 for customers (P8), the `install.sh` maintainer block, the vague missing-`gh`

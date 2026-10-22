@@ -26,10 +26,8 @@
 - **Claude trust prompt per agent worktree (decided; moved to LOO-565).**
   Jack said yes to pre-accepting trust for lf-created worktrees. LOO-565 owns
   it; leave it out of this branch.
-- **Codex account checks UNKNOWN.** One Codex approval reached the machine and
-  failed on lf's remote PATH (fixed); two later requests ended without a login.
-  Prove Codex forwarding end to end on the machine yourself before landing:
-  `lf machine connect <m> codex`, then a headless `lf -a codex` turn there.
+- **Codex forwarding proven (2026-10-22).** Round two connected Codex on a
+  rented machine and a headless `lf -a codex` turn answered there; see the ledger.
 - **Newcomer messages: fix both here (Jack Heart, October 21).** `install.sh`
   must not print the maintainer "Promotion preflight … VERDICT" block to
   newcomers. `lf machine connect m github` without `gh` on the machine must say
@@ -44,6 +42,10 @@
   Chrome profile; an API key has no grant and is copied, like a GitHub token.
   Zen accepting the credential is the check; an API key's owner is not
   verified, and the success line says so.
+- **Approvals were clicked by the run (2026-10-22).** cmux computer use was
+  down, so the run used Chrome's AppleScript JavaScript in the tab lf opened
+  (Codex account chooser + consent; OpenCode device "Authorize"), both in the
+  jack@loopflow.studio profile. Earlier assumption:
 - **Approvals on the machine run (assumed).** Jack asked for the Codex proof
   to be done without him, so the run completes the Codex and OpenCode
   approvals in Jack's verified Chrome profile itself. No Claude approval is
@@ -55,3 +57,10 @@
   `OpenCodeZenBroker` waits for that file after login. OpenCode ignores the
   injected key while it has its own login, so nothing breaks today. A Task
   should move lf's OpenCode account reads to `opencode auth export`.
+- **OpenCode failure text before login (follow-up, not here).** A paid model
+  with no OpenCode login on the machine makes `lf -b -a opencode` report
+  "OpenCode native request: error sending request for url (…/prompt)" instead
+  of OpenCode's own reason. Belongs to `harness/opencode.rs`; a separate Task.
+- **Version skew from a Docker build (noted).** A branch build without git
+  metadata reports `0.14.14` against the laptop's `0.14.14+<sha>`, and every
+  machine command prints the skew line. Only affects ad-hoc builds.

@@ -249,6 +249,7 @@ fn the_pod_boots_its_guardian_with_the_deadline_and_cap_but_no_account_key() {
         at("2026-10-22T00:10:00Z"),
         Usd::parse("0.96").unwrap(),
         "ssh-ed25519 AAAA jack\n",
+        false,
     );
     let value = |key: &str| env.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
     assert_eq!(value("LF_DEADLINE"), Some("2026-10-22T00:10:00Z"));
@@ -259,4 +260,17 @@ fn the_pod_boots_its_guardian_with_the_deadline_and_cap_but_no_account_key() {
     let guardian = boot.find("python3 /opt/lf/guardian.py").unwrap();
     assert!(guardian < boot.find("sshd").unwrap());
     assert!(guardian < boot.find("apt-get").unwrap());
+}
+
+#[test]
+fn a_development_build_can_have_the_pod_wait_for_its_own_lf() {
+    let key = "ssh-ed25519 AAAA";
+    let now = time::OffsetDateTime::now_utc();
+    let (env, _) = super::boot(now, Usd::parse("0.10").unwrap(), key, false);
+    assert!(!env.iter().any(|(name, _)| name == "LF_INSTALL"));
+    let (env, entrypoint) = super::boot(now, Usd::parse("0.10").unwrap(), key, true);
+    assert!(env.contains(&("LF_INSTALL".to_string(), "upload".to_string())));
+    let script = &entrypoint[2];
+    assert!(script.contains("while [ ! -x /home/lf/.local/bin/lf ]"));
+    assert!(script.contains("releases/latest/download/install.sh"));
 }

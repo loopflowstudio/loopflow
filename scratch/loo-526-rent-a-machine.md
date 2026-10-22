@@ -519,10 +519,20 @@ Jack, during the demo: "I don't really want to have to approve my credentials
 every time I rent a machine." Q10 in `questions.md` has the options and the
 probe; the result is "Credentials on a rented machine" above.
 
+Running a development build's pod (2026-10-22): the pod must run this
+branch's Linux lf, not the published 0.14.14, for `lf history export` and the
+long-lived-token receiver. `LF_RENT_LINUX_BIN=<linux binary>` on the renting
+command boots the pod with `LF_INSTALL=upload`: boot waits for
+`~/.local/bin/lf` instead of running the published installer, and the laptop
+uploads the file over SSH as soon as sshd answers, before the ready wait. The
+binary comes from `docker run --platform linux/amd64 rust:1-bookworm cargo
+build --release -p loopflow --bin lf` (LOO-554's recipe). A release needs
+nothing: unset, boot installs the published lf.
+
 Remaining:
 
 1. **Jack's demo (≤ $0.40)**: the Task path end to end with this branch's
-   Linux build on the pod for `lf history export`. First `lf account token
+   Linux build on the pod (`LF_RENT_LINUX_BIN`). First `lf account token
    claude <email>` per account (one Chrome approval and code paste each, a
    year's validity); then `--rent` should open Chrome zero times (GitHub
    forwards the laptop's `gh` token). It proves the real setup-token capture,

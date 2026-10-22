@@ -503,21 +503,29 @@ ssh-keygen -A >/dev/null 2>&1
 /usr/sbin/sshd
 (curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y -qq nodejs gh) >/var/log/lf-tools.log 2>&1
 su - lf -c 'mkdir -p ~/.local && npm config set prefix ~/.local && npm install -g @anthropic-ai/claude-code' >>/var/log/lf-tools.log 2>&1
-su - lf -c 'curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh' >>/var/log/lf-tools.log 2>&1
+if [ "${LF_INSTALL:-published}" = upload ]; then
+  install -d -o lf -g lf /home/lf/.local /home/lf/.local/bin
+  while [ ! -x /home/lf/.local/bin/lf ]; do sleep 2; done
+else
+  su - lf -c 'curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh' >>/var/log/lf-tools.log 2>&1
+fi
 touch /run/lf/ready
 exec sleep infinity
 "#;
 
 /// The pod's environment and entrypoint. The account key never enters it:
 /// the guardian uses the pod-scoped key RunPod injects, which can only delete
-/// this pod.
+/// this pod. With `upload_lf`, boot waits for the laptop to upload an `lf`
+/// binary instead of running the published installer, so a development build
+/// rents pods that run its own Linux build.
 pub fn boot(
     deadline: OffsetDateTime,
     cap_usd: Usd,
     public_key: &str,
+    upload_lf: bool,
 ) -> (Vec<(String, String)>, Vec<String>) {
     use base64::Engine;
-    let env = vec![
+    let mut env = vec![
         (
             "LF_GUARDIAN".to_string(),
             base64::engine::general_purpose::STANDARD.encode(GUARDIAN),
@@ -532,6 +540,9 @@ pub fn boot(
         ("LF_MAX_USD".to_string(), cap_usd.to_decimal()),
         ("PUBLIC_KEY".to_string(), public_key.trim().to_string()),
     ];
+    if upload_lf {
+        env.push(("LF_INSTALL".to_string(), "upload".to_string()));
+    }
     let entrypoint = vec!["bash".to_string(), "-c".to_string(), BOOT.to_string()];
     (env, entrypoint)
 }

@@ -32,7 +32,8 @@ that disappears.
 
 The pod runs this branch's Linux build (Docker amd64, scp) until the release
 with `lf ondemand` is published; after that the installer suffices. Acceptable,
-as in LOO-554?
+as in LOO-554? Taken 2026-10-22: `LF_RENT_LINUX_BIN` uploads it before the pod
+runs any lf, so the pod never holds the published build's store.
 
 ### Q6. Pools of owned machines in this Task
 

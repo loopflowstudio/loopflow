@@ -445,9 +445,15 @@ pub(crate) fn rent(
         return Err(anyhow!("{name} names a provider this lf cannot rent from"));
     }
     let public_key = public_key()?;
+    let linux_lf = linux_lf()?;
     let quote = api.quote(&ondemand.template)?;
     let rental = sqlite.admit_rental(name, &quote, hours, max_usd, by_hand)?;
-    let (env, entrypoint) = runpod::boot(rental.deadline, rental.cap_usd, &public_key);
+    let (env, entrypoint) = runpod::boot(
+        rental.deadline,
+        rental.cap_usd,
+        &public_key,
+        linux_lf.is_some(),
+    );
     let request = CreatePod {
         name: rental.provider_name.clone(),
         hardware: rental.hardware.clone(),
@@ -477,16 +483,62 @@ pub(crate) fn rent(
         "Rented {} ({}) at {}/h; waiting for it to boot",
         rental.hardware, pod.id, rental.usd_per_hour
     );
-    let machine = attach(runtime, sqlite, api, &rental)?;
+    let machine = attach(runtime, sqlite, api, &rental, linux_lf.as_deref())?;
     Ok((sqlite.rental(&rental.id)?, machine))
 }
 
 /// Wait for an address and the pod's ready marker, then add it as a Machine.
+/// `LF_RENT_LINUX_BIN`: a Linux `lf` the pod runs instead of the published
+/// release, so a development build can rent a pod running its own code.
+fn linux_lf() -> anyhow::Result<Option<std::path::PathBuf>> {
+    let Some(path) = std::env::var_os(LINUX_LF_ENV).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let path = std::path::PathBuf::from(path);
+    if !path.is_file() {
+        return Err(anyhow!("{LINUX_LF_ENV} names no file: {}", path.display()));
+    }
+    Ok(Some(path))
+}
+
+const LINUX_LF_ENV: &str = "LF_RENT_LINUX_BIN";
+
+/// Upload the binary the pod's boot is waiting for; sshd may not be up yet.
+fn upload_lf(route: &str, binary: &std::path::Path, deadline: Instant) -> anyhow::Result<()> {
+    println!("Uploading {} as the pod's lf", binary.display());
+    loop {
+        let uploaded = Command::new("ssh")
+            .args([
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=10",
+                route,
+                "mkdir -p ~/.local/bin && cat > ~/.local/bin/lf.new && chmod 755 ~/.local/bin/lf.new && mv ~/.local/bin/lf.new ~/.local/bin/lf",
+            ])
+            .stdin(std::fs::File::open(binary)?)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        if uploaded {
+            return Ok(());
+        }
+        if Instant::now() > deadline {
+            return Err(anyhow!("could not upload {} to {route}", binary.display()));
+        }
+        std::thread::sleep(Duration::from_secs(10));
+    }
+}
+
 fn attach(
     runtime: &tokio::runtime::Runtime,
     sqlite: &SqliteStore,
     api: &RunPod,
     rental: &Rental,
+    linux_lf: Option<&std::path::Path>,
 ) -> anyhow::Result<Machine> {
     let pod_id = rental
         .provider_id
@@ -513,6 +565,9 @@ fn attach(
     let route = format!("ssh://lf@{ip}:{port}");
     // A fresh pod has a fresh host key; accept it once, then wait for its tools.
     let started = Instant::now();
+    if let Some(binary) = linux_lf {
+        upload_lf(&route, binary, started + READY_WAIT)?;
+    }
     loop {
         let ready = Command::new("ssh")
             .args([

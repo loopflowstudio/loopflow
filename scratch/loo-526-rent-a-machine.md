@@ -524,4 +524,4 @@ Remaining:
    It also runs `lf -b task run X --rent code -a claude` once. The scheduled
    reconcile only gives back when its environment carries `RUNPOD_API_KEY` (Q9).
 
-Last check (compress 2026-10-22, token expiry): `cargo test -p loopflow --lib` background_rental + account_status 3 passed; `cargo clippy --all-targets -D warnings` clean.
+Last check (implement 2026-10-22, long-lived token rename): account_status + dto tests pass; `cargo clippy --all-targets -- -D warnings` clean.

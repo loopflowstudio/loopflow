@@ -32,6 +32,18 @@ lifecycle 117 s, Local wave launcher 49 s, CLI→Work sidebar 40 s, world reads 
 - CLI build (84–130 s) is unchanged: already behind `rust-cache` and skipped
   on merge-proof reuse. Revisit only if post-change step times show it leading.
 
+## Concept review (2026-10-21)
+
+No change. The exchange deferral is process-wide but only `lf-world` (a
+one-shot process) constructs `World`, so it never reaches other `lf` work or
+the shared integration binary. `desktop_inputs.py` and `scripts/test.py`'s
+swift predicate answer different questions on purpose: CI skips only when a
+change *cannot* reach Desktop (deny-list, unknown runs); the local gate picks
+the suite a change most likely affects (allow-list). Merging them would either
+widen the local gate to every Rust change or let CI skip world tests on Rust
+changes. Per-save Git exchange cost in real `lf task create` stays a candidate
+Reliability Task, outside LOO-562.
+
 ## Delete — do not maintain
 
 - `swift/LoopflowTests/BuiltWorld.swift` (deleted; behavior kept by `World`).

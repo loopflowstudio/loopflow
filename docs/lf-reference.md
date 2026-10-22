@@ -1238,6 +1238,9 @@ Discover a remote machine and save its SSH destination
 |---|---|
 | `<target>` | target |
 | `--label` | label |
+| `--pool` | The pool of machines you own it joins |
+| `--cost-usd` | What it cost you, committed when added |
+| `--expires-at` | After this RFC 3339 time it takes no new work |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1293,6 +1296,146 @@ Forget a connection without touching remote work
 | Argument | What it does |
 |---|---|
 | `<label>` | label |
+| `--help / -h` | Print help |
+
+## lf machine end
+
+Give a rented machine back now: copy its records, then delete it
+
+| Argument | What it does |
+|---|---|
+| `<label>` | label |
+| `--force` | Delete even though it holds unpushed work, which is lost Default: false. |
+| `--help / -h` | Print help |
+
+## lf pool
+
+Group machines you own; a pool takes new work only on a free machine
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf pool add
+
+Name a pool of machines you own
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf pool list
+
+Each pool's machines, cost, expiry and what they hold
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf pool off
+
+Take no new work; what the pool holds stays
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf pool on
+
+Take new work again
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf pool remove
+
+Forget a pool; its machines stay added
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf ondemand
+
+Rent machines from a provider within a limit and an hourly price
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf ondemand add
+
+Name what to rent and the most it may cost
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--provider` | provider |
+| `--gpu` | A GPU type; without one, the cheapest CPU pod covering vCPUs and memory |
+| `--vcpus` | vcpus |
+| `--memory-gb` | memory gb |
+| `--disk-gb` | disk gb |
+| `--image` | Image, pinned by digest when added (default: RunPod's stock Ubuntu) |
+| `--data-center` | data center |
+| `--hours` | Hard deadline for each machine it rents Default: 4. |
+| `--max` | Machines rented at once |
+| `--max-usd-per-hour` | Above this hourly price nothing is rented |
+| `--help / -h` | Print help |
+
+## lf ondemand list
+
+Templates, budgets and the machines each has rented
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf ondemand availability
+
+What it would rent now and at what price; rents nothing
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf ondemand max
+
+Change how many machines it rents at once; current machines stay
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `<max>` | max |
+| `--help / -h` | Print help |
+
+## lf ondemand rent
+
+Rent a machine by hand; it lasts until its hours, its cap or `lf machine end`
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--hours` | hours |
+| `--max-usd` | Spend at most this much on it |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf ondemand remove
+
+Forget it; its rentals' history stays
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
 | `--help / -h` | Print help |
 
 ## lf discord

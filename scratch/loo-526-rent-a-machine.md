@@ -298,15 +298,37 @@ with `--rent code`, watch the machine appear, the Task read "Jack on code-1",
 the PR push, and the machine get deleted with its Session history retained on
 the laptop. Etude rented cpu3c×8 at $0.24/h on the 21st.
 
-## Sequence
+## Delete — do not maintain
 
-1. Draft migration; `rental` module: records, pools, on-demands, admission,
-   Rental states, RunPod adapter with stubbed tests; `lf pool`, `lf ondemand`,
-   `lf machine add` flags, `lf machine end`.
-2. Guardian and pod start command; live probe.
-3. `lf task run --machine/--pool/--rent/--quote`; provisioning (add, clone+bind,
-   connect).
-4. `lf history export`, import with origin stamping, give-back pass and its
-   callers.
-5. Docs: `docs/architecture/machines.md` pools/on-demands/rentals section,
-   `lf-reference.md` regeneration, README machine section. Demo.
+Nothing: no earlier renting code exists (LOO-554's procedure was never checked in).
+
+## Status and remaining work
+
+Implemented 2026-10-21 (implement pass): draft `pools_and_rentals`; `rental`
+module (Usd, Hardware, Template, admission, CPU quote, unconfirmed resolution,
+free-machine selection, give-back judgment); RunPod adapter behind a send
+closure; guardian + pod boot; store for pools/on-demands/rentals/ownership;
+`lf pool`, `lf ondemand` (add pins the image digest via Docker Hub), `lf machine
+add --pool/--cost-usd/--expires-at`, `lf machine end [--force]`; `lf task run
+--pool/--rent/--quote` (rent → SSH ready marker → `machine add` → connect
+GitHub and Claude → clone + `repo identity --bind` → handoff → ordinary forward).
+The reconciliation pass (adopt/lose unconfirmed creates, notice guardian
+deletes, bill, give back drained or soft-deadlined rentals) runs in `lf ondemand
+list` and `lf machine end`.
+
+Remaining:
+
+1. **Records copy-up** (step 4): `lf history export`, import with
+   `origin_machine_id`, and calling it before every delete. Until then give-back
+   deletes without copying and says so ("Session and Process records on it
+   were not copied").
+2. **Pass callers**: end of a forwarded `lf task run`, and `lf task automation`.
+3. `lf machine status` should read "rental ended" instead of unreachable.
+4. **Live probe (~$0.10) and demo** — not run: both spend money. The quote path
+   was verified live (cpu3c×8 at $0.24/h; stock image pinned). Unverified on a
+   real pod: boot script (apt, sshd, nodesource, installer as `lf`), RunPod's
+   `portMappings`/`publicIp` field names, `RUNPOD_POD_ID` injection, and the
+   pod-scoped key deleting itself.
+
+Check: `cargo test -p loopflow --lib -- rental` 25 passed; `pytest
+python/tests/test_guardian.py` 5 passed; clippy clean; CLI reference regenerated.

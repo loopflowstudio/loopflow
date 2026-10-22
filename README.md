@@ -191,6 +191,19 @@ unowned Task. Ownership travels with shared planning as Task comments.
 `lf machine use mini <wave>` picks your Machine for a Wave's new Tasks and its
 Session (`--tasks` or `--session` sets one); it is yours, never committed. Connection settings and execution records remain Machine-local.
 
+```bash
+lf pool add lab && lf machine add jack@mini --pool lab        # machines you own
+lf ondemand add code --provider runpod --vcpus 8 --memory-gb 16 --max 1 --max-usd-per-hour 0.40
+lf task run LOO-570 --pool lab --rent code --quote            # where it would run, the most it could cost
+lf task run LOO-570 --pool lab --rent code                    # a free lab machine, else rent one
+lf machine end code-1                                         # give a rented machine back now
+```
+
+Renting reads `RUNPOD_API_KEY` from the environment (`doppler run -- lf …`). A
+rented machine's own guardian deletes it at its deadline or when its budget runs
+out; `lf ondemand list` adopts uncertain creates and gives back drained ones.
+Unpushed work on a rented machine refuses every give-back but `--force`.
+
 Task comments in Linear reach the Task's next useful boundary: before a Flow step,
 after an agent turn, when showing planning, and before a Linear write. Team checks
 share ten-second freshness. Only Desktop and `--watch` keep a slow clock, backing

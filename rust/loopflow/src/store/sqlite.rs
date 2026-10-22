@@ -43,6 +43,7 @@ pub(crate) mod project_content;
 mod project_rotation;
 pub(crate) mod project_selection;
 mod project_transitions;
+mod rentals;
 mod repositories;
 mod revisions;
 mod scope_defaults;

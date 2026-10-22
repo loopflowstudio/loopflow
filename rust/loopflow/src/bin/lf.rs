@@ -2231,6 +2231,36 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             }
         });
     }
+    // Placement chooses or rents the Machine and hands the Task to it; the
+    // ordinary dispatch below then forwards the run to its new owner.
+    if let Some(Commands::Task {
+        cmd:
+            TaskCommand::Run {
+                issue,
+                pool,
+                rent,
+                quote,
+                ..
+            },
+    }) = &cli.command
+    {
+        if pool.is_some() || rent.is_some() || *quote {
+            let issue = issue
+                .as_deref()
+                .or(cli.task.as_deref())
+                .context("No Task selected")?;
+            let directory = loopflow::repo::working_directory()?;
+            let repo = selected_task_repository(&cli, &directory, Some(issue))?;
+            let placement = loopflow::lf::commands::rental::Placement {
+                pool: pool.as_deref(),
+                rent: rent.as_deref(),
+                quote: *quote,
+            };
+            if loopflow::lf::commands::rental::place(&repo, issue, &placement, cli.batch)? {
+                return Ok(());
+            }
+        }
+    }
     if loopflow::lf::commands::work_route::dispatch(&cli, args)? {
         return Ok(());
     }
@@ -2287,6 +2317,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 stack_on,
                 directive,
                 reason,
+                ..
             },
     }) = &cli.command
     {
@@ -2492,6 +2523,10 @@ fn execute_command(
             loopflow::lf::commands::machine_use::run(repo, cmd)
         }),
         Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
+        Some(Commands::Pool { cmd }) => loopflow::lf::commands::rental::run_pool(cmd),
+        Some(Commands::Ondemand { cmd }) => {
+            loopflow::lf::commands::rental::run_ondemand(cmd, cli.batch)
+        }
         Some(Commands::Self_ {
             cmd:
                 loopflow::lf::SelfCommand::SyncSkills {

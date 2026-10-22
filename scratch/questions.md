@@ -40,3 +40,20 @@ Default: yes, minimally. `lf pool add/off/on/list/remove`, `lf machine add
 --pool/--cost-usd/--expires-at`, and `--pool` on `lf task run`. Expiry removes
 a machine from placement and nothing else. Alternative: on-demands and `--rent`
 only now, pools in their own Task.
+
+## Assumptions taken in implement (2026-10-21)
+
+- **Q3** took the default: `RUNPOD_API_KEY` from the environment.
+- **Q6** took the default: pools of owned machines are in this Task.
+- **`lf task run --machine M`** was not added: the root `--machine` flag already
+  forwards a command, and `lf machine use M --task X` hands off. Placement adds
+  only `--pool`, `--rent`, `--quote`.
+- **`--rent` refuses under `-b` before renting**: a fresh machine needs a
+  browser approval per login, so a headless run would pay for a machine it
+  cannot use. `lf ondemand rent` + `lf machine connect` is the headless path.
+- **By-hand rentals** (`lf ondemand rent`) are added as Machines only; they are
+  not signed in, cloned or bound until a Task is placed there.
+- **Unpushed-work check** scans `~/src/*/` on the rented machine (lf's default
+  repo root there) and counts `lf`/`claude` processes as live work.
+- **SSH user** on pods is `lf`, routed as `ssh://lf@IP:PORT`; the first contact
+  accepts the fresh host key (`StrictHostKeyChecking=accept-new`).

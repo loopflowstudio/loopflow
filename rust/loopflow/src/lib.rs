@@ -47,6 +47,7 @@ pub mod program_status;
 pub(crate) mod promotion_lock;
 pub mod provider_account;
 pub mod provider_auth;
+pub mod rental;
 pub mod repo;
 pub mod repository;
 pub mod security;

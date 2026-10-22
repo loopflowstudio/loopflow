@@ -411,7 +411,10 @@ pub(super) fn map_local_machine(conn: &Connection) -> StoreResult<Machine> {
     )?
 }
 
-fn map_machine_by_id(conn: &Connection, machine_id: &MachineId) -> StoreResult<Option<Machine>> {
+pub(super) fn map_machine_by_id(
+    conn: &Connection,
+    machine_id: &MachineId,
+) -> StoreResult<Option<Machine>> {
     conn.query_row(
         "SELECT id, route, created_at, observed_at, label FROM machines WHERE id=?1",
         [machine_id.as_str()],

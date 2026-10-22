@@ -11,6 +11,9 @@ use crate::lf::MachineCommand;
 use crate::store::Store;
 
 pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
+    if let MachineCommand::End { label, force } = cmd {
+        return super::rental::end(label, *force);
+    }
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(run_async(cmd, batch))
 }
@@ -53,11 +56,33 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         MachineCommand::Add {
             target,
             label,
+            pool,
+            cost_usd,
+            expires_at,
             json,
         } => {
             let label = label.clone().unwrap_or_else(|| default_label(target));
             if label.trim().is_empty() {
                 return Err(anyhow!("label must be nonempty"));
+            }
+            let ownership = crate::rental::Ownership {
+                pool: pool.clone(),
+                cost_usd: cost_usd.unwrap_or_default(),
+                expires_at: expires_at
+                    .as_deref()
+                    .map(|at| {
+                        time::OffsetDateTime::parse(
+                            at,
+                            &time::format_description::well_known::Rfc3339,
+                        )
+                        .map_err(|error| anyhow!("--expires-at {at:?}: {error}"))
+                    })
+                    .transpose()?,
+            };
+            if let Some(pool) = pool {
+                if store.sqlite.pool(pool)?.is_none() {
+                    return Err(anyhow!("no pool {pool}; `lf pool add {pool}` creates it"));
+                }
             }
             let probe = match probe(target, false).await {
                 Err(error)
@@ -84,6 +109,11 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 target
             };
             let machine = store.add_machine(&probe.id?, route, &label).await?;
+            if pool.is_some() || cost_usd.is_some() || expires_at.is_some() {
+                store
+                    .sqlite
+                    .set_machine_ownership(&machine.id, &ownership)?;
+            }
             print_machine(&machine, *json)?;
         }
         MachineCommand::List { label, json } => {
@@ -183,6 +213,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             unreachable!("credential commands dispatch before opening the store")
         }
         MachineCommand::Use { .. } => unreachable!("machine use dispatches with its repository"),
+        MachineCommand::End { .. } => unreachable!("machine end dispatches before the store opens"),
     }
     Ok(())
 }

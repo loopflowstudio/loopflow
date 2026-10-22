@@ -219,6 +219,30 @@ and checkout-based Session/Process membership use that location. Unknown histori
 Machines stay unknown, and file access cannot treat their paths as local. Explicit
 Session bindings retain membership independently of checkout location.
 
+## Own and rent Machines
+
+A **pool** names machines you own (`machines.pool`, with `cost_usd` and
+`expires_at`); it knows no provider. An **on-demand** (`ondemands`) is a provider
+template and a budget: machines at once and the most per hour. They share one
+namespace. A **rental** (`rentals`, `rent_…` ids) is one paid window: hardware,
+price, cap, deadline, state and billed cost, separate from the Machine it
+becomes once reachable. Task execution never learns a Machine is rented.
+
+`lf task run --pool P` hands the Task to the first machine in P that holds no
+unfinished Task and has not expired; there is no queue. `--rent R` admits
+(limit, stock, price), writes the rental as `requested` with its provider name
+`lf-<id>` before the create, creates once, waits for SSH, adds the Machine,
+signs it into GitHub and Claude, clones and binds the repository, then hands
+off. An unanswered create is `unconfirmed` until the inventory shows the name
+(adopt) or the create's window passes (`lost`); it is never resent.
+
+The pod's start command runs the standard-library guardian first
+(`rust/loopflow/src/rental/guardian.py`): it deletes the pod at its deadline,
+or sooner when its cap runs out at the charged price, with the pod-scoped key.
+The laptop gives back by drain (Task rentals), soft deadline (15 minutes
+before the hard one) or `lf machine end`; any of them refuses while the pod
+holds uncommitted or unpushed work. Owned machines are never deleted.
+
 ## Process topology
 
 ```text

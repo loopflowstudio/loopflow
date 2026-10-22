@@ -22,6 +22,7 @@ pub mod open;
 pub mod ops;
 pub mod planning;
 pub mod profile;
+pub mod rental;
 pub mod replay;
 pub mod run;
 pub mod session;

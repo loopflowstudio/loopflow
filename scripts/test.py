@@ -398,8 +398,6 @@ def _swift_commands(_changed: list[str]) -> list[Command]:
                 "loopflow",
                 "--bin",
                 "lf",
-                "--bin",
-                "lf-world",
                 "--jobs",
                 str(MAX_PARALLEL_JOBS),
             ],

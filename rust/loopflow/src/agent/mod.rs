@@ -1531,6 +1531,9 @@ fn _run_agent_once(
             }
         };
     }
+    if harness == "claude" {
+        crate::harness::claude_trust::accept_created_worktree(&cmd);
+    }
     cmd.args(hooks).args(&command.args);
     let capture = process.capture.as_ref().map(|capture| &capture.0);
     if retry {

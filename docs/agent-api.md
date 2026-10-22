@@ -106,7 +106,7 @@ lf comment INF-123 --steer "keep the public API"  # save a steer from an agent S
 lf session steers SESSION --json                 # inspect delivery
 lf session steers SESSION --retry STEER_ID        # retry one delivery
 lf --wave <wave> wave-operate "prioritize the parser"
-lf --wave <wave> wave-operate "reassess Project priorities"
+lf --wave <wave> wave-operate "recover the failed parser Flow"
 ```
 
 Save a Task comment locally; planning sync shares it, and Linear comments arrive as steers.

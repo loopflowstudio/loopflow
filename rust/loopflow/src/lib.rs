@@ -1,5 +1,6 @@
 pub mod agent;
 mod agent_input_timing;
+pub mod asana;
 pub mod build_info;
 pub mod builtins;
 pub mod chat;
@@ -37,6 +38,7 @@ pub mod data_clone;
 pub mod linear;
 #[allow(dead_code)]
 pub(crate) mod migration_drafts;
+pub mod notion;
 pub mod ops;
 pub mod performance;
 pub mod planning_exchange;

@@ -1122,7 +1122,44 @@ pub(crate) fn worktree_add_inheriting(
             ),
         });
     }
+    if let Err(error) = _mark_lf_created(path, inherit) {
+        tracing::warn!(path = %path.display(), %error, "failed to mark worktree as lf-created");
+    }
     Ok(())
+}
+
+/// Admin-dir file recording that lf created a worktree. Git removes it with
+/// the worktree; the working tree never sees it.
+const LF_CREATED_MARKER: &str = "loopflow-created";
+
+fn _mark_lf_created(path: &Path, inherit: &impl Fn(&mut Command)) -> Result<(), GitError> {
+    let marker = git_stdout_inheriting(
+        path,
+        &["rev-parse", "--git-path", LF_CREATED_MARKER],
+        inherit,
+    )?;
+    fs::write(path.join(marker.trim()), "")?;
+    Ok(())
+}
+
+/// The real-path root of the worktree containing `cwd`, when lf created it.
+/// Git resolves symlinks in `--show-toplevel`, matching Claude's config keys.
+pub(crate) fn lf_created_worktree(cwd: &Path) -> Option<PathBuf> {
+    let output = git_stdout(
+        cwd,
+        &[
+            "rev-parse",
+            "--show-toplevel",
+            "--git-path",
+            LF_CREATED_MARKER,
+        ],
+    )
+    .ok()?;
+    let mut lines = output.lines();
+    let root = lines.next()?;
+    cwd.join(lines.next()?)
+        .is_file()
+        .then(|| PathBuf::from(root))
 }
 
 /// Read a file's contents at a given revision.
@@ -1965,6 +2002,12 @@ mod tests {
         // Verify branch was created
         let branch = current_branch(&wt_path).expect("get branch");
         assert_eq!(branch, Some("new-feature".to_string()));
+
+        assert_eq!(
+            lf_created_worktree(&wt_path),
+            Some(wt_path.canonicalize().unwrap())
+        );
+        assert!(!wt_path.join(LF_CREATED_MARKER).exists());
 
         // Clean up
         worktree_remove(repo.path(), &wt_path).expect("remove worktree");

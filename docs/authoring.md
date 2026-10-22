@@ -368,13 +368,12 @@ see [Schedule ordinary commands](lf.md#schedule-ordinary-commands).
 Planning syncs through Git by default. To plan in Linear, bind the repository to a Linear Team in `.lf/config.yaml`:
 
 ```yaml
-linear:
+planning:
+  provider: linear
   team: "stable-team-uuid"
 ```
 
-Every Wave uses the repository Team and binds only its Initiative. Select the
-synchronization transport with `planning.provider`; a Team binding selects Linear
-when that choice is omitted.
+Every Wave uses the repository Team and binds only its Initiative.
 
 Which Machine runs your work for a Wave is your choice, never repository content:
 

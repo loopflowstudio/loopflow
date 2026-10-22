@@ -1039,13 +1039,13 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             } else {
                 println!("{} · {}", issue.identifier, issue.title);
             }
-            if matches!(
-                loopflow::config::load_config_or_default(Some(repo)).planning_transport(),
-                loopflow::config::PlanningConfig::Linear {}
-            ) && issue.linear_id.is_none()
+            if let Some(provider) = loopflow::config::load_config_or_default(Some(repo))
+                .planning_transport()
+                .remote_name()
+                .filter(|_| issue.linear_id.is_none())
             {
                 eprintln!(
-                    "Saved locally; pending Linear sync. Retry with `lf task sync {}`.",
+                    "Saved locally; pending {provider} sync. Retry with `lf task sync {}`.",
                     issue.identifier
                 );
             }
@@ -1247,11 +1247,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Delete { issue } => {
             let identifier = loopflow::ops::task::task_delete(repo, issue)?;
             println!("{identifier}: removed locally; execution history retained");
-            if matches!(
-                loopflow::config::load_config_or_default(Some(repo)).planning_transport(),
-                loopflow::config::PlanningConfig::Linear {}
-            ) {
-                println!("Pending Linear sync");
+            if let Some(provider) = loopflow::config::load_config_or_default(Some(repo))
+                .planning_transport()
+                .remote_name()
+            {
+                println!("Pending {provider} sync");
             }
             Ok(())
         }

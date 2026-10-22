@@ -89,7 +89,10 @@ fn missing_remote_branch_or_commit_is_named_without_creating_a_task() {
 #[test]
 fn machine_selector_names_unpushed_source_work_before_connecting_and_keeps_legacy_identity() {
     let repo = TestRepo::new();
-    repo.create_file(".lf/config.yaml", "linear:\n  team: team-task-pr-tests\n");
+    repo.create_file(
+        ".lf/config.yaml",
+        "planning:\n  provider: linear\n  team: team-task-pr-tests\n",
+    );
     repo.stage_all();
     repo.commit("Planning config");
     repo.push();

@@ -207,7 +207,11 @@ INFO detail, on stderr. Codex Sessions start through the provider protocol and a
 native terminal. Prompts and instructions stay off the command line. Conversation
 capture requires no hook approval; context refresh uses stable launch hooks.
 Review new or changed declarations with Codex’s `/hooks`; headless runs skip
-untrusted hooks. Loopflow never writes provider trust decisions.
+untrusted hooks. Loopflow writes no hook trust. It pre-accepts Claude's folder
+trust only for the exact worktrees it created (`lf`, Task checkouts,
+`lf wt create`) by writing that path's `hasTrustDialogAccepted` entry in the
+config the launched child reads; the main checkout, hand-made worktrees and
+every other setting are untouched.
 
 A Task takes up its Wave's workflow or repository default and moves through its nodes.
 Each `task run` takes one edge leaving the current node: the only one, or the
@@ -365,9 +369,9 @@ or treating missing local evidence as completion.
 
 Planning defaults to one shared Git ref on `origin`,
 `refs/loopflow/planning/shared/main`: everyone who clones the repository reads
-and writes the same plan. Want another shared ref, a plan only you see, or
-Linear? Select it in `.lf/config.yaml`, or set a personal default in
-`~/.lf/config.yaml`. Asana and Notion are planned:
+and writes the same plan. Want another shared ref, a plan only you see, Linear,
+Asana or Notion? Select it in `.lf/config.yaml`, or set a personal default in
+`~/.lf/config.yaml`:
 
 ```yaml
 planning:
@@ -384,21 +388,22 @@ planning:
 
 ```yaml
 planning:
-  provider: linear
-linear:
-  team: <team-id>
+  provider: linear              # or asana, or notion
+  team: "<team-id-or-url>"      # Linear Team, Asana team, or Notion page
 ```
 
+[Plan and share Tasks](planning.md) explains what each choice does for coworkers
+and meetings, and what flows between Loopflow and the tracker.
+
 Repository `planning` replaces the personal selection as a whole. `shared` and
-`personal` are exclusive. Existing `linear.team` selects Linear when `planning`
-is omitted. A plan published by an older build to an unconfigured personal ref
-moves to `shared/main` on the first save after upgrade, with its identifiers,
-comments and ownership; the old ref stays on the remote until you delete it with
-`git push origin :<ref>`. Machines still on an older build keep publishing to
-their personal ref until they upgrade. Every machine uses the selected transport
-independently. Linear unavailability leaves saves buffered locally; it never
-switches to Git. All Tasks in a Linear repository are queued for publication,
-including Tasks created offline. Retry a specific Task with `lf task sync <task>`: it publishes the saved Project/Task
+`personal` are exclusive. A plan published by an older build to an unconfigured
+personal ref moves to `shared/main` on the first save after upgrade, with its
+identifiers, comments and ownership; the old ref stays on the remote until you
+delete it with `git push origin :<ref>`. Machines still on an older build keep
+publishing to their personal ref until they upgrade. Every machine uses the
+selected transport independently. Linear unavailability leaves saves buffered
+locally; it never switches to Git. All Tasks in a Linear repository are queued
+for publication, including Tasks created offline. Retry a specific Task with `lf task sync <task>`: it publishes the saved Project/Task
 identity before synchronizing state, fields, and comments. An uncertain creation remains
 pending instead of silently creating a duplicate. To deliberately retry an
 uncertain issue creation, use `lf task sync <task> --retry-creation`. This reuses
@@ -508,8 +513,9 @@ generates the Task ID; later edits, Project rotation and synchronization preserv
 `lf task create --json` returns the saved Task, with its local `id`, `project_id`,
 `title`, `description` and optional `linear_id` binding, not a Linear issue.
 Connected repositories report pending sync. Field receipts retain titles, notes, assignment and ordering
-with their provider baselines; observed conflicts adopt Linear and retire the losing
-intention. An active Task connection delivers mapped titles, notes, assignment,
+with their provider baselines; the change sent last wins, so an unsent save rebases
+onto a provider edit and still delivers, while a provider edit after an attempted
+write is adopted. An active Task connection delivers mapped titles, notes, assignment,
 membership, deletion, Project fields and Task ordering after recovery. Reordering
 saves one Project-wide intention; partial delivery and lost replies retain that identity. Deletion retains execution
 and checkout history. Missing provider evidence keeps deletion pending; newer
@@ -568,7 +574,9 @@ operating instructions. Reopening keeps those instructions and native history.
 client and history survive. Each explicit fresh request creates another; ordinary
 connect recovers the current primary after an uncertain reply. Fresh accepts scope
 selection, not a Session ID. First-use trust or sign-in prompts stay open until
-answered or canceled.
+answered or canceled; Claude's folder trust prompt does not appear in
+worktrees lf created, because lf wrote that path's `hasTrustDialogAccepted`
+entry at launch.
 
 `connect --prepare` and `resume --prepare` print a terminal command without
 launching the provider. Add `--json` for connection data. Remote preparation
@@ -603,9 +611,11 @@ inspection and replay; they do not select these Session actions.
 | Task | `lf task-operate EXP-12` | `lf connect --task EXP-12` |
 
 Each conversation is its scope's operator and carries the matching operate
-procedure. It leaves running Flows alone, reads a stopped or failed Flow before
-running its remaining work fresh, and names what waits on you, including a Task
-at a workflow node. Unstarted backlog stays unstarted. A conversation acts
+procedure. On Tasks you own, it leaves running Flows alone, reads a stopped or
+failed Flow before running its remaining work fresh, and names what waits on
+you, including a Task at a workflow node. Another person's Task is listed with
+its owner and left alone. Unstarted backlog stays unstarted, and operators
+neither edit KRs or plans nor file Tasks. A conversation acts
 only during a turn: between turns, running Flows and any installed background
 checks continue on their own.
 New commands, hooks and Flow children select the current CLI through the stable

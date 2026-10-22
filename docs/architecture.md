@@ -295,7 +295,7 @@ Task Flow, piecemeal helper LfSessions, or another system.
 ### Task Flows
 
 ```bash
-lf --wave product wave-operate        # one finite planning pass
+lf --wave product wave-operate        # one finite pass over your started Tasks
 lf task run INF-123
 lf --wave <wave> wave-operate "ship invoices first"
 lf wave status product

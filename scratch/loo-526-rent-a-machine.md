@@ -355,12 +355,12 @@ stops being live, so every path to `ended` returns them, and the pass prints "LO
 Deviations from the first draft of this design, recorded in
 `scratch/questions.md`: copies live in `machine_records` rather than stamped
 rows in `processes`/`agent_sessions`; `rentals` has no copy watermark (each
-copy re-exports from an hour before the rental's start and upserts).
+copy re-exports from an hour before the rental's start and upserts);
+`lf session list --json` and the `TaskStatus` DTO omit copies by choice.
 
 Remaining:
 
-1. `lf session list --json` still omits copies (DTO unchanged by choice).
-2. **Live probe (~$0.10) and demo**, with the demo step: both spend money. The
+1. **Live probe (~$0.10) and demo**, with the demo step: both spend money. The
    quote path was verified live (cpu3c×8 at $0.24/h; stock image pinned).
    Unverified on a real pod: boot script (apt, sshd, nodesource, installer as
    `lf`), RunPod's `portMappings`/`publicIp` field names, `RUNPOD_POD_ID`

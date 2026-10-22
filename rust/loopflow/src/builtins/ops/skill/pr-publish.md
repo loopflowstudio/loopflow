@@ -9,7 +9,9 @@ accepted outcome and verification. A completed implementation or reconciliation
 step does not establish that required behavior works. Resolve clear gaps;
 return a concrete blocker when the publication criteria do not hold.
 
-Run `lf pr publish`. The command owns pushing and PR creation/update, consumes
+Run `lf sync` first and resolve any conflicts in place; a published PR merges
+cleanly with its base. Conflicts are routine work, never a question for the
+person. Then run `lf pr publish`. The command owns pushing and PR creation/update, consumes
 valid prepared copy, and otherwise generates copy through its pr-message
 template. It marks the PR ready and returns the URL without opening a browser.
 Use explicit title/body overrides only when the caller supplied or revised them.
@@ -24,5 +26,4 @@ For a persistent document workspace, inspect the entire committed range and use
 `lf commit -m "<accepted change>" <selected-path>...` before publication. Persistent
 publication pushes committed documents, preserves other staged and unstaged work,
 and keeps `scratch/` local. Do not delete scratch or create an export worktree.
-Continued publication carries new work past merged history automatically. Use
-`lf sync` when integrating other upstream changes.
+Continued publication carries new work past merged history automatically.

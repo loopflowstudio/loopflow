@@ -1132,11 +1132,11 @@ fn task_files_frames_preserve_checkout_identity_and_heartbeat() {
     ))
     .unwrap();
     let frames: Vec<TaskFilesFrame> = serde_json::from_value(wire.clone()).unwrap();
-    assert!(frames[0].changed);
-    assert!(!frames[1].changed);
+    assert_eq!(frames[0].paths, ["note.txt", ".git/index", ""]);
+    assert!(frames[1].paths.is_empty());
     assert_eq!(frames[0].request, frames[1].request);
     assert_eq!(serde_json::to_value(frames).unwrap(), wire);
-    for field in ["request", "task_id", "machine_id", "checkout", "changed"] {
+    for field in ["request", "task_id", "machine_id", "checkout", "paths"] {
         let mut missing = wire[0].clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(serde_json::from_value::<TaskFilesFrame>(missing).is_err());

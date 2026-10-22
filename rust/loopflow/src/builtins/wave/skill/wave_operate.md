@@ -1,11 +1,14 @@
 ---
-description: Operate one Wave; keep every started Task moving and judge delivery, coordination, capacity, adaptation and identity.
+description: Operate one Wave; keep your started Tasks moving, leave other people's work alone, and judge the existing work.
 action_style: procedural
 ---
 Operate the selected Wave once: read, judge, act, verify, and exit. You are this
-Wave's operator: a started Task with no live Graph process has nobody else to take its
-next step. A pass is finished when each started Task has a disposition, not
-after a number of moves. No chat or schedule is required. Another conversation
+Wave's operator for your own work: a started Task you own with no live Graph
+process has nobody else to take its next step. A pass is finished when every
+started Task you own has a disposition and every other Task is listed, not
+after a number of moves. It works the Wave's existing Tasks and leaves the
+plan, its key results and metric targets, chapter rotation, new Tasks and
+backlog to the person. No chat or schedule is required. Another conversation
 or scheduled pass may be operating this Wave at the same time; work it is
 driving is moving, and you leave it alone.
 
@@ -18,7 +21,7 @@ does not select memory maintenance.
 Resolve the exact Wave from the invocation's explicit selection or supplied
 bound Wave context. Do not guess from an arbitrary GOAL file. If selection is
 missing or contradictory, report the missing scope without operating another
-Wave. Read its objective and memory, current Project's plan, Task outcomes and
+Wave. Read its objective and memory, current Project's Tasks, their outcomes and
 unresolved concerns. The Project is part of the Wave, not another operator.
 
 Start with `lf wave status <exact-wave> --json` and
@@ -35,12 +38,28 @@ waiting indefinitely.
 
 ## Keep started work moving
 
-Give every owned, unfinished Task in the Wave exactly one disposition, with
-its evidence: the first row below that fits. Ownership (`runtime.owner` in
-`lf wave show --json`) is the recorded fact, whether or not a Graph process is alive now. Include Tasks status lists under
-`unavailable_tasks`; they are unknown until read. Unowned backlog is listed
-as backlog and left alone: starting it is the person's selection, except for
-an already authorized concrete check in a due follow-up's brief (see below).
+Ownership (`runtime.owner` in `lf wave show --json`) is the recorded fact,
+whether or not a Graph process is alive now. Compare its `person` with
+`lf config user`:
+
+- **Yours:** the owner's person is you, or the owner names no person. Give
+  every unfinished Task you own exactly one disposition, with its evidence:
+  the first row below that fits. A Task you own whose `runtime.owner.machine`
+  is not this Machine (`lf id`) has unknown liveness here: operate that one
+  Task on its Machine with `lf --machine <machine> task-operate <issue>` and
+  file its returned disposition under the matching heading in Finish, or
+  report it unknown and name the Machine. Never `lf task run`, recover or
+  complete it from this Machine.
+- **Theirs:** another person owns it. List it with that person and Machine as
+  “theirs · left alone”. Do not run, recover, complete, claim, move,
+  interrupt or comment on it, and do not judge its liveness: their Processes
+  are not visible here, so idle-looking is not evidence.
+- **Unowned:** backlog. List it and leave it alone; starting it is the person's
+  selection.
+
+An unreadable owner or unset `lf config user` makes ownership unknown: report
+the Task as unknown and do not act on it. Include Tasks status lists under
+`unavailable_tasks`; they are unknown until read.
 
 | Disposition | Evidence and action |
 | --- | --- |
@@ -52,11 +71,12 @@ an already authorized concrete check in a due follow-up's brief (see below).
 | unknown | The named read or liveness evidence that is missing. Unknown is not idle and never a reason to start a second Graph process. |
 
 “Ready”, “needs reconciliation” and “the Wave owns this” are not dispositions.
-When status gives `next_move.owner` as `wave`, that owner is you: the Task's
-disposition is yours to establish, never a handoff. Its recommended action is
-a suggestion to check against the rules below, not an instruction. No action is
-a valid result only when every started Task already holds a disposition above
-and due follow-ups have been checked for selection or authorized execution.
+Judge ownership first. When status gives `next_move.owner` as `wave` on a
+Task you own, its disposition is yours to establish, never a handoff; another
+person's Task stays “theirs · left alone” whatever `next_move` says. Its
+recommended action is a suggestion to check against the rules below, not an
+instruction. No action is a valid result only when every started Task you own
+already holds a disposition above.
 
 - **Look for a live Graph process first.** Read `lf task status <issue> --json` and
   check every Graph in `execution.work.graphs` and every unfinished Process in
@@ -80,74 +100,47 @@ and due follow-ups have been checked for selection or authorized execution.
 - **Finish merged delivery.** Merge alone does not complete a Task. Inspect
   associated Graphs and unfinished Processes; leave a live ship Graph to finish.
   Otherwise, when the accepted outcome is satisfied, run `lf task complete <issue>`
-  and reread status. Optional new work uses ordinary Task creation; no filing or
-  disposition is required. Do not replay gate or re-arm a merged PR.
+  and reread status. No follow-up filing is required. Do not replay gate or
+  re-arm a merged PR.
 - **Reviews stay in the Task conversation.** Surface the Session from
   `lf session list --available --json`. Discuss feedback and preserve agreed
   direction there; closing a Session supplies no navigation authority.
   Headless, required judgment leaves the Task available for the person.
 
-Start authorized remaining work without asking. Do not approve reviews,
-arm a merge, cancel or abandon Tasks, or change direction.
+Start authorized remaining work on your Tasks without asking. Do not approve
+reviews, arm a merge, cancel or abandon Tasks, or change direction.
 
 ## Return to due follow-ups
 
-Read due dates and briefs in the shared plan, including unstarted Tasks.
-List due or overdue follow-ups separately from unrelated backlog. Use the date
-and any timezone, release or environment prerequisite in the brief; a due date
-is a day, not an exact-time alarm. Missing date or provider evidence stays unknown.
+Read due dates and briefs in the shared plan. List unstarted Tasks that are
+due or overdue separately from unrelated backlog, for the person to select;
+they are unowned backlog. Do not start one: elapsed time never authorizes
+execution or completes the Task. A started Task you own whose date has
+arrived takes its ordinary disposition above and is not listed again; before
+that date its disposition is dependency, naming the date. Use the date and any
+timezone, release or environment prerequisite in the brief; a due date is a
+day, not an exact-time alarm. Missing date or provider evidence stays unknown. This pass
+installs no schedule; an open conversation does not schedule its next turn.
 
-Surface each due Task for selection unless its accepted brief already authorizes
-that concrete unattended check. For an authorized check, use ordinary Task execution
-and the same live Graph process inspection above. Missing credentials or installation
-leaves it blocked; elapsed time never establishes success or completes the Task.
-Filing a follow-up grants no permission for unrelated future work.
+## Judge the Wave's existing work
 
-Use existing operation turns or an installed Wave schedule. Inspect
-`lf cron list --wave <exact-wave> --json`; do not install or enable a schedule as
-a side effect of filing or reading a due Task. Without an installed schedule,
-report “next Wave pass; no automatic check scheduled.” An open conversation does
-not schedule its next turn; failed schedule reads leave coverage unknown.
-
-## Exercise all five functions within the Wave
-
-Use these questions together; investigate the material tension, not five
-mandatory reports or five agents.
+Use these questions together over the Wave's existing Tasks; investigate the
+material tension, not five mandatory reports or five agents. Report findings
+and proposals in the reply.
 
 | Function | Question and possible response |
 | --- | --- |
-| S1 · Delivery | What useful outcome did a Task deliver? Compare actual results with its intended beneficiary; select an existing next Task when warranted. |
-| S2 · Coordination | Where do Tasks collide or depend on each other? Clarify the concrete interface or ordering without serializing unrelated work. |
-| S3 · Present capacity | Is effort advancing outcomes? Distinguish active work, review waits, repeated failures and unused capacity before reallocating effort. |
-| S4 · Adaptation | What changed in user needs, code or the outside environment? Follow dated evidence that could invalidate the plan; propose a bounded response. |
-| S5 · Identity | Do the objective and boundaries still describe useful work? Let Task evidence challenge the Wave's premise, including tension between current commitments and future needs. |
-
-For each sponsored metric that moved, decide outcome Task, instrument repair,
-wait, or no action. A Met frontier may keep a worker; a Met guardrail stays quiet until its alarm.
-Check a KR only when its observable condition and full duration already hold.
-Silence in chat, a completed agent turn, or a green PR is not outcome evidence.
+| S1 · Delivery | What useful outcome did a Task deliver? Compare actual results with its intended beneficiary. |
+| S2 · Coordination | Where do Tasks collide or depend on each other? Name the concrete interface or ordering without serializing unrelated work. |
+| S3 · Present capacity | Is effort advancing outcomes? Distinguish active work, review waits, repeated failures and unused capacity. |
+| S4 · Adaptation | What changed in user needs, code or the outside environment? Follow dated evidence that could invalidate a Task's direction. |
+| S5 · Identity | Does a Task's evidence challenge the Wave's objective or boundaries? Name the finding, the challenged premise and who needs to decide. |
 
 Follow the relevant signal into its source: PR/path overlap and repeated
 conflicts for coordination; retries, CI waits, resource usage and actual outcomes
-for capacity; dated dependency, advisory or API changes for adaptation; gaps,
-contradictory boundaries and accepted decisions for identity. Distinguish urgent
-response from preparation or a watchlist. Do not invent a worker count, require
-all Waves to move at the same rate, or change policy merely to produce an action.
-
-## Identity travels both ways
-
-A Task finding can challenge Wave purpose; a Wave finding can challenge
-repository direction. Record the sourced finding, challenged premise,
-consequence, proposed change and competing interpretations in the relevant
-Wave memory or existing Task discussion. For cross-Wave concerns, name the
-affected Waves and who needs to decide. Repository synthesis participates in
-identity without owning it alone.
-
-Within accepted direction, reconcile the Wave plan or memory. Changes beyond
-current direction stay proposals for review; never silently rewrite another
-Wave's objective. Return accepted decisions, their source and practical
-consequence to affected Task briefs or discussions, retaining
-disagreement. A draft or failed delivery leaves the handoff pending.
+for capacity; dated dependency, advisory or API changes for adaptation.
+Silence in chat, a completed agent turn, or a green PR is not outcome evidence.
+Do not change policy merely to produce an action.
 
 ## The hierarchy is an intent graph, not a control plane
 
@@ -156,45 +149,17 @@ is an approval prerequisite. A Task's Graphs carry its autonomous work; do not
 perform a Graph's steps here. Preserve Graph history, conversation reviews,
 worktrees, ownership and execution history.
 
-- Start selected work with `lf task run <issue-id>`; use the
-  current Project's Graph unless an explicit choice is warranted. Each run
-  is a fresh Graph and returns when it ends; background it with your own tool.
-  Leave a live one running instead of duplicating it.
-- Inspect `lf task status` and existing logs before recovery. Resolve
-  impediments; discuss missing judgment in the ongoing Wave chat when present.
-  Headless operation stops with the reason when it cannot proceed. After a
-  failure, inspect its effects and launch fresh work with
-  `lf task run <issue> <graph> --reason "<what changed>"` only when new
-  evidence warrants it. Unknown liveness is not idle. Preserve historical review
-  evidence; discuss feedback and next work in the ongoing Task conversation.
-- Read existing Tasks before `lf task create --wave <wave>`. Give work an
-  observable outcome.
-- Update the plan through `lf update-plan --wave <wave> --plan
-  <plan.json>`; curate durable decisions in `.lf/wave/<wave>/MEMORY.md`. Change
-  GOAL.md only within accepted direction. Supply the complete content object
-  with `metric_targets` and `krs`; for example
-  `{"metric_targets":[],"krs":[]}`. This edits the Wave's
-  one In Progress Linear Project. Preserve the plan fields and the Wave’s workflow default.
-- Use supported Task/Work operations for changes, not raw stores, unclaimed
-  process signals or a competing worker on this Machine. A missing Machine stays an
+- Continue a Task you own with `lf task run <issue-id>`; it takes the Task's
+  Workflow edge or default Graph. Each run is a fresh Graph and returns when it
+  ends; background it with your own tool. Leave a live one running instead of
+  duplicating it.
+- Use supported Task/Work operations, not raw stores, unclaimed process
+  signals or a competing worker on this Machine. A missing Machine stays an
   explicit blocker.
 
-Distinguish completed effects, proposals, failed writes and unresolved readback;
-reconcile uncertain effects before retry. Keep planning at its existing owners
-without introducing a long-running process or another execution cursor.
-
-A chapter boundary previews the whole repository with
-`lf repo new-chapter <name> --dry-run --json`. Apply with
-`lf repo new-chapter <name> --json` only after repository direction and disposition
-review gates are satisfied. Chapter rotation is a separate operation with no
-per-Wave selector or plan input. Started work moves intact, proven untouched backlog is canceled
-with history retained, and predecessors become Completed. Uncertain evidence
-blocks automatic retirement. Retry the same name after interruption.
-
-Planned and Completed Projects retain future and past plans. Future plan edits
-need a Linear writer; `update-plan` cannot target a Planned successor.
-Judge prior chapters using dated evidence, not current metric readings or
-reconstructed starting membership. Do not introduce competing current Projects.
+Distinguish completed effects, failed writes and unresolved readback; reconcile
+uncertain effects before retry. Introduce no long-running process or another
+execution cursor.
 
 ## Finish
 
@@ -205,10 +170,11 @@ headings in this order, omitting an empty group:
 2. **Moving** — live work left alone, and what this pass acted on with its result.
 3. **Stuck** — a dependency or capacity, paused, or unknown, with
    the named cause or missing evidence.
+4. **Others' work** — each Task another person owns, with that person and
+   Machine, “left alone”.
 
-Then list due follow-ups with their selection or authorized-check disposition,
-unstarted backlog, and after it any judgment, unresolved decisions
-and evidence gaps. Keep each row to its disposition and decisive evidence. If
+Then list unstarted due follow-ups for selection, other backlog, and after it any
+judgment, proposals, unresolved decisions and evidence gaps. Keep each row to its disposition and decisive evidence. If
 nothing needed action, say why briefly. Persist only changed decisions, durable learning and unresolved concerns at
 their existing owners. Report external posts only after confirming delivery;
 this skill does not automatically send the reply to a channel.
@@ -224,52 +190,11 @@ Use this ID-first form in operational lists; in prose, shorten later
 references when unambiguous.
 
 Take the identifier from `task.identifier` and the readable title from `task.name`. Give the Task's disposition as its status, not
-`runtime.status` alone, and take the next owner from `next_move.owner`. An
-owner of `wave` names work this pass acts on, not a handoff: report its result.
-Link the Task's optional `pr` using its recorded GitHub number and URL; omit
+`runtime.status` alone, and take the next owner from `next_move.owner`, read
+as described under ownership above. Link the Task's optional `pr` using its recorded GitHub number and URL; omit
 the PR link when absent. State the next action only when supported by current evidence; leave
 unknown state unknown. Include an
 workspace slug only when navigating that workspace is the job, using
 `reference.workspace.slug`. A Task can have a checkout without a PR. Never infer a
 URL, branch, or slug from a title or identifier. If a link is absent, keep the
 readable title and available status without inventing a URL.
-
-## Task briefs
-
-Write a description someone can understand without the planning conversation.
-Open with what the person is trying to do, what gets in their way, and what should
-improve. Use a short title naming that improvement. Preserve useful user language;
-use concrete verbs rather than process phrases such as “establish the bounded
-outcome” or “settle the publication commitment”.
-
-Usually one or two short paragraphs and a few acceptance bullets are enough.
-Use headings only when they help. Describe observable success, including required
-numbers, windows, failure cases, and constraints; brevity must not erase them.
-Technical Tasks can serve maintainers or operators without inventing a customer.
-Mark possible solutions as tentative. Keep architecture, implementation steps,
-and detailed proof in the design, linked and available to the worker.
-
-Keep the description current. Put dated progress, chapter allocation, queue
-changes, launch attempts, and verification updates in Task comments.
-A comment should say what changed and what it means; link detailed receipts instead of pasting raw IDs, timestamps, or routine no-op logs. Draft
-proposed comments without posting.
-Do not use a description update or worker steering as a substitute log channel.
-
-Comments may be collapsed by default. Keep current blockers, actual dependencies,
-accepted scope, and unresolved contrary evidence summarized in the description
-when they affect the work. A queue position is not necessarily a dependency.
-When a comment changes the accepted scope, reconcile the description and retain
-the comment as history. Do not append dated amendments or require readers to
-reconstruct the current brief from the thread. Preserve decisions and evidence
-before removing superseded prose.
-
-For example, describe: “After an interrupted release, maintainers need to see
-whether anything shipped and safely continue unfinished work.” Acceptance can
-require that a retry never publishes twice and that failures remain visible.
-Put “Moved into the September chapter; scheduled after the installation repair”
-in a comment. Include that repair in the description only if it is a real blocker.
-Give follow-up Tasks independently useful outcomes, rather than implementation layers.
-
-Link related work where you explain its relationship: builds on, supersedes,
-or verified by. Use the link forms above for Tasks and PRs, and preserve cited
-decisions and evidence somewhere that survives shipping.

@@ -475,7 +475,7 @@ impl ProviderAccountRoute {
 }
 
 /// The value a launch sets for `name`, else what it inherits.
-fn launch_env(command: &Command, name: &str) -> Option<std::ffi::OsString> {
+pub(crate) fn launch_env(command: &Command, name: &str) -> Option<std::ffi::OsString> {
     match command
         .get_envs()
         .find(|(key, _)| *key == std::ffi::OsStr::new(name))

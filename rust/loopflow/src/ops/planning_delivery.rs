@@ -7,12 +7,12 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::durable::WorkRef;
-use crate::linear::LinearClient;
 use crate::store::planning_sync::{PlanningChange, TaskDeletion};
 use crate::store::sqlite::planning_changes::PlanningChanges;
 use crate::store::Store;
 use crate::work::edit::WorkValue;
 
+use super::planning_client::PlanningClient;
 use super::{OpsError, OpsResult};
 
 fn message(error: impl std::fmt::Display) -> OpsError {
@@ -20,7 +20,7 @@ fn message(error: impl std::fmt::Display) -> OpsError {
 }
 
 pub(crate) async fn sync_repository_fields(store: &Store, repo: &str) -> OpsResult<()> {
-    if !super::linear_observe::connected(repo) {
+    if !super::planning_client::connected(repo) {
         return Ok(());
     }
     let owners = store.sqlite.planning_field_owners(repo).map_err(message)?;
@@ -48,7 +48,7 @@ pub(crate) async fn deliver_fields(
     work: &WorkRef,
     retry: bool,
 ) -> OpsResult<()> {
-    if !super::linear_observe::connected(&repo.to_string_lossy()) {
+    if !super::planning_client::connected(&repo.to_string_lossy()) {
         return Ok(());
     }
     let owner = match work {
@@ -65,7 +65,7 @@ pub(crate) async fn deliver_fields(
         _ => None,
     };
     let attempt = async {
-        let client = super::linear::linear_client(repo).await?;
+        let client = PlanningClient::for_repository(repo).await?;
         if let Some(change) = &deletion {
             return sync_deletion(store, repo, owner, &client, change).await;
         }
@@ -88,7 +88,7 @@ pub(crate) async fn deliver_fields(
                 .map_err(message)?
                 .is_some()
             {
-                super::planning_order::sync_order(store, repo, id, &client).await?;
+                super::planning_order::sync_order(store, repo, id, client.linear()?).await?;
             }
         }
         Ok(())
@@ -124,7 +124,7 @@ async fn sync_deletion(
     store: &Store,
     repo: &Path,
     owner: PlanningChanges<'_>,
-    client: &LinearClient,
+    client: &PlanningClient,
     change: &TaskDeletion,
 ) -> OpsResult<()> {
     let PlanningChanges::Task(id) = owner else {
@@ -140,7 +140,9 @@ async fn sync_deletion(
         .issue_trash(external)
         .await
         .map_err(message)?
-        .ok_or_else(|| message("Linked Linear issue is unavailable; deletion remains uncertain"))?;
+        .ok_or_else(|| {
+            message("Linked planning task is unavailable; deletion remains uncertain")
+        })?;
     if trashed {
         if !store
             .sqlite
@@ -148,17 +150,17 @@ async fn sync_deletion(
             .map_err(message)?
         {
             return Err(message(
-                "Newer Linear evidence retained; deletion remains uncertain",
+                "Newer provider evidence retained; deletion remains uncertain",
             ));
         }
         return Ok(());
     }
-    // Complete active-issue ingestion adopts conflicting Linear edits through
+    // Complete active-issue ingestion adopts conflicting provider edits through
     // the common writer before attempting the saved removal.
     let revision = observe(store, repo, owner, client).await?.revision;
     if revision.as_deref() != Some(trash_revision.as_str()) {
         return Err(message(
-            "Linear deletion observations disagree; saved removal retained",
+            "Provider deletion observations disagree; saved removal retained",
         ));
     }
     store
@@ -237,7 +239,7 @@ async fn sync_field(
     store: &Store,
     repo: &Path,
     owner: PlanningChanges<'_>,
-    client: &LinearClient,
+    client: &PlanningClient,
     change: &PlanningChange,
     observation: &mut FieldObservation,
     retry: bool,
@@ -251,6 +253,7 @@ async fn sync_field(
     let input = match owner {
         PlanningChanges::Task(_) => task_input(store, &current)?,
         PlanningChanges::Project(_) => client
+            .linear()?
             .project_field_input(&current.value, &observation.content)
             .await
             .map_err(message)?,
@@ -262,14 +265,16 @@ async fn sync_field(
     {
         return Ok(());
     }
-    let response = match client
-        .deliver_planning_field(
-            &observation.external,
-            matches!(owner, PlanningChanges::Project(_)),
-            input,
-        )
-        .await
-    {
+    let delivery = match owner {
+        PlanningChanges::Task(_) => client.update_task(&observation.external, input).await,
+        PlanningChanges::Project(_) => {
+            client
+                .linear()?
+                .deliver_planning_field(&observation.external, true, input)
+                .await
+        }
+    };
+    let response = match delivery {
         Ok(response) => response,
         Err(error) => {
             if !retry && matches!(error, crate::linear::LinearError::RateLimited { .. }) {
@@ -363,7 +368,7 @@ async fn observe(
     store: &Store,
     repo: &Path,
     owner: PlanningChanges<'_>,
-    client: &LinearClient,
+    client: &PlanningClient,
 ) -> OpsResult<FieldObservation> {
     match owner {
         PlanningChanges::Task(id) => {
@@ -377,7 +382,7 @@ async fn observe(
                 .issue_ownership(&external)
                 .await
                 .map_err(message)?
-                .ok_or_else(|| message("Linked Linear issue is unavailable"))?;
+                .ok_or_else(|| message("Linked planning task is unavailable"))?;
             let revision = item.revision.clone();
             ingest_task(
                 store,
@@ -393,7 +398,7 @@ async fn observe(
                 .map_err(message)?
             {
                 return Err(message(
-                    "Newer or unresolved Linear planning retained; field delivery deferred",
+                    "Newer or unresolved provider planning retained; field delivery deferred",
                 ));
             }
             Ok(FieldObservation {
@@ -410,6 +415,7 @@ async fn observe(
                 .ok_or_else(|| message("Project is missing"))?;
             let external = project.linear_id()?.as_str().to_owned();
             let (observed, content) = client
+                .linear()?
                 .project_content_observation(&external)
                 .await
                 .map_err(message)?;
@@ -477,7 +483,7 @@ pub(super) async fn ingest_task(
     project: Option<&crate::linear::LinearProject>,
     observed_at: i64,
 ) -> OpsResult<()> {
-    let team = super::linear::repository_team_id(repo)?;
+    let team = super::planning_client::repository_scope(repo)?;
     if issue.team_id.as_deref() != Some(team.as_str()) {
         return Err(message(format!(
             "Task {} must belong to repository Team {team}",

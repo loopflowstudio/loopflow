@@ -141,13 +141,13 @@ Author a Wave in the repo and open its conversation:
 <!-- .lf/wave/designer/GOAL.md -->
 ## Objective
 
-Keep the design system coherent. Each wake: read the chapter plan and
-Tasks, pursue the highest-leverage open KR, start a concrete
-Task only after it is filed, and fold what changed into memory.
+Keep the design system coherent. Each wake: read the chapter's Tasks,
+keep your started ones moving, leave teammates' Tasks to them, and fold
+what changed into memory.
 ```
 
 ```bash
-lf --wave designer wave-operate        # one finite pass: keep started Tasks moving
+lf --wave designer wave-operate        # one finite pass: keep your started Tasks moving
 lf --wave designer wave-operate "ship the button audit first"
 lf connect --wave designer             # your ongoing conversation for the Wave, applying that pass on every return
 ```
@@ -286,6 +286,11 @@ Claude interactive hooks also require workspace trust, potentially once per
 folder; `claude -p` treats the workspace as trusted. Loopflow follows the providers’ [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks)
 and [Claude workspace trust](https://code.claude.com/docs/en/hooks#workspace-trust)
 policies. Unchanged declarations cannot remove Claude’s folder trust requirement.
+Loopflow pre-accepts Claude's folder trust only for the exact worktrees it
+created (`lf`, Task checkouts, `lf wt create`) by writing that path's
+`hasTrustDialogAccepted` entry in the config the launched child reads; hook
+trust, the main checkout, hand-made worktrees and every other setting are
+untouched.
 
 New Session names use a short excerpt of the request, or the invoked skill when
 no request was supplied. Task conversations use the Task title when no specific
@@ -370,6 +375,7 @@ each `.md` URL, use the curated
 |------|--------|
 | [Get Started](docs/getting-started.md) | Install, first commands, building features, going remote |
 | [Waves](docs/waves.md) | The planning model, goals, memory, KRs, Linear, crons |
+| [Plan and share Tasks](docs/planning.md) | Share and capture Tasks with or without Linear, Asana or Notion |
 | [The Agent API](docs/agent-api.md) | How agents launch, steer, and prove control of other agents |
 | [Conducting](docs/conducting.md) | Seeing what got done, what you can pick up, and how to step in |
 | [Authoring](docs/authoring.md) | Writing skills, graphs, and goals |

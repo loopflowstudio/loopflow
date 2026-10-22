@@ -11,9 +11,9 @@ public enum PlanningSyncState: String, Decodable, Sendable, Hashable {
 
     public var label: String {
         switch self {
-        case .pending: "Saved locally; pending Linear sync"
-        case .uncertain: "Awaiting Linear confirmation"
-        case .adoptedLinear: "Adopted Linear change"
+        case .pending: "Saved locally; pending planning sync"
+        case .uncertain: "Awaiting planning provider confirmation"
+        case .adoptedLinear: "Adopted planning provider change"
         }
     }
 }
@@ -35,7 +35,7 @@ public struct PlanningSyncChange: Decodable, Sendable, Hashable, Identifiable {
     public var text: String {
         var text = "\(state.label) · \(field)"
         if state == .adoptedLinear {
-            text += " · saved: \(display(localValue)) · Linear: \(display(linearValue ?? .null))"
+            text += " · saved: \(display(localValue)) · provider: \(display(linearValue ?? .null))"
         }
         if let error { text += " · \(error)" }
         return text

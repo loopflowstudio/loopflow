@@ -5,11 +5,11 @@ use std::time::Duration;
 use serde_json::json;
 
 use crate::durable::WorkRef;
-use crate::linear::LinearClient;
 use crate::store::sqlite::planning_changes::PlanningChanges;
 use crate::store::sqlite::planning_export::PlanningExport;
 use crate::store::Store;
 
+use super::planning_client::{PlanningClient, StateScope};
 use super::{OpsError, OpsResult};
 
 fn message(error: impl std::fmt::Display) -> OpsError {
@@ -17,7 +17,7 @@ fn message(error: impl std::fmt::Display) -> OpsError {
 }
 
 pub(crate) async fn sync_repository_exports(store: &Store, repo: &str) -> OpsResult<()> {
-    if !super::linear_observe::connected(repo) {
+    if !super::planning_client::connected(repo) {
         return Ok(());
     }
     store.sqlite.recover_task_filings(repo).map_err(message)?;
@@ -27,7 +27,9 @@ pub(crate) async fn sync_repository_exports(store: &Store, repo: &str) -> OpsRes
             tracing::debug!(%error, "planning export pending");
         }
     }
-    sync_retained_relations(store, Path::new(repo)).await?;
+    if super::planning_client::is_linear(repo) {
+        sync_retained_relations(store, Path::new(repo)).await?;
+    }
     Ok(())
 }
 
@@ -44,7 +46,7 @@ pub(crate) async fn retry_task_export(
 }
 
 async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool) -> OpsResult<()> {
-    if !super::linear_observe::connected(&repo.to_string_lossy()) {
+    if !super::planning_client::connected(&repo.to_string_lossy()) {
         return Ok(());
     }
     let owner = match work {
@@ -77,6 +79,7 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool
         if mapped {
             return Ok(());
         }
+        let linear = super::planning_client::is_linear(&repo.to_string_lossy());
         let initiative = match &wave_id {
             Some(id) => {
                 let wave = store
@@ -85,19 +88,19 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool
                     .map_err(message)?
                     .ok_or_else(|| message("Wave is missing"))?;
                 Some(
-                    super::linear::read_initiative(repo, wave.slug()).ok_or_else(|| {
+                    super::planning_client::wave_scope(repo, wave.slug())?.ok_or_else(|| {
                         message("Wave has no Linear Initiative; export remains pending")
                     })?,
                 )
             }
             None => None,
         };
-        let team = super::linear::repository_team_id(repo)?;
+        let team = super::planning_client::repository_scope(repo)?;
         let export = store
             .sqlite
             .prepare_planning_export(owner, &team, initiative.as_deref())
             .map_err(message)?;
-        let client = super::linear::linear_client(repo).await?;
+        let client = PlanningClient::for_repository(repo).await?;
         if observe(store, repo, owner, &client, &export, wave_id.as_ref()).await? {
             return Ok(());
         }
@@ -112,8 +115,9 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool
         }
         let mut input = export.input.clone();
         let project = matches!(owner, PlanningChanges::Project(_));
-        if project {
+        if project && linear {
             input["statusId"] = client
+                .linear()?
                 .project_field_input(
                     &crate::work::edit::WorkValue::ProjectStatus(
                         export.project_status().map_err(message)?,
@@ -123,12 +127,14 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool
                 .await
                 .map_err(message)?["statusId"]
                 .clone();
-        } else {
+        } else if !project {
             input["stateId"] = json!(client
-                .team_state_id(
-                    input["teamId"]
-                        .as_str()
-                        .ok_or_else(|| message("creation Team is missing"))?,
+                .state_id(
+                    StateScope::Team(
+                        input["teamId"]
+                            .as_str()
+                            .ok_or_else(|| message("creation Team is missing"))?,
+                    ),
                     export.task_state.as_deref().unwrap_or("unstarted")
                 )
                 .await
@@ -141,7 +147,23 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool
         {
             return Ok(());
         }
-        let response = match client.deliver_planning_creation(project, input).await {
+        let creation = match (project, linear) {
+            (true, true) => {
+                client
+                    .linear()?
+                    .deliver_planning_creation(true, input)
+                    .await
+            }
+            (true, false) => match client.create_project(&input).await {
+                Ok(revision) => Ok(crate::linear::PlanningResponse::Project {
+                    project: Box::new(export.mirrored_project(&team, revision).map_err(message)?),
+                    content: String::new(),
+                }),
+                Err(error) => Err(error),
+            },
+            (false, _) => client.create_task(input).await,
+        };
+        let response = match creation {
             Ok(response) => response,
             Err(error) => {
                 // A rejected retry cannot disprove the earlier uncertain attempt.
@@ -191,7 +213,7 @@ async fn observe(
     store: &Store,
     repo: &Path,
     owner: PlanningChanges<'_>,
-    client: &LinearClient,
+    client: &PlanningClient,
     export: &PlanningExport,
     wave: Option<&crate::id::WaveId>,
 ) -> OpsResult<bool> {
@@ -201,7 +223,26 @@ async fn observe(
         .map_err(message)?;
     match owner {
         PlanningChanges::Project(_) => {
-            let Some(project) = client.find_project(&export.id).await.map_err(message)? else {
+            let found = match client {
+                PlanningClient::Linear(linear) => {
+                    linear.find_project(&export.id).await.map_err(message)?
+                }
+                mirror => match mirror.project_revision(&export.id).await.map_err(message)? {
+                    Some(revision) => Some(
+                        export
+                            .mirrored_project(
+                                export
+                                    .initiative
+                                    .as_deref()
+                                    .ok_or_else(|| message("Project export has no team"))?,
+                                revision,
+                            )
+                            .map_err(message)?,
+                    ),
+                    None => None,
+                },
+            };
+            let Some(project) = found else {
                 return Ok(false);
             };
             if project.id != export.id || !attempted {
@@ -246,7 +287,7 @@ async fn observe(
 async fn attach_project(
     store: &Store,
     owner: PlanningChanges<'_>,
-    client: &LinearClient,
+    client: &PlanningClient,
     export: &PlanningExport,
     wave: &crate::id::WaveId,
     mut project: crate::linear::LinearProject,
@@ -273,6 +314,7 @@ async fn attach_project(
             return Ok(());
         }
         project = match client
+            .linear()?
             .deliver_project_attachment(&export.link_id, &export.id, initiative)
             .await
         {

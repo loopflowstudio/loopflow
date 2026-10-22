@@ -132,7 +132,9 @@ fn launch(home: &Path, repo: &Path, bin: &Path, measurements: &Path, args: &[&st
         }
     }
     assert!(endings > 0, "missing completed performance receipt");
-    assert!(rows < 25_000, "launch read {rows} SQLite rows");
+    // Each store open reads the whole schema_migrations ledger, so every release
+    // batch adds about 37 rows here; main sat at 24,995 when this rose.
+    assert!(rows < 26_000, "launch read {rows} SQLite rows");
     assert!(
         statements < 2_000,
         "launch executed {statements} statements"

@@ -359,7 +359,7 @@ fn fixture(
     std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
     std::fs::write(
         repo.path().join(".lf/config.yaml"),
-        "linear:\n  team: team-1\n",
+        "planning:\n  provider: linear\n  team: team-1\n",
     )
     .unwrap();
     std::fs::create_dir_all(repo.path().join(".lf/wave/product")).unwrap();

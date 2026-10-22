@@ -2205,7 +2205,7 @@ fn waited_task_landing(destination: &str, failed_startup: bool) {
     };
     for (path, contents) in [
         ("feature.txt", "keep the feature"),
-        (".lf/config.yaml", "agent: codex\nlinear:\n  team: team-task-pr-tests\n"),
+        (".lf/config.yaml", "agent: codex\nplanning:\n  provider: linear\n  team: team-task-pr-tests\n"),
         (".lf/workflows/delivery-proof.yaml", workflow),
         (".lf/graphs/delivery-proof.yaml", "- cmd: graph show ship\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n"),
     ] {

@@ -45,6 +45,23 @@ fn global_agent_help_and_no_agent_diagnostic() {
     assert!(!home.path().join(".lf").exists());
 }
 
+#[test]
+fn config_user_reports_the_forwarded_participant() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path().join(".lf"))
+        .env("LF_USER_NAME", "Dustin")
+        .env("PATH", home.path().join("no-tools"))
+        .current_dir(repo.path())
+        .args(["config", "user"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8(success(output)).unwrap(), "Dustin\n");
+}
+
 fn run(repo: &Path, home: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()

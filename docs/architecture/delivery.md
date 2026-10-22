@@ -37,7 +37,7 @@ Task Work ----> managed worktree ----> commits
 
 | Object | Authority |
 | --- | --- |
-| Task directive and Project membership | Local planning; observed conflicts adopt Linear when connected |
+| Task directive and Project membership | Local planning; when connected, the change sent last wins |
 | managed checkout placement and optional PR state | Task delivery records plus resolved Git repository |
 | commits, branch ancestry, sync state | Git |
 | PR head, required checks, merge | GitHub |

@@ -82,9 +82,10 @@ A finished Graph or published PR does not prove Task completion. Complete the
 Task when its accepted outcome is delivered, using authoritative state.
 
 For ongoing supervision, explicitly select `task-operate`, `wave-operate` or
-`repo-operate`, or the corresponding Session skill. A contribution to a Task
-need not operate it, choose a Workflow, or keep other Tasks moving. Custom
-clients retain their own interaction and workflow choices.
+`repo-operate`, or the corresponding Session skill. Operators move your
+existing Tasks and leave other people's Tasks and backlog alone. A contribution
+to a Task need not operate it, choose a Workflow, or keep other Tasks moving.
+Custom clients retain their own interaction and workflow choices.
 
 ## Delivery and durable context
 

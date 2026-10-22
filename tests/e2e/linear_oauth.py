@@ -202,7 +202,7 @@ def _exercise(lf: Path, root: Path, selection: dict, server: LinearServer) -> li
         ["remote", "add", "origin", "https://github.com/loopflowstudio/fixture.git"],
     ]:
         assert _run(["git", *args], cwd=repo).returncode == 0
-    (repo / ".lf/config.yaml").write_text("linear:\n  team: team-1\n")
+    (repo / ".lf/config.yaml").write_text("planning:\n  provider: linear\n  team: team-1\n")
     (repo / ".lf/wave/product/GOAL.md").write_text(
         "---\nlinear:\n  initiative: initiative-1\n---\nKeep working.\n"
     )

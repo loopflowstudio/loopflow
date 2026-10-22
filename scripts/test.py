@@ -694,7 +694,12 @@ SUITES: list[Suite] = [
                 "rust/loopflow/src/store/sqlite/sessions.rs",
                 "rust/loopflow/src/naming.rs",
             )
-            or _touches_exact(c, "scripts/test_desktop.sh", "scripts/desktop-headless.sb")
+            or _touches_exact(
+                c,
+                "scripts/test_desktop.sh",
+                "scripts/swift_test_limit.py",
+                "scripts/desktop-headless.sb",
+            )
         ),
         build=_swift_commands,
         proves="app builds; model and view/interaction tests run without a display session.",

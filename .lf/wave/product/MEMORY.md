@@ -17,6 +17,10 @@
 - Jack: Desktop control is macOS-only (LOO-426/427); Linux errors name a terminal
   alternative before launch or Work mutation. Ordinary lf remains cross-platform;
   displaying and execution machines differ.
+- Jack (October 21, LOO-565): lf pre-accepts Claude folder trust only for
+  worktrees lf created (git admin-dir marker; exact-path `hasTrustDialogAccepted`
+  in the config the launched child reads). No hooks or other global Claude
+  settings. Found in LOO-554's fresh-Linux QA; real-Claude verification is review's.
 - LOO-416 owns saved per-Task panes and reattachment; LOO-426 owns Task/Session
   opening; LOO-402 owns Waiting navigation, including blocked shell panes through
   shared Swift while Session Waiting stays in Rust. LOO-403 owns shortcuts and

@@ -51,8 +51,13 @@ const AMBIENT_ONLY: &[&[&str]] = &[];
 const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 
 /// Authored inputs do not select an ambient execution Wave: context reads
-/// directories, while cron add saves a command whose own selectors name its Work.
-const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"], &["wave", "cron", "add"]];
+/// directories, while cron add saves (and sync reinstalls) commands whose own
+/// selectors name their Work.
+const AUTHORED_CONTEXT: &[&[&str]] = &[
+    &["context"],
+    &["wave", "cron", "add"],
+    &["wave", "cron", "sync"],
+];
 
 /// Session entry uses an explicit Work target or checkout discovery, never an
 /// ambient Wave. `session_launch_contract` covers both forms and their effects.
@@ -70,11 +75,10 @@ const FILTER_ONLY: &[&[&str]] = &[
     &["history"],
     &["repo", "ci"],
     &["wave", "cron", "list"],
-    &["wave", "cron", "preflight"],
-    &["wave", "cron", "sync"],
+    &["wave", "cron", "publish"],
+    &["wave", "cron", "unpublish"],
     &["history", "list"],
     &["history", "usage"],
-    &["wave", "workflow", "list"],
 ];
 
 /// Commands that require a Wave on the command line and therefore never
@@ -117,13 +121,6 @@ const COMMANDS: &[Cmd] = &[
         id: "wave workflow show",
         path: &["wave", "workflow", "show"],
         base_args: &["wave", "workflow", "show", "--json"],
-        wave_form: WaveForm::Positional,
-        global_default: false,
-    },
-    Cmd {
-        id: "wave workflow source",
-        path: &["wave", "workflow", "source"],
-        base_args: &["wave", "workflow", "source", "feature"],
         wave_form: WaveForm::Positional,
         global_default: false,
     },
@@ -245,6 +242,11 @@ fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
     }
     // Connection may register the selected Wave.
     if env.id == "explicit-unknown" && cmd.id == "repo connect" {
+        return Outcome::Resolved;
+    }
+    // The fixture plans through Git, whose refresh exchanges the whole
+    // repository: a Wave selection, stale or unknown, has no effect.
+    if cmd.id == "repo refresh" {
         return Outcome::Resolved;
     }
 

@@ -422,19 +422,24 @@ struct WorkflowCatalogInspector: View {
     @Environment(\.palette) private var palette
     let entry: WorkflowCatalogEntry?
     let model: WorkModel
-    @State private var editingWorkflow = false
+    @State private var sourceError: String?
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(entry?.name ?? "Workflow unavailable").font(Typography.sectionTitle(26))
             if let entry {
-                Text(entry.source == "stored" ? "Stored in this Wave" : (entry.source ?? "builtin Workflow")).font(Typography.code(11))
+                Text(entry.source ?? "builtin Workflow").font(Typography.code(11))
                 Button(entry.source == nil ? "Customize" : "Edit") {
-                    editingWorkflow = true
+                    Task {
+                        do {
+                            let url = try await model.workflowDefinitionFile(entry)
+                            sourceError = nil
+                            NSWorkspace.shared.open(url)
+                        } catch { sourceError = error.localizedDescription }
+                    }
                 }
-                .disabled(model.breadcrumb?.wave?.roadmap.wave == nil)
             }
-            if let error = model.workflowCatalog.errorMessage {
+            if let error = sourceError ?? model.workflowCatalog.errorMessage {
                 Text(error).foregroundStyle(palette.warning)
             }
             Button("Refresh") { Task { await model.loadWorkflowCatalog(force: true) } }
@@ -443,11 +448,6 @@ struct WorkflowCatalogInspector: View {
             } else { Text(entry?.unavailable ?? "Refresh the Workflow catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }.padding(24).frame(width: 780)
-            .sheet(isPresented: $editingWorkflow) {
-                if let entry, let wave = model.breadcrumb?.wave?.roadmap.wave {
-                    WorkflowEditor(model: model, wave: wave, name: entry.name)
-                }
-            }
     }
 }
 

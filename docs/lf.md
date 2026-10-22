@@ -136,9 +136,27 @@ lf task status TASK --json       # ownership: {owner, superseded_by, log}
 ```
 
 A Task is owned by a person on a Machine, or unowned. `task checkout` and `task run`
-claim an unowned Task when they allocate its checkout. Handoff needs only the
-target's identity, not a connection. Completion, abandonment and reopening leave
-ownership alone; a Done Task shows its last owner.
+claim an unowned Task when they allocate its checkout. A claim names you by your
+Git `user.email` (lowercased), so set one before claiming. Names are display only:
+a claim is yours when it carries your email, so two people without names never
+mistake each other's claims, even on a Machine you both use. Use the same
+`user.email` on all your Machines. A claim written before emails were recorded is
+yours when it holds one of your Machines (this one or one added with `lf machine add`). Handoff needs only the target's identity, not a connection.
+Completion, abandonment and reopening leave ownership alone; a Done Task shows its
+last owner. `lf task status` prints the log as `Oct 21 14:02  claim  Lee on lee-mbp`,
+and `lf wave show`, `lf task list` and `lf wave status` name each Task's owner.
+
+```bash
+lf machine public lee-mbp        # teammates see this name on your claims and crons
+lf machine public off            # private again: they see only the Machine id
+```
+
+Machines are private by default. Your own Machines read by their local labels;
+a teammate sees a private Machine's id, or the public name it had when the entry
+was written.
+
+Under Git planning the first checkout records the Task's branch in the plan, so a
+teammate who claims and runs it checks out the same branch and finds the same PR.
 
 ```bash
 lf machine use mini infrastructure            # this Wave's new Tasks and its Session
@@ -225,7 +243,7 @@ its start. See [workflows](authoring.md#workflows).
 lf wave show product --json              # current and retained chapter planning
 lf wave workflow list                 # Workflow definitions and validity
 lf wave workflow set code WAVE     # selection for future Tasks
-lf wave workflow source feature WAVE # read the definition
+lf wave workflow source feature      # read the definition
 lf task workflow show EXP-12             # captured graph, position and history
 lf task workflow restart EXP-12          # move to start; retain graph and history
 lf graph list                            # autonomous Graph definitions
@@ -320,9 +338,7 @@ recorded repository; outside a repository, ticket aliases must be globally uniqu
 lf task edit <id> --rank 0 --assignee <person-id>
 lf task edit <id> --unassign
 lf wave edit-plan WAVE --name "Parser" --summary "Retain quoted input"
-lf wave workflow set review WAVE --file /tmp/review.yaml
-lf wave workflow list --wave WAVE --json
-lf wave workflow source review WAVE
+lf wave workflow set review WAVE      # .lf/workflows/review.yaml or a builtin
 lf wave edit-plan WAVE --description "Preserve quoted text across machines."
 lf wave update-plan --wave parser --plan /tmp/plan.json
 ```
@@ -416,6 +432,15 @@ win; this flag does not retry deletion or allocate another issue.
 a Git preference in `~/.lf/config.yaml`.
 
 ```bash
+lf refresh                          # Git planning: exchange with teammates now
+```
+
+Under Git planning, `lf refresh` fetches and imports the repository's planning
+ref, then publishes this Machine's pending changes. It exits non-zero with the
+recorded error when the exchange fails. The
+exchange is per repository, so a Wave name or `--all` changes nothing.
+
+```bash
 lf planning status --json
 lf planning key                    # show this machine's personal planning key
 lf planning key --recover <uuid>   # reuse it on a fresh second machine
@@ -460,27 +485,24 @@ Machine: Sessions and their history, Graph runs and Workflow position, checkouts
 and scratch, usage, accounts and routes, and installed crons. Each of you has
 your own conversation for a Wave or a Task.
 
-- **Names.** Claims compare display names: a Task claimed under your name, or
-  with no name on either side, reads as yours. Give each person a distinct
-  `lf user` name before claiming.
-- **Branches.** A Task's branch starts with your Git user name
-  (`dustin/etu-20-…`), so two people's branches don't collide. A Linear issue's
-  recorded branch is reused by whoever runs it.
+- **Names.** Claims compare your Git `user.email`, lowercased. `lf user` sets
+  your display name; changing it does not change whose claims are yours.
+- **Branches.** The first checkout records the Task's branch. Whoever takes
+  over reuses it and its pull request, under Git planning as under Linear.
 - **Taking over.** The owner pushes commits and scratch, then runs
   `lf task unclaim`; you `lf task claim` and `lf task run`. Their Workflow
   position, Graph history and Sessions stay on their Machine;
-  `lf task workflow move ETU-20 demo` puts you where they were. With Git
-  planning a takeover gets your own branch, so a new pull request.
-- **Operating Waves.** `wave-operate` and `repo-operate` act on every owned
-  Task, and a teammate's live Graph is invisible from your Machine: their Task
-  looks idle. Agree who operates each Wave.
+  `lf task workflow move ETU-20 demo` puts you where they were.
+- **Operating Waves.** `wave-operate` and `repo-operate` advance your existing
+  Tasks and leave teammates' Tasks and the plan alone.
 - **Reviewing.** A Workflow's design and demo nodes happen in the owner's
   conversation. A teammate reviews the pull request: publish a draft at the
   design node with `lf pr publish`.
-- **Comments.** With Git planning, a teammate's comment syncs but does not
-  steer your agents; with Linear it does.
-- **Crons.** Repository `crons:` run on every Machine that syncs them. One
-  person installs each Wave's jobs.
+- **Comments.** A teammate's comment reaches your agents at their next
+  supported boundary, under Git planning as under remote planning providers.
+- **Crons.** Install your own with `lf cron add`. They run only on that
+  Machine. Publish individual jobs with `lf cron publish` so teammates can
+  see them; fetching a published cron never installs it.
 - **Process.** A repository Skill or Graph outranks a personal one of the same
   name, so change the team's in a pull request. To try your own variant, save
   it under a new name in `~/.lf/skills`.
@@ -736,27 +758,24 @@ preserving the child's identity, PR, Session and design.
 
 ## Schedule ordinary commands
 
-```yaml
-# .lf/config.yaml
-crons:
-  - name: daily-review
-    command: [--wave, product, --batch, skill, wave/operate]
-    schedule: 0 0 9 * * *
-```
-
 ```bash
-lf cron preflight                  # validate configuration and Wave Machines
-lf cron sync                       # explicitly install the configured list
-lf cron list --wave product         # filter by the command's Work selector
-lf cron list --task EXP-12
 lf cron add daily-review --schedule daily -- --wave product --batch skill wave/operate
+lf cron publish daily-review       # let teammates see it; crons are private by default
+lf cron list                       # yours, then teammates' published crons
+lf cron list --wave product        # filter by the command's Work selector
+lf cron unpublish daily-review
+lf cron remove --wave product --flow daily-review
+lf cron sync                       # reinstall yours with the current lf
 ```
 
-Commands use ordinary `lf` arguments, including `--wave` and `--task`.
-Reading or cloning the repository installs nothing. Each Machine that syncs runs the jobs, so with two people, one installs them. An explicit `crons: []`
-removes the repository's jobs when synced; an absent list leaves them alone.
-Scope-filtered sync only changes matching jobs. Existing job names and Wave
-selectors retain installed identities and receipt history.
+Crons are yours: they run only on the Machine that installed them and are never
+committed. Commands use ordinary `lf` arguments, including `--wave` and
+`--task`. Only published crons reach Git: each Machine pushes its published
+crons, with your Git `user.email`, its Machine id and public name, if any, to
+`refs/loopflow/crons/<machine-id>` on `origin`. `lf cron list` shows a
+teammate's published crons as theirs, not installed here. When the fetch fails,
+it shows the last observed state and when it was published. Existing job names
+and Wave selectors retain installed identities and receipt history.
 
 ## Check authorized deliveries in the background
 

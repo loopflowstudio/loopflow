@@ -194,6 +194,7 @@ When editing Rust tests:
 - Mock via closures or `#[cfg(test)]`, not factory traits or extra abstractions
 - Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
 - From an lf-launched shell, run `cargo test` with inherited `LF_*` unset and `< /dev/null`: capture fixtures follow `LF_HOME`, and `lf task create` reads a piped report from open stdin.
+- Claims name their person by the Task repository's Git `user.email` and fail without one; fixtures set a repository-local identity (`TestRepo` does), and CI test jobs set only a global fallback.
 - Library and integration fixtures that mutate process environment share `loopflow_test_support::env_lock`; per-suite locks cannot isolate library modules.
 - `SqliteStore::open_ephemeral` includes the build's draft migrations; do not replay
   those drafts with `apply_migration_for_test`.
@@ -446,8 +447,9 @@ Keep canonical owner paths in command references and help, where the tree is
 the point. Preserve established short names; do not expand `wt` to `worktree`.
 `documented_commands` checks example ambiguity against Clap; adding a competing
 command requires updating any shorthand that stops resolving uniquely.
-`docs/lf-reference.md` is generated from the compiled Clap tree:
-`UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration reference_matches_the_compiled_cli`.
+`docs/lf-reference.md` is generated from the compiled Clap tree: with inherited
+`LF_*` unset, run
+`UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration reference_matches_the_compiled_cli < /dev/null`.
 
 User docs follow the same principles as prompts (see PROMPTS.md):
 

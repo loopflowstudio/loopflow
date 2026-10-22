@@ -321,6 +321,7 @@
                   "reason": "done",
                   "owner": {
                     "person": "Jack Heart",
+                    "person_key": "jack@loopflow.studio",
                     "machine": {
                       "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
                       "label": "mini"
@@ -579,6 +580,7 @@
         "reason": "done",
         "owner": {
           "person": "Jack Heart",
+          "person_key": "jack@loopflow.studio",
           "machine": {
             "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
             "label": "mini"
@@ -1900,6 +1902,7 @@
                   "reason": "done",
                   "owner": {
                     "person": "Jack Heart",
+                    "person_key": "jack@loopflow.studio",
                     "machine": {
                       "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
                       "label": "mini"
@@ -2143,6 +2146,7 @@
         "reason": "done",
         "owner": {
           "person": "Jack Heart",
+          "person_key": "jack@loopflow.studio",
           "machine": {
             "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
             "label": "mini"
@@ -3184,6 +3188,7 @@
                   "reason": "Step Process 83496037-a550-44c9-9557-d3f451dc42d8 is running __telemetry-scorecard",
                   "owner": {
                     "person": "Jack Heart",
+                    "person_key": "jack@loopflow.studio",
                     "machine": {
                       "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
                       "label": "mini"
@@ -3427,6 +3432,7 @@
         "reason": "Step Process 83496037-a550-44c9-9557-d3f451dc42d8 is running __telemetry-scorecard",
         "owner": {
           "person": "Jack Heart",
+          "person_key": "jack@loopflow.studio",
           "machine": {
             "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
             "label": "mini"

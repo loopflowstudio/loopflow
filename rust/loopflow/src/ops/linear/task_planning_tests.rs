@@ -628,49 +628,27 @@ async fn planning_response(
 }
 
 #[tokio::test]
-async fn wave_workflow_uses_stored_definition_offline() {
-    use crate::ops::project;
-
+async fn wave_workflow_selects_a_committed_definition_offline() {
     let fixture = Fixture::new().await;
     let (repo, wave) = planning_repo(&fixture).await;
-    let definition = "nodes: {}\nedges: [{from: start, to: end}]\n";
-    let source = repo.join("workflow.yaml");
-    std::fs::write(&source, definition).unwrap();
     LINEAR_TEST_CONTEXT
         .scope(fixture.context("http://127.0.0.1:1"), async {
-            let selected =
-                crate::ops::project::set_workflow(&repo, Some(wave.slug()), "code", Some(&source))
-                    .await
-                    .unwrap();
-            assert_eq!(selected.workflow.as_deref(), Some("code"));
-            assert_eq!(selected.wave_id, *wave.id());
-            std::fs::remove_file(&source).unwrap();
-            assert_eq!(
-                project::workflow_source(&repo, Some(wave.slug()), "code")
-                    .await
-                    .unwrap(),
-                definition
-            );
-            assert_eq!(
-                fixture
-                    .store
-                    .sqlite
-                    .wave_workflow(wave.id(), "code")
-                    .unwrap()
-                    .as_deref(),
-                Some(definition)
-            );
-            let catalog = project::workflow_catalog(&repo, Some(wave.id().as_str()))
+            let missing = crate::ops::project::set_workflow(&repo, Some(wave.slug()), "review")
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(missing.contains(".lf/workflows/review.yaml"), "{missing}");
+            std::fs::create_dir_all(repo.join(".lf/workflows")).unwrap();
+            std::fs::write(
+                repo.join(".lf/workflows/review.yaml"),
+                "nodes: {}\nedges: [{from: start, to: end}]\n",
+            )
+            .unwrap();
+            let selected = crate::ops::project::set_workflow(&repo, Some(wave.slug()), "review")
                 .await
                 .unwrap();
-            let entries = catalog
-                .iter()
-                .filter(|entry| entry.name == "code")
-                .collect::<Vec<_>>();
-            assert_eq!(entries.len(), 1);
-            assert_eq!(entries[0].source.as_deref(), Some("stored"));
-            assert!(entries[0].workflow.as_ref().unwrap().nodes.is_empty());
-            assert!(!repo.join(".lf/workflows").exists());
+            assert_eq!(selected.workflow.as_deref(), Some("review"));
+            assert_eq!(selected.wave_id, *wave.id());
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
         })
         .await;

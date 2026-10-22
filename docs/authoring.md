@@ -305,14 +305,17 @@ which is told its node's skill and the command for each edge leaving it. `lf --t
 
 Builtins are `feature` (design, demo, land), `code` (demo, land) and
 `research` (findings, no PR). `lf wave workflow list` lists Workflows;
-`lf graph list` lists autonomous Graphs. To edit a Workflow, read its source,
-edit the file, then save it to the Wave:
+`lf graph list` lists autonomous Graphs. To edit a Workflow, copy its source into
+`.lf/workflows/`, edit and commit it, then select it for the Wave:
 
 ```bash
-lf wave workflow source feature WAVE > /tmp/feature.yaml
-# Edit /tmp/feature.yaml.
-lf wave workflow set feature WAVE --file /tmp/feature.yaml
+lf wave workflow source feature > .lf/workflows/feature.yaml
+# Edit .lf/workflows/feature.yaml and commit it.
+lf wave workflow set feature WAVE
 ```
+
+A Wave stores only the selected name. Teammates run your definition once they
+have your commit; until then `lf task run` names the missing file.
 
 `lf graph customize NAME` copies a builtin into `.lf/graphs/`, reusing an
 existing local file and printing its path.

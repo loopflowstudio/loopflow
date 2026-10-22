@@ -845,9 +845,6 @@ fn apply_set(
         migration_preflight(conn, migration, guards)?;
         conn.execute_batch(migration.sql)?;
         seed_peer_planning(conn, migration.sql)?;
-        if migration.sql.contains("CREATE TABLE wave_workflows (") {
-            super::sqlite::wave_definitions::import_registered_workflows(conn)?;
-        }
         backfill_known_checksums(conn, set)?;
         insert_applied_migration(conn, migration, &parent_history)?;
     }

@@ -12,7 +12,12 @@ use crate::store::Store;
 
 pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(run_async(cmd, batch))
+    runtime.block_on(run_async(cmd, batch))?;
+    if matches!(cmd, MachineCommand::Public { .. }) {
+        // Publication runs its own runtime, so it waits until this one is done.
+        super::ops::republish_crons()?;
+    }
+    Ok(())
 }
 
 async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
@@ -42,6 +47,14 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         .await
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
     match cmd {
+        MachineCommand::Public { name } => {
+            let name = (name != "off").then_some(name.as_str());
+            store.sqlite.set_local_public_name(name)?;
+            match name {
+                Some(name) => println!("This Machine is public as {name}"),
+                None => println!("This Machine is private"),
+            }
+        }
         MachineCommand::Id { json } => {
             let machine = store.local_machine().await?;
             if *json {
@@ -240,8 +253,9 @@ pub(super) struct Probe {
     pub version: String,
 }
 
-pub(super) const REMOTE_PATH: &str =
-    "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"";
+// Non-interactive SSH skips shell profiles. Agent CLIs installed with npm live
+// under its configured prefix, which a user-level prefix moves out of PATH.
+pub(super) const REMOTE_PATH: &str = "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; if command -v npm >/dev/null 2>&1; then PATH=\"$PATH:$(npm config get prefix 2>/dev/null)/bin\"; fi";
 
 // Public installer, identical to the first-install command in README.md.
 const INSTALL_COMMAND: &str = "curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh";
@@ -421,12 +435,26 @@ async fn install_remote(target: &str) -> anyhow::Result<()> {
 
 pub(super) fn report_version(target: &str, remote: &str) {
     let local = crate::build_info::BUILD_VERSION;
-    if remote != local {
-        eprintln!(
-            "lf versions differ: remote {remote}, local {local}. Update the remote with `{}`",
-            update_command(target)
-        );
+    if remote == local {
+        return;
     }
+    let update = if release_number(remote) > release_number(local) {
+        "Update this one with `lf install`".to_string()
+    } else {
+        format!("Update the remote with `{}`", update_command(target))
+    };
+    eprintln!("lf versions differ: remote {remote}, local {local}. {update}");
+}
+
+/// Numeric release components; build metadata and suffixes do not order.
+fn release_number(version: &str) -> Vec<u64> {
+    version
+        .split(['-', '+'])
+        .next()
+        .unwrap_or_default()
+        .split('.')
+        .map(|part| part.parse().unwrap_or(0))
+        .collect()
 }
 
 fn update_command(target: &str) -> String {
@@ -477,7 +505,14 @@ pub fn validate_expected_machine_process() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::default_label;
+    use super::{default_label, release_number};
+
+    #[test]
+    fn release_numbers_order_by_component() {
+        assert!(release_number("0.14.14") > release_number("0.14.12"));
+        assert!(release_number("0.14.10") > release_number("0.14.9"));
+        assert_eq!(release_number("0.14.14-dev+abc"), release_number("0.14.14"));
+    }
 
     #[test]
     fn labels_follow_ssh_hosts_without_restricting_destinations() {

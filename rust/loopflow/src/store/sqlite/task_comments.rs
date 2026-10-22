@@ -224,28 +224,7 @@ impl SqliteStore {
             return Ok(());
         }
         insert_authored_comment(&tx, &task.id, comment)?;
-        if let TaskCommentAuthor::Person { name } = &comment.author {
-            if crate::ops::linear_observe::is_direction_comment(&comment.body, Some("local")) {
-                let text = match name {
-                    Some(name) => format!("Comment {} by {name}:\n\n{}", comment.id, comment.body),
-                    None => format!(
-                        "Comment {} (attribution unresolved):\n\n{}",
-                        comment.id, comment.body
-                    ),
-                };
-                Self::save_task_steer_in(
-                    &tx,
-                    &task.id,
-                    &name
-                        .as_ref()
-                        .map(|name| crate::durable::Author::Named(name.clone()))
-                        .unwrap_or(crate::durable::Author::User),
-                    &text,
-                    &format!("comment:{}", comment.id),
-                    "local",
-                )?;
-            }
-        }
+        comment_steer_in(&tx, &task.id, comment)?;
         tx.commit()?;
         Ok(())
     }
@@ -273,6 +252,42 @@ impl SqliteStore {
         )?;
         Ok(())
     }
+}
+
+/// A person's direction comment steers the Task's Sessions at their next
+/// boundary, wherever the Task runs. Local comments and comments arriving
+/// through Git planning render identically, so every Machine agrees on the
+/// steer's `(source, revision)` and text.
+pub(super) fn comment_steer_in(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+    comment: &TaskComment,
+) -> StoreResult<()> {
+    let TaskCommentAuthor::Person { name } = &comment.author else {
+        return Ok(());
+    };
+    if !crate::ops::linear_observe::is_direction_comment(&comment.body, Some("local")) {
+        return Ok(());
+    }
+    let text = match name {
+        Some(name) => format!("Comment {} by {name}:\n\n{}", comment.id, comment.body),
+        None => format!(
+            "Comment {} (attribution unresolved):\n\n{}",
+            comment.id, comment.body
+        ),
+    };
+    SqliteStore::save_task_steer_in(
+        tx,
+        task,
+        &name
+            .as_ref()
+            .map(|name| crate::durable::Author::Named(name.clone()))
+            .unwrap_or(crate::durable::Author::User),
+        &text,
+        &format!("comment:{}", comment.id),
+        "local",
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

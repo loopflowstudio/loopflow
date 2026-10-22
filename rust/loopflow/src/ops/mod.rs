@@ -52,10 +52,9 @@ pub use commit::{commit_selected, commit_workflow, commit_workflow_traced, Commi
 pub use cron::{
     add_cron, daily_time_of, default_launch_agents_dir, latest_cron_receipt, list_cron_receipts,
     list_crons, parse_schedule, parse_wait_duration, receipt_is_stale, receipt_root,
-    record_cron_preflight_failure, remove_cron, resolve_lf_path, run_cron, schedule_from_cron,
-    sync_crons, trigger_cron, validate_cron_specs, wait_for_cron_receipt, CronHost, CronOutcome,
-    CronReceipt, CronSchedule, CronSource, CronSpec, CronSyncResult, CronTargetKind, InstalledCron,
-    SystemLaunchctl,
+    record_cron_preflight_failure, reinstall_crons, remove_cron, resolve_lf_path, run_cron,
+    schedule_from_cron, trigger_cron, wait_for_cron_receipt, CronHost, CronOutcome, CronReceipt,
+    CronSchedule, CronSource, CronSpec, CronTargetKind, InstalledCron, SystemLaunchctl,
 };
 pub(crate) use cron::{cron_receipt_ids, list_cron_obligations, CronObligation};
 pub use error::{OpsError, OpsResult};

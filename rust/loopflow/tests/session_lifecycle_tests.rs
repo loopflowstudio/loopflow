@@ -1821,9 +1821,10 @@ fn declared_agent_can_start_another_tasks_graph() {
         "- cmd: sync --plan\n",
     )
     .unwrap();
-    std::fs::create_dir_all(y.join(".lf/workflows")).unwrap();
+    // The Wave default reads the repository's committed definitions.
+    std::fs::create_dir_all(fixture.repo.path().join(".lf/workflows")).unwrap();
     std::fs::write(
-        y.join(".lf/workflows/switch-proof.yaml"),
+        fixture.repo.path().join(".lf/workflows/switch-proof.yaml"),
         "nodes:\n  demo: demo\nedges:\n  - { from: start, to: demo, graph: switch-proof }\n  - { from: demo, to: end }\n",
     )
     .unwrap();
@@ -1835,11 +1836,7 @@ fn declared_agent_can_start_another_tasks_graph() {
     store.set_task_agent(&caller.id, "opencode").unwrap();
     store.set_task_agent(&target.task.id, "claude").unwrap();
     store
-        .select_wave_workflow(
-            target.task.wave_id.as_ref().unwrap(),
-            "switch-proof",
-            &std::fs::read_to_string(y.join(".lf/workflows/switch-proof.yaml")).unwrap(),
-        )
+        .select_wave_workflow(target.task.wave_id.as_ref().unwrap(), "switch-proof")
         .unwrap();
     let bin = fixture.home.path().join("bin");
     std::fs::remove_file(bin.join("lf")).unwrap();

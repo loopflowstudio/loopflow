@@ -192,19 +192,7 @@ def test_host_publisher_owns_credentialed_release_steps():
 
 def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
     config = yaml.safe_load((ROOT / ".lf/config.yaml").read_text())
-    jobs = [job for job in config["crons"] if job["command"][:2] == ["--wave", "infrastructure"]]
-    assert jobs == [
-        {
-            "name": "telemetry-daily",
-            "command": ["--wave", "infrastructure", "--batch", "graph", "telemetry-daily"],
-            "schedule": "0 0 9 * * *",
-        },
-        {
-            "name": "release-run",
-            "command": ["--wave", "infrastructure", "--batch", "graph", "release-run"],
-            "schedule": "0 0 10 * * *",
-        },
-    ]
+    assert "crons" not in config
     assert yaml.safe_load((ROOT / ".lf/graphs/release-run.yaml").read_text()) == [
         {"cmd": "repo release run patch"}
     ]
@@ -222,8 +210,9 @@ def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
     assert 'local_machine="$(lf machine id)"' in bootstrap
     assert 'placed_machine="$(lf wave status "$wave" --json' in bootstrap
     assert "--git-common-dir" in bootstrap
-    assert 'lf cron preflight --wave "$wave"' in bootstrap
-    assert '"${minimal_env[@]}" lf cron sync --wave "$wave"' in bootstrap
+    assert '"${minimal_env[@]}" lf cron add telemetry-daily --schedule "0 0 9 * * *"' in bootstrap
+    assert '"${minimal_env[@]}" lf cron add release-run --schedule "0 0 10 * * *"' in bootstrap
+    assert "-- --wave \"$wave\" --batch graph release-run" in bootstrap
     assert 'lf cron list --wave "$wave" --json' in bootstrap
     assert "lf cron trigger" in bootstrap
     assert "--graph telemetry-daily --wait --timeout 15m" in bootstrap
@@ -236,11 +225,11 @@ def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
     assert "printf '%s\\n' \"$local_machine\"" not in bootstrap
     assert "bootstrap complete: %s owns" not in bootstrap
     assert "wrong Machine in installed cron: {entry!r}" not in bootstrap
-    assert bootstrap.index('lf cron preflight --wave "$wave"') < bootstrap.index(
-        "scripts/publish_release.py check"
-    )
     assert bootstrap.index("scripts/publish_release.py check") < bootstrap.index(
-        'lf cron sync --wave "$wave"'
+        "lf cron add telemetry-daily"
+    )
+    assert bootstrap.index("lf cron add telemetry-daily") < bootstrap.index(
+        "lf cron add release-run"
     )
 
     public_contract = "\n".join(

@@ -310,6 +310,17 @@ fn executable_file(path: &Path) -> bool {
     metadata.is_file()
 }
 
+/// A failed process's own last word, formatted to follow its exit status.
+pub(crate) fn exit_reason(stderr: &str) -> String {
+    stderr
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| format!(": {line}"))
+        .unwrap_or_default()
+}
+
 pub(crate) fn shell_escape(value: &str) -> String {
     let escaped = value.replace('\'', "'\\''");
     format!("'{escaped}'")

@@ -350,9 +350,7 @@ See [Machines and processes](architecture/machines.md) and
 ```bash
 lf wave status infra --json
 lf update-plan --wave infra --plan plan.json
-lf wave workflow set research WAVE    # only the workflow
-lf wave workflow source research WAVE > /tmp/research.yaml
-lf wave workflow set research WAVE --file /tmp/research.yaml
+lf wave workflow set research WAVE    # only the workflow; .lf/workflows/ or builtin
 ```
 
 `plan.json` contains the complete current plan:
@@ -383,7 +381,7 @@ namespace. Don't paste ids by hand.
 ```bash
 lf repo connect infra --team-key LOO # first Wave establishes the repo Team
 lf repo connect --all                  # all nested Waves reuse it
-lf refresh infra              # refresh the local SQLite snapshot
+lf refresh infra              # refresh the local SQLite snapshot (Git planning: the whole repository)
 lf wave status infra                   # deterministic cache-only read
 lf task create --wave infra --title "Daemon data integrity"
 lf task workflow move 1207... end --reason "Dark mode delivered"

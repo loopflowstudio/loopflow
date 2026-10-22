@@ -166,7 +166,7 @@ struct WorldRead: Sendable, CustomTestStringConvertible {
         },
         WorldRead("config user", "userName") { world in
             let read = try await world.query.userName()
-            #expect(read == "Demo")
+            #expect(read == "Fixture Person")
         },
         WorldRead("monitor work --watch", "watchWork") { world in
             let task = try await world.task(named: running)

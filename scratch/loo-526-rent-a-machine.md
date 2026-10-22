@@ -398,6 +398,32 @@ Jack's Q10a (stored long-lived tokens) left no approval in `prepare`, so Q7's
 `-b` refusal lost its reason; replaced by the pre-rent check under "The pod" (built).
 Q8 sharpens and stays open in `questions.md`.
 
+## Concept review (2026-10-22, after the setup-token terminal, headless)
+
+The model still maps one-to-one; the terminal harness is mechanism only.
+One gap follows from Jack's "minted once a year": nothing reads the year.
+`claude_accounts_by_token` and `connect` count any stored token, so a year
+after minting `-b --rent` passes its pre-rent check, pays for a pod, installs
+a credential Anthropic refuses, and the Task fails on the pod. And the person
+learns a token's age only from that failure: `lf account list` does not say
+which accounts rentals receive.
+
+Settled (next implement):
+
+- A token past `long_lived_token_minted_at + 365 days` is no token: one
+  predicate on `LongLivedToken` (`expires_at`, `is_current(now)`) used by
+  `claude_accounts_by_token` and `connect`. Expired accounts take the existing
+  "no long-lived token" path (skip with the `lf account token` note; `-b`
+  refuses before renting when none is current; foreground mints). The skip
+  note says "expired <date>" instead of "no long-lived token".
+- `lf account list` shows each Claude account's rental token: "rental token
+  until 2027-10-22", "rental token expired 2026-…", or nothing. Renewal is
+  `lf account token claude <email>` again (overwrites). No new command, no
+  warning window.
+- A hand-supplied token (`--file`) is dated from when lf stores it; lf
+  cannot read its real mint date (no `user:profile`). Recorded in
+  `questions.md`.
+
 ## Status and remaining work
 
 Built 2026-10-21 (implement, compress, copy-up implement, compress, post-review implement): the draft
@@ -481,6 +507,9 @@ probe; the result is "Credentials on a rented machine" above.
 
 Remaining:
 
+0. **Token expiry** (concept review above): expired tokens count as absent;
+   `lf account list` shows each Claude account's rental token date. Unit test:
+   an account minted 366 days ago is skipped and fails the `-b` check.
 1. **Jack's demo (≤ $0.40)**: the Task path end to end with this branch's
    Linux build on the pod for `lf history export`. First `lf account token
    claude <email>` per account (one Chrome approval and code paste each, a

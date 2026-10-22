@@ -182,3 +182,11 @@ the callback page, so the paste stays.
   RunPod's disk deletion as the boundary (current behavior), or (b) remove the
   credential files over SSH before `DELETE` (cheap, does not revoke). Not blocking the
   demo: Jack chose installing tokens on rentals with this exposure known.
+
+## Raised in concept review after the setup-token terminal (2026-10-22)
+
+- **Assumed: a token's year runs from when lf stores it.** A token supplied
+  with `--file` may have been minted earlier; lf cannot ask Anthropic (the
+  token lacks `user:profile`). If one fails sooner, `lf account token` again
+  replaces it. Expired tokens count as absent (settled, see the design's
+  concept review).

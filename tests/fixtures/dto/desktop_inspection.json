@@ -140,7 +140,7 @@
         "condition_observed_at": "2026-10-08T18:59:58Z",
         "actions": {
           "recommended": "resume",
-          "reason": "Inspect earlier Flows before continuing"
+          "reason": "Inspect earlier Graphs before continuing"
         },
         "run_control": {
           "unavailable": "Task checkout is on another Machine"

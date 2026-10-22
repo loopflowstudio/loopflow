@@ -112,15 +112,19 @@ pub(super) fn task_of_process(
         .optional()?)
 }
 
-pub(super) fn flows_of_task(
+pub(super) fn graphs_of_task(
     conn: &rusqlite::Connection,
     task: &TaskId,
-) -> StoreResult<Vec<crate::ops::flow_process::FlowProcess>> {
-    super::flow_inventory::flows_in(
+) -> StoreResult<Vec<crate::ops::graph_process::GraphProcess>> {
+    super::graph_inventory::graphs_in(
         conn,
         &format!(
             "e.id IN ({})",
-            lf_process_ids_in(conn, "?1", Some("SELECT lf_process_id FROM flow_processes"))?
+            lf_process_ids_in(
+                conn,
+                "?1",
+                Some("SELECT lf_process_id FROM graph_processes")
+            )?
         ),
         &[&task.as_str()],
     )
@@ -249,7 +253,7 @@ fn choose_edge_in(
 ) -> StoreResult<bool> {
     if super::durable::task_state_in(tx, task)? == crate::durable::TaskState::Paused {
         return Err(crate::store::StoreError::InvalidAuthority(
-            "Task is paused; resume it before running a Flow".into(),
+            "Task is paused; resume it before running a Graph".into(),
         ));
     }
     let chosen = &workflow.definition.edges[edge as usize];
@@ -257,7 +261,7 @@ fn choose_edge_in(
         WorkflowPosition::Node { .. } => None,
         WorkflowPosition::Edge { lf_process_id, .. } => Some(lf_process_id.as_str()),
     };
-    let carried = chosen.flow.is_some();
+    let carried = chosen.graph.is_some();
     let left = tx.execute(
         "UPDATE task_workflows SET node=?2,edge=?3,lf_process_id=?4,updated_at=?5
          WHERE task_id=?1 AND node=?6 AND lf_process_id IS ?7",
@@ -423,13 +427,13 @@ fn members(
     task: &TaskId,
 ) -> StoreResult<(
     Vec<TaskSession>,
-    Vec<crate::durable::FlowProcessInventoryEntry>,
+    Vec<crate::durable::GraphProcessInventoryEntry>,
 )> {
     let sessions = tx
         .prepare(&format!(
             "SELECT s.id,s.title,s.interactive,{},s.completed_at
             FROM agent_sessions s WHERE s.id IN ({}) ORDER BY s.created_at,s.id",
-            super::sessions::SESSION_FLOW,
+            super::sessions::SESSION_GRAPH,
             session_ids("?1")
         ))?
         .query_and_then([task.as_str()], |row| {
@@ -437,16 +441,16 @@ fn members(
                 id: row.get(0)?,
                 title: row.get(1)?,
                 interactive: row.get(2)?,
-                flow_lf_process_id: row.get(3)?,
+                graph_lf_process_id: row.get(3)?,
                 completed_at: row.get(4)?,
             })
         })?
         .collect::<StoreResult<Vec<_>>>()?;
-    let flows = flows_of_task(tx, task)?
+    let graphs = graphs_of_task(tx, task)?
         .iter()
-        .map(|flow| super::flow_inventory::entry_in(tx, flow))
+        .map(|graph| super::graph_inventory::entry_in(tx, graph))
         .collect::<StoreResult<Vec<_>>>()?;
-    Ok((sessions, flows))
+    Ok((sessions, graphs))
 }
 
 impl SqliteStore {
@@ -482,14 +486,14 @@ impl SqliteStore {
     pub fn task_overview(&self, task: &TaskId) -> StoreResult<crate::task_work::TaskOverview> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
-        let (sessions, flow_processes) = members(&tx, task)?;
+        let (sessions, graph_processes) = members(&tx, task)?;
         let workflow = workflow_row(&tx, task)?;
         let history = workflow_moves(&tx, task)?;
         tx.commit()?;
         drop(conn);
         Ok(crate::task_work::TaskOverview {
             sessions,
-            flow_processes,
+            graph_processes,
             workflow: workflow.map(|row| self.read_workflow(row, history)),
         })
     }
@@ -498,7 +502,7 @@ impl SqliteStore {
     pub fn task_work(&self, task: &TaskId) -> StoreResult<TaskWork> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
-        let (sessions, flows) = members(&tx, task)?;
+        let (sessions, graphs) = members(&tx, task)?;
         let processes = tx
             .prepare(&format!(
                 "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
@@ -514,13 +518,13 @@ impl SqliteStore {
         let workflow = workflow.map(|row| self.read_workflow(row, history));
         Ok(TaskWork {
             sessions,
-            flow_processes: flows,
+            graph_processes: graphs,
             processes,
             workflow,
         })
     }
 
-    /// Single-Task execution gates need neither other Tasks nor retained Session/Flow payloads.
+    /// Single-Task execution gates need neither other Tasks nor retained Session/Graph payloads.
     pub(crate) fn task_open_processes(&self, task: &TaskId) -> StoreResult<Vec<LfProcess>> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
@@ -553,7 +557,7 @@ impl SqliteStore {
         Ok(Some(self.read_workflow(row, history)))
     }
 
-    /// Whether the carrying Flow still runs is its Process's, read here.
+    /// Whether the carrying Graph still runs is its Process's, read here.
     fn read_workflow(
         &self,
         (definition, node, edge): WorkflowRow,
@@ -603,7 +607,7 @@ impl SqliteStore {
         Ok(tx.commit()?)
     }
 
-    /// Leave by `edge`, one of `workflow.outgoing`. An edge with a Flow puts
+    /// Leave by `edge`, one of `workflow.outgoing`. An edge with a Graph puts
     /// the Task on it, carried by `by`; one that runs nothing puts it at its
     /// target. Returns false, writing nothing, when the Task is no longer
     /// where `workflow` read it, so two choosers cannot both leave.
@@ -662,13 +666,13 @@ impl SqliteStore {
         })
     }
 
-    /// Every Flow among the Task's work, oldest first.
-    pub(crate) fn task_flows(
+    /// Every Graph among the Task's work, oldest first.
+    pub(crate) fn task_graphs(
         &self,
         task: &TaskId,
-    ) -> StoreResult<Vec<crate::ops::flow_process::FlowProcess>> {
+    ) -> StoreResult<Vec<crate::ops::graph_process::GraphProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        flows_of_task(&conn, task)
+        graphs_of_task(&conn, task)
     }
 }
 
@@ -678,7 +682,7 @@ mod tests {
 
     use rusqlite::params;
 
-    use crate::durable::{FlowProcessFilter, ProjectId, TaskId};
+    use crate::durable::{GraphProcessFilter, ProjectId, TaskId};
     use crate::id::{LfProcessId, TraceId, WaveId};
     use crate::process::{LfProcessFilter, LfProcessWorkFilter};
     use crate::session::SessionFilter;
@@ -745,7 +749,7 @@ mod tests {
             edges: vec![crate::workflow::WorkflowEdge {
                 from: "start".into(),
                 to: "end".into(),
-                flow: Some("pursue".into()),
+                graph: Some("pursue".into()),
             }],
         };
         store
@@ -957,7 +961,7 @@ mod tests {
             after_cleanup.0 <= before_cleanup.0 * 2 && after_cleanup.1 <= before_cleanup.1 * 2,
             "Unrelated history increased cleanup scans: {before_cleanup:?} → {after_cleanup:?}"
         );
-        // Flow reads restrict candidates without losing historical association
+        // Graph reads restrict candidates without losing historical association
         // when the candidate ran outside the Task's checkout.
         let candidates = super::lf_process_ids_in(&conn, "?1", Some("SELECT ?2")).unwrap();
         let read_candidates = || {
@@ -983,7 +987,7 @@ mod tests {
         let after = read_candidates();
         assert!(
             after <= before * 2,
-            "Unrelated commands increased Flow membership work: {before} → {after}"
+            "Unrelated commands increased Graph membership work: {before} → {after}"
         );
     }
 
@@ -1181,14 +1185,14 @@ mod tests {
             )
             .unwrap();
         }
-        // A Flow is the Task's work when its Processes ran in the checkout.
-        let independent = store.test_flow(
+        // A Graph is the Task's work when its Processes ran in the checkout.
+        let independent = store.test_graph(
             "independent",
             "/missing/task%_/sub",
             &[("implement", None)],
             None,
         );
-        store.test_flow("unrelated", "/other", &[("implement", None)], None);
+        store.test_graph("unrelated", "/other", &[("implement", None)], None);
         let work = store.task_work(&task).unwrap();
         assert_eq!(
             work.sessions
@@ -1198,13 +1202,16 @@ mod tests {
             ["conversation", "history", "manual"]
         );
         assert_eq!(
-            work.flow_processes
+            work.graph_processes
                 .iter()
                 .map(|f| f.summary.id.as_str())
                 .collect::<Vec<_>>(),
             [independent.as_str()]
         );
-        assert_eq!(work.flow_processes[0].summary.task_id.as_ref(), Some(&task));
+        assert_eq!(
+            work.graph_processes[0].summary.task_id.as_ref(),
+            Some(&task)
+        );
         assert_eq!(work.processes.len(), 4);
         // The open reading agrees with the full one about unfinished Processes.
         let initial_open = store.task_open_processes(&task).unwrap();
@@ -1285,9 +1292,9 @@ mod tests {
         assert!(summaries
             .iter()
             .all(|session| session.task_ids == std::slice::from_ref(&task)));
-        let flows = store
-            .flow_inventory(
-                &FlowProcessFilter {
+        let graphs = store
+            .graph_inventory(
+                &GraphProcessFilter {
                     task_id: Some(task.clone()),
                     ..Default::default()
                 },
@@ -1295,8 +1302,8 @@ mod tests {
                 NonZeroU32::new(100).unwrap(),
             )
             .unwrap();
-        assert_eq!(flows.entries, work.flow_processes);
-        // The Flow's step is the only work performed in the checkout.
+        assert_eq!(graphs.entries, work.graph_processes);
+        // The Graph's step is the only work performed in the checkout.
         let performed = store
             .processes(
                 &LfProcessFilter {
@@ -1307,14 +1314,14 @@ mod tests {
                 NonZeroU32::new(100).unwrap(),
             )
             .unwrap();
-        let (flow, _) = store.flow_process(independent.as_str()).unwrap().unwrap();
+        let (graph, _) = store.graph_process(independent.as_str()).unwrap().unwrap();
         assert_eq!(
             performed
                 .entries
                 .iter()
                 .map(|process| &process.id)
                 .collect::<Vec<_>>(),
-            [&flow.steps[0].process.id]
+            [&graph.steps[0].process.id]
         );
 
         let child = TaskId::new();
@@ -1325,7 +1332,7 @@ mod tests {
             conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('child-session','Child','human',1,0,'/missing/task%_/child',?1,?2)", params![child.as_str(), wave]).unwrap();
         }
         // A nested checkout's work is also its enclosing Task's.
-        let child_flow = store.test_flow(
+        let child_graph = store.test_graph(
             "child",
             "/missing/task%_/child",
             &[("implement", None)],
@@ -1333,9 +1340,9 @@ mod tests {
         );
         let work = store.task_work(&task).unwrap();
         assert!(work
-            .flow_processes
+            .graph_processes
             .iter()
-            .any(|flow| flow.summary.id == child_flow.as_str()));
+            .any(|graph| graph.summary.id == child_graph.as_str()));
         assert!(work
             .sessions
             .iter()
@@ -1355,20 +1362,23 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["history"]
         );
-        assert!(work.flow_processes.is_empty());
+        assert!(work.graph_processes.is_empty());
 
-        // A Flow explicitly bound through a Session remains visible after the
+        // A Graph explicitly bound through a Session remains visible after the
         // checkout disappears. Inventory and Task status use the same rule.
-        let bound_flow = store.test_flow("bound", "/elsewhere", &[], None);
+        let bound_graph = store.test_graph("bound", "/elsewhere", &[], None);
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','bound-flow',?1,3,'{}')", [&bound_flow]).unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','bound-graph',?1,3,'{}')", [&bound_graph]).unwrap();
         }
         let work = store.task_work(&task).unwrap();
-        assert_eq!(work.flow_processes.len(), 1);
-        assert_eq!(work.flow_processes[0].summary.id, bound_flow.as_str());
-        assert_eq!(work.flow_processes[0].summary.task_id.as_ref(), Some(&task));
-        let (_, entry) = store.flow_process(bound_flow.as_str()).unwrap().unwrap();
+        assert_eq!(work.graph_processes.len(), 1);
+        assert_eq!(work.graph_processes[0].summary.id, bound_graph.as_str());
+        assert_eq!(
+            work.graph_processes[0].summary.task_id.as_ref(),
+            Some(&task)
+        );
+        let (_, entry) = store.graph_process(bound_graph.as_str()).unwrap().unwrap();
         assert_eq!(entry.summary.task_id.as_ref(), Some(&task));
         assert_eq!(entry.summary.wave_id.as_ref(), Some(&wave));
     }

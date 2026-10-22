@@ -2,23 +2,23 @@
 # Using lf
 
 `lf` launches coding agents, keeps their Sessions, and runs saved Skills and
-Flows. Use as much of it as the request needs. A Flow is an authored sequence
+Graphs. Use as much of it as the request needs. A Graph is an authored sequence
 of steps; it runs with or without a Task.
 
 Work in the supplied checkout. Read its agent guide and existing work, preserve
 other contributions, and carry out the request here. Do not launch another
 agent or create a worktree merely to do the work already assigned to this one.
-Follow a supplied Flow's steps and boundaries; finishing it selects no next work,
-but steps a stopped Flow never reached remain yours.
+Follow a supplied Graph's steps and boundaries; finishing it selects no next work,
+but steps a stopped Graph never reached remain yours.
 
 Use the requested tools and repository conventions. Read
-`lf help <command-or-skill>` for instructions on Sessions, Skills, Flows,
+`lf help <command-or-skill>` for instructions on Sessions, Skills, Graphs,
 worktrees and PRs.
 
 When continuing an existing Task or when the request calls for Tasks, Waves,
 or Projects, read `lf help skill work` unless that guidance was preloaded. It is also
 available as `lf skill work`. Work association supplies context; the request
-or selected Skill/Flow determines what to do. Stay within that chosen scope.
+or selected Skill/Graph determines what to do. Stay within that chosen scope.
 
 Name the Session for the work in two or three specific words. Read `session_id`
 from `LF_AGENT_CALLER` and use `lf session rename <id> "<name>" --suggest` when
@@ -40,7 +40,7 @@ new direction. Keep secrets out of output and follow the repository's policy.
 
 Use this contract when the request uses work APIs or continues an existing
 Task. Desktop and custom clients use the same APIs. Work association supplies
-context and ownership; the request, selected Skill or authored Flow supplies
+context and ownership; the request, selected Skill or authored Graph supplies
 the procedure. Reading this skill creates nothing and starts no work.
 
 ## Work model
@@ -48,14 +48,14 @@ the procedure. Reading this skill creates nothing and starts no work.
 - **Wave**: a durable objective, memory and area of responsibility.
 - **Project**: a Wave's plan, including Tasks, KRs and targets.
 - **Task**: one repository-owned intended outcome with optional Wave membership, its checkout, conversations and a current PR and delivery history.
-- **Workflow**: a Task's selected graph of review nodes and Flow edges.
-- **Flow**: one execution of authored steps, with or without a Task.
+- **Workflow**: a Task's selected graph of review nodes and Graph edges.
+- **Graph**: one execution of authored steps, with or without a Task.
 - **Session**: a conversation. **Process**: one actual lf process.
 
 Continue the selected Task or the current checkout's existing Task. Preserve
 its identity, checkout, PR and live work. Unrelated Tasks in the repository do
 not select work for this conversation. Do not create a Task merely because a
-worktree, PR or Flow exists. Create Tasks when requested or when the selected
+worktree, PR or Graph exists. Create Tasks when requested or when the selected
 planning procedure calls for them; taskless work remains taskless otherwise.
 
 Use `lf` for changes to managed worktrees, Task delivery and Work state so their
@@ -71,14 +71,14 @@ worktrees. Unknown or unavailable evidence is not an empty plan. Report the
 missing service and continue independent work; do not repair auth unasked.
 
 Before starting more execution, inspect the Task's live work, previous results
-and effects. Leave a live Flow running. A stopped Flow is history: repair the
+and effects. Leave a live Graph running. A stopped Graph is history: repair the
 cause and run the steps it did not reach, without replaying effects.
 
 `lf task run` takes up the Task's selected Workflow when applicable and runs an
 edge. `lf task workflow move` changes its position without executing anything.
 `lf task move --wave/--no-wave` changes membership and preserves existing work. Review
 feedback, Task association, and an idle process are not instructions to launch.
-A finished Flow or published PR does not prove Task completion. Complete the
+A finished Graph or published PR does not prove Task completion. Complete the
 Task when its accepted outcome is delivered, using authoritative state.
 
 For ongoing supervision, explicitly select `task-operate`, `wave-operate` or
@@ -96,10 +96,10 @@ same Task selects a new current PR and preserves earlier delivery history. No Ta
 required for ordinary PR delivery.
 
 Read the supplied brief, accepted design and relevant Wave memory. Keep working
-plans in scratch. Wave context is read-only unless the selected Loopflow Flow
+plans in scratch. Wave context is read-only unless the selected Loopflow Graph
 calls for maintaining it. Task/Wave association and use of Work APIs alone do
 not authorize writes to `.lf/wave/`. Keep proposed memory updates in local notes
-outside that procedure; never start a Flow merely to obtain write authority.
+outside that procedure; never start a Graph merely to obtain write authority.
 Never guess a Wave merely to complete a template.
 
 Use scratch freely for plans and notes; its Markdown enters context automatically.
@@ -114,7 +114,7 @@ belongs in Task comments. Preserve `<!-- loopflow-progress:... -->` provenance
 for published agent progress; `lf comment --steer` is only for new direction.
 Selected operators read failure logs and discuss missing judgment in their
 ongoing conversation. An open conversation does not schedule another turn;
-Flows and installed schedules run independently.
+Graphs and installed schedules run independently.
 
 </lf:work-guidance>
 

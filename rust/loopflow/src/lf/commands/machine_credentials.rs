@@ -10,7 +10,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
 use crate::durable::Machine;
-use crate::lf::{Cli, Commands, FlowCommand, MachineCredentialCommand, TaskCommand};
+use crate::lf::{Cli, Commands, GraphCommand, MachineCredentialCommand, TaskCommand};
 use crate::profile::EmailAddress;
 use crate::provider_account::selection::AccountSelection;
 use crate::provider_account::{
@@ -813,8 +813,8 @@ pub(super) async fn prepare_launch(
         cli.command,
         None | Some(
             Commands::Skill { .. }
-                | Commands::Flow {
-                    cmd: FlowCommand::External(_)
+                | Commands::Graph {
+                    cmd: GraphCommand::External(_)
                 }
                 | Commands::External(_)
                 | Commands::Task {

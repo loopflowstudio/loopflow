@@ -5,7 +5,7 @@ use crate::agent::stream::StreamFormat;
 use crate::agent::AgentConfig;
 use crate::agent::ProcessConfig;
 use crate::config::parse_agent;
-use crate::flow::Skill;
+use crate::graph::Skill;
 use crate::lf::commands::context::preview::PromptPreview;
 use crate::lf::commands::util::launch_session;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -346,7 +346,7 @@ fn resolve_skill(name: Option<&str>, cli: &Cli, repo: &Path) -> Result<Option<Sk
     match &cli.resolved_invocation {
         Some(invocation) => Ok(Some(invocation.skill.clone())),
         None => Ok(name
-            .map(|name| crate::flow::load_skill(name, repo))
+            .map(|name| crate::graph::load_skill(name, repo))
             .transpose()?),
     }
 }
@@ -387,7 +387,7 @@ fn build_bound_prompt_at(
 }
 
 // Keep the existing unattended Task confinement while applying it equally to
-// direct skills and Flows. The broader checkout-only versus unattended-only
+// direct skills and Graphs. The broader checkout-only versus unattended-only
 // policy remains Jack's choice; neither is selected by this intersection.
 fn confine_checkout_agent(task_checkout: bool, interactive: bool) -> bool {
     task_checkout && !interactive
@@ -496,7 +496,7 @@ fn build_prompt_at(
         }
     }
     // Ordinary third-party skills need their own instructions, not the Work
-    // operating manual. Captured Flows and attributed Work retain that guidance.
+    // operating manual. Captured Graphs and attributed Work retain that guidance.
     let standalone_native = task_input.is_none()
         && wave.is_none()
         && !captured
@@ -717,7 +717,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
 
     let result = run_headless_prompt(built, &capture, &agent_config);
     // Explicit native resume can retire this provider while its executor waits.
-    // Settle our capture as interrupted; a failed Flow step would replay it.
+    // Settle our capture as interrupted; a failed Graph step would replay it.
     if capture.attachment_replaced()? {
         capture.finish("interrupted")?;
         return Err(crate::process::CommandExit(130).into());
@@ -828,7 +828,7 @@ fn begin_capture(
         worktree: Some(built.repo_root.clone()),
         skill: built.skill_name.clone(),
         subjects,
-        flow: crate::session_record::SessionFlowMembership::Independent,
+        graph: crate::session_record::SessionGraphMembership::Independent,
         work: built.work.clone(),
     };
     let capture = if let Some(session) = resume {

@@ -1,4 +1,4 @@
-//! Delivery observation and CI repair settings. Repository checks never resume Flows.
+//! Delivery observation and CI repair settings. Repository checks never resume Graphs.
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -134,7 +134,7 @@ pub fn status(repo: &Path) -> OpsResult<AutomationStatus> {
             &super::cron::SystemLaunchctl,
         )?;
         let job = jobs.iter().find(|job| {
-            job.target_kind == super::cron::CronTargetKind::Repository && job.flow == key
+            job.target_kind == super::cron::CronTargetKind::Repository && job.graph == key
         });
         let enabled = job.is_some_and(|job| job.loaded);
         let receipts = super::cron::list_cron_receipts(

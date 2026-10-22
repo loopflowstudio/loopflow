@@ -7,7 +7,7 @@ uv run python scripts/test_network.py uv run --no-sync python \
   scripts/benchmarks/skill-invocation/launch.py --lf target/debug/lf \
   --fixtures /tmp/lf-skill-fixtures --source internal-comms --provider codex
 uv run python scripts/test_network.py uv run --no-sync python \
-  scripts/benchmarks/skill-invocation/request_mapping.py --lf target/debug/lf --flow
+  scripts/benchmarks/skill-invocation/request_mapping.py --lf target/debug/lf --graph
 uv run pytest scripts/benchmarks/skill-invocation/test_request_mapping.py -q
 uv run python scripts/test_network.py uv run --no-sync python \
   scripts/benchmarks/skill-invocation/launch.py --fixtures /tmp/lf-skill-fixtures \
@@ -30,7 +30,7 @@ Use either source with `--provider claude` or `--provider codex`. `--terminal`
 exercises lf's terminal command builder, substituting provider print/exec mode
 for unattended execution. It proves neither terminal rendering nor interactive
 behavior. Claude terminal exercises native expansion with separate gathered user
-context. `--flow` removes the source
+context. `--graph` removes the source
 file after capture and checks that its instructions still reach the provider.
 
 Matching-provider cases run lf then a plain native skill serially, with identical
@@ -52,7 +52,7 @@ Codex prompt's one-based positions and named arguments against the same API.
 `request_mapping.py` uses a synthetic Claude skill to test native argument parsing,
 model declaration application, unknown-declaration reporting and separate user
 context. `--terminal --command` exercises a single-file command with a competing
-personal skill; JSON-decoded context must retain literal argument and shell syntax. `--flow` removes its
+personal skill; JSON-decoded context must retain literal argument and shell syntax. `--graph` removes its
 source after capture and adds a same-name collision. Manifest bytes prove captured
 source retention. Its reference-file assertion is filesystem reachability only;
 `launch.py` supplies the actual provider tool read.

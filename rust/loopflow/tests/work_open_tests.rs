@@ -232,7 +232,7 @@ fn cmux_opens_the_task_conversation_through_session_connect() {
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     // The Task waits at its design review: the workspace name says so.
-    let graph = serde_json::json!({"name": "feature", "nodes": [{"name": "design", "skill": "review-design", "description": null}], "edges": [{"from": "design", "to": "end", "flow": null}]});
+    let graph = serde_json::json!({"name": "feature", "nodes": [{"name": "design", "skill": "review-design", "description": null}], "edges": [{"from": "design", "to": "end", "graph": null}]});
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
         .execute(
@@ -476,7 +476,7 @@ fn live_conversation(
                 iterations: None,
                 task_id: None,
                 wave_id: None,
-                flow_lf_process_id: None,
+                graph_lf_process_id: None,
                 work_source: None,
                 bound_at: None,
                 interactive: true,
@@ -808,7 +808,7 @@ fn links_tell_the_current_conversation_from_another_on_the_same_task() {
         &provider.0,
         started,
         repo.path(),
-        "Flow step",
+        "Graph step",
         1,
         0,
     );
@@ -854,7 +854,7 @@ fn links_tell_the_current_conversation_from_another_on_the_same_task() {
     assert_eq!(
         relation(&step),
         "other_conversation",
-        "sharing a Task does not make a Flow step the Task's conversation"
+        "sharing a Task does not make a Graph step the Task's conversation"
     );
 
     let own = caller(&primary);

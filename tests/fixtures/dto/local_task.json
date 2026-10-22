@@ -18,7 +18,7 @@
   },
   "task": {
     "actions": {
-      "reason": "run the next work with `lf task run`; inspect earlier Flows and independent Sessions first",
+      "reason": "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first",
       "recommended": "resume"
     },
     "condition": {
@@ -38,11 +38,11 @@
     },
     "execution": {
       "captured": null,
-      "reason": "No Task Flow has run; independent Sessions may still be active",
+      "reason": "No Task Graph has run; independent Sessions may still be active",
       "state": "idle",
       "step": null
     },
-    "latest_flow_process": null,
+    "latest_graph_process": null,
     "next_move": {
       "owner": "wave",
       "reason": "ready"
@@ -58,7 +58,7 @@
     "runtime": {
       "completion_pending": null,
       "provider": "codex",
-      "reason": "No Task Flow has run; independent Sessions may still be active",
+      "reason": "No Task Graph has run; independent Sessions may still be active",
       "owner": null,
       "status": "not_ready",
       "updated_at": "2026-10-08T00:00:00Z",

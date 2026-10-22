@@ -15,7 +15,7 @@ use std::process::Command;
 use std::time::Instant;
 
 use crate::error::CoreError;
-use crate::flow::{load_skill, Skill};
+use crate::graph::{load_skill, Skill};
 use crate::repository::RepoId;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -119,7 +119,7 @@ pub enum ClipboardContext {
 pub struct GatherContextOpts {
     pub repo_root: PathBuf,
     pub skill: Option<String>,
-    /// User message (positional args after skill/flow name, or inline prompt)
+    /// User message (positional args after skill/graph name, or inline prompt)
     pub message: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
@@ -214,7 +214,7 @@ pub struct PromptComponents {
     pub operate: bool,
     /// Include work API guidance for a selected or existing Work association.
     pub work: Option<WorkContext>,
-    /// User message (positional args after skill/flow name)
+    /// User message (positional args after skill/graph name)
     pub message: Option<String>,
     /// Semantic attribution for generated intent carried in `message`.
     /// Ordinary CLI speech leaves this absent and is attributed to the user.
@@ -1581,7 +1581,7 @@ pub fn loopflow_section() -> String {
 /// The work API contract is also available as the `work` skill.
 pub fn work_section() -> String {
     let source = crate::builtins::get_builtin_skill("work").expect("bundled work skill");
-    let body = crate::flow::split_frontmatter(source).map_or(source, |(_, body)| body);
+    let body = crate::graph::split_frontmatter(source).map_or(source, |(_, body)| body);
     format!("<lf:work-guidance>\n{body}\n</lf:work-guidance>")
 }
 
@@ -1712,7 +1712,7 @@ pub fn write_prompt_log(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flow::Skill;
+    use crate::graph::Skill;
     use std::path::{Path, PathBuf};
 
     fn init_repo() -> tempfile::TempDir {
@@ -2643,7 +2643,7 @@ mod tests {
         let _lock = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
         let _home =
-            crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
             .unwrap();
         let temp = loopflow_test_support::TestRepo::new();

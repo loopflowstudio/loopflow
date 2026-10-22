@@ -3,26 +3,26 @@ import Foundation
 /// Rust owns checkout association; membership grants no execution authority.
 public struct TaskWork: Codable, Sendable, Equatable {
     public let sessions: [TaskSession]
-    public let flowProcesses: [FlowProcessInventoryEntry]
+    public let graphProcesses: [GraphProcessInventoryEntry]
     public let processes: [LfProcess]
-    /// The Task's Workflow; `nil` when it runs only ad hoc Flows.
+    /// The Task's Workflow; `nil` when it runs only ad hoc Graphs.
     public let workflow: Workflow?
 
     enum CodingKeys: String, CodingKey {
         case sessions, processes, workflow
-        case flowProcesses = "flow_processes"
+        case graphProcesses = "graph_processes"
     }
 }
 
 /// Workspace facts; mechanical Process history is a separate diagnostic read.
 public struct TaskOverview: Codable, Sendable, Equatable {
     public let sessions: [TaskSession]
-    public let flowProcesses: [FlowProcessInventoryEntry]
+    public let graphProcesses: [GraphProcessInventoryEntry]
     public let workflow: Workflow?
 
     enum CodingKeys: String, CodingKey {
         case sessions, workflow
-        case flowProcesses = "flow_processes"
+        case graphProcesses = "graph_processes"
     }
 }
 
@@ -40,11 +40,11 @@ public struct Workflow: Codable, Sendable, Equatable {
     public struct Edge: Codable, Sendable, Hashable {
         public let from: String
         public let to: String
-        public let flow: String?
+        public let graph: String?
 
-        /// What `lf task run ISSUE <name>` takes to choose it: its Flow, or
+        /// What `lf task run ISSUE <name>` takes to choose it: its Graph, or
         /// the node it enters when it runs none.
-        public var launchName: String { flow ?? to }
+        public var launchName: String { graph ?? to }
     }
 
     /// One change to the Task's position.
@@ -75,7 +75,7 @@ public struct Workflow: Codable, Sendable, Equatable {
         }
     }
 
-    /// At a node the Task waits on a person. On an edge its Flow
+    /// At a node the Task waits on a person. On an edge its Graph
     /// process carries it; one that no longer runs has stopped and holds the Task.
     public enum Position: Codable, Sendable, Equatable {
         case node(String)
@@ -130,22 +130,22 @@ public struct TaskSession: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public let title: String
     public let interactive: Bool
-    /// Flow process of the Flow whose step opened the current input.
-    public let flowLfProcessId: String?
+    /// Graph process of the Graph whose step opened the current input.
+    public let graphLfProcessId: String?
     public let completedAt: Int64?
 
     enum CodingKeys: String, CodingKey {
         case id, title, interactive
-        case flowLfProcessId = "flow_lf_process_id"
+        case graphLfProcessId = "graph_lf_process_id"
         case completedAt = "completed_at"
     }
 }
 
-/// One Flow as its Flow process records it; `id` is that Process.
-public struct FlowProcessInventoryEntry: Codable, Sendable, Hashable, Identifiable {
+/// One Graph as its Graph process records it; `id` is that Process.
+public struct GraphProcessInventoryEntry: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let name: String
-    public let state: FlowProcessSummaryState
+    public let state: GraphProcessSummaryState
     public let taskId: String?
     public let waveId: String?
     public let updatedAt: Int64
@@ -162,7 +162,7 @@ public struct FlowProcessInventoryEntry: Codable, Sendable, Hashable, Identifiab
 }
 
 /// `current` says nothing about a live process; `stopped` exited before the last step.
-public enum FlowProcessSummaryState: String, Codable, Sendable, Equatable {
+public enum GraphProcessSummaryState: String, Codable, Sendable, Equatable {
     case current, completed, stopped
 }
 
@@ -172,7 +172,7 @@ extension TaskSession {
         id = StructuredIdentity.session(try values.decode(String.self, forKey: .id))
         title = try values.decode(String.self, forKey: .title)
         interactive = try values.decode(Bool.self, forKey: .interactive)
-        flowLfProcessId = (try values.decodeIfPresent(String.self, forKey: .flowLfProcessId)).map { StructuredIdentity.uuid($0) }
+        graphLfProcessId = (try values.decodeIfPresent(String.self, forKey: .graphLfProcessId)).map { StructuredIdentity.uuid($0) }
         completedAt = try values.decodeIfPresent(Int64.self, forKey: .completedAt)
     }
 }

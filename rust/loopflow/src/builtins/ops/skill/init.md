@@ -1,7 +1,7 @@
 ---
 produces: connected Loopflow path and an evidence-backed next command
 ---
-Set up the part of Loopflow the user wants to use. The launcher, Skills, Flows,
+Set up the part of Loopflow the user wants to use. The launcher, Skills, Graphs,
 worktrees and PR tools need no Task, Wave or Linear setup. Desktop offers a guided
 work experience; other clients can use the same work APIs with their own workflow.
 
@@ -28,11 +28,11 @@ needs setup. With no further direction, make a plain agent launch work. Ask only
 when a concrete setup choice cannot be inferred; do not ask the user to select
 a usage level. Continue existing Work without requiring another opt-in.
 
-For launcher, Skill, Flow, worktree or PR use, check `lf --version`, installed
+For launcher, Skill, Graph, worktree or PR use, check `lf --version`, installed
 agent availability, and only the accounts needed for the requested operation.
 Preserve existing configuration; defaults need no `.lf/config.yaml`. Prove the
 selected capability with its read-only help/status and offer one next command,
-such as `lf : "fix the failing test"` or `lf flow pursue`. Do not launch a coding
+such as `lf : "fix the failing test"` or `lf graph pursue`. Do not launch a coding
 job as a setup probe. Stop here: no Task creation, Linear connection or Wave lookup.
 
 For existing or explicitly requested managed work, read `lf help skill work` and
@@ -140,7 +140,7 @@ Use the work path already selected; ask only for missing scope:
 1. an existing Wave,
 2. a new durable Wave,
 3. an existing Linear Task,
-4. only direct skills/flows for now.
+4. only direct skills/graphs for now.
 
 This answer determines the minimum accounts and files. Do not turn init into a
 questionnaire.
@@ -162,7 +162,7 @@ use `doppler run -- lf account connect linear`. Otherwise follow the customer's 
 manager and the exact missing variable names. Never print credential values.
 
 Account connection is an external side effect. The user must choose it and
-complete the provider flow. Claim a new connection only after connect completes;
+complete the provider graph. Claim a new connection only after connect completes;
 cached status is retained evidence, not a fresh authorization check. Managed
 verification requires an accepted managed row from `auth status --json`.
 Direct skills can proceed with a local agent even
@@ -241,7 +241,7 @@ lf task status <ISSUE-ID> --json
 
 Do not create an ad-hoc worktree or convert the Task into a local prompt.
 
-### Direct skills and flows
+### Direct skills and graphs
 
 This path needs no managed setup. Offer a next command:
 
@@ -252,7 +252,7 @@ lf list
 ```
 
 These are next commands, not setup probes; do not run them automatically.
-Mention repo-local `.lf/skills/` and `.lf/flows/` only if the user wants to
+Mention repo-local `.lf/skills/` and `.lf/graphs/` only if the user wants to
 author reusable behavior.
 
 ## 5. Place execution deliberately

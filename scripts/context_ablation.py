@@ -98,7 +98,7 @@ def observe(directory: Path) -> dict[str, Any]:
     verdicts = [
         match.group(1)
         for command in commands
-        for match in re.finditer(r"\blf flow (?:decide\s+)?(?!decide\b)(\w+)", command)
+        for match in re.finditer(r"\blf graph (?:decide\s+)?(?!decide\b)(\w+)", command)
     ]
     stated = re.search(r"\b(advance|iterate|blocked|retry)\b", (final or "")[:200], re.I)
     decision = verdicts[0] if verdicts else stated.group(1) if stated else None
@@ -295,7 +295,7 @@ def launch_commit(manifest: dict[str, Any]) -> str | None:
         r"^Base commit: ([0-9a-f]{40})$", manifest[_request_key(manifest)]["task_prompt"], re.M
     )
     # A Task's first step starts at its base; later steps without a reflog are unknown.
-    first_visit = not any((manifest.get("flow") or {}).get("iterations") or [[]])
+    first_visit = not any((manifest.get("graph") or {}).get("iterations") or [[]])
     return base.group(1) if base and first_visit and manifest["skill"] == "implement" else None
 
 
@@ -321,7 +321,7 @@ def _stage(
     )  # fmt: skip
     start = _git(checkout, "rev-parse", "HEAD")
 
-    # Stage the variant in the current manifest shape, outside any Flow or caller.
+    # Stage the variant in the current manifest shape, outside any Graph or caller.
     identity = f"run_{uuid.uuid4().hex}"
     variant = {
         name: value
@@ -332,7 +332,7 @@ def _stage(
         artifact_key=identity,
         caller_artifact_key=None,
         exec={**source[key], "task_prompt": variant_prompt},
-        flow=None,
+        graph=None,
         context=None,
         cwd=str(checkout),
         repo=str(checkout),

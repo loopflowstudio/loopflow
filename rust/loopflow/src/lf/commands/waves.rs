@@ -177,7 +177,7 @@ pub enum TaskConditionState {
     Unknown,
 }
 
-use crate::durable::FlowProcessDetail;
+use crate::durable::GraphProcessDetail;
 pub use crate::ops::task_actions::{
     ci_failure_reason, derive_task_actions, TaskAction, TaskActionEvidence, TaskActionModel,
 };
@@ -215,7 +215,7 @@ pub struct TaskConditionSnapshot {
     pub evidence_age_secs: Option<i64>,
     pub local_progress: LocalProgressEvidence,
     /// Started work a finished plan has not settled: the Task is still ready,
-    /// its Flow is not idle, or its checkout holds observed unsettled work.
+    /// its Graph is not idle, or its checkout holds observed unsettled work.
     /// Keeps a terminal Task in the working set.
     pub unresolved_execution: bool,
 }
@@ -252,7 +252,7 @@ pub struct TaskDetailSnapshot {
     pub actions: TaskActionModel,
     pub workflow_name: Option<String>,
     pub workflow_source: Option<String>,
-    pub latest_flow_process: Option<FlowProcessDetail>,
+    pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
     pub pr: Option<PrSnapshot>,
@@ -495,7 +495,7 @@ pub struct RoadmapTask {
     pub actions: TaskActionModel,
     pub workflow_name: Option<String>,
     pub workflow_source: Option<String>,
-    pub latest_flow_process: Option<FlowProcessDetail>,
+    pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
     pub pr: Option<PrSnapshot>,
@@ -994,7 +994,7 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
         actions: detail.actions,
         workflow_name: detail.workflow_name,
         workflow_source: detail.workflow_source,
-        latest_flow_process: detail.latest_flow_process,
+        latest_graph_process: detail.latest_graph_process,
         execution: detail.execution,
         run_control: detail.run_control,
         pr: detail.pr,
@@ -1280,8 +1280,8 @@ async fn snapshot_task_detail(
     let pr = store.active_task_pr(&task.id).await?;
     let active = pr.as_ref().filter(|pr| pr.is_active());
     let observed_at = now();
-    let (execution, flow_record) =
-        crate::ops::task_execution::task_execution_and_flow(store, &task.id).await?;
+    let (execution, graph_record) =
+        crate::ops::task_execution::task_execution_and_graph(store, &task.id).await?;
     let status = store.task_state(&task.id).await?;
     let pending = crate::ops::task::completion_pending(store, task)?;
     let owner = store.sqlite.task_ownership(&task.id)?.owner;
@@ -1301,7 +1301,7 @@ async fn snapshot_task_detail(
     let acquisition = store.sqlite.task_acquisition(&task.id)?;
     let worktree_blocker = crate::ops::task::task_worktree_blocker(store, task).await?;
     let launch_refusal = if runtime.status == TaskState::Paused {
-        Some("Task is paused; resume it before running a Flow".to_string())
+        Some("Task is paused; resume it before running a Graph".to_string())
     } else if worktree_blocker.is_none() {
         crate::ops::task::task_process_refusal(store, task)
             .await?
@@ -1433,7 +1433,7 @@ async fn snapshot_task_detail(
         actions,
         workflow_name,
         workflow_source,
-        latest_flow_process: flow_record,
+        latest_graph_process: graph_record,
         execution: Some(execution),
         run_control,
         pr: pr.as_ref().map(|pr| {
@@ -3247,7 +3247,7 @@ mod tests {
         // A removed checkout alone does not reopen settled work.
         assert!(!unresolved(TaskState::Done, none, missing, true));
         assert!(unresolved(TaskState::Active, none, missing, true));
-        // Blocked describes a stopped failed Flow, not a live Process. Later
+        // Blocked describes a stopped failed Graph, not a live Process. Later
         // Task completion must not make that retained history current forever.
         assert!(!unresolved(
             TaskState::Done,

@@ -7,7 +7,7 @@ pub struct TaskRunControl {
     pub unavailable: Option<String>,
 }
 
-/// Facts beyond the Flow record that decide control legality.
+/// Facts beyond the Graph record that decide control legality.
 #[derive(Debug)]
 pub(crate) struct TaskRunEvidence<'a> {
     /// `None` when no durable Task Work exists yet.
@@ -20,7 +20,7 @@ pub(crate) struct TaskRunEvidence<'a> {
 pub(crate) fn task_run_control(evidence: &TaskRunEvidence) -> TaskRunControl {
     let terminal = match evidence.status {
         Some(WorkStatus::Done) => Some("Task is complete"),
-        Some(WorkStatus::Abandoned) => Some("Task is abandoned; recover it before running a Flow"),
+        Some(WorkStatus::Abandoned) => Some("Task is abandoned; recover it before running a Graph"),
         _ => evidence.plan_terminal_reason,
     };
     TaskRunControl {

@@ -27,7 +27,7 @@ use crate::chat::types::{ConversationEvent, ItemDelta, TurnUsage};
 use crate::naming::generated_session_title;
 use crate::store::{StoreError, StoreResult};
 
-/// An opaque artifact directory key; it grants no conversation or Flow authority.
+/// An opaque artifact directory key; it grants no conversation or Graph authority.
 pub(crate) fn new_artifact_key() -> String {
     Uuid::new_v4().simple().to_string()
 }
@@ -53,22 +53,23 @@ pub(crate) struct SessionCaptureSpec {
     pub worktree: Option<PathBuf>,
     pub skill: Option<String>,
     pub subjects: Vec<SubjectAttribution>,
-    pub flow: SessionFlowMembership,
+    pub graph: SessionGraphMembership,
     pub work: Option<crate::session::SessionWork>,
 }
 
-/// A Flow position older manifests captured. New captures record none: a step
-/// is an ordinary command, and its Flow is read from the Flow process record.
+/// A Graph position older manifests captured. New captures record none: a step
+/// is an ordinary command, and its Graph is read from the Graph process record.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SessionFlowStep {
+pub struct SessionGraphStep {
     pub task_id: Option<crate::work::task::TaskId>,
     pub task_pr_id: Option<crate::work::task::TaskPrId>,
     pub invocation_id: String,
-    pub flow: String,
+    #[serde(rename = "flow")] // Existing capture manifests remain replayable.
+    pub graph: String,
     pub step: String,
     /// Older manifests omitted the structural path; never infer it from a leaf index.
     pub node: Option<String>,
-    /// The step's node in its Flow process graph; absent in older manifests.
+    /// The step's node in its Graph process graph; absent in older manifests.
     #[serde(default)]
     pub key: Option<u32>,
     /// Older captures have no tuple; never derive it from their scalar visit token.
@@ -78,8 +79,8 @@ pub struct SessionFlowStep {
 /// Membership at capture time; absence in historical manifests remains unknown.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SessionFlowMembership {
-    Step(SessionFlowStep),
+pub enum SessionGraphMembership {
+    Step(SessionGraphStep),
     Independent,
 }
 
@@ -177,7 +178,8 @@ pub struct SessionCaptureManifest {
     pub worktree: Option<PathBuf>,
     pub skill: Option<String>,
     pub subjects: Vec<SubjectAttribution>,
-    pub flow: Option<SessionFlowMembership>,
+    #[serde(rename = "flow")] // Existing capture manifests remain replayable.
+    pub graph: Option<SessionGraphMembership>,
     #[serde(rename = "exec")] // Existing capture manifests remain replayable.
     pub process: Option<AgentProcessRequest>,
     pub context: Option<SessionContextRef>,
@@ -1227,10 +1229,12 @@ pub(crate) fn project_input_history(
         work_source: session.work_source,
         wave_name: names.0,
         providers,
-        task_pr_id: manifest.as_ref().and_then(|manifest| match &manifest.flow {
-            Some(SessionFlowMembership::Step(step)) => step.task_pr_id.clone(),
-            _ => None,
-        }),
+        task_pr_id: manifest
+            .as_ref()
+            .and_then(|manifest| match &manifest.graph {
+                Some(SessionGraphMembership::Step(step)) => step.task_pr_id.clone(),
+                _ => None,
+            }),
         repo: manifest
             .as_ref()
             .and_then(|m| m.repo.as_ref().map(|p| p.to_string_lossy().into_owned()))
@@ -1868,9 +1872,9 @@ impl CaptureHandle {
         manifest.repo = spec.repo;
         manifest.worktree = spec.worktree;
         manifest.skill = spec.skill;
-        // Preparation owns Work attribution and a human Flow step's membership;
+        // Preparation owns Work attribution and a human Graph step's membership;
         // the child's Task prompt context cannot reassign that captured input.
-        manifest.flow = manifest.flow.or(Some(spec.flow));
+        manifest.graph = manifest.graph.or(Some(spec.graph));
         (manifest.runtime_path, manifest.runtime_digest) = runtime_identity();
         manifest.host = gethostname::gethostname().to_string_lossy().into_owned();
         manifest.boot_id = boot_id();
@@ -2431,18 +2435,18 @@ struct SessionCapture {
 
 impl SessionCapture {
     /// Independent agent launches, including helpers, admit their conversation
-    /// before provider work. Flow reservations have their own fenced publisher.
+    /// before provider work. Graph reservations have their own fenced publisher.
     fn record_row(
         manifest: &SessionCaptureManifest,
         dir: &Path,
         work: Option<crate::session::SessionWork>,
         context: Option<&crate::trace::PreparedTurnContext>,
     ) -> StoreResult<Option<crate::session::LfSession>> {
-        let step = match &manifest.flow {
-            Some(SessionFlowMembership::Step(step)) => Some(step),
-            Some(SessionFlowMembership::Independent) | None => None,
+        let step = match &manifest.graph {
+            Some(SessionGraphMembership::Step(step)) => Some(step),
+            Some(SessionGraphMembership::Independent) | None => None,
         };
-        // Mechanical commands have a process and, in a Flow, operation history.
+        // Mechanical commands have a process and, in a Graph, operation history.
         // Capturing their diagnostics does not create an agent conversation.
         if manifest.harness == "loopflow" {
             return Ok(None);
@@ -2476,7 +2480,7 @@ impl SessionCapture {
                 task_id: work.as_ref().and_then(|work| work.task_id.clone()),
                 wave_id: work.as_ref().and_then(|work| work.wave_id.clone()),
                 work_source: work.as_ref().map(|work| work.source),
-                flow_lf_process_id: None,
+                graph_lf_process_id: None,
                 bound_at: None,
                 interactive: manifest.surface != "headless",
                 repo: None,
@@ -2852,7 +2856,7 @@ fn prepare_manifest(
         worktree: spec.worktree,
         skill: spec.skill,
         subjects: spec.subjects,
-        flow: Some(spec.flow),
+        graph: Some(spec.graph),
         process,
         context: context_ref,
         runtime_path,
@@ -3255,7 +3259,7 @@ mod tests {
             worktree: Some(cwd.to_path_buf()),
             skill: Some("implement".to_string()),
             subjects: Vec::new(),
-            flow: crate::session_record::SessionFlowMembership::Independent,
+            graph: crate::session_record::SessionGraphMembership::Independent,
             work: None,
         }
     }
@@ -3413,30 +3417,30 @@ mod tests {
         let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         let original = crate::work::task::TaskPrId::new();
-        let mut step = super::SessionFlowStep {
+        let mut step = super::SessionGraphStep {
             task_id: Some(crate::work::task::TaskId::new()),
             task_pr_id: Some(original.clone()),
             invocation_id: "invocation".into(),
-            flow: "feature".into(),
+            graph: "feature".into(),
             step: "review".into(),
             node: Some("1".into()),
             key: Some(1),
             iterations: Some(Vec::new()),
         };
         let mut prepared = spec(home.path());
-        prepared.flow = super::SessionFlowMembership::Step(step.clone());
+        prepared.graph = super::SessionGraphMembership::Step(step.clone());
         let id = CaptureHandle::prepare_at(home.path(), prepared, None).unwrap();
         let (dir, _) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
         step.task_pr_id = Some(crate::work::task::TaskPrId::new());
         let mut process = spec(home.path());
-        process.flow = super::SessionFlowMembership::Step(step);
+        process.graph = super::SessionGraphMembership::Step(step);
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
         let capture =
             CaptureHandle::start_prepared(home.path(), &id, process, &context, None).unwrap();
         capture.finish("completed").unwrap();
 
         let manifest = super::read_manifest(&dir).unwrap();
-        let Some(super::SessionFlowMembership::Step(step)) = manifest.flow else {
+        let Some(super::SessionGraphMembership::Step(step)) = manifest.graph else {
             panic!("prepared membership retained");
         };
         assert_eq!(step.task_pr_id, Some(original));

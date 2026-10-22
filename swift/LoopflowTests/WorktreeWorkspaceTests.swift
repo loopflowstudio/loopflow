@@ -56,18 +56,18 @@ struct WorktreeWorkspaceTests {
         #expect(document.editor.string == "unfinished draft")
     }
 
-    @Test("Files and the Flow process log open as panes beside a Session and are revealed, not duplicated")
+    @Test("Files and the Graph process log open as panes beside a Session and are revealed, not duplicated")
     func taskPanes() {
         let panes = fixtureWork(fixtureWorkspace("/repo")).multiplexer
         panes.show(.files(taskId: "task"))
         #expect(panes.layout.allPanes.map(\.content) == [.files(taskId: "task")])
         panes.load(sessionId: "design")
-        panes.show(.flowLog(taskId: "task"))
+        panes.show(.graphLog(taskId: "task"))
         #expect(panes.layout.allPanes.map(\.content)
-            == [.files(taskId: "task"), .session(id: "design"), .flowLog(taskId: "task")])
+            == [.files(taskId: "task"), .session(id: "design"), .graphLog(taskId: "task")])
         let log = panes.focusedPaneId
         panes.setCollapsed(paneId: log, collapsed: true)
-        panes.show(.flowLog(taskId: "task"))
+        panes.show(.graphLog(taskId: "task"))
         #expect(panes.layout.allPanes.count == 3)
         #expect(panes.focusedPaneId == log)
         #expect(!panes.collapsedPaneIds.contains(log))

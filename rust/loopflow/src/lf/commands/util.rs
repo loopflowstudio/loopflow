@@ -296,7 +296,7 @@ fn session_command_status_with_env(
                         worktree: Some(command.cwd.clone()),
                         skill: None,
                         subjects: Vec::new(),
-                        flow: crate::session_record::SessionFlowMembership::Independent,
+                        graph: crate::session_record::SessionGraphMembership::Independent,
                         work: None,
                     },
                     &context,
@@ -1017,7 +1017,7 @@ mod tests {
                 worktree: None,
                 skill: None,
                 subjects: Vec::new(),
-                flow: crate::session_record::SessionFlowMembership::Independent,
+                graph: crate::session_record::SessionGraphMembership::Independent,
                 work: None,
             },
         )
@@ -1111,7 +1111,7 @@ mod tests {
                 worktree: None,
                 skill: None,
                 subjects: Vec::new(),
-                flow: crate::session_record::SessionFlowMembership::Independent,
+                graph: crate::session_record::SessionGraphMembership::Independent,
                 work: None,
             },
         )
@@ -1407,7 +1407,7 @@ mod tests {
                     worktree: None,
                     skill: None,
                     subjects: Vec::new(),
-                    flow: crate::session_record::SessionFlowMembership::Independent,
+                    graph: crate::session_record::SessionGraphMembership::Independent,
                     work: None,
                 },
             )?;

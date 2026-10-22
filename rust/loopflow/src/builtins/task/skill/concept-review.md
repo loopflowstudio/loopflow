@@ -50,7 +50,7 @@ Do not create a per-slice review or repeat implementation evidence; realign
 reconciles the plan and code using what the work has taught us. Do not rewrite implementation or
 restart execution unless requested.
 
-## In a Flow without a person
+## In a Graph without a person
 
 Run the same review against the accepted design and the implemented change.
 Settle what accepted product decisions already imply: clearer names, merged

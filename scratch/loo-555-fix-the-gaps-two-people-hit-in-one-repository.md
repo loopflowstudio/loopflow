@@ -1,5 +1,21 @@
 # LOO-555: Fix the gaps two people hit in one repository
 
+## Recovery (2026-10-21)
+
+Jack requested recovery in the native Codex conversation. Recorded Claude
+launches failed while writing a Keychain credential; the old Flow, step and
+provider PIDs are absent. No replacement implementation Flow was launched.
+Recovery continues directly from the existing commits, leaving account
+configuration unchanged. The Claude credential failure itself is unresolved.
+
+Synced main through `ce21904f`: retained person keys and public-name privacy,
+main's insertion ordering for unstamped ownership entries, and its provider-neutral
+connection test. Corrected the branch writer to use that same connection API.
+Kept the deleted intermittent peer-planning view test deleted. Updated the
+two-person docs and matching README/index introductions to reflect Git comment
+steers, branch reuse and personal crons. Gate owns remaining verification and
+delivery; no merge or Task completion is claimed here.
+
 Status: implemented and committed (`5b725154` + `bf76c3df` on base
 `ed568b1f`, tree clean); next gate. Six kickoff passes on 2026-10-21 (878ecf
 steer reconciliation, Claude credential relaunch, an `lf checkout update`

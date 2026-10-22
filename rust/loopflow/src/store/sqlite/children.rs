@@ -129,9 +129,9 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
     task_on(conn, &input.id)?.ok_or(StoreError::NotFound)
 }
 
-/// Without Linear, the planning journal carries the Task's branch, so whoever
-/// runs it next checks out the same branch and finds the same PR. Linear owns
-/// its own `branchName`. An already-recorded branch writes nothing.
+/// Git planning carries the Task's branch, so whoever runs it next checks out
+/// the same branch and finds the same PR. Remote providers supply their branch
+/// through planning acquisition. An already-recorded branch writes nothing.
 fn record_task_branch_in(tx: &Connection, task: &TaskId, branch: &str) -> StoreResult<()> {
     let (repo, recorded): (String, Option<String>) = tx.query_row(
         "SELECT w.repo,t.planning_branch_name FROM tasks t
@@ -139,7 +139,7 @@ fn record_task_branch_in(tx: &Connection, task: &TaskId, branch: &str) -> StoreR
         [task.as_str()],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-    if recorded.as_deref() == Some(branch) || crate::ops::linear_observe::connected(&repo) {
+    if recorded.as_deref() == Some(branch) || crate::ops::planning_client::connected(&repo) {
         return Ok(());
     }
     super::planning_write::local(

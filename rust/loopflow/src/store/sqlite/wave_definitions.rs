@@ -1,7 +1,6 @@
-//! Wave registration and the separately retained Workflow import.
+//! Wave registration.
 
 use crate::work::edit::WorkValue as Edit;
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
@@ -32,7 +31,6 @@ impl SqliteStore {
         let repo = canonical.to_string();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let workflows = read_workflows(checkout)?;
         let mut parent: Option<WaveId> = None;
         let mut prefix = String::new();
         for part in name.split('/') {
@@ -73,88 +71,11 @@ impl SqliteStore {
                 }
             };
             seed_wave_files(&directory, &wave, &prefix)?;
-            save_imported_workflows(&tx, wave.as_str(), &workflows)?;
             parent = Some(wave);
         }
         tx.commit()?;
         Ok(parent.expect("validated Wave has at least one component"))
     }
-}
-
-pub(crate) fn import_registered_workflows(conn: &rusqlite::Connection) -> StoreResult<()> {
-    let mut query = conn.prepare("SELECT id,repo FROM wave_addresses")?;
-    let waves = query
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    for (wave, repo) in waves {
-        import_workflows_on(conn, &wave, Path::new(&repo))?;
-    }
-    Ok(())
-}
-
-pub(super) fn import_workflows_on(
-    conn: &rusqlite::Connection,
-    wave: &str,
-    repo: &Path,
-) -> StoreResult<()> {
-    save_imported_workflows(conn, wave, &read_workflows(repo)?)
-}
-
-fn save_imported_workflows(
-    conn: &rusqlite::Connection,
-    wave: &str,
-    workflows: &BTreeMap<String, String>,
-) -> StoreResult<()> {
-    for (name, content) in workflows {
-        conn.execute(
-            "INSERT INTO wave_workflows(wave_id,name,content) VALUES(?1,?2,?3)
-            ON CONFLICT(wave_id,name) DO NOTHING",
-            params![wave, name, content],
-        )?;
-    }
-    Ok(())
-}
-
-fn read_workflows(repo: &Path) -> StoreResult<BTreeMap<String, String>> {
-    let directory = repo.join(".lf/workflows");
-    let entries = match std::fs::read_dir(&directory) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
-        Err(error) => {
-            return Err(StoreError::InvalidData(format!(
-                "{}: {error}",
-                directory.display()
-            )))
-        }
-    };
-    let mut paths = entries
-        .map(|entry| entry.map(|entry| entry.path()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-    // Match repository discovery's .yaml preference when both extensions exist.
-    paths.sort();
-    let mut workflows = BTreeMap::new();
-    for path in paths {
-        if !path.is_file()
-            || !matches!(
-                path.extension().and_then(|extension| extension.to_str()),
-                Some("yaml" | "yml")
-            )
-        {
-            continue;
-        }
-        let name = path
-            .file_stem()
-            .expect("definition has a name")
-            .to_string_lossy()
-            .into_owned();
-        let content = std::fs::read_to_string(&path)
-            .map_err(|error| StoreError::InvalidData(format!("{}: {error}", path.display())))?;
-        workflows.entry(name).or_insert(content);
-    }
-    Ok(workflows)
 }
 
 fn seed_wave_files(directory: &Path, id: &WaveId, name: &str) -> StoreResult<()> {
@@ -189,7 +110,6 @@ fn seed_wave_files(directory: &Path, id: &WaveId, name: &str) -> StoreResult<()>
 mod tests {
     use super::SqliteStore;
     use crate::id::WaveId;
-    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
     use crate::work::wave::{Wave, WaveLocator};
 
     #[test]
@@ -227,56 +147,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn released_frontier_retains_workflows_without_copying_documents() {
-        let repo = loopflow_test_support::TestRepo::new();
-        std::fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
-        std::fs::create_dir_all(repo.path().join(".lf/wave/tools")).unwrap();
-        std::fs::write(
-            repo.path().join(".lf/wave/tools/MEMORY.md"),
-            "Only in the repo.",
-        )
-        .unwrap();
-        let definition = "nodes: {}\nedges: [{from: start, to: end}]\n";
-        let workflow_path = repo.path().join(".lf/workflows/custom.yaml");
-        std::fs::write(&workflow_path, definition).unwrap();
-        std::fs::write(repo.path().join(".lf/workflows/custom.yml"), "not selected").unwrap();
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "local_planning");
-        let id = WaveId::new();
-        conn.execute(
-            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'tools',?2,123)",
-            rusqlite::params![id, repo.path().to_string_lossy()],
-        )
-        .unwrap();
-        conn.execute_batch(&current_draft_sql("local_planning"))
-            .unwrap();
-        super::import_registered_workflows(&conn).unwrap();
-        std::fs::write(&workflow_path, "later source edit").unwrap();
-        super::import_registered_workflows(&conn).unwrap();
-        assert_eq!(
-            conn.query_row(
-                "SELECT content FROM wave_workflows WHERE wave_id=?1",
-                [&id],
-                |row| row.get::<_, String>(0)
-            )
-            .unwrap(),
-            definition
-        );
-        assert_eq!(
-            conn.query_row(
-                "SELECT count(*) FROM sqlite_master WHERE name='wave_documents'",
-                [],
-                |row| row.get::<_, i64>(0)
-            )
-            .unwrap(),
-            0
-        );
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join(".lf/wave/tools/MEMORY.md")).unwrap(),
-            "Only in the repo."
-        );
-    }
     #[tokio::test]
     async fn relocation_preserves_definitions_and_refuses_established_collisions_and_cycles() {
         let repo = loopflow_test_support::TestRepo::new();

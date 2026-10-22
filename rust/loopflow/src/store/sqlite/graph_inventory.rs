@@ -589,14 +589,5 @@ mod tests {
         );
         assert!(!stored.contains("\"flow\""), "{stored}");
         drop(conn);
-        let content = store.wave_workflow(&wave, "feature").unwrap().unwrap();
-        assert!(
-            content.contains("{ from: start, to: demo, graph: pursue }"),
-            "{content}"
-        );
-        assert!(
-            content.contains("\n    graph: ship\n") && !content.contains("flow:"),
-            "{content}"
-        );
     }
 }

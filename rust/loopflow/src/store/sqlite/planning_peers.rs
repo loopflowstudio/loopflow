@@ -204,6 +204,7 @@ impl SqliteStore {
             .map(|(record, edits)| (*record, edits))
             .collect();
         let mut conflicts = BTreeMap::new();
+        let mut inserted = std::collections::HashSet::new();
         while !pending.is_empty() {
             let mut retry = Vec::new();
             let mut progress = false;
@@ -211,7 +212,7 @@ impl SqliteStore {
             for ((table, target), edits) in pending {
                 let save = tx.savepoint()?;
                 let result = (|| {
-                    planning_write::ensure_record(&save, repo, table, target, edits)?;
+                    let created = planning_write::ensure_record(&save, repo, table, target, edits)?;
                     if !planning_write::read(&save, table, target)?
                         .iter()
                         .all(|value| {
@@ -231,11 +232,14 @@ impl SqliteStore {
                         .collect();
                     planning_write::write(&save, &selected, WriteOrigin::Import)?;
                     require_repository(&save, repo, table, target)?;
-                    Ok::<_, StoreError>(())
+                    Ok::<_, StoreError>(created)
                 })();
                 match result {
-                    Ok(()) => {
+                    Ok(created) => {
                         save.commit()?;
+                        if created {
+                            inserted.insert((table, target));
+                        }
                         progress = true;
                     }
                     Err(StoreError::Sqlite(rusqlite::Error::SqliteFailure(ref e, _)))
@@ -300,19 +304,30 @@ impl SqliteStore {
             }
         }
         // Ownership entries ride on marked comments. An owner whose open claim
-        // the exchanged log no longer shows claims again.
+        // the exchanged log no longer shows claims again. A teammate's newly
+        // arrived direction comment steers the Task as a local one would.
         let mut touched = std::collections::HashSet::new();
         for &(table, target) in grouped.keys() {
             if table != "task_comments" || conflicts.contains_key(&(table, target)) {
                 continue;
             }
-            let (task, body, created_at): (String, String, Option<String>) = tx.query_row(
-                "SELECT task_id,body,created_at FROM task_comments WHERE id=?1",
-                [target],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )?;
+            let (task, body, author, created_at): (String, String, String, Option<String>) = tx
+                .query_row(
+                    "SELECT task_id,body,author,created_at FROM task_comments WHERE id=?1",
+                    [target],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )?;
             let task = crate::durable::TaskId::from_raw(task);
             super::task_ownership::ingest_marker_in(&tx, &task, &body, created_at.as_deref())?;
+            if inserted.contains(&(table, target)) {
+                let comment = crate::work::task::comment::TaskComment {
+                    id: target.to_string(),
+                    author: serde_json::from_str(&author)?,
+                    body,
+                    created_at,
+                };
+                super::task_comments::comment_steer_in(&tx, &task, &comment)?;
+            }
             touched.insert(task);
         }
         for task in &touched {

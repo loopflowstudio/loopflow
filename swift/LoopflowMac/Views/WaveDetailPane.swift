@@ -692,6 +692,13 @@ private struct WaveTaskWorkView: View {
 
     @Environment(\.palette) private var palette
 
+    /// State, owner when owned, and who moves next.
+    private var statusLine: String {
+        let state = task.task.historyLabel ?? task.runtime?.status.label ?? "unstarted"
+        let owner = task.runtime?.owner.map { " · \($0.summary)" } ?? ""
+        return "\(state)\(owner) · next: \(task.nextMove.owner.rawValue)"
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             WaveLensView(lens: WaveLens.forTask(task.condition), diameter: 9, accessibilityId: "task-lens")
@@ -707,7 +714,7 @@ private struct WaveTaskWorkView: View {
                         .foregroundStyle(palette.text)
                         .lineLimit(2)
                 }
-                Text("\(task.task.historyLabel ?? task.runtime?.status.label ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
+                Text(statusLine)
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                 if let directive = task.directive {

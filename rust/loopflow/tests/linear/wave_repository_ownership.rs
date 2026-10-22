@@ -817,18 +817,10 @@ async fn relocation_refuses_meaningful_destination_history() {
         .await
         .unwrap();
 
-    let workflow_shadow = registered_wave(&target, "with-workflow");
-    store.create_wave(&workflow_shadow).await.unwrap();
-    rusqlite::Connection::open(&database).unwrap().execute(
-        "INSERT INTO wave_workflows(wave_id,name,content) VALUES(?1,'proof','edges: [{from: start, to: end}]')",
-        [workflow_shadow.id()],
-    ).unwrap();
-
     for (slug, shadow, evidence) in [
         ("with-task", &project_shadow, "Tasks"),
         ("with-child", &child_shadow, "child Waves"),
         ("with-pm", &pm_shadow, "PM snapshot"),
-        ("with-workflow", &workflow_shadow, "stored definitions"),
     ] {
         let error = relocate_wave(&store, established.id(), &source, Some(&target), Some(slug))
             .await

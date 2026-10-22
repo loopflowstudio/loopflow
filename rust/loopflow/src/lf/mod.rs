@@ -737,13 +737,10 @@ impl WavePlanTarget {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveWorkflowCommand {
-    /// Read the authored definition without creating a repository file
-    Source { name: String, wave: Option<String> },
+    /// Print a definition from `.lf/workflows/` or the builtins
+    Source { name: String },
     /// List Workflow definitions, including unavailable local files
     List {
-        /// Include this Wave's stored Workflow definitions
-        #[arg(long)]
-        wave: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -753,14 +750,9 @@ pub enum WaveWorkflowCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Select the Workflow future Tasks take up; captured Tasks stay unchanged
-    Set {
-        name: String,
-        wave: Option<String>,
-        /// Store this definition in the Wave
-        #[arg(long)]
-        file: Option<std::path::PathBuf>,
-    },
+    /// Select the Workflow future Tasks take up; captured Tasks stay unchanged.
+    /// Definitions are committed `.lf/workflows/<name>.yaml` files or builtins.
+    Set { name: String, wave: Option<String> },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1722,11 +1714,14 @@ pub enum CronCommand {
         /// Daily or every-minute cron expression, or a schedule alias
         #[arg(long, default_value = "daily")]
         schedule: String,
+        /// Let teammates see this cron; crons are private by default
+        #[arg(long)]
+        publish: bool,
         /// Arguments passed to lf, after --
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
-    /// List installed loopflow cron jobs
+    /// List jobs installed here, then teammates' published ones
     List {
         /// Only commands with this --wave selector
         #[arg(short = 'w', long)]
@@ -1738,23 +1733,22 @@ pub enum CronCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Validate configured commands and your Wave Machine without installing jobs
-    Preflight {
-        /// Only commands with this --wave selector
+    /// Let teammates see an installed cron (pushed to origin)
+    Publish {
+        name: String,
+        /// The cron's Wave, when the name is installed for more than one
         #[arg(short = 'w', long)]
         wave: Option<String>,
-        /// Only commands with this --task selector
-        #[arg(long)]
-        task: Option<String>,
     },
-    /// Reconcile installed jobs with the repository configuration's cron list
-    Sync {
-        /// Only commands with this --wave selector
-        #[arg(short = 'w', long, conflicts_with = "repo")]
+    /// Make an installed cron private again
+    Unpublish {
+        name: String,
+        /// The cron's Wave, when the name is installed for more than one
+        #[arg(short = 'w', long)]
         wave: Option<String>,
-        /// Only commands with this --task selector
-        #[arg(long, conflicts_with = "repo")]
-        task: Option<String>,
+    },
+    /// Reinstall this Machine's jobs with the current lf
+    Sync {
         /// Install the finite repository Task check on this Machine
         #[arg(long)]
         repo: bool,
@@ -1898,7 +1892,8 @@ pub enum RepoCommand {
         #[arg(long = "team-name")]
         team_name: Option<String>,
     },
-    /// Refresh shared planning from Linear
+    /// Refresh shared planning now: Linear per Wave, or the repository's Git
+    /// planning ref (Git ignores the Wave selection; its exchange is per repository)
     Refresh {
         wave: Option<String>,
         #[arg(long, conflicts_with = "wave")]
@@ -2012,6 +2007,9 @@ pub enum MachineCommand {
         #[command(subcommand)]
         cmd: MachineCredentialCommand,
     },
+    /// Name this Machine for teammates, or `off` to make it private again.
+    /// A private Machine's ownership entries and published crons carry only its id.
+    Public { name: String },
     /// Print this machine's stable local Machine identity.
     Id {
         #[arg(long)]

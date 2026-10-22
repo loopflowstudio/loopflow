@@ -19,8 +19,7 @@ struct WorkCLISubscriptionTests {
         let seedID = try #require(seed["id"] as? String)
         let status = try await fixture.json(["task", "status", seedID, "--json"])
         let waveName = try #require((status["execution"] as? [String: Any])?["wave"] as? String)
-        _ = try await fixture.run(["wave", "workflow", "set", "proof", waveName, "--file",
-                                   fixture.root.appendingPathComponent("proof.yaml").path])
+        _ = try await fixture.run(["wave", "workflow", "set", "proof", waveName])
         let query = fixture.lf.query
         let model = WorkModel(query: query, repoPath: fixture.repo.path)
         let keeping = Task { await model.keepWorkCurrent() }
@@ -81,7 +80,14 @@ struct WorkCLISubscriptionTests {
 
         _ = try await fixture.run(["task", action, id])
         let state = action == "complete" ? "completed" : "canceled"
-        try await eventually { model.task(id: id)?.task.task.state == state }
+        // Planning and sidebar membership arrive as independent stream frames.
+        try await eventually {
+            guard let plan = model.selectionPlans.value?.first(where: {
+                $0.owner.reference == .wave(id: wave.wave.id)
+            }) else { return false }
+            return model.task(id: id)?.task.task.state == state
+                && !plan.members.contains { $0.work.id == id }
+        }
         #expect(model.selection == .task(id: id))
         #expect(selectedPlanMembers(model).isEmpty) // Built-in plans belong to repositories and Waves, not Tasks.
         let terminalTask = try #require(model.task(id: id)?.task)
@@ -221,8 +227,10 @@ private struct WorkCLIFixture: Sendable {
         let graphs = repo.appendingPathComponent(".lf/graphs")
         try FileManager.default.createDirectory(at: graphs, withIntermediateDirectories: true)
         try Data("- cmd: graph show proof\n".utf8).write(to: graphs.appendingPathComponent("proof.yaml"))
+        let workflows = repo.appendingPathComponent(".lf/workflows")
+        try FileManager.default.createDirectory(at: workflows, withIntermediateDirectories: true)
         try Data("nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: proof}\n".utf8)
-            .write(to: root.appendingPathComponent("proof.yaml"))
+            .write(to: workflows.appendingPathComponent("proof.yaml"))
         for args in [["init", "-b", "main"], ["config", "user.name", "Fixture Person"],
                      ["config", "user.email", "fixture@example.invalid"], ["add", "."], ["commit", "-m", "Fixture"]] {
             _ = try await run(args, executable: "/usr/bin/git")

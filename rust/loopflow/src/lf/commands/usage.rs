@@ -96,7 +96,7 @@ fn print_report(runs: &[SessionHistory], days: u32) {
     for run in runs {
         println!(
             "{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<SESSION_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  {id}",
-            time = format_time(run.observed_at),
+            time = crate::lf::output::format_time(run.observed_at),
             repo = truncate(&display_repo(run.repo.as_deref()), REPO_WIDTH),
             work = truncate(&run.work_label(), WORK_WIDTH),
             run = truncate(run.label(), SESSION_WIDTH),
@@ -127,14 +127,4 @@ fn display_repo(repo: Option<&str>) -> String {
         .and_then(|value| value.to_str())
         .unwrap_or("-")
         .to_string()
-}
-
-fn format_time(unix: i64) -> String {
-    chrono::DateTime::from_timestamp(unix, 0)
-        .map(|utc| {
-            utc.with_timezone(&chrono::Local)
-                .format("%b %-d %H:%M")
-                .to_string()
-        })
-        .unwrap_or_else(|| unix.to_string())
 }

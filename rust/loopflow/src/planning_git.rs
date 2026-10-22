@@ -405,6 +405,17 @@ impl PlanningGit {
     }
 }
 
+/// Run one bounded, hook-free Git command in `repo` and return its stdout.
+/// Other Loopflow refs (published crons) share this transport discipline.
+pub(crate) fn checked_git(
+    repo: &Path,
+    operation: &'static str,
+    args: &[&str],
+    input: &[u8],
+) -> Result<Vec<u8>> {
+    git(repo, operation, args, input)?.success(operation)
+}
+
 fn git(repo: &Path, operation: &'static str, args: &[&str], input: &[u8]) -> Result<GitOutput> {
     let mut stdin = tempfile::tempfile()?;
     stdin.write_all(input)?;

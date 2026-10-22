@@ -373,7 +373,7 @@ pub(crate) fn ensure_record(
     table: &str,
     id: &str,
     edits: &[WorkEdit],
-) -> StoreResult<()> {
+) -> StoreResult<bool> {
     if table == "waves" {
         super::repositories::ensure_repository_in(conn, repo)?;
     }
@@ -383,7 +383,7 @@ pub(crate) fn ensure_record(
         |r| r.get::<_, bool>(0),
     )?;
     if exists {
-        return Ok(());
+        return Ok(false);
     }
     let missing = || StoreError::InvalidData("required planning identity is missing".into());
     match table {
@@ -462,7 +462,7 @@ pub(crate) fn ensure_record(
         }
         _ => return Err(StoreError::InvalidData("unknown Work table".into())),
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Seed released planning once, in the migration's transaction.
@@ -779,13 +779,8 @@ mod tests {
             .pending_project_changes(project.as_ref().unwrap())
             .unwrap();
         a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_project_capture BEFORE INSERT ON planning_peer_changes BEGIN SELECT RAISE(ABORT,'injected failure'); END;").unwrap();
-        assert!(a
-            .select_wave_workflow(
-                &saved.wave_id,
-                "another",
-                "nodes: {}\nedges: [{from: start, to: end}]\n"
-            )
-            .is_err());
+        let selected = a.selected_wave_workflow(&saved.wave_id).unwrap();
+        assert!(a.select_wave_workflow(&saved.wave_id, "another").is_err());
         assert_eq!(
             a.project(project.as_ref().unwrap()).unwrap().unwrap(),
             current
@@ -795,10 +790,7 @@ mod tests {
                 .unwrap(),
             pending
         );
-        assert!(a
-            .wave_workflow(&saved.wave_id, "another")
-            .unwrap()
-            .is_none());
+        assert_eq!(a.selected_wave_workflow(&saved.wave_id).unwrap(), selected);
     }
 
     #[test]

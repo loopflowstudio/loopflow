@@ -44,6 +44,10 @@ struct WaveTaskInventory: View {
                     Text(task.task.name).font(.body).lineLimit(2)
                     HStack {
                         Text(task.task.identifier).font(.caption.monospaced())
+                        if let owner = task.runtime?.owner {
+                            Text(owner.summary).font(.caption)
+                                .accessibilityIdentifier("wave-task-owner-\(task.id)")
+                        }
                         if task.runtime?.status == .paused { Label("Paused", systemImage: "pause.circle") }
                     }.foregroundStyle(palette.textSecondary)
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
@@ -473,45 +477,6 @@ struct TaskDirectiveEditor: View {
         .foregroundStyle(palette.text)
         .background(palette.background)
         .interactiveDismissDisabled(isSaving)
-    }
-}
-struct WorkflowEditor: View {
-    @Environment(\.palette) private var palette
-    let model: WorkModel
-    let wave: WaveSnapshot
-    let name: String
-    @Environment(\.dismiss) private var dismiss
-    @State private var content = ""
-    @State private var ready = false
-    @State private var saving = false
-    @State private var error: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            Text("Edit \(name)").font(Typography.sectionTitle(22))
-            TextEditor(text: $content).font(.system(.body, design: .monospaced))
-                .disabled(!ready || saving)
-                .accessibilityIdentifier("workflow-content")
-            if let error { Text(error).foregroundStyle(palette.warning) }
-            HStack {
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Save") { Task {
-                    saving = true
-                    defer { saving = false }
-                    do {
-                        try await model.saveWorkflow(name, content: content, wave: wave)
-                        dismiss()
-                    } catch { self.error = error.localizedDescription }
-                } }.disabled(!ready || saving).keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(24).frame(width: 640, height: 480)
-        .interactiveDismissDisabled(saving)
-        .task {
-            do { content = try await model.workflowSource(name, wave: wave); ready = true }
-            catch { self.error = error.localizedDescription }
-        }
     }
 }
 #endif

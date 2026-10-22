@@ -836,8 +836,7 @@ final class WorkModel {
     @ObservationIgnored private var definitionRevision: Int64?
     @ObservationIgnored private var workflowCatalogRevisions: [String: Int64] = [:]
     @ObservationIgnored private var workflowCatalogRequests: [String: UUID] = [:]
-    private var workflowWave: String? { breadcrumb?.wave?.roadmap.wave.id }
-    private var workflowCatalogKey: String { "\(repoPath ?? "")|\(workflowWave ?? "")" }
+    private var workflowCatalogKey: String { repoPath ?? "" }
     var workflowCatalog: WorkReading<[WorkflowCatalogEntry]> {
         workflowCatalogReadings[workflowCatalogKey] ?? .loading
     }
@@ -1869,24 +1868,26 @@ final class WorkModel {
         workflowCatalogRequests[key] = request
         let previous = workflowCatalogReadings[key]?.value
         let result: Result<[WorkflowCatalogEntry], Error>
-        do { result = .success(try await query.workflowCatalog(cwd: repoPath, wave: workflowWave)) }
+        do { result = .success(try await query.workflowCatalog(cwd: repoPath)) }
         catch { result = .failure(error) }
         guard home == workDataDirectory, workflowCatalogRequests[key] == request else { return }
         workflowCatalogReadings[key] = reading(from: result, lastGood: previous)
         workflowCatalogRevisions[key] = revision
     }
 
-    func workflowSource(_ name: String, wave: WaveSnapshot) async throws -> String {
-        return try await query.workflowSource(name, wave: wave.id, cwd: WaveOrigin.resolve(wave.repo))
-    }
-
-    func saveWorkflow(_ name: String, content: String, wave: WaveSnapshot) async throws {
-        let repo = WaveOrigin.resolve(wave.repo)
-        let home = workDataDirectory
-        try await query.saveWorkflow(name, content: content, wave: wave.id, cwd: repo)
-        try await confirmWorkUpdate(after: home)
-        // Standalone transports have no revision subscription.
-        if !query.streamsWork { await loadWorkflowCatalog(force: true) }
+    /// The repository file that defines the Workflow; a builtin is first copied
+    /// into `.lf/workflows/` so the edit is committed with the code.
+    func workflowDefinitionFile(_ entry: WorkflowCatalogEntry) async throws -> URL {
+        guard let repoPath else { throw RegistryQueryError("No repository is open") }
+        let root = URL(fileURLWithPath: repoPath)
+        if let source = entry.source { return root.appendingPathComponent(source) }
+        let content = try await query.workflowSource(entry.name, cwd: repoPath)
+        let url = root.appendingPathComponent(".lf/workflows/\(entry.name).yaml")
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(content.utf8).write(to: url, options: .withoutOverwriting)
+        await loadWorkflowCatalog(force: true)
+        return url
     }
 
     func definitionSource(_ entry: GraphCatalogEntry) async throws -> URL {

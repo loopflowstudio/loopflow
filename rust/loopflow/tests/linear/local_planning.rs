@@ -911,8 +911,8 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     repo.create_file(".lf/graphs/proof.yaml", "- cmd: graph show proof\n");
-    let definition = home.path().join("proof.yaml");
-    std::fs::write(&definition, "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: proof}\n  - {from: review, to: end, graph: proof}\n").unwrap();
+    let definition = repo.path().join(".lf/workflows/proof.yaml");
+    repo.create_file(".lf/workflows/proof.yaml", "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: proof}\n  - {from: review, to: end, graph: proof}\n");
     repo.stage_all();
     repo.commit("Fixture workflow");
     assert!(Command::new("git")
@@ -940,46 +940,30 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     lf(
         repo.path(),
         home.path(),
-        &[
-            "wave",
-            "workflow",
-            "set",
-            "proof",
-            "inbox",
-            "--file",
-            definition.to_str().unwrap(),
-        ],
+        &["wave", "workflow", "set", "proof", "inbox"],
     );
     let catalog = lf(
         repo.path(),
         home.path(),
-        &[
-            "wave",
-            "workflow",
-            "list",
-            "--wave",
-            status["execution"]["wave"].as_str().unwrap(),
-            "--json",
-        ],
+        &["wave", "workflow", "list", "--json"],
     );
-    let private = catalog
+    let committed = catalog
         .as_array()
         .unwrap()
         .iter()
         .find(|entry| entry["name"] == "proof")
         .unwrap();
-    assert_eq!(private["source"], "stored");
-    assert!(private["workflow"].is_object());
+    assert_eq!(committed["source"], ".lf/workflows/proof.yaml");
+    assert!(committed["workflow"].is_object());
     let source = lf(
         repo.path(),
         home.path(),
-        &["wave", "workflow", "source", "proof", "inbox"],
+        &["wave", "workflow", "source", "proof"],
     );
     assert_eq!(
         source.as_str().unwrap().trim(),
         std::fs::read_to_string(&definition).unwrap().trim()
     );
-    assert!(!repo.path().join(".lf/workflows").exists());
     let placed = lf(
         repo.path(),
         home.path(),
@@ -2737,7 +2721,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
 }
 
 #[test]
-fn wave_documents_follow_files_while_workflows_remain_stored() {
+fn wave_documents_and_workflows_follow_files() {
     for connected in [false, true] {
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
@@ -2807,6 +2791,8 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
             repo.path().join("authored-wave"),
         )
         .unwrap();
+        let definition =
+            std::fs::read_to_string(repo.path().join(".lf/workflows/finish.yaml")).unwrap();
         std::fs::remove_file(repo.path().join(".lf/workflows/finish.yaml")).unwrap();
         let absent = lf(
             repo.path(),
@@ -2816,10 +2802,21 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
         assert!(!absent
             .to_string()
             .contains(".lf/wave/tools/parser/MEMORY.md"));
+        // A Wave keeps only the name; its definition follows the file.
+        let missing = command(
+            repo.path(),
+            home.path(),
+            &["wave", "workflow", "source", "finish"],
+        )
+        .output()
+        .unwrap();
+        assert!(!missing.status.success());
+        assert!(String::from_utf8_lossy(&missing.stderr).contains(".lf/workflows/finish.yaml"));
+        std::fs::write(repo.path().join(".lf/workflows/finish.yaml"), &definition).unwrap();
         let source = lf(
             repo.path(),
             home.path(),
-            &["wave", "workflow", "source", "finish", "tools/parser"],
+            &["wave", "workflow", "source", "finish"],
         );
         assert!(source.as_str().unwrap().contains("from: start"));
         std::fs::write(repo.path().join(".lf/workflows/unimported.yaml"), workflow).unwrap();
@@ -2831,22 +2828,15 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
         let catalog = lf(
             repo.path(),
             home.path(),
-            &[
-                "wave",
-                "workflow",
-                "list",
-                "--wave",
-                "tools/parser",
-                "--json",
-            ],
+            &["wave", "workflow", "list", "--json"],
         );
         let entries = catalog.as_array().unwrap();
-        let saved = entries
+        let edited = entries
             .iter()
             .find(|entry| entry["name"] == "finish")
             .unwrap();
-        assert_eq!(saved["source"], "stored");
-        assert!(saved["unavailable"].is_null());
+        assert_eq!(edited["source"], ".lf/workflows/finish.yaml");
+        assert!(edited["unavailable"].is_string());
         let unimported = entries
             .iter()
             .find(|entry| entry["name"] == "unimported")
@@ -3319,7 +3309,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
     let source = lf(
         repo.path(),
         home.path(),
-        &["wave", "workflow", "source", "code", wave.slug()],
+        &["wave", "workflow", "source", "code"],
     );
     assert!(source.as_str().unwrap().contains("nodes:"));
     connection
@@ -3396,11 +3386,15 @@ fn wave_planning_distinguishes_missing_registry_from_unreadable_and_removes_old_
     let shown = lf(repo.path(), home.path(), &["wave", "show", "--json"]);
     assert_eq!(shown["waves"], serde_json::json!([]));
     assert!(!home.path().join("loopflow.db").exists());
-    let workflow_reads = [
-        vec!["wave", "workflow", "show", "missing", "--json"],
-        vec!["wave", "workflow", "source", "code", "missing"],
-        vec!["wave", "workflow", "list", "--wave", "missing", "--json"],
-    ];
+    // Definitions are files: reading them needs no registry and creates none.
+    for args in [
+        vec!["wave", "workflow", "source", "code"],
+        vec!["wave", "workflow", "list", "--json"],
+    ] {
+        lf(repo.path(), home.path(), &args);
+        assert!(!home.path().join("loopflow.db").exists());
+    }
+    let workflow_reads = [vec!["wave", "workflow", "show", "missing", "--json"]];
     for args in &workflow_reads {
         let output = command(repo.path(), home.path(), args).output().unwrap();
         assert!(!output.status.success());

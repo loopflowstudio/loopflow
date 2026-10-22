@@ -1,8 +1,8 @@
 pub mod accounting;
 pub(crate) mod calendar;
 pub mod history;
+pub mod published;
 
-use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 #[cfg(unix)]
@@ -39,6 +39,8 @@ pub struct CronSpec {
     pub working_directory: PathBuf,
     pub lf_path: PathBuf,
     pub host: CronHost,
+    /// Teammates can see this cron. Crons are private by default.
+    pub published: bool,
 }
 
 /// Use the same shorthand and argument parser as a direct invocation.
@@ -215,13 +217,15 @@ pub(crate) struct CronObligation {
     pub(crate) log_path: PathBuf,
 }
 
-/// Reconcile summary from [`sync_crons`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CronSyncResult {
-    /// Declared crons now present as launchd jobs (added or replaced).
+/// The crons a repository's people run, as this Machine reads them.
+#[derive(Debug, Clone, Serialize)]
+pub struct CronListing {
+    /// Installed on this Machine.
     pub installed: Vec<InstalledCron>,
-    /// Jobs in the selected repository and scope whose names are no longer declared.
-    pub removed: Vec<InstalledCron>,
+    /// Teammates' published crons, as last observed.
+    pub published: Vec<published::ObservedCron>,
+    /// Why the latest fetch failed; `published` is then the last observed state.
+    pub fetch_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -238,6 +242,7 @@ pub struct InstalledCron {
     pub repo: PathBuf,
     pub lf_path: PathBuf,
     pub loaded: bool,
+    pub published: bool,
     pub latest_receipt: Option<CronReceipt>,
 }
 
@@ -288,7 +293,7 @@ pub fn add_cron(
     spec: &CronSpec,
     launchctl: &dyn Launchctl,
 ) -> OpsResult<InstalledCron> {
-    validate_cron_specs(std::slice::from_ref(spec))?;
+    validate_cron_spec(spec)?;
     fs::create_dir_all(launch_agents_dir)?;
     if let Some(parent) = spec.log_path().parent() {
         fs::create_dir_all(parent)?;
@@ -487,67 +492,52 @@ pub fn daily_time_of(expr: &str) -> OpsResult<(u32, u32)> {
     Ok((first.hour(), first.minute()))
 }
 
-/// Validate commands and require a distinct installed identity for each job.
+/// Validate a job's command and require a name.
 ///
 /// # Errors
-/// Returns [`OpsError::Parse`] for invalid commands or duplicate job identities.
-pub fn validate_cron_specs(specs: &[CronSpec]) -> OpsResult<()> {
-    let mut labels = HashSet::new();
-    for spec in specs {
-        parse_cron_command(&spec.command)?;
-        if spec.graph.is_empty() || !labels.insert(label(&spec.wave, &spec.graph)) {
-            return Err(OpsError::Parse(format!(
-                "Cron job {} is empty or declared more than once",
-                spec.graph
-            )));
-        }
+/// Returns [`OpsError::Parse`] for an invalid command or an empty name.
+fn validate_cron_spec(spec: &CronSpec) -> OpsResult<()> {
+    parse_cron_command(&spec.command)?;
+    if spec.graph.is_empty() {
+        return Err(OpsError::Parse("Cron job name is empty".into()));
     }
     Ok(())
 }
 
-/// Reconcile the configured list, optionally filtered by the command's Work scope.
-pub fn sync_crons(
+/// Publish or unpublish an installed cron. The flag lives in its plist, so the
+/// job is rewritten in place; its schedule and history are unchanged.
+pub fn set_cron_published(
+    launch_agents_dir: &Path,
+    cron: &InstalledCron,
+    published: bool,
+    launchctl: &dyn Launchctl,
+) -> OpsResult<InstalledCron> {
+    let mut spec = read_cron_spec(&cron.path)?;
+    spec.published = published;
+    add_cron(launch_agents_dir, &spec, launchctl)
+}
+
+/// Reinstall this Machine's jobs for `repo` with the current lf and host
+/// environment. Installed plists are the only cron definitions.
+pub fn reinstall_crons(
     launch_agents_dir: &Path,
     repo: &Path,
-    wave: Option<&str>,
-    task: Option<&str>,
-    specs: &[CronSpec],
+    lf_path: &Path,
+    host: &CronHost,
     launchctl: &dyn Launchctl,
-) -> OpsResult<CronSyncResult> {
-    validate_cron_specs(specs)?;
-    for spec in specs {
-        if !command_matches_scope(&spec.command, wave, task)? {
-            return Err(OpsError::Parse(format!(
-                "Cron {} is outside the selected Work scope",
-                spec.graph
-            )));
-        }
-    }
-    let desired = specs
-        .iter()
-        .map(|spec| label(&spec.wave, &spec.graph))
-        .collect::<HashSet<_>>();
+) -> OpsResult<Vec<InstalledCron>> {
+    let repo = repo.canonicalize()?;
     let mut installed = Vec::new();
-    for spec in specs {
-        installed.push(add_cron(launch_agents_dir, spec, launchctl)?);
-    }
-    let mut removed = Vec::new();
     for existing in list_crons(launch_agents_dir, launchctl)? {
-        if existing.repo.canonicalize()? == repo.canonicalize()?
-            && command_matches_scope(&existing.command, wave, task)?
-            && !desired.contains(&existing.label)
-        {
-            if let Some(cron) = remove_cron(
-                launch_agents_dir,
-                &existing.wave,
-                &existing.graph,
-                launchctl,
-            )? {
-                removed.push(cron);
-            }
+        if existing.repo.canonicalize().ok().as_deref() != Some(repo.as_path()) {
+            continue;
         }
+        let mut spec = read_cron_spec(&existing.path)?;
+        spec.lf_path = lf_path.to_path_buf();
+        spec.host = host.clone();
+        installed.push(add_cron(launch_agents_dir, &spec, launchctl)?);
     }
-    Ok(CronSyncResult { installed, removed })
+    Ok(installed)
 }
 
 pub fn run_cron(
@@ -613,7 +603,7 @@ pub(crate) fn run_cron_recorded(
 
     let placement_error = if spec.host.machine_id != *placed_machine {
         Some(format!(
-            "installed for Machine {}, but Wave {wave} is placed on {placed_machine}; run `lf wave cron sync --wave {wave}` on the placed Machine",
+            "installed for Machine {}, but Wave {wave} is placed on {placed_machine}; run `lf cron add` on the placed Machine",
             spec.host.machine_id
         ))
     } else if *current_machine != *placed_machine {
@@ -907,6 +897,7 @@ fn inspect_cron(path: &Path, launchctl: &dyn Launchctl) -> OpsResult<InstalledCr
         repo: spec.working_directory.clone(),
         lf_path: spec.lf_path.clone(),
         loaded: launchctl.is_loaded(&label)?,
+        published: spec.published,
         latest_receipt: latest_cron_receipt(
             &receipt_root(&spec.host.lf_home),
             &spec.wave,
@@ -925,12 +916,13 @@ fn read_cron_spec(path: &Path) -> OpsResult<CronSpec> {
     let required = |key: &str| {
         plist_string(&content, key).ok_or_else(|| {
             OpsError::Parse(format!(
-                "{} is missing required {key} metadata; run `lf wave cron sync --wave <wave>`",
+                "{} is missing required {key} metadata; reinstall it with `lf cron add`",
                 path.display()
             ))
         })
     };
     Ok(CronSpec {
+        published: plist_string(&content, "LoopflowPublished").as_deref() == Some("true"),
         wave: required("LoopflowWave")?,
         graph: required("LoopflowGraph")?,
         command: match plist_string(&content, "LoopflowCommand") {
@@ -979,7 +971,7 @@ fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
     let activated_at = match plist_string(&content, "LoopflowActivatedAt") {
         Some(value) => value.parse::<i64>().map_err(|error| {
             OpsError::Parse(format!(
-                "{} has invalid LoopflowActivatedAt {value:?}: {error}; run `lf wave cron sync --wave {}`",
+                "{} has invalid LoopflowActivatedAt {value:?}: {error}; reinstall it with `lf cron add` (Wave {})",
                 path.display(),
                 spec.wave
             ))
@@ -998,7 +990,7 @@ fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
             .or_else(|| file_timestamp(path))
             .ok_or_else(|| {
                 OpsError::Message(format!(
-                    "cannot recover activation time for legacy cron {}; run `lf wave cron sync --wave {}`",
+                    "cannot recover activation time for legacy cron {}; reinstall it with `lf cron add` (Wave {})",
                     path.display(),
                     spec.wave
                 ))
@@ -1378,6 +1370,7 @@ fn render_plist(spec: &CronSpec, activated_at: i64) -> OpsResult<String> {
             spec.host.lf_home.to_string_lossy().to_string(),
         ),
         ("LoopflowPath", spec.host.path_env.clone()),
+        ("LoopflowPublished", spec.published.to_string()),
         (
             "LoopflowLogPath",
             spec.log_path().to_string_lossy().to_string(),
@@ -1513,6 +1506,7 @@ fn status_label(status: &std::process::ExitStatus) -> String {
 mod tests {
     use super::*;
     use std::cell::RefCell;
+    use std::collections::HashSet;
 
     use clap::Parser;
 
@@ -1588,6 +1582,7 @@ mod tests {
     ) -> CronSpec {
         CronSpec {
             wave: wave.to_string(),
+            published: false,
             graph: graph.to_string(),
             command: if target_kind == CronTargetKind::Repository {
                 vec!["task".into(), "reconcile".into(), "--json".into()]
@@ -1931,7 +1926,7 @@ mod tests {
 
         let error = list_crons(temp.path(), &FakeLaunchctl::default()).unwrap_err();
         assert!(error.to_string().contains("missing required LoopflowWave"));
-        assert!(error.to_string().contains("lf wave cron sync"));
+        assert!(error.to_string().contains("lf cron add"));
     }
 
     #[test]
@@ -2165,142 +2160,6 @@ mod tests {
             assert_eq!(read_cron_spec(&path).unwrap(), cron);
             assert!(accounting::claim_execution(&cron).unwrap().is_some());
         }
-    }
-
-    #[test]
-    fn task_filtered_sync_preserves_other_tasks_waves_and_repositories() {
-        let temp = tempfile::tempdir().unwrap();
-        let agents = temp.path().join("agents");
-        let launchctl = FakeLaunchctl::default();
-        let wave = spec(temp.path(), Path::new("/usr/bin/true"));
-        let mut first = wave.clone();
-        first.wave.clear();
-        first.graph = "first".into();
-        first.command = vec![
-            "--task".into(),
-            "FIX-1".into(),
-            "task".into(),
-            "status".into(),
-        ];
-        let mut second = first.clone();
-        second.graph = "second".into();
-        second.command[1] = "FIX-2".into();
-        let mut foreign = first.clone();
-        foreign.graph = "foreign".into();
-        foreign.working_directory = temp.path().join("foreign-repo");
-        for cron in [&wave, &first, &second, &foreign] {
-            add_cron(&agents, cron, &launchctl).unwrap();
-        }
-        let result = sync_crons(
-            &agents,
-            &wave.working_directory,
-            None,
-            Some("FIX-1"),
-            &[],
-            &launchctl,
-        )
-        .unwrap();
-        assert_eq!(result.removed.len(), 1);
-        assert_eq!(result.removed[0].graph, "first");
-        let remaining = list_crons(&agents, &launchctl).unwrap();
-        assert_eq!(remaining.len(), 3);
-        for cron in [&wave, &second, &foreign] {
-            assert!(remaining.iter().any(|job| job.graph == cron.graph));
-        }
-    }
-
-    #[test]
-    fn sync_validates_all_specs_before_installing() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let agents = temp.path().join("agents");
-        let launchctl = FakeLaunchctl::default();
-        let misplaced = named_spec(
-            temp.path(),
-            Path::new("/usr/bin/true"),
-            "other",
-            "telemetry-daily",
-            "0 0 9 * * *",
-            CronTargetKind::Graph,
-        );
-        let error = sync_crons(
-            &agents,
-            &temp.path().join("repo"),
-            Some("infra"),
-            None,
-            &[misplaced],
-            &launchctl,
-        )
-        .unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("outside the selected Work scope"));
-        assert!(!agents.exists());
-
-        let duplicate = named_spec(
-            temp.path(),
-            Path::new("/usr/bin/true"),
-            "infra",
-            "telemetry-daily",
-            "0 0 9 * * *",
-            CronTargetKind::Graph,
-        );
-        let error = sync_crons(
-            &agents,
-            &temp.path().join("repo"),
-            Some("infra"),
-            None,
-            &[duplicate.clone(), duplicate],
-            &launchctl,
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("more than once"));
-        assert!(!agents.exists());
-    }
-
-    #[test]
-    fn sync_installs_declared_and_prunes_undeclared() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let agents = temp.path().join("agents");
-        let launchctl = FakeLaunchctl::default();
-        let telemetry = named_spec(
-            temp.path(),
-            Path::new("/usr/bin/true"),
-            "infra",
-            "telemetry-daily",
-            "0 0 9 * * *",
-            CronTargetKind::Graph,
-        );
-        let first = sync_crons(
-            &agents,
-            &temp.path().join("repo"),
-            Some("infra"),
-            None,
-            &[telemetry],
-            &launchctl,
-        )
-        .unwrap();
-        assert_eq!(first.installed.len(), 1);
-        assert!(first.removed.is_empty());
-
-        let release = named_spec(
-            temp.path(),
-            Path::new("/usr/bin/true"),
-            "infra",
-            "release-run",
-            "0 0 10 * * *",
-            CronTargetKind::Skill,
-        );
-        let second = sync_crons(
-            &agents,
-            &temp.path().join("repo"),
-            Some("infra"),
-            None,
-            &[release],
-            &launchctl,
-        )
-        .unwrap();
-        assert_eq!(second.installed[0].graph, "release-run");
-        assert_eq!(second.removed[0].graph, "telemetry-daily");
     }
 
     #[test]

@@ -90,6 +90,12 @@ UPDATE wave_workflows
 SET content = replace(replace(content, ' flow:', ' graph:'), '{flow:', '{graph:')
 WHERE content LIKE '% flow:%' OR content LIKE '%{flow:%';
 
+UPDATE task_events
+SET kind_json = json_remove(
+    json_set(kind_json, '$.kind', 'graph_finished', '$.graph', json_extract(kind_json, '$.flow')),
+    '$.flow')
+WHERE json_extract(kind_json, '$.kind') = 'flow_finished';
+
 -- draft: saved_selections
 CREATE TABLE dashboards (
     repository_id TEXT NOT NULL REFERENCES repository_plans(id),

@@ -7,6 +7,8 @@
 //! to replace a newer installation, and then hands the bundle to ordinary
 //! published promotion with the bundle as both source and destination. That
 //! promotion records the destination, so later updates replace this copy.
+//! Later launches of the settled copy return before verification or any
+//! write, so a person's edited `.zshrc` stays as they left it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,6 +18,7 @@ use anyhow::{anyhow, Context, Result};
 
 use super::shell_path;
 use crate::build_info::MigrationAuthority;
+use crate::installation::{ArtifactRole, InstallationState};
 
 const DEFAULT_APPLICATIONS: &str = "/Applications";
 
@@ -163,6 +166,24 @@ fn refuse_downgrade(installed: &str, opened: &str, installed_app: Option<&Path>)
     Ok(())
 }
 
+/// This bundle is already the settled installation: no switch is pending, the
+/// active record activated this copy, and its CLI is this bundle's helper. A
+/// pending receipt, even one past commit, still owes recovery.
+fn is_settled_here(state: &InstallationState, bundle: &Path, helper_digest: &str) -> bool {
+    let InstallationState::Settled(active) = state else {
+        return false;
+    };
+    active
+        .activation
+        .as_ref()
+        .is_some_and(|activation| activation.app.as_deref() == Some(bundle))
+        && active
+            .selection
+            .artifact_set
+            .artifact(&ArtifactRole::Cli)
+            .is_some_and(|cli| cli.sha256 == helper_digest)
+}
+
 /// `lf install activate-app --bundle <Loopflow.app>`.
 pub fn activate_app(bundle: &Path) -> Result<()> {
     // Development builds carry a validation-only helper and are installed by
@@ -179,19 +200,21 @@ pub fn activate_app(bundle: &Path) -> Result<()> {
     // The opened bundle's own helper owns activation, whether it runs inside
     // the bundle or from the retained copy promotion re-execs.
     let current = std::env::current_exe().context("resolve the activating helper")?;
-    if super::binary_digest(&current)? != super::binary_digest(&helper)? {
+    let helper_digest = super::binary_digest(&helper)?;
+    if super::binary_digest(&current)? != helper_digest {
         return Err(anyhow!(
             "activate {} with its bundled helper {}",
             bundle.display(),
             helper.display()
         ));
     }
+    let root = crate::installation::root()?;
     // Published promotion verifies the signature before any target changes.
-    if let Some(active) = crate::installation::active_install(&crate::installation::root()?)? {
+    if let Some(active) = crate::installation::active_install(&root)? {
         let cli = active
             .selection
             .artifact_set
-            .artifact(&crate::installation::ArtifactRole::Cli)
+            .artifact(&ArtifactRole::Cli)
             .expect("validated active install has a CLI");
         if let Ok(installed) = super::read_binary_preflight(&cli.path) {
             refuse_downgrade(
@@ -200,6 +223,18 @@ pub fn activate_app(bundle: &Path) -> Result<()> {
                 active.activation.as_ref().and_then(|a| a.app.as_deref()),
             )?;
         }
+    }
+    if is_settled_here(
+        &crate::installation::read_state(&root)?,
+        &bundle,
+        &helper_digest,
+    ) {
+        println!(
+            "Loopflow {} is installed at {}.",
+            opened.display_version(),
+            bundle.display()
+        );
+        return Ok(());
     }
     let directory = super::published::install_dir()?;
     fs::create_dir_all(&directory)
@@ -222,8 +257,97 @@ pub fn activate_app(bundle: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{activate_app, check_placement, choose_app_destination, refuse_downgrade};
+    use super::{
+        activate_app, check_placement, choose_app_destination, is_settled_here, refuse_downgrade,
+    };
+    use crate::installation::{
+        ActivationTargets, ActiveInstall, ArtifactIdentity, ArtifactRole, ArtifactSet,
+        InstallSelection, InstallSource, InstallationState, RecoveryOwner, SwitchPhase,
+        SwitchReceipt,
+    };
     use std::path::{Path, PathBuf};
+
+    fn settled_install(directory: &Path, app: &Path) -> (ActiveInstall, String) {
+        let cli = directory.join("lf");
+        std::fs::write(&cli, "published lf").unwrap();
+        let cli = ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap();
+        let digest = cli.sha256.clone();
+        let set = ArtifactSet {
+            id: "published".to_string(),
+            source: InstallSource::Published,
+            source_revision: "revision".to_string(),
+            source_identity: "identity".to_string(),
+            content_sha256: digest.clone(),
+            artifacts: vec![cli],
+        };
+        let active = ActiveInstall {
+            schema_version: 1,
+            selection: InstallSelection {
+                installation_id: "published-1".to_string(),
+                source: InstallSource::Published,
+                artifact_set: set.clone(),
+                store: directory.join("loopflow.db"),
+            },
+            published_fallback: set.clone(),
+            retained_published_sets: vec![set],
+            activation: Some(ActivationTargets {
+                cli: directory.join("bin/lf"),
+                daemon: None,
+                app: Some(app.to_path_buf()),
+                legacy_app: None,
+            }),
+        };
+        (active, digest)
+    }
+
+    #[test]
+    fn opening_the_settled_copy_again_skips_promotion() {
+        let directory = tempfile::tempdir().unwrap();
+        let app = directory.path().join("Loopflow.app");
+        let (active, digest) = settled_install(directory.path(), &app);
+        let settled = InstallationState::Settled(Box::new(active));
+        assert!(is_settled_here(&settled, &app, &digest));
+        assert!(!is_settled_here(&settled, &app, "other release"));
+        assert!(!is_settled_here(
+            &settled,
+            &directory.path().join("Copy/Loopflow.app"),
+            &digest
+        ));
+    }
+
+    #[test]
+    fn a_pending_switch_still_enters_promotion_for_recovery() {
+        let directory = tempfile::tempdir().unwrap();
+        let app = directory.path().join("Loopflow.app");
+        let (active, digest) = settled_install(directory.path(), &app);
+        let cli = active
+            .selection
+            .artifact_set
+            .artifact(&ArtifactRole::Cli)
+            .unwrap()
+            .clone();
+        // Committed but not archived: Home restart or app reopen is still owed.
+        let receipt = SwitchReceipt {
+            schema_version: 1,
+            id: "switch-pending".to_string(),
+            prior: None,
+            target: active.selection.clone(),
+            published_fallback: Some(active.published_fallback.clone()),
+            target_published_fallback: Some(active.published_fallback.clone()),
+            phase: SwitchPhase::Settled,
+            recovery_owner: RecoveryOwner::Candidate,
+            target_store_advance_started: true,
+            target_store_advanced: true,
+            active_selection_committed: true,
+            coordinator: cli.clone(),
+            candidate: cli,
+            activation: active.activation.clone().unwrap(),
+            app_was_running: false,
+            disposable_store_owned: false,
+        };
+        let switching = InstallationState::Switching(Box::new(receipt));
+        assert!(!is_settled_here(&switching, &app, &digest));
+    }
 
     #[test]
     fn updates_keep_the_recorded_copy_unless_a_directory_is_explicit() {

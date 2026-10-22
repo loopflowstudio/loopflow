@@ -58,3 +58,8 @@
   waiting for activation; only the launch window and Session resume wait. A
   first install has no restored windows; a newer copy dragged over an older
   one is quit and reopened by promotion anyway.
+
+- 2026-10-22 settled reuse: `activate-app` still writes PATH whenever it reaches
+  `promote`, including promote's own "already installed" return (same release
+  opened from a second copy, not the recorded one). Assumed acceptable rather
+  than threading a changed/unchanged outcome through every `promote` caller.

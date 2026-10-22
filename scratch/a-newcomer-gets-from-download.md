@@ -397,6 +397,12 @@ Implemented in the existing installer owner:
   refuses disk-image/read-only-volume and AppTranslocation copies with the drag
   instruction, and a copy older than the active release. It then runs ordinary
   published promotion with the bundle as source and target, then writes PATH.
+  A relaunch of the settled copy (no pending receipt, active `activation.app`
+  is this bundle, active CLI digest is the bundled helper's) returns "Loopflow
+  <version> is installed at <bundle>." before signature checks, promotion and
+  the `.zshrc` write; a removed block stays removed until `lf install
+  shell-path`. A pending receipt, including a committed `Settled` one, still
+  enters promotion for recovery.
 - Published promotion with an app source verifies `codesign --deep --strict`
   and `spctl --assess` before any target changes; `release/install.sh` no
   longer verifies signatures itself.
@@ -454,20 +460,6 @@ coding tool's cost; `lf init` is no longer in the required sequence.
 
 Remaining:
 
-0. **Reuse a settled installation (concept review 2026-10-22, next
-   implement).** Today every launch runs `activate-app` through full
-   promotion — preflight, `codesign --deep --strict`, `spctl --assess`,
-   bootstrap — before `active_install_matches_candidate` says "already
-   installed", then rewrites the zsh block. The accepted design reuses a
-   settled matching installation and never replaces user shell configuration,
-   so: when there is no pending receipt and the active record's app is this
-   bundle and its CLI digest equals the bundled helper's, `activate-app`
-   returns before signature checks, promotion and `shell_path::persist`. A
-   pending receipt still enters promotion for recovery. PATH is written only
-   when activation installs or changes something; someone who removed the
-   block keeps it removed, and `lf install shell-path` restores it. Test: a
-   matching settled install skips verification and leaves `.zshrc` untouched;
-   a pending receipt still recovers.
 1. Primary-window setup view reading `lf account --json` and running the
    recovery commands in its shell, only after the running-app baseline is
    recorded (needs a display session; not recordable headless). Its docs then
@@ -500,6 +492,7 @@ open findings are folded into Remaining above.
 | Swift activation (2026-10-22) | `swift test --filter AppActivationTests` 2 passed (progress → refusal → Retry → open; settled launches skip the helper); `swift build` passed; `install::bundle` 4 passed; documented_commands 4 passed; fmt/clippy clean. | Held closure stands in for the helper; no app bundle, xcodebuild or GUI. |
 | Compress (Swift activation) | Release README activation paragraph untangled; folding `.failed` into the view's own error broke `AppActivationTests` (unhosted `@State` is invisible), so the state stays. `AppActivationTests` 2 passed. | Same limits. |
 | Realign (after Swift activation) | Plan, docs and code agree; origin/main unchanged since `98dab5ea8e`; `website/content.yaml` already links the DMG and getting-started, so no change. No tests rerun. | Reuses results above. |
+| Settled reuse (2026-10-22) | `is_settled_here` tests: matching settled install reused; other digest/copy and committed-pending receipt enter promotion. `cargo test -p loopflow --lib -- lf::commands::install machine_install app_activation_tests`: 42 passed, 2 ignored; fmt/clippy clean. | Decision tested on fixtures; `activate_app` itself is unreachable from a validation-only test build, and the install root is the real account home, so no end-to-end `.zshrc` byte check. |
 
 Proposed Wave memory update after landing (memory is read-only here): items 1,
 3 and 7 of "What stands between a newcomer and a first task" are addressed in

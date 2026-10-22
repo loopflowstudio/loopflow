@@ -51,10 +51,6 @@ impl Usd {
         Self(micros)
     }
 
-    pub fn micros(self) -> i64 {
-        self.0
-    }
-
     /// Parse `0.40`, `$0.40` or `3`; at most six decimal places.
     pub fn parse(value: &str) -> Result<Self, String> {
         let text = value.trim().trim_start_matches('$');
@@ -102,6 +98,13 @@ impl Usd {
     /// Hours this budget buys at `per_hour`.
     pub fn hours_at(self, per_hour: Usd) -> Option<f64> {
         (per_hour.0 > 0).then(|| self.0 as f64 / per_hour.0 as f64)
+    }
+}
+
+impl std::ops::Add for Usd {
+    type Output = Usd;
+    fn add(self, other: Usd) -> Usd {
+        Usd(self.0.saturating_add(other.0))
     }
 }
 
@@ -222,7 +225,7 @@ pub struct CpuFlavor {
 /// them. Take the smallest size covering both needs in each flavor, then the
 /// cheapest, preferring flavors in stock.
 pub fn cpu_quote(flavors: &[CpuFlavor], vcpus: u32, memory_gb: u32) -> Option<Quote> {
-    let smallest = vcpus.max(2).next_power_of_two();
+    let smallest = catalog_vcpus(vcpus);
     flavors
         .iter()
         .filter_map(|flavor| {
@@ -362,8 +365,6 @@ pub struct Rental {
     #[serde(with = "time::serde::rfc3339::option")]
     pub ended_at: Option<OffsetDateTime>,
     pub cost_usd: Option<Usd>,
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub copied_at: Option<OffsetDateTime>,
 }
 
 impl Rental {

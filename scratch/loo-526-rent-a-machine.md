@@ -115,8 +115,9 @@ rentals
   created_at INTEGER
   ended_at INTEGER
   cost_usd TEXT                   -- whole billed hours from /v2/billing/pods, updated each pass
-  copied_at INTEGER               -- when the laptop last copied its records
 ```
+
+Copy-up adds whatever watermark it needs (e.g. `copied_at`) in the same draft.
 
 A Machine is rented when a Rental names it, owned otherwise; `pool` and a
 Rental never both apply. One draft migration (`scripts/new_migration.py
@@ -319,7 +320,8 @@ list` and `lf machine end`.
 Remaining:
 
 1. **Records copy-up** (step 4): `lf history export`, import with
-   `origin_machine_id`, and calling it before every delete. Until then give-back
+   `origin_machine_id`, a copy watermark on `rentals`, and calling it before
+   every delete. Until then give-back
    deletes without copying and says so ("Session and Process records on it
    were not copied").
 2. **Pass callers**: end of a forwarded `lf task run`, and `lf task automation`.
@@ -332,3 +334,5 @@ Remaining:
 
 Check: `cargo test -p loopflow --lib -- rental` 25 passed; `pytest
 python/tests/test_guardian.py` 5 passed; clippy clean; CLI reference regenerated.
+
+Compress 2026-10-21: `cargo clippy -p loopflow --all-targets -D warnings` clean; `cargo test -p loopflow --lib -- rental` 25 passed.

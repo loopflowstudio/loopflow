@@ -71,7 +71,7 @@ fn map_ondemand(row: &rusqlite::Row<'_>) -> StoreResult<OnDemand> {
 }
 
 const RENTAL_COLUMNS: &str = "id,ondemand,provider,provider_name,provider_id,machine_id,by_hand,
-    hardware,usd_per_hour,cap_usd,deadline,state,created_at,ended_at,cost_usd,copied_at";
+    hardware,usd_per_hour,cap_usd,deadline,state,created_at,ended_at,cost_usd";
 
 fn map_rental(row: &rusqlite::Row<'_>) -> StoreResult<Rental> {
     let provider: String = row.get(2)?;
@@ -95,7 +95,6 @@ fn map_rental(row: &rusqlite::Row<'_>) -> StoreResult<Rental> {
         created_at: at(row.get(12)?)?,
         ended_at: row.get::<_, Option<i64>>(13)?.map(at).transpose()?,
         cost_usd: row.get::<_, Option<String>>(14)?.map(usd).transpose()?,
-        copied_at: row.get::<_, Option<i64>>(15)?.map(at).transpose()?,
     })
 }
 
@@ -240,18 +239,6 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(pool) = &ownership.pool {
-            let exists: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM pools WHERE name=?1)",
-                [pool],
-                |row| row.get(0),
-            )?;
-            if !exists {
-                return Err(invalid(format!(
-                    "no pool {pool}; `lf pool add {pool}` creates it"
-                )));
-            }
-        }
         let rented: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM rentals WHERE machine_id=?1)",
             [machine.as_str()],
@@ -274,11 +261,6 @@ impl SqliteStore {
         }
         tx.commit()?;
         Ok(())
-    }
-
-    pub fn machine_ownership(&self, machine: &MachineId) -> StoreResult<Ownership> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        ownership_in(&conn, machine)
     }
 
     /// Whether any Task was ever handed to or claimed on this Machine.
@@ -357,11 +339,7 @@ impl SqliteStore {
     /// Forget an on-demand; its rentals' history stays.
     pub fn remove_ondemand(&self, name: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let live: i64 = conn.query_row(
-            "SELECT count(*) FROM rentals WHERE ondemand=?1 AND state NOT IN ('ended','lost')",
-            [name],
-            |row| row.get(0),
-        )?;
+        let live = live_in(&conn, name)?;
         if live > 0 {
             return Err(invalid(format!(
                 "{name} still has {live} live machine(s); `lf machine end` gives them back"
@@ -387,11 +365,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let ondemand = ondemand_in(&tx, ondemand)?.ok_or(StoreError::NotFound)?;
-        let live: u32 = tx.query_row(
-            "SELECT count(*) FROM rentals WHERE ondemand=?1 AND state NOT IN ('ended','lost')",
-            [&ondemand.name],
-            |row| row.get(0),
-        )?;
+        let live = live_in(&tx, &ondemand.name)?;
         let now = at(now_unix())?;
         let admission =
             rental::admit(&ondemand, live, quote, hours, max_usd, now).map_err(invalid)?;
@@ -416,6 +390,12 @@ impl SqliteStore {
         let rental = rental_in(&tx, &id)?;
         tx.commit()?;
         Ok(rental)
+    }
+
+    /// Rentals of this on-demand that count against its limit.
+    pub fn live_rentals(&self, ondemand: &str) -> StoreResult<u32> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        live_in(&conn, ondemand)
     }
 
     pub fn rental(&self, id: &RentalId) -> StoreResult<Rental> {
@@ -489,14 +469,6 @@ impl SqliteStore {
         )
     }
 
-    pub fn set_rental_copied(&self, id: &RentalId) -> StoreResult<Rental> {
-        self.update_rental(
-            id,
-            "UPDATE rentals SET copied_at=?2 WHERE id=?1",
-            params![id.as_str(), now_unix()],
-        )
-    }
-
     fn update_rental(
         &self,
         id: &RentalId,
@@ -523,6 +495,14 @@ fn ondemand_in(conn: &Connection, name: &str) -> StoreResult<Option<OnDemand>> {
     )
     .optional()?
     .transpose()
+}
+
+fn live_in(conn: &Connection, ondemand: &str) -> StoreResult<u32> {
+    Ok(conn.query_row(
+        "SELECT count(*) FROM rentals WHERE ondemand=?1 AND state NOT IN ('ended','lost')",
+        [ondemand],
+        |row| row.get(0),
+    )?)
 }
 
 fn ownership_in(conn: &Connection, machine: &MachineId) -> StoreResult<Ownership> {

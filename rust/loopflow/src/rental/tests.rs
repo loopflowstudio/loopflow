@@ -62,7 +62,7 @@ fn quote(price: &str, available: bool) -> Quote {
 
 #[test]
 fn dollars_parse_exactly_and_print_as_people_read_them() {
-    assert_eq!(usd("$0.40").micros(), 400_000);
+    assert_eq!(usd("$0.40"), Usd::from_micros(400_000));
     assert_eq!(usd("0.03").times(8), usd("0.24"));
     assert_eq!(usd("3").to_string(), "$3.00");
     assert_eq!(usd("0.035").to_decimal(), "0.035");
@@ -245,7 +245,6 @@ fn rented(by_hand: bool) -> Rental {
         created_at: now(),
         ended_at: None,
         cost_usd: None,
-        copied_at: None,
     }
 }
 

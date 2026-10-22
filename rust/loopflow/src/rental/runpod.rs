@@ -54,31 +54,22 @@ impl std::fmt::Debug for RunPod {
     }
 }
 
-/// The account key, from the environment of the lf process that rents.
-pub fn api_key() -> anyhow::Result<String> {
-    std::env::var("RUNPOD_API_KEY")
-        .ok()
-        .filter(|key| !key.is_empty() && !key.chars().any(char::is_whitespace))
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "RUNPOD_API_KEY is not set; run with `doppler run -p etude -c prd -- lf …`"
-            )
-        })
-}
-
 impl RunPod {
-    /// With the account key from `RUNPOD_API_KEY`.
+    /// With the account key from the environment of the lf process that rents.
     pub fn from_env() -> anyhow::Result<Self> {
-        Ok(Self::new(&api_key()?))
-    }
-
-    pub fn new(key: &str) -> Self {
+        let key = std::env::var("RUNPOD_API_KEY")
+            .ok()
+            .filter(|key| !key.is_empty() && !key.chars().any(char::is_whitespace))
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "RUNPOD_API_KEY is not set; run with `doppler run -p etude -c prd -- lf …`"
+                )
+            })?;
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(60))
             .build()
             .expect("reqwest client builds with static options");
-        let key = key.to_string();
-        Self::with_send(Box::new(move |method, url, body| {
+        Ok(Self::with_send(Box::new(move |method, url, body| {
             let method = reqwest::Method::from_bytes(method.as_bytes())
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
             let mut request = client
@@ -98,10 +89,10 @@ impl RunPod {
                 .bytes()
                 .map_err(|error| std::io::Error::other(error.without_url().to_string()))?;
             Ok((status, bytes.to_vec()))
-        }))
+        })))
     }
 
-    pub fn with_send(send: Send) -> Self {
+    fn with_send(send: Send) -> Self {
         Self { send }
     }
 
@@ -311,17 +302,17 @@ impl RunPod {
         Ok(pod)
     }
 
-    /// Delete exactly this pod. Refuses when the id now names another pod;
-    /// an already absent pod is already given back.
-    pub fn delete(&self, id: &str, name: &str) -> Result<()> {
+    /// Delete exactly this pod and return it as last seen. Refuses when the id
+    /// now names another pod; an already absent pod is already given back.
+    pub fn delete(&self, id: &str, name: &str) -> Result<Option<Pod>> {
         let Some(current) = self.pod(id)? else {
-            return Ok(());
+            return Ok(None);
         };
         if current.name != name {
             return Err(Unavailable("the pod id now names a different pod".into()));
         }
         self.ask("DELETE", &format!("pods/{id}"), &[], None, true)?;
-        Ok(())
+        Ok(Some(current))
     }
 
     /// What RunPod has billed this pod, counting only contiguous whole hours
@@ -363,7 +354,7 @@ impl RunPod {
             if hour != through {
                 break;
             }
-            total = Usd::from_micros(total.micros() + amount.micros());
+            total = total + amount;
             through += time::Duration::HOUR;
         }
         Ok(total)

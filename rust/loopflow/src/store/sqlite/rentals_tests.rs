@@ -149,6 +149,7 @@ fn an_owned_machine_joins_a_pool_with_its_cost_and_leaves_when_the_pool_goes() {
     assert!(machines[0].tasks.is_empty());
 
     store.remove_pool("lab").unwrap();
-    assert_eq!(store.machine_ownership(&mini).unwrap().pool, None);
-    assert_eq!(store.machine_ownership(&mini).unwrap().cost_usd, usd("599"));
+    let left = super::ownership_in(&store.conn.lock().unwrap(), &mini).unwrap();
+    assert_eq!(left.pool, None);
+    assert_eq!(left.cost_usd, usd("599"));
 }

@@ -40,7 +40,6 @@ CREATE TABLE rentals (
   state TEXT NOT NULL CHECK(state IN ('requested','unconfirmed','booting','running','ending','ended','lost')),
   created_at INTEGER NOT NULL,
   ended_at INTEGER,
-  cost_usd TEXT,
-  copied_at INTEGER
+  cost_usd TEXT
 );
 CREATE INDEX idx_rentals_ondemand_live ON rentals(ondemand) WHERE state NOT IN ('ended','lost');

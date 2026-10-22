@@ -141,7 +141,7 @@ struct Availability {
     usd_per_hour: Usd,
     max_usd_per_hour: Usd,
     available: bool,
-    in_use: usize,
+    in_use: u32,
     max: u32,
     #[serde(with = "time::serde::rfc3339")]
     observed_at: OffsetDateTime,
@@ -221,7 +221,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             let ondemand = require_ondemand(sqlite, name)?;
             let api = RunPod::from_env()?;
             let quote = api.quote(&ondemand.template)?;
-            let in_use = live(sqlite, name)?;
+            let in_use = sqlite.live_rentals(name)?;
             let availability = Availability {
                 ondemand: name.clone(),
                 hardware: quote.hardware,
@@ -299,14 +299,6 @@ fn require_ondemand(sqlite: &SqliteStore, name: &str) -> anyhow::Result<OnDemand
     sqlite.ondemand(name)?.ok_or_else(|| {
         anyhow!("no on-demand {name}; `lf ondemand add {name} --provider runpod …` names one")
     })
-}
-
-fn live(sqlite: &SqliteStore, name: &str) -> anyhow::Result<usize> {
-    Ok(sqlite
-        .rentals(Some(name))?
-        .iter()
-        .filter(|rental| rental.state.is_live())
-        .count())
 }
 
 fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing> {
@@ -476,7 +468,7 @@ pub(crate) fn rent(
         "Rented {} ({}) at {}/h; waiting for it to boot",
         rental.hardware, pod.id, rental.usd_per_hour
     );
-    let machine = attach(runtime, sqlite, api, &rental, &ondemand.name)?;
+    let machine = attach(runtime, sqlite, api, &rental)?;
     Ok((sqlite.rental(&rental.id)?, machine))
 }
 
@@ -486,7 +478,6 @@ fn attach(
     sqlite: &SqliteStore,
     api: &RunPod,
     rental: &Rental,
-    ondemand: &str,
 ) -> anyhow::Result<Machine> {
     let pod_id = rental
         .provider_id
@@ -543,7 +534,7 @@ fn attach(
         std::thread::sleep(Duration::from_secs(10));
     }
     let probe = runtime.block_on(super::machine::probe(&route, false))?;
-    let label = next_label(sqlite, ondemand)?;
+    let label = next_label(sqlite, &rental.ondemand)?;
     let machine = sqlite.add_machine(&probe.id?, &route, &label)?;
     sqlite.attach_rental(&rental.id, &machine.id)?;
     Ok(machine)
@@ -631,7 +622,7 @@ pub fn place(
     if placement.quote {
         let ondemand = require_ondemand(sqlite, name)?;
         let quote = api.quote(&ondemand.template)?;
-        let live = u32::try_from(live(sqlite, name)?).unwrap_or(u32::MAX);
+        let live = sqlite.live_rentals(name)?;
         let admission = rental::admit(&ondemand, live, &quote, None, None, now())?;
         println!(
             "would rent {} at {}/h, ≤ {} for {}h; runs nothing",
@@ -773,8 +764,9 @@ pub(crate) fn pass(sqlite: &SqliteStore, api: &RunPod) -> anyhow::Result<()> {
 }
 
 fn reconcile(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Result<()> {
-    let pod = match (&rental.provider_id, rental.state) {
-        (None, RentalState::Requested | RentalState::Unconfirmed) => {
+    let pod = match &rental.provider_id {
+        // Requested or unconfirmed: only the name can find it.
+        None => {
             match rental::resolve_unconfirmed(
                 api.named(&rental.provider_name)?,
                 rental.created_at,
@@ -791,7 +783,7 @@ fn reconcile(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Res
                 Resolution::Wait => return Ok(()),
             }
         }
-        (Some(id), _) => match api.pod(id)? {
+        Some(id) => match api.pod(id)? {
             Some(pod) if !pod.is_gone() => pod,
             // Its guardian, or someone, already deleted it.
             _ => {
@@ -799,7 +791,6 @@ fn reconcile(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Res
                 return Ok(());
             }
         },
-        (None, _) => return Ok(()),
     };
     sqlite.set_rental_cost(&rental.id, api.billed(&pod, now())?)?;
     let Some(machine_id) = &rental.machine_id else {
@@ -863,9 +854,7 @@ fn give_back(
                 .provider_id
                 .as_deref()
                 .ok_or_else(|| anyhow!("rental {} has no confirmed pod", rental.id))?;
-            let pod = api.pod(pod_id)?;
-            api.delete(pod_id, &rental.provider_name)?;
-            if let Some(pod) = pod {
+            if let Some(pod) = api.delete(pod_id, &rental.provider_name)? {
                 sqlite.set_rental_cost(&rental.id, api.billed(&pod, now())?)?;
             }
             let ended = sqlite.set_rental_state(&rental.id, RentalState::Ended)?;

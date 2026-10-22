@@ -64,12 +64,8 @@ fn read_from(sources: &[Source]) -> Result<String, ClipboardUnavailable> {
             Err(err) => attempts.push(format!("{name}: {err}")),
             Ok(output) if !output.status.success() => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                let reason = stderr.lines().next().unwrap_or("").trim();
-                attempts.push(if reason.is_empty() {
-                    format!("{name}: {}", output.status)
-                } else {
-                    format!("{name}: {reason}")
-                });
+                let reason = crate::os_process::exit_reason(&stderr);
+                attempts.push(format!("{name}: {}{reason}", output.status));
             }
             Ok(output) => {
                 let text = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -133,7 +129,7 @@ mod tests {
         let attempts = read_from(&sources).unwrap_err().attempts;
 
         assert_eq!(attempts.len(), 3);
-        assert!(attempts[0].ends_with("xclip: Error: Can't open display: (null)"));
+        assert!(attempts[0].ends_with("xclip: exit status: 1: Error: Can't open display: (null)"));
         assert_eq!(attempts[1], "/nonexistent/xsel: not installed");
         assert!(attempts[2].ends_with("tmux: empty"));
     }

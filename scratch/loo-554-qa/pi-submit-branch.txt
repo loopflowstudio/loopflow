@@ -1,0 +1,48 @@
+
+ ▀▀█  v1.4.0
+ █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+
+[Context]
+  .lf/prompts/20261021-235726-eb27bc66-2e20-4d4c-b09f-6b502bdf02e7-QTd1qt-default.context.md
+
+[Skills]
+  5whys, advance, capture-tasks, ci-fix, commit-message, compress, concept-review, debug, default, demo, deploy, design, gate, implement, incident, init,
+kickoff, launch-plan, loop-or-next, loopflow-validate, polish, pr-land, pr-message, pr-publish, pr-review, pr-submit, prompt, pursue, qa, queue, realign,
+reduce, refine, refresh, release-notes, release-run, repo-operate, repo-session, research, review-chapter, review-design, s1, s2, s3, s4, s5, ship,
+ship-decomposed, split-wave, start-chapter, sync-conflicts, task-design, task-operate, task-session, testing-audit, token-compress, triage, unbreak,
+vsm-operate, wave-operate, wave-report, wave-review-chapter, wave-session, wave-start-chapter, work, xor-route
+
+[Extensions]
+  pi-889a489b0abf563617230d78b44f353f2a0f2a8b0371c13d9c4c45dfb2b00a10.mjs
+
+
+ Warning: No models available. Use /login to log into a provider via OAuth or API key. See:
+   /home/qa/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent/docs/providers.md
+   /home/qa/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent/docs/models.md
+
+ Error: No API key found for the selected model.
+
+ Use /login to log into a provider via OAuth or API key. See:
+   /home/qa/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent/docs/providers.md
+   /home/qa/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent/docs/models.md
+
+ Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.
+
+ Error: No API key found for the selected model.
+
+ Use /login to log into a provider via OAuth or API key. See:
+   /home/qa/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent/docs/providers.md
+   /home/qa/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent/docs/models.md
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/src/qa.agent-b0838ebe (qa/agent-b0838ebe)
+0.0%/0 (auto)                                                                                                                                            unknown

@@ -1,0 +1,49 @@
+Loopflow diagnostics: /home/qa/.lf/logs/terminal-3541dcb6-8492-42ee-94af-32f257839b91.log
+ ⠹ New session                   +
+  ┃  -rw-rw-r-- 1 qa qa  13 Oct 21 23:12 .gitignore
+  ┃  drwxrwxr-x 4 qa qa  48 Oct 21 23:12 .lf                                                                            New session - 2026-10-21T23:12:47.
+  ┃  -rw-rw-r-- 1 qa qa  42 Oct 21 23:12 README.md                                                                      631Z
+  ┃  -rwxrwxr-x 1 qa qa  29 Oct 21 23:12 hello.sh
+  ┃                                                                                                                     Context
+                                                                                                                        10,096 tokens
+     + Thought · 389ms                                                                                                  5% used
+
+     → Explored: 3 reads
+
+     + Thought · 1.7s
+
+  ┃
+  ┃  $ find .lf -maxdepth 3 -not -path '*/prompts/*' | head -50; echo "---"; ls -la .lf; echo "---"; find . -iname '
+  ┃  AGENTS.md' -o -iname 'CLAUDE.md' -o -iname 'CONTRIBUTING*' | head
+  ┃
+  ┃  (6 earlier lines)
+  ┃  total 4
+  ┃  drwxrwxr-x 4 qa qa   48 Oct 21 23:12 .
+  ┃  drwxrwxr-x 3 qa qa  104 Oct 21 23:12 ..
+  ┃  drwxrwxr-x 3 qa qa   28 Oct 21 23:12 journal
+  ┃  drwxrwxr-x 4 qa qa 4096 Oct 21 23:13 prompts
+  ┃  ---
+  ┃
+
+  ┃
+  ┃  $ echo "LF_AGENT_CALLER=$LF_AGENT_CALLER"; which lf && lf --help 2>&1 | head -40
+  ┃
+  ┃  (23 earlier lines)
+  ┃  --repo resolves names under repo_root (default ~/src) on the selected Machine.
+  ┃  --machine otherwise uses its saved remote repository.
+  ┃  With --machine: --forward-agent
+  ┃  Agent selection: -a, --agent <harness[:model]> overrides agents in Tasks, Flows, skills and child commands
+  ┃                                                                                                                       ⬖ Getting started                ✕
+  ┃  Omit owners when a command is unique: lf land → lf pr land.
+  ┃  Commands take precedence; lf skill NAME and lf flow NAME select definitions.                                           OpenCode includes free models so
+  ┃                                                                                                                         you can start immediately.
+
+     ⠴ Thinking                                                                                                             Connect from 75+ providers to
+                                                                                                                            use other models, including
+  ┃                                                                                                                         Claude, GPT, Gemini etc
+  ┃
+  ┃                                                                                                                         Connect provider        /connect
+  ┃  Build · Big Pickle OpenCode
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   ⬝⬝⬝⬝⬝⬝⬝⬝ esc interrupt                                                                10.1K (5%)  ctrl+p commands    ~/src/qa.agent:qa/agent
+

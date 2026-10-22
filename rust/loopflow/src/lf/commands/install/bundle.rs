@@ -65,24 +65,23 @@ fn is_writable_directory(path: &Path) -> bool {
     unsafe { libc::access(path.as_ptr(), libc::W_OK) == 0 }
 }
 
-/// Why a bundle cannot be the permanent installation, in words for the person
-/// who opened it.
-fn misplaced_bundle(bundle: &Path) -> Result<Option<String>> {
+/// Refuse a bundle that cannot be the permanent installation, in words for the
+/// person who opened it.
+fn check_placement(bundle: &Path) -> Result<()> {
     let path = bundle.to_string_lossy();
     if path.contains("/AppTranslocation/") || is_read_only_volume(bundle)? {
-        return Ok(Some(
+        return Err(anyhow!(
             "Loopflow is running from the disk image or a protected download location. \
              Drag Loopflow into Applications, eject the disk image, then open Loopflow from Applications."
-                .to_string(),
         ));
     }
     if bundle
         .extension()
         .is_none_or(|extension| extension != "app")
     {
-        return Ok(Some(format!("{} is not an app bundle", bundle.display())));
+        return Err(anyhow!("{} is not an app bundle", bundle.display()));
     }
-    Ok(None)
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -167,9 +166,7 @@ fn refuse_downgrade(installed: &str, opened: &str, installed_app: Option<&Path>)
 pub fn activate_app(bundle: &Path) -> Result<()> {
     let bundle = fs::canonicalize(bundle)
         .with_context(|| format!("resolve opened app {}", bundle.display()))?;
-    if let Some(problem) = misplaced_bundle(&bundle)? {
-        return Err(anyhow!(problem));
-    }
+    check_placement(&bundle)?;
     let helper = bundle.join("Contents/MacOS/lf");
     let daemon = bundle.join("Contents/MacOS/lfd");
     // The opened bundle's own helper owns activation, whether it runs inside
@@ -227,7 +224,7 @@ pub fn activate_app(bundle: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{choose_app_destination, misplaced_bundle, refuse_downgrade};
+    use super::{check_placement, choose_app_destination, refuse_downgrade};
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -264,17 +261,17 @@ mod tests {
     #[test]
     fn translocated_or_unbundled_copies_explain_the_drag() {
         let translocated = Path::new("/private/var/folders/x/AppTranslocation/ABC/d/Loopflow.app");
-        assert!(misplaced_bundle(translocated)
-            .unwrap()
-            .unwrap()
+        assert!(check_placement(translocated)
+            .unwrap_err()
+            .to_string()
             .contains("Drag Loopflow into Applications"));
         let directory = tempfile::tempdir().unwrap();
-        assert!(misplaced_bundle(directory.path())
-            .unwrap()
-            .unwrap()
+        assert!(check_placement(directory.path())
+            .unwrap_err()
+            .to_string()
             .contains("not an app bundle"));
         let app = directory.path().join("Loopflow.app");
         std::fs::create_dir(&app).unwrap();
-        assert_eq!(misplaced_bundle(&app).unwrap(), None);
+        check_placement(&app).unwrap();
     }
 }

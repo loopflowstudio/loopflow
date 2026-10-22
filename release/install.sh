@@ -161,17 +161,6 @@ main() {
   chmod +x "$src" "$daemon_src"
   app_source=""
   if [ "$(uname -s)" = "Darwin" ] && [ "$cli_only" != "1" ]; then
-    # Without LF_APPLICATIONS_DIR, lf replaces the app copy this machine
-    # recorded, or chooses /Applications (~/Applications when unwritable).
-    set --
-    if [ -n "${LF_APPLICATIONS_DIR:-}" ]; then
-      if [ ! -d "$LF_APPLICATIONS_DIR" ] || [ ! -w "$LF_APPLICATIONS_DIR" ]; then
-        echo "Application target is not writable: $LF_APPLICATIONS_DIR (pass --cli-only to skip the app)" >&2
-        exit 1
-      fi
-      set -- --app-target "$LF_APPLICATIONS_DIR/Loopflow.app" \
-        --legacy-app-target "$LF_APPLICATIONS_DIR/Concerto.app"
-    fi
     dmg_name="Loopflow.dmg"
     dmg="$tmpdir/$dmg_name"
     if ! curl -fsSL "$release_base/$dmg_name" -o "$dmg"; then
@@ -188,13 +177,13 @@ main() {
       echo "Loopflow.dmg does not contain Loopflow.app" >&2
       exit 1
     fi
-    # lf verifies the app signature before changing any target.
+    # lf verifies the app signature and chooses the destination:
+    # LF_APPLICATIONS_DIR, else the recorded copy, else /Applications.
     "$src" install promote \
       --cli-target "$dst" \
       --daemon-source "$daemon_src" \
       --daemon-target "$daemon_dst" \
       --app-source "$app_source" \
-      "$@" \
       --sync-skills
   else
     "$src" install promote \

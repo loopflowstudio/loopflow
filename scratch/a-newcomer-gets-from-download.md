@@ -436,8 +436,8 @@ Implemented in the existing installer owner:
   written by released lf; those read as `None`). `app_destination()`:
   `LF_APPLICATIONS_DIR` > recorded app > `/Applications` if writable >
   `~/Applications`. Promotion resolves it when `--app-target` is omitted;
-  `install.sh`, `scripts/install.py local` and `lf install`'s current-release
-  check all use it.
+  `install.sh` and `scripts/install.py local` never pass a target, and
+  `lf install`'s current-release check uses it too.
 - `lf install shell-path` and activation share one marked block in
   `.zshrc` in ZDOTDIR, else HOME (symlink-followed, idempotent, single-quoted
   path, failure names the exact `export` repair). `install.sh` calls it on

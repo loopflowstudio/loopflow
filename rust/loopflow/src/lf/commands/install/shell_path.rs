@@ -161,15 +161,13 @@ pub fn configure(directory: Option<&Path>) -> Result<()> {
     }
     let file = persist(directory)?;
     println!("New zsh terminals find lf: {}", file.display());
-    let login_shell = std::env::var_os("SHELL").map(PathBuf::from);
-    if login_shell
-        .as_deref()
-        .and_then(Path::file_name)
-        .is_some_and(|name| name != "zsh")
-    {
+    let other_shell = std::env::var_os("SHELL")
+        .map(PathBuf::from)
+        .filter(|shell| shell.file_name().is_some_and(|name| name != "zsh"));
+    if let Some(shell) = other_shell {
         println!(
             "Your shell is {}; add this to its startup file: {}",
-            login_shell.as_deref().expect("checked above").display(),
+            shell.display(),
             export_command(directory)?
         );
     }

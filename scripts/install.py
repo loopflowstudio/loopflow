@@ -520,17 +520,8 @@ def _promote_local_build(spec: BundleSpec, install_dir: Path, fresh: bool) -> No
     if fresh:
         command.append("--fresh")
     if platform.system() == "Darwin":
+        # lf chooses the destination, honoring LF_APPLICATIONS_DIR.
         command.extend(["--app-source", str(spec.app_path)])
-        # Without an explicit directory, lf replaces the recorded app copy.
-        if applications := os.environ.get("LF_APPLICATIONS_DIR"):
-            command.extend(
-                [
-                    "--app-target",
-                    str(Path(applications) / f"{APP_NAME}.app"),
-                    "--legacy-app-target",
-                    str(Path(applications) / "Concerto.app"),
-                ]
-            )
     _run_or_raise(command, "local promotion")
 
 

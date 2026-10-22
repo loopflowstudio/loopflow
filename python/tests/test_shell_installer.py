@@ -292,32 +292,23 @@ def test_digest_mismatch_aborts_before_promotion(
     assert not (tmp_path / "promote.log").exists()
 
 
-@pytest.mark.parametrize("explicit_applications", [True, False])
-def test_macos_release_promotes_the_verified_app_with_the_control_plane(
-    installer: Path, env: dict[str, str], tmp_path: Path, explicit_applications: bool
+def test_macos_release_leaves_the_app_destination_to_lf(
+    installer: Path, env: dict[str, str], tmp_path: Path
 ) -> None:
-    applications = tmp_path / "Applications"
-    applications.mkdir()
     app_env = {
         **env,
         "LF_INSTALL_CLI_ONLY": "0",
         "LFTEST_UNAME_SYSTEM": "Darwin",
         "LFTEST_UNAME_ARCH": "arm64",
     }
-    if explicit_applications:
-        app_env["LF_APPLICATIONS_DIR"] = str(applications)
 
     result = _run(installer, [], app_env)
 
     assert result.returncode == 0, result.stderr
     args = _promotions(tmp_path)[0]
     assert "--app-source" in args
-    if explicit_applications:
-        assert args[args.index("--app-target") + 1] == str(applications / "Loopflow.app")
-        assert args[args.index("--legacy-app-target") + 1] == str(applications / "Concerto.app")
-    else:
-        # lf resolves the recorded destination; the script must not pick one.
-        assert "--app-target" not in args and "--legacy-app-target" not in args
+    # lf resolves LF_APPLICATIONS_DIR or the recorded copy; the script must not pick one.
+    assert "--app-target" not in args and "--legacy-app-target" not in args
 
 
 def test_missing_version_value_fails_clearly(installer: Path, env: dict[str, str]) -> None:

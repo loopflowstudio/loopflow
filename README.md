@@ -279,6 +279,11 @@ Claude interactive hooks also require workspace trust, potentially once per
 folder; `claude -p` treats the workspace as trusted. Loopflow follows the providers’ [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks)
 and [Claude workspace trust](https://code.claude.com/docs/en/hooks#workspace-trust)
 policies. Unchanged declarations cannot remove Claude’s folder trust requirement.
+Loopflow pre-accepts Claude's folder trust only for the exact worktrees it
+created (`lf`, Task checkouts, `lf wt create`) by writing that path's
+`hasTrustDialogAccepted` entry in the config the launched child reads; hook
+trust, the main checkout, hand-made worktrees and every other setting are
+untouched.
 
 New Session names use a short excerpt of the request, or the invoked skill when
 no request was supplied. Task conversations use the Task title when no specific

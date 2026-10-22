@@ -3,9 +3,11 @@
 Status: implemented and published as PR #1648 on 2026-10-21. Its first gate never
 ran because lf could not select a managed Claude account; Jack Heart reconnected
 jack@loopflow.studio on October 21 and asked for gate and land of the published PR.
-Design unchanged. Product decision accepted by Jack Heart on October 21: lf
-pre-accepts Claude's folder trust for worktrees lf itself creates. Demo/review
-(real Claude pty on macOS and fresh Linux) still remains.
+The branch now carries current `main` (ed568b1, merged cleanly 2026-10-21; the
+PR diff is exactly the eight code files plus scratch). Design unchanged. Product
+decision accepted by Jack Heart on October 21: lf pre-accepts Claude's folder
+trust for worktrees lf itself creates. Demo/review (real Claude pty on macOS and
+fresh Linux) still remains.
 
 ## Problem
 
@@ -92,6 +94,12 @@ Two small pieces with one writer each.
    session; it is left alone.
 3. Update the `harness/context.rs` module doc: lf replaces no hook trust; folder
    trust is granted only by `claude_trust` for lf-created worktrees.
+4. **Usage docs say so (done 2026-10-21, from concept review).** README hooks
+   paragraph and `docs/lf.md` (hooks paragraph and `connect --fresh` trust
+   prompt note) now state that lf pre-accepts Claude's folder trust only for
+   the exact worktrees it created by writing that path's
+   `hasTrustDialogAccepted` entry; hook trust, the main checkout, hand-made
+   worktrees and every other setting are untouched. Codex sentences unchanged.
 
 ### Absent and error states
 
@@ -143,6 +151,7 @@ Out:
 
 ## Done when
 
+- README and `docs/lf.md` describe the lf-created-worktree trust entry.
 - `lf` launching Claude in a worktree lf created opens straight into the
   conversation with no trust dialog, on macOS and on a fresh Linux machine.
 - The main checkout and hand-made worktrees still show Claude's dialog.
@@ -177,4 +186,6 @@ Out:
 
 - Kickoff: real-Claude pty probes of the four trust cases → findings above.
 - Implement/compress: `env -u LF_HOME cargo test -p loopflow --lib -- claude_trust git_worktree_add < /dev/null` → 7 pass; `--test integration -- claude_opens_lf_created_worktree_already_trusted` → pass; clippy `--all-targets -D warnings` clean. Gate owns affected suites.
+- Concept review (2026-10-21): accepted model holds (lf-created provenance = git admin marker; trust decided at launch for the child's config). One consequence found: README/docs/lf.md trust prose contradicts shipped behaviour → implement item 4. No open product choice.
+- Realign (post-merge tree, HEAD 7c1054e): `env -u LF_* cargo test -p loopflow --lib -- claude_trust git_worktree_add < /dev/null` → 7 pass; no repair needed.
 - Land owns CI: PR checks show SKIPPED while scratch is committed; the full matrix runs once `lf pr land` clears scratch. Demo/review owns the real-Claude pty probes.

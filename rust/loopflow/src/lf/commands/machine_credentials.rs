@@ -18,7 +18,9 @@ use crate::provider_account::{
     ensure_account_home, match_account, new_account, open_account_store, AccountMatch,
 };
 use crate::provider_auth::Provider;
-use crate::store::{CredentialState, CredentialType, ProviderAccount, ProviderToken, SharedStore};
+use crate::store::{
+    CredentialState, CredentialType, LongLivedToken, ProviderAccount, ProviderToken, SharedStore,
+};
 
 // Deliberately no Debug: native credential JSON and tokens must never be logged.
 #[derive(Serialize, Deserialize)]
@@ -79,14 +81,14 @@ pub(super) async fn connect(
             ) else {
                 bail!("Claude account {login} has no verified identity on this laptop; `lf account connect claude {login}` first");
             };
-            let token = match store
+            let stored = store
                 .long_lived_token(provider.as_str(), &account.account_id)
-                .await?
-            {
-                Some(stored) => stored,
-                None => {
+                .await?;
+            let token = match stored {
+                Some(stored) if stored.is_current(now()) => stored,
+                stale => {
                     if !foreground(batch) {
-                        bail!("Claude account {login} has no long-lived token; `lf account token claude {login}` mints one in a foreground terminal");
+                        bail!("Claude account {login} {}; `lf account token claude {login}` mints one in a foreground terminal", token_absence(stale.as_ref()));
                     }
                     eprintln!("Minting a long-lived Claude token for {login}; approve once, renew in a year");
                     super::account::mint_long_lived_token(&store, &account, chrome_profile).await?
@@ -234,13 +236,14 @@ pub(super) async fn connect_claude_accounts(machine: &Machine, batch: bool) -> R
     let store = open_account_store().await?;
     let (minted, mut unminted) = claude_accounts_by_token(&store).await?;
     let chosen = if minted.is_empty() && foreground(batch) {
-        unminted.retain(|account| account.credential_state == CredentialState::Connected);
-        unminted
+        unminted.retain(|(account, _)| account.credential_state == CredentialState::Connected);
+        unminted.into_iter().map(|(account, _)| account).collect()
     } else {
-        for account in &unminted {
+        for (account, stale) in &unminted {
             let login = account_login(account);
             eprintln!(
-                "Skipping Claude {login}: no long-lived token (`lf account token claude {login}`)"
+                "Skipping Claude {login}: {} (`lf account token claude {login}`)",
+                token_absence(stale.as_ref())
             );
         }
         minted
@@ -266,15 +269,19 @@ pub(super) async fn connect_claude_accounts(machine: &Machine, batch: bool) -> R
 pub(super) async fn require_unattended_logins(store: &SharedStore) -> Result<()> {
     gh_token()?;
     if claude_accounts_by_token(store).await?.0.is_empty() {
-        bail!("no Claude account holds a long-lived token, and a background run cannot approve one; `lf account token claude <email>` mints it in a foreground terminal");
+        bail!("no Claude account holds a current long-lived token, and a background run cannot approve one; `lf account token claude <email>` mints it in a foreground terminal");
     }
     Ok(())
 }
 
-/// Claude accounts split into those holding a long-lived token and those without.
+/// Claude accounts split into those holding a current long-lived token and
+/// those without one, each with its expired token if it has one.
 async fn claude_accounts_by_token(
     store: &SharedStore,
-) -> Result<(Vec<ProviderAccount>, Vec<ProviderAccount>)> {
+) -> Result<(
+    Vec<ProviderAccount>,
+    Vec<(ProviderAccount, Option<LongLivedToken>)>,
+)> {
     let (mut minted, mut unminted) = (Vec::new(), Vec::new());
     for account in store
         .list_provider_accounts(Some(Provider::Claude.as_str()))
@@ -283,13 +290,23 @@ async fn claude_accounts_by_token(
         let token = store
             .long_lived_token(Provider::Claude.as_str(), &account.account_id)
             .await?;
-        if token.is_some() {
-            minted.push(account);
-        } else {
-            unminted.push(account);
+        match token {
+            Some(token) if token.is_current(now()) => minted.push(account),
+            stale => unminted.push((account, stale)),
         }
     }
     Ok((minted, unminted))
+}
+
+fn token_absence(stale: Option<&LongLivedToken>) -> String {
+    match stale {
+        Some(token) => format!("long-lived token expired {}", token.expires_on()),
+        None => "no long-lived token".into(),
+    }
+}
+
+fn now() -> i64 {
+    time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
 /// gh resolves its own selected token. It is never exported to a child.
@@ -335,12 +352,11 @@ fn require_foreground(batch: bool) -> Result<()> {
 /// Claude's credentials file holding only the access token: nothing to
 /// refresh, so no machine can rotate another's login. `expiresAt` (ms) is a
 /// year from minting, so every send of one token is byte-identical.
-fn long_lived_credentials(token: &crate::store::LongLivedToken) -> String {
-    const YEAR_SECONDS: i64 = 365 * 24 * 60 * 60;
+fn long_lived_credentials(token: &LongLivedToken) -> String {
     serde_json::json!({
         "claudeAiOauth": {
             "accessToken": token.token.expose_secret(),
-            "expiresAt": (token.minted_at + YEAR_SECONDS) * 1000,
+            "expiresAt": token.expires_at() * 1000,
         }
     })
     .to_string()
@@ -1640,7 +1656,7 @@ esac
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
-    async fn background_rental_needs_gh_and_a_long_lived_claude_token() {
+    async fn background_rental_needs_gh_and_a_current_long_lived_claude_token() {
         let _lock = crate::journal::test_env_lock();
         let root = tempfile::tempdir().unwrap();
         let _environment = Environment::isolate(root.path());
@@ -1662,8 +1678,19 @@ esac
             .to_string();
         assert!(error.contains("`lf account token claude <email>`"));
         let token = secrecy::SecretString::new("sk-ant-oat01-stored-token".into());
+        let day = 24 * 60 * 60;
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
         store
-            .set_long_lived_token("claude", &account.account_id, &token, 7)
+            .set_long_lived_token("claude", &account.account_id, &token, now - 366 * day)
+            .await
+            .unwrap();
+        assert!(super::require_unattended_logins(&store).await.is_err());
+        let error = super::connect_claude_accounts(&mini(), true)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("no Claude account to install"));
+        store
+            .set_long_lived_token("claude", &account.account_id, &token, now - day)
             .await
             .unwrap();
         super::require_unattended_logins(&store).await.unwrap();

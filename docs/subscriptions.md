@@ -150,7 +150,8 @@ reports recorded provider token/cost usage separately.
 
 JSON contains `accounts` and optional `browser` details. Each row has `scope`
 (`managed` or `local`), provider, account ID, login, cached
-credential state, verification, windows, diagnostic and recovery. Verification
+credential state, verification, windows, diagnostic, recovery and
+`rental_token_expires_at`. Verification
 is `accepted`, `rejected`, `unavailable`, or `not_checked`. Window rows retain
 `observed_at`, `resets_at`, source and plan; `verified_windows` identifies only
 this invocation's new observations. Null means unknown. A successful report
@@ -411,11 +412,14 @@ lf account token claude personal@example.com            # claude setup-token in 
 lf account token claude personal@example.com --file -   # or one minted by hand, from stdin
 ```
 
-The token is stored encrypted on the laptop account and lasts about a year.
+The token is stored encrypted on the laptop account and lasts a year from
+when lf stored it; `lf account` shows `rental token until <date>` or
+`expired <date>`, and running `lf account token` again renews it.
 Only `sk-ant-oat` subscription tokens are accepted; an API key bills per token.
 It cannot read the account profile, so the target registers the identity the
 laptop verified, and usage for that account reads unavailable there. A connect
-with no stored token mints one in the foreground.
+with no current token mints one in the foreground; a background run skips the
+account, and `-b --rent` refuses before renting when no account has one.
 
 An account-selected launch connects the requested account if missing. Invocation selectors resolve
 against the laptop's managed logins;

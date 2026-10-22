@@ -408,21 +408,12 @@ a credential Anthropic refuses, and the Task fails on the pod. And the person
 learns a token's age only from that failure: `lf account list` does not say
 which accounts rentals receive.
 
-Settled (next implement):
-
-- A token past `long_lived_token_minted_at + 365 days` is no token: one
-  predicate on `LongLivedToken` (`expires_at`, `is_current(now)`) used by
-  `claude_accounts_by_token` and `connect`. Expired accounts take the existing
-  "no long-lived token" path (skip with the `lf account token` note; `-b`
-  refuses before renting when none is current; foreground mints). The skip
-  note says "expired <date>" instead of "no long-lived token".
-- `lf account list` shows each Claude account's rental token: "rental token
-  until 2027-10-22", "rental token expired 2026-…", or nothing. Renewal is
-  `lf account token claude <email>` again (overwrites). No new command, no
-  warning window.
-- A hand-supplied token (`--file`) is dated from when lf stores it; lf
-  cannot read its real mint date (no `user:profile`). Recorded in
-  `questions.md`.
+Settled and built 2026-10-22: `LongLivedToken::is_current` (a year from
+when lf stored it, `--file` included) gates `claude_accounts_by_token` and
+`connect`; an expired account is skipped with "long-lived token expired
+<date>", `-b --rent` refuses before renting, foreground mints. `lf account`
+(there is no `lf account list`) shows "rental token until/expired <date>" and
+JSON `rental_token_expires_at`. Renewal is `lf account token` again.
 
 ## Status and remaining work
 
@@ -507,9 +498,6 @@ probe; the result is "Credentials on a rented machine" above.
 
 Remaining:
 
-0. **Token expiry** (concept review above): expired tokens count as absent;
-   `lf account list` shows each Claude account's rental token date. Unit test:
-   an account minted 366 days ago is skipped and fails the `-b` check.
 1. **Jack's demo (≤ $0.40)**: the Task path end to end with this branch's
    Linux build on the pod for `lf history export`. First `lf account token
    claude <email>` per account (one Chrome approval and code paste each, a
@@ -519,4 +507,4 @@ Remaining:
    It also runs `lf -b task run X --rent code -a claude` once. The scheduled
    reconcile only gives back when its environment carries `RUNPOD_API_KEY` (Q9).
 
-Last check (realign 2026-10-22, after compress): `cargo test -p loopflow --lib provider_auth` 85 passed; clippy last clean at implement.
+Last check (implement 2026-10-22, token expiry): `cargo test -p loopflow --lib` account_report_fixture, background_rental, long_lived_token 4 passed; `cargo clippy --all-targets -D warnings` clean.

@@ -950,6 +950,26 @@ pub struct LongLivedToken {
     pub minted_at: i64,
 }
 
+impl LongLivedToken {
+    /// Anthropic honors a `setup-token` for a year. A token supplied by hand
+    /// is dated from when lf stored it, since lf cannot read its mint date.
+    const LIFETIME_SECONDS: i64 = 365 * 24 * 60 * 60;
+
+    pub fn expires_at(&self) -> i64 {
+        self.minted_at + Self::LIFETIME_SECONDS
+    }
+
+    pub fn expires_on(&self) -> time::Date {
+        time::OffsetDateTime::from_unix_timestamp(self.expires_at())
+            .expect("a year after a stored unix time is representable")
+            .date()
+    }
+
+    pub fn is_current(&self, now: i64) -> bool {
+        now < self.expires_at()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderToken {
     pub provider: String,

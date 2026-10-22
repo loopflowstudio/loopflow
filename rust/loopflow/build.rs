@@ -83,7 +83,7 @@ fn emit_schema_references(manifest_dir: &Path, out_dir: &Path) {
     }
     let schema =
         migration_schema::product_schema(&connection).expect("project canonical schema reference");
-    let json = serde_json::to_vec(&schema).expect("serialize canonical schema reference");
+    let json = serde_json::to_vec(&*schema).expect("serialize canonical schema reference");
     fs::write(out_dir.join("canonical_schema.json"), json)
         .expect("write canonical schema reference");
 
@@ -96,7 +96,7 @@ fn emit_schema_references(manifest_dir: &Path, out_dir: &Path) {
     let schema = (!drafts.is_empty()).then(|| {
         migration_schema::product_schema(&connection).expect("project draft schema reference")
     });
-    let json = serde_json::to_vec(&schema).expect("serialize draft schema reference");
+    let json = serde_json::to_vec(&schema.as_deref()).expect("serialize draft schema reference");
     fs::write(out_dir.join("draft_schema.json"), json).expect("write draft schema reference");
 }
 

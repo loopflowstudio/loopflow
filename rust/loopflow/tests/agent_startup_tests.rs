@@ -132,7 +132,7 @@ fn launch(home: &Path, repo: &Path, bin: &Path, measurements: &Path, args: &[&st
         }
     }
     assert!(endings > 0, "missing completed performance receipt");
-    assert!(rows < 25_000, "launch read {rows} SQLite rows");
+    assert!(rows < 18_000, "launch read {rows} SQLite rows");
     assert!(
         statements < 2_000,
         "launch executed {statements} statements"

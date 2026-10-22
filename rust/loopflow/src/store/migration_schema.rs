@@ -1,5 +1,10 @@
 //! The product schema projection used by build-time and live validation.
 
+use std::collections::HashMap;
+use std::os::unix::fs::MetadataExt;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ProductSchemaObject {
     pub(super) object_type: String,
@@ -21,12 +26,85 @@ pub(super) struct ForeignKeyDefinition {
     pub(super) match_clause: String,
 }
 
+/// The last committed schema this process read from one database file.
+#[derive(Debug)]
+struct LiveSchema {
+    dev: u64,
+    ino: u64,
+    schema_version: i64,
+    schema: Arc<[ProductSchemaObject]>,
+}
+
 /// Every product table, view, index, and trigger with defining SQL and
 /// explicit foreign-key metadata. `schema_migrations` is bookkeeping rather
 /// than product schema, so no migration declares it.
+///
+/// SQLite bumps `PRAGMA schema_version` on every committed DDL change from any
+/// connection or process, so one file read twice at one cookie holds the same
+/// objects; the second read is served from memory. In-memory databases and
+/// reads inside a write transaction (uncommitted DDL) always read afresh.
 pub(crate) fn product_schema(
     conn: &rusqlite::Connection,
-) -> rusqlite::Result<Vec<ProductSchemaObject>> {
+) -> rusqlite::Result<Arc<[ProductSchemaObject]>> {
+    static LIVE_SCHEMAS: OnceLock<Mutex<HashMap<PathBuf, LiveSchema>>> = OnceLock::new();
+    let Some(file) = _cacheable_file(conn)? else {
+        return Ok(_read_product_schema(conn)?.into());
+    };
+    // Read the cookie first: a concurrent DDL commit between the two reads
+    // then stores a newer schema under an older cookie the file never returns to.
+    let schema_version: i64 = conn.pragma_query_value(None, "schema_version", |row| row.get(0))?;
+    let live_schemas = LIVE_SCHEMAS.get_or_init(Mutex::default);
+    if let Some(live) = live_schemas
+        .lock()
+        .expect("live schema cache poisoned")
+        .get(&file.path)
+        .filter(|live| {
+            live.dev == file.dev && live.ino == file.ino && live.schema_version == schema_version
+        })
+    {
+        return Ok(Arc::clone(&live.schema));
+    }
+    let schema: Arc<[ProductSchemaObject]> = _read_product_schema(conn)?.into();
+    live_schemas
+        .lock()
+        .expect("live schema cache poisoned")
+        .insert(
+            file.path,
+            LiveSchema {
+                dev: file.dev,
+                ino: file.ino,
+                schema_version,
+                schema: Arc::clone(&schema),
+            },
+        );
+    Ok(schema)
+}
+
+#[derive(Debug)]
+struct CacheableFile {
+    path: PathBuf,
+    dev: u64,
+    ino: u64,
+}
+
+fn _cacheable_file(conn: &rusqlite::Connection) -> rusqlite::Result<Option<CacheableFile>> {
+    let Some(path) = conn.path().filter(|path| !path.is_empty()) else {
+        return Ok(None);
+    };
+    if conn.transaction_state(None::<&str>)? == rusqlite::TransactionState::Write {
+        return Ok(None);
+    }
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return Ok(None);
+    };
+    Ok(Some(CacheableFile {
+        path: PathBuf::from(path),
+        dev: metadata.dev(),
+        ino: metadata.ino(),
+    }))
+}
+
+fn _read_product_schema(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<ProductSchemaObject>> {
     let mut statement = conn.prepare(
         "SELECT type, name, tbl_name, COALESCE(sql, '')
          FROM sqlite_master

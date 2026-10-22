@@ -292,7 +292,7 @@ struct RegistryQueryTests {
           "owner": {"person": "Jack Heart", "machine": {"id": null, "label": null}}
         },
         "directive": null,
-        "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null},
+        "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
         "next_move": {
           "owner": "task",
           "reason": "ready"

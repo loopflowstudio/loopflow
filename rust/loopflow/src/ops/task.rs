@@ -80,6 +80,8 @@ pub struct TaskProcessOptions {
     pub flow: Option<String>,
     pub stack_on: Option<String>,
     pub directive: Option<String>,
+    /// An existing branch the Task takes as its own, with the checkout that has it.
+    pub branch: Option<String>,
 }
 
 impl TaskProcessOptions {
@@ -955,10 +957,14 @@ fn prepare_task(
             }
             // A retained provider branch may already own Git work. It is metadata,
             // not a reason to reacquire planning or allocate another Task.
-            let branch = source.as_ref().map(|source| source.branch.clone()).or(store
-                .sqlite
-                .task_issue_branch(&task.id)
-                .map_err(task_error)?);
+            let branch = options
+                .branch
+                .clone()
+                .or(source.as_ref().map(|source| source.branch.clone()))
+                .or(store
+                    .sqlite
+                    .task_issue_branch(&task.id)
+                    .map_err(task_error)?);
             let placement =
                 prepare_task_placement(&store, &main, &task, branch.as_deref(), &options).await?;
             let task = place_prepared_task(&store, &task.id, placement).await?;

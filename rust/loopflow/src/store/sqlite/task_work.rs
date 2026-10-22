@@ -136,7 +136,6 @@ struct WorkflowRow {
     edge: Option<(u32, LfProcess)>,
 }
 
-
 fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<WorkflowRow>> {
     use rusqlite::OptionalExtension;
     let Some((graph, node, edge, process)) = conn
@@ -671,8 +670,14 @@ impl SqliteStore {
     pub(crate) fn workflow_edge_slice(
         &self,
         task: &TaskId,
-    ) -> StoreResult<Option<(CapturedGraph, crate::flow::runner::ExecutionCursor, String, LfProcess)>>
-    {
+    ) -> StoreResult<
+        Option<(
+            CapturedGraph,
+            crate::flow::runner::ExecutionCursor,
+            String,
+            LfProcess,
+        )>,
+    > {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let Some(row) = workflow_row(&conn, task)? else {
             return Ok(None);
@@ -857,13 +862,15 @@ mod tests {
             .unwrap();
         let definition = crate::workflow::CapturedGraph {
             name: "proof".into(),
-            steps: vec![crate::flow::ConcreteStep::Skill(crate::flow::ConcreteSkill {
-                skill: crate::flow::Skill::named("pursue"),
-                id: None,
-                interactive: false,
-                returns: None,
-                sources: Vec::new(),
-            })],
+            steps: vec![crate::flow::ConcreteStep::Skill(
+                crate::flow::ConcreteSkill {
+                    skill: crate::flow::Skill::named("pursue"),
+                    id: None,
+                    interactive: false,
+                    returns: None,
+                    sources: Vec::new(),
+                },
+            )],
         };
         store
             .take_up_workflow(&task, &definition, &by, None)

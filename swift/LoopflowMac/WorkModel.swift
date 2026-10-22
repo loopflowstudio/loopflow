@@ -1580,15 +1580,27 @@ final class WorkModel {
         select(requested, preservingOpening: false, besideFocused: besideFocused)
     }
 
-    /// Unknown retained Work stays reachable; explicit pause only hides its slot.
+    /// Unknown retained Work stays reachable; explicit pause and shipping only
+    /// hide its slot. A shipped Task's conversation stays open.
     var workingTaskIDs: [String] {
-        navigation.workingTaskIDs.filter { task(id: $0)?.task.runtime?.status != .paused }
+        navigation.workingTaskIDs.filter {
+            guard let task = task(id: $0)?.task else { return true }
+            return task.runtime?.status != .paused && task.shipping == nil
+        }
+    }
+
+    /// Every Task of this repository that Rust reads as shipping, until it lands.
+    var shippingTaskIDs: [String] {
+        (roadmap.value?.tasks.items ?? []).filter { task in
+            task.shipping != nil && task.task.repo.normalizedFilePath == repoPath?.normalizedFilePath
+        }.map(\.id)
     }
 
     var sidebarTaskIDs: [String] {
-        workingTaskIDs.filter { id in
+        if navigation.sidebarFilter == .shipping { return shippingTaskIDs }
+        return workingTaskIDs.filter { id in
             switch navigation.sidebarFilter {
-            case .working: return true
+            case .working, .shipping: return true
             case .available:
                 guard sessions.errorMessage == nil else { return false }
                 return taskSessions(id).contains { $0.availability == .available && $0.state != .closed }
@@ -1902,6 +1914,13 @@ final class WorkModel {
     func startTask(_ flow: String?, task: RoadmapTask) async {
         await performTaskAction(task.id) {
             try await query.runTask(issue: task.task.identifier, flow: flow, cwd: WaveOrigin.resolve(task.task.repo))
+        }
+    }
+
+    /// Ship the Task, then confirm its subscription update; it moves to Shipping.
+    func shipTask(_ task: RoadmapTask) async {
+        await performTaskAction(task.id) {
+            try await query.shipTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 

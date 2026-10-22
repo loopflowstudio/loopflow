@@ -547,6 +547,10 @@
         "run_control": {
           "unavailable": null
         },
+        "ship_control": {
+          "unavailable": null
+        },
+        "shipping": null,
         "pr": {
           "id": "pr_33333333333333333333333333333333",
           "sequence": 1,
@@ -696,6 +700,10 @@
         "run_control": {
           "unavailable": null
         },
+        "ship_control": {
+          "unavailable": null
+        },
+        "shipping": null,
         "pr": null,
         "workflow_source": "task"
       }

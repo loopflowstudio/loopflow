@@ -437,8 +437,8 @@ impl<'a> DefinitionLoader<'a> {
 
     /// Parse authored Flow text as the definition named `name`.
     fn parse_source(&mut self, name: String, content: &str) -> Result<FlowDefinition, LoadError> {
-        let value: Value =
-            serde_yaml_ng::from_str(content).map_err(|err| LoadError::InvalidFlow(err.to_string()))?;
+        let value: Value = serde_yaml_ng::from_str(content)
+            .map_err(|err| LoadError::InvalidFlow(err.to_string()))?;
         validate_flow_nesting(&self.sources, &name)?;
         self.sources.push(name.clone());
         let items = parse_flow_items(&value, self);
@@ -506,13 +506,10 @@ fn validate_stages(items: &[ConcreteStep], stages: &mut HashSet<String>) -> Resu
                         )));
                     }
                 } else if let Some(target) = return_target(items, index) {
-                    if let Some(crossed) = items[target..index]
-                        .iter()
-                        .find_map(|step| match step {
-                            ConcreteStep::Skill(step) => step.stage(),
-                            _ => None,
-                        })
-                    {
+                    if let Some(crossed) = items[target..index].iter().find_map(|step| match step {
+                        ConcreteStep::Skill(step) => step.stage(),
+                        _ => None,
+                    }) {
                         return Err(LoadError::InvalidFlow(format!(
                             "loop at {} returns across stage {crossed:?}; a person decides there",
                             skill.skill.name
@@ -811,9 +808,10 @@ fn parse_loop(map: &serde_yaml_ng::Mapping, target: &Value) -> Result<Step, Load
         .map(str::trim)
         .filter(|target| !target.is_empty())
         .ok_or_else(|| LoadError::InvalidFlow("loop must name a preceding step".to_string()))?;
-    if map.keys().any(|field| {
-        *field != key("loop") && *field != key("step") && *field != key("interactive")
-    }) {
+    if map
+        .keys()
+        .any(|field| *field != key("loop") && *field != key("step") && *field != key("interactive"))
+    {
         return Err(LoadError::InvalidFlow(
             "a loop item takes only loop and step or interactive".to_string(),
         ));
@@ -1130,8 +1128,8 @@ mod tests {
     use serde_yaml_ng::Value;
 
     use super::{
-        build_xor_routing_suffix, compile_branch, compile_flow, load_flow,
-        load_skill, ConcreteStep, DefinitionLoader, FlowDefinition, Skill, Step, XorDef, XorPath,
+        build_xor_routing_suffix, compile_branch, compile_flow, load_flow, load_skill,
+        ConcreteStep, DefinitionLoader, FlowDefinition, Skill, Step, XorDef, XorPath,
     };
     use crate::definition::Target;
     use crate::error::LoadError;
@@ -1338,7 +1336,10 @@ mod tests {
         assert!(error.to_string().contains("retired"), "{error}");
         fs::write(flows.join("item.yaml"), "- human: review-design\n").unwrap();
         let error = load_flow("item", tmp.path()).unwrap_err();
-        assert!(error.to_string().contains("interactive: <skill>"), "{error}");
+        assert!(
+            error.to_string().contains("interactive: <skill>"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -2271,7 +2272,9 @@ Design the feature.
         let flow = load_flow("deliver", tmp.path()).unwrap();
         let items = compile_flow(&flow, tmp.path()).unwrap();
         assert_eq!(items.len(), 2);
-        assert!(matches!(&items[1], ConcreteStep::Command(command) if command.item.display_name() == "land --wait-and-fix"));
+        assert!(
+            matches!(&items[1], ConcreteStep::Command(command) if command.item.display_name() == "land --wait-and-fix")
+        );
         assert!(load_flow("deploy", tmp.path()).is_err());
         assert!(load_flow("ship", tmp.path()).is_err());
     }

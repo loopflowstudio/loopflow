@@ -361,17 +361,17 @@ struct DesktopHeadlessTests {
         _ = try builtin.inspect().find(text: "builtin Workflow")
         _ = try builtin.inspect().find(button: "Customize")
         let invalid = view("proof")
-        _ = try invalid.inspect().find(ViewType.Text.self) { try $0.string().contains("unreachable") }
-        _ = try invalid.inspect().find(text: ".lf/workflows/proof.yaml")
+        _ = try invalid.inspect().find(ViewType.Text.self) { try $0.string().contains("two routes leave demo") }
+        _ = try invalid.inspect().find(text: ".lf/flows/proof.yaml")
         _ = try invalid.inspect().find(button: "Edit")
     }
 
-    @Test("A Task's Workflow shows its running edge, offers a stopped edge again, and moves by choice or by node")
+    @Test("A Task's Workflow shows its running edge, offers a stopped edge again, ships into its end, and moves by node")
     func taskWorkflow() async throws {
         let planning = try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: planning)
         let wave = try #require(roadmap.waves.first)
-        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil })
+        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && $0.shipping == nil })
         var wire = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
         let started = Recorder()
@@ -408,16 +408,23 @@ struct DesktopHeadlessTests {
         #expect(try !again.button().isDisabled())
         _ = try stopped.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-1")
 
-        // At `demo` the edges leaving it are the buttons, named by what they run.
+        // At `demo` the edges leaving it are the buttons, named by what they run;
+        // the one into `end` is Ship it, which runs every remaining step.
         let waiting = try view(position: ["kind": "node", "node": "demo"], outgoing: [3, 4])
         #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position").text().string() == "feature · demo")
         #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
             .accessibilityValue().string() == "Current")
-        let ship = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-action-4").button()
-        #expect(try ship.labelView().text().string() == "ship")
-        try ship.tap()
+        #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-action-3").button()
+            .labelView().text().string() == "pursue")
+        #expect(throws: (any Error).self) {
+            try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-action-4")
+        }
+        #expect(throws: (any Error).self) {
+            try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-4")
+        }
+        try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-ship").button().tap()
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls == [["-b", "task", "run", task.task.identifier, "ship"]])
+        #expect(await started.calls == [["-b", "--task", task.task.identifier, "ship"]])
 
         // A Task that has taken up no workflow uses its Wave or repository default.
         wire["workflow"] = NSNull()
@@ -428,8 +435,8 @@ struct DesktopHeadlessTests {
         #expect(await started.calls.last == ["-b", "task", "run", task.task.identifier])
 
         // Going back is the same command a person would type.
-        await model.moveTask(to: "design", task: task)
-        #expect(await started.calls.last == ["task", "workflow", "move", task.task.identifier, "design"])
+        await model.moveTask(to: "review-design", task: task)
+        #expect(await started.calls.last == ["task", "workflow", "move", task.task.identifier, "review-design"])
 
         // Completion has its own operation and does not move the Workflow.
         await model.completeTask(task)
@@ -466,12 +473,30 @@ struct DesktopHeadlessTests {
         }
     }
 
+    @Test("A shipped Task leaves Working tasks for Shipping, which says what it is doing")
+    func shippingFilter() throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
+        let wave = try #require(snapshot.waves.first)
+        let shipped = try #require(wave.tasks.items.first { $0.shipping != nil })
+        let other = try #require(wave.tasks.items.first { $0.shipping == nil && $0.runtime?.status != .paused })
+        let model = WorkModel(query: RegistryQuery { _, _ in "{}" }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.navigation.retainWorkingTask(shipped.id)
+        model.navigation.retainWorkingTask(other.id)
+        #expect(model.workingTaskIDs == [other.id])
+        model.navigation.sidebarFilter = .shipping
+        #expect(model.sidebarTaskIDs == [shipped.id])
+        #expect(shipped.shipping?.label == "Landing")
+        #expect(shipped.shipControl.unavailable == "Task is already shipping")
+    }
+
     @Test("A workflow is drawn as a graph: circles, described nodes, a loop arc and an arrow per edge")
     func workflowGraph() async throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
         let wave = try #require(roadmap.waves.first)
-        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil })
+        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && $0.shipping == nil })
         let started = Recorder()
         let model = WorkModel(query: RegistryQuery(start: { args, _ in await started.add(args) }, run: { _, _ in "{}" }))
         var wire = try #require(JSONSerialization.jsonObject(
@@ -486,14 +511,14 @@ struct DesktopHeadlessTests {
             return TaskWorkflowHeader(model: model, task: task, work: .available(work))
         }
 
-        // `feature`, with the Task waiting at `design`.
+        // `feature`, with the Task waiting at `review-design`.
         let feature = try view {
-            $0["position"] = ["kind": "node", "node": "design"]
+            $0["position"] = ["kind": "node", "node": "review-design"]
             $0["outgoing"] = [1, 2]
         }
-        for node in ["start", "design", "demo", "end"] {
+        for node in ["start", "review-design", "demo", "end"] {
             let drawn = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-\(node)")
-            #expect(try drawn.accessibilityValue().string() == (node == "design" ? "Current" : ""))
+            #expect(try drawn.accessibilityValue().string() == (node == "review-design" ? "Current" : ""))
         }
         _ = try feature.inspect().find(text: "you review the plan")
         _ = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-edge-0")
@@ -503,31 +528,33 @@ struct DesktopHeadlessTests {
         #expect(drawn.arrows.map(\.route) == [.straight, .loop(level: 0), .straight, .loop(level: 0), .straight])
         #expect(drawn.boxes.map(\.terminal) == [true, false, false, true])
         // Each revise loop arcs over its own node, above the row.
-        let design = try #require(drawn.boxes.first { $0.name == "design" })
+        let design = try #require(drawn.boxes.first { $0.name == "review-design" })
         #expect(drawn.arrows[1].label.y < design.frame.minY)
         #expect(abs(drawn.arrows[1].label.x - design.frame.midX) < 1)
 
-        // A definition with no PR: the edge into `end` runs nothing and is chosen as `end`.
+        // A graph with no PR: its edge into `end` runs nothing, is drawn, and
+        // Ship it is the one control that takes it.
         let catalog = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("workflow_catalog.json"))) as? [[String: Any]])
         let research = try #require(catalog.first { $0["name"] as? String == "research" }?["workflow"] as? [String: Any])
         let findings = try view {
             $0.merge(research) { _, definition in definition }
-            $0["position"] = ["kind": "node", "node": "findings"]
+            $0["position"] = ["kind": "node", "node": "research"]
             $0["outgoing"] = [1, 2]
         }
-        #expect(try findings.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-findings")
+        #expect(try findings.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-research")
             .accessibilityValue().string() == "Current")
         _ = try findings.inspect().find(text: "you read the findings")
-        let finish = try findings.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-2").button()
-        #expect(try finish.labelView().text().string() == "finish")
-        try finish.tap()
+        _ = try findings.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-edge-2")
+        let again = try findings.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-1").button()
+        #expect(try again.labelView().text().string() == "research")
+        try again.tap()
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls == [["-b", "task", "run", task.task.identifier, "end"]])
+        #expect(await started.calls == [["-b", "task", "run", task.task.identifier, "research"]])
 
         // An edge that goes back, or passes over a node, takes its own lane below the row.
         let node = { Workflow.Node(name: $0, skill: "demo", description: nil) }
-        let edge = { Workflow.Edge(from: $0, to: $1, flow: $2) }
+        let edge = { Workflow.Edge(from: $0, to: $1, name: $2) }
         let lanes = WorkflowGraphLayout(nodes: [node("a"), node("b")], edges: [
             edge("start", "a", "one"), edge("a", "b", "two"), edge("b", "a", "back"), edge("start", "b", "skip"),
         ])

@@ -128,8 +128,9 @@ struct WorkNavigator: View {
                 .allowsHitTesting(false)
             TimelineView(.periodic(from: .now, by: 5)) { clock in
                 let preview = status.preview(now: clock.date, fallback: found?.task.task.description ?? "Planning unavailable", sessions: sessions)
+                let shipping = found?.task.shipping.map { "\($0.label) · \($0.reason)" }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(preview.text).font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
+                    Text(shipping ?? preview.text).font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
                         .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
                         .help(preview.help).allowsHitTesting(false)
                     if let task = found?.task {

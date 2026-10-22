@@ -255,6 +255,9 @@ pub struct TaskDetailSnapshot {
     pub latest_flow_process: Option<FlowProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
+    /// Whether `lf ship` would start now; `unavailable` says why not.
+    pub ship_control: TaskRunControl,
+    pub shipping: Option<crate::ops::task::ship::ShippingSnapshot>,
     pub pr: Option<PrSnapshot>,
 }
 
@@ -498,6 +501,8 @@ pub struct RoadmapTask {
     pub latest_flow_process: Option<FlowProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
+    pub ship_control: TaskRunControl,
+    pub shipping: Option<crate::ops::task::ship::ShippingSnapshot>,
     pub pr: Option<PrSnapshot>,
     pub section: RoadmapSection,
 }
@@ -997,6 +1002,8 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
         latest_flow_process: detail.latest_flow_process,
         execution: detail.execution,
         run_control: detail.run_control,
+        ship_control: detail.ship_control,
+        shipping: detail.shipping,
         pr: detail.pr,
         section,
     }
@@ -1409,7 +1416,28 @@ async fn snapshot_task_detail(
                 .map(|blocker| blocker.reason.as_str()),
             launch_refusal: launch_refusal.as_deref(),
         });
-    let selection = match store.sqlite.workflow(&task.id)? {
+    let workflow = store.sqlite.workflow(&task.id)?;
+    let shipping = crate::ops::task::ship::read_shipping(
+        &store.sqlite,
+        &task.id,
+        workflow.as_ref(),
+        runtime.status,
+    )?;
+    let at_end = workflow.as_ref().is_some_and(|workflow| {
+        matches!(&workflow.position, crate::ops::workflow::WorkflowPosition::Node { node } if node == crate::workflow::END)
+    });
+    let ship_control = TaskRunControl {
+        unavailable: run_control.unavailable.clone().or_else(|| {
+            if shipping.is_some() {
+                Some("Task is already shipping".to_string())
+            } else if at_end {
+                Some("Task is at the end of its Workflow".to_string())
+            } else {
+                None
+            }
+        }),
+    };
+    let selection = match workflow {
         Some(workflow) => Some((workflow.definition.name, "task")),
         None => crate::ops::task::task_workflow_default(store, task)?,
     };
@@ -1436,6 +1464,8 @@ async fn snapshot_task_detail(
         latest_flow_process: flow_record,
         execution: Some(execution),
         run_control,
+        ship_control,
+        shipping,
         pr: pr.as_ref().map(|pr| {
             let empty = (probe_pr_empty && pr.is_active())
                 .then(|| task_pr_empty(task, pr))

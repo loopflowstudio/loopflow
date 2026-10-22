@@ -199,6 +199,7 @@ final class WorkNavigation {
         case working = "Working tasks"
         case available = "Available"
         case running = "Running"
+        case shipping = "Shipping"
     }
     /// Presentation order, independent of query arrivals, attention and recency.
     var workingTaskIDs: [String] = []

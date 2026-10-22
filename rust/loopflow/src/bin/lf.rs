@@ -1876,6 +1876,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 flow: flow.clone(),
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
+                branch: None,
             },
         )?;
         if json {
@@ -2219,6 +2220,17 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         cli.task = Some(match resolution.task {
             loopflow::ops::context::ContextFact::Bound { value, .. } => value,
             loopflow::ops::context::ContextFact::Unavailable { reason } => anyhow::bail!(reason),
+            // Shipping a branch with no Task first gives it one.
+            loopflow::ops::context::ContextFact::Unbound
+                if matches!(&cli.command, Some(Commands::Ship { .. })) =>
+            {
+                let task = loopflow::ops::task::ship::ship_branch_task(
+                    &loopflow::repo::working_directory()?,
+                    cli.wave.as_deref(),
+                )?;
+                eprintln!("Created {} for this branch", task.identifier);
+                task.identifier
+            }
             loopflow::ops::context::ContextFact::Unbound => {
                 anyhow::bail!("No Task selected; name a Task or run from its checkout")
             }
@@ -2301,6 +2313,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 flow: flow.clone(),
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
+                branch: None,
             },
         )?;
         let Some(edge) = flow else {

@@ -137,7 +137,9 @@ pub fn run_task_edge_for(cli: &Cli, issue: &str, edge: &str, checkout: &Path) ->
             }
             return Err(exit_of(status).into());
         }
-        eprintln!("Edge {edge} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again.");
+        eprintln!(
+            "Edge {edge} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again."
+        );
         attempt += 1;
     }
 }
@@ -927,7 +929,9 @@ mod tests {
             let flow = crate::flow::load_flow(name, &repo).unwrap();
             let items = crate::flow::compile_flow(&flow, &repo).unwrap();
             assert!(
-                items.iter().all(|item| !matches!(item, ConcreteStep::Skill(skill) if skill.interactive)),
+                items
+                    .iter()
+                    .all(|item| !matches!(item, ConcreteStep::Skill(skill) if skill.interactive)),
                 "{name} has a stage"
             );
         }

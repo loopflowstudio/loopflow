@@ -65,6 +65,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -405,6 +409,10 @@
     "run_control": {
       "unavailable": "Task is complete"
     },
+    "ship_control": {
+      "unavailable": "Task is complete"
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -793,6 +801,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -884,6 +896,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -1273,6 +1289,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -1364,6 +1384,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -1751,6 +1775,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,

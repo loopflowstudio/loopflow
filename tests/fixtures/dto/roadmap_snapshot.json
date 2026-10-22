@@ -439,6 +439,14 @@
             "run_control": {
               "unavailable": null
             },
+            "ship_control": {
+              "unavailable": "Task is already shipping"
+            },
+            "shipping": {
+              "shipped_at": 1792600000,
+              "state": "landing",
+              "reason": "CI running on #1650"
+            },
             "pr": null,
             "workflow_source": "task"
           },
@@ -828,6 +836,10 @@
             "run_control": {
               "unavailable": null
             },
+            "ship_control": {
+              "unavailable": null
+            },
+            "shipping": null,
             "pr": {
               "id": "pr-review",
               "sequence": 1,
@@ -924,6 +936,10 @@
             "run_control": {
               "unavailable": null
             },
+            "ship_control": {
+              "unavailable": null
+            },
+            "shipping": null,
             "pr": null,
             "workflow_source": "task"
           },
@@ -1015,6 +1031,10 @@
             "run_control": {
               "unavailable": null
             },
+            "ship_control": {
+              "unavailable": null
+            },
+            "shipping": null,
             "pr": null,
             "workflow_source": "task"
           }
@@ -1499,6 +1519,14 @@
         "run_control": {
           "unavailable": null
         },
+        "ship_control": {
+          "unavailable": "Task is already shipping"
+        },
+        "shipping": {
+          "shipped_at": 1792600000,
+          "state": "landing",
+          "reason": "CI running on #1650"
+        },
         "pr": null,
         "workflow_source": "task"
       },
@@ -1888,6 +1916,10 @@
         "run_control": {
           "unavailable": null
         },
+        "ship_control": {
+          "unavailable": null
+        },
+        "shipping": null,
         "pr": {
           "id": "pr-review",
           "sequence": 1,
@@ -1984,6 +2016,10 @@
         "run_control": {
           "unavailable": null
         },
+        "ship_control": {
+          "unavailable": null
+        },
+        "shipping": null,
         "pr": null,
         "workflow_source": "task"
       },
@@ -2075,6 +2111,10 @@
         "run_control": {
           "unavailable": null
         },
+        "ship_control": {
+          "unavailable": null
+        },
+        "shipping": null,
         "pr": null,
         "workflow_source": "task"
       }

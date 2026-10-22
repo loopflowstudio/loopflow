@@ -327,6 +327,17 @@ public struct RegistryQuery: Sendable {
         }
     }
 
+    /// Ship the Task: run its remaining Workflow to the end headless, standing
+    /// in at each stage. The process runs detached until the Task lands.
+    public func shipTask(issue: String, cwd: String?) async throws {
+        let args = ["-b", "--task", issue, "ship"]
+        if let start {
+            try await start(args, cwd)
+        } else {
+            _ = try await run(args, cwd)
+        }
+    }
+
     /// Reopen every conversation on this Machine that a restart or crash cut off,
     /// each in its own owner with no viewer; panes attach when they show it.
     public func resumeInterrupted() async throws {

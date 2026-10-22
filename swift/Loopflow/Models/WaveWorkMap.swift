@@ -53,6 +53,8 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let latestFlowProcess: FlowProcessDetail?
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
+    public let shipControl: TaskRunControl
+    public let shipping: ShippingSnapshot?
     public let directive: WorkDirectiveSnapshot?
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
@@ -65,6 +67,8 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
         case workflowSource = "workflow_source"
         case latestFlowProcess = "latest_flow_process"
         case runControl = "run_control"
+        case shipControl = "ship_control"
+        case shipping
         case nextMove = "next_move"
     }
 }
@@ -225,6 +229,8 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let latestFlowProcess: FlowProcessDetail?
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
+    public let shipControl: TaskRunControl
+    public let shipping: ShippingSnapshot?
     public let pr: PrSnapshot?
     public let section: RoadmapSection
 
@@ -234,7 +240,35 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
         case workflowSource = "workflow_source"
         case latestFlowProcess = "latest_flow_process"
         case runControl = "run_control"
+        case shipControl = "ship_control"
+        case shipping
         case nextMove = "next_move"
+    }
+}
+
+/// What a shipped Task is doing, derived in Rust; nothing here waits on a person.
+public struct ShippingSnapshot: Decodable, Sendable, Hashable {
+    public let shippedAt: Int64
+    public let state: State
+    public let reason: String
+
+    public enum State: String, Decodable, Sendable, Hashable {
+        case building, landing, repairing, restarting, paused
+    }
+
+    public var label: String {
+        switch state {
+        case .building: "Building"
+        case .landing: "Landing"
+        case .repairing: "Repairing"
+        case .restarting: "Restarting"
+        case .paused: "Paused"
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case state, reason
+        case shippedAt = "shipped_at"
     }
 }
 

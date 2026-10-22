@@ -55,6 +55,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "runtime": {
       "completion_pending": null,
       "provider": "codex",

@@ -261,8 +261,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let (definition, routes) = graph.project().unwrap();
-        let at =
-            |position| Workflow::new(definition.clone(), routes.clone(), position, Vec::new());
+        let at = |position| Workflow::new(definition.clone(), routes.clone(), position, Vec::new());
         // At a stage the conversation is told its skill and each edge.
         let waiting = at(WorkflowPosition::Node {
             node: "demo".into(),

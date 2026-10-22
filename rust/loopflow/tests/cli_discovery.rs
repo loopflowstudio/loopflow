@@ -900,11 +900,7 @@ fn flow_help_validates_expansion_and_review_boundaries_without_effects() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     let flow = repo.path().join(".lf/flows/inspection.yaml");
-    fs::write(
-        &flow,
-        "- interactive:\n    name: solo\n    id: review\n",
-    )
-    .unwrap();
+    fs::write(&flow, "- interactive:\n    name: solo\n    id: review\n").unwrap();
     let output = success(run(
         repo.path(),
         home.path(),

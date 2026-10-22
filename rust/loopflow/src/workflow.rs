@@ -106,12 +106,11 @@ impl Place {
 
 /// The steps of the body `path` descends to.
 fn body<'a>(steps: &'a [ConcreteStep], path: &[(usize, String)]) -> &'a [ConcreteStep] {
-    path.iter().fold(steps, |body, (index, selected)| {
-        match &body[*index] {
+    path.iter()
+        .fold(steps, |body, (index, selected)| match &body[*index] {
             ConcreteStep::Xor(branch) => &branch.paths[selected].steps,
             _ => unreachable!("a place descends only through XOR steps"),
-        }
-    })
+        })
 }
 
 fn step_name(step: &ConcreteStep) -> String {
@@ -458,10 +457,14 @@ mod tests {
         // Repeating review-design returns to kickoff; advancing runs pursue's first step.
         assert_eq!(start("review-design", "kickoff"), Some(0));
         let pursue = start("review-design", "pursue").unwrap();
-        assert!(matches!(&graph.steps[pursue], crate::flow::ConcreteStep::Skill(s) if s.sources.get(1).map(String::as_str) == Some("pursue")));
+        assert!(
+            matches!(&graph.steps[pursue], crate::flow::ConcreteStep::Skill(s) if s.sources.get(1).map(String::as_str) == Some("pursue"))
+        );
         assert_eq!(start("demo", "pursue"), Some(pursue));
         let deliver = start("demo", "deliver").unwrap();
-        assert!(matches!(&graph.steps[deliver], crate::flow::ConcreteStep::Skill(s) if s.skill.name == "gate"));
+        assert!(
+            matches!(&graph.steps[deliver], crate::flow::ConcreteStep::Skill(s) if s.skill.name == "gate")
+        );
         let research = CapturedGraph::load("research", repo.path())
             .unwrap()
             .unwrap();
@@ -471,7 +474,10 @@ mod tests {
             .find(|(_, edge)| edge.to == END)
             .unwrap();
         assert_eq!(routes[end as usize].start, None);
-        assert_eq!(CapturedGraph::unplanned().project().unwrap().1, [super::Route { start: None }]);
+        assert_eq!(
+            CapturedGraph::unplanned().project().unwrap().1,
+            [super::Route { start: None }]
+        );
     }
 
     #[test]
@@ -486,8 +492,14 @@ mod tests {
             .unwrap()
             .unwrap();
         let (definition, starts) = graph.project().unwrap();
-        assert_eq!(routes(&definition, START), [("implement".to_string(), "demo".to_string())]);
-        assert_eq!(routes(&definition, "demo"), [("gate".to_string(), END.to_string())]);
+        assert_eq!(
+            routes(&definition, START),
+            [("implement".to_string(), "demo".to_string())]
+        );
+        assert_eq!(
+            routes(&definition, "demo"),
+            [("gate".to_string(), END.to_string())]
+        );
         assert_eq!(
             starts[1].start,
             Some(ExecutionCursor {
@@ -525,11 +537,27 @@ mod tests {
                 .clone()
                 .unwrap()
         };
-        assert!(reason("twice").contains("two stages are named \"demo\""), "{}", reason("twice"));
-        assert!(reason("across").contains("returns across stage"), "{}", reason("across"));
-        assert!(reason("same-route").contains("two routes leave demo as implement"), "{}", reason("same-route"));
+        assert!(
+            reason("twice").contains("two stages are named \"demo\""),
+            "{}",
+            reason("twice")
+        );
+        assert!(
+            reason("across").contains("returns across stage"),
+            "{}",
+            reason("across")
+        );
+        assert!(
+            reason("same-route").contains("two routes leave demo as implement"),
+            "{}",
+            reason("same-route")
+        );
         assert_eq!(
-            catalog.iter().find(|entry| entry.name == "feature").unwrap().source,
+            catalog
+                .iter()
+                .find(|entry| entry.name == "feature")
+                .unwrap()
+                .source,
             None
         );
     }

@@ -79,6 +79,10 @@
                     "run_control": {
                       "unavailable": null
                     },
+                    "ship_control": {
+                      "unavailable": null
+                    },
+                    "shipping": null,
                     "runtime": {
                       "completion_pending": null,
                       "provider": "codex",
@@ -289,6 +293,10 @@
                     "run_control": {
                       "unavailable": "Task is complete"
                     },
+                    "ship_control": {
+                      "unavailable": "Task is complete"
+                    },
+                    "shipping": null,
                     "runtime": {
                       "completion_pending": null,
                       "provider": "codex",
@@ -404,6 +412,10 @@
                 "run_control": {
                   "unavailable": null
                 },
+                "ship_control": {
+                  "unavailable": null
+                },
+                "shipping": null,
                 "runtime": {
                   "completion_pending": null,
                   "provider": "codex",
@@ -614,6 +626,10 @@
                 "run_control": {
                   "unavailable": "Task is complete"
                 },
+                "ship_control": {
+                  "unavailable": "Task is complete"
+                },
+                "shipping": null,
                 "runtime": {
                   "completion_pending": null,
                   "provider": "codex",
@@ -871,6 +887,10 @@
       "run_control": {
         "unavailable": "Task is complete"
       },
+      "ship_control": {
+        "unavailable": "Task is complete"
+      },
+      "shipping": null,
       "runtime": {
         "completion_pending": null,
         "provider": "codex",
@@ -1314,7 +1334,7 @@
           "workflow": {
             "edges": [
               {
-                "flow": "delivery",
+                "name": "delivery",
                 "from": "start",
                 "to": "end"
               }
@@ -1824,7 +1844,7 @@
           "workflow": {
             "edges": [
               {
-                "flow": "delivery",
+                "name": "delivery",
                 "from": "start",
                 "to": "end"
               }
@@ -1971,6 +1991,10 @@
                     "run_control": {
                       "unavailable": null
                     },
+                    "ship_control": {
+                      "unavailable": null
+                    },
+                    "shipping": null,
                     "runtime": {
                       "completion_pending": null,
                       "provider": "codex",
@@ -2166,6 +2190,10 @@
                     "run_control": {
                       "unavailable": "Task is complete"
                     },
+                    "ship_control": {
+                      "unavailable": "Task is complete"
+                    },
+                    "shipping": null,
                     "runtime": {
                       "completion_pending": null,
                       "provider": "codex",
@@ -2281,6 +2309,10 @@
                 "run_control": {
                   "unavailable": null
                 },
+                "ship_control": {
+                  "unavailable": null
+                },
+                "shipping": null,
                 "runtime": {
                   "completion_pending": null,
                   "provider": "codex",
@@ -2476,6 +2508,10 @@
                 "run_control": {
                   "unavailable": "Task is complete"
                 },
+                "ship_control": {
+                  "unavailable": "Task is complete"
+                },
+                "shipping": null,
                 "runtime": {
                   "completion_pending": null,
                   "provider": "codex",
@@ -2718,6 +2754,10 @@
       "run_control": {
         "unavailable": "Task is complete"
       },
+      "ship_control": {
+        "unavailable": "Task is complete"
+      },
+      "shipping": null,
       "runtime": {
         "completion_pending": null,
         "provider": "codex",
@@ -3077,7 +3117,7 @@
           "workflow": {
             "edges": [
               {
-                "flow": "delivery",
+                "name": "delivery",
                 "from": "start",
                 "to": "end"
               }
@@ -3478,7 +3518,7 @@
           "workflow": {
             "edges": [
               {
-                "flow": "delivery",
+                "name": "delivery",
                 "from": "start",
                 "to": "end"
               }
@@ -3733,6 +3773,10 @@
                     "run_control": {
                       "unavailable": null
                     },
+                    "ship_control": {
+                      "unavailable": null
+                    },
+                    "shipping": null,
                     "runtime": {
                       "completion_pending": null,
                       "provider": "codex",
@@ -3966,6 +4010,10 @@
                 "run_control": {
                   "unavailable": null
                 },
+                "ship_control": {
+                  "unavailable": null
+                },
+                "shipping": null,
                 "runtime": {
                   "completion_pending": null,
                   "provider": "codex",
@@ -4208,6 +4256,10 @@
       "run_control": {
         "unavailable": null
       },
+      "ship_control": {
+        "unavailable": null
+      },
+      "shipping": null,
       "runtime": {
         "completion_pending": null,
         "provider": "codex",
@@ -4506,7 +4558,7 @@
           "workflow": {
             "edges": [
               {
-                "flow": "delivery",
+                "name": "delivery",
                 "from": "start",
                 "to": "end"
               }
@@ -4844,7 +4896,7 @@
           "workflow": {
             "edges": [
               {
-                "flow": "delivery",
+                "name": "delivery",
                 "from": "start",
                 "to": "end"
               }

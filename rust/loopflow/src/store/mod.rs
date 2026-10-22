@@ -1569,13 +1569,15 @@ mod tests {
             ).unwrap();
             let definition = crate::workflow::CapturedGraph {
                 name: "review".into(),
-                steps: vec![crate::flow::ConcreteStep::Skill(crate::flow::ConcreteSkill {
-                    skill: crate::flow::Skill::named("review"),
-                    id: None,
-                    interactive: true,
-                    returns: None,
-                    sources: Vec::new(),
-                })],
+                steps: vec![crate::flow::ConcreteStep::Skill(
+                    crate::flow::ConcreteSkill {
+                        skill: crate::flow::Skill::named("review"),
+                        id: None,
+                        interactive: true,
+                        returns: None,
+                        sources: Vec::new(),
+                    },
+                )],
             };
             store
                 .sqlite

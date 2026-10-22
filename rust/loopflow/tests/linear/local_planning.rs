@@ -2838,11 +2838,7 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
         );
         assert_eq!(source.as_str().unwrap(), workflow);
         std::fs::write(repo.path().join(".lf/flows/unimported.yaml"), workflow).unwrap();
-        std::fs::write(
-            repo.path().join(".lf/flows/finish.yaml"),
-            "invalid: true",
-        )
-        .unwrap();
+        std::fs::write(repo.path().join(".lf/flows/finish.yaml"), "invalid: true").unwrap();
         let catalog = lf(
             repo.path(),
             home.path(),

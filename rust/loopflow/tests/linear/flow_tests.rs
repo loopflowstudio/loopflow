@@ -1713,7 +1713,11 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
         &["--task", "INF-123", "review-contribution", "--batch"],
         Some(&path),
     );
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(String::from_utf8_lossy(&output.stderr).contains("Reached accept"));
     assert!(!home.path().join("prompts").exists());
     let listed = run_lf(

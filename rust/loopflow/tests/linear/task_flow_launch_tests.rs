@@ -1069,10 +1069,13 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
         .unwrap()
         .unwrap();
     let select = |name: &str| {
-        sqlite.select_wave_workflow(task.wave_id.as_ref().unwrap(),
-            name,
-            "- flow: proof\n- interactive: {name: demo, id: review}\n",
-        ).unwrap();
+        sqlite
+            .select_wave_workflow(
+                task.wave_id.as_ref().unwrap(),
+                name,
+                "- flow: proof\n- interactive: {name: demo, id: review}\n",
+            )
+            .unwrap();
     };
     select("before-checkout");
     fixture.ok(&["task", "checkout", "INF-124", "--name", "first-workflow"]);

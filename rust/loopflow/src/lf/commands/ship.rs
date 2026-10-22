@@ -84,7 +84,10 @@ pub fn run(
                             summary,
                         })),
                         Some(repeat),
-                    ) => (repeat, format!("{stage} (stand-in) → repeat, blocked: {summary}")),
+                    ) => (
+                        repeat,
+                        format!("{stage} (stand-in) → repeat, blocked: {summary}"),
+                    ),
                     (
                         Some(SkillOutcome::Decided(FlowVerdict {
                             decision: FlowDecision::Advance,

@@ -33,8 +33,9 @@ struct TaskWorkflowHeader: View {
                         .lineLimit(1)
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-workflow-position")
+                    // Routes into `end` are one Ship it button.
                     ForEach(workflow.outgoing, id: \.self) { index in
-                        if workflow.edges.indices.contains(index) {
+                        if workflow.edges.indices.contains(index), workflow.edges[index].to != "end" {
                             let edge = workflow.edges[index]
                             Button(edge.name) { Task { await model.startTask(edge.name, task: task) } }
                                 .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
@@ -43,6 +44,7 @@ struct TaskWorkflowHeader: View {
                                 .accessibilityIdentifier("task-workflow-action-\(index)")
                         }
                     }
+                    shipControl
                     Spacer(minLength: 0)
                     // Put the Task at a node without running anything.
                     Menu("Move to") {
@@ -70,6 +72,7 @@ struct TaskWorkflowHeader: View {
                         .disabled(unavailable != nil)
                         .help(unavailable ?? "lf task run \(task.task.identifier)")
                         .accessibilityIdentifier("task-workflow-start")
+                    shipControl
                     Spacer()
                 } else {
                     Text(work.errorMessage.map { "Workflow could not be read: \($0)" }
@@ -104,6 +107,22 @@ struct TaskWorkflowHeader: View {
             .frame(minHeight: 28)
     }
 
+    /// Ship it, or what shipping is doing now. Rust decides whether it can start.
+    @ViewBuilder private var shipControl: some View {
+        if let shipping = task.shipping {
+            Text("\(shipping.label) · \(shipping.reason)")
+                .foregroundStyle(palette.textSecondary)
+                .accessibilityIdentifier("task-shipping")
+        } else if !(task.task.isTerminal || task.runtime?.status.isTerminal == true) {
+            let refusal = readingUnavailable ?? task.shipControl.unavailable
+            Button("Ship it") { Task { await model.shipTask(task) } }
+                .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
+                .disabled(acting || refusal != nil)
+                .help(refusal ?? "lf --task \(task.task.identifier) ship: run every remaining step and land it")
+                .accessibilityIdentifier("task-ship")
+        }
+    }
+
     private var draft: TaskRunDraft? { model.navigation.taskRunDrafts[task.id] }
     private var acting: Bool { draft?.acting == true }
 
@@ -124,7 +143,9 @@ struct TaskWorkflowHeader: View {
                 if let workflow = work.value?.workflow {
                     WorkflowGraph(
                         nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
-                        choices: workflow.outgoing, unavailable: unavailable, fits: true,
+                        // Ship it is the one way into `end`.
+                        choices: workflow.outgoing.filter { workflow.edges.indices.contains($0) && workflow.edges[$0].to != "end" },
+                        unavailable: unavailable, fits: true,
                         hint: { "lf task run \(task.task.identifier) \($0.name) · to \($0.to)" },
                         choose: { edge in Task { await model.startTask(edge.name, task: task) } })
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -247,6 +268,10 @@ struct TaskActionItems: View {
         if task.task.isTerminal || task.runtime?.status.isTerminal == true {
             Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
         } else {
+            if task.shipping == nil {
+                Button("Ship it") { Task { await model.shipTask(task) } }
+                    .disabled(unavailable || task.shipControl.unavailable != nil)
+            }
             Button("Complete Task") { Task { await model.completeTask(task) } }.disabled(unavailable)
             Button(task.runtime?.status == .paused ? "Resume Task" : "Pause Task") {
                 Task { await model.pauseTask(task, paused: task.runtime?.status != .paused) }

@@ -84,9 +84,8 @@ Skills that need another Work's perspective launch it directly with
 explain the failure in ordinary output and stop. The Wave operator
 reads existing logs and discusses unresolved judgment in its own chat.
 
-Keep design and review in the Task conversation. Operational Flows reject
-`human: true` steps, including inside composed Flows and XOR alternatives, before
-launching work. Save agreed feedback and remaining work in the conversation;
+Keep design and review in the Task conversation: mark those steps
+`interactive: <skill>` in a Task's graph. Save agreed feedback and remaining work in the conversation;
 Session completion controls are retired. Inspect the exact
 Flow and its effects before selecting further work.
 
@@ -257,45 +256,46 @@ handoff parity; that still requires a configured end-to-end demonstration.
 
 ## Workflows
 
-A workflow is a Task's outer shape: nodes where you take part in the Task
-conversation, joined by edges that each run one Flow.
+A workflow is a graph whose `interactive:` steps are stages: places where you
+take part in the Task conversation. Everything between stages runs on its own.
 
 ```yaml
-# .lf/workflows/feature.yaml
-nodes:
-  design: review-design      # the skill the conversation uses at this node
-  demo: demo
-edges:
-  - { from: start,  to: design, flow: task-design }
-  - { from: design, to: design, flow: task-design }   # revise the design
-  - { from: design, to: demo,   flow: pursue }
-  - { from: demo,   to: demo,   flow: pursue }        # another pass
-  - { from: demo,   to: end,    flow: ship }          # land
+# .lf/flows/feature.yaml
+- kickoff
+- loop: kickoff
+  interactive: review-design   # you review the plan; repeat or go on
+- flow: pursue
+- loop: implement
+  interactive: demo            # you try the change
+- flow: deliver                # gate, then land and stay until it merges
 ```
 
 ```bash
-lf task run DES-123            # start: the only edge, task-design
-lf task run DES-123 pursue     # at design: build it
-lf task run DES-123 ship       # at demo: land it
-lf task status DES-123         # node, or the edge it is on
-lf task workflow move DES-123 design    # go back without running anything
+lf task run DES-123            # start: runs kickoff up to review-design
+lf task run DES-123 pursue     # at review-design: build it, up to demo
+lf ship                        # from anywhere: run every remaining step to merge
+lf task status DES-123         # stage, or the route it is on
+lf task workflow move DES-123 review-design    # go back without running anything
 ```
 
-`start` and `end` are implicit. A node may say what you do there:
-`design: { skill: review-design, description: you review the plan }`;
-without one, the skill's first line stands in. An edge names a Flow or skill; Task launch resolves it and uses the explicit
-`flow` or `skill` invocation. Only an edge into `end` may omit `flow:`; take it with
-`lf task run ISSUE end`. A Task with no PR is a workflow with no landing edge,
-like builtin `research`. An edge is named by what it runs, so two edges
-leaving one node run different things.
+`start` and `end` are implicit. Routes between stages are projected from the
+graph, never written: each is named by what it runs first (the composed graph,
+else the skill), so `pursue` and `deliver` above. A stage's description is its
+skill's first line of prose. `interactive:` may sit inside an `xor` path as a
+conditional stage. A graph with no stages runs whole; one with no PR, like
+builtin `research`, ends with a route into `end` that runs nothing.
+
+`lf ship` runs the remaining steps in the foreground, with a headless agent
+standing in for you at each stage: it runs the stage's skill, decides advance or
+repeat, and records why in the Task history.
 
 On its first `lf task run`, a Task selects the Workflow you name, then its Wave
 default, then repository `workflow:`. It keeps the graph as it was then.
 The Task's position is stored. Choosing an edge puts the Task on it; the
 process that ran the edge puts the Task at its target when the Flow succeeds.
-A Flow that stops or fails leaves the Task on the edge, shown as stopped:
-choose that edge again, choose another one leaving the same node, or
-`lf task workflow move ISSUE NODE`. `task workflow move` puts the Task at any node and runs
+A Flow that stops or fails leaves the Task on the route, shown as stopped:
+choose it again, choose another one leaving the same stage, or
+`lf task workflow move ISSUE STAGE`. `task workflow move` puts the Task at any stage and runs
 nothing: go back for another round, skip ahead, or record a landing that
 settled after its Flow stopped. An edge cannot be chosen while another is
 running. `lf task status ISSUE --json` carries the position, the edges that
@@ -316,7 +316,6 @@ lf wave workflow set feature WAVE --file /tmp/feature.yaml
 
 `lf flow customize NAME` copies a builtin into `.lf/flows/`, reusing an
 existing local file and printing its path.
-Overrides stay within their kind: a Flow and a Workflow can share a name.
 An invalid local source stays unavailable and never exposes a hidden builtin.
 
 `lf wave workflow set NAME WAVE` changes what future Tasks take up.

@@ -180,16 +180,16 @@ mod tests {
         assert!(get_builtin_flow("task").is_none());
         let first = get_builtin_flow("task-design").expect("Task first flow");
         assert!(first.contains("- kickoff"));
-        // Review stages belong to the Task conversation, never to a builtin Flow.
+        // Stages belong to the Task graphs; the Flows they compose run on their own.
         for flow in ["task-design", "pursue", "incident"] {
             assert!(!get_builtin_flow(flow)
                 .unwrap_or_else(|| panic!("{flow} is builtin"))
-                .contains("human:"));
+                .contains("interactive:"));
         }
         assert!(get_builtin_flow("pursue")
             .expect("Task loop flow")
             .contains("flow: refresh"));
-        assert!(get_builtin_flow("ship")
+        assert!(get_builtin_flow("deliver")
             .expect("Task final flow")
             .contains("- cmd: land --wait-and-fix"));
         assert!(get_builtin_flow("finish-delivery").is_none());

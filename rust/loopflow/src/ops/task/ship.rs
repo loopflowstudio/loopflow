@@ -5,11 +5,14 @@
 //! the stage's skill and decides the route. Pause holds it; reconcile restarts
 //! a ship process that died.
 
+use serde::{Deserialize, Serialize};
+
 use crate::durable::TaskState;
 use crate::id::LfProcessId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::error::OpsResult;
-use crate::ops::workflow::{Workflow, WorkflowMoveKind, WorkflowPosition};
+use crate::ops::workflow::{Workflow, WorkflowMove, WorkflowMoveKind, WorkflowPosition};
+use crate::pr_landing::{PrLanding, PrLandingState};
 use crate::work::task::Task;
 use crate::workflow::{END, START};
 
@@ -69,6 +72,129 @@ pub(crate) fn shipping_process(workflow: &Workflow) -> Option<&LfProcessId> {
         .take_while(|entry| entry.kind != WorkflowMoveKind::Set)
         .find(|entry| entry.kind == WorkflowMoveKind::Shipped)
         .and_then(|entry| entry.lf_process_id.as_ref())
+}
+
+/// What a shipped Task is doing, derived from its moves, its ship process,
+/// its state and its landing; never stored. Nothing here waits on a person.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShippingSnapshot {
+    /// When the current shipping began: its first `Shipped` move.
+    pub shipped_at: i64,
+    pub state: ShippingState,
+    /// One line saying what is happening.
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ShippingState {
+    Building,
+    Landing,
+    Repairing,
+    Restarting,
+    Paused,
+}
+
+/// The `Shipped` moves of the current shipping, oldest first: those since a
+/// person last set the Task's position.
+fn shipped_moves(workflow: &Workflow) -> Vec<&WorkflowMove> {
+    let mut moves: Vec<_> = workflow
+        .history
+        .iter()
+        .rev()
+        .take_while(|entry| entry.kind != WorkflowMoveKind::Set)
+        .filter(|entry| entry.kind == WorkflowMoveKind::Shipped)
+        .collect();
+    moves.reverse();
+    moves
+}
+
+/// The Task's shipping, when it is shipping. `alive` is the ship process's
+/// liveness; unknown evidence is never read as a dead process.
+pub(crate) fn shipping_snapshot(
+    workflow: &Workflow,
+    status: TaskState,
+    alive: ProcessIdentityEvidence,
+    landing: Option<&PrLanding>,
+) -> Option<ShippingSnapshot> {
+    shipping_process(workflow)?;
+    if matches!(status, TaskState::Done | TaskState::Abandoned) {
+        return None;
+    }
+    let moves = shipped_moves(workflow);
+    let shipped_at = moves.first()?.at;
+    let restarts = moves
+        .iter()
+        .filter(|entry| entry.note.as_deref() == Some(RESTART_NOTE))
+        .count();
+    let shipping = |state, reason: String| {
+        Some(ShippingSnapshot {
+            shipped_at,
+            state,
+            reason,
+        })
+    };
+    if status == TaskState::Paused {
+        return shipping(
+            ShippingState::Paused,
+            "Paused; resume it to keep shipping".into(),
+        );
+    }
+    if alive == ProcessIdentityEvidence::Dead {
+        let times = if restarts > 0 {
+            format!(" (restarted ×{restarts})")
+        } else {
+            String::new()
+        };
+        return shipping(
+            ShippingState::Restarting,
+            format!("Ship process exited; restarts at the next check{times}"),
+        );
+    }
+    if let Some(landing) = landing {
+        let number = landing.pr_number;
+        return match landing.state {
+            PrLandingState::Repairing | PrLandingState::Blocked => shipping(
+                ShippingState::Repairing,
+                match &landing.blocked_reason {
+                    Some(reason) => format!("Repairing #{number} · {reason}"),
+                    None => format!("Repairing #{number}"),
+                },
+            ),
+            _ => shipping(ShippingState::Landing, format!("CI running on #{number}")),
+        };
+    }
+    let definition = &workflow.definition;
+    let reason = match &workflow.position {
+        WorkflowPosition::Edge { edge, .. } => {
+            let edge = &definition.edges[*edge as usize];
+            format!("{} → {}", edge.name, edge.to)
+        }
+        WorkflowPosition::Node { node } if definition.node(node).is_some() => {
+            format!("{node} (stand-in)")
+        }
+        WorkflowPosition::Node { node } => format!("from {node}"),
+    };
+    shipping(ShippingState::Building, reason)
+}
+
+/// Read a Task's shipping from the store: its moves, its ship process and its landing.
+pub(crate) fn read_shipping(
+    sqlite: &crate::store::sqlite::SqliteStore,
+    task: &crate::work::task::TaskId,
+    workflow: Option<&Workflow>,
+    status: TaskState,
+) -> crate::store::StoreResult<Option<ShippingSnapshot>> {
+    let Some(workflow) = workflow else {
+        return Ok(None);
+    };
+    let Some(process) = shipping_process(workflow) else {
+        return Ok(None);
+    };
+    let alive = crate::journal::process_evidence(sqlite, process);
+    let landing = sqlite.pending_task_landing(task)?;
+    Ok(shipping_snapshot(workflow, status, alive, landing.as_ref()))
 }
 
 /// Approve the Task and claim it for this process, unless a live process
@@ -148,6 +274,35 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
             .map_err(task_error)?;
         Ok(ShipStart::Begun(Box::new(task)))
     })
+}
+
+/// Create a Task for the checkout's branch so it can ship: it takes the branch,
+/// its checkout and any PR as its own, and is titled from the branch.
+pub fn ship_branch_task(repo: &std::path::Path, wave: Option<&str>) -> OpsResult<Task> {
+    let branch = crate::git::current_branch(repo)
+        .map_err(task_error)?
+        .ok_or_else(|| task_error("lf ship needs a branch; this checkout is detached"))?;
+    if crate::git::get_default_branch(repo).map_err(task_error)? == branch {
+        return Err(task_error(format!(
+            "{branch} is the default branch; ship from a Task or a branch of its own"
+        )));
+    }
+    let title = branch
+        .rsplit('/')
+        .next()
+        .unwrap_or(&branch)
+        .replace(['-', '_'], " ");
+    let task = super::task_create(repo, wave, Some(title), None)?;
+    super::prepare_task(
+        repo,
+        &task.identifier,
+        super::TaskProcessOptions {
+            wave: wave.map(str::to_owned),
+            branch: Some(branch),
+            ..Default::default()
+        },
+        None,
+    )
 }
 
 /// Read where the shipped Task stands and what runs next.
@@ -295,11 +450,16 @@ pub fn restart_ships(repo: &std::path::Path) -> OpsResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{next_step, shipping_process, ShipStep};
+    use super::{
+        next_step, shipping_process, shipping_snapshot, ShipStep, ShippingState, RESTART_NOTE,
+    };
+    use crate::durable::TaskState;
     use crate::id::LfProcessId;
+    use crate::journal::ProcessIdentityEvidence;
     use crate::ops::workflow::{
         Workflow, WorkflowActor, WorkflowMove, WorkflowMoveKind, WorkflowPosition,
     };
+    use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::workflow::CapturedGraph;
 
     fn moved(kind: WorkflowMoveKind, process: &LfProcessId) -> WorkflowMove {
@@ -401,5 +561,99 @@ mod tests {
         set.push(moved(WorkflowMoveKind::Set, &LfProcessId::new()));
         assert!(shipping_process(&on("demo", set)).is_none());
         assert!(shipping_process(&on("demo", Vec::new())).is_none());
+    }
+
+    #[test]
+    fn shipping_reads_what_happens_now_and_never_waits_on_a_person() {
+        let repo = tempfile::tempdir().unwrap();
+        let graph = CapturedGraph::load("feature", repo.path())
+            .unwrap()
+            .unwrap();
+        let (definition, routes) = graph.project().unwrap();
+        let mut restarted = moved(WorkflowMoveKind::Shipped, &LfProcessId::new());
+        restarted.note = Some(RESTART_NOTE.into());
+        restarted.at = 9;
+        let mut first = moved(WorkflowMoveKind::Shipped, &LfProcessId::new());
+        first.at = 5;
+        let shipped = Workflow::new(
+            definition.clone(),
+            routes.clone(),
+            WorkflowPosition::Node {
+                node: "demo".into(),
+            },
+            vec![first, restarted],
+        );
+        let read = |status, alive, landing: Option<&PrLanding>| {
+            shipping_snapshot(&shipped, status, alive, landing).unwrap()
+        };
+        let building = read(TaskState::Active, ProcessIdentityEvidence::Live, None);
+        assert_eq!(building.shipped_at, 5);
+        assert_eq!(building.state, ShippingState::Building);
+        assert_eq!(building.reason, "demo (stand-in)");
+        // Unknown liveness is not a dead process.
+        assert_eq!(
+            read(TaskState::Active, ProcessIdentityEvidence::Unknown, None).state,
+            ShippingState::Building
+        );
+        let restarting = read(TaskState::Active, ProcessIdentityEvidence::Dead, None);
+        assert_eq!(restarting.state, ShippingState::Restarting);
+        assert!(restarting.reason.contains("×1"), "{}", restarting.reason);
+        assert_eq!(
+            read(TaskState::Paused, ProcessIdentityEvidence::Dead, None).state,
+            ShippingState::Paused
+        );
+
+        let mut landing = PrLanding::new(
+            NewPrLanding {
+                repo: "loopflowstudio/loopflow".into(),
+                pr_number: 1650,
+                worktree: repo.path().to_path_buf(),
+                branch: "jack/x".into(),
+                task_id: None,
+                requested_head_sha: "head".into(),
+            },
+            time::OffsetDateTime::now_utc(),
+        )
+        .unwrap();
+        let landing_now = read(
+            TaskState::Active,
+            ProcessIdentityEvidence::Live,
+            Some(&landing),
+        );
+        assert_eq!(landing_now.state, ShippingState::Landing);
+        assert_eq!(landing_now.reason, "CI running on #1650");
+        landing.state = PrLandingState::Blocked;
+        landing.blocked_reason = Some("rust-lint".into());
+        let repairing = read(
+            TaskState::Active,
+            ProcessIdentityEvidence::Live,
+            Some(&landing),
+        );
+        assert_eq!(repairing.state, ShippingState::Repairing);
+        assert_eq!(repairing.reason, "Repairing #1650 · rust-lint");
+
+        // Done, or never shipped, is not shipping.
+        assert!(shipping_snapshot(
+            &shipped,
+            TaskState::Done,
+            ProcessIdentityEvidence::Live,
+            None
+        )
+        .is_none());
+        let unshipped = Workflow::new(
+            definition,
+            routes,
+            WorkflowPosition::Node {
+                node: "demo".into(),
+            },
+            Vec::new(),
+        );
+        assert!(shipping_snapshot(
+            &unshipped,
+            TaskState::Active,
+            ProcessIdentityEvidence::Live,
+            None
+        )
+        .is_none());
     }
 }

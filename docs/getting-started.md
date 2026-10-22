@@ -187,8 +187,8 @@ or CLI command; the prefix is otherwise optional.
 
 Flow YAML owns step order and explicit backward edges. Every step is
 autonomous; design review and the demo happen in the Task conversation. A Flow
-with backward edges is a loopflow; it runs with or without a Task. `ship` and
-`deploy` supply explicitly selected delivery steps.
+with backward edges is a loopflow; it runs with or without a Task. `deliver`
+gates the branch and lands it.
 
 ### Custom skills
 
@@ -232,8 +232,9 @@ branch and Task PR record when present; they do not require a running Task Flow.
 nohup lf ship &   # run the Task's remaining steps to merge and completion
 ```
 
-`lf ship` stands in for you at each Workflow node, running its skill headless,
-and stays in the foreground until the Task completes. A second `lf ship` while
+`lf ship` stands in for you at each Workflow stage, running its skill headless,
+and stays in the foreground until the Task completes. On a branch with no Task
+it first creates one for the branch and its checkout. A second `lf ship` while
 one runs exits 0; `lf task pause` holds it, and the minute `lf task reconcile`
 restarts one that died.
 

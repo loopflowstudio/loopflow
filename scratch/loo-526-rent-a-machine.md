@@ -249,11 +249,14 @@ The give-back pass, in order:
    code-1"); `lf machine status` shows "rental ended" instead of unreachable.
    `lf machine remove code-1` is allowed afterwards and loses nothing.
 
-**Who runs the pass.** There is no daemon. Built: the whole pass in `lf
-ondemand list`; `lf machine end` gives back its one rental; the end of a
-forwarded `lf task run` reconciles its Machine's rental (`rental::settle`),
-which also strips `--pool/--rent/--quote` before forwarding. Planned: the
-installed periodic Task check (`lf task automation`). A soft deadline 15 minutes
+**Who runs the pass.** There is no daemon. `lf machine end` gives back its
+one rental; the end of a forwarded `lf task run` reconciles its Machine's rental
+(`rental::settle`), which also strips `--pool/--rent/--quote` before
+forwarding. Planned: the installed periodic Task check (`lf task automation`).
+`lf ondemand list` refreshes from RunPod (adopt or lose unconfirmed creates,
+notice pods already gone, update cost) and never copies or deletes: a listing,
+including `--json` polled by a client, must not end a paid machine
+(concept review 2026-10-21; built code still gives back from `list`). A soft deadline 15 minutes
 before the hard one turns the pass from "when drained" into "now". The guardian
 is the backstop for a laptop that never comes back: what it deletes at the hard
 deadline was copied on an earlier pass or was unreachable for the whole window.
@@ -313,6 +316,25 @@ the laptop. Etude rented cpu3c×8 at $0.24/h on the 21st.
 
 Nothing: no earlier renting code exists (LOO-554's procedure was never checked in).
 
+## Concept review (2026-10-21, headless)
+
+Reviewed against Jack's brief and the built change. Pool / OnDemand / Machine /
+Rental / ownership handoff map one-to-one to what a person does; no merge or
+rename is implied. Two directions for the next implement pass:
+
+1. **Listing is passive.** Move give-back (holdings check, copy-up, delete) out
+   of `lf ondemand list`; keep its provider refresh. Give-back runs from `lf
+   machine end`, `rental::settle`, and the periodic check. Jack's demo still
+   reads "code-1 ended" in `list` because the forwarded land settles it.
+2. **Retained history is readable, not just listed.** The brief's outcome is
+   Session history retained on the laptop; a copied Session that `lf session
+   list` names but nothing opens is half of that. `lf history show <id>` reads
+   `machine_records` and `~/.lf/machines/<origin>/runs` for a copied Session
+   before the demo. `--json` and the `TaskStatus` DTO stay unchanged.
+
+Not changed, recorded for Jack: `--rent` under `-b` (Q7), and logins left on
+a deleted pod (Q8). Neither blocks the interactive demo the brief names.
+
 ## Status and remaining work
 
 Built 2026-10-21 (implement, compress, copy-up implement, compress): the draft
@@ -336,8 +358,10 @@ Remaining:
 
 1. **Pass caller** `lf task automation` (periodic check); the soft deadline
    only acts when some pass runs.
-2. `lf history show <id>` and `lf session list --json` do not read copies.
-3. **Live probe (~$0.10) and demo**, with the demo step: both spend money. The
+2. Give-back out of `lf ondemand list` (concept review 1).
+3. `lf history show <id>` reads copied Sessions (concept review 2); `lf session
+   list --json` still does not.
+4. **Live probe (~$0.10) and demo**, with the demo step: both spend money. The
    quote path was verified live (cpu3c×8 at $0.24/h; stock image pinned).
    Unverified on a real pod: boot script (apt, sshd, nodesource, installer as
    `lf`), RunPod's `portMappings`/`publicIp` field names, `RUNPOD_POD_ID`

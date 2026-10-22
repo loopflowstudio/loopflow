@@ -69,3 +69,24 @@ only now, pools in their own Task.
   RunPod console or by its guardian.
 - **Copies appear in text output only**: `lf session list --json` and the
   `TaskStatus` DTO are unchanged, which avoids DTO fixture and Swift changes.
+
+## Raised in concept review (2026-10-21)
+
+### Q7. Renting from a background run
+
+`lf -b task run X --rent R` refuses before renting, because a fresh pod needs
+one Chrome approval per login (GitHub, Claude). Autonomous Task runs are
+`lf -b task run … -a claude`, so today they cannot rent. Alternatives: (a) keep
+refusing; the person rents and connects first; (b) rent, open the approvals in
+Jack's Chrome, and wait as an Available attention state with the pod billing;
+(c) forward GitHub (forwardable per the 2026-10-07 machine decision) and sign in
+only Claude. Default kept: (a). Not blocking: the brief's demo is interactive.
+
+### Q8. Logins on a deleted pod
+
+Give-back deletes the pod but signs nothing out; a Claude or GitHub credential
+written there is RunPod's disk until wiped, and stays valid. The brief directs
+`lf machine connect` (LOO-413) on rented machines, which settles using it. Open:
+whether give-back should sign out first where a provider supports it, or
+rented machines should get minted, short-lived GitHub credentials (the
+"hardware Jack does not own root on" trigger from the July forwarding decision).

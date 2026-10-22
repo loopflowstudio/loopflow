@@ -2084,7 +2084,7 @@ pub enum MachineCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum PersonCommand {
-    /// List the people fetched from `origin` by `lf refresh`
+    /// List the people last fetched from `origin`
     List {
         #[arg(long)]
         json: bool,

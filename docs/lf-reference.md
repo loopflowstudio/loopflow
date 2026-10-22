@@ -1323,7 +1323,7 @@ See the people who share this repository's `origin`
 
 ## lf person list
 
-List the people fetched from `origin` by `lf refresh`
+List the people last fetched from `origin`
 
 | Argument | What it does |
 |---|---|

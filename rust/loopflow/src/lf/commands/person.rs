@@ -1,4 +1,4 @@
-//! People who share this repository's `origin`, as `lf refresh` last fetched them.
+//! People who share this repository's `origin`, as planning sync last fetched them.
 
 use anyhow::anyhow;
 
@@ -17,7 +17,7 @@ pub fn run(cmd: &PersonCommand) -> anyhow::Result<()> {
         return Ok(());
     }
     if people.is_empty() {
-        println!("No people fetched yet; `lf refresh` fetches them from origin");
+        println!("No people fetched from origin yet");
     }
     for person in &people {
         let accounts: Vec<String> = person

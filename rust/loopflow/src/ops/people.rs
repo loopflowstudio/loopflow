@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{OpsError, OpsResult};
 use crate::person::{PersonProvider, PersonRecord, ProviderAccount};
@@ -12,7 +12,7 @@ use crate::store::sqlite::SqliteStore;
 const REMOTE: &str = "origin";
 
 /// One person as `lf person list` shows them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonView {
     pub key: String,
     pub name: String,

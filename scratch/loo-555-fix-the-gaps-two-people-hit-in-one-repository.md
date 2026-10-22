@@ -34,11 +34,9 @@ This conversation leaves that Flow running and launches no competing delivery.
 Prepared PR copy is in `scratch/pr-title.txt` and `scratch/pr-body.md`;
 retain the validation limits and former cron install commands when publishing.
 
-Status: implemented and committed (`5b725154` + `bf76c3df` on base
-`ed568b1f`, tree clean); next gate. Six kickoff passes on 2026-10-21 (878ecf
-steer reconciliation, Claude credential relaunch, an `lf checkout update`
-stash restore, LOO-550 landing, a six-hour process sweep) changed no plan;
-the relaunch narrative lives in this file's git history. Jack Heart filed the seven
+Status: implemented, merged with main through #1607 (`ce21904f`), committed;
+next gate. Seven kickoff passes on 2026-10-21 changed no plan; their narrative
+lives in this file's git history. Jack Heart filed the seven
 items on 2026-10-21 from LOO-550's two-person docs review. They are accepted direction.
 The mechanisms below are kickoff choices; the consequential ones are logged in
 `scratch/questions.md` for Jack.
@@ -372,47 +370,12 @@ Forbidden:
 
 All five slices are implemented.
 
-LOO-550 landed on main as #1637 (`91b21dc5`); its docs are reconciled in the
-rebase, as "Main moved" lists.
-
-## Main moved 2026-10-21 (#1637, #1647)
-
-Found at the fourth kickoff; unchanged through the sixth. Main is two commits past
-the base `ed568b1f`; twelve of this branch's files overlap, and nothing changes
-the plan. `git merge-tree origin/main HEAD` conflicts in exactly three files:
-`docs/lf.md`, `docs/conducting.md` and `DesktopHeadlessTests.swift`. The
-rebase step owns these resolutions:
-
-- **LOO-550 landed (#1637).** Its `docs/lf.md` "Work with another person"
-  section documents the gaps as current behavior. Rewrite its caveats to this
-  branch's behavior and keep Jack's surrounding prose: a Git-planning
-  takeover reuses the Task's branch and PR (not "your own branch, so a new
-  pull request"); a teammate's comment steers under Git as under Linear (not
-  "syncs but does not"); crons are personal and published per cron (not
-  "Repository `crons:` run on every Machine"); the identity line names Git
-  `user.email` as what claims compare, with `lf user` as display only. This
-  branch's `docs/lf.md` edits (`lf machine public`, `lf refresh`, `lf cron
-  publish`) stay. README line 12 "a comment on a Linear task reaches its
-  agents" loses "Linear". The homepage already says "Comment on someone's
-  task, and their agents read it", so item 1's homepage edit is done on main.
-- **PR test budget (#1647).** `.config/nextest.toml` profile `pr` terminates a
-  test after 120 s. `two_people` runs in 19 s here (the earlier 80 s included
-  building `lf-world`), so no override entry; add one only from a measured CI
-  run.
-- **`docs/conducting.md`.** LOO-550 wrote "comments imported through Git
-  planning do not" become steers. Keep this branch's sentence (comments steer
-  under either transport) and take main's "shared plan" wording in the
-  `lf wave show` paragraph above it.
-- **CI (`ci.yml`).** Auto-merges; all six "Give tests a fallback Git identity"
-  steps survive. In `swift-test` the step must follow the checkout's
-  `with: fetch-depth: 0`, not split it (fixed at the fifth kickoff; a `run:`
-  step with `with:` is invalid).
-- **Swift (`DesktopHeadlessTests.swift`).** Main deleted `storedWorkflow` and
-  `peerPlanningStatus` as intermittent. This branch's `customizedWorkflow`
-  replaces `storedWorkflow` with a temp-repository file write, a different
-  mechanism, so it stays; `peerPlanningStatus` stays deleted.
-- Main also deleted `tests/world_recipes.rs`; the `two-people` recipe is proven
-  by `tests/two_people.rs` alone.
+Main is merged through #1607 (`e22a86bf` + repairs `c2b94445`, `575d15c8`).
+The merge kept this branch's two-person docs over LOO-550's caveats, main's
+deletion of `peerPlanningStatus` and `world_recipes.rs`, the six CI fallback
+Git identity steps, and `planning_client::connected` (main's provider-neutral
+test, covering Asana and Notion, which steer through Linear's ingest path).
+`two_people` runs in ~28 s, inside nextest's `pr` 120 s limit.
 
 ## Done when (gate)
 
@@ -496,4 +459,5 @@ lists `lf machine public` and `cron publish/unpublish`), and the PR body's
 - 2026-10-21 implement re-pass: no code change needed; lib `task_ownership` 8 passed (incl. both private-Machine publication tests), fmt clean. Realign (after `lf machine public` republish): `two_people` 1 passed (80s), lib `published` 17 passed, fmt + clippy clean; earlier same day lib `task_ownership` 8, `cron::` 47, `world_recipes` 3, `test_desktop.sh --filter DesktopHeadless` 14, `pytest test_release_automation.py` 10 passed, clippy clean. Gate owns the full suite.
 - 2026-10-21 implement (owner key fallback): build ok; lib `task_ownership` 8, `two_people` 1, integration `dto` 42, swift `TaskRowMetadataTests|Fixture` 77 passed; fmt + clippy clean. Gate owns the full suite.
 - 2026-10-21 compress (second pass): the store's private `Holder` is gone; `TaskOwnershipEntry::owner()` yields the `TaskOwner` the reading, the published prose and the log renderer all use, with `resolved_in` adding the best-known Machine label. fmt + clippy clean; lib `task_ownership` 8 passed, `two_people` 1 passed. Gate owns the full suite.
-- 2026-10-21 kickoffs (six relaunch passes, latest after the six-hour sweep, work committed as `5b725154`): each pass `cargo fmt --check` clean, `cargo check --all-targets` ok (~27s), `two_people` 1 passed (19–30s); the third also ran integration `reference_matches_the_compiled_cli` 1, `documented_commands` 4, `dto` 42 and lib `task_ownership published cron:: planning_git planning_peers task_comments` 77 passed (one `task_comments_read_and_publish_without_starting_work` failure under a 117s loaded batch, an untouched Linear HTTP fixture, passed on three reruns). The fifth fixed `ci.yml` `swift-test` (a `run:` step had split the checkout from its `with:`). Main stays at #1637 + #1647 with the three conflicts "Main moved" lists. No plan change. Gate owns the full suite.
+- 2026-10-21 kickoffs (six relaunch passes, latest after the six-hour sweep, work committed as `5b725154`): each pass `cargo fmt --check` clean, `cargo check --all-targets` ok (~27s), `two_people` 1 passed (19–30s); the third also ran integration `reference_matches_the_compiled_cli` 1, `documented_commands` 4, `dto` 42 and lib `task_ownership published cron:: planning_git planning_peers task_comments` 77 passed (one `task_comments_read_and_publish_without_starting_work` failure under a 117s loaded batch, an untouched Linear HTTP fixture, passed on three reruns). The fifth fixed `ci.yml` `swift-test` (a `run:` step had split the checkout from its `with:`). No plan change. Gate owns the full suite.
+- 2026-10-21 seventh kickoff (after the #1607 merge): main's new `unstamped_entries_in_one_second_keep_their_written_order` applied released migrations only and missed the draft's `person_key`; it now opens the store fixture. fmt + clippy clean; `two_people` 1, lib `task_ownership` 9, `published` 17, `cron::` 47, `planning_peers` 2, `task_comments` 4, integration `reference_matches_the_compiled_cli` 1, `documented_commands` 4, `dto` 42 passed. Gate owns the full suite.

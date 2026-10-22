@@ -784,9 +784,8 @@ mod tests {
 
     #[test]
     fn unstamped_entries_in_one_second_keep_their_written_order() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        crate::store::migrations::apply_sqlite(&conn).unwrap();
-        let task = TaskId::new();
+        let (_dir, store, task) = store_with_unowned_task();
+        let conn = store.conn.lock().unwrap();
         // Linear stamps provider order later; until then a claim and its handoff
         // share a whole-second `at`, and the handoff's id may sort first.
         for (id, kind) in [("own_zzzz", "claim"), ("own_aaaa", "handoff")] {

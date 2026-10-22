@@ -1,9 +1,9 @@
 # From install to an open Loopflow
 
 Status: accepted direction; Rust installer activation, PATH, destination and
-native agent install implemented (see This slice). Swift setup, auth/GitHub
-actions and live Mac acceptance remain outstanding.
-Baseline: `102522bc25adc146d4b8cc3f343677ed8170f636`.
+native agent install implemented (see This slice). Auth/GitHub actions, Swift
+setup and live Mac acceptance remain outstanding.
+Baseline: synced onto main `98dab5ea8e` (v0.14.15).
 Research performed 2026-09-26 (run-local date).
 
 ## Problem
@@ -14,7 +14,7 @@ instructions assume a working shell PATH, an authenticated coding tool, and a
 Git project. The primary window offers no obvious way to acquire those first
 two things or open the third.
 
-Jack's accepted direction in `wave/growth/MEMORY.md` makes the Mac app the
+Jack's accepted direction in `.lf/wave/growth/MEMORY.md` makes the Mac app the
 primary experience and puts direct AI interaction in its embedded terminal.
 This design serves that direction. It does not require Linear, a Wave, or a
 completed Task to finish setup. Jack's review direction makes Linear optional
@@ -449,12 +449,22 @@ Implemented in the existing installer owner:
   definition; missing-tool errors and doctor fallbacks name these installers
   and offer both tools.
 
-Remaining, in order: Swift first-launch call to activate-app (progress,
-failure, retry; app is quiesced/reopened by promotion when source == target —
-unproven live); `lf auth status --json` native-status DTO with Rust/Swift
-fixture and Codex `login status`; `lf auth connect --default-agent`; `gh`
-acquisition and GitHub sign-in; primary-window setup view after the running-app
-baseline; docs; then the clean-account Done-when trials. The retained-helper
+Remaining, in the order Jack set on 2026-10-22 (installer first, then
+provider/GitHub setup actions):
+
+1. `lf auth status <provider> --json` native-status DTO with Rust/Swift
+   fixture, and Codex native `login status` (Keychain logins).
+2. `lf auth connect --default-agent` writing Home config `agent` on verified
+   success only.
+3. `gh` acquisition without a package manager (mechanism unresolved) and a
+   GitHub status/sign-in observation through `lf auth github`.
+4. Swift first-launch call to activate-app (progress, failure, retry; app is
+   quiesced/reopened by promotion when source == target — unproven live).
+5. Primary-window setup view, only after the running-app baseline is recorded.
+6. Docs, then the clean-account Done-when trials.
+
+The live baseline and clean-account acceptance are open gaps; Jack directed
+that fixtures not substitute for them. The retained-helper
 GUI-exit survival and real promotion/recovery entry remain unproven
 (prior reviews, commit `d5c043c13a`).
 
@@ -469,6 +479,11 @@ open findings are folded into Remaining above.
 | Shell/no-PATH probes (kickoff) | Fresh zsh lacked `.local/bin`; installer wrote no startup file. | Temporary HOME, developer OS. |
 | Lifecycle + completion fixtures (2026-09-26) | `app_activation_tests` 7 passed; `machine_install::tests` 23 passed; fmt/clippy passed. | Native sleep stand-ins; no real promotion, keeper or GUI. |
 | Installer/agent slice (2026-10-22) | `cargo test -p loopflow --lib` for install::{shell_path,bundle,published,agent}, machine_install, app_activation_tests, engine::agent: all passed (38 + 64 + 16 in focused runs). Fresh `zsh -ic` resolves a path with spaces/quotes/`$`/backquotes. Built `lf install shell-path` with `env -i` HOME/ZDOTDIR twice: one block, `command -v lf` resolves. `activate-app` on a non-bundle and on a mismatched helper refuses before any state read. `test_shell_installer.py` 19 passed. clippy/fmt/ruff clean. | No real signed bundle, promotion, provider installer download, or clean account. Affected-suite gate not run. |
+| After main sync + recovery fix `257ed79113` (2026-10-22) | `cargo test -p loopflow --lib -- lf::commands::install machine_install app_activation_tests`: 37 passed, 2 ignored. | Same fixture limits. |
+
+Proposed Wave memory update after landing (memory is read-only here): items 1,
+3 and 7 of "What stands between a newcomer and a first task" are addressed in
+code on this branch for zsh and Codex/Claude; clean-Mac proof still absent.
 
 ## Measure
 

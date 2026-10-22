@@ -243,6 +243,9 @@ pub(crate) fn resolve_lf_binary() -> Result<PathBuf> {
             .filter(|value| !value.is_empty())
             .or_else(|| std::env::var_os("CARGO_BIN_EXE_lf"))
             .map(PathBuf::from)
+    } else if crate::store::copy::selected().is_some() {
+        // The copy belongs to the build that made it: children run this binary.
+        Some(std::env::current_exe()?)
     } else {
         // The gate selects and verifies the installed artifact when executed.
         let gate = crate::installation::entry_gate_path(
@@ -435,6 +438,21 @@ mod tests {
     use std::time::Duration;
 
     use super::{lf_session_shell_command, terminate_process_group};
+
+    #[test]
+    fn a_draft_build_on_the_default_home_keeps_itself_and_its_copy() {
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        // Only a build carrying drafts selects a copy; without one the default
+        // home belongs to the installed lf, which this test must not exec.
+        if crate::store::copy::selected().is_none() {
+            return;
+        }
+        crate::installation::dispatch_default_cli().unwrap();
+        assert_eq!(
+            super::resolve_lf_binary().unwrap(),
+            std::env::current_exe().unwrap()
+        );
+    }
 
     #[test]
     fn private_home_keeps_explicit_binary_selection() {

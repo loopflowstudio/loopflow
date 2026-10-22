@@ -1,5 +1,5 @@
 -- Released Flow records: a Flow process with one step, a Task mid-edge
--- on a Workflow whose edges name `flow`, and a Wave workflow authored with `flow:`.
+-- on a Workflow whose edges name `flow`, a finished Flow in its history, and a Wave workflow authored with `flow:`.
 INSERT INTO processes(id,trace_id,command,cwd,repo,started_at)
     VALUES('00000000-0000-4000-8000-00000000f100','00000000-0000-4000-8000-0000000000aa','["lf","flow","pursue"]','{repo}','{repo}',1);
 INSERT INTO processes(id,trace_id,parent_lf_process_id,command,cwd,repo,started_at,completed_at,outcome,exit_code)
@@ -24,3 +24,5 @@ edges:
     to: end
     flow: ship
 ');
+INSERT INTO task_events(task_id,kind_json,created_at)
+    VALUES('{task}','{"kind":"flow_finished","invocation_id":"00000000-0000-4000-8000-00000000f1aa","flow":"pursue","summary":"Built the change."}',3);

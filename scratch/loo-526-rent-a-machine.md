@@ -377,6 +377,19 @@ Live probe, 2026-10-22 (Task conversation, disposable `LF_HOME`, ~$0.03 total):
 - Not exercised: `lf history export` over SSH (the pod ran published lf, which
   lacks the command) and the Task path (`--rent`, connect, clone, hand-off).
 
+Demo attempt, 2026-10-22: Jack ran the first demo command with the installed
+lf 0.14.14, which has no `ondemand` and took it for a skill name. The branch
+binary could not open his home either: main's unreleased `rename_flow_to_graph`
+draft left 81 `task_events` rows as `flow_finished`, and the semantic check
+refused the copy. Fixed here in that draft (rows read as `graph_finished`),
+proved in `released_flow_records_read_as_graphs_after_the_rename`. With that
+passing, the build still re-executed the installed lf after making its copy
+(#1612 never taught `dispatch_default_cli` about copies), so `ondemand` reached
+0.14.14. Fixed: a build with a selected copy keeps running, and its children
+resolve to the same binary. The demo runs `target/release/lf` directly; it
+works on `~/.lf/copies/<drafts>/loopflow.db`, a snapshot of the real store, so
+the Task is there and laptop-side PR and push effects are deliberately inert.
+
 Remaining:
 
 1. **Jack's demo (≤ $0.40)**: the Task path end to end, with Chrome approvals
@@ -384,4 +397,4 @@ Remaining:
    pod for `lf history export`. The scheduled reconcile only gives back when
    its environment carries `RUNPOD_API_KEY` (Q9).
 
-Last check (implement 2026-10-22): `cargo clippy -p loopflow --all-targets -D warnings` and `cargo fmt --check` clean; `cargo test -p loopflow --lib -- rentals rental` 29 passed (incl. `an_ended_rental_hands_its_open_tasks_back_here`).
+Last check (demo repair 2026-10-22): `cargo clippy -p loopflow --all-targets -D warnings` and `cargo fmt --check` clean; `cargo test -p loopflow --lib -- os_process::tests store::copy released_flow_records_read_as_graphs_after_the_rename` 18 passed; `target/release/lf ondemand list` runs on the copy of the real store.

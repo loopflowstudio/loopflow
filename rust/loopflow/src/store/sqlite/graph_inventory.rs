@@ -589,6 +589,15 @@ mod tests {
         );
         assert!(!stored.contains("\"flow\""), "{stored}");
         drop(conn);
+        let events = store.task_events_after(&task, 0).unwrap();
+        assert_eq!(
+            events.iter().map(|event| &event.kind).collect::<Vec<_>>(),
+            [&crate::work::task::TaskEventKind::GraphFinished {
+                invocation_id: "00000000-0000-4000-8000-00000000f1aa".into(),
+                graph: "pursue".into(),
+                summary: "Built the change.".into(),
+            }]
+        );
         let content = store.wave_workflow(&wave, "feature").unwrap().unwrap();
         assert!(
             content.contains("{ from: start, to: demo, graph: pursue }"),

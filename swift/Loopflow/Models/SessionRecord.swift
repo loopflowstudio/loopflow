@@ -1,47 +1,50 @@
 import Foundation
 
 public enum SessionState: String, Codable, Sendable, Hashable {
-    case waiting
+    /// Metadata has no trustworthy live/closed observation.
+    case unknown
     case active
-    case ready
     case closed
 }
 
-public enum SessionKind: String, Codable, Sendable, Hashable {
-    case ask
-    case flow
-    case interactive
+public enum SessionAvailability: String, Codable, Sendable, Hashable {
+    case available
+
+    public var label: String {
+        switch self {
+        case .available: "Available"
+        }
+    }
 }
 
 public enum SessionActionKind: String, Codable, Sendable, Hashable {
     case open
     case moveHere = "move_here"
-    case complete
 }
 
 /// Who chose a Session's title. Rust never lets a generated suggestion
 /// replace a human-assigned name. `unavailable` means the canonical name lives
-/// on another Home; the title is only a local label.
+/// on another Machine; the title is only a local label.
 public enum SessionTitleSource: String, Codable, Sendable, Hashable {
     case generated
     case human
     case unavailable
 }
 
-/// Whether a Session is an occurrence of its Task's managed Flow. Rust owns
-/// this from the Flow position or the Run's recorded capture; Swift never
+/// Whether a Session is an occurrence of a Graph. Rust owns
+/// this from the Graph position or the Session's recorded capture; Swift never
 /// infers it from Task, checkout, provider, or skill.
-public enum SessionFlowMembership: Codable, Sendable, Hashable {
-    case step(flow: String, invocationId: String, step: String, node: String?, iterations: [[UInt32]]?,
-              occurrence: SessionFlowOccurrence)
+public enum SessionGraphMembership: Codable, Sendable, Hashable {
+    case step(graph: String, graphLfProcessId: String, step: String, node: UInt32?, iterations: [[UInt32]]?,
+              occurrence: SessionGraphOccurrence)
     case independent
     case unknown(reason: String)
 
     private enum Kind: String, Codable { case step, independent, unknown }
 
     enum CodingKeys: String, CodingKey {
-        case kind, flow, step, iterations, occurrence, reason
-        case invocationId = "invocation_id"
+        case kind, graph, step, iterations, occurrence, reason
+        case graphLfProcessId = "graph_lf_process_id"
         case node
     }
 
@@ -50,12 +53,12 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
         switch try container.decode(Kind.self, forKey: .kind) {
         case .step:
             self = .step(
-                flow: try container.decode(String.self, forKey: .flow),
-                invocationId: try container.decode(String.self, forKey: .invocationId),
+                graph: try container.decode(String.self, forKey: .graph),
+                graphLfProcessId: StructuredIdentity.uuid(try container.decode(String.self, forKey: .graphLfProcessId)),
                 step: try container.decode(String.self, forKey: .step),
-                node: try container.decodeIfPresent(String.self, forKey: .node),
+                node: try container.decodeIfPresent(UInt32.self, forKey: .node),
                 iterations: try container.decodeIfPresent([[UInt32]].self, forKey: .iterations),
-                occurrence: try container.decode(SessionFlowOccurrence.self, forKey: .occurrence)
+                occurrence: try container.decode(SessionGraphOccurrence.self, forKey: .occurrence)
             )
         case .independent:
             self = .independent
@@ -67,10 +70,10 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .step(flow, invocationId, step, node, iterations, occurrence):
+        case let .step(graph, graphLfProcessId, step, node, iterations, occurrence):
             try container.encode(Kind.step, forKey: .kind)
-            try container.encode(flow, forKey: .flow)
-            try container.encode(invocationId, forKey: .invocationId)
+            try container.encode(graph, forKey: .graph)
+            try container.encode(graphLfProcessId, forKey: .graphLfProcessId)
             try container.encode(step, forKey: .step)
             try container.encode(node, forKey: .node)
             try container.encode(iterations, forKey: .iterations)
@@ -83,18 +86,19 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
         }
     }
 
-    /// Short human label: "feature / implement · iteration (2, 1)", "Independent".
+    /// Short human label: "pursue / implement · pass 3", "Independent".
     public var label: String {
         switch self {
-        case let .step(flow, _, step, _, iterations, occurrence):
-            let base = "\(flow) / \(step)"
+        case let .step(graph, _, step, _, iterations, occurrence):
+            let base = "\(graph) / \(step)"
             let label: String
             if let iterations {
-                label = flowIterationLabel(iterations).map { "\(base) · iteration \($0)" } ?? base
+                label = graphIterationLabel(iterations).map { "\(base) · \($0)" } ?? base
             } else {
-                label = "\(base) · iteration unavailable"
+                label = "\(base) · pass unavailable"
             }
             switch occurrence {
+            case .unknown: return "\(label) · position unavailable"
             case .current: return label
             case .earlier: return "\(label) · earlier"
             case .past: return "\(label) · past run"
@@ -102,18 +106,20 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
         case .independent:
             return "Independent"
         case .unknown:
-            return "Flow membership unknown"
+            return "Graph membership unknown"
         }
     }
 }
 
-/// Where a Flow occurrence sits relative to its Flow's current position.
-public enum SessionFlowOccurrence: String, Codable, Sendable, Hashable {
+/// Where a Graph occurrence sits relative to its Graph's current position.
+public enum SessionGraphOccurrence: String, Codable, Sendable, Hashable {
+    /// Known membership without a recorded selected occurrence.
+    case unknown
     /// The invocation's current position.
     case current
     /// An earlier position of the invocation that is still active.
     case earlier
-    /// An invocation that has finished or been replaced by a restart.
+    /// An invocation that has finished or been followed by a newer one.
     case past
 }
 
@@ -129,43 +135,156 @@ public struct SessionAction: Codable, Sendable, Hashable {
     }
 }
 
+public struct SessionWorkspace: Codable, Sendable, Hashable {
+    public var identity: WorkspaceIdentity { WorkspaceIdentity(machineId: machineId, worktree: worktree) }
+    public let machineId: String
+    public let worktree: String
+    public let taskId: String?
+    public let unavailable: String?
+
+    enum CodingKeys: String, CodingKey {
+        case worktree, unavailable
+        case machineId = "machine_id"
+        case taskId = "task_id"
+    }
+}
+
+extension SessionWorkspace {
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        machineId = StructuredIdentity.prefixed(try values.decode(String.self, forKey: .machineId), "home_")
+        worktree = try values.decode(String.self, forKey: .worktree)
+        taskId = (try values.decodeIfPresent(String.self, forKey: .taskId)).map { StructuredIdentity.prefixed($0, "task_") }
+        unavailable = try values.decodeIfPresent(String.self, forKey: .unavailable)
+    }
+}
+
 /// One resumable Session and the exact command that opens it.
-/// Rust owns completion, FlowStep decisions, and provider-client liveness.
+/// Rust owns completion, GraphStep decisions, and provider-client liveness.
+public struct SessionPreview: Codable, Hashable, Sendable {
+    public let providerThread: String
+    public let providerTurn: String
+    public let observedAt: Int64
+    public let source: String
+    public let text: String
+
+    enum CodingKeys: String, CodingKey {
+        case providerThread = "provider_thread"
+        case providerTurn = "provider_turn"
+        case observedAt = "observed_at"
+        case source, text
+    }
+}
+
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
+    public let preview: SessionPreview?
+    public let primaryScope: String?
+    public let availability: SessionAvailability?
+    public let programStatus: ProgramStatusRecords?
+    /// The provider's current AgentProcess; absent when Loopflow never launched one.
+    public let agentProcessId: String?
+    /// Its Task names it as the Task's primary conversation.
+    public let taskPrimary: Bool
+    public let taskIds: [String]
     public let id: String
-    public let runId: String
-    public let kind: SessionKind
+    public let interactive: Bool
     public let work: WorkReference?
+    public var workspace: SessionWorkspace?
     public let waveId: String?
     public let workPath: String?
     public let actions: [SessionAction]
     public let title: String
     public let titleSource: SessionTitleSource
-    public let flowMembership: SessionFlowMembership
+    public let graphMembership: SessionGraphMembership
     public let detail: String
-    /// Provider harness recorded on the Session's Run manifest; nil when the
-    /// Run is on another Home or its manifest is unreadable.
+    /// Provider harness recorded on the Session's capture manifest; nil when the
+    /// capture is on another Machine or its manifest is unreadable.
     public let provider: String?
     public let cwd: String
     public let state: SessionState
     public let readySummary: String?
-    public let openArgv: [String]
+    public var openArgv: [String]
     public let terminalIds: [String]
+
+    /// One word for a row: Available for a person wins over what its client is doing.
+    public var statusLabel: String {
+        if state != .closed, let availability { return availability.label }
+        switch state {
+        case .active: return "Active"
+        case .closed: return "Closed"
+        case .unknown: return interactive ? "Session" : "Run"
+        }
+    }
 
     public func action(_ kind: SessionActionKind) -> SessionAction? {
         actions.first { $0.kind == kind }
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, work, title, detail, provider, cwd, state
+        case id, interactive, work, workspace, title, detail, provider, cwd, state, availability
+        case preview
+        case programStatus = "program_status"
+        case agentProcessId = "agent_process_id"
+        case primaryScope = "primary_scope"
+        case taskPrimary = "task_primary"
         case waveId = "wave_id"
+        case taskIds = "task_ids"
         case actions
-        case runId = "run_id"
         case titleSource = "title_source"
-        case flowMembership = "flow_membership"
+        case graphMembership = "graph_membership"
         case workPath = "work_path"
         case readySummary = "ready_summary"
         case openArgv = "open_argv"
         case terminalIds = "terminal_ids"
+    }
+}
+
+/// A Task's open conversations as its page orders them: the ones available for a
+/// person first, its primary leading either group. Closed ones are not listed.
+public struct TaskSessionGroups: Sendable, Equatable {
+    public let available: [SessionRecord]
+    public let working: [SessionRecord]
+
+    public init(_ sessions: [SessionRecord]) {
+        let open = sessions.filter { $0.state != .closed }
+        let primaryFirst = open.filter(\.taskPrimary) + open.filter { !$0.taskPrimary }
+        available = primaryFirst.filter { $0.availability == .available }
+        working = primaryFirst.filter { $0.availability != .available }
+    }
+}
+
+/// A bounded inventory page; nil next marks a complete enumeration.
+public struct SessionPage: Codable, Sendable, Hashable {
+    public let entries: [SessionRecord]
+    public let next: String?
+}
+
+extension SessionRecord {
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        preview = try values.decodeIfPresent(SessionPreview.self, forKey: .preview)
+        primaryScope = try values.decodeIfPresent(String.self, forKey: .primaryScope)
+        availability = try values.decodeIfPresent(SessionAvailability.self, forKey: .availability)
+        programStatus = try values.decodeIfPresent(ProgramStatusRecords.self, forKey: .programStatus)
+        agentProcessId = (try values.decodeIfPresent(String.self, forKey: .agentProcessId)).map { StructuredIdentity.uuid($0) }
+        taskPrimary = try values.decode(Bool.self, forKey: .taskPrimary)
+        taskIds = (try values.decode([String].self, forKey: .taskIds)).map { StructuredIdentity.prefixed($0, "task_") }
+        id = StructuredIdentity.session(try values.decode(String.self, forKey: .id))
+        interactive = try values.decode(Bool.self, forKey: .interactive)
+        work = try values.decodeIfPresent(WorkReference.self, forKey: .work)
+        workspace = try values.decodeIfPresent(SessionWorkspace.self, forKey: .workspace)
+        waveId = (try values.decodeIfPresent(String.self, forKey: .waveId)).map { StructuredIdentity.uuid($0) }
+        workPath = try values.decodeIfPresent(String.self, forKey: .workPath)
+        actions = try values.decode([SessionAction].self, forKey: .actions)
+        title = try values.decode(String.self, forKey: .title)
+        titleSource = try values.decode(SessionTitleSource.self, forKey: .titleSource)
+        graphMembership = try values.decode(SessionGraphMembership.self, forKey: .graphMembership)
+        detail = try values.decode(String.self, forKey: .detail)
+        provider = try values.decodeIfPresent(String.self, forKey: .provider)
+        cwd = try values.decode(String.self, forKey: .cwd)
+        state = try values.decode(SessionState.self, forKey: .state)
+        readySummary = try values.decodeIfPresent(String.self, forKey: .readySummary)
+        openArgv = try values.decode([String].self, forKey: .openArgv)
+        terminalIds = try values.decode([String].self, forKey: .terminalIds)
     }
 }

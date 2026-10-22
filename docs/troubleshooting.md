@@ -3,71 +3,103 @@
 Each section: symptom, cause, fix. Commands are complete and runnable as
 written.
 
-## A Wave is not running
-
-**Symptom:** The app or `lf ls` shows the Wave stopped; `lf chat` reports no
-listener.
-
-**Cause:** No resident process is serving the Wave — nothing starts one
-automatically except the app, `lf start`, or a cron wake.
+## Doctor reports a failure
 
 ```bash
-lf status <wave> --json    # current registry + runtime evidence
-lf home probe <wave>       # reachable? stopped? running? — with the next action
-lf start <wave>            # idempotently start the Wave on this machine
+lf doctor
+lf cron list
+lf cron history --wave infrastructure --graph telemetry-daily --days 2
+lf cron sync
 ```
+
+Doctor checks installation selection, store compatibility, Process integrity and
+scheduled receipts separately. Installation commands can have no repository; a
+recorded repository must be an absolute path. Missing scheduled receipts remain
+failures even when ordinary commands work. A receipt proves invocation, not
+successful completion of its Graph or Skill.
+
+For a missing receipt, inspect the executable and log path Doctor prints. Jobs
+installed before the stable entry gate may pin a superseded binary, which a
+later install removes, and fail before recording a receipt. After installing a release with this repair,
+run `lf cron sync` from the repository to reinstall your jobs;
+use `lf cron sync --repo` for repository Task checks. New scheduled invocations
+follow the selected installation across promotions. Existing Sessions
+retain their runtime ownership.
+
+Doctor reads storage without initializing it or applying migrations. An incompatible
+store still reports readable Process evidence, scheduler obligations and installation
+selection.
+
+Binary freshness compares against locally cached `origin/main`, without fetching.
+That reference may be stale, and merged source may be newer than the latest
+published release. `lf install` installs that published release; Doctor
+itself installs nothing.
+
+## A Wave has no active conversation
+
+Wave operations are finite. Read its plan and invoke the next pass explicitly,
+or inspect its cron schedule:
+
+```bash
+lf wave status <wave> --json
+lf --wave <wave> wave-operate
+lf cron list
+```
+
+A quiet Wave needs no service restart.
 
 ## Task Work stops advancing
 
 **Symptom:** A Task is still `ready`, but no useful work is advancing or its
 provider process stopped.
 
-Read its durable state before restarting anything:
+Read its durable state before launching anything:
 
 ```bash
 lf task status INF-123 --json
-lf runs --task INF-123 --json
+lf usage --days 0 --task INF-123 --json
 lf session list
 ```
 
 `ready` means the Task is nonterminal. Status reports `execution` separately:
-starting, running, waiting for review, blocked, idle, or unknown. Read its
-reason and worker Run before recovery. Wave status and roadmap use that same
-execution evidence for their recommendations. Dirty files under a live worker
-are ongoing progress.
+starting, running, stalled, blocked, idle, or unknown. It observes the Task's
+most recently launched Graph. Read its reason before recovery. Wave status and
+roadmap use that same execution evidence for their recommendations. Dirty files
+under a live Graph are ongoing progress.
 
-Task Run history includes independent helpers, whether recorded with the public
-issue identifier or internal Task ID. An idle Task Flow does not prove those
+Task execution history includes independent helpers, whether recorded with the public
+issue identifier or internal Task ID. An idle Task Graph does not prove those
 helpers are idle; a completed launcher does not prove its interactive Session
-is closed. Inspect Sessions separately. Recover advancement through Task
-controls; reserve bound helper Runs for distinct contributions.
+is closed. Inspect Sessions separately. Reserve bound helper conversations
+for distinct contributions.
 
-Task status and `lf runs` show up to 50 Runs started in the last seven days.
-Inspect an exact Run ID for older evidence; an empty recent list does not prove
-that no worker or Session remains active.
+Wave status shows up to 50 recent Session inputs from the last seven days.
+Read complete Task history with `lf usage --days 0 --task <task> --json`, or inspect
+one input with `lf history show <session> --input <capture>`. An empty recent list
+does not prove that no Graph or Session remains active.
 
-Answer an exact pending question, send unsolicited durable direction through
-Steer, or resume a stopped process through the same Task Work:
+Answer an exact pending question, send durable direction through Steer, or
+launch fresh work for the same Task:
 
 ```bash
-lf session open <session-id>
-lf session complete <session-id>    # return saved review or Ask feedback
-lf task steer INF-123 "address the latest feedback"
-lf task interrupt INF-123
-lf task resume INF-123
-lf task resume INF-123 --reason "provider credentials repaired"
+lf session connect <session-id>
+lf comment INF-123 "address the latest feedback"
+lf interrupt INF-123
+lf task run INF-123
+lf task run INF-123 --reason "provider credentials repaired"
 ```
 
-`resume` starts a fresh boundary from the Task Work, Steers, worktree, and
-active PR. It refuses while another exact Task worker is live. A Task Steer
-is a Linear Task comment; the active Task worker receives new comments when
-possible and the next Skill seed always reads them. `task interrupt` ends the
+`task run` runs a fresh Graph in the Task checkout with its Steers and
+active PR. It never continues an earlier Graph; a stopped one leaves its
+Processes as history. Unknown liveness stays
+unknown. A Task Steer is a Task comment; the running Graph receives new
+comments when possible and the next Skill seed always reads them. `task interrupt` ends the
 active boundary so the next one re-reads direction. Neither command's receipt
 proves that the provider applied the direction.
 
 During new-Task placement, status reports the declared worktree as initializing.
 If creation does not finish, status keeps the Task identity and names the exact
-path and branch to restore before resuming.
+path and branch to restore before launching.
 
 ## Rate limits
 
@@ -82,20 +114,43 @@ the account unavailable until its reported reset and immediately tries the next
 account in the grant. `--account` retains the normal route as fallback;
 `--only-account` stays inside the accounts it names.
 
-After repairing provider access, retry the Task or Project operation:
+After repairing provider access, launch the Task or Project operation again:
 
 ```bash
-lf task resume INF-123 --reason "provider credentials repaired"
+lf task run INF-123 --reason "provider credentials repaired"
 ```
 
-Project operations are finite Runs, so recovery is a fresh `project run`, not a
-resume of Project process state.
+Wave operation uses finite conversations. Invoke `lf --wave <wave> wave-operate`
+for another pass; there is no long-running Project process to resume.
 
 Other options:
 
 - Wait and retry
 - Reduce parallel waves
-- Switch a one-shot flow to a different model: `lf gate -m codex`
+- Switch a one-shot run to a different model: `lf gate -a codex`
+
+## Disk space
+
+```bash
+lf disk                                # ~/.lf by category against its budget, plus every worktree
+lf disk clean --dry-run                # what an aggressive cleanup would remove
+lf disk clean                          # remove it; logs each removal to ~/.lf/logs/disk.log
+```
+
+`lf disk clean` removes worktrees `lf wt prune` would, completed Tasks' build
+output, dead process receipts, every database backup but the newest, and
+captures and logs older than `--keep-days` (7). It then rotates `~/.lf` to its
+budget. Set the budget in `~/.lf/config.yaml`:
+
+```yaml
+disk_budget: 20G                       # the default
+```
+
+Starting a Session rotates `~/.lf` at most hourly: the oldest backups, draft
+store copies, captures and logs go first. The database, account homes, the
+newest backup of each database, anything written in the last day and anything a
+process holds open are never removed, so `lf disk` can still show Home over
+budget.
 
 ## Worktree issues
 
@@ -105,23 +160,53 @@ List all worktrees, then clean up stale entries:
 
 ```bash
 lf wt list
-lf wt prune --dry-run    # show clean terminal or week-stale worktrees
-lf wt prune              # remove those worktrees and their branches
+lf wt prune --dry-run                  # show clean terminal or week-stale worktrees
+lf wt prune                            # remove those worktrees and their branches
 ```
+
+```bash
+lf wt prune --branches --dry-run       # finished branches on origin and locally, with reasons
+lf wt prune --branches                 # delete them; exit 1 on GitHub auth, rate limit or failed delete
+```
+
+A branch goes only with evidence at its exact head: a merged or closed PR, a
+finished Task already in the default branch, or a release candidate whose tag
+exists. An open PR, a worktree, or an unfinished Task always keeps it.
+
+```bash
+lf wt timing                           # count, median, p95 and failures per lf version
+lf wt timing --json
+```
+
+Every `lf wt list` appends its durations to `~/.lf/perf/wt-list.jsonl`: total,
+startup (launch through the start receipt), local Git, the remote call, and the
+time spent writing Process receipts to SQLite. Local Git and the remote overlap.
+Interrupted runs are recorded; a run killed outright is not. The file holds
+durations, counts, the repository root and the `lf` version, and never more
+than 1,000 samples.
 
 Prune always preserves uncommitted files. Without terminal evidence, an open PR
 or branch activity in the last seven days also prevents cleanup. Use
-`lf wt remove NAME --force` only when intentionally discarding a worktree.
-
-Feature-worktree integration fetches and pins `origin/<default>` without
-moving the default-branch checkout:
+`lf wt delete NAME --force` only when intentionally discarding a worktree.
 
 ```bash
-lf rebase
+lf monitor prune --dry-run --json       # inspect exact process cleanup candidates
+lf monitor prune --json                 # recheck and apply
 ```
 
-The feature branch uses the current remote base even when the sibling default
-checkout has not moved.
+Pruning reports each AgentProcess it settles or retains, including the reason.
+An unlaunched reservation can be retired when its owning LfProcess is proven
+dead. A missing PID, a completed Task, or an old Session does not prove provider
+exit: unresolved records continue to protect their checkouts. Cleanup retains
+Task outcomes, provider history and unknown exit results.
+
+```bash
+lf sync
+```
+
+Refreshes the local default branch, preserving its unpublished commits and edits,
+then merges it into the feature branch. Stacked Tasks merge their live parent
+until it lands, then merge the default branch using their recorded fork.
 
 ## Status says `ready`, but the Task is waiting
 
@@ -135,7 +220,7 @@ Inspect the focused projection instead of inferring a control state from one
 field:
 
 ```bash
-lf status <wave> --json
+lf wave status <wave> --json
 lf task status INF-123 --json
 ```
 
@@ -146,11 +231,10 @@ resume the provider. There is no Run slot or PR-limit counter to clear.
 
 **Symptom:** Task fails with context/token limit errors.
 
-The default context is already minimal: agent doc (CLAUDE.md/AGENTS.md), `LOOPFLOW.md`, `scratch/`, and `wave/`. Reduce further:
+The provider loads `AGENTS.md` natively. Loopflow adds `LOOPFLOW.md`, `scratch/`, and `.lf/wave/`. Reduce further:
 
 ```bash
-lf qa --no-loopflow         # skip LOOPFLOW.md
-lf qa --docs src/small/     # limit --docs to a narrower path or glob
+lf qa --docs src/small/                # limit --docs to a narrower path or glob
 ```
 
 `--docs` only adds what you pass—drop paths or narrow globs to shrink it further.
@@ -168,7 +252,7 @@ the install command. For Claude Code:
 
 ```bash
 lf install agent claude    # the official native installer; no npm needed
-lf auth connect claude
+lf account connect claude
 ```
 
 With no `agent` configured, Loopflow uses the first of Codex, Claude Code, and

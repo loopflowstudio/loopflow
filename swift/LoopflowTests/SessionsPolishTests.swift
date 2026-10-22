@@ -9,10 +9,10 @@ import Testing
 struct SessionsPolishTests {
     @Test("One window's registry retains a repo workspace across visits")
     func registryRetainsWorkspacePerRepo() {
-        let registry = SessionsWorkspaceRegistry()
-        let first = registry.workspace(for: "/tmp/repo")
-        let again = registry.workspace(for: "/tmp/repo")
-        let other = registry.workspace(for: "/tmp/other")
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let first = fixtureWork(registry, fixtureWorkspace("/tmp/repo"))
+        let again = fixtureWork(registry, fixtureWorkspace("/tmp/repo"))
+        let other = fixtureWork(registry, fixtureWorkspace("/tmp/other"))
         #expect(first === again)
         #expect(first !== other)
         #expect(first.multiplexer === again.multiplexer)
@@ -20,58 +20,49 @@ struct SessionsPolishTests {
 
     @Test("Separate windows never share a multiplexer or surface pool")
     func separateWindowsGetSeparateWorkspaces() {
-        let windowA = SessionsWorkspaceRegistry()
-        let windowB = SessionsWorkspaceRegistry()
-        let a = windowA.workspace(for: "/tmp/repo")
-        let b = windowB.workspace(for: "/tmp/repo")
+        let windowA = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let windowB = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let a = fixtureWork(windowA, fixtureWorkspace("/tmp/repo"))
+        let b = fixtureWork(windowB, fixtureWorkspace("/tmp/repo"))
         #expect(a !== b)
         #expect(a.multiplexer !== b.multiplexer)
         #expect(a.surfaces !== b.surfaces)
     }
 
-    @Test("A shell exit closes its retained pane while SessionsView is absent")
-    func shellExitSurvivesNavigation() {
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: "/tmp/repo")
-        workspace.multiplexer.newShell()
-        let paneId = workspace.multiplexer.focusedPaneId
-        let other = registry.workspace(for: "/tmp/other")
-        other.multiplexer.newShell()
-
-        NotificationCenter.default.post(
-            name: .ghosttySurfaceClosed, object: TerminalIdentity.session(paneId)
-        )
-        #expect(workspace.multiplexer.focusedPane.content == .shell)
-        NotificationCenter.default.post(
-            name: .ghosttySurfaceClosed, object: TerminalIdentity.shell(paneId)
-        )
-
-        #expect(registry.workspace(for: "/tmp/repo").multiplexer.focusedPane.content == .empty)
-        #expect(other.multiplexer.focusedPane.content == .shell)
+    @Test("A shell exit from another Machine cannot close a same-ID pane")
+    func shellExitKeepsMachineIdentity() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let local = fixtureWork(registry, fixtureWorkspace("/same/path"))
+        local.multiplexer.newShell(location: local.location)
+        let shell = local.multiplexer.focusedPane
+        let tab = try #require(shell.content.selectedShell)
+        #expect(registry.key(containingShell: tab.id, machineId: "peer") == nil)
+        NotificationCenter.default.post(name: .ghosttySurfaceClosed,
+            object: TerminalIdentity.shell(tab.id, machineId: "peer"))
+        #expect(local.multiplexer.focusedPane == shell)
     }
 
-    private func record(kind: String, state: String = "active") throws -> SessionRecord {
-        try JSONDecoder().decode(
-            SessionRecord.self,
-            from: Data(
-                """
-                {
-                  "id": "polish", "run_id": "polish",
-                  "kind": "\(kind)",
-                  "work": null,
-                  "title": "Polish fixture",
-                  "detail": "fixture-provider",
-                  "cwd": "/tmp",
-                  "state": "\(state)",
-                  "ready_summary": null,
-                  "work_path": "product / Desktop / LOO-291",
-                  "actions": \(sessionActionFixtureJSON(kind: kind, state: state)),
-                  "title_source": "generated", "flow_membership": {"kind": "independent"}, "terminal_ids": [],
-                  "open_argv": ["lf", "session", "open", "polish"]
-                }
-                """.utf8
-            )
+    @Test("A shell exit closes its retained pane while SessionsView is absent")
+    func shellExitSurvivesNavigation() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let workspace = fixtureWork(registry, fixtureWorkspace("/tmp/repo"))
+        workspace.multiplexer.newShell(location: workspace.location)
+        let shell = workspace.multiplexer.focusedPane
+        let tab = try #require(shell.content.selectedShell)
+        let other = fixtureWork(registry, fixtureWorkspace("/tmp/other"))
+        other.multiplexer.newShell(location: other.location)
+        let otherShell = other.multiplexer.focusedPane
+
+        NotificationCenter.default.post(
+            name: .ghosttySurfaceClosed, object: TerminalIdentity.session(tab.id, machineId: fixtureMachineId)
         )
+        #expect(workspace.multiplexer.focusedPane == shell)
+        NotificationCenter.default.post(
+            name: .ghosttySurfaceClosed, object: TerminalIdentity.shell(tab.id, machineId: fixtureMachineId)
+        )
+
+        #expect(fixtureWork(registry, fixtureWorkspace("/tmp/repo")).multiplexer.focusedPane.content == .empty)
+        #expect(other.multiplexer.focusedPane.content.selectedShell?.location == other.location)
     }
 }
 #endif

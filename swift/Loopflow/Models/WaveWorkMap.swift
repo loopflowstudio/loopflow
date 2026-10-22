@@ -2,33 +2,43 @@ import Foundation
 
 public struct WaveWorkMap: Sendable, Hashable {
     public let objective: String
-    public let chapter: ChapterSummary?
+    public let projects: WorkEvidence<ProjectPlanningSnapshot>
+    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
     public let tasks: WorkEvidence<WaveTaskWork>
 
-    public init(objective: String, chapter: ChapterSummary?, tasks: WorkEvidence<WaveTaskWork>) {
+    public init(objective: String, projects: WorkEvidence<ProjectPlanningSnapshot>, tasks: WorkEvidence<WaveTaskWork>) {
         self.objective = objective
-        self.chapter = chapter
+        self.projects = projects
         self.tasks = tasks
     }
 }
 
-public struct ChapterSummary: Decodable, Sendable, Hashable {
+public enum ProjectStatus: String, Decodable, Sendable, Hashable {
+    case backlog, planned, started, paused, completed, canceled
+}
+
+public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
+    public let sync: PlanningSyncStatus
+    public let current: Bool
     public let id: String
-    public let sourceProjectId: String
-    public let sourceWorkId: String?
-    public let sourceProjectSlug: String?
-    public let metricTargets: [ChapterMetricTarget]
-    public let flows: ProjectFlowPlanSnapshot
+    public let linearId: String?
+    public let slug: String
+    public let name: String
+    public let status: ProjectStatus
+    public let metricTargets: [MetricTarget]
     public let krs: [PlanningKeyResult]
-    public let phase: String
-    public let error: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, flows, krs, phase, error
+        case id, slug, name, status, krs, current, sync
+        case linearId = "linear_id"
         case metricTargets = "metric_targets"
-        case sourceProjectId = "source_project_id"
-        case sourceWorkId = "source_work_id"
-        case sourceProjectSlug = "source_project_slug"
+    }
+}
+
+extension WorkEvidence where Item == ProjectPlanningSnapshot {
+    public var currentProject: ProjectPlanningSnapshot? {
+        let current = items.filter { $0.current }
+        return current.count == 1 ? current[0] : nil
     }
 }
 
@@ -38,22 +48,25 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let task: TaskPlanningSnapshot
     public let reference: TaskReferenceSnapshot
     public let runtime: TaskRuntimeSnapshot?
+    public let workflowName: String?
+    public let workflowSource: String?
+    public let latestGraphProcess: GraphProcessDetail?
+    public let execution: TaskExecutionSnapshot?
+    public let runControl: TaskRunControl
     public let directive: WorkDirectiveSnapshot?
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
     public let actions: TaskActionModel
-    public let prs: [PrSnapshot]
-    public let activePr: String?
+    public let pr: PrSnapshot?
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, directive, condition, actions, prs
+        case task, reference, runtime, directive, condition, actions, pr, execution
+        case workflowName = "workflow_name"
+        case workflowSource = "workflow_source"
+        case latestGraphProcess = "latest_graph_process"
+        case runControl = "run_control"
         case nextMove = "next_move"
-        case activePr = "active_pr"
     }
-}
-
-public struct ProjectFlowPlanSnapshot: Decodable, Sendable, Hashable {
-    public let recommended: String?
 }
 
 public struct PlanningKeyResult: Decodable, Sendable, Identifiable, Hashable {
@@ -63,38 +76,116 @@ public struct PlanningKeyResult: Decodable, Sendable, Identifiable, Hashable {
     public let holds: Bool
 }
 
+public struct TaskAcquisition: Decodable, Sendable, Hashable {
+    public let state: State
+    public let observedAt: Int64?
+
+    public enum State: String, Decodable, Sendable {
+        case available, invalid, removed, absent, unavailable
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case state
+        case observedAt = "observed_at"
+    }
+}
+
 public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
+    public let acquisition: TaskAcquisition
+    public let sync: PlanningSyncStatus
     public let id: String
+    public let repositoryId: String
+    public let repo: String
+    public let projectId: String?
+    public let waveId: String?
+    public let linearId: String?
     public let identifier: String
     public let name: String
     public let description: String
     public let rank: UInt32
+    public let state: String?
+    public let completedAt: String?
+    public let dueDate: String?
     public let completed: Bool
     public let assignee: String?
+
+    enum CodingKeys: String, CodingKey {
+        case repositoryId = "repository_id", projectId = "project_id", waveId = "wave_id"
+        case repo
+        case id, identifier, name, description, rank, completed, state, assignee, sync, acquisition
+        case linearId = "linear_id"
+        case completedAt = "completed_at"
+        case dueDate = "due_date"
+    }
+
+    public var terminalLabel: String? {
+        switch state {
+        case "canceled": "Canceled"
+        case "duplicate": "Duplicate"
+        default: isSuccessful ? "Completed" : nil
+        }
+    }
+
+    public var historyLabel: String? {
+        isSuccessful && completedAt == nil ? "Completed · date unavailable" : terminalLabel
+    }
+
+    public var isTerminal: Bool { isSuccessful || state == "canceled" || state == "duplicate" }
+    public var isSuccessful: Bool { state == "completed" || (state == nil && completed) }
 }
 
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let workId: String
-    public let status: WorkStatus
+    public let status: TaskState
+    /// A durable completion request awaiting settlement.
+    public let completionPending: String?
     public let reason: String
     public let updatedAt: String
     public let provider: String
-    /// Durable evidence that work began; `false` means none is recorded.
-    public let started: Bool
+    /// Who owns the Task on which Machine; absent when it is unowned.
+    public let owner: TaskOwner?
 
     enum CodingKeys: String, CodingKey {
-        case status, reason, provider, started
+        case status, reason, provider, owner
         case workId = "work_id"
+        case completionPending = "completion_pending"
         case updatedAt = "updated_at"
     }
 }
 
-/// Stable Task references shared by `lf status` and `lf roadmap`. The issue URL
+/// A Machine for display. A missing id is an unknown Machine.
+public struct MachineRef: Decodable, Sendable, Hashable {
+    public let id: String?
+    public let label: String?
+}
+
+/// The person and Machine that own a Task.
+public struct TaskOwner: Decodable, Sendable, Hashable {
+    public let person: String?
+    /// The owner's lowercase Git email; shown when they have no name.
+    public let personKey: String?
+    public let machine: MachineRef
+
+    enum CodingKeys: String, CodingKey {
+        case person, machine
+        case personKey = "person_key"
+    }
+
+    /// "Jack Heart on mini"; "Machine unknown" when the Machine was never recorded.
+    public var summary: String {
+        let person = person ?? personKey ?? "Someone"
+        if let label = machine.label, !label.isEmpty { return "\(person) on \(label)" }
+        if let id = machine.id { return "\(person) on \(id)" }
+        return "\(person) · Machine unknown"
+    }
+}
+
+/// Stable Task references shared by `lf wave status` and `lf wave show`. The issue URL
 /// comes from the cached PM snapshot; workspace evidence comes from durable
 /// Task Work and remains after execution finishes.
 public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
     public let issueUrl: URL?
-    public let workspace: TaskWorkspaceSnapshot?
+    public let workspace: TaskWorktreeSnapshot?
 
     enum CodingKeys: String, CodingKey {
         case workspace
@@ -102,14 +193,20 @@ public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
     }
 }
 
-public struct TaskWorkspaceSnapshot: Decodable, Sendable, Hashable {
+public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
+    public let machineId: String?
+    public let machineLabel: String?
+    public var identity: WorkspaceIdentity? { machineId.map { WorkspaceIdentity(machineId: $0, worktree: worktree) } }
     public let slug: String
     public let branch: String?
+    public let baseCommit: String
     public let worktree: String
     public let localExists: Bool?
 
     enum CodingKeys: String, CodingKey {
         case slug, branch, worktree
+        case baseCommit = "base_commit"
+        case machineId = "machine_id", machineLabel = "machine_label"
         case localExists = "local_exists"
     }
 }
@@ -117,7 +214,7 @@ public struct TaskWorkspaceSnapshot: Decodable, Sendable, Hashable {
 public enum RoadmapSection: String, Decodable, Sendable, Hashable {
     case now
     case waiting
-    case available
+    case notStarted = "not_started"
     case later
 }
 
@@ -130,14 +227,21 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
     public let actions: TaskActionModel
-    public let flow: TaskFlowSnapshot
-    public let activePr: PrSnapshot?
+    public let workflowName: String?
+    public let workflowSource: String?
+    public let latestGraphProcess: GraphProcessDetail?
+    public let execution: TaskExecutionSnapshot?
+    public let runControl: TaskRunControl
+    public let pr: PrSnapshot?
     public let section: RoadmapSection
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, condition, actions, flow, section
+        case task, reference, runtime, condition, actions, execution, section, pr
+        case workflowName = "workflow_name"
+        case workflowSource = "workflow_source"
+        case latestGraphProcess = "latest_graph_process"
+        case runControl = "run_control"
         case nextMove = "next_move"
-        case activePr = "active_pr"
     }
 }
 
@@ -182,17 +286,15 @@ public enum TaskConditionState: String, Decodable, Sendable, Hashable {
 
 /// The lifecycle actions Task Work can take. Mirrors the Rust
 /// `TaskAction`; the server computes which are legal, clients never re-derive.
-public enum TaskAction: String, Decodable, Sendable, Hashable {
+public enum TaskAction: String, Codable, Sendable, Hashable {
     case resume
     case openPr = "open_pr"
-    case startNextPr = "start_next_pr"
-    case complete
     case noAction = "no_action"
 }
 
 /// The next legal action and why. A nil recommendation means Task Work has not
 /// started; callers do not reconstruct a matrix of blocked alternatives.
-public struct TaskActionModel: Decodable, Sendable, Hashable {
+public struct TaskActionModel: Codable, Sendable, Hashable {
     public let recommended: TaskAction?
     public let reason: String
 }
@@ -224,12 +326,15 @@ public struct TaskConditionSnapshot: Decodable, Sendable, Hashable {
     public let observedAt: String
     public let evidenceAgeSeconds: Int?
     public let localProgress: LocalProgressEvidence
+    /// Started work a finished plan has not settled; keeps a terminal Task current.
+    public let unresolvedExecution: Bool
 
     enum CodingKeys: String, CodingKey {
         case state, reason
         case observedAt = "observed_at"
         case evidenceAgeSeconds = "evidence_age_secs"
         case localProgress = "local_progress"
+        case unresolvedExecution = "unresolved_execution"
     }
 }
 
@@ -288,21 +393,12 @@ public struct PrMergeRequestSnapshot: Decodable, Sendable, Hashable {
     public let mode: PrMergeMode
     public let requestedAt: String
     public let headSha: String
-    public let afterMerge: PrAfterMerge
-    public let nextSlug: String?
 
     enum CodingKeys: String, CodingKey {
         case mode
         case requestedAt = "requested_at"
         case headSha = "head_sha"
-        case afterMerge = "after_merge"
-        case nextSlug = "next_slug"
     }
-}
-
-public enum PrAfterMerge: String, Decodable, Sendable, Hashable {
-    case continueTask = "continue_task"
-    case completeTask = "complete_task"
 }
 
 public struct GithubPrSnapshot: Decodable, Sendable, Hashable {
@@ -310,7 +406,7 @@ public struct GithubPrSnapshot: Decodable, Sendable, Hashable {
     public let url: URL
 }
 
-/// A reading from `lf status`, or the reason there is none. Mirrors Rust
+/// A reading from `lf wave status`, or the reason there is none. Mirrors Rust
 /// `Evidence<T>` (`lf/commands/waves.rs`): "we looked and found nothing" and "we
 /// could not look" are different facts, and a surface that renders them the same
 /// is lying. `truncated` says a cap hid older items.
@@ -352,5 +448,11 @@ public enum WorkEvidence<Item: Decodable & Sendable & Hashable>: Decodable, Send
     public var unavailableReason: String? {
         if case let .unavailable(reason) = self { return reason }
         return nil
+    }
+
+    /// The items that pass `isIncluded`; unavailable evidence stays unavailable.
+    public func filter(_ isIncluded: (Item) -> Bool) -> WorkEvidence<Item> {
+        guard case let .available(items, truncated) = self else { return self }
+        return .available(items: items.filter(isIncluded), truncated: truncated)
     }
 }

@@ -6,7 +6,6 @@
 brew "git"  # git (required)
 brew "rust"  # rust (required)
 brew "uv"  # uv (required)
-brew "tmux"  # tmux (required)
 brew "gh"  # gh (required)
 brew "doppler"  # doppler (required)
 brew "node"  # npm (optional)

@@ -1,187 +1,98 @@
-//! Durable Project and Task compatibility rows and their observation outbox.
+//! Durable Project and Task rows and their events.
 
-use crate::child::ObservationRecipient;
-use crate::durable::{FlowPosition, TaskFlowBlocker, TaskWorkerClaim};
+use std::sync::Arc;
+
 use crate::id::WaveId;
-use crate::work::project::{
-    ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
-};
+use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::{
-    LinearObservationApply, LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId,
-    TaskLinearObservation, TaskPr, TaskPrId,
+    LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId, TaskLinearObservation,
+    TaskPr, TaskPrId,
 };
 use time::OffsetDateTime;
 
-use super::{run_sqlite, Store, StoreResult};
+use super::{run_planning_write, run_sqlite, Store, StoreResult};
 
 impl Store {
-    pub async fn create_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
+    pub(crate) async fn create_task(
+        &self,
+        input: &crate::work::task::NewTask,
+        acquisition: Option<Arc<super::PlanningLocks>>,
+    ) -> StoreResult<Task> {
+        let input = input.clone();
+        run_planning_write(&self.sqlite, acquisition, move |store| {
+            store.create_task(&input)
+        })
+        .await
+    }
+
+    pub async fn edit_task(
+        &self,
+        id: &TaskId,
+        expected_revision: u64,
+        patch: &crate::work::task::TaskUpdate,
+    ) -> StoreResult<Task> {
+        let id = id.clone();
+        let patch = patch.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.edit_task(&id, expected_revision, &patch)
+        })
+        .await
+    }
+
+    pub(crate) async fn task_checkout(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Option<super::sqlite::TaskCheckout>> {
         let task = task.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_checkout(&task)).await
+    }
+
+    pub(crate) async fn task_checkouts(&self) -> StoreResult<Vec<super::sqlite::TaskCheckout>> {
+        run_sqlite(&self.sqlite, |store| store.task_checkouts()).await
+    }
+    pub(crate) async fn lock_checkout_roots(
+        &self,
+        roots: Vec<std::path::PathBuf>,
+    ) -> StoreResult<Vec<Arc<std::fs::File>>> {
+        run_sqlite(&self.sqlite, move |store| {
+            store
+                .lock_checkout_roots(&[], &roots)
+                .map(|locks| locks.into_iter().map(Arc::new).collect())
+        })
+        .await
+    }
+
+    pub async fn place_task(
+        &self,
+        task_id: &TaskId,
+        worktree: &std::path::Path,
+        workspace_slug: &str,
+        pr: &TaskPr,
+        acquisition: Option<Arc<super::PlanningLocks>>,
+    ) -> StoreResult<Task> {
+        let task_id = task_id.clone();
+        let worktree = worktree.to_path_buf();
+        let workspace_slug = workspace_slug.to_string();
         let pr = pr.clone();
-        run_sqlite(&self.sqlite, move |store| store.insert_task(&task, &pr)).await
-    }
-
-    pub async fn create_task_with_worktree(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
-        let task = task.clone();
-        let pr = pr.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.insert_task_with_worktree(&task, &pr)
+        run_planning_write(&self.sqlite, acquisition, move |store| {
+            store.place_task(&task_id, &worktree, &workspace_slug, &pr)
         })
         .await
     }
 
-    pub async fn reopen_task(&self, task: &Task, pr: Option<&TaskPr>) -> StoreResult<()> {
-        let task = task.clone();
-        let pr = pr.cloned();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reopen_task(&task, pr.as_ref())
-        })
-        .await
-    }
-
-    pub async fn update_task(&self, task: &Task) -> StoreResult<()> {
-        let task = task.clone();
-        run_sqlite(&self.sqlite, move |store| store.update_task(&task)).await
-    }
-
-    pub async fn settle_task_worker(
-        &self,
-        task: &Task,
-        expected: &TaskWorkerClaim,
-        next: &FlowPosition,
-        progress: Option<&str>,
-    ) -> StoreResult<FlowPosition> {
-        let task = task.clone();
-        let expected = expected.clone();
-        let next = next.clone();
-        let progress = progress.map(str::to_string);
-        run_sqlite(&self.sqlite, move |store| {
-            store.settle_task_worker(&task, &expected, &next, progress.as_deref())
-        })
-        .await
-    }
-
-    pub async fn finish_task_flow(
-        &self,
-        task: &Task,
-        expected: &TaskWorkerClaim,
-        progress: Option<&str>,
-    ) -> StoreResult<()> {
-        let task = task.clone();
-        let expected = expected.clone();
-        let progress = progress.map(str::to_string);
-        run_sqlite(&self.sqlite, move |store| {
-            store.finish_task_flow(&task, &expected, progress.as_deref())
-        })
-        .await
-    }
-
-    pub async fn block_task_flow(
-        &self,
-        task_id: &TaskId,
-        expected: &TaskWorkerClaim,
-        failure: &TaskFlowBlocker,
-    ) -> StoreResult<FlowPosition> {
+    pub async fn set_task_agent(&self, task_id: &TaskId, agent: &str) -> StoreResult<()> {
         let task_id = task_id.clone();
-        let expected = expected.clone();
-        let failure = failure.clone();
+        let agent = agent.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.block_task_flow(&task_id, &expected, &failure)
+            store.set_task_agent(&task_id, &agent)
         })
         .await
     }
 
-    pub async fn release_task_worker(
-        &self,
-        task_id: &TaskId,
-        expected: &TaskWorkerClaim,
-    ) -> StoreResult<FlowPosition> {
-        let task_id = task_id.clone();
-        let expected = expected.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.release_task_worker(&task_id, &expected)
-        })
-        .await
-    }
-
-    pub async fn complete_human_task_boundary(
-        &self,
-        task: &Task,
-        expected: &FlowPosition,
-        next: &FlowPosition,
-        summary: &str,
-    ) -> StoreResult<FlowPosition> {
+    pub(crate) async fn complete_task(&self, task: &Task, request: i64) -> StoreResult<bool> {
         let task = task.clone();
-        let expected = expected.clone();
-        let next = next.clone();
-        let summary = summary.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.complete_human_task_boundary(&task, &expected, &next, &summary)
-        })
-        .await
-    }
-
-    pub async fn finish_human_task_boundary(
-        &self,
-        task: &Task,
-        expected: &FlowPosition,
-        summary: &str,
-    ) -> StoreResult<()> {
-        let task = task.clone();
-        let expected = expected.clone();
-        let summary = summary.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.finish_human_task_boundary(&task, &expected, &summary)
-        })
-        .await
-    }
-
-    pub async fn retry_task_flow(
-        &self,
-        task_id: &TaskId,
-        expected: &FlowPosition,
-    ) -> StoreResult<FlowPosition> {
-        let task_id = task_id.clone();
-        let expected = expected.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.retry_task_flow(&task_id, &expected)
-        })
-        .await
-    }
-
-    pub(crate) async fn restart_task_flow(
-        &self,
-        task: &Task,
-        checkpoint_head: &str,
-    ) -> StoreResult<()> {
-        let task = task.clone();
-        let checkpoint_head = checkpoint_head.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.restart_task_flow(&task, &checkpoint_head)
-        })
-        .await
-    }
-
-    pub async fn rebind_task_issue_identifier(
-        &self,
-        issue_id: &str,
-        old_identifier: &str,
-        new_identifier: &str,
-    ) -> StoreResult<bool> {
-        let issue_id = issue_id.to_string();
-        let old_identifier = old_identifier.to_string();
-        let new_identifier = new_identifier.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.rebind_task_issue_identifier(&issue_id, &old_identifier, &new_identifier)
-        })
-        .await
-    }
-
-    pub async fn complete_task(&self, task: &Task, skipped_pr: Option<&TaskPr>) -> StoreResult<()> {
-        let task = task.clone();
-        let skipped_pr = skipped_pr.cloned();
-        run_sqlite(&self.sqlite, move |store| {
-            store.complete_task(&task, skipped_pr.as_ref())
+            store.complete_task(&task, request)
         })
         .await
     }
@@ -209,6 +120,35 @@ impl Store {
         .await
     }
 
+    pub async fn stack_task_placement(&self, task: &Task, parent: &TaskPrId) -> StoreResult<()> {
+        let task = task.clone();
+        let parent = parent.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.stack_task_placement(&task, &parent)
+        })
+        .await
+    }
+
+    pub async fn sync_task_placement(
+        &self,
+        task_id: &TaskId,
+        new_base: &str,
+        clear_parent: bool,
+        updated_at: OffsetDateTime,
+    ) -> StoreResult<()> {
+        let task_id = task_id.clone();
+        let new_base = new_base.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.sync_task_placement(&task_id, &new_base, clear_parent, updated_at)
+        })
+        .await
+    }
+
+    pub async fn insert_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
+        let pr = pr.clone();
+        run_sqlite(&self.sqlite, move |store| store.insert_task_pr(&pr)).await
+    }
+
     pub async fn update_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
         let pr = pr.clone();
         run_sqlite(&self.sqlite, move |store| store.update_task_pr(&pr)).await
@@ -225,11 +165,6 @@ impl Store {
             store.record_task_pr_repair_incident(&pr_id, kind, occurred_at)
         })
         .await
-    }
-
-    pub async fn heal_task_pr_base(&self, pr: &TaskPr) -> StoreResult<()> {
-        let pr = pr.clone();
-        run_sqlite(&self.sqlite, move |store| store.heal_task_pr_base(&pr)).await
     }
 
     pub async fn task_prs(&self, task_id: &TaskId) -> StoreResult<Vec<TaskPr>> {
@@ -308,28 +243,9 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.active_task_pr(&task_id)).await
     }
 
-    pub async fn rebase_task_pr(
-        &self,
-        pr_id: &TaskPrId,
-        new_base: &str,
-        clear_parent: bool,
-        updated_at: OffsetDateTime,
-    ) -> StoreResult<()> {
-        let pr_id = pr_id.clone();
-        let new_base = new_base.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.rebase_task_pr(&pr_id, &new_base, clear_parent, updated_at)
-        })
-        .await
-    }
-
-    pub async fn settle_task_pr(&self, settled: &TaskPr, next: Option<&TaskPr>) -> StoreResult<()> {
+    pub async fn settle_task_pr(&self, settled: &TaskPr) -> StoreResult<()> {
         let settled = settled.clone();
-        let next = next.cloned();
-        run_sqlite(&self.sqlite, move |store| {
-            store.settle_task_pr(&settled, next.as_ref())
-        })
-        .await
+        run_sqlite(&self.sqlite, move |store| store.settle_task_pr(&settled)).await
     }
 
     pub(crate) async fn settle_task_pr_merged(
@@ -340,15 +256,6 @@ impl Store {
         let settled = settled.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.settle_task_pr_merged(&settled, merged_at)
-        })
-        .await
-    }
-
-    pub async fn complete_task_after_pr(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
-        let task = task.clone();
-        let pr = pr.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.complete_task_after_pr(&task, &pr)
         })
         .await
     }
@@ -364,26 +271,15 @@ impl Store {
         .await
     }
 
-    pub async fn apply_linear_observation(
-        &self,
-        apply: LinearObservationApply,
-    ) -> StoreResult<LinearObservationOutcome> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.apply_linear_observation(&apply)
-        })
-        .await
-    }
-
-    pub async fn apply_linear_comment(
+    pub(crate) async fn apply_linear_observation(
         &self,
         task_id: &TaskId,
-        comment_id: String,
-        text: String,
+        observation: crate::linear::LinearIssueObservation,
         observed_at: OffsetDateTime,
-    ) -> StoreResult<Option<i64>> {
+    ) -> StoreResult<LinearObservationOutcome> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.apply_linear_comment(&task_id, &comment_id, &text, observed_at)
+            store.apply_linear_observation(&task_id, &observation, observed_at)
         })
         .await
     }
@@ -407,35 +303,10 @@ impl Store {
     ) -> StoreResult<TaskEvent> {
         let task_id = task_id.clone();
         let kind = kind.clone();
-        let write_task_id = task_id.clone();
-        let write_kind = kind.clone();
-        let event = run_sqlite(&self.sqlite, move |store| {
-            store.append_task_event(&write_task_id, &write_kind)
+        run_sqlite(&self.sqlite, move |store| {
+            store.append_task_event(&task_id, &kind)
         })
-        .await?;
-        self.nudge_task_event(&task_id, &kind, &event).await?;
-        Ok(event)
-    }
-
-    async fn nudge_task_event(
-        &self,
-        task_id: &TaskId,
-        kind: &TaskEventKind,
-        event: &TaskEvent,
-    ) -> StoreResult<()> {
-        if kind.is_wave_observable() {
-            if let Some(task) = self.get_task(task_id).await? {
-                if let Some(wave) = self.get_wave(&task.wave_id).await? {
-                    if let Err(error) =
-                        crate::lf::commands::chat::nudge_child_observations(wave.name()).await
-                    {
-                        tracing::debug!(%error, %task_id, event_id = event.id,
-                            "Task delivery failed; the Wave observer will retry its durable outbox");
-                    }
-                }
-            }
-        }
-        Ok(())
+        .await
     }
 
     pub async fn task_events_after(
@@ -467,16 +338,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.insert_project(&project)).await
     }
 
-    pub async fn reopen_project(&self, project: &Project) -> StoreResult<()> {
-        let project = project.clone();
-        run_sqlite(&self.sqlite, move |store| store.reopen_project(&project)).await
-    }
-
-    pub async fn update_project(&self, project: &Project) -> StoreResult<()> {
-        let project = project.clone();
-        run_sqlite(&self.sqlite, move |store| store.update_project(&project)).await
-    }
-
     pub async fn get_project(&self, project_id: &ProjectId) -> StoreResult<Option<Project>> {
         let project_id = project_id.clone();
         run_sqlite(&self.sqlite, move |store| store.project(&project_id)).await
@@ -505,37 +366,10 @@ impl Store {
     ) -> StoreResult<ProjectEvent> {
         let project_id = project_id.clone();
         let kind = kind.clone();
-        let write_project_id = project_id.clone();
-        let write_kind = kind.clone();
-        let event = run_sqlite(&self.sqlite, move |store| {
-            store.append_project_event(&write_project_id, &write_kind)
+        run_sqlite(&self.sqlite, move |store| {
+            store.append_project_event(&project_id, &kind)
         })
-        .await?;
-        if kind.is_wave_observable() {
-            if let Some(project) = self.get_project(&project_id).await? {
-                match self.get_wave(&project.wave_id).await? {
-                    Some(wave) => {
-                        if let Err(error) =
-                            crate::lf::commands::chat::nudge_child_observations(wave.name()).await
-                        {
-                            tracing::debug!(
-                                %error,
-                                %project_id,
-                                event_id = event.id,
-                                "live Project observation delivery failed; Wave observer will retry"
-                            );
-                        }
-                    }
-                    None => tracing::error!(
-                        wave_id = %project.wave_id,
-                        %project_id,
-                        event_id = event.id,
-                        "Project observation cannot nudge its missing owning Wave"
-                    ),
-                }
-            }
-        }
-        Ok(event)
+        .await
     }
 
     pub async fn project_events_after(
@@ -549,33 +383,11 @@ impl Store {
         })
         .await
     }
+}
 
-    pub async fn pending_observations(
-        &self,
-        recipient: &ObservationRecipient,
-    ) -> StoreResult<Vec<ObservationOutboxRow>> {
-        let recipient = recipient.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.pending_observations(&recipient)
-        })
-        .await
-    }
-
-    pub async fn pending_project_observations(
-        &self,
-        project_id: &ProjectId,
-    ) -> StoreResult<Vec<ObservationOutboxRow>> {
-        let project_id = project_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.pending_project_observations(&project_id)
-        })
-        .await
-    }
-
-    pub async fn mark_observation_delivered(&self, id: i64) -> StoreResult<()> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.mark_observation_delivered(id)
-        })
-        .await
+#[cfg(test)]
+impl Store {
+    pub(crate) async fn seed_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<Task> {
+        self.sqlite.seed_task(task, pr)
     }
 }

@@ -1,7 +1,6 @@
 [
   {
     "id": "task_00000000000000000000000000000001:task-design:review_kickoff:0",
-    "kind": "flow",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -16,10 +15,13 @@
     "open_argv": [
       "lf",
       "session",
-      "open",
+      "connect",
       "task_00000000000000000000000000000001:task-design:review_kickoff:0"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
     "actions": [
@@ -27,26 +29,44 @@
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
-        "unavailable_reason": null
+        "unavailable_reason": "This Session is active in another terminal; use Move here to transfer it"
       },
       {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Complete the review and return feedback to the next Flow step",
-        "unavailable_reason": "The session agent has not marked this ready"
+        "kind": "move_here",
+        "label": "Move here",
+        "help": "Transfer control here; unsent text in the previous terminal is not transferred",
+        "unavailable_reason": null
       }
     ],
-    "run_id": "run_00000000000000000000000000000001",
-    "flow_membership": {
+    "graph_membership": {
       "kind": "step",
-      "flow": "task-design",
-      "invocation_id": "00000000-0000-0000-0000-00000000f10w",
+      "graph": "task-design",
       "step": "review-design",
       "occurrence": "current",
-      "node": "1",
+      "node": 1,
       "iterations": [
         []
-      ]
+      ],
+      "graph_lf_process_id": "00000000-0000-0000-0000-00000000f10w"
+    },
+    "workspace": {
+      "machine_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "availability": "available",
+    "task_primary": false,
+    "program_status": null,
+    "agent_process_id": "44444444-4444-4444-8444-444444444444",
+    "preview": {
+      "provider_thread": "thread-fixture",
+      "provider_turn": "turn-fixture",
+      "observed_at": 1700000000,
+      "source": "codex",
+      "text": "Current provider output"
     }
   }
 ]

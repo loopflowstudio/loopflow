@@ -1,11 +1,12 @@
 # Configuration
 
 ```bash
-lf user name          # show the resolved display name
-lf user name --json   # name as a JSON string, or null when unavailable
+lf user                                # show the resolved display name
+lf user --json                         # name as a JSON string, or null when unavailable
 ```
 
-Returns a display name, such as `Jack Heart`, using Git's configured `user.name`,
+`user` is the unique shortcut for `lf config user`. It returns a display name,
+such as `Jack Heart`, using Git's configured `user.name`,
 including repository overrides. Agents can use a familiar name such as `Jack`
 in prose. No first name or username is derived from this value. Override it
 in personal Loopflow configuration (`$LF_HOME/config.yaml`, or
@@ -18,10 +19,14 @@ user:
 
 Edit `user.name` to correct it; remove it or leave it blank to use Git again.
 Keep other settings in the file. Repo `.lf/config.yaml` cannot override this
-preference. Direct interactive and batch launches use the resolved name, and `lf ssh`
+preference. Direct interactive and batch launches use the resolved name, and `lf --machine`
 carries the caller's name rather than reading the destination owner's name.
+A non-empty `LF_USER_NAME` overrides these sources for a launched request; an
+empty or whitespace-only value falls through to personal configuration and Git.
+Steering comments prefer their recorded requester, then Linear's author name.
 Names describe people; they do not grant authority or establish who wrote an
-older request. Unattributed background Task and Wave work remains unattributed.
+older request. Task claims compare names, so give each person on a repository a
+distinct one: a claim with no name, or under yours, reads as yours. Unattributed background Task and Wave work remains unattributed.
 
 Persisted artifacts use the person's name; session replies use “you.” Stored
 transcripts retain their conversational wording.
@@ -31,11 +36,10 @@ submitting a prompt or resetting its participant. Agents can use a name they
 already know or the configured name; no reconciliation is required. Opening a
 session does not approve a review.
 
-`lf user name --json` resolves the name without provider or PM access.
-The Mac chat composer uses this local query when sending a message; CLI chat
-captures the caller's name before posting to a listener. The name travels with
-the message and survives replay. Old messages without names stay anonymous.
-Bare interrupts do not load a name, so a preference-read failure cannot block them.
+`lf user --json` resolves the name without provider or PM access.
+Session prompts carry the selected participant name. Stored transcripts retain
+their original wording; unnamed historical messages remain anonymous.
+
 Discord and Linear retain their provider author IDs alongside display names;
 a shared publisher account never substitutes for an explicitly named requester.
 
@@ -43,7 +47,7 @@ Start with a one-run override; keep it in repo config only when the choice
 should apply to everyone:
 
 ```bash
-lf gate -m codex --docs docs/api.md
+lf gate -a codex --docs docs/api.md
 ```
 
 ```yaml
@@ -60,46 +64,106 @@ config files.
 
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
-| Model | `-m claude:opus` | `agent: claude:opus` |
-| Interactive TUI | direct TTY or `-i` | `session.launch: tui` |
+| Agent | `-a claude:opus` | `agent: claude:opus` |
+| [Planning synchronization](lf.md#choose-planning-synchronization) | — | `planning: {provider: linear, team: "<id>"}`, `planning: {provider: asana, team: "<gid-or-url>"}`, `planning: {provider: notion, team: "<page-url-or-id>"}` or `planning: {provider: git, shared: team}` |
+| Interactive terminal | direct TTY or `-i` | — |
 | Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
-| Include branch files | `--diff-files` | `diff_files: true` |
-| Include raw diff | `--diff` | `diff: true` |
+| Include branch files | `--diff files` | `diff_files: true` |
+| Include raw diff | `--diff patch` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
-| Disable Loopflow guidance | `--no-loopflow` | — |
 | Context files | — | `context: [FILE]` |
 | Chrome automation | `--chrome` | `chrome: true` |
-| Yolo mode (skip permissions) | — | `yolo: true` |
-| Claude/Codex/OpenCode launch surface | `--tui` / `--ide` | `session.launch: tui` |
-| Review FlowStep terminal | `LF_EXTERNAL_TERMINAL=Ghostty` | global-only `session.terminal: Ghostty` |
+| Yolo mode (skip permissions) | `--yolo` | `yolo: true` |
+| Account's own provider home | `--isolate` / `--shared` | `isolate: true` |
+| [`~/.lf` disk budget](troubleshooting.md#disk-space) | — | global-only `disk_budget: 20G` |
+| Review GraphStep terminal | — | global-only `session.terminal: Ghostty` |
+| End agents nobody is viewing | — | `session.end_detached_after: 24h` (or `off`) |
+
+## Scratch lifecycle
+
+```bash
+lf scratch clear   # remove checkpointed scratch additions; retain existing files and edits
+```
+
+Skills write plans and notes to `scratch/` without setup, and recursive Markdown
+there enters agent context automatically. Scratch follows ordinary Git behavior
+in every checkout. No scratch setting is required.
+
+`lf pr submit` and `lf pr land` invoke this cleanup during preparation, so default
+Graphs need no extra step. It is also available on its own. Publishing a draft or
+ready PR does not run general scratch cleanup; PR-copy handoff artifacts retain
+their existing lifecycle. Cleanup uses the existing Task diff base
+or the branch's merge base with main; it removes only added files, preserving
+existing files, edits, detected renames and `.gitkeep`. Untracked files outside
+the checkpoint remain. Repeating cleanup makes no empty commit.
+
+## Context budgets
+
+Native Codex Sessions restore their context binding on start and reconnect,
+including when the provider is still running. A missing delivery file reports its
+path; reconnect the Loopflow Session to restore the binding from its saved input.
+Missing referenced files remain errors and must be restored at their reported paths.
+Host hook declarations and Codex trust decisions remain unchanged.
+
+```bash
+lf context                         # size targets, sources and current usage
+lf context --wave intelligence     # local Wave memory and scratch
+lf context --task LOO-303 --json    # Task checkout, including Wave memory
+```
+
+Edit the existing repo `.lf/config.yaml`:
+
+```yaml
+context_budgets:
+  memory_tokens: 6000
+  scratch_tokens: 8000
+```
+
+Override individual fields for a Wave in `.lf/wave/<name>/GOAL.md` frontmatter:
+
+```yaml
+---
+context_budgets:
+  memory_tokens: 10000
+---
+```
+
+Each field resolves from Wave frontmatter, repo config, personal config, then
+the compiled default. `lf context` shows the winning source for every value.
+The same block supports `memory_bytes` and `scratch_bytes`. Values must be positive
+integers. These are authoring targets, not launch limits; exceeding them does not
+refuse a launch or select its context. The retired `goal_*` and `input_*` keys are removed.
+
+`lf context` measures recursive scratch Markdown and checkout Wave/ancestor memory,
+without contacting a provider or reading the clipboard. Defaults are 16,000 tokens /
+128 KiB for memory and 12,000 tokens / 96 KiB for scratch. Curate stale notes gradually,
+preserving live decisions and evidence; re-query after writing.
+
+The first conversation turn contains the skill followed by the request. Terminal
+launches pass it as an argument; if its UTF-8 size reaches the 122,880-byte argument
+cap, launch fails before starting the provider and reports the size and cap. Headless
+message streams have no terminal-argument cap.
 
 ## Context Assembly
 
-Every skill gets context assembled automatically. Run any command to see the breakdown:
+Launch headers inventory gathered sources; those counts are not the bytes sent
+in a provider request. The harness loads its repo guide natively.
 
-```
-Tokens: 12,847
+| Content | Delivery | Selection |
+|---------|----------|-----------|
+| Operating and surface instructions, participant, reply guidance | Fixed added-instructions slot | Standalone native skills retain their own guidance |
+| Skill and request | First turn | Selected skill and launch message |
+| Scratch and checkout Wave/ancestor documents | Refreshed conversation block; whole files, marked start excerpts and a complete listing | Current checkout and selected Wave |
+| Explicit docs | File paths in the listing | `docs:` or `--docs` |
+| Branch changes | Git inspection commands and changed paths | `--diff patch`, `diff_files: true` |
+| Codebase summaries | Complete private reference files | `summaries:` |
+| Clipboard | Tagged block after the request in the first turn | `-c` |
 
-docs           3,842 ███
-  README.md      988 █
-scratch        3,050 ██
-clipboard      1,234 █
-```
-
-The token breakdown shows what's included:
-
-| Section | What it contains | Config |
-|---------|------------------|--------|
-| **files** | Agent doc (AGENTS.md/CLAUDE.md/STYLE.md), `LOOPFLOW.md`, `scratch/`, `wave/` | always on; `--no-loopflow` drops `LOOPFLOW.md` |
-| **scratch** | `scratch/` design artifacts | always included |
-| **wave** | `wave/` docs | always included |
-| **docs** | Explicit docs files, globs, and directory markdown walks | `docs:` |
-| **diff** | Branch diff when requested | `--diff` |
-| **diff_files** | Files changed on this branch when requested | `diff_files: true` |
-| **summary** | Token-limited codebase overviews | `summaries:` in config |
-| **clipboard** | Pasted content (errors, context) | `-c` flag |
-
-Defaults work well for most repos. Summaries require configuration.
+The block refreshes at startup and after compaction. After compaction it also
+includes the saved active skill. Large documents include marked start excerpts
+with complete source paths and sizes.
+The rendered block stays within the provider byte cap; overflow listings and skills
+remain readable through complete-file pointers.
 
 ## Config Files
 
@@ -111,7 +175,8 @@ For most settings, repo overrides global. For additive settings (`docs`, `contex
 # ~/.lf/config.yaml (global)
 agent: claude:opus
 session:
-  terminal: Ghostty       # presents review FlowStep sessions on this Home
+  terminal: Ghostty       # presents review GraphStep sessions on this Machine
+  end_detached_after: 24h # stop an unviewed Session's agent; `lf resume` reopens it
 
 # .lf/config.yaml (repo)
 agent: codex        # overrides global
@@ -119,13 +184,13 @@ context:
   - docs/api.md           # combined with global context
 ```
 
+Scheduled commands are personal and never configured here; see
+[Schedule ordinary commands](lf.md#schedule-ordinary-commands).
+
 Example repo config:
 
 ```yaml
 agent: claude:opus
-
-session:
-  launch: tui
 
 context:
   - src/schema.py
@@ -140,12 +205,12 @@ exclude:
   - node_modules
 ```
 
-## Flows
+## Graphs
 
-Flows are YAML files in `.lf/flows/`:
+Graphs are YAML files in `.lf/graphs/`:
 
 ```yaml
-# .lf/flows/ship-api.yaml
+# .lf/graphs/ship-api.yaml
 - implement
 - compress
 - gate
@@ -181,7 +246,7 @@ and waits for the configured completion evidence. `area` scopes the range.
 auto-detect supported manifests.
 
 `verify` runs during `lf release run`, after Loopflow resolves the version and
-exact change range but before it prepares release changes. `lf release check`
+exact change range but before it prepares release changes. `lf check`
 only reads that evidence; it does not execute repository hooks. `prepare` runs
 after manifest bumps inside the isolated release worktree. Both hook types
 accept `{target}`, `{version}`, and `{previous_tag}` placeholders. The
@@ -208,18 +273,15 @@ previous target tag.
 
 ### Loopflow Guidance
 
-Ambient operating guidance for inline execution and mechanical git/PR operations. Injected by default; tier skills add scoped delegation.
-
-| | |
-|---|---|
-| **CLI** | `--no-loopflow` |
-| **Default** | included |
-
-Use `--no-loopflow` when you want a leaner prompt without loopflow-specific process guidance.
+Launches receive the small `LOOPFLOW.md` contract. Task- and Wave-associated
+launches also preload Work guidance. Read `lf help skill work` when entering
+Work APIs from an existing conversation. Standalone native skills retain their
+own guidance. Association selects context; a requested skill or Graph selects
+the procedure.
 
 ### Docs
 
-Prefetch specific files, globs, or directories into context. Not included by default.
+List specific files, globs, or directories for the agent to read. Not included by default.
 
 | | |
 |---|---|
@@ -228,25 +290,29 @@ Prefetch specific files, globs, or directories into context. Not included by def
 | **Default** | none (empty) |
 
 Each entry is a file (`README.md`), a glob (`'*.md'`), or a directory (`swift/`
-gathers `*.md` under it). Use this to pull in reference docs relevant to the
-task—it doesn't restrict which files the agent can edit. `scratch/` and
-`wave/` are always included automatically; you don't need `--docs` for them.
+gathers `*.md` under it). Resolved paths appear in the context listing; file
+bodies are not inlined. This doesn't restrict which files the agent can edit.
+Scratch and the selected Wave's checkout Markdown are gathered automatically.
+Wave context reads `.lf/wave/<name>/` and each path-segment ancestor, excluding siblings
+and children; listings point to those files, not database snapshots.
 
 ### Branch Files (diff_files)
 
-Full content of files modified on the current branch.
+List paths modified on the current branch for the agent to inspect.
 
 | | |
 |---|---|
-| **CLI** | `--diff-files` / `--no-diff-files` |
+| **CLI** | `--diff files` / `--diff none` |
 | **Config** | `diff_files: true` |
 | **Default** | `false` |
 
-Use `--diff-files` when the agent needs complete file bodies, not just line changes. Combine with `--diff` when the exact patch also matters.
+Use `--diff files` to identify changed files. The reference points to Git inspection;
+it does not preload file bodies or patches.
 
 ### Clipboard
 
-Paste content (errors, stack traces, context) into the prompt.
+Append clipboard content in its own tagged block after the request in the first turn.
+It counts toward the terminal argument cap.
 
 | | |
 |---|---|
@@ -257,19 +323,19 @@ Use `-c` when debugging: copy an error, then `lf debug -c`.
 
 ### Raw Diff
 
-Include `git diff main...HEAD` output showing exact line changes.
+Point to Git inspection commands rather than inlining a frozen patch.
 
 | | |
 |---|---|
-| **CLI** | `--diff` / `--no-diff` |
+| **CLI** | `--diff patch` / `--diff none` |
 | **Config** | `diff: true` |
 | **Default** | `false` (not included) |
 
-Use when you want the agent to see precisely what changed. Can combine with `--diff-files`.
+Use when the agent needs to inspect exact changes. `--diff both` also lists changed paths.
 
 ### Context Files
 
-Additional files always included in every skill.
+Additional file paths listed for every skill.
 
 | | |
 |---|---|
@@ -293,20 +359,20 @@ Set the default harness, with an optional model.
 
 | | |
 |---|---|
-| **CLI** | `lf gate -m codex:o3` |
+| **CLI** | `lf gate -a codex:o3` |
 | **Config** | `agent: claude:opus` (optional) |
-| **Default** | unset (resolution falls back to skill defaults, then the first of `codex`, `claude`, `opencode` installed on this machine) |
+| **Default** | unset (resolution falls back to skill defaults, then the first of `codex`, `claude`, `opencode`, `pi` installed on this machine) |
 
 ```yaml
 agent: codex          # harness default
 # agent: claude:opus  # harness plus model
 ```
 
-Harnesses: `claude`, `codex`, `opencode`. Use `harness:model` for specific models.
+Harnesses: `claude`, `codex`, `opencode`, `pi`. Use `harness:model` for specific models.
 
 Four built-in skills intentionally default to Claude: `kickoff`,
-`review-design`, `review-slice`, and `prompt`. Every other unconfigured
-built-in skill uses Codex when it is installed, then Claude, then OpenCode. A
+`review-design`, `realign`, and `prompt`. Every other unconfigured
+built-in skill uses Codex when it is installed, then Claude, then OpenCode, then Pi. A
 CLI `-m` or authored `agent:` config remains an explicit override.
 
 Loopflow starts every Codex CLI and interactive run on the standard service tier,
@@ -323,6 +389,49 @@ agent: opencode:opencode/glm-5.2         # explicit model
 agent: opencode:moonshotai/kimi-k2       # explicit provider/model
 ```
 
+### Pi
+
+```bash
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.3.0
+pi                                      # configure a model and /login
+lf -a pi implement                     # native interactive Session
+lf -b -a pi:anthropic/claude-sonnet-4-6 implement
+lf resume <session-id>                  # reopen its exact Pi conversation
+```
+
+Pi 1.3.0 is the protocol baseline. Bare `pi` uses Pi's own model selection;
+`pi:provider/model` passes the model to Pi. Pi owns credentials and its native
+session files. API keys supplied to the process (for example through Doppler)
+remain available to Pi; Loopflow does not copy Claude/Codex subscription logins
+into it. Configure Pi on each Machine where it runs.
+
+Headless work uses Pi RPC; native Sessions retain Pi's terminal interface.
+Loopflow supplies context through a launch-local extension, including after
+compaction, and translates selected skills with their arguments. Resume requires
+the recorded session file; deleting it produces an error instead of a new chat.
+Keep that file when moving or archiving work. A native `/new` or session switch
+changes the conversation outside Loopflow's recorded identity; start another
+Loopflow Session to select a new conversation.
+
+Text, tool events and reported token/cost usage enter capture/history. Pi's final
+`agent_settled` event ends a turn, including Pi's internal retries and queued
+steering. Loopflow preserves a final failure; it does not send an automatic
+continuation prompt. Resume with explicit input to continue. A blank terminal
+answer fails headless execution. Native usage checkpoints survive a crash before
+settlement; missing usage stays unknown.
+
+`lf session steer <session-id> "direction"` queues guidance during an active Pi
+run through the same saved-steer receipts used by other harnesses. An emitted
+receipt means local delivery, not proof the model incorporated it. Idle Sessions
+stay idle. Direct RPC steering reports queued, rejected or uncertain delivery
+independently of the initiating turn's result.
+Managed account switching, subscription limits, native response schemas,
+turn limits and transferring Pi history to another harness are unavailable.
+Headless extension dialogs fail with an instruction
+to open the Session interactively. Pi's tools use the OS user's permissions;
+project trust and the working directory do not sandbox them. Provider-only
+worktree confinement is unsupported; managed Tasks use the caller's OS boundary.
+
 ### Supported Harnesses
 
 Optional list of harnesses exposed in Loopflow's model picker and settings.
@@ -332,6 +441,7 @@ supported_harnesses:
   - claude
   - codex
   - opencode
+  - pi
 ```
 
 This list is additive across global and repo config.
@@ -339,7 +449,7 @@ This list is additive across global and repo config.
 ### Run Mode
 
 Direct named invocations use an interactive session when stdin or stdout is a
-TTY. Automated flow nodes and `--batch` invocations run headlessly. Skill
+TTY. Automated graph nodes and `-b` invocations run headlessly. Skill
 frontmatter never changes scheduling.
 
 | | |
@@ -347,8 +457,8 @@ frontmatter never changes scheduling.
 | **CLI** | `-i` (interactive), `-b` (batch/headless) |
 | **Default** | interactive for a direct TTY; headless otherwise |
 
-Flows declare a required User gate on the exact skill occurrence with a stable
-`id` and `human: true`; see [Authoring](authoring.md#flows).
+Graphs hold autonomous steps only; a `human: true` step is rejected at launch.
+See [Authoring](authoring.md#graphs).
 
 ### Chrome
 
@@ -356,9 +466,13 @@ Enable browser automation for Claude Code.
 
 | | |
 |---|---|
-| **CLI** | `--chrome` / `--no-chrome` |
+| **CLI** | `--chrome on` / `--chrome off` |
 | **Config** | `chrome: true` |
 | **Default** | `false` |
+
+Applies to fresh and resumed Claude Sessions, both terminal and headless.
+`--chrome off` explicitly disables the vendor integration. Other providers do
+not use this Claude-specific setting.
 
 Requires the [Chrome extension](https://chromewebstore.google.com/detail/claude-browser-tool/gfbkicmkbhdjacjmfjffcldkdopkfjgk) and a paid Claude plan.
 
@@ -368,6 +482,7 @@ Skip vendor permission prompts and sandboxes.
 
 | | |
 |---|---|
+| **CLI** | `--yolo` |
 | **Config** | `yolo: true` |
 | **Default** | `false` |
 
@@ -377,41 +492,53 @@ non-interactive Claude runs skip permission prompts. User and repo-level vendor
 configs that are already more permissive are not downgraded. For example, Codex
 `sandbox_mode = "danger-full-access"` or Claude
 `permissions.defaultMode = "bypassPermissions"` are left to the vendor config.
-If vendor config is less permissive, Loopflow warns and supplies its default.
+If vendor config is less permissive, Loopflow supplies its default.
 
-`yolo: true` is the explicit Loopflow bypass: Claude uses
-`--dangerously-skip-permissions`, Codex uses
-`--dangerously-bypass-approvals-and-sandbox`, and OpenCode uses
-`permission: "allow"` via `OPENCODE_CONFIG_CONTENT`.
+`--yolo` or `yolo: true` is the explicit Loopflow bypass: Claude uses
+`--dangerously-skip-permissions`, Codex sends `sandbox: "danger-full-access"`
+and `approvalPolicy: "never"` through its app-server protocol, and OpenCode uses
+`permission: {"*": "allow"}` via `OPENCODE_CONFIG_CONTENT`.
 
-Durable Task provider turns are the exception. Their assigned worktree is a
-hard write boundary, so `yolo` and a more permissive vendor config cannot widen
-it. Codex runs with `workspace-write`, Claude uses its strict fail-closed Bash
-sandbox, and OpenCode denies external-directory tools.
+Managed Task turns require an execution boundary independently of vendor
+permission settings. Claude and Codex bypass their own permission prompts within
+managed execution; `yolo` does not remove the required boundary. Pi uses the same
+caller-owned OS environment and its own credentials; no vendor sandbox is implied.
+OpenCode cannot currently satisfy that managed execution requirement. For
+provider-only worktree scope, Codex uses `workspace-write`, Claude uses its strict fail-closed Bash
+sandbox, and OpenCode denies external-directory tools, including with `yolo`.
+
+Stopped-session resume reloads Loopflow settings at the saved checkout. The
+provider's conversation identity and account stay attached; a current model
+setting for that provider applies. A configured different provider does not
+change the saved history's provider. CLI overrides take precedence. Connecting
+to an already running provider keeps its existing launch settings. Historical
+replay uses captured inputs. Resuming native history from an isolated account
+keeps that account's provider home, including when `--shared` is requested.
+
+Claude turn limits and native JSON schemas require headless mode; terminal
+launches reject them. Other headless providers report unsupported turn limits
+or native schemas and continue with ordinary output; this also preserves
+historical replay. Graph output validation still applies to every provider.
 
 ### Worktree Sandboxes
 
 Claude and Codex CLI/TUI sessions launched from a Git worktree automatically add
 the main repo as an extra writable directory. This keeps normal agent
 permissions, but lets Git write the linked worktree index under
-`<main>/.git/worktrees/<worktree>/` when the agent stages, commits, rebases, or
+`<main>/.git/worktrees/<worktree>/` when the agent stages, commits, syncs, or
 runs mechanical `lf` commands. Durable Task provider turns do not add the main
 repo. Loopflow owns their Git mutations after the provider edits and tests the
 assigned files.
 
-### Session Launch
+### Interactive sessions
 
-Pick where directly invoked interactive skills open.
-
-```yaml
-session:
-  launch: tui          # tui | ide
+```bash
+lf -a claude audit
 ```
 
-`tui` opens Claude, Codex, or OpenCode in the current terminal. `ide` opens the
-Codex or Claude app by URL scheme and falls back to `tui` if no app handles the
-link. OpenCode is terminal-only. The per-run flags `--tui` / `--ide` override
-this default.
+Interactive skills run in the current terminal. A direct TTY invocation is
+interactive by default; `-i` keeps interactive execution when input is piped.
+Use `-b` for headless execution.
 
 ### Summaries
 
@@ -432,25 +559,120 @@ Account state and repository routes are managed through CLI commands rather
 than `config.yaml`:
 
 ```bash
-lf auth connect claude primary@example.com --chrome-profile primary@example.com
-lf route set claude primary@ engineering@
+lf account connect claude primary@example.com --chrome-profile primary@example.com
+lf account route set claude primary@ engineering@
 lf --account primary@ implement
 ```
 
 See [Subscription Management](/docs/subscriptions) for identity storage,
 access profiles, routing, health, selectors, and remote development. See
-[Security](/docs/security) for credential forwarding and trust boundaries.
+[Security](/docs/security) for machine logins and trust boundaries.
 
-### External Skills
-
-Loopflow has one external skill channel plus one compatibility shim. No config needed.
-
-- **`npx/<owner>/<repo>`** — fetched live via [`npx skills`](https://www.npmjs.com/package/skills) and cached under `.agents/skills/`. If the skill is already cached — or `npx skills find` can resolve it — `npx/<name>` often works too. This is the general escape hatch for third-party Claude Skill packages.
-- **`rams/rams`** — legacy single-file compatibility shim. It resolves only when `~/.claude/commands/rams.md` exists.
+### Skill sources
 
 ```bash
-lf npx/vercel-labs/deep-research      # live fetch, cached on first run
-lf rams/rams                          # legacy compatibility alias, if installed
+lf help audit                       # inspect the selected file
+lf list skill                       # list names and sources
 ```
 
-The older `skill_sources` config block and `~/.superpowers` auto-detection have been removed. If you were pointing at a local directory of skill prompts, place the files under `.lf/skills/<namespace>/<skill>.md` (repo-local) or `~/.lf/skills/<namespace>/<skill>.md` (user-global) and invoke them as `lf <namespace>/<skill>`. Namespaced skills use `/`, not `:`.
+Put `audit/SKILL.md` in `.claude/skills`, `.agents/skills`, or `.codex/skills`.
+A bundle wins over a same-named Markdown file in the same folder.
+Single Markdown files also work in `.lf/skills`, `.claude/commands`, and
+`.codex/prompts`. Supporting files inside a skill bundle are not separate skills.
+Namespaces use `/`, such as `lf help team/audit`.
+
+Repository sources win over personal sources, then embedded builtins. A team's
+repository Skill changes everyone's process; to try your own variant, save it
+under a new name in `~/.lf/skills`. Within each
+scope, precedence is `.lf/skills`, `.claude/skills`, `.claude/commands`,
+`.agents/skills`, `.codex/skills`, `.codex/prompts`. Personal Claude and Codex
+folders respect `CLAUDE_CONFIG_DIR` and `CODEX_HOME`. Generated Loopflow exports
+never override the current embedded builtin. Help, listing, execution lookup,
+and retained Graph definitions use the same selection. Listings prefer the authored
+`description`, falling back to the first prose line.
+
+Install third-party skills with their own installer, then use their installed
+names. The `npx/` fetch path and `rams/rams` alias are removed; an installed
+`rams.md` is named `rams`.
+
+`lf -b -a claude audit` invokes a Claude bundle directly from its original
+folder through the native command parser, with gathered context separate from
+command arguments. Terminal Claude uses a captured native plugin with the same
+declarations and exact arguments; gathered context uses the refreshed conversation block.
+Codex sources use explicit native skill links on both surfaces, including sources
+outside Codex's discovered catalog. Cross-harness launches translate argument
+and tool-name instructions, retain declarations and identify the original asset
+directory. Codex custom prompts expand one-based positions and `NAME=value`
+arguments. A warning names declarations the launch does not enforce.
+
+Standalone native skills use their own instructions with gathered conversation
+context; builtin launches receive the launcher contract and associated Work
+guidance. Memory and scratch
+budgets are authoring targets, not launch gates. LF builtins remain inline in
+the first turn. Captured Graph definitions survive
+source-file changes or removal: Claude uses a captured native definition, while
+Codex uses captured instructions. Both retain the original resource directory;
+resources removed with the bundle are not preserved.
+
+```bash
+lf sync-skills --yes       # personal skills and builtin skills/Graphs → home
+lf sync-skills --repo      # repository skills/Graphs → this checkout
+```
+
+Global exports go to `~/.claude/skills` and `~/.agents/skills`; repository exports
+go to the corresponding checkout directories, never home. Release promotion’s
+skill sync includes builtin Graphs. Recipes capture Graph topology at sync time;
+sync again after adding, editing, removing or overriding repository definitions.
+Headless commands load their skills when launched.
+
+Exact names win: `.lf/skills/wave/session.md` and `.lf/skills/wave-session.md`
+are distinct definitions. `lf skill wave/session` selects the first; `lf skill
+wave-session` selects the second. When no exact name exists, `/` → `-` provides a
+fallback. Multiple fallback candidates produce an ambiguity naming the candidates.
+The same rules apply to Graphs. Repository, personal and provider-root precedence
+apply to identical literal names. Existing unique bare shortcuts remain; hyphen
+suffixes do not create new shortcuts. Untyped lookup checks exact names before
+fallbacks, with Graph-first precedence for the same literal name.
+
+Exports use one portable name per skill in both directories: lowercase letters,
+digits and separating hyphens, at most 64 characters. `repo/operate` exports as
+`repo-operate`. Long names use their final component plus a stable suffix, such as
+`pdf-a1b2c3d4`. Exact literal names keep priority; collisions receive distinct
+suffixes so neither skill is lost. Original `lf` names remain unchanged; native
+slash aliases are replaced by these portable names. Graph exports yield to skills
+at the same projected name and retain their original exact Graph identity.
+Third-party files and bundles are preserved. Sync prunes only generated exports
+after replacements are writable.
+Original native declarations and resource paths remain attached to each source;
+cross-harness exports do not claim to enforce or translate native controls.
+
+## Scratch cleanup during delivery
+
+Delivery clears committed scratch additions relative to the Task's base (or the
+branch's integration base). Existing files, edits and renames remain repository
+content. `scratch/.gitkeep` is preserved. Use `lf scratch clear` for the same
+explicit cleanup; checkpoint intended notes first. Uncommitted files are preserved
+by this command. Delivery checkpoints the intended change before cleanup.
+
+## Merge policy
+
+```yaml
+# .lf/config.yaml — only needed to prefer a particular allowed method
+merge_method: merge  # merge, squash, or rebase
+```
+
+`arm` and `land` read the repository's allowed GitHub merge methods. Without a
+preference, choose squash, then merge, then rebase from the allowed methods.
+A repository preference disabled by GitHub returns an actionable error before
+replacing an existing auto-merge request. A merge queue owns its method, so lf
+sends no method or commit-message override for queued merging. Personal config
+cannot override this repository policy. Every request retains the observed head
+commit check and GitHub's protection requirements.
+
+Keep procedure in repository instructions and Graphs: who should review, when to
+run checks, and whether to stop at `publish`, `submit`, or auto-merge. Do not
+replace whole lifecycle commands with scripts whose successful exit could mean
+something different. Release targets already expose `verify`, `prepare`,
+`workflow`, `publisher`, and `completion`; use those boundaries for repository
+build and packaging tools. Current PR and release observation supports GitHub;
+other hosts need publication, identity and completion support together.

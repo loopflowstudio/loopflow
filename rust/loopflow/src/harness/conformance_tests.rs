@@ -8,8 +8,9 @@ use tokio::sync::mpsc;
 
 use super::claude_mapping::{self, ReaderState};
 use super::codex::{process_notification, process_rpc_error, NotificationState};
-use super::opencode_mapping;
+use super::{opencode_history::History, opencode_mapping};
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
+use crate::id::AgentSessionId;
 
 fn read_trace_lines(file_name: &str) -> Vec<String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -31,7 +32,7 @@ fn drain_events(
     }
 }
 
-fn replay_claude_trace(file_name: &str) -> (Vec<ConversationEvent>, Option<String>) {
+fn replay_claude_trace(file_name: &str) -> (Vec<ConversationEvent>, Option<AgentSessionId>) {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut events = Vec::new();
     let mut state = ReaderState::default();
@@ -55,7 +56,7 @@ fn replay_claude_trace(file_name: &str) -> (Vec<ConversationEvent>, Option<Strin
         }
     }
 
-    let session_id = state.take_provider_session_id();
+    let session_id = state.take_agent_session();
 
     if !saw_turn_completed {
         for item in state.drain_open_items(Lifecycle::Failed) {
@@ -116,39 +117,12 @@ fn replay_codex_lines(lines: Vec<String>) -> Vec<ConversationEvent> {
     events
 }
 
-fn replay_opencode_trace(file_name: &str) -> Vec<ConversationEvent> {
-    let mut lines = read_trace_lines(file_name)
-        .into_iter()
-        .filter(|line| !line.trim().is_empty());
-    let session_create: Value = serde_json::from_str(
-        &lines
-            .next()
-            .expect("opencode trace should start with session create payload"),
-    )
-    .expect("session create payload should be valid json");
-    let session_id = session_create
-        .get("id")
-        .and_then(Value::as_str)
-        .expect("session create payload should include canonical id")
-        .to_string();
-    let mut state = opencode_mapping::ReaderState::new(session_id, None, "opencode");
-    let mut events = Vec::new();
-
-    for line in lines {
-        let value: Value = serde_json::from_str(&line).expect("trace line should be valid json");
-        let mapped = opencode_mapping::map_event(&value, &mut state);
-        events.extend(mapped.events);
-    }
-
-    events
-}
-
 #[test]
 fn claude_trace_normal_turn() {
     let (events, session_id) = replay_claude_trace("claude_normal_turn.ndjson");
     assert_eq!(
-        session_id.as_deref(),
-        Some("sess_claude_normal"),
+        session_id,
+        Some("sess_claude_normal".into()),
         "system event's session id should be captured for --resume"
     );
     let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
@@ -317,6 +291,27 @@ fn codex_trace_error_turn() {
     ));
 }
 
+#[test]
+fn codex_inline_error_survives_without_a_separate_notification() {
+    let lines: Vec<_> = read_trace_lines("codex_error.jsonl")
+        .into_iter()
+        .filter(|line| serde_json::from_str::<Value>(line).unwrap()["method"] != "error")
+        .collect();
+    let events = replay_codex_lines(lines.clone().into_iter().chain(lines).collect());
+    let kinds: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            "turn_started",
+            "error",
+            "turn_completed",
+            "turn_started",
+            "error",
+            "turn_completed"
+        ]
+    );
+}
+
 /// A `willRetry: true` error mid-turn must NOT produce a terminal Error
 /// event: the vendor keeps the turn alive and retries, so the turn survives
 /// to its real completion. The error surfaces non-terminally as a Thought
@@ -372,96 +367,114 @@ fn codex_rpc_error_response_maps_to_error_event() {
     ));
 }
 
+// Synthetic native message shapes follow the isolated OpenCode 2.0.32 proof.
+// Status/SSE alone supplies neither a native completion nor measured usage.
 #[test]
-fn opencode_trace_normal_turn_reports_no_usage_when_none_was_reported() {
-    let events = replay_opencode_trace("opencode_normal_turn.ndjson");
-    let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
-    // This fixture's idle status carries no usage, so the turn must end without
-    // a usage report. Emitting a defaulted one here would assert "the provider
-    // measured zero" and erase the totals the stream already accumulated.
-    assert_eq!(
-        event_types,
-        vec!["turn_started", "text_delta", "turn_completed"]
-    );
-    assert!(matches!(
-        events
+fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
+    use crate::id::LfProcessId;
+    use crate::store::sqlite::SqliteStore;
+
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("store.db");
+    let store = SqliteStore::open_ephemeral(&path).unwrap();
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    let process = LfProcessId::new();
+    sql.execute(
+        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+        [process.as_str()],
+    )
+    .unwrap();
+    for measured in [None, Some(0), Some(40)] {
+        let input = crate::session_record::new_artifact_key();
+        let session = format!("session-{measured:?}");
+        store.test_session(&session, &input);
+        let attachment = store
+            .claim_session_attachment(&session, None, &process, false)
+            .unwrap();
+        let mut history = History::new(Some((store.clone(), session.clone(), attachment)));
+        let request = history.request().unwrap();
+        let agent_session = AgentSessionId::from(session.as_str());
+        let mut display = opencode_mapping::ReaderState::new(agent_session.clone(), None);
+        let user = json!({"id":request,"type":"user","text":"request","time":{"created":0}});
+        let mut message = json!({"id":"assistant","type":"assistant","time":{"created":1},
+            "content":[{"id":"tool","type":"tool","name":"shell",
+                "state":{"status":"running","input":{"command":"echo ok"}}}]});
+        let messages = [user.clone(), message.clone()];
+        let observed = history.observe(&agent_session, &messages).unwrap();
+        let started = observed.events;
+        assert!(
+            matches!(&started[..], [ConversationEvent::TurnStarted { turn_id }] if turn_id == &request)
+        );
+        let tools = display.observe_messages(&observed.messages);
+        assert!(
+            matches!(&tools[..], [ConversationEvent::ItemStarted {turn_id, item: ConversationItem::Command {status: Lifecycle::Running, ..}}] if turn_id == &request)
+        );
+
+        assert!(store
+            .session_history(&session, 0, 0)
+            .unwrap()
             .iter()
-            .find(|event| matches!(event, ConversationEvent::TurnCompleted { .. })),
-        Some(ConversationEvent::TurnCompleted {
-            status: Lifecycle::Completed,
-            ..
-        })
-    ));
-}
+            .all(|row| row.kind != crate::session::SessionEventKind::Completed));
 
-/// Pins that a reported usage survives the mapping with its real values.
-///
-/// This test alone does NOT guard the zeroed-usage bug: its fixture reports
-/// usage, so `usage.unwrap_or_default()` would return the same numbers and it
-/// stays green against the defect. Its sibling —
-/// `opencode_trace_normal_turn_reports_no_usage_when_none_was_reported` — is
-/// what goes red when a defaulted `TurnUsage` is emitted. Keep both.
-#[test]
-fn opencode_trace_reports_the_tokens_the_provider_measured() {
-    let events = replay_opencode_trace("opencode_reported_usage.ndjson");
-    let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
-    assert_eq!(
-        event_types,
-        vec![
-            "turn_started",
-            "text_delta",
-            "usage_checkpoint",
-            "turn_completed"
-        ]
-    );
-    let Some(ConversationEvent::UsageCheckpoint { usage, .. }) = events.get(2) else {
-        panic!("a reported idle usage should produce a usage_checkpoint event");
-    };
-    assert_eq!(usage.input_tokens, Some(40));
-    assert_eq!(usage.output_tokens, Some(5197));
-    assert_eq!(usage.total_input_tokens, Some(40));
-    assert_eq!(usage.model.as_deref(), Some("opencode/glm-5.2"));
-    assert_eq!(usage.cost_usd, Some(0.985363));
-}
-
-#[test]
-fn opencode_trace_tool_lifecycle() {
-    let events = replay_opencode_trace("opencode_tool_lifecycle.ndjson");
-    let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
-    assert_eq!(
-        event_types,
-        vec![
-            "turn_started",
-            "item_started",
-            "item_completed",
-            "turn_completed"
-        ]
-    );
-    assert!(matches!(
-        events
-            .iter()
-            .find(|event| matches!(event, ConversationEvent::TurnCompleted { .. })),
-        Some(ConversationEvent::TurnCompleted {
-            status: Lifecycle::Completed,
-            ..
-        })
-    ));
-}
-
-#[test]
-fn opencode_trace_error_turn() {
-    let events = replay_opencode_trace("opencode_error_turn.ndjson");
-    let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
-    assert_eq!(event_types, vec!["turn_started", "turn_completed", "error"]);
-    assert!(matches!(
-        events[1],
-        ConversationEvent::TurnCompleted {
-            status: Lifecycle::Failed,
-            ..
+        message["content"][0]["state"] = json!({"status":"completed","input":{"command":"echo ok"},"content":[{"type":"text","text":"ok"}],"metadata":{"exit":0},"time":{"start":1,"end":2}});
+        message["content"].as_array_mut().unwrap().push(json!({"id":"answer","sessionID":session,"messageID":"assistant","type":"text","text":"Final answer"}));
+        message["finish"] = json!("stop");
+        message["time"]["completed"] = json!(3);
+        if let Some(input) = measured {
+            message["tokens"] =
+                json!({"input":input,"output":5,"reasoning":0,"cache":{"read":0,"write":0}});
+            message["cost"] = json!(0.5);
         }
-    ));
-    assert!(matches!(
-        events[2],
-        ConversationEvent::Error { ref code, .. } if code == "command_failed"
-    ));
+        let messages = [user.clone(), message.clone()];
+        let observed = history.observe(&agent_session, &messages).unwrap();
+        let output = display.observe_messages(&observed.messages);
+        assert!(output.iter().any(|event| matches!(event, ConversationEvent::ItemCompleted {turn_id,item:ConversationItem::Command {output:Some(text),exit_code:Some(0),..}} if turn_id == &request && text == "ok")));
+        assert!(output.iter().any(|event| matches!(event, ConversationEvent::TextDelta {turn_id,content} if turn_id == &request && content == "Final answer")));
+        assert!(display.observe_messages(&observed.messages).is_empty());
+        let idle = json!({"id":"idle","type":"idle","outcome":"succeeded","time":{"created":4}});
+        let completion = history
+            .observe(
+                &agent_session,
+                &[user.clone(), message.clone(), idle.clone()],
+            )
+            .unwrap()
+            .events;
+        assert!(
+            matches!(&completion[..], [ConversationEvent::TurnCompleted {turn_id,status:Lifecycle::Completed}] if turn_id == &request)
+        );
+        assert!(history
+            .observe(&agent_session, &[user, message, idle])
+            .unwrap()
+            .events
+            .is_empty());
+        let usage = store.input_history(input.as_str()).unwrap().usage;
+        assert_eq!(usage.input_tokens, measured);
+        assert_eq!(usage.output_tokens, measured.map(|_| 5));
+        assert_eq!(usage.cost_usd, measured.map(|_| 0.5));
+    }
+}
+
+#[test]
+fn opencode_native_error_completes_only_its_request() {
+    let mut history = History::default();
+    let request = history.request().unwrap();
+    let user = json!({"id":request,"type":"user","text":"request"});
+    let message = json!({"id":"assistant","type":"assistant","time":{"created":1,"completed":2},
+        "error":{"message":"provider rejected request"},"content":[]});
+    let idle = json!({"id":"idle","type":"idle","outcome":"failed","time":{"created":3},"error":{"message":"provider rejected request"}});
+    let events = history
+        .observe(
+            &"session".into(),
+            &[user.clone(), message.clone(), idle.clone()],
+        )
+        .unwrap()
+        .events;
+    assert!(
+        matches!(&events[..], [ConversationEvent::TurnStarted {turn_id}, ConversationEvent::Error {message,..}, ConversationEvent::TurnCompleted {turn_id:completed,status:Lifecycle::Failed}] if turn_id == &request && completed == &request && message == "provider rejected request")
+    );
+    assert!(history
+        .observe(&"session".into(), &[user, message, idle])
+        .unwrap()
+        .events
+        .is_empty());
 }

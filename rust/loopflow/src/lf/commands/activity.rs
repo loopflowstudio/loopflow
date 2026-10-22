@@ -1,15 +1,15 @@
-//! `lf activity` — one ordered record of durable Work facts.
+//! `lf history` — one ordered record of durable Work facts.
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::durable::{Author, SteerComment, WorkRef};
-use crate::lf::commands::runs::{collect_run_activity_since, RunSnapshot};
 use crate::lf::commands::util::parse_since;
 use crate::lf::commands::waves::PrMergeRequestSnapshot;
 use crate::lf::commands::work_catalog::{WorkCatalog, WorkOwner};
 use crate::lf::commands::WorkFilter;
+use crate::session_record::SessionHistory;
 use crate::store::sqlite::SqliteStore;
 use crate::work::task::{GithubPr, TaskPr, TaskPrId};
 
@@ -39,12 +39,21 @@ pub struct WorkActivityEntry {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkActivityFact {
     WorkCreated,
-    RunStarted {
-        run_id: String,
+    InputCaptured {
+        session_id: crate::id::LfSessionId,
+        captured: i64,
     },
-    RunFinished {
-        run_id: String,
+    InputCompletionRecorded {
+        session_id: crate::id::LfSessionId,
+        captured: i64,
         status: String,
+    },
+    ProviderHistoryRecorded {
+        session_id: crate::id::LfSessionId,
+        captured: Option<i64>,
+        reference: crate::session_record::ProviderHistoryReference,
+        lf_process_id: Option<crate::id::LfProcessId>,
+        status: Option<String>,
     },
     PrStarted {
         id: TaskPrId,
@@ -73,16 +82,10 @@ pub enum WorkActivityFact {
     },
 }
 
-pub fn run(
-    since_value: &str,
-    limit: usize,
-    wave: Option<&str>,
-    project: Option<&str>,
-    task: Option<&str>,
-    json: bool,
-) -> Result<()> {
+pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
+    let limit = options.limit;
     let generated_at = OffsetDateTime::now_utc();
-    let since = parse_since(since_value, generated_at)?.unix_timestamp();
+    let since = parse_since(&options.since, generated_at)?.unix_timestamp();
     if limit == 0 || limit > MAX_LIMIT {
         return Err(anyhow!(
             "--limit must be between 1 and {MAX_LIMIT}; got {}",
@@ -91,9 +94,9 @@ pub fn run(
     }
 
     let filter = WorkFilter {
-        wave,
-        project,
-        task,
+        wave: options.wave.as_deref(),
+        project: options.project.as_deref(),
+        task: options.task.as_deref(),
     };
     let path = crate::store::database_path_from_env()?;
     let snapshot = if path.exists() {
@@ -109,7 +112,7 @@ pub fn run(
         }
     };
 
-    if json {
+    if options.json {
         println!("{}", serde_json::to_string(&snapshot)?);
     } else {
         print_snapshot(&snapshot);
@@ -117,7 +120,7 @@ pub fn run(
     Ok(())
 }
 
-fn build_snapshot(
+pub(crate) fn build_snapshot(
     store: &SqliteStore,
     generated_at: i64,
     since: i64,
@@ -137,16 +140,61 @@ fn build_snapshot(
             .ok_or_else(|| anyhow!("Task {} is missing from the Work catalog", task.id))?;
         for pr in store
             .task_prs(&task.id)
-            .map_err(|error| anyhow!("failed to read PRs for {}: {error}", task.plan.identifier))?
+            .map_err(|error| anyhow!("failed to read PRs for {}: {error}", task.identifier))?
         {
             entries.extend(pr_entries(&pr, work, since));
         }
     }
 
-    let runs = collect_run_activity_since(filter, since, &catalog)?;
-    for run in runs {
-        if let Some(work) = catalog.resolve_run(&run) {
-            entries.extend(run_entries(&run, work, since));
+    let history =
+        store.conversation_history(filter.wave, filter.project, filter.task, None, since, true)?;
+    for snapshot in history {
+        let work = snapshot
+            .task_id
+            .clone()
+            .map(WorkRef::Task)
+            .or_else(|| snapshot.wave_id.clone().map(WorkRef::Wave));
+        if let Some(work) = work.and_then(|work| catalog.owners.get(&work)) {
+            entries.extend(input_entries(&snapshot, work, since));
+        }
+        for provider in &snapshot.providers {
+            let work = provider
+                .task_id
+                .clone()
+                .map(WorkRef::Task)
+                .or_else(|| provider.wave_id.clone().map(WorkRef::Wave));
+            let Some(owner) = work.and_then(|work| catalog.owners.get(&work)) else {
+                continue;
+            };
+            for (phase, at) in [
+                ("started", provider.started_at),
+                ("completed", provider.completed_at),
+            ] {
+                let Some(at) = at.filter(|at| *at >= since) else {
+                    continue;
+                };
+                entries.push(activity_entry(
+                    format!(
+                        "session:{}:{}:{phase}",
+                        snapshot.session_id,
+                        serde_json::to_string(&provider.reference)?
+                    ),
+                    at,
+                    format!("{} provider {phase}", snapshot.label()),
+                    owner,
+                    WorkActivityFact::ProviderHistoryRecorded {
+                        session_id: snapshot.session_id.clone(),
+                        captured: snapshot.captured,
+                        reference: provider.reference.clone(),
+                        lf_process_id: provider.lf_process_id.clone(),
+                        status: if phase == "completed" {
+                            provider.outcome.clone()
+                        } else {
+                            None
+                        },
+                    },
+                ));
+            }
         }
     }
 
@@ -209,29 +257,36 @@ fn activity_entry(
     }
 }
 
-fn run_entries(run: &RunSnapshot, work: &WorkOwner, since: i64) -> Vec<WorkActivityEntry> {
-    let label = run.label();
+fn input_entries(input: &SessionHistory, work: &WorkOwner, since: i64) -> Vec<WorkActivityEntry> {
     let mut entries = Vec::new();
-    if run.started >= since {
+    let Some(captured) = input.captured else {
+        return entries;
+    };
+    if input.observed_at >= since {
         entries.push(activity_entry(
-            format!("run:{}:started", run.id),
-            run.started,
-            format!("{label} started"),
+            format!("session:{}:{captured}:captured", input.session_id),
+            input.observed_at,
+            format!("{} input captured", input.label()),
             work,
-            WorkActivityFact::RunStarted {
-                run_id: run.id.clone(),
+            WorkActivityFact::InputCaptured {
+                session_id: input.session_id.clone(),
+                captured,
             },
         ));
     }
-    if let Some(ended) = run.ended.filter(|ended| *ended >= since) {
+    if let (Some(outcome), Some(at)) = (
+        &input.recorded_outcome,
+        input.recorded_at.filter(|at| *at >= since),
+    ) {
         entries.push(activity_entry(
-            format!("run:{}:finished", run.id),
-            ended,
-            format!("{label} finished {}", run.status()),
+            format!("session:{}:{captured}:completion", input.session_id),
+            at,
+            format!("{} recorder reported {outcome}", input.label()),
             work,
-            WorkActivityFact::RunFinished {
-                run_id: run.id.clone(),
-                status: run.status().to_string(),
+            WorkActivityFact::InputCompletionRecorded {
+                session_id: input.session_id.clone(),
+                captured,
+                status: outcome.clone(),
             },
         ));
     }
@@ -334,7 +389,7 @@ fn steer_entry(comment: &SteerComment, work: &WorkOwner) -> WorkActivityEntry {
         format!("Steered: {}", comment.steer.text),
         work,
         WorkActivityFact::SteerIssued {
-            id: comment.steer.id,
+            id: comment.steer.sequence,
             author: comment.steer.author.clone(),
         },
     )
@@ -405,8 +460,7 @@ fn print_snapshot(snapshot: &WorkActivitySnapshot) {
 mod tests {
     use super::*;
     use crate::work::task::{
-        AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, TaskId,
-        TaskPrId,
+        GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, TaskId, TaskPrId,
     };
 
     #[test]
@@ -418,7 +472,7 @@ mod tests {
         assert_eq!(snapshot.items.len(), 5);
         assert!(matches!(
             snapshot.items[0].fact,
-            WorkActivityFact::RunFinished { ref status, .. } if status == "ok"
+            WorkActivityFact::InputCompletionRecorded { ref status, .. } if status == "ok"
         ));
         assert!(matches!(
             snapshot.items[1].fact,
@@ -458,8 +512,11 @@ mod tests {
         let second = task_owner("W2-2", "control", "live");
         let comment = |work: WorkRef| SteerComment {
             work,
-            steer: crate::durable::Steer {
-                id: 1,
+            steer: crate::steer::Steer {
+                id: crate::id::SteerId::new(),
+                sequence: 1,
+                source: "fixture".into(),
+                revision: "1".into(),
                 author: Author::User,
                 text: "direction".to_string(),
             },
@@ -563,39 +620,23 @@ mod tests {
     }
 
     #[test]
-    fn run_start_and_finish_name_the_same_generic_run() {
-        let run = RunSnapshot {
-            id: "run_00000000000000000000000000000001".to_string(),
-            parent_run_id: None,
-            repo: Some("/repo".to_string()),
-            worktree: Some("/repo.task".to_string()),
-            subjects: vec![crate::run_record::SubjectAttribution::declared(
-                "task:W2-1".to_string(),
-            )],
-            skill: Some("implement".to_string()),
-            outcome: Some("completed".to_string()),
-            started: 10,
-            ended: Some(20),
-            usage: crate::run_record::RunUsage::empty(),
-            evidence_gaps: 0,
-            harness: "codex".to_string(),
-            model: None,
-            surface: "cli".to_string(),
-        };
-
-        let entries = run_entries(&run, &task_owner("W2-1", "control", "live"), 0);
+    fn input_capture_and_recorded_completion_are_not_provider_success() {
+        let input: SessionHistory = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/session_history_summary.json"
+        ))
+        .unwrap();
+        let entries = input_entries(&input, &task_owner("W2-1", "control", "live"), 0);
         assert!(matches!(
             entries[0].fact,
-            WorkActivityFact::RunStarted { .. }
+            WorkActivityFact::InputCaptured { .. }
         ));
         assert!(matches!(
-            &entries[1].fact,
-            WorkActivityFact::RunFinished {
-                run_id,
-                status,
-            } if run_id == "run_00000000000000000000000000000001"
-                && status == "completed"
+            entries[1].fact,
+            WorkActivityFact::InputCompletionRecorded { .. }
         ));
+        assert_eq!(input.providers.len(), 2);
+        assert_eq!(input.providers[0].outcome.as_deref(), Some("failed"));
+        assert_eq!(input.providers[1].outcome.as_deref(), Some("completed"));
     }
 
     #[test]
@@ -637,8 +678,6 @@ mod tests {
                     mode: PrMergeMode::Auto,
                     requested_at: OffsetDateTime::from_unix_timestamp(30).unwrap(),
                     head_sha: "head".to_string(),
-                    after_merge: AfterMerge::ContinueTask,
-                    next_slug: None,
                 }),
             }),
             merge_commit: Some("merge".to_string()),

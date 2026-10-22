@@ -2,20 +2,37 @@
 // Wraps the libghostty C API for terminal embedding in Loopflow.
 
 import Foundation
+import Loopflow
 import SwiftUI
 import AppKit
 import Darwin
 
+// Foundation can select the account's shared temp directory despite TMPDIR.
+// Honor the process's explicit directory for embedded terminal files.
+func terminalTemporaryDirectory() -> URL {
+    if let path = ProcessInfo.processInfo.environment["TMPDIR"], !path.isEmpty {
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+    return FileManager.default.temporaryDirectory
+}
+
 extension Notification.Name {
+    static let loopflowThemeChanged = Notification.Name("loopflow.themeChanged")
+    static let ghosttyCopyConfirmation = Notification.Name("loopflow.ghosttyCopyConfirmation")
     static let ghosttyTerminalBell = Notification.Name("loopflow.ghosttyTerminalBell")
     static let ghosttyTerminalTitle = Notification.Name("loopflow.ghosttyTerminalTitle")
     static let ghosttySurfaceClosed = Notification.Name("loopflow.ghosttySurfaceClosed")
 }
 
 enum TerminalIdentity: Hashable, Sendable {
-    case session(String)
-    case shell(String)
-    case taskTerminal(String)
+    case session(String, machineId: String)
+    case shell(String, machineId: String)
+
+    var machineId: String {
+        switch self {
+        case .session(_, let machineId), .shell(_, let machineId): machineId
+        }
+    }
 }
 
 struct GhosttyTerminalTitle {
@@ -28,7 +45,7 @@ import GhosttyKit
 import CoreVideo
 
 enum GhosttyRuntimeResources {
-    static let sourceRevision = "4c838723173da757a16a2f3afd4c94f16732ef6a"
+    static let sourceRevision = "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
 
     static var directoryURL: URL? {
         #if SWIFT_PACKAGE
@@ -78,87 +95,80 @@ final class GhosttyManager: ObservableObject {
     @Published private(set) var state: State = .uninitialized
 
     private nonisolated(unsafe) var app: ghostty_app_t?
-    private nonisolated(unsafe) var config: ghostty_config_t?
 
     static let shared = GhosttyManager()
 
-    // Loopflow color scheme — warm charcoal in the canvas's hue family
-    // (`TerminalPalette`). Every ANSI color except 0 clears 3:1 on it; 0 is
-    // black by convention and stays near the surface.
-    private static let loopflowConfig = """
-    # Loopflow Terminal Theme - Warm charcoal
-    background = \(TerminalPalette.css(TerminalPalette.backgroundHex))
-    foreground = \(TerminalPalette.css(TerminalPalette.foregroundHex))
-    cursor-color = \(TerminalPalette.css(TerminalPalette.accentHex))
-    selection-background = \(TerminalPalette.css(TerminalPalette.selectionHex))
-    selection-foreground = \(TerminalPalette.css(TerminalPalette.foregroundHex))
+    private nonisolated(unsafe) var baseline: ghostty_config_t?
+    // Current preview plus applied candidate; cancel reuses validated config.
+    private nonisolated(unsafe) var themeConfigs: [String: (TerminalPalette, ghostty_config_t)] = [:]
+    private(set) var theme = ThemeDefinition.light
+    static let loopflowConfig = "font-size = 13\nminimum-contrast = 3\n"
 
-    # Palette - muted tones on warm charcoal
-    palette = 0=#1A1816
-    palette = 1=#D4756A
-    palette = 2=#8B9A6B
-    palette = 3=#D4A574
-    palette = 4=#7B8FA8
-    palette = 5=#A67B93
-    palette = 6=#7FAFAF
-    palette = 7=#C8C1B8
-
-    # Bright variants (8 lifted from #3C4550, which was 1.65:1 on the surface)
-    palette = 8=#7F766F
-    palette = 9=#E89888
-    palette = 10=#ABB97B
-    palette = 11=#E8C594
-    palette = 12=#9BAFC8
-    palette = 13=#C69BB3
-    palette = 14=#9FCFCF
-    palette = 15=#F5F1EA
-
-    font-size = 13
-
-    """
+    func applyTheme(_ theme: ThemeDefinition, retaining appliedID: String? = nil) throws {
+        if let baseline {
+            let candidate: ghostty_config_t
+            if let cached = themeConfigs[theme.id], cached.0 == theme.terminal {
+                candidate = cached.1
+            } else {
+                candidate = try GhosttyThemeConfiguration.candidate(theme, baseline: baseline)
+                if let previous = themeConfigs[theme.id] { ghostty_config_free(previous.1) }
+                themeConfigs[theme.id] = (theme.terminal, candidate)
+            }
+            if let app {
+                ghostty_app_update_config(app, candidate)
+                ghostty_app_set_color_scheme(app, theme.isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
+            }
+            for id in Array(themeConfigs.keys) where id != theme.id && id != appliedID {
+                if let discarded = themeConfigs.removeValue(forKey: id) { ghostty_config_free(discarded.1) }
+            }
+        } else {
+            guard Self.libraryReady, let empty = ghostty_config_new() else {
+                throw ThemeError("Could not initialize terminal appearance.")
+            }
+            defer { ghostty_config_free(empty) }
+            let candidate = try GhosttyThemeConfiguration.candidate(theme, baseline: empty)
+            ghostty_config_free(candidate)
+        }
+        self.theme = theme
+        NotificationCenter.default.post(name: .loopflowThemeChanged, object: theme)
+    }
 
     // These settings load after user defaults. Resources enable Ghostty's
     // native shell integration for detected shells; provider Sessions launch
     // `lf`, so they receive no shell hooks. Keep their historical TERM value
-    // even though the matching Ghostty terminfo is now bundled.
-    private static let embeddedConfig = """
+    // even though the matching Ghostty terminfo is now bundled. The padding
+    // is fixed here because block overlays are laid out from the same numbers.
+    // Command-Up and Command-Down move between prompts whatever the person's
+    // own Ghostty config binds them to.
+    static let embeddedConfig = """
     term = xterm-256color
+    macos-login-session = false
     shell-integration = detect
     scrollback-limit = 10000000
+    window-padding-x = \(Int(GhosttyTerminalPadding.x))
+    window-padding-y = \(Int(GhosttyTerminalPadding.y))
+    window-padding-balance = false
     image-storage-limit = 67108864
+    keybind = super+arrow_up=jump_to_prompt:-1
+    keybind = super+arrow_down=jump_to_prompt:1
     """
 
-    private init() {}
+    /// Ghostty's process-wide state is set up once, however many callers ask.
+    static let libraryReady: Bool = {
+        guard let resources = GhosttyRuntimeResources.directoryURL,
+              setenv("GHOSTTY_RESOURCES_DIR", resources.path, 1) == 0 else { return false }
+        return ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) == GHOSTTY_SUCCESS
+    }()
 
-    private func writeConfig(_ contents: String, named name: String) -> String? {
-        let tempDir = FileManager.default.temporaryDirectory
-        let configPath = tempDir.appendingPathComponent(name)
-        do {
-            try contents.write(to: configPath, atomically: true, encoding: .utf8)
-            return configPath.path
-        } catch {
-            print("[GhosttyManager] Failed to write config: \(error)")
-            return nil
-        }
-    }
+    private init() {}
 
     func initialize() {
         guard state == .uninitialized else { return }
         state = .initializing
 
-        guard let resources = GhosttyRuntimeResources.directoryURL else {
-            state = .failed("Bundled Ghostty shell resources are missing or mismatched")
-            return
-        }
-        guard setenv("GHOSTTY_RESOURCES_DIR", resources.path, 1) == 0 else {
-            state = .failed("Failed to configure bundled Ghostty shell resources")
-            return
-        }
-
         // Initialize Ghostty library
-        let initResult = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
-        guard initResult == GHOSTTY_SUCCESS else {
-            state = .failed("ghostty_init failed with code \(initResult)")
+        guard Self.libraryReady else {
+            state = .failed("Could not initialize Ghostty with its bundled shell resources")
             return
         }
 
@@ -168,27 +178,32 @@ final class GhosttyManager: ObservableObject {
             return
         }
 
-        // Load Loopflow theme first, then user defaults
-        if let path = writeConfig(Self.loopflowConfig, named: "loopflow-ghostty-theme") {
-            path.withCString { ghostty_config_load_file(cfg, $0) }
+        let config: ghostty_config_t
+        do {
+            try GhosttyThemeConfiguration.load(Self.loopflowConfig, into: cfg)
+            ghostty_config_load_default_files(cfg)
+            var embeddedConfig = Self.embeddedConfig
+            // Ghostty treats a failed CoreVideo display link as an allocation error
+            // and refuses every surface. Its timer renderer works without that link.
+            var displayLink: CVDisplayLink?
+            let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+            if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+                embeddedConfig += "\nwindow-vsync = false\n"
+                print("[GhosttyManager] CoreVideo display link unavailable (\(displayLinkStatus)); using timer rendering")
+            }
+            displayLink = nil
+            // Independent theme files never participate in the base configuration.
+            // Clearing before finalize also removes their conditional replay path.
+            try GhosttyThemeConfiguration.load(embeddedConfig + "\ntheme =\n", into: cfg)
+            ghostty_config_finalize(cfg)
+            self.baseline = cfg
+            config = try GhosttyThemeConfiguration.candidate(theme, baseline: cfg)
+            themeConfigs[theme.id] = (theme.terminal, config)
+        } catch {
+            if baseline == nil { ghostty_config_free(cfg) }
+            state = .failed(error.localizedDescription)
+            return
         }
-        ghostty_config_load_default_files(cfg)
-        var embeddedConfig = Self.embeddedConfig
-        // Ghostty treats a failed CoreVideo display link as an allocation error
-        // and refuses every surface. Its timer renderer works without that link.
-        var displayLink: CVDisplayLink?
-        let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
-        if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
-            embeddedConfig += "\nwindow-vsync = false\n"
-            print("[GhosttyManager] CoreVideo display link unavailable (\(displayLinkStatus)); using timer rendering")
-        }
-        displayLink = nil
-        if let path = writeConfig(embeddedConfig, named: "loopflow-ghostty-embedded") {
-            path.withCString { ghostty_config_load_file(cfg, $0) }
-        }
-        ghostty_config_finalize(cfg)
-        self.config = cfg
-
         // Create runtime config with callbacks
         var runtimeConfig = ghostty_runtime_config_s()
         runtimeConfig.userdata = Unmanaged.passUnretained(self).toOpaque()
@@ -207,8 +222,44 @@ final class GhosttyManager: ObservableObject {
             else { return false }
             // Resolve identity while the callback's surface is valid. Deferred
             // notifications carry values, never an unowned terminal pointer.
-            let terminal = MainActor.assumeIsolated {
-                Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue().terminal
+            let (view, terminal) = MainActor.assumeIsolated {
+                let view = Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue()
+                return (view, view.terminal)
+            }
+            switch action.tag {
+            case GHOSTTY_ACTION_START_SEARCH:
+                let needle = action.action.start_search.needle.map { String(cString: $0) }
+                Task { @MainActor [weak view] in
+                    guard let view, !view.childExited else { return }
+                    view.searchBar.open(needle: needle)
+                }
+                return true
+            case GHOSTTY_ACTION_END_SEARCH:
+                Task { @MainActor [weak view] in view?.searchBar.end() }
+                return true
+            case GHOSTTY_ACTION_SEARCH_TOTAL:
+                let total = action.action.search_total.total
+                Task { @MainActor [weak view] in view?.searchBar.receive(total: total) }
+                return true
+            case GHOSTTY_ACTION_SEARCH_SELECTED:
+                let selected = action.action.search_selected.selected
+                Task { @MainActor [weak view] in view?.searchBar.receive(selected: selected) }
+                return true
+            default: break
+            }
+            if action.tag == GHOSTTY_ACTION_PROGRAM_STATUS,
+               let status = action.action.program_status?.pointee,
+               let event = copyProgramStatusEvent(
+                   event: Int(status.event.rawValue), state: Int(status.state),
+                   kind: Int(status.kind), progress: Int(status.progress),
+                   id: status.id, app: status.app, title: status.title, msg: status.msg
+               ) {
+                let (owner, incarnation) = MainActor.assumeIsolated {
+                    let view = Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue()
+                    return (view.programStatus, view.programStatus.incarnation)
+                }
+                Task { @MainActor in owner.receive(event, incarnation: incarnation) }
+                return true
             }
             if action.tag == GHOSTTY_ACTION_RING_BELL {
                 Task { @MainActor in
@@ -232,15 +283,25 @@ final class GhosttyManager: ObservableObject {
             }
             return false
         }
-        runtimeConfig.read_clipboard_cb = { userdata, _, state in
-            guard let userdata else { return }
-            MainActor.assumeIsolated {
+        runtimeConfig.read_clipboard_cb = { userdata, _, state, _, _, _ in
+            guard let userdata else { return GHOSTTY_CLIPBOARD_READ_UNAVAILABLE }
+            return MainActor.assumeIsolated {
                 let view = Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue()
-                guard let surface = view.surface else { return }
+                guard let surface = view.surface else { return GHOSTTY_CLIPBOARD_READ_UNAVAILABLE }
                 let value = NSPasteboard.general.string(forType: .string) ?? ""
-                value.withCString {
-                    ghostty_surface_complete_clipboard_request(surface, $0, state, false)
+                value.withCString { text in
+                    "text/plain".withCString { mime in
+                        var content = ghostty_clipboard_content_s(mime: mime, data: text, len: value.utf8.count)
+                        withUnsafePointer(to: &content) { contents in
+                            var complete = ghostty_clipboard_complete_s(
+                                contents: contents, contents_len: 1, available: nil, available_len: 0,
+                                confirmed: false, remember: false
+                            )
+                            ghostty_surface_complete_clipboard_request(surface, &complete, state)
+                        }
+                    }
                 }
+                return GHOSTTY_CLIPBOARD_READ_STARTED
             }
         }
         runtimeConfig.confirm_read_clipboard_cb = { userdata, content, state, request in
@@ -250,17 +311,25 @@ final class GhosttyManager: ObservableObject {
                 guard let surface = view.surface else { return }
                 let allowed = request == GHOSTTY_CLIPBOARD_REQUEST_PASTE
                     || request == GHOSTTY_CLIPBOARD_REQUEST_OSC_52_WRITE
-                let value = allowed ? content.map(String.init(cString:)) ?? "" : ""
-                value.withCString {
-                    ghostty_surface_complete_clipboard_request(surface, $0, state, allowed)
+                guard allowed, let content else {
+                    ghostty_surface_deny_clipboard_request(surface, state)
+                    return
                 }
+                var complete = ghostty_clipboard_complete_s(
+                    contents: content.pointee.contents, contents_len: content.pointee.contents_len,
+                    available: content.pointee.available, available_len: content.pointee.available_len,
+                    confirmed: true, remember: false
+                )
+                ghostty_surface_complete_clipboard_request(surface, &complete, state)
             }
         }
         runtimeConfig.write_clipboard_cb = { _, _, content, len, _ in
             guard let content, len > 0, let data = content.pointee.data else { return }
+            let bytes = UnsafeRawBufferPointer(start: data, count: content.pointee.len)
+            let value = String(decoding: bytes, as: UTF8.self)
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
-            pasteboard.setString(String(cString: data), forType: .string)
+            pasteboard.setString(value, forType: .string)
         }
         runtimeConfig.close_surface_cb = { userdata, _ in
             guard let userdata else { return }
@@ -271,12 +340,13 @@ final class GhosttyManager: ObservableObject {
             }
         }
 
-        guard let ghosttyApp = ghostty_app_new(&runtimeConfig, cfg) else {
+        guard let ghosttyApp = ghostty_app_new(&runtimeConfig, config) else {
             state = .failed("Failed to create Ghostty app")
             return
         }
 
         self.app = ghosttyApp
+        ghostty_app_set_color_scheme(ghosttyApp, theme.isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
         state = .ready
     }
 
@@ -318,9 +388,8 @@ final class GhosttyManager: ObservableObject {
         if let app {
             ghostty_app_free(app)
         }
-        if let config {
-            ghostty_config_free(config)
-        }
+        for (_, config) in themeConfigs.values { ghostty_config_free(config) }
+        if let baseline { ghostty_config_free(baseline) }
     }
 }
 
@@ -339,6 +408,9 @@ final class GhosttyManager: ObservableObject {
     @Published private(set) var state: State = .failed("GhosttyKit not available")
 
     static let shared = GhosttyManager()
+
+    private(set) var theme = ThemeDefinition.light
+    func applyTheme(_ theme: ThemeDefinition, retaining appliedID: String? = nil) throws { self.theme = theme }
 
     private init() {}
 

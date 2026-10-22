@@ -1,39 +1,65 @@
-use loopflow::controller::wave::metrics::MetricPortfolioDto;
-use loopflow::durable::WorkStatus;
+use loopflow::durable::TaskState;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot, WaveDetailSnapshot};
-use loopflow::ops::pm::PmShowResult;
+use loopflow::work::wave::metrics::MetricPortfolioDto;
 
-const PM_SHOW: &str = include_str!("../../../tests/fixtures/dto/pm_show.json");
 const WAVE_DETAIL: &str = include_str!("../../../tests/fixtures/dto/wave_detail.json");
 const ROADMAP: &str = include_str!("../../../tests/fixtures/dto/roadmap_snapshot.json");
 const METRIC_PORTFOLIO: &str = include_str!("../../../tests/fixtures/dto/metric_portfolio.json");
 
 #[test]
-fn active_runs_preserve_identity_waiting_clients_and_incomplete_evidence() {
-    use loopflow::lf::commands::runs::ActiveRunsSnapshot;
+fn activity_retains_unknown_record_identity_without_a_pid() {
+    use loopflow::lf::commands::top::{ActivitySnapshot, ActivityState};
+    let snapshot: ActivitySnapshot = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/activity_snapshot.json"
+    ))
+    .unwrap();
+    let unknown = &snapshot.nodes[2];
+    assert_eq!(unknown.state, ActivityState::Unknown);
+    assert_eq!(unknown.pid, None);
+    assert_eq!(unknown.parent_id.as_ref(), Some(&snapshot.nodes[0].id));
+    assert!(unknown.id.starts_with("process:"));
+    assert_eq!(
+        serde_json::from_str::<ActivitySnapshot>(&serde_json::to_string(&snapshot).unwrap())
+            .unwrap(),
+        snapshot
+    );
+}
+
+#[test]
+fn active_sessions_preserve_identity_waiting_clients_and_incomplete_evidence() {
+    use loopflow::lf::commands::session_history::ActiveSessionsSnapshot;
     use loopflow::lf::commands::top::ActivityState;
     let json = include_str!("../../../tests/fixtures/dto/active_runs.json");
-    let snapshot: ActiveRunsSnapshot = serde_json::from_str(json).unwrap();
+    let snapshot: ActiveSessionsSnapshot = serde_json::from_str(json).unwrap();
     assert_eq!(
         snapshot.discovery,
-        loopflow::lf::commands::runs::DiscoveryState::Ready
+        loopflow::lf::commands::session_history::DiscoveryState::Unavailable
     );
-    assert_eq!(snapshot.runs[0].work, snapshot.task);
-    assert_eq!(snapshot.runs[0].processes[0].state, ActivityState::Waiting);
+    assert_eq!(snapshot.sessions[0].work, snapshot.task);
+    assert_eq!(
+        snapshot.sessions[0].processes[0].state,
+        ActivityState::Waiting
+    );
+    assert_eq!(
+        snapshot.sessions[0].processes[1].state,
+        ActivityState::Unknown
+    );
+    assert_eq!(snapshot.sessions[0].processes[1].pid, None);
     assert_eq!(snapshot.gaps.len(), 1);
     assert_eq!(
-        serde_json::from_str::<ActiveRunsSnapshot>(&serde_json::to_string(&snapshot).unwrap())
+        serde_json::from_str::<ActiveSessionsSnapshot>(&serde_json::to_string(&snapshot).unwrap())
             .unwrap(),
         snapshot
     );
     let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
     missing.as_object_mut().unwrap().remove("discovery");
-    assert!(serde_json::from_value::<ActiveRunsSnapshot>(missing).is_err());
+    assert!(serde_json::from_value::<ActiveSessionsSnapshot>(missing).is_err());
 }
 
 #[test]
 fn task_comments_keep_authorship_and_require_every_field() {
-    use loopflow::ops::pm::{TaskCommentAuthor, TaskComments};
+    use loopflow::work::task::comment::TaskCommentAuthor;
+    use loopflow::work::task::comment::TaskComments;
     let json = include_str!("../../../tests/fixtures/dto/task_comments.json");
     let thread: TaskComments = serde_json::from_str(json).unwrap();
     assert_eq!(thread.comments[0].author, TaskCommentAuthor::Integration);
@@ -41,7 +67,7 @@ fn task_comments_keep_authorship_and_require_every_field() {
         thread.comments[2].author,
         TaskCommentAuthor::Person { name: None }
     );
-    // What `lf pm task comments --json` prints is exactly what Swift decodes,
+    // What `lf task comment ISSUE --json` prints is exactly what Swift decodes,
     // including explicit nulls Swift requires to be present.
     assert_eq!(
         serde_json::to_value(&thread).unwrap(),
@@ -56,92 +82,67 @@ fn task_comments_keep_authorship_and_require_every_field() {
 }
 
 #[test]
-fn pm_show_preserves_repository_team_and_project_ownership() {
-    let snapshot: PmShowResult = serde_json::from_str(PM_SHOW).unwrap();
-
-    assert_eq!(snapshot.wave, "survival/infrastructure");
-    assert_eq!(
-        snapshot.projects[0].initiative_ids,
-        ["initiative-infrastructure"]
-    );
-    assert_eq!(snapshot.projects[0].name, "Gmail");
-    assert_eq!(
-        snapshot.projects[0].flows.as_ref().unwrap().recommended,
-        None
-    );
-    assert_eq!(snapshot.projects[0].team_ids, ["team-loo"]);
-    assert_eq!(snapshot.items[0].identifier, "LOO-2");
-    assert_eq!(snapshot.items[0].project_id, "project-gmail");
-    assert_eq!(snapshot.items[0].team_id, "team-loo");
-
-    let round_trip = serde_json::to_string(&snapshot).unwrap();
-    assert_eq!(
-        serde_json::from_str::<PmShowResult>(&round_trip).unwrap(),
-        snapshot
-    );
-}
-
-#[test]
-fn pm_show_rejects_a_legacy_item_without_stable_ownership() {
-    let mut fixture: serde_json::Value = serde_json::from_str(PM_SHOW).unwrap();
-    fixture["items"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("project_id");
-
-    let error = serde_json::from_value::<PmShowResult>(fixture).unwrap_err();
-    assert!(error.to_string().contains("project_id"));
-}
-
-#[test]
-fn wave_detail_requires_machine_and_turn_controls() {
+fn wave_detail_preserves_graph_and_machine() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
     assert_eq!(
-        snapshot
-            .chapter
-            .as_ref()
-            .unwrap()
-            .flows
-            .recommended
-            .as_deref(),
-        Some("task-design")
+        snapshot.wave.machine.as_ref().unwrap().label.as_deref(),
+        Some("mini")
     );
-    assert!(!snapshot.wave.paused);
-    assert!(snapshot.wave.enabled);
+    assert_eq!(
+        snapshot.project_readiness.state,
+        loopflow::store::sqlite::ProjectReadinessState::Ready
+    );
+    assert!(snapshot.project_readiness.activation.is_none());
+    let Evidence::Ok {
+        items: projects, ..
+    } = &snapshot.projects
+    else {
+        panic!("missing Projects")
+    };
+    assert_eq!(projects[0].sync.changes[1].field, "task_order");
+    let Evidence::Ok { items: tasks, .. } = &snapshot.tasks else {
+        panic!("missing Tasks")
+    };
+    assert_eq!(tasks[0].task.sync.changes[0].field, "creation");
+    assert_eq!(tasks[0].task.id, tasks[0].runtime.as_ref().unwrap().work_id);
+    assert_eq!(tasks[0].task.linear_id.as_deref(), Some("issue-1"));
+    let Evidence::Ok { items: runs, .. } = &snapshot.history else {
+        panic!("fixture contains recorded Runs");
+    };
+    assert_eq!(runs[0].first_provider_attempt_at, Some(1784052010));
+    assert_eq!(
+        runs[0].task_pr_id.as_ref().map(|id| id.as_str()),
+        Some("pr_33333333333333333333333333333333")
+    );
+
+    let loopflow::lf::commands::waves::Evidence::Ok { items, .. } = &snapshot.projects else {
+        panic!("missing Projects")
+    };
+
+    assert!(items[0].current);
+    assert_eq!(
+        items[0].status,
+        loopflow::work::project::ProjectStatus::Started
+    );
 
     let encoded = serde_json::to_string(&snapshot).unwrap();
     let decoded: WaveDetailSnapshot = serde_json::from_str(&encoded).unwrap();
-    assert!(!decoded.wave.paused);
-    assert!(decoded.wave.enabled);
     assert_eq!(
-        decoded.chapter.as_ref().unwrap().flows,
-        snapshot.chapter.as_ref().unwrap().flows
+        serde_json::to_value(&decoded.projects).unwrap(),
+        serde_json::to_value(&snapshot.projects).unwrap()
     );
-
-    let mut legacy: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
-    legacy["wave"].as_object_mut().unwrap().remove("paused");
-    let error = serde_json::from_value::<WaveDetailSnapshot>(legacy).unwrap_err();
-    assert!(error.to_string().contains("paused"));
-
-    let mut missing_enabled: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
-    missing_enabled["wave"]
-        .as_object_mut()
-        .unwrap()
-        .remove("enabled");
-    let error = serde_json::from_value::<WaveDetailSnapshot>(missing_enabled).unwrap_err();
-    assert!(error.to_string().contains("enabled"));
 }
 
 #[test]
-fn status_preserves_stranded_tasks_without_a_project_layer() {
+fn status_preserves_stranded_tasks_alongside_project_history() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
-    assert_eq!(snapshot.unavailable_tasks[0].status, WorkStatus::Ready);
+    assert_eq!(snapshot.unavailable_tasks[0].status, TaskState::Ready);
     let Evidence::Ok { items, .. } = snapshot.tasks else {
         panic!("available tasks")
     };
     assert_eq!(items[0].runtime.as_ref().unwrap().reason, "ready");
     let encoded = serde_json::from_str::<serde_json::Value>(WAVE_DETAIL).unwrap();
-    assert!(encoded.get("projects").is_none());
+    assert_eq!(encoded["projects"]["items"][0]["status"], "started");
 }
 
 #[test]
@@ -150,17 +151,33 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
     assert!(matches!(
         detail.metric_portfolio.metrics.as_slice(),
         [metric] if metric.identity.metric_id == "task-loop-trust"
-            && matches!(metric.evidence, loopflow::controller::wave::metrics::MetricEvidenceDto::Met { .. })
+            && matches!(metric.evidence, loopflow::work::wave::metrics::MetricEvidenceDto::Met { .. })
     ));
 
     let roadmap: RoadmapSnapshot = serde_json::from_str(ROADMAP).unwrap();
-    let Evidence::Ok { items, .. } = &roadmap.waves[0].tasks else {
+    // Each Task is written once, under the roadmap; Waves do not repeat them.
+    assert_eq!(
+        serde_json::to_value(&roadmap).unwrap(),
+        serde_json::from_str::<serde_json::Value>(ROADMAP).unwrap()
+    );
+    let Evidence::Ok { items, .. } = roadmap.wave_tasks(&roadmap.waves[0]) else {
         panic!("fixture has current Project evidence")
     };
     assert!(!items.is_empty());
     assert_eq!(
-        roadmap.waves[0].chapter.as_ref().unwrap().flows.recommended,
-        None
+        items[0]
+            .reference
+            .workspace
+            .as_ref()
+            .unwrap()
+            .machine_label
+            .as_deref(),
+        Some("build-server")
+    );
+    assert!(
+        serde_json::to_value(&roadmap.waves[0].projects).unwrap()["items"][0]
+            .get("workflow")
+            .is_none()
     );
     assert_eq!(
         items[0].reference.workspace.as_ref().unwrap().local_exists,
@@ -210,7 +227,16 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
 #[test]
 fn metric_portfolio_fixture_locks_every_tagged_payload() {
     let portfolio: MetricPortfolioDto = serde_json::from_str(METRIC_PORTFOLIO).unwrap();
-    assert_eq!(portfolio.metrics.len(), 10);
+    assert_eq!(portfolio.metrics.len(), 11);
+    assert!(matches!(
+        &portfolio.metrics[10].evidence,
+        loopflow::work::wave::metrics::MetricEvidenceDto::Unknown {
+            cause: loopflow::work::wave::metrics::MetricUnknownCauseDto::TargetUnavailable {
+                value: 1.0,
+                ..
+            }
+        }
+    ));
     assert_eq!(portfolio.contract_issues.len(), 5);
     assert_eq!(
         portfolio.metrics[0].description,
@@ -237,6 +263,7 @@ fn metric_portfolio_fixture_locks_every_tagged_payload() {
             "unknown",
             "unavailable",
             "untargeted",
+            "unknown",
         ]
     );
 
@@ -254,27 +281,915 @@ fn metric_portfolio_fixture_locks_every_tagged_payload() {
 }
 
 #[test]
-fn chapter_history_keeps_dated_task_evidence() {
-    let snapshot: loopflow::work::chapter::ChapterSnapshot = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/chapter_snapshot.json"
-    ))
-    .unwrap();
-    assert_eq!(snapshot.closed_at, Some(snapshot.observed_at));
-    assert_eq!(snapshot.metrics_evaluated_at, 100);
-    assert_eq!(snapshot.content.metric_targets.len(), 1);
+fn session_history_retains_receipts_and_unknown_lf_process() {
+    let input = include_str!("../../../tests/fixtures/dto/session_history.json");
+    let events: Vec<loopflow::session::SessionEvent> = serde_json::from_str(input).unwrap();
     assert_eq!(
-        snapshot.content.metric_targets[0].target,
-        snapshot.metrics.metrics[0].target.clone().unwrap()
+        events[1].kind,
+        loopflow::session::SessionEventKind::Completed
     );
-    assert!(!snapshot.tasks[0].task.completed);
     assert_eq!(
-        snapshot.tasks[0].disposition,
-        loopflow::work::chapter::TaskDisposition::Move
+        events[0].agent_session.as_ref().unwrap().as_str(),
+        "thread_fixture"
     );
-    let history: Vec<loopflow::work::chapter::ChapterHistoryEntry> = serde_json::from_str(
-        include_str!("../../../tests/fixtures/dto/chapter_history.json"),
+    assert!(events[1].lf_process_id.is_none());
+    assert_eq!(events[0].payload["total"]["inputTokens"], 40);
+    assert_eq!(
+        events[2].kind,
+        loopflow::session::SessionEventKind::Observed
+    );
+    assert!(events[2].provider_turn.is_none());
+    assert!(events[2].agent_session.is_none());
+    assert_eq!(
+        serde_json::to_value(events).unwrap(),
+        serde_json::from_str::<serde_json::Value>(input).unwrap()
+    );
+}
+
+#[test]
+fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Files {
+        directory: loopflow::ops::task::TaskDirectory,
+        changes: loopflow::ops::task::TaskChangesSnapshot,
+        diff: loopflow::ops::task::TaskDiffSnapshot,
+        file: loopflow::ops::task::TaskFileSnapshot,
+        save: loopflow::ops::task::TaskFileSave,
+    }
+    let json = include_str!("../../../tests/fixtures/dto/task_files.json");
+    let files: Files = serde_json::from_str(json).unwrap();
+    assert_eq!(files.changes.base_commit, files.diff.base_commit);
+    assert_eq!(files.changes.files[0].old_path.as_deref(), Some("old.txt"));
+    assert_eq!(files.file.content.as_deref(), Some("\u{feff}notes\r\n"));
+    assert_eq!(
+        serde_json::to_value(files).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
+fn process_page_retains_outcomes_unknowns_and_continuation() {
+    let json = include_str!("../../../tests/fixtures/dto/process_page.json");
+    let page: loopflow::process::LfProcessPage = serde_json::from_str(json).unwrap();
+    assert_eq!(page.entries[0].exit_code, Some(42));
+    assert_eq!(page.entries[0].via_agent, None);
+    assert_eq!(page.entries[0].pid, None);
+    assert_eq!(page.entries[1].pid, Some(4242));
+    assert_eq!(page.entries[1].kind, loopflow::process::ProcessKind::Agent);
+    assert_eq!(
+        page.entries[1].agent_session_id.as_deref(),
+        Some("conversation")
+    );
+    assert_eq!(page.entries[1].os_started_at, Some(1790640000));
+    assert_eq!(
+        page.entries[1].parent_lf_process_id.as_ref(),
+        Some(&page.entries[0].id)
+    );
+    assert_eq!(page.entries[1].outcome, None);
+    assert_eq!(page.next.as_ref().unwrap().id, page.entries[1].id);
+    assert_eq!(
+        serde_json::to_value(page).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    assert!(serde_json::from_str::<loopflow::process::LfProcessPage>("{}").is_err());
+}
+
+#[test]
+fn session_input_history_retains_distinct_native_results_and_unknown_process() {
+    let value: loopflow::lf::commands::session_history::SessionHistory = serde_json::from_str(
+        include_str!("../../../tests/fixtures/dto/session_history_summary.json"),
     )
     .unwrap();
-    assert_eq!(history.len(), 2);
-    assert_eq!(history[0].source_project_id, snapshot.source_project_id);
+    assert_eq!(value.providers.len(), 2);
+    assert_eq!(value.providers[0].outcome.as_deref(), Some("failed"));
+    assert!(value.providers[0].lf_process_id.is_none());
+    assert_eq!(value.providers[0].usage.input_tokens, None);
+    assert_eq!(value.providers[1].usage.input_tokens, Some(0));
+    assert_eq!(value.status(), "failed → completed");
+    let encoded = serde_json::to_value(&value).unwrap();
+    assert!(encoded.get("subjects").is_none());
+    assert!(encoded.get("outcome").is_none());
+    assert_eq!(
+        serde_json::from_value::<loopflow::lf::commands::session_history::SessionHistory>(encoded)
+            .unwrap(),
+        value
+    );
+}
+
+#[test]
+fn task_status_preserves_canonical_work_and_acquisition_evidence() {
+    use loopflow::ops::task::TaskStatus;
+    let json = include_str!("../../../tests/fixtures/dto/task_status.json");
+    let status: TaskStatus = serde_json::from_str(json).unwrap();
+    let task = status.task.as_ref().unwrap();
+    let project = status.project.as_ref().unwrap();
+    assert_eq!(task.title, "Route incoming mail");
+    assert_eq!(task.project_id, Some(project.id.clone()));
+    assert_ne!(task.id.as_str(), task.linear_id.as_ref().unwrap().as_str());
+    assert_eq!(project.description, "Retained authored prose.");
+    assert_eq!(status.observed_at, Some(1790683200));
+    assert_eq!(
+        status.planning_state,
+        loopflow::store::PlanningState::Available
+    );
+    assert!(!status.planning_stale);
+    assert!(status.planning_error.is_none());
+    assert!(status.execution.is_none());
+    let ownership = status.ownership.as_ref().unwrap();
+    assert_eq!(
+        ownership.owner.as_ref().unwrap().to_string(),
+        "Jack Heart on mini"
+    );
+    assert_eq!(
+        ownership
+            .log
+            .iter()
+            .map(|entry| entry.kind)
+            .collect::<Vec<_>>(),
+        [
+            loopflow::durable::OwnershipKind::Claim,
+            loopflow::durable::OwnershipKind::Handoff
+        ]
+    );
+    let value: serde_json::Value = serde_json::from_str(json).unwrap();
+    assert_eq!(serde_json::to_value(status).unwrap(), value);
+    let mut missing = value;
+    missing.as_object_mut().unwrap().remove("planning_stale");
+    assert!(serde_json::from_value::<TaskStatus>(missing).is_err());
+}
+
+#[test]
+fn graph_compositions_round_trip_distinct_compositions_and_required_children() {
+    use loopflow::graph::compiled::GraphCatalogEntry;
+    let json = include_str!("../../../tests/fixtures/dto/graph_composition.json");
+    let entry: GraphCatalogEntry = serde_json::from_str(json).unwrap();
+    let value: serde_json::Value = serde_json::from_str(json).unwrap();
+    assert_eq!(serde_json::to_value(&entry).unwrap(), value);
+    let mut missing = value;
+    missing["composition"]["items"][2]
+        .as_object_mut()
+        .unwrap()
+        .remove("items");
+    assert!(serde_json::from_value::<GraphCatalogEntry>(missing).is_err());
+    let catalog: Vec<GraphCatalogEntry> = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/graph_catalog.json"
+    ))
+    .unwrap();
+    assert!(catalog[0].composition.is_some() && catalog[1].composition.is_none());
+}
+
+#[test]
+fn prepared_checkout_retains_owning_home_without_starting_execution() {
+    let json = include_str!("../../../tests/fixtures/dto/task_checkout.json");
+    let snapshot: loopflow::ops::task::TaskSnapshot = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        snapshot.machine_id.as_ref().unwrap().as_str(),
+        "home_00000000000000000000000000000001"
+    );
+    assert_eq!(
+        snapshot.worktree.as_deref(),
+        Some("/src/loopflow.workspace")
+    );
+    assert!(snapshot.pr.is_none());
+    assert!(!snapshot.branch.as_ref().unwrap().is_empty());
+    assert_eq!(
+        snapshot.execution.state,
+        loopflow::ops::task_execution::TaskExecutionState::Idle
+    );
+    assert_eq!(
+        serde_json::to_value(&snapshot).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
+fn task_work_preserves_all_owners() {
+    let input = include_str!("../../../tests/fixtures/dto/task_work.json");
+    let work: loopflow::task_work::TaskWork = serde_json::from_str(input).unwrap();
+    assert_eq!(work.sessions.len(), 2);
+    assert_eq!(work.graph_processes.len(), 1);
+    assert!(!work.processes.is_empty());
+    let workflow = work.workflow.as_ref().expect("fixture Task has a workflow");
+    assert_eq!(
+        workflow.position,
+        loopflow::ops::workflow::WorkflowPosition::Edge {
+            edge: 2,
+            lf_process_id: work.graph_processes[0].summary.id.clone(),
+            running: true,
+        }
+    );
+    // A conversation's move names it; an edge's arrival names no one.
+    let asked = workflow.history.last().expect("fixture has history");
+    assert_eq!(
+        asked.actor,
+        loopflow::ops::workflow::WorkflowActor::Conversation
+    );
+    assert_eq!(
+        asked.session_id.as_deref(),
+        Some(work.sessions[0].id.as_str())
+    );
+    assert_eq!(
+        serde_json::to_value(work).unwrap(),
+        serde_json::from_str::<serde_json::Value>(input).unwrap()
+    );
+}
+
+#[test]
+fn task_automation_keeps_coverage_distinct_from_repair_hold() {
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_automation.json"
+    ))
+    .unwrap();
+    let status: loopflow::ops::task_automation::AutomationStatus =
+        serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(status.coverage, "overdue");
+    assert_eq!(status.tasks[1].enabled, Some(false));
+    assert_eq!(serde_json::to_value(status).unwrap(), value);
+}
+
+#[test]
+fn context_report_keeps_unknown_sources_distinct_from_zero() {
+    use loopflow::context_usage::{ContextReport, ContextSource};
+    let input = include_str!("../../../tests/fixtures/dto/context_report.json");
+    let report: ContextReport = serde_json::from_str(input).unwrap();
+    assert_eq!(
+        serde_json::to_value(&report).unwrap(),
+        serde_json::from_str::<serde_json::Value>(input).unwrap()
+    );
+    let steers = &report.steps[0].sources[4];
+    assert_eq!(steers.source, ContextSource::Steers);
+    assert_eq!((steers.count, steers.over_budget), (Some(384), false));
+    assert!(report.steps[1]
+        .sources
+        .iter()
+        .all(|usage| usage.tokens.is_none()));
+    assert_eq!(ContextReport::new(report.steps.clone()), report);
+}
+
+#[test]
+fn graph_detail_keeps_its_launched_graph_and_every_step() {
+    let input = include_str!("../../../tests/fixtures/dto/graph_detail.json");
+    let detail: loopflow::durable::GraphProcessDetail = serde_json::from_str(input).unwrap();
+    assert_eq!(detail.steps.len(), 6);
+    // The running step is the second pass of the node the loop returned to.
+    let running = detail.steps.last().unwrap();
+    assert_eq!((running.key, running.completed_at), (0, None));
+    assert_eq!(detail.current, Some(running.key));
+    assert_eq!(
+        serde_json::to_value(detail).unwrap(),
+        serde_json::from_str::<serde_json::Value>(input).unwrap()
+    );
+}
+
+#[test]
+fn work_frames_keep_each_part_and_require_every_envelope_field() {
+    use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
+    let json = include_str!("../../../tests/fixtures/dto/work_frame.json");
+    let frames: Vec<WorkFrame> = serde_json::from_str(json).unwrap();
+    let source: serde_json::Value = serde_json::from_str(json).unwrap();
+    assert_eq!(serde_json::to_value(&frames).unwrap(), source);
+    assert!(matches!(frames[0].content, WorkContent::Planning(Some(_))));
+    assert_eq!(frames[0].answers, None);
+    assert_eq!(frames[0].copy, None);
+    assert_eq!(
+        frames[6].copy.as_deref(),
+        Some("/Users/fixture/.lf/copies/3f2a9c1b")
+    );
+    assert!(matches!(frames[2].content, WorkContent::Task(None)));
+    assert!(frames[2].unavailable.is_some());
+    assert!(frames[4].revisions.is_none());
+    assert!(matches!(frames[8].content, WorkContent::Checkpoint));
+    assert_eq!(frames[8].answers, Some(8));
+    let WorkContent::TaskHistory(Some(history)) = &frames[9].content else {
+        panic!("diagnostic history frame");
+    };
+    assert!(!history.work.processes.is_empty());
+    let WorkContent::PeerPlanning(Some(peers)) = &frames[7].content else {
+        panic!("peer planning frame");
+    };
+    assert_eq!(peers.repo, "/src/loopflow");
+    assert!(peers.destinations.is_empty());
+    let WorkContent::Heartbeat(heartbeat) = &frames[5].content else {
+        panic!("last fixture frame is a heartbeat");
+    };
+    assert_eq!(heartbeat.projections["planning"], 3);
+    let WorkContent::Task(Some(task)) = &frames[6].content else {
+        panic!("the read Task part carries its work and Graph runs");
+    };
+    assert_eq!(task.work.graph_processes.len(), task.graph_processes.len());
+    for field in ["sequence", "home", "part"] {
+        let mut missing = source[0].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<WorkFrame>(missing).is_err(),
+            "{field} must be required"
+        );
+    }
+}
+
+#[test]
+fn separate_workflow_catalog_preserves_invalid_sources() {
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/workflow_catalog.json"
+    ))
+    .unwrap();
+    let entries: Vec<loopflow::workflow::WorkflowCatalogEntry> =
+        serde_json::from_value(value.clone()).unwrap();
+    assert!(entries[0].workflow.is_some());
+    assert!(entries[1].workflow.is_none() && entries[1].unavailable.is_some());
+    assert_eq!(serde_json::to_value(entries).unwrap(), value);
+}
+
+#[test]
+fn task_delivery_preserves_execution_and_due_unstarted_tasks() {
+    use loopflow::lf::commands::waves::RoadmapTask;
+    let json = include_str!("../../../tests/fixtures/dto/task_delivery_rows.json");
+    let rows: std::collections::BTreeMap<String, RoadmapTask> = serde_json::from_str(json).unwrap();
+    assert!(rows["pending"]
+        .runtime
+        .as_ref()
+        .unwrap()
+        .completion_pending
+        .as_ref()
+        .unwrap()
+        .contains("lf task complete"));
+    assert_eq!(
+        rows["completed_running"].runtime.as_ref().unwrap().status,
+        loopflow::durable::TaskState::Done
+    );
+    assert_eq!(
+        rows["completed_running"].execution,
+        rows["pending"].execution
+    );
+    assert!(rows["due"].runtime.is_none());
+    assert_eq!(rows["due"].task.due_date.as_deref(), Some("2026-10-08"));
+    assert_eq!(
+        serde_json::to_value(&rows).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing = serde_json::to_value(&rows["pending"]).unwrap();
+    missing.as_object_mut().unwrap().remove("run_control");
+    assert!(serde_json::from_value::<RoadmapTask>(missing).is_err());
+}
+
+#[test]
+fn composed_lifecycle_preserves_completion_before_workflow_arrival() {
+    use loopflow::lf::commands::waves::RoadmapTask;
+    use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
+    use loopflow::ops::task::TaskStatus;
+    let captures: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_lifecycle.json"
+    ))
+    .unwrap();
+    for phase in ["merged", "completed", "arrived"] {
+        let capture = &captures[phase];
+        let status: TaskStatus = serde_json::from_value(capture["status"].clone()).unwrap();
+        let row: RoadmapTask = serde_json::from_value(capture["row"].clone()).unwrap();
+        let planning: WorkFrame =
+            serde_json::from_value(capture["planning_frame"].clone()).unwrap();
+        let task: WorkFrame = serde_json::from_value(capture["task_frame"].clone()).unwrap();
+        assert!(planning.unavailable.is_none() && task.unavailable.is_none());
+        let WorkContent::Task(Some(task)) = task.content else {
+            panic!("Task frame missing")
+        };
+        let WorkContent::Planning(Some(plan)) = planning.content else {
+            panic!("planning frame missing")
+        };
+        let execution = status.execution.unwrap();
+        assert_eq!(task.work.workflow, execution.work.workflow);
+        assert_eq!(row.runtime.as_ref().unwrap().status, execution.status);
+        let loopflow::lf::commands::waves::Evidence::Ok { items, .. } =
+            plan.roadmap.wave_tasks(&plan.roadmap.waves[0])
+        else {
+            panic!("Task plan unavailable")
+        };
+        let projected = items
+            .iter()
+            .find(|row| row.task.identifier == "FIX-1")
+            .unwrap();
+        assert_eq!(projected.runtime.as_ref().unwrap().status, execution.status);
+        if phase != "merged" {
+            assert_eq!(execution.status, loopflow::durable::TaskState::Done);
+        }
+    }
+    assert_eq!(
+        captures["merged"]["status"]["execution"]["work"]["workflow"],
+        captures["completed"]["status"]["execution"]["work"]["workflow"]
+    );
+    assert_eq!(
+        captures["completed"]["status"]["execution"]["work"]["workflow"]["position"]["running"],
+        true
+    );
+    assert_eq!(
+        captures["arrived"]["status"]["execution"]["work"]["workflow"]["position"],
+        serde_json::json!({"kind":"node","node":"end"})
+    );
+}
+
+#[test]
+fn planning_sync_preserves_delivery_and_losing_values() {
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/planning_sync.json"
+    ))
+    .unwrap();
+    let sync: loopflow::store::planning_sync::PlanningSyncStatus =
+        serde_json::from_value(value.clone()).unwrap();
+    assert!(sync.connected);
+    assert_eq!(
+        sync.changes[1].state,
+        loopflow::store::planning_sync::PlanningSyncState::Uncertain
+    );
+    assert_eq!(sync.changes[2].field, "task_title");
+    assert_eq!(sync.changes[3].field, "task_assignee");
+    assert_eq!(sync.changes[2].local_value, "Local title");
+    assert_eq!(
+        sync.changes[2].linear_value,
+        Some(serde_json::json!("Linear title"))
+    );
+    assert_eq!(serde_json::to_value(&sync).unwrap(), value);
+    assert!(sync.lines()[3].contains("provider: null"));
+}
+
+#[test]
+fn desktop_pane_command_requires_an_exact_content_occurrence() {
+    use loopflow::lf::commands::desktop::DesktopPaneCommand;
+    let json = include_str!("../../../tests/fixtures/dto/desktop_pane_commands.json");
+    let requests: Vec<DesktopPaneCommand> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        serde_json::to_value(&requests).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    for request in &requests {
+        let wire = serde_json::to_value(request).unwrap();
+        for field in wire["action"].as_object().unwrap().keys() {
+            let mut missing = wire.clone();
+            missing["action"].as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<DesktopPaneCommand>(missing).is_err());
+        }
+    }
+    let request = &requests[0];
+    assert_eq!(
+        request.action,
+        loopflow::lf::commands::desktop::DesktopPaneAction::Hide
+    );
+    assert_eq!(request.target.incarnation, "occurrence-session-pane");
+    let wire = serde_json::to_value(request).unwrap();
+    assert_eq!(
+        wire,
+        serde_json::from_str::<serde_json::Value>(json).unwrap()[0]
+    );
+    for field in ["repository", "window", "work", "pane", "incarnation"] {
+        let mut missing = wire.clone();
+        missing["target"].as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<DesktopPaneCommand>(missing).is_err());
+    }
+    let mut missing = wire;
+    missing.as_object_mut().unwrap().remove("action");
+    assert!(serde_json::from_value::<DesktopPaneCommand>(missing).is_err());
+}
+
+#[test]
+fn desktop_text_distinguishes_empty_and_unavailable() {
+    use loopflow::lf::commands::desktop::{
+        DesktopTextReading, DesktopTextResult, DesktopTextUnavailable,
+    };
+    let json = include_str!("../../../tests/fixtures/dto/desktop_text_readings.json");
+    let readings: Vec<DesktopTextReading> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        serde_json::to_value(&readings).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    assert_eq!(
+        readings[0].result,
+        DesktopTextResult::Available {
+            text: String::new(),
+            truncated: false
+        }
+    );
+    assert_eq!(
+        readings[2].result,
+        DesktopTextResult::Unavailable {
+            reason: DesktopTextUnavailable::MissingSurface
+        }
+    );
+    for reading in &readings {
+        let wire = serde_json::to_value(reading).unwrap();
+        for owner in ["request", "result"] {
+            for field in wire[owner].as_object().unwrap().keys() {
+                let mut missing = wire.clone();
+                missing[owner].as_object_mut().unwrap().remove(field);
+                assert!(serde_json::from_value::<DesktopTextReading>(missing).is_err());
+            }
+        }
+    }
+}
+
+#[test]
+fn desktop_opening_distinguishes_launch_acceptance_from_usable_and_failed() {
+    use loopflow::lf::commands::desktop::{DesktopOpening, DesktopOpeningStatus};
+    let json = include_str!("../../../tests/fixtures/dto/desktop_openings.json");
+    let readings: Vec<DesktopOpening> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        readings.iter().map(|r| r.status).collect::<Vec<_>>(),
+        vec![
+            DesktopOpeningStatus::Opening,
+            DesktopOpeningStatus::Usable,
+            DesktopOpeningStatus::Failed
+        ]
+    );
+    assert!(readings[0].reason.is_none());
+    assert!(readings[2].reason.is_some());
+    assert_eq!(
+        serde_json::to_value(readings).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
+fn task_run_explanations_preserve_actions_and_missing_evidence() {
+    use loopflow::ops::task::{TaskRunAction, TaskRunExplanation};
+    let json = include_str!("../../../tests/fixtures/dto/task_run_explanations.json");
+    let reports: Vec<TaskRunExplanation> = serde_json::from_str(json).unwrap();
+    assert!(matches!(
+        &reports[0].action,
+        Some(TaskRunAction::Edge { take_up: true, .. })
+    ));
+    assert!(matches!(
+        &reports[1].action,
+        Some(TaskRunAction::Edge { graph: None, .. })
+    ));
+    assert!(matches!(
+        &reports[2].action,
+        Some(TaskRunAction::Graph { .. })
+    ));
+    assert!(reports[3].action.is_none());
+    assert_eq!(
+        serde_json::to_value(reports).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing[0].as_object_mut().unwrap().remove("unavailable");
+    assert!(serde_json::from_value::<Vec<TaskRunExplanation>>(missing).is_err());
+}
+
+#[test]
+fn work_links_carry_readable_labels_routes_and_conversation_relation() {
+    use loopflow::lf::commands::open::{ConversationRelation, WorkLink};
+    let json = include_str!("../../../tests/fixtures/dto/work_links.json");
+    let links: Vec<WorkLink> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        links[0].conversation,
+        ConversationRelation::OtherConversation
+    );
+    assert!(links[0].target.execution_machine.is_some());
+    assert_eq!(links[1].conversation, ConversationRelation::Unknown);
+    assert!(links[1].url.contains("?repository="));
+    assert_eq!(
+        serde_json::to_value(links).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing[0].as_object_mut().unwrap().remove("fallback_argv");
+    assert!(serde_json::from_value::<Vec<WorkLink>>(missing).is_err());
+}
+
+#[test]
+fn session_connect_explanations_preserve_intent_and_unavailable_evidence() {
+    use loopflow::lf::commands::context::{
+        OpenMode, SessionConnectExplanation, SessionConnectIntent,
+    };
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/session_connect_explanations.json"
+    ))
+    .unwrap();
+    let reports: Vec<SessionConnectExplanation> = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(
+        reports[0].action.as_ref().unwrap().intent,
+        SessionConnectIntent::Start
+    );
+    assert_eq!(reports[0].action.as_ref().unwrap().mode, OpenMode::Refuse);
+    assert_eq!(
+        reports[1].action.as_ref().unwrap().intent,
+        SessionConnectIntent::Resume
+    );
+    assert_eq!(reports[1].action.as_ref().unwrap().mode, OpenMode::Takeover);
+    assert!(reports[1].action.as_ref().unwrap().prepare_only);
+    assert_eq!(
+        reports[2].action.as_ref().unwrap().intent,
+        SessionConnectIntent::ConnectOrResume
+    );
+    assert_eq!(reports[2].action.as_ref().unwrap().mode, OpenMode::Try);
+    assert!(!reports[2].unavailable.is_empty());
+    assert!(reports[3].action.is_none());
+    assert!(reports[3].state.is_none());
+    assert!(reports[3].actions.is_empty());
+    assert_eq!(serde_json::to_value(&reports).unwrap(), wire);
+    for field in ["resolution", "actions", "impediments", "unavailable"] {
+        let mut missing = wire[0].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<SessionConnectExplanation>(missing).is_err());
+    }
+}
+
+#[test]
+fn work_authors_preserve_names_and_historical_attribution() {
+    let fixture = include_str!("../../../tests/fixtures/dto/work_authors.json");
+    let authors: Vec<loopflow::durable::Author> = serde_json::from_str(fixture).unwrap();
+    assert_eq!(
+        authors[1],
+        loopflow::durable::Author::Named("Fixture author".into())
+    );
+    assert_eq!(
+        serde_json::to_value(authors).unwrap(),
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+    );
+}
+
+#[test]
+fn session_steer_status_preserves_excerpt_evidence() {
+    let fixture = include_str!("../../../tests/fixtures/dto/session_steers.json");
+    let page: loopflow::steer::SessionSteerPage = serde_json::from_str(fixture).unwrap();
+    assert_eq!(page.items[0].excerpted, Some(true));
+    assert_eq!(page.items[0].evidence, "emitted");
+    assert_eq!(
+        serde_json::to_value(page).unwrap(),
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+    );
+}
+
+#[test]
+fn peer_planning_status_keeps_journal_and_independent_receipts() {
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/peer_planning_status.json"
+    ))
+    .unwrap();
+    let statuses: Vec<loopflow::store::PeerPlanningStatus> =
+        serde_json::from_value(value.clone()).unwrap();
+    assert!(statuses[0].pending_local);
+    assert_eq!(
+        statuses[0].publication_state.as_deref(),
+        Some("unconfirmed")
+    );
+    assert_eq!(statuses[0].conflicts.len(), 1);
+    assert!(statuses[1].pending_local);
+    assert_eq!(
+        statuses[1].changes["comment-head"]
+            .edit
+            .change
+            .value()
+            .unwrap()["author"],
+        serde_json::json!({"kind": "person", "name": "Maya"})
+    );
+    assert_eq!(
+        statuses[1].changes["title-loser"]
+            .edit
+            .change
+            .value()
+            .unwrap(),
+        "Retained title"
+    );
+    assert!(!statuses[1].candidates.contains("title-loser"));
+    assert!(statuses[1].changes["title-head"]
+        .parents
+        .contains("title-loser"));
+    for status in &statuses {
+        let journal = loopflow::planning_exchange::PlanningSnapshot {
+            changes: status.changes.clone(),
+        };
+        journal.validate().unwrap();
+        assert_eq!(
+            status.candidates,
+            journal.winners().map(|(id, _)| id.to_owned()).collect()
+        );
+    }
+    assert_eq!(serde_json::to_value(&statuses).unwrap(), value);
+    for field in ["conflicts", "changes", "candidates", "pending_local"] {
+        let mut missing = value[1].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<loopflow::store::PeerPlanningStatus>(missing).is_err());
+    }
+}
+
+#[test]
+fn unplaced_wave_preserves_nullable_machine() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/unplaced_wave.json"
+    ))
+    .unwrap();
+    let wave: loopflow::lf::commands::waves::WaveSnapshot =
+        serde_json::from_value(fixture.clone()).unwrap();
+    assert!(wave.machine.is_none());
+    assert_eq!(wave.active_tasks, 1);
+    assert_eq!(serde_json::to_value(wave).unwrap(), fixture);
+}
+
+#[test]
+fn repository_identity_preserves_explicit_local_locators() {
+    use loopflow::durable::RepositoryIdentity;
+    let json = include_str!("../../../tests/fixtures/dto/repository_identity.json");
+    let identity: RepositoryIdentity = serde_json::from_str(json).unwrap();
+    assert_eq!(identity.locators.len(), 2);
+    assert_eq!(identity.id, identity.locators[1]);
+    assert_eq!(
+        serde_json::to_value(&identity).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing = serde_json::to_value(&identity).unwrap();
+    missing.as_object_mut().unwrap().remove("locators");
+    assert!(serde_json::from_value::<RepositoryIdentity>(missing).is_err());
+}
+
+#[test]
+fn task_move_explanations_preserve_positions_and_completion_uncertainty() {
+    use loopflow::ops::task::TaskMoveExplanation;
+    use loopflow::ops::workflow::WorkflowPosition;
+    let json = include_str!("../../../tests/fixtures/dto/task_move_explanations.json");
+    let reports: Vec<TaskMoveExplanation> = serde_json::from_str(json).unwrap();
+    let restart = reports[0].action.as_ref().unwrap();
+    assert!(matches!(
+        restart.from,
+        Some(WorkflowPosition::Edge { running: true, .. })
+    ));
+    assert_eq!(restart.to, "start");
+    assert_eq!(restart.reason.as_deref(), Some("Restart Workflow"));
+    let completion = reports[1].action.as_ref().unwrap();
+    assert!(completion.workflow.is_none());
+    assert!(completion.from.is_none());
+    assert_eq!(completion.to, "end");
+    assert!(!reports[1].unavailable.is_empty());
+    assert!(reports[2].action.is_none());
+    assert_eq!(
+        serde_json::to_value(reports).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing[0]["action"].as_object_mut().unwrap().remove("to");
+    assert!(serde_json::from_value::<Vec<TaskMoveExplanation>>(missing).is_err());
+}
+
+#[test]
+fn task_planning_explanations_preserve_intent_and_effects() {
+    use loopflow::ops::task::{TaskPlanningAction, TaskPlanningExplanation};
+    let json = include_str!("../../../tests/fixtures/dto/task_planning_explanations.json");
+    let reports: Vec<TaskPlanningExplanation> = serde_json::from_str(json).unwrap();
+    assert!(matches!(
+        &reports[0].action,
+        Some(TaskPlanningAction::Create {
+            project: Some(_),
+            ..
+        })
+    ));
+    assert!(
+        matches!(&reports[1].action, Some(TaskPlanningAction::Edit { revision: 3, fields }) if fields == &["title", "assignee"])
+    );
+    assert!(matches!(
+        &reports[2].action,
+        Some(TaskPlanningAction::Comment {
+            message: Some(_),
+            steer: true,
+            refresh: false
+        })
+    ));
+    assert!(matches!(
+        &reports[3].action,
+        Some(TaskPlanningAction::Comment {
+            message: None,
+            refresh: true,
+            ..
+        })
+    ));
+    assert!(
+        matches!(&reports[5].action, Some(TaskPlanningAction::Move { wave, project, previous_project })
+        if wave.as_deref() == Some("destination-wave") && project.as_deref() == Some("destination-project") && previous_project.as_deref() == Some("source-project"))
+    );
+    assert!(
+        matches!(&reports[6].action, Some(TaskPlanningAction::Save { path, revision, draft_bytes: 42 })
+        if path == "scratch/note.md" && revision == "observed-file-revision")
+    );
+    assert!(reports[4].action.is_none());
+    assert!(!reports[4].impediments.is_empty());
+    assert_eq!(
+        serde_json::to_value(reports).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing[0].as_object_mut().unwrap().remove("effects");
+    assert!(serde_json::from_value::<Vec<TaskPlanningExplanation>>(missing).is_err());
+}
+
+#[test]
+fn task_checkout_explanations_keep_proposals_separate_from_admission() {
+    use loopflow::ops::task::{TaskCheckoutBehavior, TaskCheckoutExplanation};
+    let json = include_str!("../../../tests/fixtures/dto/task_checkout_explanations.json");
+    let reports: Vec<TaskCheckoutExplanation> = serde_json::from_str(json).unwrap();
+    for (report, behavior) in reports.iter().zip([
+        TaskCheckoutBehavior::Prepare,
+        TaskCheckoutBehavior::Reuse,
+        TaskCheckoutBehavior::Restore,
+    ]) {
+        assert_eq!(report.action.as_ref().unwrap().behavior, behavior);
+        assert!(!report.unavailable.is_empty());
+    }
+    assert!(reports[3].action.is_none());
+    assert_eq!(
+        serde_json::to_value(reports).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
+fn task_locations_preserve_owner_freshness_and_unavailable_evidence() {
+    use loopflow::durable::{TaskLocation, TaskLocationObservation};
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_locations.json"
+    ))
+    .unwrap();
+    let readings: Vec<TaskLocationObservation> = serde_json::from_value(wire.clone()).unwrap();
+    assert!(matches!(
+        readings[0].location,
+        TaskLocation::Recorded {
+            checkout: Some(_),
+            ..
+        }
+    ));
+    assert!(matches!(
+        readings[1].location,
+        TaskLocation::Recorded { checkout: None, .. }
+    ));
+    assert!(matches!(readings[2].location, TaskLocation::Unrecorded));
+    assert!(matches!(
+        readings[3].location,
+        TaskLocation::Unavailable { .. }
+    ));
+    assert_eq!(serde_json::to_value(readings).unwrap(), wire);
+}
+
+#[test]
+fn task_files_frames_preserve_checkout_identity_and_heartbeat() {
+    use loopflow::ops::task::TaskFilesFrame;
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_files_frames.json"
+    ))
+    .unwrap();
+    let frames: Vec<TaskFilesFrame> = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(frames[0].paths, ["note.txt", ".git/index", ""]);
+    assert!(frames[1].paths.is_empty());
+    assert_eq!(frames[0].request, frames[1].request);
+    assert_eq!(serde_json::to_value(frames).unwrap(), wire);
+    for field in ["request", "task_id", "machine_id", "checkout", "paths"] {
+        let mut missing = wire[0].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<TaskFilesFrame>(missing).is_err());
+    }
+}
+
+#[test]
+fn desktop_pane_receipt_returns_the_affected_identity() {
+    use loopflow::lf::commands::desktop::DesktopPaneReceipt;
+    let json = include_str!("../../../tests/fixtures/dto/desktop_pane_receipt.json");
+    let receipt: DesktopPaneReceipt = serde_json::from_str(json).unwrap();
+    assert_eq!(receipt.pane, "created-pane");
+    assert_eq!(receipt.work.repository, receipt.repository);
+    assert_eq!(
+        serde_json::to_value(&receipt).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
+fn paused_task_state_is_unfinished() {
+    let state: TaskState =
+        serde_json::from_str(include_str!("../../../tests/fixtures/dto/task_paused.json")).unwrap();
+    assert_eq!(state, TaskState::Paused);
+    assert!(!state.is_terminal());
+    assert_eq!(serde_json::to_string(&state).unwrap(), "\"paused\"");
+}
+
+#[test]
+fn task_overview_excludes_diagnostic_process_history() {
+    let input = include_str!("../../../tests/fixtures/dto/task_overview.json");
+    let overview: loopflow::task_work::TaskOverview = serde_json::from_str(input).unwrap();
+    assert!(overview.workflow.is_some());
+    assert_eq!(
+        serde_json::to_value(overview).unwrap(),
+        serde_json::from_str::<serde_json::Value>(input).unwrap()
+    );
+}
+
+#[test]
+fn desktop_state_retains_outer_and_inner_layouts() {
+    use loopflow::lf::commands::desktop::DesktopInspection;
+    let reading: DesktopInspection = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/desktop_inspection.json"
+    ))
+    .unwrap();
+    let window = &reading.windows[0];
+    assert_eq!(window.open_work, [window.workspaces[0].work.clone()]);
+    assert_eq!(window.workspaces[0].layout.ratio, Some(0.6));
+    assert_eq!(window.workspaces[0].hidden_panes, ["files-pane"]);
+    let encoded = serde_json::to_string(&reading).unwrap();
+    assert_eq!(
+        serde_json::from_str::<DesktopInspection>(&encoded).unwrap(),
+        reading
+    );
 }

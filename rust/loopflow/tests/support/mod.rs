@@ -1,51 +1,98 @@
+pub mod planning;
+
+use loopflow_test_support::env_lock;
 use std::env;
 use std::ffi::OsString;
+use std::fs;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
 
+use base64::prelude::*;
 use loopflow::id::WaveId;
-use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-use loopflow::store::{PmSnapshotRow, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV};
+use loopflow::linear::{LinearIssueId, LinearProjectId};
+use loopflow::store::{StorageConfig, Store};
 use loopflow::work::project::{Project, ProjectId};
-use loopflow::work::task::{PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
+use loopflow::work::task::{LinearWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
+use loopflow_test_support::TestRepo;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 
-/// Ambient execution identity a live agent process exports. Tests must never inherit the
-/// real Run that invoked the suite.
-const AMBIENT_AGENT_ENV: [&str; 3] = ["LF_RUN_ID", "LF_WAVE_ID", "LF_ACCOUNT_LEASE"];
+pub mod ambient;
 
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
+#[cfg(unix)]
+#[allow(dead_code)] // Shared native provider fixture compiled into multiple test crates.
+pub fn install_native_codex(bin: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::create_dir_all(bin).unwrap();
+    let provider = bin.join("codex");
+    fs::write(
+        &provider,
+        format!(
+            "#!/bin/sh\nexec /usr/bin/python3 '{}' \"$@\"\n",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/native_codex.py")
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(provider, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[allow(dead_code)] // Shared GitHub fixture compiled into multiple test crates.
+pub fn github_checks_page(head: &str, checks: &[(&str, &str, bool)]) -> String {
+    let nodes: Vec<_> = checks
+        .iter()
+        .map(|(name, conclusion, required)| {
+            serde_json::json!({
+                "__typename":"CheckRun", "name":name, "status":"COMPLETED",
+                "conclusion":conclusion, "isRequired":required,
+                "startedAt":"2026-09-29T00:00:00Z", "detailsUrl":format!("https://ci/{name}"),
+                "checkSuite":{"workflowRun":null}
+            })
+        })
+        .collect();
+    serde_json::json!({"head":head,"commit":head,"contexts":{
+        "nodes":nodes,"pageInfo":{"hasNextPage":false,"endCursor":null}
+    }})
+    .to_string()
+}
+
+#[allow(dead_code)] // Shared GitHub fixture compiled into multiple test crates.
+pub fn github_merge_response(
+    number: u64,
+    head: &str,
+    state: &str,
+    merge_state: &str,
+    request: Option<&str>,
+) -> String {
+    let queued = request.and_then(|request| request.strip_prefix("queued:"));
+    serde_json::json!({"data":{"repository":{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"pullRequest":{
+        "id":queued.unwrap_or("PR_fixture"), "number":number,
+        "url":format!("https://example.com/pr/{number}"),
+        "state":state, "isDraft":false, "headRefName":"fixture", "headRefOid":head,
+        "mergedAt":if state == "MERGED" { Some("2026-09-29T00:00:00Z") } else { None },
+        "mergeCommit":if state == "MERGED" { Some(serde_json::json!({"oid":head})) } else { None },
+        "mergeStateStatus":merge_state, "isMergeQueueEnabled":request == Some("awaiting_queue") || queued.is_some(),
+        "autoMergeRequest":request.map(|_| serde_json::json!({"enabledAt":"2026-09-29T00:00:00Z"})),
+        "mergeQueueEntry":queued.map(|_| serde_json::json!({"id":"queue-entry"}))
+    }}}}).to_string()
 }
 
 struct HomeOverride {
+    _ambient: ambient::EnvGuard,
     previous_lf_home: Option<OsString>,
-    previous_db_path: Option<OsString>,
-    previous_control_home: Option<OsString>,
-    previous_control_db_path: Option<OsString>,
     _temp: TempDir,
 }
 
 impl HomeOverride {
     fn new_temp() -> Self {
+        let ambient = ambient::EnvGuard::new();
         let temp = TempDir::new().expect("temp home dir");
         let previous_lf_home = env::var_os("LF_HOME");
-        let previous_db_path = env::var_os("LF_DB_PATH");
-        let previous_control_home = env::var_os(CONTROL_HOME_ENV);
-        let previous_control_db_path = env::var_os(CONTROL_DB_PATH_ENV);
         env::remove_var("LF_HOME");
-        env::remove_var("LF_DB_PATH");
-        env::remove_var(CONTROL_HOME_ENV);
-        env::remove_var(CONTROL_DB_PATH_ENV);
         env::set_var("LF_HOME", temp.path());
         Self {
+            _ambient: ambient,
             previous_lf_home,
-            previous_db_path,
-            previous_control_home,
-            previous_control_db_path,
             _temp: temp,
         }
     }
@@ -56,18 +103,6 @@ impl Drop for HomeOverride {
         match &self.previous_lf_home {
             Some(prev) => env::set_var("LF_HOME", prev),
             None => env::remove_var("LF_HOME"),
-        }
-        match &self.previous_db_path {
-            Some(prev) => env::set_var("LF_DB_PATH", prev),
-            None => env::remove_var("LF_DB_PATH"),
-        }
-        match &self.previous_control_home {
-            Some(prev) => env::set_var(CONTROL_HOME_ENV, prev),
-            None => env::remove_var(CONTROL_HOME_ENV),
-        }
-        match &self.previous_control_db_path {
-            Some(prev) => env::set_var(CONTROL_DB_PATH_ENV, prev),
-            None => env::remove_var(CONTROL_DB_PATH_ENV),
         }
     }
 }
@@ -84,7 +119,7 @@ pub fn codex_app_server_script(output: &str, setup: &str) -> String {
     let output = serde_json::to_string(output)
         .expect("encode mock Codex output")
         .replace('\'', r#"'"'"'"#);
-    r#"#!/bin/sh
+    codex_socket_script(&r#"#!/bin/sh
 __SETUP__
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
@@ -95,24 +130,85 @@ read -r turn_start
 echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
 echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"inProgress"}}}'
 printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"turn-test","itemId":"message-test","delta":__OUTPUT__}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-test","turnId":"turn-test","item":{"type":"agentMessage","id":"message-test","text":__OUTPUT__,"phase":"final_answer"}}}'
 echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"completed"}}}'
+if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
 while read -r line; do :; done
 "#
     .replace("__SETUP__", setup)
-    .replace("__OUTPUT__", &output)
+    .replace("__OUTPUT__", &output))
+}
+
+#[allow(dead_code)] // Shared provider transport compiled into multiple test crates.
+pub fn codex_socket_script(script: &str) -> String {
+    let bridge = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/codex_socket.py")
+        .replace('\'', r#"'"'"'"#);
+    format!(
+        r#"#!/bin/sh
+if [ -z "$LF_TEST_CODEX_STDIO" ]; then
+    case "$*" in
+        *--listen*) exec python3 '{bridge}' "$0" "$@" ;;
+    esac
+fi
+{script}
+"#,
+        script = script.strip_prefix("#!/bin/sh\n").unwrap_or(script),
+    )
+}
+
+#[allow(dead_code)] // Shared synthetic account for provider-backed CLI proofs.
+pub fn register_codex_account(home: &Path) {
+    let account_home = home.join("accounts/codex/fixture");
+    fs::create_dir_all(&account_home).unwrap();
+    let email = "fixture@example.com";
+    let claims = BASE64_URL_SAFE_NO_PAD
+        .encode(serde_json::json!({"email": email, "sub": "fixture"}).to_string());
+    fs::write(
+        account_home.join("auth.json"),
+        serde_json::json!({"tokens": {
+            "access_token": "synthetic-fixture-token",
+            "id_token": format!("h.{claims}.s")
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    store
+        .upsert_provider_account(&loopflow::store::ProviderAccount {
+            provider: "codex".into(),
+            account_id: loopflow::store::ProviderAccountId::parse("fixture").unwrap(),
+            home: Some(account_home),
+            login_email: Some(loopflow::profile::EmailAddress::parse(email).unwrap()),
+            observed_email: None,
+            observed_subject: None,
+            observed_credential_digest: None,
+            observed_plan: None,
+            credential_state: loopflow::store::CredentialState::Connected,
+            routing_state: loopflow::store::RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
 }
 
 pub struct EnvGuard {
-    _lock: std::sync::MutexGuard<'static, ()>,
     previous_path: Option<String>,
     previous_home: Option<String>,
     previous_lf_home: Option<OsString>,
-    previous_db_path: Option<OsString>,
-    previous_control_home: Option<OsString>,
-    previous_control_db_path: Option<OsString>,
-    previous_ambient_context: Vec<(&'static str, Option<OsString>)>,
+    previous_lf_bin: Option<OsString>,
+    previous_codex_home: Option<OsString>,
+    previous_claude_home: Option<OsString>,
+    _ambient: ambient::EnvGuard,
     _bin: TempDir,
     _lf_home: TempDir,
+    _lock: std::sync::MutexGuard<'static, ()>,
 }
 
 impl EnvGuard {
@@ -137,6 +233,7 @@ impl EnvGuard {
         include_existing_path: bool,
     ) -> Self {
         let lock = env_lock().lock().unwrap_or_else(|err| err.into_inner());
+        let cli = loopflow_test_support::lf_binary();
         let bin = TempDir::new().expect("temp bin dir");
         for (name, content) in entries {
             write_executable(bin.path(), name, content);
@@ -152,37 +249,32 @@ impl EnvGuard {
             env::set_var("HOME", home);
         }
         let previous_lf_home = env::var_os("LF_HOME");
-        let previous_db_path = env::var_os("LF_DB_PATH");
-        let previous_control_home = env::var_os(CONTROL_HOME_ENV);
-        let previous_control_db_path = env::var_os(CONTROL_DB_PATH_ENV);
-        let previous_ambient_context = AMBIENT_AGENT_ENV
-            .iter()
-            .map(|name| {
-                let prev = env::var_os(name);
-                env::remove_var(name);
-                (*name, prev)
-            })
-            .collect();
-        let lf_home = TempDir::new().expect("temp lf home dir");
+        let ambient = ambient::EnvGuard::new();
+        let previous_lf_bin = env::var_os("LF_BIN");
+        env::set_var("LF_BIN", cli);
+        let lf_home = TempDir::new().expect("temp lf machine dir");
         env::remove_var("LF_HOME");
-        env::remove_var("LF_DB_PATH");
-        env::remove_var(CONTROL_HOME_ENV);
-        env::remove_var(CONTROL_DB_PATH_ENV);
-        if home.is_some() {
+        if let Some(home) = home {
             // Keep HOME-based config discovery intact while isolating its store.
-            env::set_var("LF_DB_PATH", lf_home.path().join("loopflow.db"));
+            env::set_var("LF_HOME", home.join(".lf"));
         } else {
             env::set_var("LF_HOME", lf_home.path());
         }
+        // A shared launch signs its provider's native home in as the routed
+        // account; that home must never be the developer's own.
+        let previous_codex_home = env::var_os("CODEX_HOME");
+        env::set_var("CODEX_HOME", lf_home.path().join("native-codex"));
+        let previous_claude_home = env::var_os("CLAUDE_CONFIG_DIR");
+        env::set_var("CLAUDE_CONFIG_DIR", lf_home.path().join("native-claude"));
         Self {
             _lock: lock,
             previous_path,
             previous_home,
             previous_lf_home,
-            previous_db_path,
-            previous_control_home,
-            previous_control_db_path,
-            previous_ambient_context,
+            previous_lf_bin,
+            previous_codex_home,
+            previous_claude_home,
+            _ambient: ambient,
             _bin: bin,
             _lf_home: lf_home,
         }
@@ -208,50 +300,65 @@ impl Drop for EnvGuard {
         } else {
             env::remove_var("HOME");
         }
+        match &self.previous_lf_bin {
+            Some(previous) => env::set_var("LF_BIN", previous),
+            None => env::remove_var("LF_BIN"),
+        }
         match &self.previous_lf_home {
             Some(prev) => env::set_var("LF_HOME", prev),
             None => env::remove_var("LF_HOME"),
         }
-        match &self.previous_db_path {
-            Some(prev) => env::set_var("LF_DB_PATH", prev),
-            None => env::remove_var("LF_DB_PATH"),
+        match &self.previous_codex_home {
+            Some(prev) => env::set_var("CODEX_HOME", prev),
+            None => env::remove_var("CODEX_HOME"),
         }
-        match &self.previous_control_home {
-            Some(prev) => env::set_var(CONTROL_HOME_ENV, prev),
-            None => env::remove_var(CONTROL_HOME_ENV),
-        }
-        match &self.previous_control_db_path {
-            Some(prev) => env::set_var(CONTROL_DB_PATH_ENV, prev),
-            None => env::remove_var(CONTROL_DB_PATH_ENV),
-        }
-        for (name, prev) in &self.previous_ambient_context {
-            match prev {
-                Some(prev) => env::set_var(name, prev),
-                None => env::remove_var(name),
-            }
+        match &self.previous_claude_home {
+            Some(prev) => env::set_var("CLAUDE_CONFIG_DIR", prev),
+            None => env::remove_var("CLAUDE_CONFIG_DIR"),
         }
     }
 }
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
+pub fn bind_task_planning(repo: &TestRepo) {
+    repo.create_file(
+        ".lf/config.yaml",
+        "planning:\n  provider: linear\n  team: team-task-pr-tests\n",
+    );
+    repo.create_file(
+        ".lf/wave/task-pr-tests/GOAL.md",
+        "---\nlinear:\n  initiative: initiative-task-pr-tests\n---\nKeep work.\n",
+    );
+    repo.stage_all();
+    repo.commit("Bind fixture planning before creating Task checkouts");
+}
+
+#[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
 pub struct RegisteredTask {
+    pub database: std::path::PathBuf,
     pub store: Store,
     pub task: Task,
     pub pr: TaskPr,
 }
 
-#[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
-pub fn register_task(
+/// Seed a retained PR row explicitly, independently of checkout placement.
+#[allow(dead_code)] // Shared helper compiled into tests without delivery fixtures.
+pub fn register_task_with_pr(
     home: &Path,
     worktree: &Path,
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    register_task_fixture(home, worktree, branch, base_commit)
+    let registered = register_task_fixture(home, worktree, branch, base_commit);
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(registered.store.insert_task_pr(&registered.pr))
+        .unwrap();
+    registered
 }
 
-#[allow(dead_code)] // Shared helper compiled into integration tests without this incident shape.
-pub fn register_unrun_task(
+#[allow(dead_code)] // Shared helper compiled into suites with published Tasks only.
+pub fn register_task_without_pr(
     home: &Path,
     worktree: &Path,
     branch: &str,
@@ -280,39 +387,59 @@ fn register_task_fixture(
     );
     let project = Project {
         id: ProjectId::new(),
-        plan: ProjectPlan {
-            id: LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
-            slug: "task-pr-tests".to_string(),
-            name: "Task PR tests".to_string(),
-            prompt_context: "Keep Task PR transitions durable.".to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
-        },
+
+        summary: String::new(),
+        status: loopflow::work::project::ProjectStatus::Started,
+        linear_id: Some(
+            LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
+        ),
+        slug: "task-pr-tests".to_string(),
+        name: "Task PR tests".to_string(),
+        description: "Keep Task PR transitions durable.".to_string(),
+        krs: Vec::new(),
+        metric_targets: Vec::new(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
         wave_id: wave.id().clone(),
-        iteration: 0,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
     };
     let task = Task {
+        repository_id: loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db"))
+            .unwrap()
+            .ensure_repository(wave.repo())
+            .unwrap(),
         id: TaskId::new(),
-        plan: TaskPlan {
-            id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
-            identifier: "INF-123".to_string(),
-            title: "Prove Task PR transitions".to_string(),
-            description: "Exercise the persisted lifecycle.".to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
-        },
-        pm_writeback: PmWritebackState::Current,
-        wave_id: wave.id().clone(),
-        project_id: project.id.clone(),
-        worktree: worktree.to_path_buf(),
+
+        revision: 0,
+        linear_id: Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id")),
+        identifier: "INF-123".to_string(),
+        title: "Prove Task PR transitions".to_string(),
+        description: "Exercise the persisted lifecycle.".to_string(),
+        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+
+        pm_writeback: LinearWritebackState::Current,
+        wave_id: Some(wave.id().clone()),
+        project_id: Some(project.id.clone()),
+        worktree: Some(worktree.to_path_buf()),
         workspace_slug: "task-pr-proof".to_string(),
+        branch: branch.to_string(),
+        base_commit: base_commit.to_string(),
+        parent_pr_id: None,
+        agent: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
+        rank: 0,
+        assignee: None,
+        due_date: None,
+        state: None,
+        completed: false,
+        completed_at: None,
         observation: loopflow::work::task::Observation::NotRequired,
     };
-    let pr = TaskPr {
+    let mut pr = TaskPr {
         id: TaskPrId::new(),
         task_id: task.id.clone(),
         sequence: 1,
@@ -333,53 +460,47 @@ fn register_task_fixture(
     };
     runtime.block_on(async {
         store.create_wave(&wave).await.expect("create test wave");
-        let pm_payload = serde_json::json!({
-            "projects": [{
-                "id": project.plan.id.as_str(),
-                "slug": project.plan.slug.as_str(),
-                "name": project.plan.name.as_str(),
-                "summary": "",
-                "metric_targets": [],
-                "flows": null,
-                "krs": [],
-                "initiative_ids": ["initiative-task-pr-tests"],
-                "team_ids": ["team-task-pr-tests"]
-            }],
-            "items": [{
-                "id": task.plan.id.as_str(),
-                "identifier": task.plan.identifier.as_str(),
-                "url": "https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions",
-                "name": task.plan.title.as_str(),
-                "description": task.plan.description.as_str(),
-                "rank": 1,
-                "completed": false,
-                "project_id": project.plan.id.as_str(),
-                "project": project.plan.slug.as_str(),
-                "team_id": "team-task-pr-tests",
-                "assignee": null
-            }]
-        })
-        .to_string();
-        store
-            .put_pm_snapshot(PmSnapshotRow {
-                wave_id: wave.id().clone(),
-                provider: "linear".to_string(),
-                initiative: "initiative-task-pr-tests".to_string(),
-                synced_at: now.unix_timestamp(),
-                payload: pm_payload,
-            })
-            .await
-            .expect("cache Task PR context");
         store
             .create_project(&project)
             .await
             .expect("create test project");
+        rusqlite::Connection::open(home.join("loopflow.db"))
+            .expect("open fixture database")
+            .execute(
+                "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+                rusqlite::params![wave.id(), project.id.as_str()],
+            )
+            .expect("select fixture Project");
+        planning::seed_unplaced_task(&home.join("loopflow.db"), &task);
+        planning::seed_linear_admission(&home.join("loopflow.db"), &wave, &project, &task);
+        pr.task_id = task.id.clone();
         store
-            .create_task(&task, &pr)
+            .place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &pr,
+                None,
+            )
             .await
             .expect("create test Task");
+        store
+            .append_task_event(
+                &task.id,
+                &loopflow::work::task::TaskEventKind::CheckoutReady {
+                    branch: branch.to_string(),
+                    base_commit: base_commit.to_string(),
+                },
+            )
+            .await
+            .unwrap();
     });
-    RegisteredTask { store, task, pr }
+    RegisteredTask {
+        store,
+        task,
+        pr,
+        database: home.join("loopflow.db"),
+    }
 }
 
 /// A second Task in the fixture's Wave and Project, tracking `branch` from its
@@ -397,11 +518,13 @@ pub fn register_sibling_task(
     let now = OffsetDateTime::now_utc();
     let mut task = registered.task.clone();
     task.id = TaskId::new();
-    task.plan.id = LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id");
-    task.plan.identifier = identifier.to_string();
-    task.plan.title = format!("Sibling {identifier}");
+    task.linear_id =
+        Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"));
+    task.identifier = identifier.to_string();
+    task.title = format!("Sibling {identifier}");
     task.workspace_slug = branch.to_string();
-    task.worktree = worktree.to_path_buf();
+    task.branch = branch.to_string();
+    task.worktree = Some(worktree.to_path_buf());
     task.created_at = now;
     task.updated_at = now;
     let pr = TaskPr {
@@ -413,9 +536,27 @@ pub fn register_sibling_task(
         updated_at: now,
         ..registered.pr.clone()
     };
+    planning::seed_unplaced_task(&registered.database, &task);
     runtime
-        .block_on(registered.store.create_task(&task, &pr))
+        .block_on(registered.store.place_task(
+            &task.id,
+            task.worktree.as_ref().unwrap(),
+            &task.workspace_slug,
+            &pr,
+            None,
+        ))
         .expect("create sibling Task");
+    if worktree.is_dir() {
+        runtime
+            .block_on(registered.store.append_task_event(
+                &task.id,
+                &loopflow::work::task::TaskEventKind::CheckoutReady {
+                    branch: branch.to_string(),
+                    base_commit: task.base_commit.clone(),
+                },
+            ))
+            .unwrap();
+    }
     task
 }
 
@@ -446,4 +587,125 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
         perms.set_mode(0o755);
         std::fs::set_permissions(&path, perms).expect("chmod");
     }
+}
+
+/// Record a Graph the way `lf graph` leaves one: a Graph process, its GraphProcess row
+/// and one step Process in `cwd`, both exited. Returns the Graph process's id, which
+/// names the Graph.
+#[allow(dead_code)] // Shared helper compiled into integration tests that record no Graph.
+pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: &str) -> String {
+    use loopflow::graph::{ConcreteSkill, ConcreteStep, Skill};
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
+    let graph_process = loopflow::id::LfProcessId::new();
+    let step = loopflow::id::LfProcessId::new();
+    for (id, parent, argv) in [
+        (graph_process.clone(), None, vec!["lf", "graph", graph]),
+        (
+            step.clone(),
+            Some(graph_process.clone()),
+            vec!["lf", "--batch", "skill", label],
+        ),
+    ] {
+        db.execute(
+            "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,completed_at,outcome)
+             VALUES(?1,?2,?3,?4,?5,?5,1,2,?6)",
+            rusqlite::params![
+                id.as_str(),
+                loopflow::id::TraceId::new().as_str(),
+                parent.as_ref().map(|parent| parent.as_str().to_owned()),
+                serde_json::to_string(&argv).expect("argv serializes"),
+                cwd.to_string_lossy(),
+                outcome
+            ],
+        )
+        .expect("record Graph Process");
+    }
+    let compiled = loopflow::graph::compiled::CompiledGraph::new(
+        graph,
+        &[ConcreteStep::Skill(ConcreteSkill {
+            skill: Skill::named(label),
+            id: None,
+            human: false,
+            returns: None,
+            sources: Vec::new(),
+        })],
+    );
+    db.execute(
+        "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,?2,?3)",
+        rusqlite::params![
+            graph_process.as_str(),
+            graph,
+            serde_json::to_string(&compiled).expect("compiled serializes")
+        ],
+    )
+    .expect("record GraphProcess");
+    db.execute(
+        "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations) VALUES(?1,?2,0,'[[]]')",
+        rusqlite::params![graph_process.as_str(), step.as_str()],
+    )
+    .expect("record Graph step");
+    graph_process.to_string()
+}
+
+/// Every Graph in launch order: its process's outcome and each recorded step as
+/// `{graph, label, key, iterations, argv}`, `argv` without the binary path.
+#[allow(dead_code)] // Shared helper compiled into integration tests that read no Graph.
+pub fn recorded_graphs(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value>)> {
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
+    let mut graph_processes = db
+        .prepare(
+            "SELECT d.id,d.outcome,g.graph,g.compiled FROM graph_processes g JOIN processes d ON d.id=g.lf_process_id
+             ORDER BY d.rowid",
+        )
+        .expect("select Graph processes");
+    let rows = graph_processes
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .expect("read Graph processes")
+        .collect::<rusqlite::Result<Vec<(String, Option<String>, String, String)>>>()
+        .expect("decode Graph processes");
+    rows.into_iter()
+        .map(|(graph_process, outcome, graph, compiled)| {
+            let compiled: loopflow::graph::compiled::CompiledGraph =
+                serde_json::from_str(&compiled).expect("a Graph compiled");
+            fn label(nodes: &[loopflow::graph::compiled::GraphNode], key: u32) -> Option<String> {
+                nodes.iter().find_map(|node| {
+                    if node.key == key {
+                        return Some(node.label.clone());
+                    }
+                    node.paths.iter().find_map(|path| label(&path.steps, key))
+                })
+            }
+            let mut steps = db
+                .prepare(
+                    "SELECT e.command,s.node,s.iterations FROM graph_process_steps s
+                     JOIN processes e ON e.id=s.lf_process_id WHERE s.graph_lf_process_id=?1 ORDER BY s.seq",
+                )
+                .expect("select Graph steps");
+            let steps = steps
+                .query_map([graph_process], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, u32>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .expect("read Graph steps")
+                .map(|row| {
+                    let (argv, key, iterations) = row.expect("a Graph step");
+                    let argv: Vec<String> = serde_json::from_str(&argv).expect("a JSON argv");
+                    serde_json::json!({
+                        "graph": graph,
+                        "label": label(&compiled.steps, key).expect("a compiled node"),
+                        "key": key,
+                        "iterations": serde_json::from_str::<serde_json::Value>(&iterations)
+                            .expect("iteration counts"),
+                        "argv": argv[1..],
+                    })
+                })
+                .collect();
+            (outcome, steps)
+        })
+        .collect()
 }

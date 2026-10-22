@@ -1,16 +1,15 @@
-//! SQLite persistence for watched pull-request landings.
+//! SQLite persistence for finite pull-request delivery checks.
 
 use std::path::PathBuf;
 
 use rusqlite::{params, types::Type, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::durable::HomeId;
 use crate::pr_landing::{
     LandingPlacement, LandingSupervisor, PrLanding, PrLandingId, PrLandingState,
 };
 use crate::store::{StoreError, StoreResult};
-use crate::work::task::{AfterMerge, TaskId};
+use crate::work::task::TaskId;
 
 fn timestamp(value: OffsetDateTime) -> i64 {
     value.unix_timestamp()
@@ -34,19 +33,6 @@ fn map_landing(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrLanding> {
     let placement = match row.get::<_, Option<String>>(13)?.as_deref() {
         None => None,
         Some("local") => Some(LandingPlacement::Local),
-        Some("home") => {
-            let home = row.get::<_, Option<String>>(14)?.ok_or_else(|| {
-                invalid_column(
-                    14,
-                    crate::durable::DurableDataError::InvalidId(
-                        "home supervisor has no Home id".to_string(),
-                    ),
-                )
-            })?;
-            Some(LandingPlacement::Home {
-                home_id: HomeId::parse(&home).map_err(|error| invalid_column(14, error))?,
-            })
-        }
         Some(value) => {
             return Err(invalid_column(
                 13,
@@ -68,11 +54,6 @@ fn map_landing(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrLanding> {
         .get::<_, String>(11)?
         .parse()
         .map_err(|error| invalid_column(11, error))?;
-    let after_merge = row
-        .get::<_, Option<String>>(9)?
-        .map(|value| value.parse())
-        .transpose()
-        .map_err(|error| invalid_column(9, error))?;
     Ok(PrLanding {
         id: PrLandingId::from_raw(row.get::<_, String>(0)?),
         repo: row.get(1)?,
@@ -83,8 +64,6 @@ fn map_landing(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrLanding> {
         requested_head_sha: row.get(6)?,
         observed_head_sha: row.get(7)?,
         merge_commit: row.get(8)?,
-        after_merge,
-        next_slug: row.get(10)?,
         state,
         generation,
         supervisor,
@@ -97,11 +76,51 @@ fn map_landing(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrLanding> {
 const LANDING_COLUMNS: &str = "
     id, repo, pr_number, worktree, branch, task_id,
     requested_head_sha, observed_head_sha, merge_commit, after_merge,
-    next_slug, state, generation, supervisor_placement, supervisor_home_id,
+    next_slug, state, generation, supervisor_placement, supervisor_machine_id,
     supervisor_process_id, supervisor_heartbeat_at,
     blocked_reason, created_at, updated_at";
 
 impl super::SqliteStore {
+    /// A landing of `worktree` that still awaits its merge.
+    pub(crate) fn pending_landing_at(
+        &self,
+        worktree: &std::path::Path,
+    ) -> StoreResult<Option<String>> {
+        let worktree = std::fs::canonicalize(worktree).unwrap_or_else(|_| worktree.to_path_buf());
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT id FROM pr_landings WHERE worktree=?1
+                 AND state NOT IN ('merged','closed') ORDER BY updated_at DESC LIMIT 1",
+                rusqlite::params![worktree.to_string_lossy()],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn pending_pr_landings(&self, repo: &str) -> StoreResult<Vec<PrLanding>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(&format!(
+            "SELECT {LANDING_COLUMNS} FROM pr_landings
+             WHERE repo=?1 AND state NOT IN ('merged', 'closed') ORDER BY created_at, id"
+        ))?;
+        let rows = statement
+            .query_map([repo], map_landing)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn release_pr_landing(&self, landing: &PrLanding) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE pr_landings SET supervisor_placement=NULL, supervisor_machine_id=NULL,
+             supervisor_process_id=NULL, supervisor_heartbeat_at=NULL, generation=generation+1
+             WHERE id=?1 AND generation=?2",
+            params![landing.id.as_str(), landing.generation as i64],
+        )?;
+        Ok(())
+    }
+
     pub fn start_or_join_pr_landing(&self, landing: &PrLanding) -> StoreResult<PrLanding> {
         landing
             .validate()
@@ -139,7 +158,7 @@ impl super::SqliteStore {
                 transaction.execute(
                     "UPDATE pr_landings
                      SET state='watching', generation=?2, blocked_reason=NULL,
-                         supervisor_placement=NULL, supervisor_home_id=NULL,
+                         supervisor_placement=NULL, supervisor_machine_id=NULL,
                          supervisor_process_id=NULL, supervisor_heartbeat_at=NULL,
                          worktree=?3, branch=?4
                      WHERE id=?1",
@@ -155,13 +174,11 @@ impl super::SqliteStore {
             // and its OS lock until it finishes. A blocked retry can relocate.
             transaction.execute(
                 "UPDATE pr_landings
-                 SET requested_head_sha=?2, after_merge=?3, next_slug=?4, updated_at=?5
+                 SET requested_head_sha=?2, updated_at=?3
                  WHERE id=?1 AND state IN ('watching', 'repairing')",
                 params![
                     existing.id.as_str(),
                     landing.requested_head_sha,
-                    landing.after_merge.map(AfterMerge::as_str),
-                    landing.next_slug,
                     timestamp(landing.updated_at),
                 ],
             )?;
@@ -195,13 +212,12 @@ impl super::SqliteStore {
         transaction.execute(
             "INSERT INTO pr_landings (
                 id, repo, pr_number, worktree, branch, task_id,
-                requested_head_sha, observed_head_sha, merge_commit, after_merge,
-                next_slug, state, generation, supervisor_placement, supervisor_home_id,
+                requested_head_sha, observed_head_sha, merge_commit, state, generation, supervisor_placement, supervisor_machine_id,
                 supervisor_process_id, supervisor_heartbeat_at,
                 blocked_reason, created_at, updated_at
              ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10, ?11, ?12,
-                NULL, NULL, NULL, NULL, NULL, ?13, ?13
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10,
+                NULL, NULL, NULL, NULL, NULL, ?11, ?11
              )",
             params![
                 landing.id.as_str(),
@@ -212,8 +228,6 @@ impl super::SqliteStore {
                 landing.task_id.as_ref().map(TaskId::as_str),
                 landing.requested_head_sha,
                 landing.observed_head_sha,
-                landing.after_merge.map(AfterMerge::as_str),
-                landing.next_slug,
                 landing.state.as_str(),
                 landing.generation as i64,
                 timestamp(landing.created_at),
@@ -232,22 +246,6 @@ impl super::SqliteStore {
         )
         .optional()
         .map_err(StoreError::from)
-    }
-
-    pub fn recoverable_pr_landings(
-        &self,
-        stale_before: OffsetDateTime,
-    ) -> StoreResult<Vec<PrLanding>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(&format!(
-            "SELECT {LANDING_COLUMNS} FROM pr_landings
-             WHERE state IN ('watching', 'repairing')
-               AND (supervisor_process_id IS NULL OR supervisor_heartbeat_at <= ?1)
-             ORDER BY created_at"
-        ))?;
-        let rows = statement.query_map([timestamp(stale_before)], map_landing)?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StoreError::from)
     }
 
     pub fn claim_pr_landing(
@@ -275,7 +273,11 @@ impl super::SqliteStore {
             transaction.commit()?;
             return Ok(None);
         };
-        if current.state.is_terminal() || current.generation != expected_generation {
+        if matches!(
+            current.state,
+            PrLandingState::Merged | PrLandingState::Closed
+        ) || current.generation != expected_generation
+        {
             transaction.commit()?;
             return Ok(None);
         }
@@ -297,14 +299,14 @@ impl super::SqliteStore {
         let now = claim.heartbeat_at;
         let changed = transaction.execute(
             "UPDATE pr_landings
-             SET generation=?2, supervisor_placement=?3, supervisor_home_id=?4,
+             SET generation=?2, supervisor_placement=?3, supervisor_machine_id=?4,
                  supervisor_process_id=?5, supervisor_heartbeat_at=?6, updated_at=?6
-             WHERE id=?1 AND generation=?7 AND state IN ('watching', 'repairing')",
+             WHERE id=?1 AND generation=?7 AND state IN ('watching', 'repairing', 'blocked')",
             params![
                 landing_id.as_str(),
                 generation as i64,
                 claim.placement.storage_str(),
-                claim.placement.home_id().map(HomeId::as_str),
+                Option::<String>::None,
                 i64::from(claim.process_id),
                 timestamp(now),
                 expected_generation as i64,
@@ -335,7 +337,7 @@ impl super::SqliteStore {
             "UPDATE pr_landings
              SET supervisor_heartbeat_at=?3, updated_at=?3
              WHERE id=?1 AND generation=?2
-               AND state IN ('watching', 'repairing')
+               AND state IN ('watching', 'repairing', 'blocked')
                AND supervisor_process_id IS NOT NULL",
             params![
                 landing_id.as_str(),
@@ -356,7 +358,7 @@ impl super::SqliteStore {
                  blocked_reason=?6,
                  supervisor_heartbeat_at=?7, updated_at=?7
              WHERE id=?1 AND generation=?2
-               AND state IN ('watching', 'repairing')",
+               AND state IN ('watching', 'repairing', 'blocked')",
             params![
                 landing.id.as_str(),
                 landing.generation as i64,
@@ -380,7 +382,7 @@ mod tests {
         LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
     };
     use crate::store::sqlite::SqliteStore;
-    use crate::work::task::{AfterMerge, TaskId};
+    use crate::work::task::TaskId;
 
     fn landing(now: OffsetDateTime) -> PrLanding {
         PrLanding::new(
@@ -391,8 +393,6 @@ mod tests {
                 branch: "jack/make-pr-landing-a-watched".to_string(),
                 task_id: None,
                 requested_head_sha: "head-a".to_string(),
-                after_merge: None,
-                next_slug: None,
             },
             now,
         )
@@ -472,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn joining_active_landing_refreshes_head_and_task_disposition() {
+    fn joining_active_landing_refreshes_head_and_preserves_task_placement() {
         let (_directory, store) = store();
         store
             .conn
@@ -483,22 +483,18 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         let mut initial = landing(now);
         initial.task_id = Some(TaskId::new());
-        initial.after_merge = Some(AfterMerge::CompleteTask);
         let created = store.start_or_join_pr_landing(&initial).unwrap();
 
         let mut revised = initial;
         revised.requested_head_sha = "head-b".to_string();
         revised.observed_head_sha = "head-b".to_string();
-        revised.after_merge = Some(AfterMerge::ContinueTask);
-        revised.next_slug = Some("follow-up-proof".to_string());
         revised.worktree = PathBuf::from("/tmp/another-checkout");
         revised.branch = "another-local-branch".to_string();
         let joined = store.start_or_join_pr_landing(&revised).unwrap();
 
         assert_eq!(joined.id, created.id);
+        assert_eq!(joined.task_id, created.task_id);
         assert_eq!(joined.requested_head_sha, "head-b");
-        assert_eq!(joined.after_merge, Some(AfterMerge::ContinueTask));
-        assert_eq!(joined.next_slug.as_deref(), Some("follow-up-proof"));
         assert_eq!(joined.worktree, created.worktree);
         assert_eq!(joined.branch, created.branch);
     }

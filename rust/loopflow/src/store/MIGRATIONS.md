@@ -1,40 +1,67 @@
 # Schema migrations
 
 ```bash
-uv run python scripts/new_migration.py add_wave_colour   # author a draft (no ordinal)
+uv run python scripts/new_migration.py add_wave_colour   # this Task's draft (no ordinal)
 uv run python scripts/check_migrations.py                # what CI and the release run
 ```
 
-Write the SQL below the header, and you are done — there is nothing to paste into
-`migrations.rs`. A **draft** carries a stable snake_case name, an immutable
-authoring id (a 128-bit token, 32 hex chars), and **no ordinal**; it lives at
-`migrations/drafts/<name>__<id>.sql`.
-The draft's file *is* its registration: canonicalization discovers it by scanning
-the directory, and Rust never sees it until the release cut appends the canonical
-`Migration` entry it generates. Because a draft has no ordinal and two branches
-authoring the same name mint different 128-bit ids (materially collision-resistant),
-concurrent branches never contend,
-renumber, or share a registry edit, and the allocator performs no `git fetch` or
-rebase. Ordering that matters — a data migration that must run after another — is
-declared with `--depends-on` (naming another draft or an already-released
-migration), not by a serial number.
+Write the SQL in `migrations/drafts/<name>.sql`, and you are done — there is
+nothing to paste into `migration_catalog.rs`. The file *is* the draft's
+registration and its name is the draft's identity: canonicalization discovers it by
+scanning the directory, and Rust never sees it until the release cut appends the
+canonical `Migration` entry it generates.
+
+## One draft per Task, edited in place
+
+A Task keeps one draft until it lands. When the schema changes again, rewrite that
+file to the final shape; run `new_migration.py` again and it prints the draft the
+branch already has instead of creating another. Nothing has applied an unreleased
+draft except disposable `LF_HOME` experiments, so there is no intermediate schema
+to preserve, migrate from, or test. The same holds for another Task's unreleased
+draft already on main: to change or undo it, edit it — do not add a draft that
+alters or drops what it created.
+
+A draft has no ordinal, so concurrent branches never contend, renumber, or share a
+registry edit. Ordering that matters between Tasks — a draft that must run after
+another draft or after an already-released migration — is declared with
+`--depends-on` (a `-- depends_on:` header), not by a serial number.
+
+Test the upgrade from the released frontier to the finished draft. A custom
+`LF_HOME` is initialized once with the build's exact schema; after editing a
+draft, start a fresh one.
+
+To see a draft on real data, run the branch's lf on the default home. A build
+with drafts never opens `~/.lf/loopflow.db`: the first command clones it to
+`~/.lf/copies/<draft digest>/` (an instant APFS clone of one pinned snapshot),
+applies the drafts there and keeps working on that copy. Editing a draft selects
+a new copy; removing the directory refreshes it. The copy shares captures and
+account homes, so agents run on real credentials, but it cannot push, call
+GitHub or reach Linear, and it never signals the shared store's processes.
+
+First use blocks the command that makes the copy. On 2026-10-20 a release build
+with one `CREATE TABLE` draft took 265 s against an 8.8 GB store with 910k
+`processes` rows. A timed rerun (336 s) split it into: snapshot 0.01 s,
+`apply_set` and the draft SQL under 0.1 s, `validate_foreign_keys` 49 s,
+`validate_persisted_json` 0.6 s, and 284 s to forget the shared store's process
+identity, an `UPDATE` across every `processes` row that fires its per-row
+triggers. Later commands on the same copy pay none of it.
 
 ## The release cut assigns canonical ids
 
 The release PR is the single publication boundary that turns drafts into canonical
-migrations. `lf release run` invokes the canonicalizer with `--release-cut` inside the
+migrations. `lf repo release run` invokes the canonicalizer with `--release-cut` inside the
 release worktree, **after the version bump and before the commit**, so the generated
 files are part of the release PR and run under real Rust CI before the queue merges
-and tags. It freezes the draft set, rejects missing or cyclic dependencies (and two
-drafts sharing a readable name in one cut), and topologically orders it (edges
+and tags. It freezes the draft set, rejects missing or cyclic dependencies, and topologically orders it (edges
 first, ties broken by name — never merge time, PR number, or wall clock). It then
-concatenates the ordered bodies into the release's one
-`<major>.<minor>.<patch>.001_release.sql` batch. `-- draft: <name>` markers retain
-the authoring identities for dependencies and incident review. The cut appends one
+concatenates the ordered bodies into a
+`<major>.<minor>.<patch>.<ordinal>_release.sql` batch, starting at `001`. `-- draft: <name>` markers retain
+the draft names for dependencies and incident review. The cut appends one
 `Migration` entry and deletes all consumed drafts atomically; on any failure it
 restores the tree byte-for-byte. The same drafts and version always produce the
-same id and diff, so an aborted release regenerates identically. A second batch for
-the same package version is rejected. The manual script is a `--check` preview
+same id and diff, so an aborted release regenerates identically. If migrations arrive after the first preparation commit, a corrected release cut
+appends the next batch in the same unpublished version. Earlier batches remain
+byte-for-byte immutable; a preparation commit does not consume a version. The manual script is a `--check` preview
 only; creating canonical files requires `--release-cut`. Rust CI uses the separate
 `--materialize-for-tests` authority in its disposable checkout. The release run is
 the authority that publishes.
@@ -56,18 +83,71 @@ SQLite table rebuild cannot cascade-delete child history. It runs
 `PRAGMA foreign_key_check` before commit and restores enforcement afterward; a
 migration that leaves a dangling reference rolls back as one unit.
 
+That is the only place stored rows are scanned for dangling references during
+ordinary use. Opening a store validates its migration ledger and schema and
+relies on per-connection enforcement; `lf doctor` and installation
+preflight run the full `PRAGMA foreign_key_check`, which reads the whole database.
+
 Persisted JSON is schema too. Changing a required field, enum variant, or wire
-shape in a DTO stored by the database requires an ordinal-free repair draft and
-a typed upgrade test seeded with the previous shape. Before commit, the runner
+shape in a DTO stored by the database requires a repair in the Task's draft and
+a typed upgrade test seeded with the released shape. Before commit, the runner
 deserializes every registered persisted JSON column into its current Rust type
 and reports all incompatible rows together; any failure rolls back the complete
 migration transaction.
+
+Retired Machine landing supervision stays in `pr_landings.retired_supervisor_json`
+with its original Machine, PID, heartbeat and generation. The migration advances
+the claim generation and clears executable supervision without changing delivery
+intent, failures or terminal history. Older executables cannot acquire another
+Machine claim. Historical PIDs are evidence only; they must never be signaled locally.
 
 Before advancing an existing on-disk database, the runner takes a SQLite backup
 inside the same exclusive transaction and publishes it atomically beside the
 database. The filename carries the previously applied migration and a fingerprint
 of the complete ledger plus product schema, so a backup from another branch-local
-history cannot be mistaken for the state being repaired.
+history cannot be mistaken for the state being repaired. Once a migration
+commits, the two newest backups with that fingerprinted name stay and older ones
+are removed; a file named any other way is never touched.
+
+## Older lf keeps opening an additively extended store
+
+Every ledger row records a `reader_floor`: the oldest lf that can open the store
+once that migration is applied. The release cut proves each draft additive by
+applying it over the released schema — every old object survives unchanged, new
+objects are tables or non-unique indexes, new columns are nullable or defaulted,
+and no existing row is inserted, updated or deleted. An all-additive batch keeps
+the previous floor; anything else raises it to the release being cut. Force a
+semantic break, such as a new status value an older reader rejects, with
+`-- breaks: <reason>` in the draft. Nothing declares a draft additive.
+
+```text
+canonicalizing 1 draft(s) into 0.15.0.001_release:
+  draft drop_waves [(none)]
+lf < 0.15.0 can no longer open the store (raised by: drop_waves)
+```
+
+Rename, drop and reshape directly; the floor rises to that release and the
+cut says so. We do not stage reader-first rollouts (add, dual-write, drop
+later) yet, so a floor only ever stays put or rises to the release being cut.
+
+A raised floor goes to `release/unreleased/BREAKING.md`, from there into the
+release notes and the release PR title, and `lf install promote` prints it
+before advancing. It is visibility, not a gate. Releases cut before floors
+existed count as breaking at their own version.
+
+An ordinary open accepts a newer tail when its highest floor is at or below the
+running lf, and then requires every object this build expects to be present
+unchanged; tables may have gained columns. Otherwise it refuses with
+`this store needs lf 0.15.0 or newer (it has 0.15.0.001_release; latest known 0.14.9.001_release); install it with lf install`.
+Promotion never applies history it does not know; selecting an older lf the
+floor admits, as a rollback does, applies nothing and is allowed.
+
+New code must accept what an older writer leaves behind. While older lf still
+runs, it writes rows without the new columns, so read `NULL` there sensibly, and
+avoid `INSERT OR REPLACE` on extended tables: an older writer's replace drops
+the newer columns. Runtime SQL names its columns — `check_migrations.py` rejects
+positional `INSERT ... VALUES` and `SELECT *` outside tests — and JSON persisted
+in the store tolerates fields it does not know.
 
 ## The one rule
 
@@ -84,18 +164,20 @@ the last release tag and fails the build if one moved.
   same ids and names. A file nobody registered never runs; a registry entry whose
   id, name, and file disagree is a lie about what a database applied.
 - The registry is in id order. New canonical ids match the full package version,
-  use ordinal `001`, and name the single batch `release`. Known historical
+  use increasing ordinals starting at `001`, and name each batch `release`. Known historical
   three-part ids remain valid; no new one can be introduced.
 - Every canonical migration already on `origin/main` has the same ordinal, name, and
   bytes.
 - Nothing that shipped in the last release tag has changed.
-- Every draft under `drafts/` is well-formed: a snake_case name matching its file, a
-  `-- name:` header, no collision with a released migration name, and a `depends_on`
-  graph that resolves to other drafts with no cycle. Drafts have no ordinal, so they
-  are never compared against `origin/main`.
+- Every draft under `drafts/` is well-formed: a snake_case `<name>.sql`, no
+  collision with a released migration name, and a `depends_on` graph that resolves
+  to other drafts or released migrations with no cycle. Drafts have no ordinal, so they
+  are never compared against `origin/main`. The check prints which drafts would
+  raise the reader floor.
+- Runtime SQL names its columns: no positional `INSERT ... VALUES`, no `SELECT *`.
 
-It runs in CI, and — because `lf release` cuts a tag from local state and never
-reads a CI result — `lf release check` and `lf release run` run it themselves
+It runs in CI, and — because `lf repo release` cuts a tag from local state and never
+reads a CI result — `lf repo release check` and `lf repo release run` run it themselves
 before anything is cut. Same script, both paths.
 
 ## Identity
@@ -103,7 +185,7 @@ before anything is cut. Same script, both paths.
 ```text
 0.12.2.001_release.sql
  │  │ │  │   └── canonical batch name
- │  │ │  └────── ordinal; one batch means every release uses 001
+ │  │ │  └────── ordinal; corrected cuts append 002, 003, …
  └──┴─┴───────── package major.minor.patch that published the batch
 ```
 
@@ -113,7 +195,7 @@ before anything is cut. Same script, both paths.
   release-scoped ids in the same major/minor line. A binary skipped from `1.1.0`
   to `1.2.0` applies every missing patch and minor batch in that order.
 - The file stem *is* the `schema_migrations.version` string. `MigrationId` in
-  `migrations.rs` is the only thing that formats or parses it.
+  `migration_catalog.rs` is the only thing that formats or parses it.
 - The ledger records the SQL checksum, parent-history fingerprint, build
   provenance, source checkout and revision, and package version. Old canonical
   rows receive checksums when the provenance migration first runs; their writer
@@ -123,13 +205,27 @@ before anything is cut. Same script, both paths.
 
 ## What a database can be told
 
+The build generates the canonical schema reference from the registered SQL using
+the bundled SQLite library, then embeds its schema values in the binary. Canonical
+and development validation share the existing per-process cache keyed by exact
+ordered migration SQL; the generated reference seeds its canonical entry. Drafts
+and historical prefixes construct their reference on first use. Each validation
+compares the actual database schema, including constraints, indexes, triggers and
+foreign keys. The process reads that schema once per file and SQLite schema cookie
+(`PRAGMA schema_version`, bumped by every committed DDL change from any process);
+in-memory databases and reads inside a write transaction always read afresh.
+Neither cache holds a validity result, an open SQLite connection or the ledger:
+applied versions, checksums and reader floors are read on every open.
+
 | State | Message |
 | --- | --- |
 | Behind the chain | applies the missing tail and continues |
 | Unpublished build against `~/.lf/loopflow.db` | validates the applied prefix without running its pending migrations |
 | Pre-namespace `001_initial` stamp | adopted as `0.10.001_initial` — same bytes, no data moved |
 | Known leading migration names under branch-local ordinals | verifies the complete product schema, rewrites the ledger to canonical order, then continues |
-| Carries an unknown id | reports the unknown and latest-known ids — a newer release or a divergent local build wrote it |
+| Newer migrations within this lf's reader floor | opens; this build's schema must survive unchanged |
+| Newer migrations above this lf's reader floor | names the lf version the store needs |
+| Carries an unknown id not past this build's history | reports the unknown and latest-known ids — a newer release or a divergent local build wrote it |
 | Skipped a migration, or drifted from the chain's schema | *delete loopflow.db and rerun* |
 
 ## Why there is no separate "schema change without a migration" check

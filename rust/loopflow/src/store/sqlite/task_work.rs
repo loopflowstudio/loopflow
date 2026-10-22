@@ -1,0 +1,1555 @@
+//! One association rule for CLI and Desktop. Membership is additive to binding;
+//! it never rewrites event attribution or follows causal parent Processes.
+
+use std::collections::HashMap;
+
+use crate::durable::TaskId;
+use crate::id::LfProcessId;
+use crate::ops::workflow::{
+    Workflow, WorkflowActor, WorkflowMove, WorkflowMoveKind, WorkflowPosition,
+};
+use crate::process::LfProcess;
+use crate::store::StoreResult;
+use crate::task_work::{TaskSession, TaskWork};
+use crate::workflow::{WorkflowDefinition, END, START};
+
+use super::SqliteStore;
+
+fn tasks(selector: &str) -> String {
+    format!("SELECT id,worktree,checkout_machine_id FROM tasks WHERE id={selector} OR issue_identifier={selector} OR external_issue_id={selector}")
+}
+
+fn checkout(cwd: &str) -> String {
+    // Component boundaries avoid /repo.task matching /repo.task-other. Paths
+    // remain usable after checkout removal; SQL LIKE would treat '%' as syntax.
+    format!("tw.checkout_machine_id=(SELECT id FROM machines WHERE route='local') AND tw.worktree!='' AND ({cwd}=rtrim(tw.worktree,'/') OR instr({cwd},rtrim(tw.worktree,'/')||'/')=1)")
+}
+
+fn process_membership(conn: &rusqlite::Connection, process: &str) -> StoreResult<String> {
+    let current = checkout(&format!("{process}.cwd"));
+    // Read-only clients also inspect released databases before promotion.
+    // Those schemas cannot have relocation receipts; leave them untouched.
+    let relocations: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='relocated_task_processes' AND type='table')",
+        [], |row| row.get(0),
+    )?;
+    Ok(if relocations {
+        format!("(({current}) AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id={process}.id)) OR EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.task_id=tw.id AND r.process_id={process}.id)")
+    } else {
+        current
+    })
+}
+
+fn session_membership(session: &str) -> String {
+    format!(
+        "{session}.primary_scope IS NULL
+         AND ({session}.task_id=tw.id OR ({}))",
+        checkout(&format!("{session}.cwd")),
+    )
+}
+
+pub(super) fn session_ids(selector: &str) -> String {
+    format!(
+        "SELECT a.id FROM agent_sessions a JOIN ({}) tw ON ({})",
+        tasks(selector),
+        session_membership("a")
+    )
+}
+
+pub(super) fn session_tasks(session: &str) -> String {
+    format!(
+        "SELECT tw.id FROM tasks tw WHERE {} ORDER BY tw.id",
+        session_membership(session)
+    )
+}
+
+pub(super) fn lf_process_ids(conn: &rusqlite::Connection, selector: &str) -> StoreResult<String> {
+    // History and attachments share one query-local membership; the partial
+    // index skips retained events that name no Process.
+    Ok(format!("WITH members AS MATERIALIZED ({})
+        SELECT ae.id FROM processes ae JOIN ({}) tw ON ({})
+        UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL
+        UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL
+        UNION SELECT p.id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members)",
+        session_ids(selector), tasks(selector), process_membership(conn, "ae")?))
+}
+
+/// Prefer the deepest checkout when membership names more than one Task.
+/// Explicit Session bindings use the same association as Task inventory.
+pub(super) fn task_of_process(
+    conn: &rusqlite::Connection,
+    process: &LfProcessId,
+) -> StoreResult<Option<String>> {
+    use rusqlite::OptionalExtension;
+    Ok(conn
+        .query_row(
+            &format!(
+                "WITH members AS MATERIALIZED (
+                    SELECT session_id AS id FROM session_events INDEXED BY session_process_membership
+                        WHERE lf_process_id=?1
+                    UNION SELECT agent_session_id FROM processes
+                        WHERE kind='agent' AND attached_lf_process_id=?1 AND agent_session_id IS NOT NULL)
+                 SELECT tw.id FROM tasks tw JOIN processes e ON e.id=?1
+                 WHERE ({}) OR EXISTS(SELECT 1 FROM agent_sessions a
+                    WHERE a.id IN (SELECT id FROM members) AND ({}))
+                 ORDER BY length(tw.worktree) DESC, tw.id LIMIT 1",
+                process_membership(conn, "e")?, session_membership("a")
+            ),
+            [process],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+/// Each Task in `tasks` paired with each Graph among its work. Membership is
+/// driven from the Graphs, so asking for every Task costs one reading: a Graph
+/// joins the checkout that is its directory or one of its ancestors, the same
+/// containment `checkout` tests from the other side.
+fn task_graph_pairs(conn: &rusqlite::Connection, tasks: &str) -> StoreResult<String> {
+    let relocations: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='relocated_task_processes' AND type='table')",
+        [], |row| row.get(0),
+    )?;
+    let (unmoved, relocated) = if relocations {
+        (
+            "WHERE NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id=f.id)",
+            "UNION SELECT r.task_id, r.process_id FROM relocated_task_processes r JOIN tw ON tw.id=r.task_id
+                WHERE r.process_id IN (SELECT id FROM f)",
+        )
+    } else {
+        ("", "")
+    };
+    Ok(format!(
+        "WITH RECURSIVE tw AS MATERIALIZED ({tasks}),
+            f AS MATERIALIZED (SELECT e.id, e.cwd FROM graph_processes fp JOIN processes e ON e.id=fp.lf_process_id),
+            up(id, path) AS (SELECT id, cwd FROM f {unmoved}
+                UNION ALL SELECT id, rtrim(rtrim(path, replace(path,'/','')),'/') FROM up WHERE path!=''),
+            checkouts AS MATERIALIZED (SELECT id, rtrim(worktree,'/') AS root FROM tw
+                WHERE checkout_machine_id=(SELECT id FROM machines WHERE route='local') AND worktree!=''),
+            links(session_id, graph) AS (
+                SELECT se.session_id, se.lf_process_id FROM session_events se INDEXED BY session_events_process
+                    WHERE se.lf_process_id IN (SELECT id FROM f)
+                UNION SELECT p.agent_session_id, p.attached_lf_process_id FROM processes p
+                    WHERE p.kind='agent' AND p.attached_lf_process_id IN (SELECT id FROM f) AND p.agent_session_id IS NOT NULL
+                UNION SELECT p.agent_session_id, p.id FROM processes p
+                    WHERE p.kind='agent' AND p.id IN (SELECT id FROM f) AND p.agent_session_id IS NOT NULL)
+         SELECT c.id AS task_id, up.id AS graph FROM up JOIN checkouts c ON c.root=up.path
+         {relocated}
+         UNION SELECT tw.id, l.graph FROM links l JOIN agent_sessions a ON a.id=l.session_id JOIN tw ON ({})",
+        session_membership("a"),
+    ))
+}
+
+pub(super) fn graphs_of_task(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+) -> StoreResult<Vec<crate::ops::graph_process::GraphProcess>> {
+    super::graph_inventory::graphs_in(
+        conn,
+        &format!(
+            "e.id IN (SELECT graph FROM ({}))",
+            task_graph_pairs(conn, &tasks("?1"))?
+        ),
+        &[&task.as_str()],
+    )
+}
+
+/// Each Task's most recently launched Graph, for every Task in one reading.
+fn latest_task_graphs(
+    conn: &rusqlite::Connection,
+) -> StoreResult<HashMap<TaskId, crate::ops::graph_process::GraphProcess>> {
+    let mut latest = HashMap::new();
+    let mut query = conn.prepare(&format!(
+        "SELECT task_id, graph FROM ({}) pairs
+         ORDER BY (SELECT e.rowid FROM processes e WHERE e.id=pairs.graph)",
+        task_graph_pairs(conn, "SELECT id,worktree,checkout_machine_id FROM tasks")?
+    ))?;
+    for row in query.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })? {
+        let (task, graph) = row?;
+        latest.insert(task, graph);
+    }
+    let ids = serde_json::to_string(&latest.values().collect::<Vec<_>>())?;
+    let graphs: HashMap<_, _> = super::graph_inventory::graphs_in(
+        conn,
+        "e.id IN (SELECT value FROM json_each(?1))",
+        &[&ids],
+    )?
+    .into_iter()
+    .map(|graph| (graph.process.id.to_string(), graph))
+    .collect();
+    latest
+        .into_iter()
+        .map(|(task, graph)| {
+            let task = TaskId::parse(&task)
+                .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+            let graph = graphs.get(&graph).cloned().ok_or_else(|| {
+                crate::store::StoreError::InvalidData(format!("Graph {graph} has no Graph process"))
+            })?;
+            Ok((task, graph))
+        })
+        .collect()
+}
+
+/// The Task's workflow row: its definition, the node it waits at or left,
+/// and the edge it is on with the Process carrying it.
+type WorkflowRow = (WorkflowDefinition, String, Option<(u32, LfProcess)>);
+
+fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<WorkflowRow>> {
+    use rusqlite::OptionalExtension;
+    let Some((graph, node, edge, process)) = conn
+        .query_row(
+            "SELECT graph,node,edge,lf_process_id FROM task_workflows WHERE task_id=?1",
+            [task.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<u32>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        )
+        .optional()?
+    else {
+        return Ok(None);
+    };
+    let edge = match edge.zip(process) {
+        Some((edge, process)) => Some((
+            edge,
+            conn.query_row(
+                &format!("{} WHERE e.id=?1", super::processes::PROCESS_SELECT),
+                [process],
+                super::processes::read_process,
+            )?,
+        )),
+        None => None,
+    };
+    Ok(Some((serde_json::from_str(&graph)?, node, edge)))
+}
+
+fn workflow_moves(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec<WorkflowMove>> {
+    conn.prepare(
+        "SELECT m.workflow,m.kind,m.from_node,m.to_node,m.edge,m.lf_process_id,e.caller_session_id,m.note,m.at
+         FROM task_workflow_moves m LEFT JOIN processes e ON e.id=m.lf_process_id
+         WHERE m.task_id=?1 ORDER BY m.seq",
+    )?
+    .query_and_then([task.as_str()], |row| {
+        let kind: String = row.get(1)?;
+        let kind = WorkflowMoveKind::parse(&kind).ok_or_else(|| {
+            crate::store::StoreError::InvalidData(format!("unknown workflow move {kind:?}"))
+        })?;
+        // An arrival is the edge's own; any other move is its caller's.
+        let session_id = row
+            .get::<_, Option<String>>(6)?
+            .filter(|_| kind != WorkflowMoveKind::Arrived);
+        Ok(WorkflowMove {
+            workflow: row.get(0)?,
+            kind,
+            from: row.get(2)?,
+            to: row.get(3)?,
+            edge: row.get(4)?,
+            lf_process_id: row.get(5)?,
+            actor: match (kind, &session_id) {
+                (WorkflowMoveKind::Arrived, _) => WorkflowActor::Edge,
+                (_, Some(_)) => WorkflowActor::Conversation,
+                (_, None) => WorkflowActor::Person,
+            },
+            session_id: session_id.map(Into::into),
+            note: row.get(7)?,
+            at: row.get(8)?,
+        })
+    })?
+    .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_workflow_move(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+    workflow: &str,
+    kind: WorkflowMoveKind,
+    (from, to): (&str, &str),
+    edge: Option<u32>,
+    by: Option<&LfProcessId>,
+    note: Option<&str>,
+) -> StoreResult<()> {
+    conn.execute(
+        "INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,lf_process_id,note,at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        rusqlite::params![
+            task.as_str(),
+            workflow,
+            kind.as_str(),
+            from,
+            to,
+            edge,
+            by,
+            note,
+            crate::store::rows::now_unix()
+        ],
+    )?;
+    Ok(())
+}
+
+/// How a Task reaches `end`.
+#[derive(Debug, Clone)]
+pub(crate) enum EndMove {
+    /// The edge the calling process carried it along succeeded.
+    Arrive,
+    /// It leaves by an edge that runs nothing.
+    Choose { workflow: Workflow, edge: u32 },
+    /// It is put there. A Task with no Workflow is put at the end of one
+    /// with nothing between.
+    Set,
+}
+
+fn choose_edge_in(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+    workflow: &Workflow,
+    edge: u32,
+    by: Option<&LfProcessId>,
+    note: Option<&str>,
+) -> StoreResult<bool> {
+    if super::durable::task_state_in(tx, task)? == crate::durable::TaskState::Paused {
+        return Err(crate::store::StoreError::InvalidAuthority(
+            "Task is paused; resume it before running a Graph".into(),
+        ));
+    }
+    let chosen = &workflow.definition.edges[edge as usize];
+    let stopped = match &workflow.position {
+        WorkflowPosition::Node { .. } => None,
+        WorkflowPosition::Edge { lf_process_id, .. } => Some(lf_process_id.as_str()),
+    };
+    let carried = chosen.graph.is_some();
+    let left = tx.execute(
+        "UPDATE task_workflows SET node=?2,edge=?3,lf_process_id=?4,updated_at=?5
+         WHERE task_id=?1 AND node=?6 AND lf_process_id IS ?7",
+        rusqlite::params![
+            task.as_str(),
+            if carried { &chosen.from } else { &chosen.to },
+            carried.then_some(edge),
+            by.filter(|_| carried),
+            crate::store::rows::now_unix(),
+            chosen.from,
+            stopped
+        ],
+    )?;
+    if left == 0 {
+        return Ok(false);
+    }
+    append_workflow_move(
+        tx,
+        task,
+        &workflow.definition.name,
+        WorkflowMoveKind::Chose,
+        (&chosen.from, &chosen.to),
+        Some(edge),
+        by,
+        note,
+    )?;
+    Ok(true)
+}
+
+fn arrive_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, by: &LfProcessId) -> StoreResult<()> {
+    let Some((definition, _, Some((edge, carrier)))) = workflow_row(tx, task)? else {
+        return Ok(());
+    };
+    if &carrier.id != by {
+        return Ok(());
+    }
+    let arrived = &definition.edges[edge as usize];
+    tx.execute(
+        "UPDATE task_workflows SET node=?2,edge=NULL,lf_process_id=NULL,updated_at=?3 WHERE task_id=?1",
+        rusqlite::params![task.as_str(), arrived.to, crate::store::rows::now_unix()],
+    )?;
+    append_workflow_move(
+        tx,
+        task,
+        &definition.name,
+        WorkflowMoveKind::Arrived,
+        (&arrived.from, &arrived.to),
+        Some(edge),
+        Some(by),
+        None,
+    )
+}
+
+fn set_node_in(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+    node: &str,
+    by: Option<&LfProcessId>,
+    note: Option<&str>,
+) -> StoreResult<bool> {
+    let Some((definition, from, edge)) = workflow_row(tx, task)? else {
+        return Ok(false);
+    };
+    tx.execute(
+        "UPDATE task_workflows SET node=?2,edge=NULL,lf_process_id=NULL,updated_at=?3 WHERE task_id=?1",
+        rusqlite::params![task.as_str(), node, crate::store::rows::now_unix()],
+    )?;
+    append_workflow_move(
+        tx,
+        task,
+        &definition.name,
+        WorkflowMoveKind::Set,
+        (&from, node),
+        edge.map(|(edge, _)| edge),
+        by,
+        note,
+    )?;
+    Ok(true)
+}
+
+fn stands_at_end(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1 AND node=?2 AND edge IS NULL)",
+        [task.as_str(), END],
+        |row| row.get(0),
+    )?)
+}
+
+/// Make `how` for the Task. Returns whether this move put it at `end`: false
+/// when it already stood there, or when the move no longer applied.
+pub(super) fn reach_end_in(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+    how: &EndMove,
+    by: Option<&LfProcessId>,
+    note: Option<&str>,
+) -> StoreResult<bool> {
+    if stands_at_end(tx, task)? {
+        return Ok(false);
+    }
+    match how {
+        EndMove::Arrive => {
+            if let Some(by) = by {
+                arrive_in(tx, task, by)?;
+            }
+        }
+        EndMove::Choose { workflow, edge } => {
+            choose_edge_in(tx, task, workflow, *edge, by, note)?;
+        }
+        EndMove::Set => {
+            if !set_node_in(tx, task, END, by, note)? {
+                let unplanned = crate::workflow::unplanned();
+                tx.execute(
+                    "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,?3,?4)",
+                    rusqlite::params![
+                        task.as_str(),
+                        serde_json::to_string(&unplanned)?,
+                        END,
+                        crate::store::rows::now_unix()
+                    ],
+                )?;
+                append_workflow_move(
+                    tx,
+                    task,
+                    &unplanned.name,
+                    WorkflowMoveKind::Set,
+                    (START, END),
+                    None,
+                    by,
+                    note,
+                )?;
+            }
+        }
+    }
+    let arrived = stands_at_end(tx, task)?;
+    if arrived {
+        super::children::request_completion_in(tx, task, note)?;
+    }
+    Ok(arrived)
+}
+
+/// Match unfinished Processes through checkout, Session history and attachments.
+/// Start from the small unfinished inventory and retain the attachment partial index.
+fn task_open_process_ids(conn: &rusqlite::Connection) -> StoreResult<String> {
+    let session = session_membership("a");
+    Ok(format!(
+        "WITH task_scope AS MATERIALIZED (SELECT id,worktree,checkout_machine_id FROM tasks WHERE id=?1),
+        open AS MATERIALIZED (SELECT id,cwd,agent_session_id,attached_lf_process_id FROM processes INDEXED BY processes_unfinished
+            WHERE completed_at IS NULL),
+        sessions AS (SELECT DISTINCT se.lf_process_id AS process,se.session_id AS session
+            FROM open CROSS JOIN session_events se ON se.lf_process_id=open.id
+            UNION SELECT p.attached_lf_process_id,p.agent_session_id FROM open CROSS JOIN processes p INDEXED BY agent_process_attachment ON p.attached_lf_process_id=open.id WHERE p.kind='agent'
+            UNION SELECT id,agent_session_id FROM open WHERE agent_session_id IS NOT NULL)
+        SELECT open.id FROM open JOIN task_scope tw ON {}
+        UNION SELECT s.process FROM sessions s JOIN agent_sessions a ON a.id=s.session
+            JOIN task_scope tw ON ({session})",
+        process_membership(conn, "open")?
+    ))
+}
+
+fn members(
+    tx: &rusqlite::Connection,
+    task: &TaskId,
+) -> StoreResult<(
+    Vec<TaskSession>,
+    Vec<crate::durable::GraphProcessInventoryEntry>,
+)> {
+    let sessions = tx
+        .prepare(&format!(
+            "SELECT s.id,s.title,s.interactive,{},s.completed_at
+            FROM agent_sessions s WHERE s.id IN ({}) ORDER BY s.created_at,s.id",
+            super::sessions::SESSION_GRAPH,
+            session_ids("?1")
+        ))?
+        .query_and_then([task.as_str()], |row| {
+            Ok(TaskSession {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                interactive: row.get(2)?,
+                graph_lf_process_id: row.get(3)?,
+                completed_at: row.get(4)?,
+            })
+        })?
+        .collect::<StoreResult<Vec<_>>>()?;
+    let graphs = graphs_of_task(tx, task)?
+        .iter()
+        .map(|graph| super::graph_inventory::entry_in(tx, graph))
+        .collect::<StoreResult<Vec<_>>>()?;
+    Ok((sessions, graphs))
+}
+
+impl SqliteStore {
+    pub(crate) fn reach_workflow_end(
+        &self,
+        task: &TaskId,
+        how: &EndMove,
+        note: Option<&str>,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let by = crate::journal::current_lf_process_id();
+        let moved = reach_end_in(&tx, task, how, by.as_ref(), note)?;
+        tx.commit()?;
+        Ok(moved)
+    }
+
+    pub(crate) fn session_task_ids(&self, session: &str) -> StoreResult<Vec<TaskId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "SELECT tw.id FROM tasks tw JOIN agent_sessions a ON a.id=?1 WHERE {} ORDER BY tw.id",
+            session_membership("a")
+        ))?;
+        let rows = query.query_map([session], |row| row.get::<_, String>(0))?;
+        rows.map(|row| {
+            TaskId::parse(&row?)
+                .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
+        })
+        .collect()
+    }
+
+    /// Current workspace facts, without enumerating mechanical Process history.
+    pub fn task_overview(&self, task: &TaskId) -> StoreResult<crate::task_work::TaskOverview> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.savepoint()?;
+        let (sessions, graph_processes) = members(&tx, task)?;
+        let workflow = workflow_row(&tx, task)?;
+        let history = workflow_moves(&tx, task)?;
+        tx.commit()?;
+        drop(conn);
+        Ok(crate::task_work::TaskOverview {
+            sessions,
+            graph_processes,
+            workflow: workflow.map(|row| self.read_workflow(row, history)),
+        })
+    }
+
+    /// Read all three owners in one SQLite snapshot, including closed history.
+    pub fn task_work(&self, task: &TaskId) -> StoreResult<TaskWork> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.savepoint()?;
+        let (sessions, graphs) = members(&tx, task)?;
+        let processes = tx
+            .prepare(&format!(
+                "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
+                super::processes::PROCESS_SELECT,
+                lf_process_ids(&tx, "?1")?
+            ))?
+            .query_map([task.as_str()], super::processes::read_process)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let workflow = workflow_row(&tx, task)?;
+        let history = workflow_moves(&tx, task)?;
+        tx.commit()?;
+        drop(conn);
+        let workflow = workflow.map(|row| self.read_workflow(row, history));
+        Ok(TaskWork {
+            sessions,
+            graph_processes: graphs,
+            processes,
+            workflow,
+        })
+    }
+
+    /// Single-Task execution gates need neither other Tasks nor retained Session/Graph payloads.
+    pub(crate) fn task_open_processes(&self, task: &TaskId) -> StoreResult<Vec<LfProcess>> {
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
+        let mut query = conn.prepare(&format!(
+            "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
+            super::processes::PROCESS_SELECT,
+            task_open_process_ids(&conn)?,
+        ))?;
+        let processes = query
+            .query_map([task.as_str()], super::processes::read_process)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(processes)
+    }
+
+    /// Whether a command with no recorded exit may still be running.
+    /// Unknown is not stopped.
+    pub(crate) fn process_may_run(&self, process: &crate::process::LfProcess) -> bool {
+        crate::journal::process_evidence(self, &process.id)
+            != crate::journal::ProcessIdentityEvidence::Dead
+    }
+
+    /// The Task's Workflow with its history.
+    pub(crate) fn workflow(&self, task: &TaskId) -> StoreResult<Option<Workflow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let Some(row) = workflow_row(&conn, task)? else {
+            return Ok(None);
+        };
+        let history = workflow_moves(&conn, task)?;
+        drop(conn);
+        Ok(Some(self.read_workflow(row, history)))
+    }
+
+    /// Whether the carrying Graph still runs is its Process's, read here.
+    fn read_workflow(
+        &self,
+        (definition, node, edge): WorkflowRow,
+        history: Vec<WorkflowMove>,
+    ) -> Workflow {
+        let position = match edge {
+            None => WorkflowPosition::Node { node },
+            Some((edge, process)) => WorkflowPosition::Edge {
+                edge,
+                lf_process_id: process.id.to_string(),
+                running: process.completed_at.is_none() && self.process_may_run(&process),
+            },
+        };
+        Workflow::new(definition, position, history)
+    }
+
+    /// Take up `definition` for the Task as it is defined now, at `start`.
+    /// It replaces the Task's earlier Workflow; the history stays.
+    pub(crate) fn take_up_workflow(
+        &self,
+        task: &TaskId,
+        definition: &WorkflowDefinition,
+        by: &LfProcessId,
+        note: Option<&str>,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT OR REPLACE INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,?3,?4)",
+            rusqlite::params![
+                task.as_str(),
+                serde_json::to_string(definition)?,
+                START,
+                crate::store::rows::now_unix()
+            ],
+        )?;
+        append_workflow_move(
+            &tx,
+            task,
+            &definition.name,
+            WorkflowMoveKind::TookUp,
+            (START, START),
+            None,
+            Some(by),
+            note,
+        )?;
+        Ok(tx.commit()?)
+    }
+
+    /// Leave by `edge`, one of `workflow.outgoing`. An edge with a Graph puts
+    /// the Task on it, carried by `by`; one that runs nothing puts it at its
+    /// target. Returns false, writing nothing, when the Task is no longer
+    /// where `workflow` read it, so two choosers cannot both leave.
+    pub(crate) fn choose_workflow_edge(
+        &self,
+        task: &TaskId,
+        workflow: &Workflow,
+        edge: u32,
+        by: &LfProcessId,
+        note: Option<&str>,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let left = choose_edge_in(&tx, task, workflow, edge, Some(by), note)?;
+        tx.commit()?;
+        Ok(left)
+    }
+
+    /// The edge `by` carried the Task along succeeded: put the Task at its
+    /// target. A Task no longer on that edge stays where it was put.
+    pub(crate) fn arrive_workflow_edge(&self, task: &TaskId, by: &LfProcessId) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        arrive_in(&tx, task, by)?;
+        Ok(tx.commit()?)
+    }
+
+    /// Put the Task at `node` of its Workflow, running nothing. Returns
+    /// false when the Task has no Workflow.
+    pub(crate) fn set_workflow_node(
+        &self,
+        task: &TaskId,
+        node: &str,
+        by: &LfProcessId,
+        note: Option<&str>,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let set = set_node_in(&tx, task, node, Some(by), note)?;
+        tx.commit()?;
+        Ok(set)
+    }
+
+    /// The node `by`'s edge enters, while the Task is still on that edge.
+    pub(crate) fn workflow_edge_target(
+        &self,
+        task: &TaskId,
+        by: &LfProcessId,
+    ) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(match workflow_row(&conn, task)? {
+            Some((definition, _, Some((edge, carrier)))) if &carrier.id == by => {
+                Some(definition.edges[edge as usize].to.clone())
+            }
+            _ => None,
+        })
+    }
+
+    /// Each Task's most recently launched Graph, read for every Task at once.
+    pub(crate) fn latest_task_graphs(
+        &self,
+    ) -> StoreResult<HashMap<TaskId, crate::ops::graph_process::GraphProcess>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        latest_task_graphs(&conn)
+    }
+
+    /// Every Graph among the Task's work, oldest first.
+    pub(crate) fn task_graphs(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Vec<crate::ops::graph_process::GraphProcess>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        graphs_of_task(&conn, task)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU32;
+
+    use rusqlite::params;
+
+    use crate::durable::{GraphProcessFilter, ProjectId, TaskId};
+    use crate::id::{LfProcessId, TraceId, WaveId};
+    use crate::process::{LfProcessFilter, LfProcessWorkFilter};
+    use crate::session::SessionFilter;
+    use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn paused_task_retains_workflow_and_resumes_without_execution() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let task = TaskId::new();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        let by = LfProcessId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo/task',1)",
+                params![by, crate::id::TraceId::new()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO projects(id,wave_id,created_at) VALUES(?1,?2,1)",
+                params![project.as_str(), wave],
+            )
+            .unwrap();
+        }
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE waves SET current_project_id=?1 WHERE id=?2",
+                params![project.as_str(), wave],
+            )
+            .unwrap();
+        store
+            .create_task(&crate::work::task::NewTask {
+                repository_id: store.ensure_repository("/repo").unwrap(),
+                id: task.clone(),
+                project_id: Some(project),
+                title: "Retained Task".into(),
+                description: "Brief".into(),
+                due_date: None,
+            })
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET worktree='/repo/task' WHERE id=?1",
+                [task.as_str()],
+            )
+            .unwrap();
+        let definition = crate::workflow::WorkflowDefinition {
+            name: "proof".into(),
+            nodes: vec![],
+            edges: vec![crate::workflow::WorkflowEdge {
+                from: "start".into(),
+                to: "end".into(),
+                graph: Some("pursue".into()),
+            }],
+        };
+        store
+            .take_up_workflow(&task, &definition, &by, None)
+            .unwrap();
+        let before = store.workflow(&task).unwrap().unwrap();
+        store.set_task_paused(&task, true).unwrap();
+        store.set_task_paused(&task, true).unwrap();
+        assert_eq!(
+            store.task_state(&task).unwrap(),
+            crate::durable::TaskState::Paused
+        );
+        assert!(!store
+            .task_automation(&task)
+            .unwrap()
+            .enabled
+            .unwrap_or(true));
+        assert!(store
+            .choose_workflow_edge(&task, &before, 0, &LfProcessId::new(), None)
+            .is_err());
+        assert_eq!(store.workflow(&task).unwrap().unwrap(), before);
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        assert_eq!(
+            store.task_state(&task).unwrap(),
+            crate::durable::TaskState::Paused
+        );
+        store.set_task_paused(&task, false).unwrap();
+        assert_eq!(
+            store.task_state(&task).unwrap(),
+            crate::durable::TaskState::Ready
+        );
+        assert_eq!(store.workflow(&task).unwrap().unwrap(), before);
+        assert_eq!(
+            store.task(&task).unwrap().unwrap().worktree,
+            Some(std::path::PathBuf::from("/repo/task"))
+        );
+    }
+
+    #[test]
+    fn end_request_is_atomic_and_survives_reopening_the_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let task = TaskId::new();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        {
+            let mut conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)",params![project.as_str(),wave]).unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,workspace_slug,branch,base_commit,created_at,updated_at,issue_title,issue_description,pm_snapshot_synced_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/repo','proof','proof','head',1,1,'Findings','Accepted findings',1)",params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute_batch("CREATE TRIGGER refuse_request BEFORE INSERT ON task_events WHEN json_extract(NEW.kind_json,'$.kind')='completion_requested' BEGIN SELECT RAISE(ABORT,'unavailable'); END").unwrap();
+            {
+                let tx = conn.transaction().unwrap();
+                assert!(super::reach_end_in(&tx, &task, &super::EndMove::Set, None, None).is_err());
+            }
+            assert!(!super::stands_at_end(&conn, &task).unwrap());
+            conn.execute_batch("DROP TRIGGER refuse_request").unwrap();
+            let tx = conn.transaction().unwrap();
+            assert!(super::reach_end_in(&tx, &task, &super::EndMove::Set, None, None).unwrap());
+            tx.commit().unwrap();
+        }
+        let (request, _) = store.task_completion_pending(&task).unwrap().unwrap();
+        store
+            .fail_task_completion(&task, request, "provider unavailable")
+            .unwrap();
+        let workflow = store.workflow(&task).unwrap();
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        assert_eq!(
+            store.task_completion_pending(&task).unwrap(),
+            Some((request, "provider unavailable".into()))
+        );
+        let retained = store.task(&task).unwrap().unwrap();
+        assert!(store.complete_task(&retained, request).unwrap());
+        assert!(store.complete_task(&retained, request).unwrap());
+        assert!(store.task_completion_pending(&task).unwrap().is_none());
+        assert_eq!(store.workflow(&task).unwrap(), workflow);
+        let conn = store.conn.lock().unwrap();
+        assert_eq!(
+            super::super::durable::task_state_in(&conn, &task).unwrap(),
+            crate::durable::TaskState::Done
+        );
+        let completed: i64 = conn.query_row("SELECT count(*) FROM task_events WHERE task_id=?1 AND json_extract(kind_json,'$.kind')='completed'",[task.as_str()],|row| row.get(0)).unwrap();
+        assert_eq!(completed, 1);
+        drop(conn);
+        store.reopen_task(&task, Some("Continue findings")).unwrap();
+        assert!(!store.complete_task(&retained, request).unwrap());
+        assert!(store.task_completion_pending(&task).unwrap().is_none());
+        assert_eq!(store.workflow(&task).unwrap(), workflow);
+        assert_ne!(
+            store.task_state(&task).unwrap(),
+            crate::durable::TaskState::Done
+        );
+    }
+
+    #[test]
+    fn every_task_latest_graph_matches_its_own_graphs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        let (task, sibling, idle) = (TaskId::new(), TaskId::new(), TaskId::new());
+        let mut graphs = Vec::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
+            conn.execute(
+                "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_proof','/repo',1)",
+                [],
+            )
+            .unwrap();
+            // A sibling whose path extends the Task's is not inside it.
+            for (id, n, worktree) in [
+                (&task, 1, "/repo/task/"),
+                (&sibling, 2, "/repo/task-other"),
+                (&idle, 3, "/repo/idle"),
+            ] {
+                conn.execute("INSERT INTO tasks(repository_id,id,project_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES('repo_proof',?1,?2,?3,?4,1,(SELECT id FROM machines WHERE route='local'))", params![id.as_str(), project.as_str(), format!("PROOF-{n}"), worktree]).unwrap();
+            }
+            for cwd in [
+                "/repo/task",
+                "/repo/task-other",
+                "/repo/task/deep/er",
+                "/repo/task-other/x",
+                "/elsewhere",
+            ] {
+                let id = LfProcessId::new();
+                conn.execute(
+                    "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,?3,1)",
+                    params![id, TraceId::new(), cwd],
+                )
+                .unwrap();
+                graphs.push(id);
+            }
+        }
+        let graph = crate::graph::compiled::CompiledGraph::new("proof", &[]);
+        for id in &graphs {
+            store.record_graph_process(id, &graph).unwrap();
+        }
+        let latest = store.latest_task_graphs().unwrap();
+        for id in [&task, &sibling, &idle] {
+            assert_eq!(
+                latest.get(id),
+                store.task_graphs(id).unwrap().last(),
+                "{id}"
+            );
+        }
+        assert_eq!(
+            latest[&task].process.cwd.as_deref(),
+            Some("/repo/task/deep/er")
+        );
+        assert_eq!(
+            latest[&sibling].process.cwd.as_deref(),
+            Some("/repo/task-other/x")
+        );
+        assert!(!latest.contains_key(&idle));
+    }
+
+    #[test]
+    fn process_membership_does_not_read_events_that_name_no_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let task = TaskId::new();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        let turn = LfProcessId::new();
+        let finished = LfProcessId::new();
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+            [&wave],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
+        conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+        conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/repo/task',1,(SELECT id FROM machines WHERE route='local'))", params![task.as_str(), project.as_str()]).unwrap();
+        // The Session is bound, and its Processes ran elsewhere: only event
+        // history associates them with the Task.
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,task_id,wave_id,cwd)
+            VALUES('bound','bound','human',1,0,?1,?2,'/elsewhere')", params![task.as_str(), wave]).unwrap();
+        for (id, completed) in [(&turn, None), (&finished, Some(2))] {
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome) VALUES(?1,?2,'/elsewhere',1,?3,?4)",
+                params![id, TraceId::new(), completed, completed.map(|_: i64| "succeeded")],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload)
+                VALUES('bound','started',?1,?1,1,'{}')", [id]).unwrap();
+        }
+        let read = |unfinished: bool, expected: &[&LfProcessId]| {
+            let mut query = conn
+                .prepare(&format!(
+                    "{} WHERE {} e.id IN ({}) ORDER BY e.started_at DESC,e.id",
+                    super::super::processes::PROCESS_SELECT,
+                    if unfinished {
+                        "e.completed_at IS NULL AND"
+                    } else {
+                        ""
+                    },
+                    super::lf_process_ids(&conn, "?1").unwrap()
+                ))
+                .unwrap();
+            let mut ids = query
+                .query_map([task.as_str()], |row| row.get::<_, LfProcessId>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+            let mut expected: Vec<_> = expected.iter().map(|id| (*id).clone()).collect();
+            expected.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+            assert_eq!(ids, expected);
+            query.get_status(rusqlite::StatementStatus::VmStep)
+        };
+        let before = (read(true, &[&turn]), read(false, &[&turn, &finished]));
+        for n in 0..2_000 {
+            conn.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+                VALUES('bound','observed',?1,1,'{}')",
+                [n.to_string()],
+            )
+            .unwrap();
+        }
+        let after = (read(true, &[&turn]), read(false, &[&turn, &finished]));
+        assert!(
+            after.0 <= before.0 * 2 && after.1 <= before.1 * 2,
+            "Events naming no Process increased membership work: {before:?} → {after:?}"
+        );
+        // Cleanup must ignore completed Process history as it grows, including
+        // attachment lookup for unrelated completed providers.
+        let cleanup_cost = || {
+            let mut query = conn
+                .prepare(&super::task_open_process_ids(&conn).unwrap())
+                .unwrap();
+            let ids = query
+                .query_map([task.as_str()], |row| row.get::<_, LfProcessId>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(ids, vec![turn.clone()]);
+            (
+                query.get_status(rusqlite::StatementStatus::VmStep),
+                query.get_status(rusqlite::StatementStatus::FullscanStep),
+            )
+        };
+        let before_cleanup = cleanup_cost();
+        for n in 0..2_000 {
+            let id = LfProcessId::new();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,cwd,started_at,completed_at)
+                VALUES(?1,?1,'/unrelated',1,2)",
+                [&id],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+            conn.execute(
+                "INSERT INTO tasks(repository_id,id,project_id,issue_identifier,created_at,branch)
+                VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,?3,1,?3)",
+                params![TaskId::new().as_str(), project.as_str(), format!("OLD-{n}")],
+            )
+            .unwrap();
+        }
+        let after_cleanup = cleanup_cost();
+        eprintln!("cleanup VM/full-scan steps: {before_cleanup:?} → {after_cleanup:?}");
+        assert!(
+            after_cleanup.0 <= before_cleanup.0 * 2 && after_cleanup.1 <= before_cleanup.1 * 2,
+            "Unrelated history increased cleanup scans: {before_cleanup:?} → {after_cleanup:?}"
+        );
+        // Graph reads start from the Graphs without losing historical association
+        // when the Graph ran outside the Task's checkout.
+        conn.execute(
+            "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'proof','{}')",
+            [&finished],
+        )
+        .unwrap();
+        let pairs = super::task_graph_pairs(&conn, &super::tasks("?1")).unwrap();
+        let read_graphs = || {
+            let mut statement = conn.prepare(&pairs).unwrap();
+            let selected = statement
+                .query_map([task.as_str()], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(selected, vec![finished.to_string()]);
+            statement.get_status(rusqlite::StatementStatus::VmStep)
+        };
+        let before = read_graphs();
+        for _ in 0..2_000 {
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/unrelated',1)",
+                params![LfProcessId::new(), TraceId::new()],
+            )
+            .unwrap();
+        }
+        let after = read_graphs();
+        assert!(
+            after <= before * 2,
+            "Unrelated commands increased Graph membership work: {before} → {after}"
+        );
+        // Every Task's Graphs are one reading driven from the Graphs, so Sessions
+        // that reach no Graph cost nothing however many Tasks are read. On
+        // October 18, 2026 each Task rescanned all 4,246 of Jack Heart's
+        // Sessions: 2.3 s for 622 Tasks.
+        let every_task =
+            super::task_graph_pairs(&conn, "SELECT id,worktree,checkout_machine_id FROM tasks")
+                .unwrap();
+        let read_every_task = || {
+            let mut statement = conn.prepare(&every_task).unwrap();
+            let pairs = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(pairs, vec![(task.to_string(), finished.to_string())]);
+            statement.get_status(rusqlite::StatementStatus::VmStep)
+        };
+        let before = read_every_task();
+        for n in 0..2_000 {
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,task_id,wave_id,cwd)
+                VALUES(?1,'quiet','human',1,0,?2,?3,'/repo/task')", params![format!("quiet-{n}"), task.as_str(), wave]).unwrap();
+        }
+        let after = read_every_task();
+        assert!(
+            after <= before * 2,
+            "Sessions reaching no Graph increased every Task's Graph reading: {before} → {after}"
+        );
+    }
+
+    #[tokio::test]
+    async fn task_checkout_machine_keeps_session_filters_beside_other_machines() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let other = loopflow_test_support::TestRepo::new();
+        let dir = tempfile::tempdir().unwrap();
+        let alias = dir.path().join("alias");
+        std::os::unix::fs::symlink(repo.path(), &alias).unwrap();
+        std::fs::create_dir(repo.path().join("sub")).unwrap();
+        let store = std::sync::Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                dir.path().join("db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let home = store.local_machine().await.unwrap().id;
+        let task = TaskId::new();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        {
+            let conn = store.sqlite.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','Retained Task',?3,1,(SELECT id FROM machines WHERE route='local'))",params![task.as_str(),project.as_str(),repo.path().to_str().unwrap()]).unwrap();
+            for (id, path, scope) in [
+                ("a-alias", alias.join("sub"), None),
+                ("b-subdir", repo.path().join("sub"), None),
+                ("c-repo", repo.path().to_path_buf(), Some("repository")),
+                ("d-orphan", other.path().to_path_buf(), None),
+            ] {
+                conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,primary_scope,interactive) VALUES(?1,?1,'human',1,0,?2,?3,1)",params![id,path.to_str().unwrap(),scope]).unwrap();
+                super::super::sessions::test_capture(
+                    &conn,
+                    id,
+                    &crate::session_record::new_artifact_key(),
+                );
+            }
+        }
+        let remote = crate::durable::MachineId::new();
+        store
+            .sqlite
+            .add_machine(&remote, "worker", "worker")
+            .unwrap();
+        let mut filter = SessionFilter {
+            task: Some("PROOF-1".into()),
+            limit: 1,
+            after: Some(String::new()),
+            ..Default::default()
+        };
+        for expected in ["a-alias", "b-subdir"] {
+            let page = crate::ops::human_session::list(&store, &filter)
+                .await
+                .unwrap();
+            assert_eq!(page.len(), 1);
+            assert_eq!(page[0].id, expected);
+            assert_eq!(page[0].task_ids, vec![task.clone()]);
+            assert_eq!(page[0].workspace.as_ref().unwrap().machine_id, home);
+            filter.after = Some(page[0].id.to_string());
+        }
+        filter.task = None;
+        filter.orphan = true;
+        filter.after = Some(String::new());
+        for expected in ["c-repo", "d-orphan"] {
+            let page = crate::ops::human_session::list(&store, &filter)
+                .await
+                .unwrap();
+            assert_eq!(page.len(), 1);
+            assert_eq!(page[0].id, expected);
+            assert!(page[0].task_ids.is_empty());
+            filter.after = Some(page[0].id.to_string());
+        }
+    }
+
+    #[test]
+    fn scoped_sessions_stay_out_of_tasks_and_orphan_pages_include_only_unassociated_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let task = TaskId::new();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/repo/task',1,(SELECT id FROM machines WHERE route='local'))",params![task.as_str(),project.as_str()]).unwrap();
+            for (id, scope, wave_id, cwd) in [
+                ("a-task", None, None, "/repo/task/sub"),
+                ("b-repo", Some("repository"), None, "/repo/task"),
+                ("c-wave", Some("wave"), Some(wave.as_str()), "/repo/task"),
+                ("d-orphan", None, None, "/repo/other"),
+                (
+                    "e-wave-attribution",
+                    None,
+                    Some(wave.as_str()),
+                    "/repo/task",
+                ),
+            ] {
+                conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,primary_scope,wave_id,interactive) VALUES(?1,?1,'human',1,0,?2,?3,?4,1)",params![id,cwd,scope,wave_id]).unwrap();
+                super::super::sessions::test_capture(
+                    &conn,
+                    id,
+                    &crate::session_record::new_artifact_key(),
+                );
+            }
+        }
+        assert_eq!(
+            store.session_task_ids("a-task").unwrap(),
+            vec![task.clone()]
+        );
+        assert_eq!(
+            store.session_task_ids("e-wave-attribution").unwrap(),
+            vec![task]
+        );
+        for id in ["b-repo", "c-wave", "d-orphan"] {
+            assert!(store.session_task_ids(id).unwrap().is_empty());
+        }
+        let mut filter = SessionFilter {
+            orphan: true,
+            limit: 1,
+            after: Some(String::new()),
+            ..Default::default()
+        };
+        for expected in ["b-repo", "c-wave", "d-orphan"] {
+            let page = store.session_summaries(&filter, 0).unwrap();
+            assert_eq!(page.len(), 1);
+            assert_eq!(page[0].id, expected);
+            filter.after = Some(page[0].id.to_string());
+        }
+        assert!(store.session_summaries(&filter, 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_ownership() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let task = TaskId::new();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        let mechanical = LfProcessId::new();
+        let bound_process = LfProcessId::new();
+        let sibling = LfProcessId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/missing/task%_',1,(SELECT id FROM machines WHERE route='local'))", params![task.as_str(), project.as_str()]).unwrap();
+            for (id, cwd, bound, complete) in [
+                ("manual", "/missing/task%_/src", false, false),
+                ("conversation", "/missing/task%_", false, false),
+                ("history", "/elsewhere", true, true),
+                ("sibling", "/missing/task%_-other", false, false),
+                ("wildcard", "/missing/taskAB", false, false),
+            ] {
+                conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id,completed_at)
+                    VALUES(?1,?1,'human',1,0,?2,?3,?4,?5)", params![id,cwd,bound.then(|| task.as_str()),bound.then_some(wave.as_str()),complete.then_some(2)]).unwrap();
+            }
+            for id in ["manual", "conversation", "history", "sibling", "wildcard"] {
+                super::super::sessions::test_capture(
+                    &conn,
+                    id,
+                    &crate::session_record::new_artifact_key(),
+                );
+            }
+            for (id, cwd) in [
+                (&mechanical, "/missing/task%_"),
+                (&bound_process, "/elsewhere"),
+                (&sibling, "/missing/task%_-other"),
+            ] {
+                conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome) VALUES(?1,?2,?3,1,2,'succeeded')", params![id, TraceId::new(), cwd]).unwrap();
+            }
+            // Binding includes earlier Processes in the inventory without assigning
+            // their earlier performed work or usage to this Task.
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','before-bind',?1,1,'{}')", [&bound_process]).unwrap();
+            conn.execute(
+                "UPDATE processes SET parent_lf_process_id=?1 WHERE id=?2",
+                params![mechanical, sibling],
+            )
+            .unwrap();
+        }
+        // A Graph is the Task's work when its Processes ran in the checkout.
+        let independent = store.test_graph(
+            "independent",
+            "/missing/task%_/sub",
+            &[("implement", None)],
+            None,
+        );
+        store.test_graph("unrelated", "/other", &[("implement", None)], None);
+        let work = store.task_work(&task).unwrap();
+        assert_eq!(
+            work.sessions
+                .iter()
+                .map(|s| s.id.as_str())
+                .collect::<Vec<_>>(),
+            ["conversation", "history", "manual"]
+        );
+        assert_eq!(
+            work.graph_processes
+                .iter()
+                .map(|f| f.summary.id.as_str())
+                .collect::<Vec<_>>(),
+            [independent.as_str()]
+        );
+        assert_eq!(
+            work.graph_processes[0].summary.task_id.as_ref(),
+            Some(&task)
+        );
+        assert_eq!(work.processes.len(), 4);
+        // The open reading agrees with the full one about unfinished Processes.
+        let initial_open = store.task_open_processes(&task).unwrap();
+        assert_eq!(initial_open.len(), 2);
+        assert!(initial_open
+            .iter()
+            .all(|process| process.completed_at.is_none()));
+        let unfinished = LfProcessId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/elsewhere',1)",
+                params![unfinished, TraceId::new()],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','open',?1,1,'{}')", [&unfinished]).unwrap();
+        }
+        let open = store.task_open_processes(&task).unwrap();
+        assert_eq!(open.len(), 3);
+        assert!(open.iter().any(|process| process.id == unfinished));
+        // With every Process unfinished, each membership path agrees: checkout,
+        // Session event and attachment.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TEMP TABLE finished AS SELECT id,completed_at FROM processes;
+             UPDATE processes SET completed_at=NULL;",
+            )
+            .unwrap();
+        let ids = |processes: Vec<crate::process::LfProcess>| {
+            processes
+                .into_iter()
+                .map(|process| process.id)
+                .collect::<Vec<_>>()
+        };
+        let all = ids(store.task_work(&task).unwrap().processes);
+        assert_eq!(all.len(), 5);
+        assert_eq!(ids(store.task_open_processes(&task).unwrap()), all);
+        store.conn.lock().unwrap().execute_batch(
+            "UPDATE processes SET completed_at=(SELECT completed_at FROM finished WHERE finished.id=processes.id);
+             DROP TABLE finished;",
+        )
+        .unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("DELETE FROM session_events WHERE receipt_key='open'", [])
+                .unwrap();
+            conn.execute("DELETE FROM processes WHERE id=?1", [&unfinished])
+                .unwrap();
+        }
+        assert!(work
+            .processes
+            .iter()
+            .any(|process| process.id == mechanical));
+        assert!(work
+            .processes
+            .iter()
+            .any(|process| process.id == bound_process));
+        assert_eq!(
+            store.session_task_ids("manual").unwrap(),
+            std::slice::from_ref(&task)
+        );
+        assert!(store.session_task_ids("sibling").unwrap().is_empty());
+        let summaries = store
+            .session_summaries(
+                &SessionFilter {
+                    task: Some("PROOF-1".into()),
+                    interactive: None,
+                    history: true,
+                    ..Default::default()
+                },
+                0,
+            )
+            .unwrap();
+        assert_eq!(summaries.len(), work.sessions.len());
+        assert!(summaries
+            .iter()
+            .all(|session| session.task_ids == std::slice::from_ref(&task)));
+        let graphs = store
+            .graph_inventory(
+                &GraphProcessFilter {
+                    task_id: Some(task.clone()),
+                    ..Default::default()
+                },
+                None,
+                NonZeroU32::new(100).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(graphs.entries, work.graph_processes);
+        // The Graph's step is the only work performed in the checkout.
+        let performed = store
+            .processes(
+                &LfProcessFilter {
+                    performed_work: Some(LfProcessWorkFilter::Task(task.clone())),
+                    ..Default::default()
+                },
+                None,
+                NonZeroU32::new(100).unwrap(),
+            )
+            .unwrap();
+        let (graph, _) = store.graph_process(independent.as_str()).unwrap().unwrap();
+        assert_eq!(
+            performed
+                .entries
+                .iter()
+                .map(|process| &process.id)
+                .collect::<Vec<_>>(),
+            [&graph.steps[0].process.id]
+        );
+
+        let child = TaskId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'child','PROOF-2','/missing/task%_/child',1,(SELECT id FROM machines WHERE route='local'))", params![child.as_str(), project.as_str()]).unwrap();
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('child-session','Child','human',1,0,'/missing/task%_/child',?1,?2)", params![child.as_str(), wave]).unwrap();
+        }
+        // A nested checkout's work is also its enclosing Task's.
+        let child_graph = store.test_graph(
+            "child",
+            "/missing/task%_/child",
+            &[("implement", None)],
+            None,
+        );
+        let work = store.task_work(&task).unwrap();
+        assert!(work
+            .graph_processes
+            .iter()
+            .any(|graph| graph.summary.id == child_graph.as_str()));
+        assert!(work
+            .sessions
+            .iter()
+            .any(|session| session.id == "child-session"));
+        let memberships = store.session_task_ids("child-session").unwrap();
+        assert!(memberships.contains(&task) && memberships.contains(&child));
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("UPDATE tasks SET worktree='' WHERE id=?1", [task.as_str()])
+                .unwrap();
+        }
+        let work = store.task_work(&task).unwrap();
+        assert_eq!(
+            work.sessions
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            ["history"]
+        );
+        assert!(work.graph_processes.is_empty());
+
+        // A Graph explicitly bound through a Session remains visible after the
+        // checkout disappears. Inventory and Task status use the same rule.
+        let bound_graph = store.test_graph("bound", "/elsewhere", &[], None);
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','bound-graph',?1,3,'{}')", [&bound_graph]).unwrap();
+        }
+        let work = store.task_work(&task).unwrap();
+        assert_eq!(work.graph_processes.len(), 1);
+        assert_eq!(work.graph_processes[0].summary.id, bound_graph.as_str());
+        assert_eq!(
+            work.graph_processes[0].summary.task_id.as_ref(),
+            Some(&task)
+        );
+        let (_, entry) = store.graph_process(bound_graph.as_str()).unwrap().unwrap();
+        assert_eq!(entry.summary.task_id.as_ref(), Some(&task));
+        assert_eq!(entry.summary.wave_id.as_ref(), Some(&wave));
+    }
+}

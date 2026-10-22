@@ -65,25 +65,31 @@ public enum Typography {
     /// Everything else.
     public static let text = body(13)
     /// Row titles when selected, Session names.
-    public static let textStrong = body(13).weight(.bold)
+    public static let textStrong = strong(13)
     /// Meta, ranks, IDs.
     public static let meta = caption(11)
     /// Section headings and table heads; callers add `.textCase(.uppercase)`
     /// and `.tracking(0.66)` (0.06em).
-    public static let label = caption(11).weight(.bold)
+    public static let label = strong(11)
     /// Skill names, IDs, chips, terminal chrome.
     public static let mono = code(12)
 
+    // Select bundled faces by name; family/weight matching can choose an
+    // account-installed face that is unavailable inside the app sandbox.
     public static func heroTitle(_ size: CGFloat = 32) -> Font {
-        .custom(serifFamily, size: size).weight(.semibold)
+        .custom("CormorantGaramond-SemiBold", size: size)
     }
 
     public static func sectionTitle(_ size: CGFloat = 20) -> Font {
-        .custom(serifFamily, size: size).weight(.medium)
+        .custom("CormorantGaramond-Medium", size: size)
     }
 
     public static func body(_ size: CGFloat = 14) -> Font {
         .custom(sansFamily, size: size)
+    }
+
+    public static func strong(_ size: CGFloat = 14) -> Font {
+        .custom("Lato-Bold", size: size)
     }
 
     public static func caption(_ size: CGFloat = 12) -> Font {
@@ -138,33 +144,51 @@ public extension View {
     }
 
     func keyboardFocusRing(_ isFocused: Bool, cornerRadius: CGFloat = CornerRadius.md) -> some View {
-        overlay(
+        modifier(KeyboardFocusRing(isFocused: isFocused, cornerRadius: cornerRadius))
+    }
+}
+
+private struct KeyboardFocusRing: ViewModifier {
+    let isFocused: Bool
+    let cornerRadius: CGFloat
+    @Environment(\.palette) private var palette
+
+    func body(content: Content) -> some View {
+        content.overlay {
             RoundedRectangle(cornerRadius: cornerRadius)
-                .stroke(Color.accentColor, lineWidth: 2)
+                .strokeBorder(palette.keyboardFocus, lineWidth: 2)
+                .padding(-3)
                 .opacity(isFocused ? 1 : 0)
-        )
+                .allowsHitTesting(false)
+        }
     }
 }
 
 public struct DarkButtonStyle: ButtonStyle {
+    @Environment(\.isFocused) private var focused
     @Environment(\.palette) private var palette
+
+    @State private var hovering = false
 
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(Typography.body())
-            .foregroundStyle(Color.loopflowCream)
+            .foregroundStyle(palette.accentText)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: CornerRadius.md)
-                    .fill(configuration.isPressed ? palette.accentHover : palette.accent)
+                    .fill(configuration.isPressed ? palette.accentPressed : (hovering ? palette.accentHover : palette.accent))
             )
+            .onHover { hovering = $0 }
+            .keyboardFocusRing(focused)
     }
 }
 
 public struct GhostButtonStyle: ButtonStyle {
+    @Environment(\.isFocused) private var focused
     @Environment(\.palette) private var palette
 
     public init() {}
@@ -172,28 +196,32 @@ public struct GhostButtonStyle: ButtonStyle {
     public func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(Typography.body())
-            .foregroundStyle(palette.accent)
+            .foregroundStyle(palette.actionInk)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: CornerRadius.md)
                     .fill(configuration.isPressed ? palette.surfaceMuted : Color.clear)
             )
+            .keyboardFocusRing(focused)
     }
 }
 
 public struct DestructiveButtonStyle: ButtonStyle {
+    @Environment(\.palette) private var palette
+    @Environment(\.isFocused) private var focused
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(Typography.body())
-            .foregroundStyle(Color.statusError)
+            .foregroundStyle(palette.failure)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: CornerRadius.md)
-                    .strokeBorder(Color.statusError.opacity(configuration.isPressed ? 0.8 : 0.5), lineWidth: 1)
+                    .strokeBorder(palette.failure.opacity(configuration.isPressed ? 0.8 : 0.5), lineWidth: 1)
             )
+            .keyboardFocusRing(focused)
     }
 }

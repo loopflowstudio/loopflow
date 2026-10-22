@@ -3,23 +3,22 @@ import Loopflow
 import SwiftUI
 
 /// Collapsed Comments below a Task's Description. The count and thread come
-/// from the selected Task's own Linear read; a failed read keeps any earlier
+/// from the selected Task's planning reader; a failed read keeps any earlier
 /// thread visible and says it may be out of date. Comments are never derived
 /// from the Description.
 struct TaskCommentsView: View {
-    let model: PodiumModel
+    let model: WorkModel
     let task: RoadmapTask
-    let wave: WaveSnapshot
     @Environment(\.palette) private var palette
 
-    private var reading: PodiumReading<TaskComments> { model.comments[task.id] }
+    private var reading: WorkReading<TaskComments> { model.comments[task.id] }
     private var thread: TaskComments? { reading.value }
     private var expanded: Bool { model.navigation.expandedComments.contains(task.id) }
     private var inFlight: Bool { model.comments.inFlight.contains(task.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            WorkspaceDisclosureHeading(
+            WorkDisclosureHeading(
                 title: "Comments",
                 count: thread?.comments.count,
                 expanded: expanded,
@@ -32,17 +31,17 @@ struct TaskCommentsView: View {
                     let navigation = model.navigation
                     if navigation.expandedComments.remove(task.id) == nil {
                         navigation.expandedComments.insert(task.id)
-                        Task { await model.loadComments(task: task, wave: wave) }
+                        Task { await model.loadComments(task: task) }
                     }
                 },
-                retry: { Task { await model.loadComments(task: task, wave: wave) } }
+                retry: { Task { await model.loadComments(task: task) } }
             )
             .padding(.top, Spacing.sm)
             if expanded {
                 if let thread { threadView(thread) } else { statusText }
             }
         }
-        .task(id: task.id) { await model.loadComments(task: task, wave: wave) }
+        .task(id: task.id) { await model.loadComments(task: task) }
     }
 
     private var heading: String {
@@ -68,7 +67,7 @@ struct TaskCommentsView: View {
 
     private func threadView(_ thread: TaskComments) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let reason = reading.errorMessage {
+            if let reason = reading.errorMessage ?? thread.refreshError {
                 Text("Latest read failed: \(reason)")
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
@@ -85,11 +84,21 @@ struct TaskCommentsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                         Text(Self.author(comment.author))
-                            .font(Typography.body(12.5).weight(.bold))
+                            .font(Typography.strong(12.5))
                             .foregroundStyle(palette.text)
+                        if thread.pendingSync.contains(comment.id) {
+                            Text("Pending sync")
+                                .font(Typography.caption(12))
+                                .foregroundStyle(palette.textSecondary)
+                        }
                         Text(Self.date(comment.createdAt))
                             .font(Typography.caption(12))
                             .foregroundStyle(palette.textTertiary)
+                    }
+                    if let conflict = thread.conflicts[comment.id] {
+                        Text("Saved local comment; the planning provider’s edit is current")
+                            .font(Typography.strong(12.5))
+                        MarkdownBlocks(source: Self.readableBody(conflict)).equatable()
                     }
                     let body = Self.readableBody(comment.body)
                     if body.isEmpty {

@@ -1,19 +1,21 @@
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::agent::{build_session_command, AgentConfig, ProviderInvocation};
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::engine::agent::{build_claude_stream_session_args, AgentConfig};
 use crate::harness::claude_mapping::ReaderState;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::{claude_mapping, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome};
+use crate::id::AgentSessionId;
 use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
 use crate::store::ProviderAccountId;
@@ -29,10 +31,12 @@ pub struct ClaudeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
     raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     config: Option<AgentConfig>,
+    capture: Option<crate::agent::AgentCapture>,
     should_seed_task_prompt: bool,
+    skill_input: Option<String>,
     /// Vendor session id captured from the first turn's `system` event; a
     /// respawn (after interrupt/crash) resumes it via `--resume`.
-    provider_session_id: Arc<Mutex<Option<String>>>,
+    agent_session: Arc<Mutex<Option<AgentSessionId>>>,
     account_route: Option<ProviderAccountRoute>,
     requested_account_id: Option<ProviderAccountId>,
     turn_in_progress: Arc<AtomicBool>,
@@ -43,6 +47,7 @@ pub struct ClaudeHarness {
     /// The runner turn id every provider turn in the current coalesced boundary
     /// reports under. Set by `send_input`, read by the reader.
     current_turn_id: Arc<Mutex<Option<String>>>,
+    requests: Arc<Mutex<HashMap<String, crate::session::SessionTurnOrigin>>>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
     reader_task: Option<JoinHandle<()>>,
@@ -58,9 +63,9 @@ impl std::fmt::Debug for ClaudeHarness {
 }
 
 /// Serialize one Claude Code stream-json user message.
-fn user_message_line(text: &str) -> String {
+fn user_message_line(text: &str, id: &str) -> String {
     let message = serde_json::json!({
-        "type": "user",
+        "type": "user", "uuid": id,
         "message": {"role": "user", "content": [{"type": "text", "text": text}]},
     });
     format!("{message}\n")
@@ -72,13 +77,16 @@ impl ClaudeHarness {
             events,
             raw_provider: None,
             config: None,
+            capture: None,
             should_seed_task_prompt: true,
-            provider_session_id: Arc::new(Mutex::new(None)),
+            skill_input: None,
+            agent_session: Arc::new(Mutex::new(None)),
             account_route: None,
             requested_account_id: None,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             pending_results: Arc::new(AtomicI64::new(0)),
             current_turn_id: Arc::new(Mutex::new(None)),
+            requests: Arc::new(Mutex::new(HashMap::new())),
             child: None,
             stdin: None,
             reader_task: None,
@@ -86,6 +94,11 @@ impl ClaudeHarness {
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             interrupt_requested: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    fn turn_origin(&self) -> Result<crate::session::SessionTurnOrigin> {
+        let (store, session, attachment) = self.owner()?;
+        Ok(store.session_turn_origin(&session, &attachment)?)
     }
 
     /// Spawn the persistent stream-json process and its reader, if not already
@@ -96,32 +109,61 @@ impl ClaudeHarness {
         }
         let config = self
             .config
-            .as_ref()
+            .as_mut()
             .ok_or_else(|| anyhow!("claude harness not started"))?;
+        if let (Some(capture), Some((session, attachment))) =
+            (&self.capture, &mut config.session_attachment)
+        {
+            *attachment = capture.prepare_agent_process(session, attachment)?;
+            config.env.insert(
+                crate::process::AGENT_CALLER_ENV.into(),
+                serde_json::to_string(&attachment.caller(session.clone().into()))?,
+            );
+        }
         let resume_id = self
-            .provider_session_id
+            .agent_session
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone();
-        let args = build_claude_stream_session_args(config, resume_id.as_deref());
+        let context_file = crate::agent::write_system_prompt_file(config, "session")?;
+        let mut args = build_session_command(
+            config,
+            ProviderInvocation::ClaudeStream {
+                session_id: resume_id.as_ref(),
+            },
+            context_file.as_deref(),
+        )?
+        .args;
+        if let Some(invocation) = &config.skill_invocation {
+            let (flags, input) = invocation.claude_input(config)?;
+            args.extend(flags);
+            self.skill_input = Some(input);
+        }
         let mut cmd = Command::new("claude");
         cmd.args(&args);
-        super::configure_agent_env(&mut cmd, config);
-        if let Some(route) = &self.account_route {
-            route.apply_tokio(&mut cmd);
+        if let Some(context) = &config.conversation_context {
+            cmd.args(super::context::claude_args(context)?);
         }
+        super::configure_agent_env(&mut cmd, config);
+        if let Some(context) = &config.conversation_context {
+            context.configure_hooks(cmd.as_std_mut())?;
+        }
+        let activation = match &self.account_route {
+            Some(route) => route.launch_as(cmd.as_std_mut()).await?,
+            None => None,
+        };
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         if let Some(cwd) = &config.cwd {
             cmd.current_dir(cwd);
         }
-        super::configure_vendor_tokio_env(&mut cmd)?;
+        super::configure_vendor_std_env(cmd.as_std_mut())?;
         self.shutdown_requested.store(false, Ordering::SeqCst);
 
-        let mut child = cmd
-            .spawn()
-            .map_err(|err| anyhow!("failed to spawn claude: {err}"))?;
+        let owner = self.owner()?;
+        let mut child = super::agent_process::spawn(cmd, None, &owner)?;
+        drop(activation);
         let stdin = child
             .stdin
             .take()
@@ -135,7 +177,15 @@ impl ClaudeHarness {
             .take()
             .ok_or_else(|| anyhow!("failed to capture claude stderr"))?;
 
-        self.spawn_reader(stdout);
+        self.spawn_reader(
+            stdout,
+            super::claude_history::History {
+                owner,
+                requests: self.requests.clone(),
+                pending: VecDeque::new(),
+                activity: Default::default(),
+            },
+        );
         self.stderr_task = Some(spawn_stderr_logger(stderr, "claude_harness"));
         self.stdin = Some(stdin);
         self.child = Some(child);
@@ -144,7 +194,11 @@ impl ClaudeHarness {
 
     /// The persistent NDJSON reader: maps events for the whole process lifetime
     /// and emits one `TurnCompleted` per coalesced runner turn.
-    fn spawn_reader(&mut self, stdout: tokio::process::ChildStdout) {
+    fn spawn_reader(
+        &mut self,
+        stdout: tokio::process::ChildStdout,
+        mut history: super::claude_history::History,
+    ) {
         let events = self.events.clone();
         let raw_provider = self.raw_provider.clone();
         let turn_in_progress = self.turn_in_progress.clone();
@@ -152,7 +206,7 @@ impl ClaudeHarness {
         let current_turn_id = self.current_turn_id.clone();
         let shutdown = self.shutdown_requested.clone();
         let interrupted = self.interrupt_requested.clone();
-        let session_slot = self.provider_session_id.clone();
+        let session_slot = self.agent_session.clone();
         let account_route = self.account_route.clone();
         self.reader_task = Some(tokio::spawn(async move {
             let reader = BufReader::new(stdout);
@@ -204,8 +258,22 @@ impl ClaudeHarness {
                     }
                 }
 
+                if let Err(error) = history.record(&line) {
+                    let _ = events.send(ConversationEvent::Error {
+                        code: "claude_history".into(),
+                        message: error.to_string(),
+                        evidence: None,
+                    });
+                    break;
+                }
                 let result = claude_mapping::process_line(&line, &turn_id(), &events, &mut state);
-                if let Some(session_id) = state.take_provider_session_id() {
+                if let Some(session_id) = state.take_agent_session() {
+                    let (store, session, attachment) = &history.owner;
+                    if let Err(error) =
+                        store.record_session_agent_session(session, attachment, &session_id)
+                    {
+                        tracing::warn!(%error, "could not select Claude native conversation");
+                    }
                     *session_slot
                         .lock()
                         .expect("claude provider session id lock poisoned") =
@@ -258,12 +326,14 @@ impl ClaudeHarness {
 
     /// Tear the persistent process down and reap its tasks. The next
     /// `send_input` respawns and resumes the captured session.
-    async fn kill_process(&mut self) {
-        self.stdin = None;
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+    async fn kill_process(&mut self) -> Result<()> {
+        if self.child.is_some() {
+            super::agent_process::stop(&self.owner()?)?;
+            // Common close proves group death and reaps our leader. Dropping
+            // the Tokio handle also permits its reaper to collect a late zombie.
+            self.child = None;
         }
+        self.stdin = None;
         if let Some(task) = self.reader_task.take() {
             let mut task = task;
             if tokio::time::timeout(Duration::from_secs(2), &mut task)
@@ -280,11 +350,51 @@ impl ClaudeHarness {
         }
         self.pending_results.store(0, Ordering::SeqCst);
         self.turn_in_progress.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn owner(&self) -> Result<super::agent_process::AttachmentOwner> {
+        super::agent_process::open_owner(
+            self.config
+                .as_ref()
+                .and_then(|config| config.session_attachment.as_ref()),
+        )
+    }
+
+    async fn send_line(&mut self, line: String) -> Result<()> {
+        let mut stdin = self
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("claude stdin not available"))?;
+        let (store, session, attachment) = match self.owner() {
+            Ok(owner) => owner,
+            Err(error) => {
+                self.stdin = Some(stdin);
+                return Err(error);
+            }
+        };
+        let (stdin, result) = tokio::task::spawn_blocking(move || {
+            let result = store.with_session_dispatch(&session, &attachment, || {
+                super::dispatch::write_fenced(&mut stdin, line.as_bytes())
+            });
+            (stdin, result)
+        })
+        .await?;
+        self.stdin = Some(stdin);
+        result?;
+        Ok(())
     }
 }
 
 #[async_trait]
 impl Harness for ClaudeHarness {
+    fn set_capture(&mut self, capture: Option<crate::agent::AgentCapture>) {
+        self.capture = capture;
+    }
+    fn pid(&self) -> Option<u32> {
+        self.child.as_ref().and_then(Child::id)
+    }
+
     fn set_raw_provider_sender(
         &mut self,
         raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
@@ -294,13 +404,13 @@ impl Harness for ClaudeHarness {
 
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
         let requested_session = self
-            .provider_session_id
+            .agent_session
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone();
         let account_route = resolve_provider_account_exact(
             Provider::Claude,
-            requested_session.as_deref(),
+            requested_session.as_ref(),
             self.requested_account_id.as_ref(),
         )
         .await?;
@@ -309,7 +419,7 @@ impl Harness for ClaudeHarness {
             .is_some_and(|route| !route.resume_requested_session())
         {
             *self
-                .provider_session_id
+                .agent_session
                 .lock()
                 .expect("claude provider session id lock poisoned") = None;
         }
@@ -319,9 +429,6 @@ impl Harness for ClaudeHarness {
         let mut version_command = Command::new("claude");
         version_command.arg("--version");
         super::configure_agent_env(&mut version_command, config);
-        if let Some(route) = &self.account_route {
-            route.apply_tokio(&mut version_command);
-        }
         let output = version_command.output().await;
         match output {
             Ok(out) if out.status.success() => {
@@ -357,6 +464,13 @@ impl Harness for ClaudeHarness {
         }
         let mut turn_guard = TurnInProgressGuard::new(self.turn_in_progress.clone());
 
+        self.interrupt_requested.store(false, Ordering::SeqCst);
+        self.ensure_process().await?;
+        let skill_input = self
+            .should_seed_task_prompt
+            .then(|| self.skill_input.take())
+            .flatten();
+
         // The first message of a run carries the task prompt as a preamble.
         let mut turn_content = content.to_string();
         if self.should_seed_task_prompt {
@@ -373,10 +487,12 @@ impl Harness for ClaudeHarness {
             }
         }
 
-        self.interrupt_requested.store(false, Ordering::SeqCst);
-        self.ensure_process().await?;
-
-        let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
+        let origin = self.turn_origin()?;
+        let turn_id = uuid::Uuid::new_v4().to_string();
+        self.requests
+            .lock()
+            .expect("Claude request lock poisoned")
+            .insert(turn_id.clone(), origin);
         *self
             .current_turn_id
             .lock()
@@ -387,49 +503,70 @@ impl Harness for ClaudeHarness {
             turn_id: turn_id.clone(),
         });
 
-        let stdin = self
-            .stdin
-            .as_mut()
-            .ok_or_else(|| anyhow!("claude stdin not available"))?;
-        if let Err(error) = stdin
-            .write_all(user_message_line(&turn_content).as_bytes())
-            .await
-        {
+        // Send non-query skill context and the correlated query through one
+        // write/error path, so either write failure tears down the process.
+        let mut seed = String::new();
+        if let Some(input) = skill_input {
+            if !turn_content.is_empty() {
+                seed = format!(
+                    "{}\n",
+                    serde_json::json!({
+                        "type": "user", "shouldQuery": false,
+                        "message": {"role": "user", "content": turn_content}
+                    })
+                );
+            }
+            turn_content = input;
+        }
+        seed.push_str(&user_message_line(&turn_content, &turn_id));
+        if let Err(error) = self.send_line(seed).await {
             // The process died between spawn and write; tear it down so the
             // next send_input respawns cleanly.
             drop(turn_guard);
-            self.kill_process().await;
+            self.kill_process().await?;
             return Err(anyhow!("failed to write claude seed message: {error}"));
         }
-        let _ = stdin.flush().await;
 
         turn_guard.disarm();
         Ok(())
     }
 
     async fn send_current(&mut self, content: &str) -> SendCurrentOutcome {
-        let Some(stdin) = self.stdin.as_mut() else {
+        if self.stdin.is_none() {
             return SendCurrentOutcome::NotSteerable;
-        };
+        }
         // Atomically join the open boundary. A separate bool check followed by
         // `fetch_add` races the reader's final `fetch_sub`: a steer could be
         // accepted after TurnCompleted and escape as a second boundary.
         if self
             .pending_results
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |pending| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |pending| {
                 (pending > 0).then(|| pending.saturating_add(1))
             })
             .is_err()
         {
             return SendCurrentOutcome::NotSteerable;
         }
-        if let Err(error) = stdin.write_all(user_message_line(content).as_bytes()).await {
+        let origin = match self.turn_origin() {
+            Ok(origin) => origin,
+            Err(error) => {
+                self.pending_results.fetch_sub(1, Ordering::SeqCst);
+                return SendCurrentOutcome::Failed {
+                    error: error.to_string(),
+                };
+            }
+        };
+        let request = uuid::Uuid::new_v4().to_string();
+        self.requests
+            .lock()
+            .expect("Claude request lock poisoned")
+            .insert(request.clone(), origin);
+        if let Err(error) = self.send_line(user_message_line(content, &request)).await {
             self.pending_results.fetch_sub(1, Ordering::SeqCst);
             return SendCurrentOutcome::Failed {
                 error: format!("failed to write claude steer: {error}"),
             };
         }
-        let _ = stdin.flush().await;
         let provider_turn_id = self
             .current_turn_id
             .lock()
@@ -449,28 +586,26 @@ impl Harness for ClaudeHarness {
             return Ok(());
         }
         self.interrupt_requested.store(true, Ordering::SeqCst);
-        self.kill_process().await;
-        Ok(())
+        self.kill_process().await
     }
 
     async fn stop(&mut self) -> Result<()> {
         self.shutdown_requested.store(true, Ordering::SeqCst);
-        self.kill_process().await;
-        Ok(())
+        self.kill_process().await
     }
 
-    fn provider_session_id(&self) -> Option<String> {
-        self.provider_session_id
+    fn agent_session(&self) -> Option<AgentSessionId> {
+        self.agent_session
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone()
     }
 
-    fn set_provider_session_id(&mut self, provider_session_id: Option<String>) {
+    fn set_agent_session(&mut self, agent_session: Option<AgentSessionId>) {
         *self
-            .provider_session_id
+            .agent_session
             .lock()
-            .expect("claude provider session id lock poisoned") = provider_session_id;
+            .expect("claude provider session id lock poisoned") = agent_session;
     }
 
     fn set_provider_account_id(&mut self, account_id: Option<ProviderAccountId>) {
@@ -485,25 +620,320 @@ impl Harness for ClaudeHarness {
 }
 
 #[cfg(test)]
+mod activity_tests {
+    use std::time::Duration;
+
+    use tokio::process::Command;
+    use tokio::sync::mpsc;
+
+    use super::ClaudeHarness;
+    use crate::harness::Harness;
+    use crate::session_record::{
+        activity, CaptureHandle, SessionCaptureSpec, SessionGraphMembership,
+    };
+
+    #[tokio::test]
+    async fn claude_body_activity_does_not_require_process_group_authority() {
+        let home = tempfile::tempdir().unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut harness = ClaudeHarness::new(tx);
+        harness.child = Some(
+            Command::new("sleep")
+                .arg("300")
+                .kill_on_drop(true)
+                .spawn()
+                .unwrap(),
+        );
+        let capture = CaptureHandle::begin_at(
+            home.path(),
+            SessionCaptureSpec {
+                harness: "claude".into(),
+                model: None,
+                surface: "headless".into(),
+                cwd: home.path().into(),
+                repo: None,
+                worktree: None,
+                skill: None,
+                subjects: vec![],
+                graph: SessionGraphMembership::Independent,
+                work: None,
+            },
+        )
+        .unwrap();
+        capture.observe_activity(harness.pid()).await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if activity::read(home.path(), &capture.artifact_key()).await
+                    == activity::Activity::Running
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("a live Claude child must have observable CPU without a process group");
+        assert_eq!(harness.process_group_id(), None);
+        // The injected child was never admitted; kill_on_drop ends it.
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
 
-    // build_claude_session_turn_args coverage lives in engine::agent::tests.
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Isolate provider and database selection.
+    async fn claude_stop_fences_takeover_and_ends_the_recorded_groups() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let original_path = std::env::var_os("PATH").unwrap_or_default();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN", "PATH"]);
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("loopflow.db");
+        std::env::set_var("LF_HOME", home.path());
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+        let conn = rusqlite::Connection::open(&database).unwrap();
+        let process = crate::id::LfProcessId::new();
+        conn.execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+            [&process],
+        )
+        .unwrap();
+        let script = home.path().join("claude");
+        std::fs::write(&script, "#!/bin/sh\nwhile read -r line; do printf '%s\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"ok\"}'; done\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Vendor setup rebuilds PATH from the process environment, not AgentConfig.
+        let mut paths = vec![home.path().to_path_buf()];
+        paths.extend(std::env::split_paths(&original_path));
+        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let mut harnesses = Vec::new();
+        let mut recorded = Vec::new();
+        for id in ["first", "second"] {
+            store.test_session(id, &crate::session_record::new_artifact_key());
+            conn.execute(
+                "UPDATE agent_sessions SET interactive=0, provider='claude' WHERE id=?1",
+                [id],
+            )
+            .unwrap();
+            let attachment = store
+                .claim_session_attachment(id, None, &process, true)
+                .unwrap();
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let mut harness = ClaudeHarness::new(tx);
+            let mut config = live_config();
+            config.session_attachment = Some((id.into(), attachment.clone()));
+            harness.config = Some(config);
+            harness.send_input("one turn").await.unwrap();
+            let (pid, birth) = store
+                .agent_process_identity(id)
+                .unwrap()
+                .expect("managed Claude publishes exact AgentProcess identity");
+            assert_eq!(harness.pid(), Some(pid));
+            assert!(birth > 0);
+            recorded.push((pid, birth));
+            // Retain the first process while the same Process starts the next step.
+            harnesses.push(harness);
+        }
+        let original = harnesses[0].owner().unwrap().2;
+        let replacement = store
+            .claim_session_attachment("first", Some(&original), &process, false)
+            .unwrap();
+        assert!(harnesses[0].stop().await.is_err());
+        assert_eq!(
+            crate::journal::process_identity_evidence(recorded[0].0, recorded[0].1),
+            crate::journal::ProcessIdentityEvidence::Live
+        );
+        harnesses[0].config.as_mut().unwrap().session_attachment =
+            Some(("first".into(), replacement));
+        for harness in &mut harnesses {
+            harness.stop().await.unwrap();
+        }
+        assert_ne!(recorded[0].0, recorded[1].0);
+        for (pid, _) in recorded {
+            assert!(crate::journal::OsProcess::group(pid).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn interrupted_capture_retains_policy_after_settings_change_and_fences_old_snapshots() {
+        use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionGraphMembership};
+
+        async fn observed_input(home: &std::path::Path, text: &str) -> String {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let inputs = std::fs::read_to_string(home.join("inputs")).unwrap_or_default();
+                    if inputs.contains(text) {
+                        break inputs;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap()
+        }
+
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _env = crate::test_ambient::EnvGuard::clear(&["PATH", "LF_BIN"]);
+        let home = ledger.home();
+        std::fs::create_dir_all(home.join(".lf")).unwrap();
+        std::fs::write(
+            home.join(".lf/config.yaml"),
+            "agent: claude:sonnet\nyolo: true\nchrome: true\n",
+        )
+        .unwrap();
+        let settings = crate::config::load_config(Some(home)).unwrap().unwrap();
+        // Without explicit YOLO, an already-bypassing vendor setting omits the
+        // CLI override. This makes an accidental policy reload observable.
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::write(
+            home.join(".claude/settings.json"),
+            r#"{"permissions":{"defaultMode":"bypassPermissions"}}"#,
+        )
+        .unwrap();
+        let script = home.join("claude");
+        std::fs::write(&script, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> launches\nwhile read -r line; do printf '%s\\n' \"$line\" >> inputs; done\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("PATH", format!("{}:/usr/bin:/bin", home.display()));
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
+            let capture = CaptureHandle::begin_at(
+                home,
+                SessionCaptureSpec {
+                    harness: "claude".into(),
+                    model: None,
+                    surface: "headless".into(),
+                    cwd: home.into(),
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: vec![],
+                    graph: SessionGraphMembership::Independent,
+                    work: None,
+                },
+            )?;
+            capture.claim_session_attachment()?;
+            let (session, first) = capture.session_attachment().unwrap();
+            let store = crate::store::sqlite::SqliteStore::new(&home.join("loopflow.db"))?;
+            runtime.block_on(async {
+                let (tx, _rx) = mpsc::unbounded_channel();
+                let mut harness = ClaudeHarness::new(tx);
+                harness.config = Some(AgentConfig {
+                    agent: settings.agent,
+                    chrome: settings.chrome,
+                    skip_permissions: settings.yolo,
+                    cwd: Some(home.into()),
+                    session_attachment: Some((session.clone(), first.clone())),
+                    ..AgentConfig::default()
+                });
+                harness.set_capture(Some(capture.clone().into()));
+                harness.send_input("first request").await.unwrap();
+                // Pipe acceptance precedes provider execution. Interrupt only
+                // after this throwaway provider consumed its first request.
+                observed_input(home, "first request").await;
+                let first_pid = harness.pid().unwrap();
+                // The native conversation survives the OS process's interruption.
+                harness.set_agent_session(Some("native-conversation".into()));
+                harness.interrupt().await.unwrap();
+                let ended = store.process(&first.agent_process_id).unwrap().unwrap();
+                assert_eq!(ended.pid, Some(first_pid));
+                assert!(ended.completed_at.is_some());
+
+                std::fs::write(
+                    home.join(".lf/config.yaml"),
+                    "agent: claude:haiku\nyolo: false\nchrome: false\n",
+                )
+                .unwrap();
+                let current = crate::config::load_config(Some(home)).unwrap().unwrap();
+                assert!(!current.yolo && !current.chrome);
+                assert_eq!(current.agent.as_deref(), Some("claude:haiku"));
+                harness.send_input("resumed request").await.unwrap();
+                let (_, second) = capture.session_attachment().unwrap();
+                assert_ne!(first.agent_process_id, second.agent_process_id);
+                assert_ne!(first.token, second.token);
+                let running = store.process(&second.agent_process_id).unwrap().unwrap();
+                assert_eq!(running.pid, harness.pid());
+                assert_eq!(running.parent_lf_process_id, first.lf_process_id);
+                assert!(running.completed_at.is_none());
+                assert_eq!(store.process(&first.agent_process_id).unwrap(), Some(ended));
+                assert!(capture.prepare_agent_process(&session, &first).is_err());
+                assert!(store
+                    .record_session_connection(&session, &first, "stale", &"stale".into())
+                    .is_err());
+
+                // Pending operations retain the old snapshot, not the capture's
+                // current value. Neither a pipe write nor a signal may use it.
+                harness.config.as_mut().unwrap().session_attachment =
+                    Some((session.clone(), first));
+                assert!(harness.send_line("stale request\n".into()).await.is_err());
+                assert!(harness.stop().await.is_err());
+                assert!(harness
+                    .child
+                    .as_mut()
+                    .unwrap()
+                    .try_wait()
+                    .unwrap()
+                    .is_none());
+                harness.config.as_mut().unwrap().session_attachment =
+                    Some((session.clone(), second.clone()));
+                assert!(!observed_input(home, "resumed request")
+                    .await
+                    .contains("stale request"));
+                let launches = std::fs::read_to_string(home.join("launches")).unwrap();
+                assert_eq!(launches.lines().count(), 2);
+                for launch in launches.lines() {
+                    assert!(
+                        launch.contains("--dangerously-skip-permissions"),
+                        "{launch}"
+                    );
+                    assert!(launch.contains("--chrome"), "{launch}");
+                    assert!(launch.contains("--model sonnet"), "{launch}");
+                    assert!(!launch.contains("--no-chrome"), "{launch}");
+                    assert!(!launch.contains("haiku"), "{launch}");
+                }
+                assert!(launches
+                    .lines()
+                    .nth(1)
+                    .unwrap()
+                    .contains("--resume native-conversation"));
+                harness.stop().await.unwrap();
+                capture.finish("completed").unwrap();
+                let settled = store.session_attachment(&session).unwrap().unwrap();
+                assert_eq!(settled.agent_process_id, second.agent_process_id);
+                assert_eq!(settled.lf_process_id, None);
+            });
+            Ok(())
+        })
+        .unwrap();
+    }
 
     #[tokio::test]
     async fn send_input_spawn_failure_releases_turn_guard() {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = ClaudeHarness::new(tx);
         harness.config = Some(AgentConfig {
+            chrome: false,
+            session_attachment: None,
             system_prompt: String::new(),
+            conversation_context: None,
             task_prompt: "task".to_string(),
+            skill_invocation: None,
+            output_schema: None,
             agent: None,
             cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4()).into()),
             max_turns: None,
             resume_token: None,
             provider_account_id: None,
             provider_account_authority_home: None,
-            write_scope: crate::engine::agent::AgentWriteScope::Configured,
+            write_scope: crate::agent::AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
@@ -544,20 +974,123 @@ mod tests {
         assert!(!harness.interrupt_requested.load(Ordering::SeqCst));
     }
 
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Isolate the stand-in provider and its homes.
+    async fn agent_session_resumes_on_a_fresh_process() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _environment = crate::test_ambient::EnvGuard::clear(&[
+            "LF_HOME",
+            "LF_BIN",
+            "PATH",
+            "HOME",
+            "CLAUDE_CONFIG_DIR",
+        ]);
+        let home = tempfile::tempdir().unwrap();
+        for key in ["LF_HOME", "HOME", "CLAUDE_CONFIG_DIR"] {
+            std::env::set_var(key, home.path());
+        }
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        // Admission samples the child's birth through ps before exec.
+        std::env::set_var("PATH", format!("{}:/usr/bin:/bin", home.path().display()));
+        let script = home.path().join("claude");
+        std::fs::write(&script, r#"#!/bin/sh
+resume=""
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = "--resume" ]; then shift; resume="$1"; fi
+    shift
+done
+while read -r line; do
+    if [ -z "$resume" ]; then
+        printf '%s' remembered > memory
+        answer=created
+    elif [ "$resume" = "vendor-conversation" ] && [ -f memory ]; then
+        answer=remembered
+    else
+        exit 1
+    fi
+    printf '%s\n' '{"type":"system","subtype":"init","session_id":"vendor-conversation"}'
+    printf '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"%s"}}\n' "$answer"
+    printf '{"type":"result","subtype":"success","session_id":"vendor-conversation","result":"%s"}\n' "$answer"
+done
+"#).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Each harness is its own admitted conversation; both resume one
+        // provider-owned AgentSession.
+        let database = home.path().join("loopflow.db");
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+        let process = crate::id::LfProcessId::new();
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+                [&process],
+            )
+            .unwrap();
+        let admitted = |id: &str| {
+            store.test_session(id, &crate::session_record::new_artifact_key());
+            rusqlite::Connection::open(&database)
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET interactive=0, provider='claude' WHERE id=?1",
+                    [id],
+                )
+                .unwrap();
+            let attachment = store
+                .claim_session_attachment(id, None, &process, true)
+                .unwrap();
+            let mut config = live_config();
+            config.cwd = Some(home.path().to_path_buf());
+            config.session_attachment = Some((id.into(), attachment));
+            config
+        };
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut first = ClaudeHarness::new(tx);
+        first.config = Some(admitted("first"));
+        first.send_input("remember").await.unwrap();
+        let (status, answer, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
+            .await
+            .unwrap();
+        assert_eq!(status, Lifecycle::Completed);
+        assert!(answer.contains("created"));
+        let agent_session: AgentSessionId = first.agent_session().unwrap();
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut resumed = ClaudeHarness::new(tx);
+        resumed.set_agent_session(Some(agent_session.clone()));
+        resumed.config = Some(admitted("second"));
+        resumed.send_input("recall").await.unwrap();
+        let (status, answer, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
+            .await
+            .unwrap();
+        let different_process = first.pid() != resumed.pid();
+        first.stop().await.unwrap();
+        resumed.stop().await.unwrap();
+        assert!(different_process);
+        assert_eq!(status, Lifecycle::Completed);
+        assert!(answer.contains("remembered"));
+        assert_eq!(resumed.agent_session(), Some(agent_session));
+    }
+
     // Live persistent-process checks against the real `claude` CLI (subscription
     // auth). Ignored by default — run explicitly with a live login:
     //   cargo test -p loopflow --lib claude::tests::live_ -- --ignored --nocapture
     fn live_config() -> AgentConfig {
         AgentConfig {
+            chrome: false,
+            session_attachment: None,
             system_prompt: String::new(),
+            conversation_context: None,
             task_prompt: String::new(),
-            agent: None,
+            skill_invocation: None,
+            output_schema: None,
+            agent: Some("claude".into()),
             cwd: Some(std::env::temp_dir()),
             max_turns: None,
             resume_token: None,
             provider_account_id: None,
             provider_account_authority_home: None,
-            write_scope: crate::engine::agent::AgentWriteScope::Configured,
+            write_scope: crate::agent::AgentWriteScope::Configured,
             execution_boundary: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
@@ -594,7 +1127,9 @@ mod tests {
     async fn live_persistent_process_handles_sequential_turns() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = ClaudeHarness::new(tx);
-        harness.start(&live_config()).await.expect("start");
+        let mut config = live_config();
+        let _ledger = super::super::admit_for_test(&mut config);
+        harness.start(&config).await.expect("start");
 
         harness
             .send_input("Reply with exactly: ALPHA")
@@ -605,7 +1140,7 @@ mod tests {
         assert!(text.contains("ALPHA"), "first turn text: {text:?}");
 
         // Same persistent process, second turn — the session id must be stable.
-        let session_after_first = harness.provider_session_id();
+        let session_after_first = harness.agent_session();
         harness
             .send_input("Reply with exactly: BETA")
             .await
@@ -615,7 +1150,7 @@ mod tests {
         assert!(text.contains("BETA"), "second turn text: {text:?}");
         assert_eq!(
             session_after_first,
-            harness.provider_session_id(),
+            harness.agent_session(),
             "the persistent process keeps one vendor session across turns"
         );
 
@@ -627,7 +1162,9 @@ mod tests {
     async fn live_send_current_coalesces_into_one_boundary() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = ClaudeHarness::new(tx);
-        harness.start(&live_config()).await.expect("start");
+        let mut config = live_config();
+        let _ledger = super::super::admit_for_test(&mut config);
+        harness.start(&config).await.expect("start");
 
         harness
             .send_input("Write a slow, detailed 200-word explanation of how a bicycle works.")

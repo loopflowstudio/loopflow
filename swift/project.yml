@@ -25,7 +25,11 @@ targets:
         excludes:
           - Info.plist
           - Fonts
+          - Themes
       - path: Loopflow/Fonts
+        buildPhase: resources
+        type: folder
+      - path: Loopflow/Themes
         buildPhase: resources
         type: folder
     settings:
@@ -41,7 +45,11 @@ targets:
         excludes:
           - Info.plist
           - GhosttyResources
+          - ThirdPartyNotices
       - path: LoopflowMac/GhosttyResources
+        buildPhase: resources
+        type: folder
+      - path: LoopflowMac/ThirdPartyNotices
         buildPhase: resources
         type: folder
     dependencies:
@@ -53,9 +61,11 @@ targets:
           export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
           /usr/bin/python3 "$SRCROOT/../scripts/loopflow-dev.py" bundle-control-tools \
             --output "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH"
+          uv run --project "$SRCROOT/.." python "$SRCROOT/../scripts/third_party.py" package \
+            "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
           if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ]; then
             signing_identity="${EXPANDED_CODE_SIGN_IDENTITY:--}"
-            for helper in lf lfd; do
+            for helper in lf; do
               /usr/bin/codesign --force --sign "$signing_identity" \
                 "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/$helper"
             done

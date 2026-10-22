@@ -1,0 +1,57 @@
+use std::ffi::OsString;
+
+/// Execution authority and capture context inherited by tests launched inside lf.
+pub const AMBIENT_TASK_ENV: &[&str] = &[
+    "LF_AGENT_OVERRIDE",
+    "LF_YOLO_OVERRIDE",
+    "LF_CHROME_OVERRIDE",
+    // Detached children must use the fixture binary, not the launching agent's installation.
+    "LF_BIN",
+    "LF_TRACE_ID",
+    "LF_PROCESS_ID",
+    "LF_GIT_OPERATION_ID",
+    "LF_CAPTURE_KEY",
+    "LF_AGENT_CALLER",
+    "LF_AS",
+    "LF_RUN_ID",
+    "LF_RUN_DIR",
+    "LF_GRAPH_ID",
+    "LF_WAVE_ID",
+    "LF_ACCOUNT_SELECTION",
+    "LF_ACCOUNT_ISOLATION",
+    "LF_HUMAN_SESSION",
+];
+
+/// Call while holding the suite's environment lock; restore on drop.
+#[derive(Debug)]
+pub struct EnvGuard(Vec<(String, Option<OsString>)>);
+
+impl EnvGuard {
+    pub fn new() -> Self {
+        Self::clear(AMBIENT_TASK_ENV)
+    }
+
+    pub fn clear(names: &[&str]) -> Self {
+        Self(
+            names
+                .iter()
+                .map(|&name| {
+                    let value = std::env::var_os(name);
+                    std::env::remove_var(name);
+                    (name.to_owned(), value)
+                })
+                .collect(),
+        )
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        for (name, value) in &self.0 {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+}

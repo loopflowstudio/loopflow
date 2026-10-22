@@ -1,7 +1,6 @@
-// Repository rail, Wave list, and the selected Wave's work map + conversation.
-// Discovery is a periodic registry query (`lf ls`); live conversation and
-// resident motion stream directly from that Wave's listener.
+// Portfolio's repository rail and Wave inspectors. Tasks open in their repository window.
 
+import AppKit
 import SwiftUI
 import Loopflow
 
@@ -10,23 +9,32 @@ enum RepoFilter: Hashable {
     case repo(String)
 }
 
+@MainActor
+private final class WindowModel {
+    private(set) lazy var model = WorkModel.window(query: RegistryQueryLocal.shared)
+}
+
 struct WavesView: View {
     let portfolioService: PortfolioService
-
-    /// A repo to pre-select on appear (from `--repo`, a deep link, or the repo
-    /// window). Collapsed to its main worktree for reads — the on-disk `wave/`
-    /// dir holds quick-launch templates that live on main by design.
-    var initialRepoPath: String? = nil
+    /// The Work list and Wave inspectors share this window's readings.
+    /// Built when a window first renders: the app describes this view at every
+    /// launch, and a model decodes the saved workspace.
+    @State private var window = WindowModel()
+    private var model: WorkModel { window.model }
+    let openTask: (String, String) -> Void
 
     @Environment(\.palette) private var palette
 
     @State private var repoStates: [String: PortfolioRepoState] = [:]
 
-    /// Repos shown in the rail: a live `~/src` scan of main (non-worktree) repos.
-    /// Derived off the main thread in `refreshRepos`.
-    @State private var repos: [PortfolioRepo] = []
+    private var repos: [PortfolioRepo] {
+        if AppTestMode.current() == .mockWaves {
+            return [PortfolioRepo(path: MockWaveFixture.repoPath, error: nil)]
+        }
+        return portfolioService.repos
+    }
 
-    /// Authored waves discovered on disk per repo path: `<repo>/wave/<name>/GOAL.md`.
+    /// Authored waves discovered on disk per repo path: `<repo>/.lf/wave/<name>/GOAL.md`.
     /// Merged with registered waves so not-yet-launched waves are still listed.
     @State private var authoredWavesByRepo: [String: [String]] = [:]
     @State private var plansByWaveKey: [String: WavePlan] = [:]
@@ -34,7 +42,6 @@ struct WavesView: View {
     @State private var selection: RepoFilter = .all
     @State private var selectedWaveId: String?
     @State private var isShowingCreate = false
-    @State private var didApplyInitialRepo = false
     @State private var didRestoreStickyRepo = false
 
     /// All waves across every repo: registry rows merged with Waves authored on
@@ -117,6 +124,24 @@ struct WavesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
+        .task { await model.keepWorkCurrent() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await refreshRepos() }
+        }
+        .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
+        .onChange(of: selectedWave?.id, initial: true) { _, _ in
+            model.detailWaveId = selectedWave.flatMap { $0.isRegistered ? $0.id : nil }
+            if let wave = selectedWave, wave.isRegistered {
+                model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave))
+            }
+        }
+        // Waves arrive with every planning frame.
+        .onChange(of: model.planningSequence) { _, _ in
+            Task {
+                await syncRepoStates()
+                await refreshAuthoredWaves()
+            }
+        }
         .sheet(isPresented: $isShowingCreate) {
             CreateWaveSheet(
                 repos: repos,
@@ -127,22 +152,14 @@ struct WavesView: View {
             .environment(\.palette, palette)
         }
         .task {
-            let initialMain = await registerInitialRepoIfNeeded()
             await refreshRepos()
             await refreshAuthoredWaves()
-            if let initialMain, !didApplyInitialRepo {
-                didApplyInitialRepo = true
-                selection = .repo(initialMain)
-            } else {
-                restoreStickyRepoSelectionIfNeeded()
-            }
+            restoreStickyRepoSelectionIfNeeded()
             ensureRepoStates()
             await syncRepoStates()
-            await pollRegistry()
         }
-        .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
+        .onChange(of: portfolioService.repos) { _, _ in
             Task {
-                await refreshRepos()
                 await refreshAuthoredWaves()
                 ensureRepoStates()
                 await syncRepoStates()
@@ -154,15 +171,17 @@ struct WavesView: View {
                !filteredWaves.contains(where: { waveSelectionId($0) == id }) {
                 selectedWaveId = nil
             }
+            model.setRepoPath(roadmapRepoPath)
             persistRepoSelection()
         }
     }
 
-    // MARK: - Wave list (burgundy)
+    // MARK: - Wave list
 
     private var waveListColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
             waveListHeader
+            portfolioControls
 
             if filteredWaves.isEmpty {
                 emptyWaveState
@@ -187,7 +206,7 @@ struct WavesView: View {
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color.loopflowBurgundy)
+        .background(palette.surfaceMuted)
     }
 
     /// Repository scope as a dropdown above the Wave list, plus New. The rail is
@@ -199,7 +218,7 @@ struct WavesView: View {
             Spacer(minLength: 0)
 
             Circle()
-                .fill(isAnyConnected ? Color.statusSuccess : Color.white.opacity(0.3))
+                .fill(isAnyConnected ? palette.success : palette.textTertiary)
                 .frame(width: 6, height: 6)
                 .help(isAnyConnected ? "Connected" : "Connecting…")
 
@@ -208,7 +227,7 @@ struct WavesView: View {
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(repos.isEmpty ? .white.opacity(0.35) : .white)
+                    .foregroundStyle(repos.isEmpty ? palette.textTertiary : palette.text)
             }
             .buttonStyle(.plain)
             .disabled(repos.isEmpty)
@@ -217,6 +236,81 @@ struct WavesView: View {
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.md)
+    }
+
+    private var portfolioControls: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            if let selected = portfolioService.selection {
+                Picker("Repositories", selection: Binding(
+                    get: { selected.mode },
+                    set: { mode in Task { await portfolioService.perform([mode.rawValue]) } }
+                )) {
+                    Text("Folder").tag(PortfolioMode.folder)
+                    Text("Manual").tag(PortfolioMode.manual)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("portfolio-mode")
+
+                if selected.mode == .folder {
+                    Text(selected.root).font(.caption).textSelection(.enabled)
+                    Button("Choose Folder…") { choosePortfolioPaths(folder: true) }
+                        .accessibilityIdentifier("portfolio-folder")
+                    ForEach(selected.repos.filter { $0.error != nil }) { repo in
+                        Text("\(repo.displayName): \(repo.error ?? "")").font(.caption)
+                    }
+                } else {
+                    Button("Add Repositories…") { choosePortfolioPaths(folder: false) }
+                        .accessibilityIdentifier("portfolio-add")
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            ForEach(selected.repos) { repo in
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(repo.displayName)
+                                        Text(repo.error ?? repo.path).font(.caption).textSelection(.enabled)
+                                    }
+                                    Spacer()
+                                    Button("Remove", systemImage: "minus.circle") {
+                                        Task { await portfolioService.perform(["remove", repo.path]) }
+                                    }.labelStyle(.iconOnly)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 200)
+                }
+                if !portfolioService.legacyPaths.isEmpty {
+                    Button("Import Saved Desktop Repositories") {
+                        Task { await portfolioService.importLegacy() }
+                    }
+                    .accessibilityIdentifier("portfolio-import")
+                }
+            }
+            if let error = portfolioService.error {
+                Text(error).font(.caption).textSelection(.enabled)
+            }
+            HStack {
+                Button("Refresh") { Task { await refreshRepos() } }
+                if portfolioService.isPending { ProgressView().controlSize(.small) }
+            }
+        }
+        .foregroundStyle(palette.text)
+        .padding(.horizontal, Spacing.lg)
+        .padding(.bottom, Spacing.md)
+        .disabled(portfolioService.isPending)
+    }
+
+    private func choosePortfolioPaths(folder: Bool) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = !folder
+        panel.prompt = folder ? "Choose Folder" : "Add Repositories"
+        panel.begin { response in
+            guard response == .OK else { return }
+            let paths = panel.urls.map(\.path)
+            Task { await portfolioService.perform([folder ? "folder" : "add"] + paths) }
+        }
     }
 
     private var repoDropdown: some View {
@@ -234,12 +328,12 @@ struct WavesView: View {
             HStack(spacing: Spacing.xs) {
                 Text(headerTitle)
                     .font(Typography.sectionTitle(16))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(palette.text)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(palette.textSecondary)
             }
             .contentShape(Rectangle())
         }
@@ -254,7 +348,7 @@ struct WavesView: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(repos.isEmpty ? "No repositories found." : "No waves yet.")
                 .font(Typography.caption())
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(palette.textSecondary)
             if !repos.isEmpty {
                 Button {
                     isShowingCreate = true
@@ -272,7 +366,7 @@ struct WavesView: View {
         .padding(.vertical, Spacing.md)
     }
 
-    // MARK: - Wave detail (WaveChat)
+    // MARK: - Wave detail
 
     @ViewBuilder
     private var waveDetail: some View {
@@ -280,14 +374,18 @@ struct WavesView: View {
             WaveDetailPane(
                 wave: wave,
                 repoPath: waveRepoPath(for: wave),
-                onClose: { selectedWaveId = nil }
+                streamed: model.waveDetail,
+                isProjectActivationPending: model.isProjectActivationPending(id: wave.id),
+                transportError: model.projectCommandErrors[wave.id],
+                onActivateProject: { model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave)) },
+                onClose: { selectedWaveId = nil },
+                onOpenTask: { id in
+                    openTask(waveRepoPath(for: wave), id)
+                }
             )
             .id(waveSelectionId(wave))
         } else {
-            RoadmapView(
-                repoPath: roadmapRepoPath,
-                onOpenWave: openRoadmapWave
-            )
+            RoadmapView(model: model, onOpenWave: openRoadmapWave, onOpenTask: openTask)
         }
     }
 
@@ -306,11 +404,7 @@ struct WavesView: View {
         selectedWaveId = waveSelectionId(wave)
     }
 
-    /// On-disk repo root for the wave's state, where its
-    /// `wave/<name>/.wave-endpoint` discovery pointer lives. Wave state is
-    /// published at the ORIGIN repo, so a worktree rail path resolves here
-    /// (memoized) — chat discovery, the launcher, and Session navigation all
-    /// inherit the same origin path.
+    /// Resolve the canonical repository shared by Work and Session navigation.
     private func waveRepoPath(for wave: WaveViewModel) -> String {
         WaveOrigin.resolve(repoState(for: wave)?.repo.path ?? wave.repo)
     }
@@ -357,39 +451,12 @@ struct WavesView: View {
         try await state.createWave(name: name)
     }
 
-    /// Register the launch-provided repo so it shows in the rail, and return its
-    /// main-worktree path for pre-selection.
-    private func registerInitialRepoIfNeeded() async -> String? {
-        guard let initialRepoPath, !didApplyInitialRepo else { return nil }
-        if AppTestMode.shouldBypassRegistry { return nil }
-        let readPath = await Task.detached {
-            PortfolioDiscovery.resolveLaunchRepo(initialRepoPath)
-        }.value
-        guard let readPath else { return nil }
-        if !portfolioService.repos.contains(where: { $0.path.normalizedFilePath == readPath }) {
-            portfolioService.addRepo(URL(fileURLWithPath: readPath))
-        }
-        return readPath
-    }
-
-    /// Source the rail directly from a `~/src` scan of main (non-worktree) repos,
-    /// every time. A launch-provided `initialRepoPath` is merged in via
-    /// `resolveLaunchRepo`, which accepts only Git working-tree roots and always
-    /// collapses a linked worktree to its main checkout.
-    /// Runs the git/FS work off the main thread.
     private func refreshRepos() async {
-        if AppTestMode.shouldBypassRegistry {
-            repos = portfolioService.repos
-            return
-        }
-
-        repos = await PortfolioDiscovery.repos(
-            initialRepoPath: initialRepoPath,
-            persistedRepos: portfolioService.repos
-        )
+        guard !AppTestMode.shouldBypassRegistry else { return }
+        await portfolioService.refresh()
     }
 
-    /// Enumerate each rail repo's authored waves — `<repo>/wave/<name>/GOAL.md`
+    /// Enumerate each rail repo's authored waves — `<repo>/.lf/wave/<name>/GOAL.md`
     /// directories — off the main thread, so the list can offer them as launchable
     /// rows before they have a registry entry.
     private func refreshAuthoredWaves() async {
@@ -421,13 +488,21 @@ struct WavesView: View {
         ensureRepoStates()
 
         do {
-            let waves = try await RegistryQueryLocal.shared.allWaves()
+            // The window's stream already holds the registry's Waves; read
+            // once only before its first planning frame.
+            let waves: [Wave]
+            if let streamed = model.waves.value {
+                waves = streamed
+            } else {
+                waves = try await RegistryQueryLocal.shared.allWaves()
+            }
             let plans = await buildWavePlanCache(registryWaves: waves)
             plansByWaveKey = plans
             for state in repoStates.values {
                 state.applyConnectedWaves(waves, plans: plans)
             }
             selectRequestedWaveIfNeeded()
+            raiseCaptureSheetIfRequested()
         } catch {
             for state in repoStates.values {
                 state.markRefreshFailed()
@@ -439,14 +514,10 @@ struct WavesView: View {
     /// registry, so the `mock-waves` UI-test mode renders the stable list lenses
     /// and auto-selects a Wave into its full detail hierarchy. Idempotent.
     private func seedMockWaves() {
-        let repo = PortfolioRepo(path: MockWaveFixture.repoPath, lastOpened: Date())
+        let repo = PortfolioRepo(path: MockWaveFixture.repoPath, error: nil)
         // A persisted production repo filter must not hide the deterministic
         // fixture list while leaving its selected detail onscreen.
         selection = .all
-        if !portfolioService.repos.contains(where: { $0.path == repo.path }) {
-            portfolioService.addRepo(repo.url)
-        }
-        repos = [repo]
         let state = repoStates[repo.path]
             ?? PortfolioRepoState(repo: repo, registryQuery: RegistryQueryLocal.shared)
         state.applyConnectedWaves(MockWaveFixture.waves, plans: MockWaveFixture.plans)
@@ -455,17 +526,19 @@ struct WavesView: View {
            let selected = state.waves.first(where: { $0.name == MockWaveFixture.selectedWaveName }) {
             selectedWaveId = waveSelectionId(selected)
         }
-        // Drive the sheet-presentation leg of the AttributeGraph zero-cycle
-        // matrix headlessly: once the populated detail hierarchy has settled,
-        // raise the create sheet over it — a genuine mid-session presentation,
-        // not a cold-launch-with-sheet. Gated so the plain mock render stays
-        // sheet-free. See scripts/check_attributegraph_cycles.sh --sheet.
-        if ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_PRESENT_SHEET"] != nil,
-           !isShowingCreate {
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
-                isShowingCreate = true
-            }
+    }
+
+    /// Drive the sheet-presentation leg of the AttributeGraph zero-cycle
+    /// matrix headlessly: once a world's populated detail hierarchy has
+    /// settled, raise the create sheet over it — a genuine mid-session
+    /// presentation, not a cold-launch-with-sheet. Gated so ordinary renders
+    /// stay sheet-free. See scripts/check_attributegraph_cycles.sh --sheet.
+    private func raiseCaptureSheetIfRequested() {
+        guard ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_PRESENT_SHEET"] != nil,
+              !isShowingCreate else { return }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            isShowingCreate = true
         }
     }
 
@@ -532,20 +605,6 @@ struct WavesView: View {
         }
     }
 
-    /// Discovery has no stream: re-query the registry on a slow cadence so a
-    /// wave that started, stopped, or advanced since the last read shows up.
-    /// Each wave's live conversation + run motion is its own per-wave SSE,
-    /// opened by the detail pane — not funnelled through a center.
-    private func pollRegistry() async {
-        if AppTestMode.shouldBypassRegistry { return }
-        while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(5))
-            if Task.isCancelled { return }
-            await syncRepoStates()
-            await refreshAuthoredWaves()
-        }
-    }
-
     /// A live screenshot can request one real Wave after the registry resolves.
     /// Fixture selection stays in `seedMockWaves`; production has no requested
     /// branch, so this is inert outside the explicit `live` harness.
@@ -558,8 +617,7 @@ struct WavesView: View {
     }
 }
 
-
-/// Minimal create-wave flow: pick a target repo, name the wave, submit. Creates
+/// Minimal create-wave graph: pick a target repo, name the wave, submit. Creates
 /// the Wave files through `PortfolioRepoState.createWave`.
 private struct CreateWaveSheet: View {
     let repos: [PortfolioRepo]
@@ -598,7 +656,7 @@ private struct CreateWaveSheet: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
                 .font(Typography.body())
-                .tint(palette.accent)
+                .tint(palette.actionInk)
                 .padding(.horizontal, Spacing.md)
                 .padding(.vertical, Spacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -627,7 +685,7 @@ private struct CreateWaveSheet: View {
             if let errorMessage {
                 Text(errorMessage)
                     .font(Typography.caption())
-                    .foregroundStyle(Color.statusError)
+                    .foregroundStyle(palette.failure)
             }
 
             HStack(spacing: Spacing.md) {
@@ -680,5 +738,5 @@ private struct CreateWaveSheet: View {
 }
 
 #Preview {
-    WavesView(portfolioService: PortfolioService())
+    WavesView(portfolioService: PortfolioService(), openTask: { _, _ in })
 }

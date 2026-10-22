@@ -1,171 +1,105 @@
-# Loopflow Website Content
-# Edit copy here—no need to touch main.py
+# Edit copy here; main.py renders it.
 
+navigation:
+- label: For you
+  href: /#mac
+  optional: true
+- label: Docs
+  href: /docs
+- label: Company
+  menu:
+  - label: Loopflow Studio
+    href: /studio
+  - label: Etude
+    href: /etude
+  - label: Fantasia
+    href: /fantasia
+  - label: About
+    href: /about
+- label: GitHub ↗
+  href: https://github.com/loopflowstudio/loopflow
+  optional: true
+install:
+  label: Install
+  href: /#start
+# The company page and the short pages under the Company menu. Drafted with Jack
+# Heart on 2026-10-08; copy beyond his quoted lines is draft.
+studio:
+  company:
+    title: Loopflow Studio
+    heading: We make three things.
+    efforts:
+    - name: Loopflow
+      label: The tool we build with
+      text: Loopflow is a software engineering CLI for your agents. Free and open source.
+      status: Available today
+      link:
+        label: Loopflow ↗
+        href: /
+    - name: Etude
+      label: What we sell
+      text: 'Experiment orchestration, for doing science inside a company: state the hypothesis, run
+        the experiment, read the evidence, change your mind.'
+      status: Not yet available
+      link:
+        label: Etude ↗
+        href: /etude
+    - name: Fantasia
+      label: The research that drives both
+      text: 'Superhuman Magic: The Gathering bots. Building them is what drives the development of
+        Loopflow and Etude.'
+      status: In progress
+      link:
+        label: Fantasia ↗
+        href: /fantasia
+  fantasia:
+    title: Fantasia
+    label: Fantasia · Loopflow Studio
+    heading: 'Superhuman Magic: The Gathering bots.'
+    lede: 'An AI-assisted Pro Tour testing house: serious practice, visible disagreement, rapid experiments,
+      and the fun of discovering something together.'
+    points:
+    - title: Today
+      text: A person can play a one-on-one game against a trained bot, a search bot, or random play,
+        and replay the finished game.
+    - title: The aim
+      text: Bots that play better than the best people.
+    - title: Why Magic
+      text: It is the lever for the other two. Building the bots shows us what Loopflow needs, and
+        running their training shows us what Etude needs. Fantasia is Etude’s first user.
+    status: In progress.
+    link:
+      label: Source ↗
+      href: https://github.com/loopflowstudio/fantasia
+  etude:
+    title: Etude
+    label: Etude · Loopflow Studio
+    heading: Experiment orchestration.
+    lede: We are building this.
+  about:
+    title: About
+    label: About · Loopflow Studio
+    heading: Jack Heart
+    lede: Founder of Loopflow Studio.
+# The homepage's body is home.html. This block holds what other pages share with
+# it: the install command, the download, and the footer.
 homepage:
-  hero:
-    tagline: "A software instrument."
-    subline: >-
-      It doesn't make the software for you. You make the software through it.
-    loopflow_download_url: "https://downloads.loopflow.studio/Loopflow-latest.dmg"
-
-  showcase:
-    items:
-      - image: "/static/wave-surface.png"
-        image_alt: "A Wave with its objective, projects, tasks, and live conversation"
-        caption: "A Wave: its goal, its work, and a conversation you can steer."
-
-  pillars:
-    heading: "One task at a time"
-    diagram_alt: >-
-      You ask, and you make the plan together. It builds and checks, then
-      you review the demo. If the result is not right yet, it
-      builds again and shows you another demo. Otherwise the work is done.
-    items:
-      - title: "Make the plan"
-        description: >-
-          You say what you want. You work out the plan together and it
-          writes it down.
-      - title: "Let it build"
-        description: >-
-          It works in small steps and checks each one. Watch, or go do
-          something else.
-      - title: "See the result"
-        description: >-
-          It shows you what it made, working. Not right yet? It goes back
-          and builds again.
-
-  problems:
-    heading: "What it helps with"
-    items:
-      - title: "It goes in circles"
-        problem: >-
-          AI can build a lot of software fast. It can also spend all day
-          going in circles, and it's hard to tell which is happening.
-        solve: >-
-          Loopflow keeps track, so you can see what got done and what still
-          needs you.
-      - title: "It says it's done"
-        problem: >-
-          Finished and working are not the same thing.
-        solve: >-
-          Loopflow shows you the result running before anything counts as
-          done.
-      - title: "You lose the thread"
-        problem: >-
-          The more you hand off, the more there is to catch up on.
-        solve: >-
-          Loopflow checks in at the plan and at the demo. Step in closer
-          whenever you like.
-      - title: "It forgets"
-        problem: >-
-          Every new session starts from zero.
-        solve: >-
-          Loopflow writes down what it learned and brings it to the next
-          task.
-      - title: "Tasks trip over each other"
-        problem: >-
-          Two things in progress at once can undo each other.
-        solve: >-
-          Each task gets its own copy of your project, so work in progress
-          never collides.
-      - title: "It's not how you'd do it"
-        problem: >-
-          Everyone works differently.
-        solve: >-
-          Every step is a plain text file. Change any of them.
-
-  definition:
-    heading: "What is a loopflow?"
-    diagram_alt: >-
-      The default flow, step by step: kickoff, review plan, implement,
-      compress, review, decide, review demo, decide, done. Review plan and
-      review demo need a person. Each decide step can return to implement.
-    paragraphs:
-      - >-
-        A flow is a directed graph of steps. Each step gives an agent one
-        bounded job. In a pipeline, steps run in order and the graph has no
-        cycles.
-      - >-
-        A loopflow is a flow with at least one backward edge. A deciding
-        step looks at the work so far and either continues forward or
-        returns to an earlier step. The steps in between form the loop
-        body, and they repeat until the deciding step moves on.
-
-  scale:
-    heading: "Works for one person or a whole company"
-    text: >-
-      Everyone runs it on their own computer, set up their own way. Nobody
-      has to buy it or get it approved. A team can start with one person
-      who already uses it.
-
-  building_blocks:
-    heading: "Every step is a file you can change"
-    items:
-      - label: "A skill"
-        filename: ".lf/skills/implement.md"
-        content: |
-          Turn the design doc into working code.
-
-          ## Workflow
-          1. Understand the design
-          2. Implement data structures and functions
-          3. Verify with tests and done-when checks
-
-      - label: "A flow"
-        filename: ".lf/flows/feature.yaml"
-        content: |
-          - kickoff
-          - step:
-              id: review_plan
-              name: review-design
-              human: true
-          - step:
-              id: implement
-              name: implement
-          - compress
-          - review-slice
-          - step:
-              id: decide
-              name: loop-decide
-              repeat:
-                from: implement
-          - step:
-              id: review_demo
-              name: demo
-              human: true
-      - label: "A task"
-        filename: "terminal"
-        content: |
-          lf task start "Unify token validation" \
-            --project unified-sign-in
-          lf task steer AUTH-12 \
-            "prefer the middleware approach"
-          lf task status AUTH-12 --json
-          lf pr land -c
-      - label: "A wave"
-        filename: "wave/auth/GOAL.md"
-        content: |
-          ## Objective
-
-          Unify authentication. Each wake, pick the next gap — duplicate
-          token validation, session refresh, a slow startup path — direct
-          the concrete Task that closes it, and record what shipped in
-          memory.
-
-          ## Process
-
-          Read current Projects, KR proof, and Project-owned metrics. Route
-          the most important gap to its owning Project; record only
-          strategy-changing learning in memory.
-
+  title: how you design, implement, demo, release and study software in harmony
   install:
-    heading: "Get Loopflow"
-    facts: >-
-      Free and open source · Runs on your computer · Every step is a file
-      you can change · Needs Claude Code or Codex, which have their own cost
-    note: "The Mac app includes the command line tool."
-    cli_label: "Or just the command line tool (macOS or Linux):"
-    command_display: |
-      curl -fsSL https://loopflow.studio/install.sh | sh
-      lf init
-    command_copy: "curl -fsSL https://loopflow.studio/install.sh | sh && lf init"
+    label: Install
+    install_command: curl -fsSL https://loopflow.studio/install.sh | sh
+    links:
+    - label: Getting started ↗
+      href: /docs/getting-started
+    - label: Source ↗
+      href: https://github.com/loopflowstudio/loopflow
+    download_url: https://downloads.loopflow.studio/Loopflow-latest.dmg
+  footer:
+    text: Loopflow · An open-source software instrument.
+    links:
+    - label: Loopflow Studio
+      href: /studio
+    - label: Get started ↗
+      href: /docs/getting-started
+    - label: Source ↗
+      href: https://github.com/loopflowstudio/loopflow

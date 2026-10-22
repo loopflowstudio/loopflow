@@ -13,7 +13,7 @@ import Testing
             try record("first", title: "review-design"),
             try record("second", title: "lyric-cadenza"),
         ])
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
         await model.refreshSessions()
         model.navigation.selectedSessionId = "first"
@@ -54,7 +54,7 @@ import Testing
             try record("second", title: "lyric-cadenza"),
         ])
         await source.reject("Session name must be at most 80 characters")
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refreshSessions()
         model.navigation.selectedSessionId = "first"
         model.beginSessionRename(try #require(model.sessions.value?.first { $0.id == "first" }))
@@ -74,18 +74,40 @@ import Testing
         #expect(model.navigation.renaming == nil)
     }
 
+    @Test("A late rename cannot dismiss a newer draft for the same Session")
+    func lateRenameKeepsNewDraft() async throws {
+        let first = try record("first", title: "Original")
+        let second = try record("second", title: "Other")
+        let source = RenameSource(records: [first, second])
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refreshSessions()
+        model.beginSessionRename(first)
+        model.navigation.renaming?.text = "Submitted"
+        await source.holdNext("rename")
+        let saving = Task { await model.commitSessionRename() }
+        await source.waitUntilHeld("rename")
+        model.beginSessionRename(second)
+        model.beginSessionRename(first)
+        model.navigation.renaming?.text = "New unsent name"
+        await source.release("rename")
+        await saving.value
+        #expect(title(model, "first") == "Submitted")
+        #expect(model.navigation.renaming?.text == "New unsent name")
+        #expect(model.navigation.renaming?.submitting == false)
+    }
+
     @Test("The breadcrumb drills Wave → Task → exact Session, with siblings as the final choice")
     func breadcrumbNamesTheExactSession() throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
         let task = WorkReference.task(id: "ts_review00000000000000000000000000")
-        let one = WorkspaceProjection(roadmaps: roadmap.waves, sessions: [try record("first", title: "review-design", work: task)])
+        let one = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: [try record("first", title: "review-design", work: task)])
         let single = try #require(one.breadcrumb(selection: nil, sessionId: "first"))
         #expect(single.wave?.roadmap.wave.name == "product")
         #expect(single.task?.task.task.identifier == "W2-131")
         #expect(single.session?.id == "first")
         #expect(single.siblings.map(\.id) == ["first"])
 
-        let many = WorkspaceProjection(roadmaps: roadmap.waves, sessions: [
+        let many = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: [
             try record("first", title: "Launch design", work: task),
             try record("second", title: "Verification cases", work: task),
             try record("loose", title: "lyric-cadenza", work: nil),
@@ -100,7 +122,7 @@ import Testing
         #expect(unmatched.wave == nil && unmatched.task == nil)
     }
 
-    private func title(_ model: PodiumModel, _ id: String) -> String? {
+    private func title(_ model: WorkModel, _ id: String) -> String? {
         model.sessions.value?.first { $0.id == id }?.title
     }
 }
@@ -109,12 +131,14 @@ func renameFixtureRecord(
     _ id: String, title: String, source: String = "generated", work: WorkReference? = nil
 ) throws -> SessionRecord {
     let workJSON = String(decoding: try JSONEncoder().encode(work), as: UTF8.self)
+    let taskIds = work.flatMap { $0.kind == .task ? [$0.id] : nil } ?? []
+    let taskIdsJSON = String(decoding: try JSONEncoder().encode(taskIds), as: UTF8.self)
     return try JSONDecoder().decode(SessionRecord.self, from: Data("""
-    {"id":"\(id)","run_id":"run_\(id)","kind":"interactive","work":\(workJSON),"title":"\(title)",
-     "detail":"codex","cwd":"/src/loopflow","state":"closed","wave_id":null,"work_path":null,
-     "actions":\(sessionActionFixtureJSON(kind: "interactive", state: "closed")),
-     "ready_summary":null,"title_source":"\(source)","flow_membership":{"kind":"independent"},
-     "terminal_ids":[],"open_argv":["lf","session","open","\(id)"]}
+    {"id":"\(id)","run_id":"run_\(id)", "interactive": true,"work":\(workJSON),"title":"\(title)",
+     "detail":"codex","cwd":"/src/loopflow","state":"active","wave_id":null,"work_path":null,
+     "actions":\(sessionActionFixtureJSON(state: "active")),
+     "ready_summary":null,"title_source":"\(source)","task_primary":false, "graph_membership":{"kind":"independent"},
+     "task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
     """.utf8))
 }
 
@@ -153,7 +177,7 @@ private actor RenameSource {
     }
 
     func read(_ args: [String]) async throws -> String {
-        if args == ["roadmap", "--all", "--json"] {
+        if args == ["wave", "show", "--all", "--json"] {
             return try roadmapJSON()
         }
         guard args.count >= 2, args[0] == "session" else { return "[]" }
@@ -167,7 +191,7 @@ private actor RenameSource {
         }
         switch verb {
         case "list":
-            return String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)
+            return #"{"entries":\#(String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)),"next":null}"#
         case "rename":
             renames.append(args)
             if let rejection { throw RegistryQueryError(rejection) }

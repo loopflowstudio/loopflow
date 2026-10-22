@@ -1,5 +1,9 @@
 # Codebase map
 
+This is a current-source navigation map, including historical capture evidence.
+The [contract and cutover status](../architecture-reference.md#cutover-status)
+own the accepted model and the remaining conversion.
+
 Start from a behavior, not a directory. Follow its request until it crosses a
 named domain boundary; then switch to the next area's owner.
 
@@ -19,13 +23,11 @@ complexity.
 | --- | --- | ---: | --- |
 | CLI and presentation | `rust/loopflow/src/lf/`, `src/bin/` | 31,700 | command grammar, dispatch, status/read models, terminal output |
 | Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task/Project operations, sessions, PR, Git, release, metrics, PM |
-| Prompt and process engine | `rust/loopflow/src/engine/`, `src/harness/` | 29,300 | Skill/Flow discovery, prompt assembly, provider subprocess streams |
+| Prompt assembly, Graph runner and provider processes | `rust/loopflow/src/prompt/`, `agent/`, `graph/`, `skills/`, `src/harness/` | 29,300 | Skill/Graph discovery, prompt assembly, provider subprocess streams |
 | Tracked Work | `work/`, `pm/` | — | Wave/Task facts, Task PR identity, planning-provider models |
-| Boundary execution | `controller/` | — | optional Wave service and claimed Task Flow boundaries |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite, migrations, durable domain rows, outer command receipts |
-| Provider authority | `provider_auth/`, `provider_account/` | 7,500 | login, encrypted tokens, account homes, routes, leases |
-| Home daemon | `lfd/` | 2,900 | Home HTTP API, webhooks, Wave and service reconciliation |
-| Shared root modules | top-level `src/*.rs` | 10,400 | Run records, artifacts, repository identity, subscriptions |
+| Provider authority | `provider_auth/`, `provider_account/` | 7,500 | login, encrypted tokens, account homes and routes |
+| Shared root modules | top-level `src/*.rs` | 10,400 | Session captures, artifacts, repository identity, subscriptions |
 | Released and draft SQL | `store/migrations/**/*.sql` | 4,900 | immutable schema history and current draft frontier |
 | Swift app production | `swift/Loopflow/`, `swift/LoopflowMac/` | 18,200 | shared DTOs/services and macOS presentation |
 | External tests | Rust, Python, and Swift test roots | 27,100 | cross-module, wire, migration, CLI, and app proofs |
@@ -40,86 +42,77 @@ subprocess edge to one concept.
 | Behavior | Begin at | Main object passed onward |
 | --- | --- | --- |
 | command parsing | [`lf/mod.rs`](../../rust/loopflow/src/lf/mod.rs) | command args and launch context |
-| Skill/Flow discovery | [`lf/discovery.rs`](../../rust/loopflow/src/lf/discovery.rs) | selected Skill or Flow |
-| prompt assembly | [`engine/prompt.rs`](../../rust/loopflow/src/engine/prompt.rs) | system/task prompt pair |
-| provider routing | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | selected account route and lease |
+| Skill/Graph discovery | [`definition/mod.rs`](../../rust/loopflow/src/definition/mod.rs) | selected Skill or Graph |
+| prompt assembly | [`prompt/mod.rs`](../../rust/loopflow/src/prompt/mod.rs) | system/task prompt pair |
+| provider routing | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | selected account route |
 | provider streams | [`harness/`](../../rust/loopflow/src/harness/) | normalized conversation and usage |
-| Run evidence | [`run_record.rs`](../../rust/loopflow/src/run_record.rs) | manifest, append events, terminal receipt |
-| shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work/) | `WorkRef`, status, inputs, placement, Wave/Task facts |
-| Project operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave/operate` Run |
-| Task boundary executor | [`controller/task/`](../../rust/loopflow/src/controller/task/) | one claimed Flow boundary |
+| Session capture evidence | [`session_record.rs`](../../rust/loopflow/src/session_record.rs) | manifest, append events, terminal receipt |
+| shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work/) | `WorkRef`, status, inputs, Task ownership, Wave/Task facts |
+| Project operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave-operate` conversation |
+| Graph process | [`lf/commands/graph.rs`](../../rust/loopflow/src/lf/commands/graph.rs) | one lf process holding the graph and cursor, starting each step as a child Process |
 | Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave/) | identity, config, memory, repository scope |
-| Wave automation | [`controller/wave/`](../../rust/loopflow/src/controller/wave/) | listener, resident, placement policy, runtime |
+| Wave facts | [`work/wave/`](../../rust/loopflow/src/work/wave/) | goals, metrics, memory, relocation |
 | store abstraction | [`store/`](../../rust/loopflow/src/store/) | domain rows and transactions |
-| Home daemon | [`lfd/mod.rs`](../../rust/loopflow/src/lfd/mod.rs) | Home HTTP and service reconciliation |
-| machine install | [`machine_install.rs`](../../rust/loopflow/src/machine_install.rs) | artifact set and switch receipt |
+| installation | [`installation.rs`](../../rust/loopflow/src/installation.rs) | artifact set and switch receipt |
 | Mac read surfaces | [`swift/Loopflow/`](../../swift/Loopflow/) | required-field DTOs from `lf --json` |
 
 ## Public process surfaces
 
 ```text
-lf                         foreground command and Skill/Flow launches
+lf                         foreground command and Skill/Graph launches
 lf-prompt                  prompt-oriented executable surface
-lfd                        one Home's service keeper and webhook receiver
-lf __resident              Wave resident process
-lf task __worker           one already-claimed Task boundary
-lf __provider-session      provider hook that binds native session identity to a Run
-lf __screenshot-supervisor bounded browser-capture owner
+lf-world                   builds fake worlds for demos and tests through production writers
+lf __context-block         provider turn-boundary hook: context at start/compaction, steers at tool and prompt boundaries, Linear acquisition at turn end
 Loopflow.app               pure client over CLI/HTTP DTOs
 ```
 
 Internal process names are implementation surfaces, not a second user API.
-Flows may invoke the named internal operations that own their exact boundary.
+Graphs may invoke the named internal operations that own their exact boundary.
 
 | Public family | Owns |
 | --- | --- |
-| `lf <skill>`, `lf flow` | direct execution and composition |
-| `lf wave`, `project`, `task`, `work` | planning and Work coordination |
-| `lf ask`, `session` | durable Sessions and resolution |
-| `lf wt`, `commit`, `rebase`, `pr`, `ci` | worktree and delivery operations |
-| `lf runs`, `usage`, `activity` | durable execution/history projections |
+| `lf <skill>`, `lf graph` | direct execution and composition |
+| `lf wave`, `repo`, `task` | planning and Work coordination |
+| `lf session` | durable Sessions and resolution |
+| `lf wt`, `commit`, `sync`, `pr`, `ci` | worktree and delivery operations |
+| `lf history`, `history show`, `usage` | durable execution/history projections |
 | `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
-| `lf home`, `start`, `stop`, `pause`, `resume`, `ssh` | Home identity, placement, service routing |
-| `lf auth`, `profile`, `route` | provider credential and account authority |
+| `lf machine`, `lf --machine` | Machine identity and command routing |
+| `lf account` | provider credential and account authority |
 | `lf install`, `release` | artifact selection and release workflow |
 
 Argument-level behavior belongs in the [`lf` reference](../lf.md). Wire DTOs
 have required fields unless their type is explicitly optional. Rust and Swift
 round-trip the same fixtures under `tests/fixtures/dto/`.
 
-`lf task prepare` belongs to tracked Work and delivery: it starts no execution.
-`lf task run`, `restart`, and `resume` compose that substrate with a bounded
-Task worker. `lf --task ... <skill>` goes directly through execution with Task
-attribution and never advances the Task's Flow position.
+`lf checkout` belongs to tracked Work and delivery: it starts no execution.
+`lf task run ISSUE` places the Task and fills its defaults, then is
+`lf --task ISSUE graph GRAPH` in that checkout. `lf --task ... <skill>` goes directly through execution with
+Task attribution and never moves a Graph's position.
 
 ## Dependency direction
 
 ```text
-task worker -> execution
-task worker -> work
-task worker -> delivery
-delivery   -> work
-surface    -> controller, execution, work, delivery
+task launch -> execution
+task launch -> work
+task launch -> delivery
+delivery    -> work
+surface     -> execution, work, delivery
 
-execution ⇏ work, task worker
-work      ⇏ task worker
+execution ⇏ work, task launch
+work      ⇏ task launch
 ```
 
 Keep these directions literal. Work types own Project/Task domain progression;
-the Task worker joins them with the exact `FlowPosition` claim.
+Task launch joins them by starting an ordinary Graph in the Task checkout.
 Execution accepts preassembled Wave memory and opaque Work attribution; it does
 not resolve either from the planning store.
 
-## HTTP boundaries
+## External transport
 
-The Home daemon exposes Home-scoped health, status, Wave start/stop/reconcile,
-webhook, and landing-claim routes. A Wave listener exposes only that Wave's
-channel, conversation, events, messages, observations, stop, and
-resident attachment/context routes.
-
-HTTP is a local supervision and presentation transport. It does not centralize
-Run records, provider credentials, or cross-Home process control. Remote access
-reaches the target Home explicitly; see [Homes and processes](homes.md).
+The CLI talks to planning and model providers. The independent Discord bridge
+uses outbound REST requests. Remote execution reaches the target Machine through
+`lf --machine`; see [Machines and processes](machines.md).
 
 ## Add a provider
 
@@ -144,7 +137,7 @@ usage receipt.
 4. Rebuild prompts or views from the fact at a boundary.
 5. Keep provider observation and authored state distinguishable.
 
-Do not introduce a global revision, active-Run slot, or mirrored lifecycle to
+Do not introduce a global revision, generic active-attempt slot, or mirrored lifecycle to
 coordinate facts that already have natural keys.
 
 ## Add a read surface
@@ -163,10 +156,10 @@ authority.
 
 Process control begins at spawn, not at a later lookup. Create a fresh process
 scope and publish birth-validated ownership before exposing stop or steer. The
-receipt must include PID plus kernel birth identity, Home/boot identity, and
+receipt must include PID plus kernel birth identity, Machine/boot identity, and
 the exact group, session, or native scope. Revalidate every later signal.
 
-Never infer ownership from a Run id, Work, PID alone, tmux name, telemetry, or
+Never infer ownership from a conversation ID, Work, PID alone, tmux name, telemetry, or
 parentage.
 
 ## Keep the map honest
@@ -176,7 +169,7 @@ uv run python scripts/check_architecture.py
 ```
 
 The checker materializes the live schema and discovers public CLI families,
-process entrypoints, Home and Wave HTTP routes, provider kinds, subprocess
+process entrypoints, Machine and Wave HTTP routes, provider kinds, subprocess
 edges, read projections, compatibility seams, and retired vocabulary. Every
 discovered item must occur once in the checked reference.
 

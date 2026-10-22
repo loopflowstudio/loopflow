@@ -24,7 +24,7 @@ public enum MetricStage: String, Decodable, Sendable, Hashable {
     case installed, graduated
 }
 
-public enum MetricTarget: Decodable, Sendable, Hashable {
+public enum Threshold: Decodable, Sendable, Hashable {
     case atLeast(Double)
     case atMost(Double)
 
@@ -133,6 +133,7 @@ public enum MetricEvidence: Decodable, Sendable, Hashable {
 
 public enum MetricUnknownCause: Decodable, Sendable, Hashable {
     case never
+    case targetUnavailable(value: Double, sourceWindowStart: String, sourceWindowEnd: String)
     case revisionMismatch(expected: String, observed: String, sourceTime: String)
     case incomplete(value: Double, sourceWindowStart: String, sourceWindowEnd: String)
     case windowMismatch(value: Double, sourceWindowStart: String, sourceWindowEnd: String)
@@ -153,6 +154,12 @@ public enum MetricUnknownCause: Decodable, Sendable, Hashable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(String.self, forKey: .kind) {
         case "never": self = .never
+        case "target_unavailable":
+            self = .targetUnavailable(
+                value: try container.decode(Double.self, forKey: .value),
+                sourceWindowStart: try container.decode(String.self, forKey: .sourceWindowStart),
+                sourceWindowEnd: try container.decode(String.self, forKey: .sourceWindowEnd)
+            )
         case "revision_mismatch":
             self = .revisionMismatch(
                 expected: try container.decode(String.self, forKey: .expectedContractRevision),
@@ -203,7 +210,7 @@ public struct MetricReading: Decodable, Sendable, Hashable, Identifiable {
     public let instrumented: Bool
     public let instrument: String
     public let unit: String
-    public let target: MetricTarget?
+    public let target: Threshold?
     public let window: String
     public let freshnessPolicy: String
     public let freshness: MetricFreshness
@@ -278,10 +285,10 @@ public enum MetricContractIssue: Decodable, Sendable, Hashable {
     }
 }
 
-public struct ChapterMetricTarget: Decodable, Sendable, Hashable, Identifiable {
+public struct MetricTarget: Decodable, Sendable, Hashable, Identifiable {
     public var id: String { metricId }
     public let metricId: String
-    public let target: MetricTarget
+    public let target: Threshold
     enum CodingKeys: String, CodingKey {
         case metricId = "metric_id"
         case target

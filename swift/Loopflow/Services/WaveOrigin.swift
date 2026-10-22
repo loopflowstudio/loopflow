@@ -2,9 +2,9 @@ import Foundation
 
 /// The repo a wave's on-disk state lives under.
 ///
-/// A running wave publishes `wave/<name>/.wave-endpoint` and its journal to the
+/// A running wave publishes `.lf/wave/<name>/.wave-endpoint` and its journal to the
 /// ORIGIN repo — the main checkout — never to a worktree. Mirrors Rust
-/// `wave_origin` in `rust/loopflow/src/engine/wave_context.rs` (keep the two in
+/// `wave_origin` in `rust/loopflow/src/work/wave/context.rs` (keep the two in
 /// skill): a path that is itself a working-tree root resolves to the parent of
 /// its shared git dir (`git rev-parse --git-common-dir`); the main checkout
 /// resolves to itself; a non-git path, a plain subdirectory of a repo, or any
@@ -16,6 +16,15 @@ import Foundation
 public enum WaveOrigin {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var cache: [String: String] = [:]
+    nonisolated(unsafe) private static var changes = 0
+
+    /// Counts recorded origins. A caller that derives values from `cached` can
+    /// keep them until this moves.
+    public static var revision: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return changes
+    }
 
     public static func resolve(_ repoPath: String) -> String {
         let key = cacheKey(repoPath)
@@ -28,6 +37,7 @@ public enum WaveOrigin {
         let origin = resolveUncached(repoPath)
         lock.lock()
         cache[key] = origin
+        changes += 1
         lock.unlock()
         return origin
     }
@@ -42,6 +52,14 @@ public enum WaveOrigin {
         lock.lock()
         defer { lock.unlock() }
         return cache[key] ?? repoPath
+    }
+
+    /// Record a path already known to be its own origin, so resolving it runs no `git`.
+    public static func remember(origin: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        cache[cacheKey(origin)] = origin
+        changes += 1
     }
 
     private static func cacheKey(_ repoPath: String) -> String {

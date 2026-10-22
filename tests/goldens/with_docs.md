@@ -1,188 +1,149 @@
 <lf:loopflow>
-# Operating Through Loopflow
+# Using lf
 
-Loopflow owns git, worktrees, delegation, and release plumbing. Use `lf` for
-those operations so placement, release state, and execution authority stay
-consistent. Read-only inspection and ordinary edits/tests run directly here.
+`lf` launches coding agents, keeps their Sessions, and runs saved Skills and
+Graphs. Use as much of it as the request needs. A Graph is an authored sequence
+of steps; it runs with or without a Task.
 
-## Execute Here First
+Work in the supplied checkout. Read its agent guide and existing work, preserve
+other contributions, and carry out the request here. Do not launch another
+agent or create a worktree merely to do the work already assigned to this one.
+Follow a supplied Graph's steps and boundaries; finishing it selects no next work,
+but steps a stopped Graph never reached remain yours.
 
-Stay in the worktree supplied for this run. Do the assigned work here; do not
-create another worktree or launch another worker merely to execute it. When
-worktree management is the task, use `lf wt`, never raw `git worktree`.
+Use the requested tools and repository conventions. Read
+`lf help <command-or-skill>` for instructions on Sessions, Skills, Graphs,
+worktrees and PRs.
 
-Use orchestration only when the user or selected skill calls for it. Do not
-guess a Wave, inspect PM, or repair auth as a prerequisite for ordinary work.
-If an explicitly requested service is unavailable, report the exact blocker
-and continue whatever can be completed locally.
+When continuing an existing Task or when the request calls for Tasks, Waves,
+or Projects, read `lf help skill work` unless that guidance was preloaded. It is also
+available as `lf skill work`. Work association supplies context; the request
+or selected Skill/Graph determines what to do. Stay within that chosen scope.
 
-## Git and delivery
+Name the Session for the work in two or three specific words. Read `session_id`
+from `LF_AGENT_CALLER` and use `lf session rename <id> "<name>" --suggest` when
+its generated name needs improving. This preserves a human-assigned name.
+Do not rename a branch or worktree to match the conversation.
 
-```bash
-lf commit -m "<what changed and why>"  # local checkpoint
-lf rebase --plan                     # inspect integration strategy
-lf rebase                            # apply it
-lf pr publish --title "..."          # push and create/update PR
-lf pr submit                         # prepare for the user's merge click
-lf pr arm                            # prepare and request auto-merge; return
-lf pr land                           # watch CI, repair, and finish merged
-```
+Answer the user in this conversation. Keep progress in local notes and the final
+response. Refer to people by their supplied names in persisted artifacts and
+as “you” in conversation; never infer authorship from accounts or machine owners.
 
-Publish is the default for making work visible; it does not rebase. Submit is
-for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
-`-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
-selected delivery skill for preparation and recovery. `lf pr open` also opens
-the review page; use it only when the user asks to see the PR.
-
-Preserve existing work before editing. Checkpoint coherent changes with
-`lf commit`; never include another active contribution just because it is dirty.
-Do not ask permission for reversible edits or local tests. Ask before pushing,
-PR mutations, external messages or other external side effects, and destructive
-operations unless already authorized by the user or selected workflow.
-
-## Evidence Loop
-
-Make the finish line explicit: the observable result, proof, and near-misses
-that do not count. When uncertainty matters, record observations separately
-from hypotheses in the working design or evidence notes.
-
-Use the smallest safe check that distinguishes the leading explanations.
-Verify against all relevant recorded evidence, not only the latest case.
-Treat unexpected tool, test, or user output as a
-counterexample: stop dependent steps, revise the model, then continue. Never
-rewrite an observation to preserve an explanation or call a simulation live proof.
-
-Delegate only when authorized and when an independent subset makes the problem
-smaller. Keep the main blocker inline. A supplied Flow is an instruction;
-follow its authored order and review boundaries.
-
-## Speak and inspect
-
-Write in language the user would use themselves. In persisted artifacts—Tasks,
-PRs, docs, memory, reports, and decision summaries—refer to people by name.
-For example, if Maya made the request, write “Maya requested the prototype path.”
-In conversation with Maya, write “You requested the prototype path.”
-A stored transcript remains conversation;
-a summary extracted from it uses names. Refer to other participants by name.
-Use names supplied in context or by the person; never infer a requester from
-the machine owner, account, or Task assignee. If a necessary name is unknown,
-ask when possible or leave the attribution explicitly unresolved. Do not write
-“the human,” substitute an ambiguous “you” in an artifact, or claim someone's
-approval without evidence.
-
-Answer the user in this conversation. Never open another
-session merely to reach them. Headless, `lf ask "<request>"` opens a durable
-session and waits for completion. Respect existing authorization.
-A `human: true` Flow step uses the same Session surface: Complete returns
-review feedback to the next step; a following loop-decide chooses navigation
-through its authored edge. Readiness alone does not release the caller.
-
-When asked about Loopflow state, use `lf ls --json`, `lf status <wave> --json`,
-or `lf roadmap --json`. Do not reconstruct shared state from processes or
-worktrees. Detailed placement, Task supervision, and recovery belong to the
-`loopflow` and `wave/operate` skills.
-
-Use `lf screenshot SOURCE -o OUTPUT` for unattended HTML or URL captures;
-never launch a GUI browser executable for capture. Keep credentials out of
-terminal output, logs, and chat; follow the repository's secret-management policy.
-
-## Context and durable knowledge
-
-Read the supplied repo guide and existing design before deriving another plan.
-Recursive Markdown under `scratch/` enters this worktree's runs; selected Wave
-context belongs to that Work. A path in another checkout does not transfer its
-contents. Treat earlier drafts as evidence, not automatic approval.
-
-Write designs to `scratch/<branch>.md` and open assumptions to
-`scratch/questions.md`. Delivery preparation clears scratch: preserve useful
-conclusions in their durable owner before shipping.
-
-Put repeatable task instructions in the skill that exercises them; repo-wide
-conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<name>/MEMORY.md` through `update-wave` or
-`record-learnings`. Do not create miscellaneous `.lf/` handoff notes or copy
-maintainer instructions into customer skills.
+Recursive Markdown under `scratch/` enters this checkout's runs. Files in another
+checkout do not transfer their contents. Historical context is evidence, not
+new direction. Keep secrets out of output and follow the repository's policy.
 
 </lf:loopflow>
+
+<lf:work-guidance>
+# Working with Tasks and Waves
+
+Use this contract when the request uses work APIs or continues an existing
+Task. Desktop and custom clients use the same APIs. Work association supplies
+context and ownership; the request, selected Skill or authored Graph supplies
+the procedure. Reading this skill creates nothing and starts no work.
+
+## Work model
+
+- **Wave**: a durable objective, memory and area of responsibility.
+- **Project**: a Wave's plan, including Tasks, KRs and targets.
+- **Task**: one repository-owned intended outcome with optional Wave membership, its checkout, conversations and a current PR and delivery history.
+- **Workflow**: a Task's selected graph of review nodes and Graph edges.
+- **Graph**: one execution of authored steps, with or without a Task.
+- **Session**: a conversation. **Process**: one actual lf process.
+
+Continue the selected Task or the current checkout's existing Task. Preserve
+its identity, checkout, PR and live work. Unrelated Tasks in the repository do
+not select work for this conversation. Do not create a Task merely because a
+worktree, PR or Graph exists. Create Tasks when requested or when the selected
+planning procedure calls for them; taskless work remains taskless otherwise.
+
+Use `lf` for changes to managed worktrees, Task delivery and Work state so their
+recorded ownership stays consistent. Ordinary inspection, edits and tests run
+here. Preserve existing contributions before checkpointing with `lf commit`.
+
+## Inspect and act
+
+Read `lf task status <issue> --json`, `lf wave status <wave> --json`,
+`lf wave list --json`, or `lf wave show --json` for the requested scope.
+Use these shared reads instead of reconstructing Work state from processes or
+worktrees. Unknown or unavailable evidence is not an empty plan. Report the
+missing service and continue independent work; do not repair auth unasked.
+
+Before starting more execution, inspect the Task's live work, previous results
+and effects. Leave a live Graph running. A stopped Graph is history: repair the
+cause and run the steps it did not reach, without replaying effects.
+
+`lf task run` takes up the Task's selected Workflow when applicable and runs an
+edge. `lf task workflow move` changes its position without executing anything.
+`lf task move --wave/--no-wave` changes membership and preserves existing work. Review
+feedback, Task association, and an idle process are not instructions to launch.
+A finished Graph or published PR does not prove Task completion. Complete the
+Task when its accepted outcome is delivered, using authoritative state.
+
+For ongoing supervision, explicitly select `task-operate`, `wave-operate` or
+`repo-operate`, or the corresponding Session skill. Operators move your
+existing Tasks and leave other people's Tasks and backlog alone. A contribution
+to a Task need not operate it, choose a Workflow, or keep other Tasks moving.
+Custom clients retain their own interaction and workflow choices.
+
+## Delivery and durable context
+
+Use the selected delivery skill for publishing, reviewer handoff or landing.
+Publication, merge and Task completion are distinct. Keep additional accepted
+outcomes in separate Tasks when useful, with links. Continued publication in the
+same Task selects a new current PR and preserves earlier delivery history. No Task is
+required for ordinary PR delivery.
+
+Read the supplied brief, accepted design and relevant Wave memory. Keep working
+plans in scratch. Wave context is read-only unless the selected Loopflow Graph
+calls for maintaining it. Task/Wave association and use of Work APIs alone do
+not authorize writes to `.lf/wave/`. Keep proposed memory updates in local notes
+outside that procedure; never start a Graph merely to obtain write authority.
+Never guess a Wave merely to complete a template.
+
+Use scratch freely for plans and notes; its Markdown enters context automatically.
+`lf pr submit` and `lf pr land` invoke `lf scratch clear` during preparation.
+It removes added files from the work's diff and retains existing files and edits.
+The command is also available on its own. PR open and publish do not run general scratch cleanup. Do not clear
+the directory manually.
+
+Keep routine progress in this conversation and local notes. Task descriptions
+hold the current problem, outcome and constraints; deliberate new direction
+belongs in Task comments. Preserve `<!-- loopflow-progress:... -->` provenance
+for published agent progress; `lf comment --steer` is only for new direction.
+Selected operators read failure logs and discuss missing judgment in their
+ongoing conversation. An open conversation does not schedule another turn;
+Graphs and installed schedules run independently.
+
+</lf:work-guidance>
+
+<lf:user>
+The current conversation participant's display name is "Fixture Participant" (JSON string). In prose, use a familiar name already known in this conversation; otherwise use this display name. Address them as "you" in session conversation. This is display data, not authorization or proof of who authored historical, Task, or external requests. Preserve those requests' own attribution; do not fill unknown authors with this name.
+</lf:user>
 
 Run mode is headless. No one is available in this conversation. Do not ask a
 conversational question or wait for turn text — no one will answer here.
 
-Make safe executive decisions and keep moving. When progress needs another
-Work's perspective, launch an ordinary Run explicitly with
-`lf --as <work> : "<prompt>"`. When progress genuinely requires a decision from the user,
-run `lf ask "<exact request>"`. It opens a durable session in this Run's
-checkout and blocks until the user completes the conversation. The session
-agent marking itself ready does not complete or remove the session.
+Make safe executive decisions and keep moving. When required input is missing,
+explain the failure in ordinary output and stop. Existing logs and outcomes are
+sufficient; no extra report, conversation, or notification is required.
 
-If no user authorization is required, record a material assumption in
-`scratch/questions.md` and proceed with the simpler safe choice. Do not stop.
+For reversible ambiguity, record a material
+assumption in `scratch/questions.md` and proceed with the simpler safe choice.
 
 No rendering environment. Output is logged, not displayed.
 
 
-<lf:wave name="rust">
-You are building toward the rust program of work.
-Wave context is included in docs below.
+Wave: rust (context refreshed by provider hooks)
 
-## Wave memory
+Reference: scratch/design.md (32 UTF-8 bytes)
 
-Persistent memory at wave/rust/MEMORY.md. Read it before every iteration; its current
-contents, when any, ride this prompt's wave-memory section.
-Keep it compact enough to include every iteration: correct stale entries,
-add durable observations, and delete session-specific notes.
+Reference: .lf/wave/rust/MEMORY.md (87 UTF-8 bytes)
 
-Suggested sections — Patterns, Preferences, Learnings — but add your own as needed.
-- Patterns: codebase conventions, architecture, how things connect
-- Preferences: user workflow, tool choices, communication norms
-- Learnings: what worked, what failed, surprises
+Reference: .lf/wave/rust/README.md (39 UTF-8 bytes)
 
-What belongs elsewhere:
-- architectural decisions → wave docs or explicit docs
-- design rationale → scratch/ or wave plan
-- session-specific notes → nowhere (let them die)
-
-How to update:
-- Edit the file through the ordinary repository workflow; no live Wave is required.
-- `update-wave` owns deliberate end-of-work curation.
-- Correct or remove entries that are wrong or stale.
-- Use absolute dates, not "today" or "recently".
-- When a section grows large, promote stable entries to wave docs or explicit docs and trim.
-</lf:wave>
-
-<lf:wave-memory>
-- Keep prompts concise and concrete.
-- Prefer behavior-focused tests over mock wiring.
-</lf:wave-memory>
-
-Scratch design artifacts and working notes.
-
-<lf:scratch>
-<lf:file path="scratch/design.md">
-# Design
-
-Current design notes.
-
-</lf:file>
-</lf:scratch>
-
-Reference files for this task. Includes parent documentation for context.
-<lf:files>
-<lf:file path="wave/rust/README.md">
-# Rust Roadmap
-
-Overview of Rust work.
-
-</lf:file>
-<lf:file path="README.md">
-# Test Repo
-
-Root readme.
-
-</lf:file>
-</lf:files>
-
-The skill.
+Reference: README.md (26 UTF-8 bytes)
 
 <lf:skill:test>
 # Test step

@@ -1,44 +1,13 @@
-use time::OffsetDateTime;
-
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, FlowPosition, Home, HomeId, Placement, RunId, Steer, SteerComment, TaskId,
-    TaskWorkerClaim, TaskWorkerClaimOutcome, TaskWorkerOwner, ToolResponseReceipt,
+    AbandonReceipt, Machine, MachineId, SteerComment, TaskId, ToolResponseReceipt,
     ToolResponseWrite, WorkRef, WorkStatus,
 };
+use crate::steer::Steer;
 
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
-    pub async fn record_flow_route(
-        &self,
-        task_id: &TaskId,
-        run_id: &RunId,
-        path: &str,
-    ) -> StoreResult<()> {
-        let task_id = task_id.clone();
-        let run_id = run_id.clone();
-        let path = path.to_owned();
-        run_sqlite(&self.sqlite, move |store| {
-            store.record_flow_route(&task_id, &run_id, &path)
-        })
-        .await
-    }
-
-    pub async fn record_flow_verdict(
-        &self,
-        task_id: &TaskId,
-        run_id: &crate::durable::RunId,
-        verdict: &crate::engine::transitions::FlowVerdict,
-    ) -> StoreResult<()> {
-        let task_id = task_id.clone();
-        let run_id = run_id.clone();
-        let verdict = verdict.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.record_flow_verdict(&task_id, &run_id, &verdict)
-        })
-        .await
-    }
     pub(crate) async fn task_issue_identifier(
         &self,
         external_issue_id: &str,
@@ -50,122 +19,56 @@ impl Store {
         .await
     }
 
-    pub async fn home_by_id(&self, home_id: &HomeId) -> StoreResult<Option<Home>> {
-        let home_id = home_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.home_by_id(&home_id)).await
+    pub async fn machine_by_id(&self, machine_id: &MachineId) -> StoreResult<Option<Machine>> {
+        let machine_id = machine_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.machine_by_id(&machine_id)).await
     }
 
-    pub async fn local_home(&self) -> StoreResult<Home> {
-        run_sqlite(&self.sqlite, move |store| store.local_home()).await
+    pub async fn local_machine(&self) -> StoreResult<Machine> {
+        run_sqlite(&self.sqlite, move |store| store.local_machine()).await
     }
 
-    pub async fn observe_home(&self, home_id: &HomeId, route: &str) -> StoreResult<Home> {
-        let home_id = home_id.clone();
-        let route = route.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.observe_home(&home_id, &route)
-        })
-        .await
-    }
-
-    pub async fn placement(&self, work: &WorkRef) -> StoreResult<Placement> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| store.placement(&work)).await
-    }
-
-    pub async fn set_work_enabled(&self, work: &WorkRef, enabled: bool) -> StoreResult<Placement> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.set_work_enabled(&work, enabled)
-        })
-        .await
-    }
-
-    pub(crate) async fn place_work(
+    pub async fn add_machine(
         &self,
-        work: &WorkRef,
-        home_id: &HomeId,
-    ) -> StoreResult<Placement> {
-        let work = work.clone();
-        let home_id = home_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.place_work(&work, &home_id)).await
-    }
-
-    pub async fn set_flow_position(
-        &self,
-        task_id: &TaskId,
-        position: FlowPosition,
-    ) -> StoreResult<FlowPosition> {
-        let task_id = task_id.clone();
+        machine_id: &MachineId,
+        target: &str,
+        label: &str,
+    ) -> StoreResult<Machine> {
+        let machine_id = machine_id.clone();
+        let (target, label) = (target.to_string(), label.to_string());
         run_sqlite(&self.sqlite, move |store| {
-            store.set_flow_position(&task_id, &position)
+            store.add_machine(&machine_id, &target, &label)
         })
         .await
     }
 
-    pub async fn flow_position(&self, task_id: &TaskId) -> StoreResult<Option<FlowPosition>> {
-        let task_id = task_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.flow_position(&task_id)).await
+    pub async fn machines(&self) -> StoreResult<Vec<Machine>> {
+        run_sqlite(&self.sqlite, move |store| store.machines()).await
     }
 
-    pub async fn claim_task_worker(
-        &self,
-        task_id: &TaskId,
-        expected_invocation: &str,
-        expected_version: u64,
-        owner: &TaskWorkerOwner,
-        claimed_at: OffsetDateTime,
-    ) -> StoreResult<TaskWorkerClaimOutcome> {
-        let task_id = task_id.clone();
-        let expected_invocation = expected_invocation.to_string();
-        let owner = owner.clone();
+    pub async fn rename_machine(&self, label: &str, name: &str) -> StoreResult<()> {
+        let (label, name) = (label.to_string(), name.to_string());
         run_sqlite(&self.sqlite, move |store| {
-            store.claim_task_worker(
-                &task_id,
-                &expected_invocation,
-                expected_version,
-                &owner,
-                claimed_at,
-            )
+            store.rename_machine(&label, &name)
         })
         .await
     }
 
-    pub async fn reclaim_task_worker(
-        &self,
-        task_id: &TaskId,
-        expected: &TaskWorkerClaim,
-        owner: &TaskWorkerOwner,
-        claimed_at: OffsetDateTime,
-    ) -> StoreResult<TaskWorkerClaim> {
-        let task_id = task_id.clone();
-        let expected = expected.clone();
-        let owner = owner.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reclaim_task_worker(&task_id, &expected, &owner, claimed_at)
-        })
-        .await
+    pub async fn remove_machine(&self, label: &str) -> StoreResult<()> {
+        let label = label.to_string();
+        run_sqlite(&self.sqlite, move |store| store.remove_machine(&label)).await
     }
 
-    pub async fn bind_task_worker_run(
+    pub async fn wave_owning_machine(
         &self,
-        task_id: &TaskId,
-        expected: &TaskWorkerClaim,
-        worker_run_id: &RunId,
-        owner: &TaskWorkerOwner,
-    ) -> StoreResult<TaskWorkerClaim> {
-        let task_id = task_id.clone();
-        let expected = expected.clone();
-        let worker_run_id = worker_run_id.clone();
-        let owner = owner.clone();
+        wave: &crate::id::WaveId,
+        setting: crate::durable::MachineSetting,
+    ) -> StoreResult<(MachineId, crate::durable::OwningMachineSource)> {
+        let wave = wave.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.bind_task_worker_run(&task_id, &expected, &worker_run_id, &owner)
+            store.wave_owning_machine(&wave, setting)
         })
         .await
-    }
-
-    pub async fn human_task_flow_positions(&self) -> StoreResult<Vec<FlowPosition>> {
-        run_sqlite(&self.sqlite, |store| store.human_task_flow_positions()).await
     }
 
     pub async fn abandon(&self, work: &WorkRef, reason: &str) -> StoreResult<AbandonReceipt> {
@@ -177,6 +80,11 @@ impl Store {
     pub async fn work_status(&self, work: &WorkRef) -> StoreResult<WorkStatus> {
         let work = work.clone();
         run_sqlite(&self.sqlite, move |store| store.work_status(&work)).await
+    }
+
+    pub async fn task_state(&self, task: &TaskId) -> StoreResult<crate::durable::TaskState> {
+        let task = task.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_state(&task)).await
     }
 
     pub async fn work_for_child(&self, target: &ChildRef) -> StoreResult<WorkRef> {
@@ -204,7 +112,7 @@ impl Store {
     }
 
     #[cfg(test)]
-    pub(crate) async fn append_steer(
+    pub(crate) async fn save_steer(
         &self,
         work: &WorkRef,
         author: crate::durable::Author,
@@ -213,7 +121,7 @@ impl Store {
         let work = work.clone();
         let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.append_steer(&work, &author, &text)
+            store.save_steer(&work, &author, &text)
         })
         .await
     }
@@ -268,32 +176,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn disabled_work_remains_disabled_when_moved() {
-        let (store, work) = wave_work().await;
-        let local = store.local_home().await.unwrap();
-
-        let disabled = store.set_work_enabled(&work, false).await.unwrap();
-        assert!(!disabled.enabled);
-
-        let remote = store
-            .observe_home(&crate::durable::HomeId::new(), "ssh://jack@buildbox")
+    async fn removing_connection_preserves_identity() {
+        let (store, _) = wave_work().await;
+        let id = crate::durable::MachineId::new();
+        let added = store.add_machine(&id, "mini", "builder").await.unwrap();
+        assert!(store
+            .add_machine(&crate::durable::MachineId::new(), "other", "builder")
             .await
-            .unwrap();
-        assert!(!store.place_work(&work, &remote.id).await.unwrap().enabled);
-        assert!(!store.place_work(&work, &local.id).await.unwrap().enabled);
-
-        assert!(store.set_work_enabled(&work, true).await.unwrap().enabled);
+            .is_err());
+        store.rename_machine("builder", "mini").await.unwrap();
+        assert_eq!(store.machines().await.unwrap()[0].id, id);
+        store.remove_machine("mini").await.unwrap();
+        assert!(store.machines().await.unwrap().is_empty());
+        let retained = store.machine_by_id(&id).await.unwrap().unwrap();
+        assert_eq!(retained.created_at, added.created_at);
+        assert_eq!(retained.route, "mini");
+        assert!(retained.label.is_none());
     }
 
     #[tokio::test]
-    async fn local_home_route_cannot_be_observed_as_remote() {
+    async fn local_machine_cannot_be_added_as_remote() {
         let (store, _) = wave_work().await;
-        let local = store.local_home().await.unwrap();
+        let local = store.local_machine().await.unwrap();
 
         assert!(matches!(
-            store.observe_home(&local.id, "ssh://jack@elsewhere").await,
-            Err(StoreError::InvalidData(message)) if message.contains("cannot replace local Home")
+            store.add_machine(&local.id, "ssh://jack@elsewhere", "ssh://jack@elsewhere").await,
+            Err(StoreError::InvalidData(message)) if message.contains("cannot add the local machine")
         ));
-        assert_eq!(store.local_home().await.unwrap(), local);
+        assert_eq!(store.local_machine().await.unwrap(), local);
     }
 }

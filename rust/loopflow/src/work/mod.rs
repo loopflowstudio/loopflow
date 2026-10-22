@@ -1,6 +1,12 @@
 //! Durable tracked Work, independent of any autonomous controller.
 
-pub mod chapter;
+pub mod edit;
+pub mod link;
+pub mod link_receiver;
 pub mod project;
+pub mod selection;
 pub mod task;
 pub mod wave;
+
+#[cfg(test)]
+mod selection_tests;

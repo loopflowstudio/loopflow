@@ -1,129 +1,180 @@
 import SwiftUI
 import AppKit
 import Loopflow
+import os
 
 private func enrichProcessPathForGUILaunch() {
     let existing = ProcessInfo.processInfo.environment
     let enriched = GUIProcessEnvironment.enriched(existing)
     for key in existing.keys where enriched[key] == nil { unsetenv(key) }
-    if let path = enriched["PATH"] { setenv("PATH", path, 1) }
+    for key in ["PATH", "LF_BIN"] {
+        if let value = enriched[key] { setenv(key, value, 1) }
+    }
 }
 
 @main
 struct LoopflowApp: App {
+    @State private var taskLinks = WorkLinkRouter.shared
     @State private var portfolioService = PortfolioService()
+    @State private var workspaces: RepositoryWorkspaces
     @Environment(\.openWindow) private var openWindow
     @State private var snapshotError: String?
     @State private var showSnapshotError = false
+    @State private var openingError: String?
     @State private var didOpenCaptureView = false
-    @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
+    @AppStorage("taskFilesAutosave") private var taskFilesAutosave = true
+    @State private var appearance: AppearanceStore
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
         Perf.begin(Perf.coldStart, "launch", id: "launch",
                    detail: "pre_main_ms=\(Int(Perf.millisecondsSinceProcessStart() ?? -1))")
+        Perf.begin(Perf.workspaceCurrent, "launch", id: "launch")
+        if AppTestMode.current() == nil { LaunchJournal.home.begin() }
         bootstrapLoopflowApp()
+        _workspaces = State(initialValue: RepositoryWorkspaces(
+            localMachineId: AppTestMode.shouldBypassRegistry ? nil : WorkCache.home.load()?.machineId))
         // Enrich our own process PATH before any children spawn, so tools launched
         // by Wave launchers can find git and agent CLIs that live in
         // Homebrew or ~/.local/bin.
         enrichProcessPathForGUILaunch()
+        // A reboot leaves interrupted Sessions behind; bring them all back unasked.
+        if AppTestMode.current() == nil {
+            Task.detached(priority: .utility) {
+                do {
+                    try await RegistryQueryLocal.shared.resumeInterrupted()
+                } catch {
+                    Logger(subsystem: "studio.loopflow", category: "sessions")
+                        .error("Resuming interrupted Sessions failed: \(String(describing: error), privacy: .public)")
+                }
+            }
+        }
+        // Ghostty borrows the process environment when appearance initializes it.
+        // Finish environment changes before publishing the initial theme.
+        _appearance = State(initialValue: AppearanceStore.shared)
     }
 
     var body: some Scene {
-        let resolvedAppearance = AppTestMode.forcesLightAppearance
-            ? AppearanceMode.light.rawValue
-            : appearanceMode
         let launchRepoURL = LaunchArguments.repoURL()
-        let registryQuery = SessionFixture.query ?? RegistryQueryLocal.shared
+        let registryQuery = RegistryQueryLocal.shared
 
-        WindowGroup {
-            PodiumView(
-                portfolioService: portfolioService,
-                initialRepoPath: launchRepoURL?.path,
-                query: registryQuery
-            )
-            .tint(.loopflowBurgundy)
-            .modifier(AppAppearance(mode: resolvedAppearance))
+        WindowGroup(id: "workspace", for: RepositoryWorkspace.self) { $workspace in
+            Group {
+                // A capture opens its target window from a window that stays:
+                // the launch view hands off to a repository window, and opening
+                // another window during that hand-off aborts in AttributeGraph.
+                if let workspace {
+                    RepositoryWorkspaceView(workspace: workspace, portfolioService: portfolioService,
+                                            workspaces: workspaces,
+                                            query: registryQuery, router: taskLinks,
+                                            openRepository: requestRepository)
+                        .task { openCaptureViewIfNeeded() }
+                } else if AppTestMode.shouldBypassRegistry {
+                    RepoView(portfolioService: portfolioService,
+                             sessionWorkspaces: workspaces.registry(for: "fixture"), initialRepoPath: launchRepoURL?.path,
+                             query: registryQuery)
+                        .task { openCaptureViewIfNeeded() }
+                } else {
+                    WorkspaceLaunchView {
+                        if let path = launchRepoURL?.path ?? loadLoopflowState()?.selectedRepoPath {
+                            try await openRepository(path)
+                        } else {
+                            openWindow(id: "portfolio")
+                        }
+                    }
+                }
+            }
+            .modifier(AppAppearance(appearance: appearance))
             .onOpenURL { handleDeepLink($0) }
             .uiTestWindowWidth()
             .uiTestSnapshot()
-            .task {
-                openCaptureViewIfNeeded()
-            }
         }
         .windowStyle(.automatic)
+        .windowToolbarStyle(.unifiedCompact(showsTitle: false))
         .defaultSize(width: 1280, height: 800)
         .commands {
-            CommandGroup(after: .appSettings) {
-                Picker("Appearance", selection: Binding(
-                    get: { appearanceMode },
-                    set: { appearanceMode = $0 }
-                )) {
-                    ForEach(AppearanceMode.allCases, id: \.rawValue) { mode in
-                        Text(mode.menuTitle).tag(mode.rawValue)
-                    }
-                }
-                .pickerStyle(.radioGroup)
+            ConsoleCommands()
+            CommandGroup(replacing: .appInfo) {
+                Button("About Loopflow") { openWindow(id: "about-loopflow") }
             }
 
-            CommandGroup(after: .saveItem) {
+            CommandGroup(replacing: .newItem) {
+                Button("Open Repo…") { openRepoPanel() }
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
+            }
+            CommandGroup(replacing: .help) {
+                Button("Keyboard Shortcuts") { openWindow(id: "keyboard-shortcuts") }
                 Button("Snapshot for Review") {
                     snapshotCurrentWindow()
                 }
-                .keyboardShortcut("4", modifiers: [.command])
             }
 
             CommandMenu("Go") {
                 Button("Portfolio") {
                     openWindow(id: "portfolio")
                 }
-                .keyboardShortcut("0", modifiers: .command)
 
                 Button("Telemetry") {
                     openWindow(id: "telemetry")
                 }
-                .keyboardShortcut("1", modifiers: .command)
 
                 if !portfolioService.repos.isEmpty {
                     Menu("Move to Repo") {
                         ForEach(portfolioService.repos) { repo in
                             Button(repo.displayName) {
-                                portfolioService.addRepo(repo.url)
-                                openWindow(id: "repo", value: repo.url)
+                                requestRepository(repo.path, nil)
                             }
+                            .disabled(repo.error != nil)
+                            .help(repo.error ?? repo.path)
                         }
                     }
                 }
 
-                Button("Open Repo…") {
-                    openRepoPanel()
-                }
-                .keyboardShortcut("o", modifiers: [.command, .shift])
             }
         }
 
-        WindowGroup(id: "repo", for: URL.self) { $repoURL in
-            WavesView(
-                portfolioService: portfolioService,
-                initialRepoPath: repoURL?.path
-            )
-            .tint(.loopflowBurgundy)
-            .modifier(AppAppearance(mode: resolvedAppearance))
+        Window("About Loopflow", id: "about-loopflow") {
+            AboutLoopflowView()
         }
-        .windowStyle(.automatic)
-        .defaultSize(width: 1080, height: 760)
+        .windowResizability(.contentSize)
+
+        Window("Open Source Licenses", id: "open-source-licenses") {
+            OpenSourceLicensesView()
+        }
+        .defaultSize(width: 760, height: 600)
 
         Window("Portfolio", id: "portfolio") {
-            WavesView(portfolioService: portfolioService)
-                .tint(.loopflowBurgundy)
-                .modifier(AppAppearance(mode: resolvedAppearance))
+            WavesView(portfolioService: portfolioService, openTask: { path, id in
+                requestRepository(path, .task(TaskLink(issue: id, repo: path)))
+            })
+                .modifier(AppAppearance(appearance: appearance))
+                .onOpenURL { handleDeepLink($0) }
         }
         .defaultSize(width: 1080, height: 760)
+
+        Window("Open Work", id: "open-work") {
+            WorkspaceOpeningFeedback(error: $openingError)
+                .modifier(AppAppearance(appearance: appearance))
+        }
+        .defaultSize(width: 480, height: 240)
+
+        Settings {
+            TabView {
+                ThemeChooser(appearance: appearance).tabItem { Label("Appearance", systemImage: "paintpalette") }
+                Form { Toggle("Autosave Task Files", isOn: $taskFilesAutosave) }
+                    .padding(24).tabItem { Label("Editing", systemImage: "pencil") }
+                DeliverySettingsView(query: registryQuery, portfolio: portfolioService)
+                    .tabItem { Label("Delivery", systemImage: "checkmark.circle") }
+                KeyboardShortcutsView().tabItem { Label("Keyboard Shortcuts", systemImage: "keyboard") }
+            }.modifier(AppAppearance(appearance: appearance))
+        }
+        Window("Keyboard Shortcuts", id: "keyboard-shortcuts") { KeyboardShortcutsView() }
+            .defaultSize(width: 540, height: 480)
 
         Window("Telemetry", id: "telemetry") {
             TelemetryDashboardView()
-                .tint(.loopflowBurgundy)
-                .modifier(AppAppearance(mode: resolvedAppearance))
+                .modifier(AppAppearance(appearance: appearance))
+                .onOpenURL { handleDeepLink($0) }
         }
         .defaultSize(width: 1180, height: 860)
 
@@ -155,24 +206,65 @@ struct LoopflowApp: App {
         }
     }
 
+    /// Work addresses resolve only through Rust's shared owners (`lf open --link`).
+    /// An ambiguous or unknown address changes nothing and reports the qualified choices.
     @MainActor
     private func handleDeepLink(_ url: URL) {
         guard url.scheme == "loopflow" else { return }
         switch url.host {
-        case "open":
-            guard let repoPath = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "repo" })?.value
-            else { return }
-            let repoURL = URL(fileURLWithPath: repoPath)
-            guard let mainRepo = portfolioService.addRepo(repoURL) else { return }
-            openWindow(id: "repo", value: mainRepo)
-        case "portfolio":
+        case "open" where url.path.isEmpty && viewItems(url) != nil:
+            // `lf desktop view` names a selection expression, not a Work address.
+            guard let (repoPath, expression) = viewItems(url) else { return }
+            requestRepository(repoPath, .view(expression: expression, address: url.absoluteString))
+        case "portfolio" where url.path.isEmpty:
             openWindow(id: "portfolio")
-        case "sessions":
+        case "sessions" where url.path.isEmpty:
             NotificationCenter.default.post(name: .openSessions, object: nil)
         default:
-            break
+            taskLinks.receiveAddress { isLatest in
+                do {
+                    let query = RegistryQueryLocal.shared
+                    let resolved = try await query.workLink(url)
+                    let link = LinkedWork(resolved)
+                    var path = resolved.target.repositoryPath
+                    if case .task(let task) = link, let repo = task.repo { path = repo }
+                    try await openRepository(path, link: link, address: resolved.url, raises: isLatest)
+                } catch { reportOpeningError(error) }
+            }
         }
+    }
+
+    private func viewItems(_ url: URL) -> (repo: String, expression: String)? {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        guard let repo = items.first(where: { $0.name == "repo" })?.value,
+              let expression = items.first(where: { $0.name == "view" })?.value else { return nil }
+        return (repo, expression)
+    }
+
+    @MainActor
+    private func reportOpeningError(_ error: Error) {
+        guard !(error is CancellationError) else { return }
+        openingError = error.localizedDescription
+        openWindow(id: "open-work")
+    }
+
+    @MainActor
+    private func requestRepository(_ path: String, _ link: LinkedWork?) {
+        Task {
+            do { try await openRepository(path, link: link) }
+            catch { reportOpeningError(error) }
+        }
+    }
+
+    @MainActor
+    private func openRepository(_ path: String, link: LinkedWork? = nil, address: String? = nil,
+                                raises: @MainActor () -> Bool = { true }) async throws {
+        let query = RegistryQueryLocal.shared
+        let workspace = try await taskLinks.openRepository(path: path, link: link, address: address, query: query,
+                                                           raises: raises) { workspace in
+            openWindow(id: "workspace", value: workspace)
+        }
+        try? saveLoopflowState(LoopflowState(selectedRepoPath: workspace.path))
     }
 
     @MainActor
@@ -183,31 +275,38 @@ struct LoopflowApp: App {
         panel.allowsMultipleSelection = false
         panel.prompt = "Open Repo"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard let mainRepo = portfolioService.addRepo(url) else {
-            let alert = NSAlert()
-            alert.messageText = "“\(url.lastPathComponent)” isn’t a Git repository"
-            alert.informativeText =
-                "Loopflow works inside a project that uses Git. "
-                + "Choose a folder that already does, or run “git init” in this one first."
-            alert.runModal()
-            return
-        }
-        openWindow(id: "repo", value: mainRepo)
+        requestRepository(url.path, nil)
     }
 }
 
-/// Resolve system appearance inside the window, where SwiftUI supplies its
-/// effective color scheme. An App-level environment read cannot supply it.
+/// Resolve every window from the app-owned theme, including native controls.
 struct AppAppearance: ViewModifier {
-    let mode: String
-    @Environment(\.colorScheme) private var systemScheme
+    let appearance: AppearanceStore
+    @Environment(\.openSettings) private var openSettings
 
     func body(content: Content) -> some View {
-        let theme = AppearanceMode.resolvedTheme(rawValue: mode, systemScheme: systemScheme)
+        let theme = appearance.effectiveTheme
         content
-            .preferredColorScheme(theme.preferredScheme)
-            .environment(\.colorScheme, theme.preferredScheme ?? systemScheme)
+            .preferredColorScheme(theme.colorScheme)
+            .environment(\.colorScheme, theme.colorScheme)
             .environment(\.palette, theme.palette)
+            .environment(\.theme, theme)
+            .tint(theme.palette.accentInk)
+            .foregroundStyle(theme.palette.text)
+            .background(theme.palette.background)
+            .safeAreaInset(edge: .top) {
+                if let notice = appearance.notice, !appearance.chooserOpen {
+                    HStack {
+                        Text(notice).font(.caption)
+                        Button("Choose Theme…") {
+                            appearance.beginPreview()
+                            openSettings()
+                        }
+                    }
+                    .padding(8).foregroundStyle(theme.palette.text)
+                    .background(theme.palette.surface)
+                }
+            }
     }
 }
 
@@ -248,6 +347,9 @@ private extension View {
                     if captureWindow != nil { break }
                     try? await Task.sleep(nanoseconds: 100_000_000)
                 }
+                // A launch view that hands off to a repository window is
+                // replaced before it settles; the replacement captures.
+                if Task.isCancelled { return }
 
                 if let window = captureWindow {
                     if let width = AppTestMode.windowWidth {
@@ -257,6 +359,7 @@ private extension View {
                         window.setContentSize(NSSize(width: width, height: height))
                     }
                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    if Task.isCancelled { return }
                     if window.isVisible {
                         do {
                             _ = try SnapshotService().snapshotWindow(window, to: path)

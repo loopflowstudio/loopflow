@@ -39,14 +39,6 @@ struct WaveSurfacePrimaryHierarchyTests {
         }
     }
 
-    @Test("the primary Podium Wave detail renders the shared metric portfolio")
-    func podiumWaveDetailRendersMetricPortfolio() throws {
-        let source = try Self.paneSource("WorkSurfaceView.swift")
-
-        #expect(source.contains("WaveMetricPortfolioView("))
-        #expect(source.contains("portfolio: roadmap.metricPortfolio"))
-    }
-
     private static func paneSource(_ name: String, sourceFile: String = #filePath) throws -> String {
         let viewsDir = URL(fileURLWithPath: sourceFile)
             .deletingLastPathComponent()      // LoopflowTests

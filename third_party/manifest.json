@@ -1,0 +1,556 @@
+{
+  "ghostty": {
+    "url": "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip",
+    "sha256": "19d6f6e2f93cf3d967aaaa9761c6ee1995683381ac432598d7b0496610934ce9",
+    "revision": "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0",
+    "libintl_members": [
+      "bindtextdom.o",
+      "dcgettext.o",
+      "dcigettext.o",
+      "dcngettext.o",
+      "dgettext.o",
+      "dngettext.o",
+      "explodename.o",
+      "finddomain.o",
+      "gettext.o",
+      "hash-string.o",
+      "intl-compat.o",
+      "l10nflist.o",
+      "langprefs.o",
+      "loadmsgcat.o",
+      "localealias.o",
+      "log.o",
+      "ngettext.o",
+      "plural-exp.o",
+      "plural.o",
+      "setlocale.o",
+      "textdomain.o",
+      "version.o",
+      "compat.o",
+      "getlocalename_l-unsafe.o",
+      "localename.o",
+      "localename-environ.o",
+      "localename-unsafe.o",
+      "setlocale-lock.o",
+      "setlocale_null.o",
+      "setlocale_null-unlocked.o"
+    ]
+  },
+  "components": [
+    {
+      "id": "ghostty",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://github.com/ghostty-org/ghostty/archive/a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0.tar.gz",
+        "sha256": "27722996a289447c1ee4d79b53f211f7c0c2e086d9efa35b739a8ca4b1391c95"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/ghostty.txt",
+          "sha256": "38e20846dcf9a4c11b612e12916418a5288286608459f31d12113cd3e0b3d9ec"
+        }
+      ]
+    },
+    {
+      "id": "freetype-freetype",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/freetype-1220b81f6ecfb3fd222f76cf9106fecfa6554ab07ec7fdc4124b9bb063ae2adf969d.tar.gz",
+        "sha256": "427201f5d5151670d05c1f5b45bef5dda1f2e7dd971ef54f0feaaa7ffd2ab90c"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/freetype-freetype.txt",
+          "sha256": "f211638c1d832c65868dd83a2b6397358cf95caec25e648d98f636912e60f43e"
+        }
+      ]
+    },
+    {
+      "id": "libpng-libpng",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/libpng-1220aa013f0c83da3fb64ea6d327f9173fa008d10e28bc9349eac3463457723b1c66.tar.gz",
+        "sha256": "fecc95b46cf05e8e3fc8a414750e0ba5aad00d89e9fdf175e94ff041caf1a03a"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/libpng-libpng.txt",
+          "sha256": "0caeda181b7305064b37c6853e7b7095050ef0c97d224bcaae787a0b6a5cc503"
+        }
+      ]
+    },
+    {
+      "id": "zlib-zlib",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/zlib-1220fed0c74e1019b3ee29edae2051788b080cd96e90d56836eea857b0b966742efb.tar.gz",
+        "sha256": "17e88863f3600672ab49182f217281b6fc4d3c762bde361935e436a95214d05c"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/zlib-zlib.txt",
+          "sha256": "97898cd24ff025482d7a03a34bde681008418e79e45ad1cb96c8ecd9af7b9d01"
+        }
+      ]
+    },
+    {
+      "id": "oniguruma-oniguruma",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/oniguruma-1220c15e72eadd0d9085a8af134904d9a0f5dfcbed5f606ad60edc60ebeccd9706bb.tar.gz",
+        "sha256": "001aa1202e78448f4c0bf1a48c76e556876b36f16d92ce3207eccfd61d99f2a0"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/oniguruma-oniguruma.txt",
+          "sha256": "a4d780032f7db15e33f8d8dd1500454178ab93aa57fe4963383443f2f6133099"
+        }
+      ]
+    },
+    {
+      "id": "glslang-glslang",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/glslang-12201278a1a05c0ce0b6eb6026c65cd3e9247aa041b1c260324bf29cee559dd23ba1.tar.gz",
+        "sha256": "14a2edbb509cb3e51a9a53e3f5e435dbf5971604b4b833e63e6076e8c0a997b5"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/glslang-glslang.txt",
+          "sha256": "c86a2c03aec4c8dbbe557596858776433866a5c37aa5d307a88003f4a69c16ea"
+        }
+      ]
+    },
+    {
+      "id": "spirv-cross-spirv_cross",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/spirv_cross-1220fb3b5586e8be67bc3feb34cbe749cf42a60d628d2953632c2f8141302748c8da.tar.gz",
+        "sha256": "b52b6fcfc45e7fa69b1f06a1362c155473444e2cc09995556b156c53ba6657e3"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/spirv-cross-spirv_cross.txt",
+          "sha256": "dfab64ca84061bc754a6451980935a2879fb5157023bf7b643c1fcfc32e41a96"
+        }
+      ]
+    },
+    {
+      "id": "sentry-sentry",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/sentry-1220446be831adcca918167647c06c7b825849fa3fba5f22da394667974537a9c77e.tar.gz",
+        "sha256": "2ac6497cc8d61a8d31093e47addb8c9b2c45b16b0705bb334a835b6423c318df"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/sentry-sentry.txt",
+          "sha256": "fdd9ad263e47f7c65c000ded18a64a42a08fc279aef4a2113a99b02d47855221"
+        }
+      ]
+    },
+    {
+      "id": "breakpad-breakpad",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918.tar.gz",
+        "sha256": "6cca98943d1a990766cef61077c09aff5938063fe17a1efe1228e5412b6d6ad9",
+        "packaged": {
+          "sha256": "3d78b0b701e98063cd974c1d5a2009f420474bfe7a6384d40593ca728f09db07",
+          "omit_binary_fixtures": [
+            "breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918/src/client/mac/testapp/crashduringload",
+            "breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918/src/client/mac/testapp/crashInMain"
+          ]
+        }
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/breakpad-breakpad.txt",
+          "sha256": "28fd46313ce1f83fa2716c64c5e630296849bf059758023b3df2eb1ae98557b7"
+        }
+      ]
+    },
+    {
+      "id": "highway-highway",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/highway-66486a10623fa0d72fe91260f96c892e41aceb06.tar.gz",
+        "sha256": "87d4f8893ef4e08f224973608ffebf94268a81380ba79c12e8841968c80aa212"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/highway-highway.txt",
+          "sha256": "cd7021182524e0d8dbdabb509dbbae6bc21829cfcb31857dcc6d14889e5a6f94"
+        }
+      ]
+    },
+    {
+      "id": "dcimgui-bindings",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/DearBindings_v0.17_ImGui_v1.92.5-docking.tar.gz",
+        "sha256": "8bfec500e00926f679853ee23d67cc392d3c3181733ca4704738651d3f70baa3"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/dcimgui-bindings.txt",
+          "sha256": "b08fd9947ec127fd7785801cac8b1eea2ab4282008cdaae8e50331d870f30d0d"
+        }
+      ]
+    },
+    {
+      "id": "dcimgui-imgui",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/N-V-__8AAEbOfQBnvcFcCX2W5z7tDaN8vaNZGamEQtNOe0UI.tar.gz",
+        "sha256": "c816c20e8c75f3e15ae867350e79925502d1a6a85938bb1a73b8927e5f31f9cb"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/dcimgui-imgui.txt",
+          "sha256": "aa645d3da9be2dcf82c11580f389cf373803787f57c049b08d07c6de9e95c3c8"
+        }
+      ]
+    },
+    {
+      "id": "wuffs-wuffs",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/wuffs-7411f488fe2e2c205c3d3b3d28638b7356522930.tar.gz",
+        "sha256": "17877d346f7988651d6c62e45b2e3b05c86809a6442c5e34612374b2a9719a1c"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/wuffs-wuffs.txt",
+          "sha256": "62a8d6c894df53820217be2122005d7bda1069819620beefb6d62e9c57f87035"
+        }
+      ]
+    },
+    {
+      "id": "wuffs-pixels",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/pixels-12207ff340169c7d40c570b4b6a97db614fe47e0d83b5801a932dcd44917424c8806.tar.gz",
+        "sha256": "55e83b16d091082502bf149bf457f31f42092c5982650e3ffbae7b48871bf11a"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/wuffs-pixels.txt",
+          "sha256": "7980eaa7ddc61c03ccd329426a25c4745409125ff13414515346bf902efbe94b"
+        }
+      ]
+    },
+    {
+      "id": "libxev",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/libxev-9ce8e8e6ff89e583258a7f8e7adeeeaeae8611bf.tar.gz",
+        "sha256": "e2b9b224cd78101156abb8f46479a51f6cce66c4815c632856e20a1440dd02b7"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/libxev.txt",
+          "sha256": "2abe349039b70ca4a47dbd406032163d0ce7316089052043bd1a52092c765bbd"
+        }
+      ]
+    },
+    {
+      "id": "vaxis",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/vaxis-1dbbe575dff4586fe51e3217aa5c3fecdcbb6089.tar.gz",
+        "sha256": "3ea050e905887c46bca1a2c18e41d6edf574c1aa6ebfbc5cf3c52846275e4fa8"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/vaxis.txt",
+          "sha256": "1306dd94538c211fcfd9f9dda2ea715d243c042fa6e14934047e6a4e74001196"
+        }
+      ]
+    },
+    {
+      "id": "z2d",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/z2d-7dbae85c81784dba9988320bf9543ed9a81350c8.tar.gz",
+        "sha256": "e55c9d0b156edaddfea32fb1c0e3597e1b6306b9a4ec1888e2f8008c598bced8"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/z2d.txt",
+          "sha256": "8425dcd8f4d11b43d8a755ffbba9e4fb478a759e8295e76a546138dce625ebfd"
+        }
+      ]
+    },
+    {
+      "id": "zig_objc",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/zig_objc-c8de82ff80281215ad92900866dab7103a8efa8b.tar.gz",
+        "sha256": "831eaec554bb23ef20229f1e705d8f53e8a29c829840bb8d0f5edb05c76d6df0"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/zig_objc.txt",
+          "sha256": "0415819b91e7123550c83c2fac3cb3fe778a17a8eb1fbf5d47109e526b019360"
+        }
+      ]
+    },
+    {
+      "id": "uucode",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://github.com/jacobsandlund/uucode/archive/9d55524551411b493cca41ca06363625d90aff1e.tar.gz",
+        "sha256": "68d23543cb2c6c5dfdbdf38b38375e0c6d412a5c5fb72ce06bd139f7a4d25132"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/uucode.txt",
+          "sha256": "5c5f26c8d2e93f0ab15b658ccd95a22d02be65622401d8c92ef54e92fa4b087d"
+        }
+      ]
+    },
+    {
+      "id": "zf",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/zf-c35c421f84895193246db06c40683c1a30e616ef.tar.gz",
+        "sha256": "ca4bc109fd9d97cedae2f5bdb879cc78c346d43c14a34e3a2abd2ee9208c8547"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/zf.txt",
+          "sha256": "a123d769be3405435ea46577a85211ac38fe8af3f0c783a5322ab483e884d9cc"
+        }
+      ]
+    },
+    {
+      "id": "jetbrains_mono",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/JetBrainsMono-2.304.tar.gz",
+        "sha256": "c57a691e8b82ad098b5963f3959032e4038f391087af7715885ba59046105cc4"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/jetbrains_mono.txt",
+          "sha256": "314d4e1e89b8bb6c5936ef3f16942d568a5afc9111a1173e39cc3fa4f4bbae9a"
+        }
+      ]
+    },
+    {
+      "id": "nerd_fonts_symbols_only",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/NerdFontsSymbolsOnly-3.4.0.tar.gz",
+        "sha256": "1164d1b956d4bde248d7b2f0998c43cc94f5202431a1564a793895b1e73b0d04"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/nerd_fonts_symbols_only.txt",
+          "sha256": "1745777eb9ecea5a8828df8dcb2b1837860b3505fea58f2688408b324ef6da37"
+        }
+      ]
+    },
+    {
+      "id": "gettext",
+      "scope": "GhosttyKit",
+      "source": {
+        "url": "https://deps.files.ghostty.org/gettext-0.24.tar.gz",
+        "sha256": "c918503d593d70daf4844d175a13d816afacb667c06fba1ec9dcd5002c1518b7"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/gettext.txt",
+          "sha256": "41333c451fcbfa45bc2325c62b72037a0d007d778e462c3d4685b31ada73ca44"
+        }
+      ]
+    },
+    {
+      "id": "nerd-glyphs",
+      "scope": "GhosttyKit",
+      "notices": [
+        {
+          "path": "third_party/notices/nerd-glyphs.txt",
+          "sha256": "feea76b94d82213763cc685894dac9f44adc642bc345efe49d92f9ed643b39ba"
+        }
+      ]
+    },
+    {
+      "id": "app-fonts",
+      "scope": "Desktop",
+      "notices": [
+        {
+          "path": "third_party/notices/app-fonts.txt",
+          "sha256": "17b912df78b4ed923a1b2d3a03def226afeb47279cd1e54823c13f3f0964c2e1"
+        }
+      ]
+    },
+    {
+      "id": "zig-runtime",
+      "scope": "GhosttyKit",
+      "notices": [
+        {
+          "path": "third_party/notices/zig-runtime.txt",
+          "sha256": "9f42c05fb5a3be1a3002fd81c88b8ac8769b1a8aa08ddfd69e919610bf8a7b9b"
+        }
+      ]
+    }
+  ],
+  "crate_notices": {
+    "block2@0.6.2": {
+      "path": "third_party/notices/crate-block2.txt",
+      "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+    },
+    "dispatch2@0.3.1": {
+      "path": "third_party/notices/crate-dispatch2.txt",
+      "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+    },
+    "objc2@0.6.4": {
+      "path": "third_party/notices/crate-objc2.txt",
+      "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+    },
+    "objc2-encode@4.1.0": {
+      "path": "third_party/notices/crate-objc2-encode.txt",
+      "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+    },
+    "tiktoken-rs@0.12.1": {
+      "path": "third_party/notices/crate-tiktoken-rs.txt",
+      "sha256": "f7c6ddf9d84fd7b8ad5917e4074d4c05e4c1dfb752a28a0058f06bd0f5e2edcc"
+    }
+  },
+  "notice_provenance": {
+    "dear-bindings": {
+      "url": "https://raw.githubusercontent.com/dearimgui/dear_bindings/v0.17/LICENSE.txt",
+      "sha256": "b08fd9947ec127fd7785801cac8b1eea2ab4282008cdaae8e50331d870f30d0d"
+    },
+    "simdutf": {
+      "url": "https://raw.githubusercontent.com/simdutf/simdutf/v9.0.0/LICENSE-MIT",
+      "sha256": "fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f"
+    },
+    "cormorant": {
+      "url": "https://raw.githubusercontent.com/CatharsisFonts/Cormorant/v3.609/OFL.txt",
+      "sha256": "9134ca6996bd33ea2022e109f13f20e29dee1dcd8b2e8878aad576d2ca334e9f"
+    },
+    "lato": {
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/lato/OFL.txt",
+      "sha256": "74ba064d03f1f1c4a952da936c3eb71866c34404916734de3cae73b34357e59e"
+    },
+    "cc-by-4.0": {
+      "url": "https://creativecommons.org/licenses/by/4.0/legalcode.txt",
+      "sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411"
+    },
+    "nerd-README.md": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/README.md",
+      "sha256": "8538467a6f1f67b9d7fb7f95da492796ac1f02046121aa4138c07026e85c5fb2"
+    },
+    "nerd-codicons-LICENSE.txt": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/codicons/LICENSE.txt",
+      "sha256": "d6239afa918961b465b07bf7411cbe34ff6685854f58553db7966f4881a0211f"
+    },
+    "nerd-codicons-README.md": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/codicons/README.md",
+      "sha256": "86fd7d1b3b215633d6a8457fe0dbf561bda25af01c5c1ca4a4c53ec4e7c9ffea"
+    },
+    "nerd-devicons-README.md": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/devicons/README.md",
+      "sha256": "4d5547fb89112b934f117d1688872dc29389f1ac1cd7e831fc938561a1023aea"
+    },
+    "nerd-devicons-fixed-README.md": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/devicons/fixed/README.md",
+      "sha256": "35b5b8e221383cc1bf87e37d4298b37a05f1395e43edd452c7a79c8225e9e788"
+    },
+    "nerd-devicons-vorillaz-README.md": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/devicons/vorillaz/README.md",
+      "sha256": "4772f570f66011a1f0d2b1358f48809c472cea8439cfca54f66a9ed9ad34c828"
+    },
+    "nerd-font-awesome-LICENSE.txt": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/font-awesome/LICENSE.txt",
+      "sha256": "de784a808496d49f5f80dd9d1d6e9a51cff712cfbc339e7c25155631ae3cdb5d"
+    },
+    "nerd-font-awesome-README.md": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/font-awesome/README.md",
+      "sha256": "83a5c255a5c182d1697086313265bf83788c22fe9f2c160777ecda3e32d8d76c"
+    },
+    "nerd-materialdesign-LICENSE": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/materialdesign/LICENSE",
+      "sha256": "3bae6305bcaa6d10219b999f65c342034c2d40b1c0e8567fa08605e73ccba829"
+    },
+    "nerd-materialdesign-README.md": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/materialdesign/README.md",
+      "sha256": "7afc59be7303f6877297db80c1ea8f506bcf4e18290ff85e1bba1584ffa0555b"
+    },
+    "nerd-octicons-LICENSE": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/octicons/LICENSE",
+      "sha256": "4f886642f9e8d99eeadd484acdac011c3fde8a338faf52f5ca1408c13b9a9b63"
+    },
+    "nerd-pomicons-LICENSE": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/pomicons/LICENSE",
+      "sha256": "cb4797a9745683f287c28833db596e9d68ec43082d59359b3a49c504f0f610ce"
+    },
+    "nerd-pomicons-README.md": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/pomicons/README.md",
+      "sha256": "c0de5db022d38bc135ceb3d1d0c892b2a36a0deb2d4df5e728c964e952edeacd"
+    },
+    "nerd-powerline-extra-LICENSE": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/powerline-extra/LICENSE",
+      "sha256": "544307a58e6826c24145b2af1c3578b53e2e21ae0e6c67ab4c6abd544304d26a"
+    },
+    "nerd-powerline-extra-README.md": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/powerline-extra/README.md",
+      "sha256": "5c79ad0af0366752aac6a0887126554e74c84cecff9b56e1e411758000d3e8cc"
+    },
+    "nerd-powerline-symbols-LICENSE.txt": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/powerline-symbols/LICENSE.txt",
+      "sha256": "46d5355e4734468135d8e4a30d0916292cc4df2b3ec30aa68c866f82497933be"
+    },
+    "nerd-powerline-symbols-README.md": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/powerline-symbols/README.md",
+      "sha256": "c6cde819271276da3f8faa35a1163d902f2a903e9eb375646dd473c0c582cdef"
+    },
+    "nerd-weather-icons-OFL.txt": {
+      "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/src/glyphs/weather-icons/OFL.txt",
+      "sha256": "69cdedc8a4f57a30d68e4f045af8b9cce0ec3b1a6e7eec1ad41737c894f26790"
+    },
+    "crate-block2": {
+      "url": "https://raw.githubusercontent.com/madsmtm/objc2/b4167b582b2f75f9a1be75495c41b765344fd03c/LICENSE.md",
+      "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+    },
+    "crate-dispatch2": {
+      "url": "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md",
+      "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+    },
+    "crate-objc2": {
+      "url": "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md",
+      "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+    },
+    "crate-objc2-encode": {
+      "url": "https://raw.githubusercontent.com/madsmtm/objc2/8d214f5477365ffcbcbb7de058c86ed9a518efb7/LICENSE.md",
+      "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+    },
+    "crate-tiktoken-rs": {
+      "url": "https://raw.githubusercontent.com/zurawiki/tiktoken-rs/72a5a800651a1cea1ad609292446ba02c80e3bcd/LICENSE",
+      "sha256": "f7c6ddf9d84fd7b8ad5917e4074d4c05e4c1dfb752a28a0058f06bd0f5e2edcc"
+    },
+    "glyph-devicons": {
+      "url": "https://raw.githubusercontent.com/devicons/devicon/6910f0503efdd315c8f9b858234310c06e04d9c0/LICENSE",
+      "sha256": "121194741d4a915b9f5890fdd6dd95121f9b1f816517c792358d72d7c838d664"
+    },
+    "glyph-font-logos": {
+      "url": "https://raw.githubusercontent.com/Lukas-W/font-logos/d3bf5d299e54595db1b19681a0cc57ab10454857/LICENSE",
+      "sha256": "88d9b4eb60579c191ec391ca04c16130572d7eedc4a86daa58bf28c6e14c9bcd"
+    },
+    "glyph-extension": {
+      "url": "https://raw.githubusercontent.com/andrelzgava/font-awesome-extension/09d80249058ee8018a45da30add4339289dbb466/LICENCE",
+      "sha256": "b47b15d771c4507a75ff65beca3a78168d6af4cca9b45177a1aa817139c64ba5"
+    },
+    "glyph-seti": {
+      "url": "https://raw.githubusercontent.com/jesseweed/seti-ui/2d6c5e68b4ded73c92dac291845ee44e1182d511/LICENSE.md",
+      "sha256": "d4d2d888c6a0a220a7b0e2d6013cf37539b0e05ef937002b3b33bdb364575b88"
+    },
+    "glyph-iec": {
+      "url": "https://raw.githubusercontent.com/jloughry/Unicode/805536fb6f93604da985d80e0c6b099f98f8b4d9/LICENSE.txt",
+      "sha256": "11aef1cdf2d58d822e6857e2574870ccc59d4900052bf5c098e319d750e7ac3d"
+    }
+  }
+}

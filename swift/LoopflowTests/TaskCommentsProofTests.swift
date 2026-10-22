@@ -16,7 +16,7 @@ private func fixture(_ name: String) throws -> Data {
     try Data(contentsOf: fixtureRoot.appendingPathComponent(name))
 }
 
-@Suite("Task Comments native proof", .serialized)
+@Suite("Task Comments native proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskCommentsProofTests {
     @Test("Collapsed count, thread, failure and a late read stay with their own Task beside a live Session")
@@ -24,13 +24,13 @@ struct TaskCommentsProofTests {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: repo)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let workspace = fixtureWork(registry, fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<2 {
-            workspace.multiplexer.newShell()
-            let pane = workspace.multiplexer.focusedPaneId
-            let terminal = registry.surfaces.view(for: .shell(pane))
+            workspace.multiplexer.newShell(location: workspace.location)
+            let pane = workspace.multiplexer.focusedPane.content.selectedShell!.id
+            let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
             terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
@@ -47,12 +47,12 @@ struct TaskCommentsProofTests {
                                 work: .task(id: "ts_review00000000000000000000000000"))
         )) as? [String: Any])
         session["state"] = "active"
-        session["actions"] = sessionActionFixture(kind: "interactive", state: "active")
+        session["actions"] = sessionActionFixture(state: "active")
         session["terminal_ids"] = [shells[0]]
         session["open_argv"] = ["must-not-launch"]
         let source = try CommentSource(session: JSONSerialization.data(withJSONObject: [session]))
         let query = RegistryQuery { args, _ in try await source.respond(args) }
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refresh()
         model.navigation.content = .terminals
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
@@ -69,7 +69,10 @@ struct TaskCommentsProofTests {
         }
         func label(_ id: String) throws -> String { try find(id).accessibilityLabel().string() }
         func waitFor(_ condition: () async throws -> Bool) async throws {
-            for _ in 0..<30 where !(try await condition()) { try await settle(window) }
+            for _ in 0..<30 {
+                if try await condition() { return }
+                try await settle(window)
+            }
         }
 
         // Task A: the count is read on selection, the thread stays collapsed.
@@ -79,7 +82,7 @@ struct TaskCommentsProofTests {
         try await settle(window)
         #expect(try label("task-comments-toggle") == "Comments, 3, collapsed")
         #expect((try? find("task-comments-thread")) == nil)
-        #expect(await source.reads.first == ["pm", "task", "comments", "--id", "issue-review", "--wave", "product", "--json"])
+        #expect(await source.reads.first == ["task", "comment", "issue-review", "--wave", "product", "--json"])
 
         // Expanding rereads and shows actual authorship, dates and Markdown.
         try find("task-comments-toggle").button().tap()
@@ -158,7 +161,7 @@ struct TaskCommentsProofTests {
     }
 
     private func captureIfRequested(_ window: NSWindow, name: String) throws {
-        guard let directory = ProcessInfo.processInfo.environment["LOOPFLOW_FLOW_CAPTURE_DIR"],
+        guard let directory = ProcessInfo.processInfo.environment["LOOPFLOW_GRAPH_CAPTURE_DIR"],
               let content = window.contentView,
               let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
         content.cacheDisplay(in: content.bounds, to: bitmap)
@@ -206,14 +209,14 @@ private actor CommentSource {
 
     func respond(_ args: [String]) async throws -> String {
         switch (args.first, args.dropFirst().first) {
-        case ("roadmap", _): return roadmap
-        case ("ls", _): return "[]"
-        case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-        case ("session", "list"): return session
-        case ("flow", "list"): return "[]"
-        case ("pm", "task") where args.dropFirst(2).first == "comments":
+        case ("wave", "show"): return roadmap
+        case ("wave", "list"): return "[]"
+        case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+        case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
+        case ("graph", "list"): return "[]"
+        case ("task", "comment"):
             reads.append(args)
-            let issue = args[args.firstIndex(of: "--id")! + 1]
+            let issue = args[2]
             let ids: [String]
             switch replies[issue] {
             case .thread(let chosen): ids = chosen
@@ -225,6 +228,7 @@ private actor CommentSource {
             }
             let thread: [String: Any] = [
                 "identifier": issue,
+                "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull(),
                 "comments": comments.filter { ids.contains($0["id"] as? String ?? "") },
             ]
             return String(decoding: try JSONSerialization.data(withJSONObject: thread), as: UTF8.self)

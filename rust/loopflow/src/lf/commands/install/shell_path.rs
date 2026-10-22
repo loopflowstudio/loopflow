@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 
-use crate::engine::process::shell_escape;
+use crate::os_process::shell_escape;
 
 const BEGIN: &str = "# >>> Loopflow PATH >>>";
 const END: &str = "# <<< Loopflow PATH <<<";

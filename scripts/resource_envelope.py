@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import shutil
@@ -12,10 +13,10 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
+from typing import IO, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-POLICY_PATH = REPO_ROOT / "performance" / "budgets.json"
+POLICY_PATH = REPO_ROOT / "scripts" / "performance-budgets.json"
 BUILD_RELATIVE_PATHS = (
     Path("target"),
     Path(".build"),
@@ -23,14 +24,17 @@ BUILD_RELATIVE_PATHS = (
     Path("website/node_modules"),
 )
 GATE_RELATIVE_PATH = Path(".lf/tmp/gate")
+UV_CACHE_PRUNE_TIMEOUT_SECONDS = 15
+INVENTORY_TIMEOUT_SECONDS = 15
 
 
 @dataclass(frozen=True)
 class ResourcePolicy:
     minimum_free_disk_bytes: int
-    maximum_worktree_build_bytes: int
-    maximum_aggregate_build_bytes: int
-    maximum_run_record_bytes: int
+    cleanup_target_free_disk_bytes: int
+    build_cache_retention_hours: int
+    worktree_build_cleanup_bytes: int
+    maximum_session_capture_bytes: int
     maximum_uv_cache_bytes: int
     maximum_cargo_cache_bytes: int
     maximum_gate_artifact_bytes: int
@@ -172,8 +176,7 @@ def collect_snapshot(repo: Path, policy: ResourcePolicy) -> ResourceSnapshot:
                 owner=str(repo),
                 detail=discovery_error,
                 action=(
-                    "run `git worktree list --porcelain` from this checkout and repair "
-                    "its metadata"
+                    "run `git worktree list --porcelain` from this checkout and repair its metadata"
                 ),
                 recoverable=False,
             )
@@ -181,9 +184,7 @@ def collect_snapshot(repo: Path, policy: ResourcePolicy) -> ResourceSnapshot:
         worktrees = [Worktree(repo, _branch(repo))]
 
     for worktree in worktrees:
-        active = active_paths is None or any(
-            _is_within(cwd, worktree.path) for cwd in active_paths
-        )
+        active = active_paths is None or any(_is_within(cwd, worktree.path) for cwd in active_paths)
         build_paths = tuple(worktree.path / relative for relative in BUILD_RELATIVE_PATHS)
         sources.append(
             _measure_source(
@@ -192,12 +193,12 @@ def collect_snapshot(repo: Path, policy: ResourcePolicy) -> ResourceSnapshot:
                 owner=worktree.branch,
                 root=worktree.path,
                 paths=build_paths,
-                budget=policy.maximum_worktree_build_bytes,
+                budget=policy.worktree_build_cleanup_bytes,
                 disposable=True,
                 active=active,
                 action=(
-                    "run `uv run python scripts/resource_envelope.py --recover`; "
-                    "recovery removes only build roots from inactive worktrees"
+                    "recovery can clean completed, idle builds unchanged for "
+                    f"{policy.build_cache_retention_hours}h; active and recent builds are retained"
                 ),
                 issues=measurement_issues,
             )
@@ -223,20 +224,20 @@ def collect_snapshot(repo: Path, policy: ResourcePolicy) -> ResourceSnapshot:
         )
 
     authority_home = _authority_home()
-    run_root = authority_home / "runs"
+    capture_root = authority_home / "runs"
     sources.append(
         _measure_source(
-            id="runs:home",
-            kind="runs",
-            owner="Loopflow Home",
+            id="session-captures:home",
+            kind="session-captures",
+            owner="Loopflow Machine",
             root=authority_home,
-            paths=(run_root,),
-            budget=policy.maximum_run_record_bytes,
+            paths=(capture_root,),
+            budget=policy.maximum_session_capture_bytes,
             disposable=False,
             active=True,
             action=(
-                f"inspect {run_root}; Run records are durable local evidence and are never "
-                "auto-deleted"
+                f"inspect {capture_root}; Session captures are durable local evidence "
+                "and are never auto-deleted"
             ),
             issues=measurement_issues,
         )
@@ -276,6 +277,20 @@ def collect_snapshot(repo: Path, policy: ResourcePolicy) -> ResourceSnapshot:
     )
 
     issues = _assess_sources(disk.free, policy, sources)
+    if disk.free < policy.cleanup_target_free_disk_bytes:
+        warnings.append(
+            f"{_format_bytes(disk.free)} free is below the "
+            f"{_format_bytes(policy.cleanup_target_free_disk_bytes)} cleanup target; "
+            "recovery retains active and recent builds. Verification can continue above "
+            f"the {_format_bytes(policy.minimum_free_disk_bytes)} emergency reserve"
+        )
+    warnings.extend(
+        f"{source.owner} ({source.root}): {source.kind} uses "
+        f"{_format_bytes(source.bytes)} / {_format_bytes(source.budget_bytes)} "
+        f"cleanup threshold; {source.action}"
+        for source in sources
+        if source.bytes > source.budget_bytes
+    )
     issues.extend(measurement_issues)
     issues.sort(key=lambda issue: issue.code)
     return ResourceSnapshot(
@@ -292,7 +307,6 @@ def collect_snapshot(repo: Path, policy: ResourcePolicy) -> ResourceSnapshot:
 
 
 def recover_resources(
-    repo: Path,
     policy: ResourcePolicy,
     snapshot: ResourceSnapshot,
     now: Optional[float] = None,
@@ -301,21 +315,23 @@ def recover_resources(
     actions: list[RecoveryAction] = []
     roots_used = 0
     bytes_used = 0
-    issue_codes = {issue.code for issue in snapshot.issues}
-    disk_pressure = "disk:free" in issue_codes
+    oversized = {source.id for source in snapshot.sources if source.bytes > source.budget_bytes}
+    disk_pressure = snapshot.free_disk_bytes < policy.cleanup_target_free_disk_bytes
 
     gate_sources = sorted(
         (source for source in snapshot.sources if source.kind == "gate" and source.bytes),
         key=lambda source: -source.bytes,
     )
     for source in gate_sources:
-        if source.id not in issue_codes and not disk_pressure:
+        if source.id not in oversized and not disk_pressure:
             continue
         if roots_used >= policy.maximum_recovery_roots:
             break
         if bytes_used + source.bytes > policy.maximum_recovery_bytes:
             continue
         action = _prune_old_gate_artifacts(source, policy, now)
+        if action is None:
+            continue
         actions.append(action)
         roots_used += 1
         bytes_used += action.removed_bytes
@@ -323,7 +339,8 @@ def recover_resources(
     uv_source = next((source for source in snapshot.sources if source.id == "cache:uv"), None)
     if (
         uv_source is not None
-        and ("cache:uv" in issue_codes or disk_pressure)
+        and uv_source.bytes > 0
+        and ("cache:uv" in oversized or disk_pressure)
         and roots_used < policy.maximum_recovery_roots
         and bytes_used + uv_source.bytes <= policy.maximum_recovery_bytes
     ):
@@ -332,49 +349,130 @@ def recover_resources(
         roots_used += 1
         bytes_used += uv_action.removed_bytes
 
-    aggregate_build = sum(source.bytes for source in snapshot.sources if source.kind == "build")
-    needed = max(
-        0,
-        policy.minimum_free_disk_bytes - snapshot.free_disk_bytes,
-        aggregate_build - policy.maximum_aggregate_build_bytes,
-    )
-    needed = max(0, needed - bytes_used)
-    required_builds = {
-        source.id
-        for source in snapshot.sources
-        if source.kind == "build" and source.id in issue_codes
-    }
-    candidates = sorted(
-        (
-            source
-            for source in snapshot.sources
-            if source.kind == "build" and source.disposable and not source.active and source.bytes
-        ),
-        key=lambda source: (source.id not in required_builds, -source.bytes),
-    )
-    for source in candidates:
-        if roots_used >= policy.maximum_recovery_roots:
-            break
-        if bytes_used >= policy.maximum_recovery_bytes:
-            break
-        if source.id not in required_builds and needed <= 0:
-            break
-        if bytes_used + source.bytes > policy.maximum_recovery_bytes:
-            continue
-        action = _remove_build_artifacts(source)
-        actions.append(action)
-        roots_used += 1
-        bytes_used += action.removed_bytes
-        needed = max(0, needed - action.removed_bytes)
+    if roots_used < policy.maximum_recovery_roots and bytes_used < policy.maximum_recovery_bytes:
+        actions.extend(
+            _prune_completed_builds(
+                Path(snapshot.filesystem),
+                policy,
+                policy.maximum_recovery_roots - roots_used,
+                policy.maximum_recovery_bytes - bytes_used,
+            )
+        )
 
     return tuple(actions)
 
 
 def inspect_resources(repo: Path, policy: ResourcePolicy, recover: bool) -> ResourceReport:
-    before = collect_snapshot(repo, policy)
-    recovery = recover_resources(repo, policy, before) if recover and not before.ok else ()
-    after = collect_snapshot(repo, policy) if recovery else before
-    return ResourceReport(str(POLICY_PATH), before, after, tuple(recovery))
+    repo = repo.resolve()
+    lock = _lock_recovery() if recover else None
+    try:
+        before = collect_snapshot(repo, policy)
+        recovery = recover_resources(policy, before) if lock is not None else ()
+        may_have_changed = any(
+            action.status in {"removed", "pruned", "failed"} for action in recovery
+        )
+        after = collect_snapshot(repo, policy) if may_have_changed else before
+        return ResourceReport(str(POLICY_PATH), before, after, recovery)
+    finally:
+        if lock is not None:
+            lock.close()
+
+
+def _lock_recovery() -> Optional[IO[str]]:
+    # Shared caches need one cleaner across repositories and worktrees. A busy
+    # cleaner never makes another verification wait; process exit releases it.
+    path = Path("/tmp") / f"loopflow-cache-recovery-{os.getuid()}.lock"
+    handle = path.open("a+")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    return handle
+
+
+def _prune_completed_builds(
+    repo: Path,
+    policy: ResourcePolicy,
+    maximum_roots: int,
+    maximum_bytes: int,
+) -> tuple[RecoveryAction, ...]:
+    # Retain the selected Home; inherited work attribution grants no cleanup authority.
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
+    if "LF_HOME" in os.environ:
+        environment["LF_HOME"] = os.environ["LF_HOME"]
+    try:
+        executable = os.environ.get("LF_BIN") or shutil.which("lf")
+        if executable is None:
+            raise FileNotFoundError("no lf executable available")
+        result = subprocess.run(
+            [
+                executable,
+                "wt",
+                "prune",
+                "--builds",
+                "--json",
+                "--retention-hours",
+                str(policy.build_cache_retention_hours),
+                "--maximum-roots",
+                str(maximum_roots),
+                "--maximum-bytes",
+                str(maximum_bytes),
+            ],
+            cwd=repo,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode:
+            raise ValueError(f"lf build cleanup exited {result.returncode}")
+        receipt = json.loads(result.stdout)
+        if receipt["dry_run"] is not False:
+            raise ValueError("unexpected preview receipt")
+        actions = []
+        for entry in receipt["entries"]:
+            status = entry["status"]
+            allocated_bytes = entry["allocated_bytes"]
+            if status not in {"removed", "retained", "failed"}:
+                raise ValueError("unknown build cleanup status")
+            actions.append(
+                RecoveryAction(
+                    f"build:{entry['worktree']}",
+                    entry["worktree"],
+                    allocated_bytes if status == "removed" else 0,
+                    (entry["path"],) if status == "removed" else (),
+                    status,
+                    entry["reason"],
+                )
+            )
+        if sum(action.removed_bytes for action in actions) != receipt["removed_bytes"]:
+            raise ValueError("inconsistent allocated-byte receipt")
+        return tuple(actions)
+    except OSError as exc:
+        return (
+            RecoveryAction(
+                "build-cleanup",
+                "lf wt prune",
+                0,
+                (),
+                "retained",
+                f"build output retained: {exc}; use a capable `lf wt prune --builds`",
+            ),
+        )
+    except (subprocess.TimeoutExpired, ValueError, KeyError, TypeError) as exc:
+        # The owner may already have removed output before losing its receipt.
+        return (
+            RecoveryAction(
+                "build-cleanup",
+                "lf wt prune",
+                0,
+                (),
+                "failed",
+                f"build cleanup result unknown: {exc}; inspect `lf wt prune --builds --dry-run`",
+            ),
+        )
 
 
 def _discover_worktrees(repo: Path) -> tuple[list[Worktree], Optional[str]]:
@@ -424,16 +522,18 @@ def _running_cwds() -> tuple[Optional[set[Path]], Optional[str]]:
             timeout=15,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-        return None, f"cannot prove inactive worktrees ({exc}); recovery will retain all builds"
+        return None, (
+            f"cannot inventory inactive worktrees ({exc}); "
+            "cleanup independently inspects ownership and activity"
+        )
     if result.returncode != 0:
         return None, (
-            "cannot prove inactive worktrees "
-            f"(lsof exited {result.returncode}); recovery will retain all builds"
+            "cannot inventory inactive worktrees "
+            f"(lsof exited {result.returncode}); "
+            "cleanup independently inspects ownership and activity"
         )
     paths = {
-        Path(line[1:]).resolve()
-        for line in result.stdout.splitlines()
-        if line.startswith("n/")
+        Path(line[1:]).resolve() for line in result.stdout.splitlines() if line.startswith("n/")
     }
     return paths, None
 
@@ -447,10 +547,8 @@ def _is_within(path: Path, root: Path) -> bool:
 
 
 def _authority_home() -> Path:
-    for name in ("LF_CONTROL_HOME", "LF_HOME"):
-        value = os.environ.get(name)
-        if value:
-            return Path(value).expanduser()
+    if value := os.environ.get("LF_HOME"):
+        return Path(value).expanduser()
     return Path.home() / ".lf"
 
 
@@ -467,7 +565,17 @@ def _uv_cache_dir() -> Path:
 def _allocated_bytes(path: Path) -> int:
     if not path.exists() and not path.is_symlink():
         return 0
-    result = subprocess.run(["du", "-sk", str(path)], capture_output=True, text=True)
+    try:
+        result = subprocess.run(
+            ["du", "-sk", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=INVENTORY_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise OSError(
+            f"cannot measure {path}: {INVENTORY_TIMEOUT_SECONDS}-second inventory deadline exceeded"
+        ) from exc
     if result.returncode == 0:
         first = result.stdout.split(maxsplit=1)
         if first:
@@ -524,97 +632,48 @@ def _assess_sources(
 ) -> list[ResourceIssue]:
     issues = []
     if free_disk_bytes < policy.minimum_free_disk_bytes:
+        recoverable = sorted(
+            (
+                source
+                for source in sources
+                if source.kind == "build"
+                and source.disposable
+                and not source.active
+                and source.bytes
+            ),
+            key=lambda source: -source.bytes,
+        )
+        roots = (
+            "; ".join(
+                f"{source.owner}: {source.root} ({_format_bytes(source.bytes)})"
+                for source in recoverable[: policy.maximum_recovery_roots]
+            )
+            or "none currently inactive"
+        )
         issues.append(
             ResourceIssue(
                 code="disk:free",
                 owner="host filesystem",
                 detail=(
                     f"{_format_bytes(free_disk_bytes)} free is below the "
-                    f"{_format_bytes(policy.minimum_free_disk_bytes)} verification floor"
+                    f"{_format_bytes(policy.minimum_free_disk_bytes)} emergency reserve"
                 ),
                 action=(
                     "run `uv run python scripts/resource_envelope.py --recover`; "
-                    "verification will not start until the safety floor is restored"
+                    "verification will not start until the emergency reserve is restored. "
+                    f"Largest inactive build roots (recent builds retained): {roots}"
                 ),
                 recoverable=True,
             )
         )
-    for source in sources:
-        if source.bytes <= source.budget_bytes:
-            continue
-        issues.append(
-            ResourceIssue(
-                code=source.id,
-                owner=source.owner,
-                detail=(
-                    f"{source.kind} uses {_format_bytes(source.bytes)} / "
-                    f"{_format_bytes(source.budget_bytes)} budget"
-                ),
-                action=source.action,
-                recoverable=source.disposable and not source.active,
-            )
-        )
-    build_bytes = sum(source.bytes for source in sources if source.kind == "build")
-    if build_bytes > policy.maximum_aggregate_build_bytes:
-        issues.append(
-            ResourceIssue(
-                code="build:aggregate",
-                owner="Loopflow worktrees",
-                detail=(
-                    f"build roots use {_format_bytes(build_bytes)} / "
-                    f"{_format_bytes(policy.maximum_aggregate_build_bytes)} aggregate budget"
-                ),
-                action=(
-                    "run `uv run python scripts/resource_envelope.py --recover`; "
-                    "the largest inactive worktree builds are cleaned first"
-                ),
-                recoverable=any(
-                    source.kind == "build" and source.disposable and not source.active
-                    for source in sources
-                ),
-            )
-        )
     return issues
-
-
-def _remove_build_artifacts(source: ResourceSource) -> RecoveryAction:
-    removed_paths = []
-    removed_bytes = 0
-    allowed = {source.root / relative for relative in BUILD_RELATIVE_PATHS}
-    for path in source.paths:
-        if path not in allowed or path == source.root:
-            return RecoveryAction(
-                source.id,
-                source.owner,
-                0,
-                (),
-                "refused",
-                f"{path} is outside the build-artifact allowlist",
-            )
-        if not path.exists() and not path.is_symlink():
-            continue
-        measured = _allocated_bytes(path)
-        if path.is_dir() and not path.is_symlink():
-            shutil.rmtree(path)
-        else:
-            path.unlink()
-        removed_paths.append(str(path))
-        removed_bytes += measured
-    return RecoveryAction(
-        source.id,
-        source.owner,
-        removed_bytes,
-        tuple(removed_paths),
-        "removed",
-        "removed allowlisted build artifacts; worktree and source retained",
-    )
 
 
 def _prune_old_gate_artifacts(
     source: ResourceSource,
     policy: ResourcePolicy,
     now: float,
-) -> RecoveryAction:
+) -> Optional[RecoveryAction]:
     gate_root = source.root / GATE_RELATIVE_PATH
     if source.paths != (gate_root,):
         return RecoveryAction(
@@ -639,6 +698,8 @@ def _prune_old_gate_artifacts(
                 child.unlink()
             removed_paths.append(str(child))
             removed_bytes += measured
+    if not removed_paths:
+        return None
     return RecoveryAction(
         source.id,
         source.owner,
@@ -650,17 +711,36 @@ def _prune_old_gate_artifacts(
 
 
 def _prune_uv_cache() -> RecoveryAction:
-    before = _allocated_bytes(_uv_cache_dir())
-    result = subprocess.run(["uv", "cache", "prune"], capture_output=True, text=True)
-    after = _allocated_bytes(_uv_cache_dir())
-    detail = result.stderr.strip() or result.stdout.strip()
+    cache = _uv_cache_dir()
+    before = _allocated_bytes(cache)
+    try:
+        # An enclosing `uv run` can hold the cache lock until this script exits.
+        result = subprocess.run(
+            ["uv", "cache", "prune"],
+            capture_output=True,
+            text=True,
+            timeout=UV_CACHE_PRUNE_TIMEOUT_SECONDS,
+            env={**os.environ, "UV_LOCK_TIMEOUT": "0"},
+        )
+    except subprocess.TimeoutExpired:
+        status = "timed_out"
+        detail = (
+            f"uv cache prune exceeded {UV_CACHE_PRUNE_TIMEOUT_SECONDS}s; "
+            "the cache may be in use, including by an enclosing `uv run`. "
+            "Other recovery continues; retry `uv cache prune` after other uv processes exit"
+        )
+    else:
+        status = "pruned" if result.returncode == 0 else "failed"
+        detail = result.stderr.strip() or result.stdout.strip()
+        detail = detail or f"uv cache prune exited {result.returncode}"
+    after = _allocated_bytes(cache)
     return RecoveryAction(
         "cache:uv",
         "uv",
         max(0, before - after),
         (),
-        "pruned" if result.returncode == 0 else "failed",
-        detail or f"uv cache prune exited {result.returncode}",
+        status,
+        detail,
     )
 
 
@@ -686,7 +766,7 @@ def _print_report(report: ResourceReport) -> None:
     for source in snapshot.sources:
         if source.bytes == 0 and source.kind in {"build", "gate"}:
             continue
-        mark = "FAIL" if source.bytes > source.budget_bytes else "ok  "
+        mark = "warn" if source.bytes > source.budget_bytes else "ok  "
         active = " · active" if source.active else ""
         print(
             f"{mark}  {source.kind:<6} {_format_bytes(source.bytes):>10} / "
@@ -705,13 +785,13 @@ def _print_report(report: ResourceReport) -> None:
 
 def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Measure Loopflow build, cache, Run record, disk, and CPU budgets."
+        description="Measure Loopflow build, cache, capture history, disk, and CPU budgets."
     )
     parser.add_argument("--json", action="store_true", help="emit the complete report as JSON")
     parser.add_argument(
         "--recover",
         action="store_true",
-        help="clean only allowlisted inactive/disposable pressure, then remeasure",
+        help="clean inactive disposable roots, retain active builds, then remeasure",
     )
     parser.add_argument("--repo", type=Path, default=REPO_ROOT, help="Loopflow checkout to inspect")
     parser.add_argument("--policy", type=Path, default=POLICY_PATH, help="budget policy JSON")

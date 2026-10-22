@@ -14,10 +14,10 @@ Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`
 | You need | For |
 |---|---|
 | macOS or Linux | Everything |
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [OpenCode](https://github.com/anomalyco/opencode), signed in | Every run. Loopflow uses the one you have; these have their own cost |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://github.com/anomalyco/opencode), or [Pi](https://github.com/earendil-works/pi) (1.3+), signed in | Every run. Loopflow uses the one you have; these have their own cost |
 | `git`, and a project in a git repository | Every run |
 | [GitHub CLI](https://cli.github.com) (`gh`), signed in | Pull requests |
-| A [Linear](https://linear.app) workspace | Tasks and Waves |
+| A [Linear](https://linear.app) workspace | Optional Linear-backed planning; planning defaults to Git |
 
 A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 
@@ -26,9 +26,10 @@ A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 | I want to... | Start here |
 |---|---|
 | Try loopflow from terminal | `lf init` |
-| Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
-| Steer and inspect from terminal | `lf start <name>` → `lf chat` / `lf status` |
-| Run on another machine | `lf ssh <home-id> start <name>` ([Go Remote](#go-remote)) |
+| Run autonomous waves | Author `.lf/wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
+| Steer and inspect from terminal | `lf --wave <name> wave-operate` → `lf wave status` |
+| Run on another machine | `lf --machine <machine-id> --wave <name> wave-operate` ([Go Remote](#go-remote)) |
+| Join a repository a teammate already runs | `lf user`, then `lf planning status` ([Work with another person](lf.md#work-with-another-person)) |
 
 ---
 
@@ -51,12 +52,13 @@ clipboard        634 ▏
 
 The `-c` flag pastes your clipboard. `lf` assembles context—operating guidance,
 scratch notes, and clipboard—and passes it to the coding agent. Before the
-provider starts, Loopflow publishes one immutable Run manifest under this
-Home's `$LF_HOME/runs/`; conversation, usage, and terminal evidence accumulate
-there without becoming a lock on the repository or planning system. Add repo
-docs explicitly with `--docs` and changed file bodies with `--diff-files`.
+provider starts, Loopflow reserves the LfSession and captures its input in
+this Machine. The store must be writable even for unbound work. Native history
+retains provider outcomes and usage; Process records the command result. Add repo
+docs explicitly with `--docs` and changed file bodies with `--diff files`.
 
-`LOOPFLOW.md` ships as default operating guidance for every run; opt out with `--no-loopflow`.
+`LOOPFLOW.md` supplies launcher guidance; Task- and Wave-associated launches
+also receive Work guidance. Standalone native skills retain their own instructions.
 
 Or try the demo repo:
 
@@ -65,7 +67,14 @@ git clone https://github.com/loopflowstudio/loopflow-demos
 cd loopflow-demos/calculator
 python -m pytest test_calc.py    # see the bug
 # copy error to clipboard
-lf debug -c                       # fix it
+lf debug -c                            # fix it
+```
+
+### Open a conversation
+
+```bash
+lf                         # ask a question or start work
+lf operate                 # review and operate the repository’s open work
 ```
 
 ### Inline prompts
@@ -75,14 +84,56 @@ lf : "fix the typo in README"
 lf : "add type hints to utils.py"
 ```
 
+### Worktree placement
+
+```bash
+lf wt create fix-login
+lf wt switch fix-login
+```
+
+New sibling worktrees use `../<repo>.fix-login`, with the primary checkout's
+current directory name as `<repo>`. Renaming that checkout changes the prefix
+for new siblings; existing worktrees keep their paths.
+
+If at least two live, branch-bearing worktrees share a parent directory other
+than the primary checkout's parent, lf creates new worktrees there as
+`fix-login`. Directory names can differ from branch names, as with city-named
+workspaces or branches renamed after checkout creation. No lf configuration is
+needed. New branches remain `<author>/fix-login`.
+
+With fewer examples or conflicting parent directories, lf uses its default
+sibling path, `../<repo>.fix-login`. Detached and missing checkouts do not
+establish a layout. Existing branch checkouts are reused wherever they live.
+Matching a host's worktree directory does not register a workspace in that host
+or run its setup scripts. Git checkout-hook failures retain the checkout and
+report the setup error instead of reporting success.
+
+Task checkout adds its readable identifier: `lf checkout ENG-123` creates
+`<author>/eng-123-fix-login` for “Fix login”, with `eng-123-fix-login` as the
+workspace segment. Local Tasks use six hex characters, extended only for
+collisions. Known Linear IDs work offline. Later Linear synchronization changes
+Task labels and generated Session names; existing branches and checkouts stay put.
+
+Reusing an existing worktree stays local, even when its remote is unavailable.
+For new work, lf refreshes the default branch from its configured Git upstream;
+a repository without a remote uses its local base. Advertised remote defaults,
+existing local branch conventions and the primary checkout supply the default
+branch without requiring `main` or lf configuration. In a fork, configure the
+base branch to track the integration remote using ordinary Git tracking.
+Publication and stacked PR remotes still have GitHub/origin assumptions.
+
+`lf sync --manual main` integrates an explicit local branch without fetching an
+unrelated remote. An explicitly selected remote-tracking target fetches that
+remote; a fetch failure remains an error.
+
 ### Context flags
 
 | Flag | What it adds |
 |------|--------------|
 | `-c` | Clipboard content |
 | `--docs PATH,PATH` | Add specific files, globs, or directories to context |
-| `--diff-files` | Full content of files changed on the branch |
-| `--diff` | Raw `git diff` output |
+| `--diff files` | Full content of files changed on the branch |
+| `--diff patch` | Raw `git diff` output |
 | `-i` | Interactive mode |
 | `-b` | Batch/headless mode |
 
@@ -90,13 +141,14 @@ lf : "add type hints to utils.py"
 
 ## Build Features
 
-Start from a Linear task; Loopflow creates and retains its worktree.
+Start from a Task; Loopflow creates and retains its worktree.
 
 ```bash
-lf task start --wave <wave> "add OAuth login"
+lf task create --wave <wave> --title "add OAuth login"
+lf -b task run <issue-id> &
 lf task status <issue-id>
-lf task steer <issue-id> "support passkeys too"
-lf task wait <issue-id> --until terminal
+lf comment <issue-id> "support passkeys too"
+lf wait <issue-id> --until terminal
 ```
 
 ### Skills chain
@@ -107,7 +159,7 @@ lf task wait <issue-id> --until terminal
 | `design` | Explore the problem, write spec to `scratch/<branch>.md` |
 | `implement` | Read spec, build it |
 | `compress` | Simplify the implementation without changing behavior |
-| `gate` | Verify the branch for shipping: tests, static checks, docs, PR description |
+| `gate` | Verify the branch for shipping: tests, static checks and docs |
 | `qa` | Thorough quality assessment of the current branch |
 
 ### How steps chain
@@ -116,23 +168,28 @@ lf task wait <issue-id> --until terminal
 |------|-------|--------|
 | design | — | `scratch/<branch>.md` |
 | implement | `scratch/<branch>.md` | code |
-| gate | code, tests | code, PR description |
+| gate | code, tests | code, docs and proof |
 | qa | code | findings and fixes on branch |
 
-### Named flows
+### Named graphs
 
-Chain skills manually, or use a named flow (a flow is a sequence of steps; each step names a skill, an op, or a subflow):
+Chain skills manually, or use a named graph (a graph is a sequence of steps; each step names a skill, an op, or a subgraph):
 
 ```bash
-lf --task DES-123 design                  # design skill with Task context
-lf flow launch-plan                      # plan the core → implement → gate → demo → land
-lf build                                 # one code → reviewable Task slice
-lf ship                                  # final Task gate → learnings → land
+lf incident                            # unbreak → 5whys → launch-plan
+lf code                                # pursue: implement until it holds, publish the PR
+lf feature                             # kickoff → pursue; ends at a published PR
+lf ship                                # gate → land and complete the Task
 ```
 
-Flow YAML owns step order, interactive reviews (`human: true`), and explicit
-backward edges. A Flow with backward edges is a loopflow; it runs with or without
-a Task. `ship` and `deploy` supply explicitly selected delivery steps.
+Use bare names for both skills and Graphs: `lf debug`, `lf code`, `lf incident`.
+`lf graph incident` explicitly selects the Graph when a name also names a skill
+or CLI command; the prefix is otherwise optional.
+
+Graph YAML owns step order and explicit backward edges. Every step is
+autonomous; design review and the demo happen in the Task conversation. A Graph
+with backward edges is a loopflow; it runs with or without a Task. `ship` and
+`deploy` supply explicitly selected delivery steps.
 
 ### Custom skills
 
@@ -151,7 +208,7 @@ Focus on input validation and auth boundaries.
 ```
 
 ```bash
-lf audit    # runs your custom skill
+lf audit                               # runs your custom skill
 ```
 
 The [Authoring guide](authoring.md) covers prompt contracts, evidence loops,
@@ -160,95 +217,87 @@ and Wave goals.
 ### Shipping
 
 ```bash
-lf pr publish   # push + create or update PR (no browser)
-lf pr open      # publish, then open the PR for review
-lf pr submit    # prepare the exact head; you click merge
-lf pr arm       # arm exact-head auto-merge and return
-lf pr land      # watch, repair CI, and return after GitHub merges
+lf pr open      # push + create or update a draft, then open its page
+lf pr publish   # push + create or update PR and mark ready (no browser)
+lf submit    # prepare the exact head; you click merge
+lf arm       # arm exact-head auto-merge and return
+lf land      # request auto-merge, record delivery, and return
+lf pr reconcile # check recorded landings once and settle merges
+lf ci watch     # watch PR checks; start a ci-fix when a landing fails
 ```
 
 Use the same delivery verbs for Task and non-Task branches. They act on the
-branch and Task PR record when present; they do not require a live Task worker.
+branch and Task PR record when present; they do not require a running Task Graph.
 
 ---
 
 ## Scale with Waves
 
-Ready to automate? Waves remain available continuously and choose another
-bounded pass when chat, child observations, crons, or a heartbeat wake them.
-
-`lf` skills are manual building blocks. A Wave is a durable operating context
-whose optional resident handles chat and recurring selection. Project
-operations and Task workers run independently of that resident.
-
-Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional
-frontmatter sets machine config such as `owner:`, `home:`, `crons:`, and `pm:`), then open it in
-**Loopflow** (macOS) — the home for running waves. Select the repository and
-the Wave to get its persistent conversation beside the Linear-backed
-Project → Task work map; the app starts the Wave's resident process when
-needed. From the CLI, `lf start shipper` does the same start.
-
-The Wave creates or selects a Linear task, starts it with `lf task run
-<issue-id>`, and stays steerable while the Task runs in its stable
-worktree. `lf pr land` keeps the PR under one durable watcher through CI repair
-and merge; review feedback returns to the same Task and linked events land in
-the Wave thread.
-
-Inspect running work through Loopflow:
-
 ```bash
-lf ps --json          # live processes and their ownership evidence
-lf status shipper     # Wave work, Runs, and Task conditions
-lf session list       # conversations waiting for a person
+lf --wave shipper wave-operate "Review the release blockers"
+lf wave status shipper
+lf ps --json
 ```
 
-Use `lf session list`, then `lf session open <session-id>`, for every unresolved
-interactive Run, Ask, or Task FlowStep. Finish it with the kind-specific action
-shown in the [Sessions lifecycle](../README.md#sessions).
+Author `.lf/wave/shipper/GOAL.md` with an objective and operating guidance.
+`lf cron add` schedules recurring commands on your Machine; `pm:` connects shared planning. Each
+`wave-operate` invocation keeps your started Tasks moving and leaves the plan alone.
+Tasks own implementation in stable worktrees; `lf land` hands off delivery and
+`lf pr reconcile` settles verified merges; `lf ci watch` repairs failed CI
+while it runs.
 
-Use `lf prompt: draft wave/shipper/GOAL.md` to author the loop contract. Use
-`lf design` to explore an uncertain operating context, or write it by hand.
-Once `wave/` files exist, `lf wave serve <name>` runs them and Loopflow picks them up.
+Open the repository in Loopflow on macOS to read Waves, Tasks and conversations.
+`lf session list` finds conversations and Graph reviews; open one with
+`lf session connect <session-id>`. Completing it returns its saved feedback.
 
 [Waves →](waves.md) · [Conducting →](conducting.md)
 
----
-
 ## Go Remote
 
-Run agents while you sleep. A Home is a stable machine identity with local
-planning, process, journal, and Run evidence; its SSH route can change.
+Run agents while you sleep. A Machine is a stable machine identity with local
+planning, process, journal, and conversation history; its SSH route can change.
 Bootstrap the remote identity once:
 
 ```bash
-lf ssh jack@mini.local home id --json
-lf home observe <home-id> ssh://jack@mini.local
-lf ls --json
-lf work place wave <wave-id> <home-id>    # record origin-side planning state
-lf ssh <home-id> start shipper
+lf machine add jack@mini.local --label mini
+lf machine list --json
+lf wave list --json
+lf --machine mini --wave shipper wave-operate
+lf machine use mini --task LOO-123  # move one Task's ownership to mini
 ```
 
-`lf start shipper` always starts shipper on the machine executing that command.
-`lf ssh <home-id> start shipper` executes the same operation on the named Home,
-which proves its identity before changing lifecycle state. One Home keeper
-serves every Wave running there.
+Pick the Machine that runs your new Tasks for a Wave:
 
-Reads follow the same rule: `lf runs`, `lf usage`, `lf ls`, and `lf status`
-read the executing Home. Prefix the command with `lf ssh <home-id>` to read
-another Home. Loopflow does not silently aggregate or replicate Run records.
+```bash
+lf machine use mini shipper        # stored here and on your other Machines
+lf session connect --wave shipper  # your Wave Session, now on mini
+```
 
-Foreground `lf ssh` commands can choose from subscription accounts installed on
-the origin and target. A resident that outlives SSH sheds forwarded credentials
-and uses authority installed on its own machine. See
+The choice is yours alone and never committed. Existing Tasks stay put; move one
+with `lf machine use <machine> --task <task>`.
+
+The target Machine proves its identity before running the command and keeps the
+resulting execution locally.
+
+Reads follow the same rule: `lf history list`, `lf usage`, `lf wave list`, and `lf wave status`
+read the executing Machine. Prefix the command with `lf --machine <machine-id>` to read
+another Machine. Loopflow does not silently aggregate or replicate execution records.
+
+`lf machine connect <machine> <provider> [email]` installs a separate login
+(github, claude, codex, opencode or linear) on an added machine. Account-selected
+`lf --machine` launches connect a missing login in the foreground and then use its
+resident credential. See
 [Subscription Management](subscriptions.md#use-subscriptions-over-ssh).
 
 Auth connects your providers locally:
 
 ```bash
-lf auth github    # connect GitHub
-lf auth claude    # connect Claude
-lf auth linear    # connect Linear with OAuth
-lf auth status    # check connections
+lf account connect github    # connect GitHub
+lf account connect claude    # connect Claude
+lf account connect linear    # connect Linear with OAuth; needs LINEAR_CLIENT_ID/SECRET or Doppler
+lf account connect asana     # or plan in Asana; needs ASANA_CLIENT_ID/SECRET or Doppler
+lf account connect notion    # or plan in Notion; needs NOTION_CLIENT_ID/SECRET or Doppler
+lf account    # refresh managed identity and usage
 ```
 
 ---

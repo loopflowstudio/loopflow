@@ -155,10 +155,8 @@ main() {
   tar -xzf "$tarball" -C "$tmpdir"
 
   src="$tmpdir/lf"
-  daemon_src="$tmpdir/lfd"
   dst="$install_dir/lf"
-  daemon_dst="$install_dir/lfd"
-  chmod +x "$src" "$daemon_src"
+  chmod +x "$src"
   app_source=""
   if [ "$(uname -s)" = "Darwin" ] && [ "$cli_only" != "1" ]; then
     dmg_name="Loopflow.dmg"
@@ -181,19 +179,15 @@ main() {
     # LF_APPLICATIONS_DIR, else the recorded copy, else /Applications.
     "$src" install promote \
       --cli-target "$dst" \
-      --daemon-source "$daemon_src" \
-      --daemon-target "$daemon_dst" \
       --app-source "$app_source" \
       --sync-skills
   else
     "$src" install promote \
       --cli-target "$dst" \
-      --daemon-source "$daemon_src" \
-      --daemon-target "$daemon_dst" \
       --sync-skills
   fi
 
-  echo "Installed to $install_dir/lf and $install_dir/lfd"
+  echo "Installed to $install_dir/lf"
 
   if [ "$(uname -s)" = "Darwin" ]; then
     # New terminals: lf owns one marked block in the zsh startup file.

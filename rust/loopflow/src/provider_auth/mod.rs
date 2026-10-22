@@ -2,12 +2,13 @@
 //! providers, token extraction from vendor CLI artifacts, and store-direct
 //! persistence into store provider tokens.
 //!
-//! Shared home — called in-process by `lf auth`. Auth lifecycle notifications
-//! go through [`AuthEventSink`]. Auth is poll-only in the base
-//! wave model (see `scratch/eventing.md` §5), so both the CLI and the HTTP
-//! routes pass [`no_event_sink`] — the store write is the record; a caller
-//! reads it back by querying the provider list.
+//! Called in-process by `lf account`. Each attempt retains its completion until
+//! consumed, including credential persistence failure. Stored tokens own durable
+//! credential state; they do not establish whether a new attempt succeeded.
 
+#[cfg(unix)]
+mod browser_handoff;
+pub(crate) mod codex;
 pub mod credential_socket;
 
 use std::collections::{HashMap, HashSet};
@@ -23,8 +24,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
+use base64::prelude::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Url;
@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{ChildStdin, Command};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
@@ -54,15 +54,43 @@ const SOCKET_AUTH_MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const OPENCODE_AUTH_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const OPENCODE_AUTH_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const OPENCODE_AUTH_URL: &str = "https://opencode.ai/auth";
-const LINEAR_OAUTH_AUTHORIZE_URL: &str = "https://linear.app/oauth/authorize";
-const LINEAR_OAUTH_TOKEN_URL: &str = "https://api.linear.app/oauth/token";
-const LINEAR_OAUTH_REDIRECT_URI: &str = "http://localhost:19222/oauth/callback";
-const LINEAR_OAUTH_CALLBACK_ADDR: &str = "127.0.0.1:19222";
-const LINEAR_CLIENT_ID_ENV: &str = "LINEAR_CLIENT_ID";
-const LINEAR_CLIENT_SECRET_ENV: &str = "LINEAR_CLIENT_SECRET";
-const LINEAR_OAUTH_DEFAULT_SCOPE: &str = "read,write";
-#[cfg(target_os = "macos")]
-const CLAUDE_BROWSER_AUTH_TIMEOUT: Duration = Duration::from_secs(120);
+const LINEAR_OAUTH: PmOAuthSpec = PmOAuthSpec {
+    provider: Provider::Linear,
+    authorize_url: "https://linear.app/oauth/authorize",
+    token_url: "https://api.linear.app/oauth/token",
+    client_id_env: "LINEAR_CLIENT_ID",
+    client_secret_env: "LINEAR_CLIENT_SECRET",
+    authorize_params: &[("scope", "read,write")],
+    redirect_port: 19222,
+    basic_auth: false,
+    rotates_refresh_token: true,
+    refresh_requires_secret: false,
+};
+const ASANA_OAUTH: PmOAuthSpec = PmOAuthSpec {
+    provider: Provider::Asana,
+    authorize_url: "https://app.asana.com/-/oauth_authorize",
+    token_url: "https://app.asana.com/-/oauth_token",
+    client_id_env: "ASANA_CLIENT_ID",
+    client_secret_env: "ASANA_CLIENT_SECRET",
+    authorize_params: &[("scope", "default")],
+    redirect_port: 19222,
+    basic_auth: false,
+    rotates_refresh_token: false,
+    refresh_requires_secret: true,
+};
+/// The Notion integration's registered redirect is port 19223 (1c925c0c18).
+const NOTION_OAUTH: PmOAuthSpec = PmOAuthSpec {
+    provider: Provider::Notion,
+    authorize_url: "https://api.notion.com/v1/oauth/authorize",
+    token_url: "https://api.notion.com/v1/oauth/token",
+    client_id_env: "NOTION_CLIENT_ID",
+    client_secret_env: "NOTION_CLIENT_SECRET",
+    authorize_params: &[("owner", "user")],
+    redirect_port: 19223,
+    basic_auth: true,
+    rotates_refresh_token: false,
+    refresh_requires_secret: true,
+};
 #[cfg(target_os = "macos")]
 const CLAUDE_KEYCHAIN_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(target_os = "macos")]
@@ -78,11 +106,6 @@ static GH_LOGIN_RE: Lazy<Regex> = Lazy::new(|| {
 });
 static ANSI_ESCAPE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\x1B\[[0-9;]*[A-Za-z]").expect("ansi escape regex"));
-#[cfg(any(target_os = "macos", test))]
-static CLAUDE_AUTHORIZATION_CODE_SEARCH_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"[A-Za-z0-9_-]{20,}#[A-Za-z0-9_-]{20,}")
-        .expect("Claude authorization code search regex")
-});
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -93,6 +116,8 @@ pub enum Provider {
     Codex,
     OpenCodeZen,
     Linear,
+    Asana,
+    Notion,
     Doppler,
 }
 
@@ -104,17 +129,21 @@ impl Provider {
             Self::Codex => "codex",
             Self::OpenCodeZen => "opencodezen",
             Self::Linear => "linear",
+            Self::Asana => "asana",
+            Self::Notion => "notion",
             Self::Doppler => "doppler",
         }
     }
 
-    pub fn all() -> [Self; 6] {
+    pub fn all() -> [Self; 8] {
         [
             Self::GitHub,
             Self::Claude,
             Self::Codex,
             Self::OpenCodeZen,
             Self::Linear,
+            Self::Asana,
+            Self::Notion,
             Self::Doppler,
         ]
     }
@@ -126,6 +155,8 @@ impl Provider {
             Self::Codex => "Codex",
             Self::OpenCodeZen => "OpenCode Zen",
             Self::Linear => "Linear",
+            Self::Asana => "Asana",
+            Self::Notion => "Notion",
             Self::Doppler => "Doppler",
         }
     }
@@ -135,7 +166,7 @@ impl Provider {
             Self::Claude => Some("ANTHROPIC_API_KEY"),
             Self::Codex => Some("OPENAI_API_KEY"),
             Self::OpenCodeZen => Some("OPENCODE_API_KEY"),
-            Self::GitHub | Self::Linear | Self::Doppler => None,
+            Self::GitHub | Self::Linear | Self::Asana | Self::Notion | Self::Doppler => None,
         }
     }
 
@@ -145,14 +176,23 @@ impl Provider {
 
     pub fn api_key_configure_error(self) -> Option<&'static str> {
         match self {
-            Self::Linear => Some("Linear requires OAuth. Run 'lf auth linear' to connect."),
+            Self::Linear => {
+                Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
+            }
+            Self::Asana => Some("Asana requires OAuth. Run 'lf account connect asana' to connect."),
+            Self::Notion => {
+                Some("Notion requires OAuth. Run 'lf account connect notion' to connect.")
+            }
             _ => None,
         }
     }
 
     /// Whether this provider can refresh without user interaction.
     pub fn supports_automatic_refresh(self) -> bool {
-        matches!(self, Self::GitHub | Self::Codex | Self::Linear)
+        matches!(
+            self,
+            Self::GitHub | Self::Codex | Self::Linear | Self::Asana | Self::Notion
+        )
     }
 }
 
@@ -173,6 +213,8 @@ impl FromStr for Provider {
             "codex" => Ok(Self::Codex),
             "opencodezen" | "opencode" | "zen" | "oc" => Ok(Self::OpenCodeZen),
             "linear" | "lin" => Ok(Self::Linear),
+            "asana" => Ok(Self::Asana),
+            "notion" => Ok(Self::Notion),
             "doppler" => Ok(Self::Doppler),
             _ => Err(ParseProviderError {
                 input: value.trim().to_string(),
@@ -213,8 +255,25 @@ impl AuthStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// How the provider completes authorization after the browser opens.
+#[derive(Clone, PartialEq, Eq)]
+pub enum AuthCompletion {
+    Browser { manual_uri: Option<String> },
+    Manual,
+}
+
+impl std::fmt::Debug for AuthCompletion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Browser { .. } => f.write_str("Browser"),
+            Self::Manual => f.write_str("Manual"),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct AuthFlowResponse {
+    pub completion: AuthCompletion,
     pub provider: Provider,
     pub verification_uri: String,
     pub verification_uri_complete: Option<String>,
@@ -222,33 +281,14 @@ pub struct AuthFlowResponse {
     pub expires_in: Option<u64>,
 }
 
-/// Auth lifecycle notifications. Base callers pass [`no_event_sink`] and rely
-/// on the store write; the type is retained as the sink a future narrow auth
-/// SSE (see `scratch/eventing.md` §5b) would feed.
-#[derive(Debug, Clone)]
-pub enum AuthEvent {
-    FlowStarted {
-        provider: Provider,
-        verification_uri: String,
-        verification_uri_complete: Option<String>,
-    },
-    Connected {
-        provider: Provider,
-        login: Option<String>,
-    },
-    Failed {
-        provider: Provider,
-        error: String,
-    },
-    Disconnected {
-        provider: Provider,
-    },
-}
-
-pub type AuthEventSink = Arc<dyn Fn(AuthEvent) + Send + Sync>;
-
-pub fn no_event_sink() -> AuthEventSink {
-    Arc::new(|_| {})
+impl std::fmt::Debug for AuthFlowResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthFlowResponse")
+            .field("provider", &self.provider)
+            .field("completion", &self.completion)
+            .field("expires_in", &self.expires_in)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,7 +335,11 @@ impl AuthFlowHandle {
         }
     }
 
-    pub fn requires_authorization_code(&self) -> bool {
+    pub(crate) fn code_input(&self) -> Option<AuthorizationCodeInput> {
+        self.authorization_code_input.clone()
+    }
+
+    pub fn supports_authorization_code(&self) -> bool {
         self.authorization_code_input.is_some()
     }
 
@@ -317,8 +361,8 @@ impl AuthFlowHandle {
     }
 }
 
-#[derive(Clone)]
-struct AuthorizationCodeInput {
+#[derive(Debug, Clone)]
+pub(crate) struct AuthorizationCodeInput {
     provider: Provider,
     stdin: Arc<Mutex<Option<ChildStdin>>>,
 }
@@ -331,7 +375,7 @@ impl AuthorizationCodeInput {
         }
     }
 
-    async fn submit(&self, code: &str) -> Result<(), AuthError> {
+    pub(crate) async fn submit(&self, code: &str) -> Result<(), AuthError> {
         let code = code.trim();
         if code.is_empty() {
             return Err(AuthError::CommandFailed {
@@ -413,9 +457,9 @@ pub enum AuthError {
     #[error("unsupported provider: {0}")]
     UnsupportedProvider(String),
     #[error("auth flow already in progress for {0}")]
-    FlowAlreadyPending(Provider),
+    GraphAlreadyPending(Provider),
     #[error("no pending auth flow for {0}")]
-    NoPendingFlow(Provider),
+    NoPendingGraph(Provider),
     #[error("{0} auth flow does not accept manual completion")]
     CompletionUnavailable(Provider),
     #[error("{provider} CLI not found: {command}")]
@@ -449,10 +493,10 @@ pub enum AuthError {
     CredentialSocket { provider: Provider, message: String },
 }
 
-/// Only closed categories and HTTP status codes may escape a Linear refresh.
+/// Only closed categories and HTTP status codes may escape a planning refresh.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[non_exhaustive]
-pub enum LinearRefreshError {
+pub enum PmRefreshError {
     #[error("stored credential has no refresh token")]
     MissingRefreshGrant,
     #[error("OAuth client configuration is unavailable")]
@@ -471,7 +515,7 @@ pub enum LinearRefreshError {
     InvalidResponse,
 }
 
-impl LinearRefreshError {
+impl PmRefreshError {
     pub(crate) fn retryable_now(self) -> bool {
         matches!(self, Self::Unavailable { .. } | Self::InvalidResponse)
     }
@@ -489,8 +533,8 @@ impl LinearRefreshError {
 
 #[cfg(test)]
 tokio::task_local! {
-    pub(crate) static LINEAR_REFRESH_URL: String;
-    pub(crate) static LINEAR_REFRESH_CONFIG: Result<(String, String), LinearRefreshError>;
+    pub(crate) static PM_REFRESH_URL: String;
+    pub(crate) static PM_REFRESH_CONFIG: Result<(String, String), PmRefreshError>;
 }
 
 #[derive(Debug, Error)]
@@ -510,7 +554,7 @@ pub enum TokenRefreshError {
     #[error("{provider} OAuth refresh failed: {reason}")]
     OAuth {
         provider: Provider,
-        reason: LinearRefreshError,
+        reason: PmRefreshError,
     },
 }
 
@@ -567,64 +611,133 @@ struct OAuthErrorResponse {
     error_description: Option<String>,
 }
 
-// ── Linear OAuth ────────────────────────────────────────────────────
+// ── Planning provider OAuth ─────────────────────────────────────────
 
-/// Linear OAuth uses a loopback redirect (`http://localhost:19222/oauth/callback`):
+/// One planning provider's OAuth application. Every provider uses loopback
+/// consent; their registered ports, client authentication and refresh grants differ.
+#[derive(Debug)]
+pub(crate) struct PmOAuthSpec {
+    provider: Provider,
+    authorize_url: &'static str,
+    token_url: &'static str,
+    client_id_env: &'static str,
+    client_secret_env: &'static str,
+    /// Provider-specific authorization parameters: scope, or Notion's `owner`.
+    authorize_params: &'static [(&'static str, &'static str)],
+    /// The loopback port registered as the application's redirect.
+    redirect_port: u16,
+    /// Notion takes client credentials as HTTP Basic and a JSON body.
+    basic_auth: bool,
+    /// Linear rotates refresh grants; Asana keeps one long-lived grant.
+    rotates_refresh_token: bool,
+    /// PKCE public clients refresh by client ID alone; Asana requires its secret.
+    refresh_requires_secret: bool,
+}
+
+fn pm_oauth(provider: Provider) -> Option<&'static PmOAuthSpec> {
+    match provider {
+        Provider::Linear => Some(&LINEAR_OAUTH),
+        Provider::Asana => Some(&ASANA_OAUTH),
+        Provider::Notion => Some(&NOTION_OAUTH),
+        _ => None,
+    }
+}
+
+impl PmOAuthSpec {
+    fn redirect_uri(&self) -> String {
+        format!("http://localhost:{}/oauth/callback", self.redirect_port)
+    }
+
+    /// A token request: form fields with the client credentials, or for Basic
+    /// authentication the same grant as JSON.
+    fn token_request(
+        &self,
+        url: &str,
+        client_id: &str,
+        client_secret: Option<&str>,
+        grant: &[(&str, &str)],
+    ) -> reqwest::RequestBuilder {
+        let client = reqwest::Client::new().post(url);
+        if self.basic_auth {
+            let body: serde_json::Map<String, serde_json::Value> = grant
+                .iter()
+                .map(|(key, value)| (key.to_string(), serde_json::json!(value)))
+                .collect();
+            return client.basic_auth(client_id, client_secret).json(&body);
+        }
+        let mut form = vec![("client_id", client_id)];
+        if let Some(secret) = client_secret {
+            form.push(("client_secret", secret));
+        }
+        form.extend_from_slice(grant);
+        client
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(serde_urlencoded::to_string(form).expect("token form fields are strings"))
+    }
+}
+
+/// Planning OAuth uses a loopback redirect (`http://localhost:<port>/oauth/callback`):
 /// consent is a single click and the code arrives on a short-lived local listener.
-/// Once Linear returns a refresh token, `refresh_pm_oauth_token` renews headlessly
-/// with the stored PKCE client ID.
+/// Once the provider returns a refresh token, `refresh_pm_oauth_token` renews headlessly.
 #[derive(Debug, Clone)]
-struct LinearOAuthBroker {
+pub(crate) struct PmOAuthBroker {
+    spec: &'static PmOAuthSpec,
     completed_token: Arc<Mutex<Option<ProviderToken>>>,
 }
 
 #[derive(Debug, Clone)]
-struct LinearOAuthApp {
+struct PmOAuthApp {
+    spec: &'static PmOAuthSpec,
     client_id: String,
     client_secret: String,
-    scope: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct LinearOAuthTokenResponse {
+struct PmOAuthTokenResponse {
     access_token: String,
     refresh_token: Option<String>,
     expires_in: Option<i64>,
 }
 
-impl LinearOAuthBroker {
-    fn new() -> Self {
+impl PmOAuthBroker {
+    /// # Panics
+    /// Panics when `provider` is not a planning provider.
+    pub(crate) fn new(provider: Provider) -> Self {
         Self {
+            spec: pm_oauth(provider).expect("planning providers have an OAuth application"),
             completed_token: Arc::new(Mutex::new(None)),
         }
     }
 
-    async fn oauth_app() -> Result<LinearOAuthApp, AuthError> {
+    async fn oauth_app(&self) -> Result<PmOAuthApp, AuthError> {
         let (client_id, client_secret) = oauth_client_credentials(
-            Provider::Linear,
-            LINEAR_CLIENT_ID_ENV,
-            LINEAR_CLIENT_SECRET_ENV,
+            self.spec.provider,
+            self.spec.client_id_env,
+            self.spec.client_secret_env,
         )
         .await?;
 
-        Ok(LinearOAuthApp {
+        Ok(PmOAuthApp {
+            spec: self.spec,
             client_id,
             client_secret,
-            scope: LINEAR_OAUTH_DEFAULT_SCOPE.to_string(),
         })
     }
 
-    fn build_authorization_url(app: &LinearOAuthApp, code_verifier: &str, state: &str) -> String {
-        let code_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
-        let mut url = Url::parse(LINEAR_OAUTH_AUTHORIZE_URL)
-            .expect("linear oauth authorize URL should parse");
+    fn build_authorization_url(app: &PmOAuthApp, code_verifier: &str, state: &str) -> String {
+        let code_challenge =
+            BASE64_URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
+        let mut url =
+            Url::parse(app.spec.authorize_url).expect("planning OAuth authorize URL should parse");
         {
             let mut pairs = url.query_pairs_mut();
             pairs.append_pair("client_id", &app.client_id);
-            pairs.append_pair("redirect_uri", LINEAR_OAUTH_REDIRECT_URI);
+            pairs.append_pair("redirect_uri", &app.spec.redirect_uri());
             pairs.append_pair("response_type", "code");
             pairs.append_pair("state", state);
-            pairs.append_pair("scope", &app.scope);
+            for (key, value) in app.spec.authorize_params {
+                pairs.append_pair(key, value);
+            }
             pairs.append_pair("code_challenge", &code_challenge);
             pairs.append_pair("code_challenge_method", "S256");
             pairs.append_pair("prompt", "consent");
@@ -633,30 +746,28 @@ impl LinearOAuthBroker {
     }
 
     async fn exchange_code(
-        app: &LinearOAuthApp,
+        app: &PmOAuthApp,
         code_verifier: &str,
         code: &str,
     ) -> Result<ProviderToken, AuthError> {
-        let body = serde_urlencoded::to_string([
-            ("grant_type", "authorization_code"),
-            ("client_id", app.client_id.as_str()),
-            ("client_secret", app.client_secret.as_str()),
-            ("redirect_uri", LINEAR_OAUTH_REDIRECT_URI),
-            ("code", code),
-            ("code_verifier", code_verifier),
-        ])
-        .map_err(|err| AuthError::OAuthRequest {
-            provider: Provider::Linear,
-            message: format!("failed to encode token request: {err}"),
-        })?;
-        let response = reqwest::Client::new()
-            .post(LINEAR_OAUTH_TOKEN_URL)
-            .header("content-type", "application/x-www-form-urlencoded")
-            .body(body)
+        let redirect_uri = app.spec.redirect_uri();
+        let response = app
+            .spec
+            .token_request(
+                app.spec.token_url,
+                &app.client_id,
+                Some(&app.client_secret),
+                &[
+                    ("grant_type", "authorization_code"),
+                    ("redirect_uri", &redirect_uri),
+                    ("code", code),
+                    ("code_verifier", code_verifier),
+                ],
+            )
             .send()
             .await
             .map_err(|err| AuthError::OAuthRequest {
-                provider: Provider::Linear,
+                provider: app.spec.provider,
                 message: err.to_string(),
             })?;
 
@@ -666,7 +777,7 @@ impl LinearOAuthBroker {
                 .bytes()
                 .await
                 .map_err(|err| AuthError::OAuthRequest {
-                    provider: Provider::Linear,
+                    provider: app.spec.provider,
                     message: err.to_string(),
                 })?;
             let message = oauth_error_message(body.as_ref())
@@ -675,21 +786,21 @@ impl LinearOAuthBroker {
                 || status == reqwest::StatusCode::UNAUTHORIZED
             {
                 return Err(AuthError::CodeExchangeRejected {
-                    provider: Provider::Linear,
+                    provider: app.spec.provider,
                     message,
                 });
             }
             return Err(AuthError::OAuthRequest {
-                provider: Provider::Linear,
+                provider: app.spec.provider,
                 message: format!("HTTP {status}: {message}"),
             });
         }
 
         let payload = response
-            .json::<LinearOAuthTokenResponse>()
+            .json::<PmOAuthTokenResponse>()
             .await
             .map_err(|err| AuthError::OAuthRequest {
-                provider: Provider::Linear,
+                provider: app.spec.provider,
                 message: format!("failed to decode token response: {err}"),
             })?;
 
@@ -699,7 +810,7 @@ impl LinearOAuthBroker {
             .map(|seconds| now_unix() + seconds);
 
         Ok(ProviderToken {
-            provider: Provider::Linear.as_str().to_string(),
+            provider: app.spec.provider.as_str().to_string(),
             access_token: payload.access_token,
             refresh_token: payload.refresh_token,
             oauth_client_id: Some(app.client_id.clone()),
@@ -712,33 +823,36 @@ impl LinearOAuthBroker {
 }
 
 #[async_trait]
-impl AuthBroker for LinearOAuthBroker {
+impl AuthBroker for PmOAuthBroker {
     fn provider(&self) -> Provider {
-        Provider::Linear
+        self.spec.provider
     }
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let app = Self::oauth_app().await?;
+        let provider = self.spec.provider;
+        let app = self.oauth_app().await?;
         let code_verifier = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
         let state = Uuid::new_v4().to_string();
         let verification_uri = Self::build_authorization_url(&app, &code_verifier, &state);
-        let listener = oauth_callback_listener(Provider::Linear, LINEAR_OAUTH_CALLBACK_ADDR)?;
+        let listener =
+            oauth_callback_listener(provider, &format!("127.0.0.1:{}", self.spec.redirect_port))?;
         let completed_token = self.completed_token.clone();
         let monitor = tokio::spawn(monitor_oauth_callback(
-            Provider::Linear,
+            provider,
             listener,
             Duration::from_secs(15 * 60),
-            "linear OAuth timed out",
+            "planning OAuth timed out",
             completed_token,
             move |code| {
                 let app = app.clone();
                 let code_verifier = code_verifier.clone();
-                async move { LinearOAuthBroker::exchange_code(&app, &code_verifier, &code).await }
+                async move { PmOAuthBroker::exchange_code(&app, &code_verifier, &code).await }
             },
         ));
 
         let response = AuthFlowResponse {
-            provider: Provider::Linear,
+            completion: AuthCompletion::Browser { manual_uri: None },
+            provider,
             verification_uri_complete: Some(verification_uri.clone()),
             verification_uri,
             user_code: None,
@@ -866,6 +980,7 @@ pub struct ProviderAuthService {
 
 struct PendingAuth {
     lifecycle: JoinHandle<()>,
+    completion: Option<tokio::sync::oneshot::Receiver<Result<(), AuthError>>>,
     authorization_code_input: Option<AuthorizationCodeInput>,
 }
 
@@ -912,7 +1027,6 @@ impl ProviderAuthService {
     }
 
     pub async fn list_statuses(&self) -> Result<Vec<ProviderAuthSnapshot>, AuthError> {
-        self.prune_finished_pending().await;
         let pending_providers = self.pending_providers().await;
         let mut snapshots = Vec::with_capacity(Provider::all().len());
 
@@ -934,7 +1048,6 @@ impl ProviderAuthService {
     }
 
     pub async fn status(&self, provider: Provider) -> Result<ProviderAuthSnapshot, AuthError> {
-        self.prune_finished_pending().await;
         if self.is_pending(provider).await {
             return Ok(ProviderAuthSnapshot {
                 provider,
@@ -946,6 +1059,20 @@ impl ProviderAuthService {
         }
 
         self.resolve_snapshot(provider).await
+    }
+
+    /// Read only the stored local credential; absence leaves ambient auth uninspected.
+    pub(crate) async fn cached_status(
+        &self,
+        provider: Provider,
+    ) -> Result<Option<ProviderAuthSnapshot>, AuthError> {
+        let Some(store) = &self.store else {
+            return Ok(None);
+        };
+        store
+            .provider_auth_snapshot(provider)
+            .await
+            .map_err(|_| AuthError::Filesystem("read local credential metadata failed".into()))
     }
 
     async fn resolve_snapshot(
@@ -1016,14 +1143,10 @@ impl ProviderAuthService {
         })
     }
 
-    pub async fn start_auth(
-        &self,
-        provider: Provider,
-        events: AuthEventSink,
-    ) -> Result<AuthFlowResponse, AuthError> {
+    pub async fn start_auth(&self, provider: Provider) -> Result<AuthFlowResponse, AuthError> {
         self.prune_finished_pending().await;
         if self.is_pending(provider).await {
-            return Err(AuthError::FlowAlreadyPending(provider));
+            return Err(AuthError::GraphAlreadyPending(provider));
         }
 
         let broker = self.broker(provider)?;
@@ -1033,77 +1156,72 @@ impl ProviderAuthService {
             authorization_code_input,
         } = broker.start_auth().await?;
 
-        events(AuthEvent::FlowStarted {
-            provider,
-            verification_uri: response.verification_uri.clone(),
-            verification_uri_complete: response.verification_uri_complete.clone(),
-        });
-
-        let pending = self.pending.clone();
-        let broker_for_task = broker.clone();
-        let events_for_task = events.clone();
         let store_for_task = self.store.clone();
 
+        let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
+        let mut pending_guard = self.pending.lock().await;
         let lifecycle = tokio::spawn(async move {
-            let monitor_result = monitor.wait(provider).await;
-
-            match monitor_result {
-                Ok(()) => match broker_for_task.check_status().await {
-                    Ok(AuthStatus::Active { login }) => {
-                        // Extract and persist the token (always as OAuth)
-                        if let Some(store) = &store_for_task {
-                            // Check if switching from apikey to oauth
-                            if let Ok(Some(existing)) =
-                                store.get_provider_token(provider.as_str()).await
-                            {
-                                if existing.credential_type == CredentialType::ApiKey {
-                                    tracing::info!(
-                                        provider = %provider,
-                                        "switched from API key to OAuth (subscription billing)"
-                                    );
-                                }
-                            }
-                            if let Some(token) = broker_for_task.extract_token().await {
-                                if let Err(err) = store.upsert_provider_token(&token).await {
-                                    warn!(provider = %provider, error = %err, "failed to persist provider token");
-                                }
-                            }
-                        }
-                        events_for_task(AuthEvent::Connected { provider, login });
-                    }
-                    Ok(status) => {
-                        events_for_task(AuthEvent::Failed {
-                            provider,
-                            error: format!("completed with status {}", status.as_str()),
-                        });
-                    }
-                    Err(err) => {
-                        events_for_task(AuthEvent::Failed {
-                            provider,
-                            error: err.to_string(),
-                        });
-                    }
-                },
-                Err(err) => {
-                    events_for_task(AuthEvent::Failed {
+            let result = async {
+                monitor.wait(provider).await?;
+                let status = broker.check_status().await?;
+                let AuthStatus::Active { .. } = status else {
+                    return Err(AuthError::CommandFailed {
                         provider,
-                        error: err.to_string(),
+                        message: format!(
+                            "credential capture ended with status {}",
+                            status.as_str()
+                        ),
                     });
+                };
+                if let Some(store) = &store_for_task {
+                    if let Some(token) = broker.extract_token().await {
+                        store.upsert_provider_token(&token).await.map_err(|_| {
+                            AuthError::CommandFailed {
+                                provider,
+                                message: "credential persistence failed".to_string(),
+                            }
+                        })?;
+                    }
                 }
+                Ok(())
             }
-
-            let mut pending = pending.lock().await;
-            pending.remove(&provider);
+            .await;
+            let _ = completion_tx.send(result);
+            // Keep completion available until its caller consumes it or a later
+            // start prunes it. Finished tasks no longer represent pending auth.
         });
 
-        self.pending.lock().await.insert(
+        pending_guard.insert(
             provider,
             PendingAuth {
                 lifecycle,
+                completion: Some(completion_rx),
                 authorization_code_input,
             },
         );
         Ok(response)
+    }
+
+    /// Consume this attempt's completion, including credential persistence errors.
+    ///
+    /// Call once after `start_auth`; dropping this future consumes the result too.
+    /// Cached status does not establish whether this attempt succeeded.
+    ///
+    /// # Errors
+    /// Returns the attempt's authorization or persistence error, or `NoPendingGraph`
+    /// when its completion has already been consumed or no attempt was started.
+    pub async fn wait_for_auth(&self, provider: Provider) -> Result<(), AuthError> {
+        let completion = self
+            .pending
+            .lock()
+            .await
+            .get_mut(&provider)
+            .and_then(|pending| pending.completion.take())
+            .ok_or(AuthError::NoPendingGraph(provider))?;
+        completion.await.map_err(|_| AuthError::CommandFailed {
+            provider,
+            message: "authorization completion unavailable".to_string(),
+        })?
     }
 
     pub async fn complete_auth(&self, provider: Provider, code: &str) -> Result<(), AuthError> {
@@ -1119,11 +1237,7 @@ impl ProviderAuthService {
         self.broker(provider)?.complete_auth(code).await
     }
 
-    pub async fn disconnect(
-        &self,
-        provider: Provider,
-        events: AuthEventSink,
-    ) -> Result<(), AuthError> {
+    pub async fn disconnect(&self, provider: Provider) -> Result<(), AuthError> {
         self.abort_pending(provider).await;
         self.broker(provider)?.disconnect().await?;
         if let Some(store) = &self.store {
@@ -1131,11 +1245,10 @@ impl ProviderAuthService {
                 warn!(provider = %provider, error = %err, "failed to delete provider token");
             }
         }
-        events(AuthEvent::Disconnected { provider });
         Ok(())
     }
 
-    async fn abort_pending(&self, provider: Provider) {
+    pub(crate) async fn abort_pending(&self, provider: Provider) {
         let pending = self.pending.lock().await.remove(&provider);
         if let Some(pending) = pending {
             pending.lifecycle.abort();
@@ -1148,10 +1261,14 @@ impl ProviderAuthService {
     }
 
     async fn is_pending(&self, provider: Provider) -> bool {
-        self.pending.lock().await.contains_key(&provider)
+        self.pending
+            .lock()
+            .await
+            .get(&provider)
+            .is_some_and(|pending| !pending.lifecycle.is_finished())
     }
 
-    pub async fn pending_requires_authorization_code(&self, provider: Provider) -> bool {
+    pub async fn pending_supports_authorization_code(&self, provider: Provider) -> bool {
         self.pending
             .lock()
             .await
@@ -1160,7 +1277,13 @@ impl ProviderAuthService {
     }
 
     async fn pending_providers(&self) -> HashSet<Provider> {
-        self.pending.lock().await.keys().copied().collect()
+        self.pending
+            .lock()
+            .await
+            .iter()
+            .filter(|(_, pending)| !pending.lifecycle.is_finished())
+            .map(|(provider, _)| *provider)
+            .collect()
     }
 
     fn broker(&self, provider: Provider) -> Result<Arc<dyn AuthBroker>, AuthError> {
@@ -1192,8 +1315,12 @@ fn default_brokers(client: Option<Arc<CredentialSocketClient>>) -> Vec<Arc<dyn A
     brokers
 }
 
-fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 1] {
-    [Arc::new(LinearOAuthBroker::new()) as Arc<dyn AuthBroker>]
+fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 3] {
+    [
+        Arc::new(PmOAuthBroker::new(Provider::Linear)) as Arc<dyn AuthBroker>,
+        Arc::new(PmOAuthBroker::new(Provider::Asana)) as Arc<dyn AuthBroker>,
+        Arc::new(PmOAuthBroker::new(Provider::Notion)) as Arc<dyn AuthBroker>,
+    ]
 }
 
 fn socket_auth_flow_handle(
@@ -1207,7 +1334,8 @@ fn socket_auth_flow_handle(
         .unwrap_or(SOCKET_AUTH_DEFAULT_TIMEOUT)
         .min(SOCKET_AUTH_MAX_TIMEOUT);
     let provider_name = provider.as_str().to_string();
-    let flow_response = AuthFlowResponse {
+    let graph_response = AuthFlowResponse {
+        completion: AuthCompletion::Browser { manual_uri: None },
         provider,
         verification_uri: response.verification_uri,
         verification_uri_complete: response.verification_uri_complete,
@@ -1240,7 +1368,7 @@ fn socket_auth_flow_handle(
             }
         }
     });
-    AuthFlowHandle::new(flow_response, monitor)
+    AuthFlowHandle::new(graph_response, monitor)
 }
 
 #[derive(Debug, Clone)]
@@ -1395,9 +1523,7 @@ impl AuthBroker for ClaudeAuthBroker {
     }
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let mut command = self.login_command();
-        command.env("BROWSER", "echo");
-        command.env("CLAUDE_BROWSER", "echo");
+        let command = self.login_command();
 
         start_auth_command(
             Provider::Claude,
@@ -1488,23 +1614,23 @@ impl CodexAuthBroker {
         }
     }
 
-    fn command(&self) -> Command {
+    fn command(&self, subcommand: &str) -> Command {
         let mut command = Command::new("codex");
         command.env("CODEX_HOME", &self.codex_home);
         command
-    }
-
-    fn add_file_store_override(&self, command: &mut Command) {
+            .env_remove("CODEX_ACCESS_TOKEN")
+            .env_remove("OPENAI_API_KEY");
         if self.force_file_store {
             command.args(["-c", "cli_auth_credentials_store=\"file\""]);
         }
+        command.arg(subcommand);
+        command
     }
 
     async fn refresh_access_token(&self) -> Result<(), AuthError> {
-        let mut command = self.command();
-        self.add_file_store_override(&mut command);
-        command.arg("app-server");
-        refresh_codex_access_token_with_command(&mut command).await
+        codex::refresh(&mut self.command("app-server"))
+            .await
+            .map(|_| ())
     }
 }
 
@@ -1515,19 +1641,7 @@ impl AuthBroker for CodexAuthBroker {
     }
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let mut command = self.command();
-        self.add_file_store_override(&mut command);
-        command.arg("login");
-        command.env("BROWSER", "echo");
-
-        start_auth_command(
-            Provider::Codex,
-            "codex",
-            command,
-            AuthCommandInput::None,
-            parse_generic_auth_line,
-        )
-        .await
+        codex::start_login(&mut self.command("app-server")).await
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
@@ -1550,11 +1664,7 @@ impl AuthBroker for CodexAuthBroker {
     }
 
     async fn disconnect(&self) -> Result<(), AuthError> {
-        let mut command = self.command();
-        self.add_file_store_override(&mut command);
-        command.arg("logout");
-
-        match command.output().await {
+        match self.command("logout").output().await {
             Ok(output) if output.status.success() => Ok(()),
             Ok(_) | Err(_) => {
                 let auth_path = self.codex_home.join("auth.json");
@@ -1614,6 +1724,44 @@ pub async fn disconnect_provider_account_auth(
         .await
 }
 
+/// Offline evidence from the managed provider's own credential format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CredentialPresence {
+    Present,
+    Missing,
+    Unreadable,
+    Uninspected,
+}
+
+pub(crate) fn provider_account_credential_presence(
+    provider: Provider,
+    home: &Path,
+) -> CredentialPresence {
+    let file = match provider {
+        Provider::Claude => ".credentials.json",
+        Provider::Codex => "auth.json",
+        _ => return CredentialPresence::Uninspected,
+    };
+    let raw = match fs::read_to_string(home.join(file)) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return CredentialPresence::Missing
+        }
+        Err(_) => return CredentialPresence::Unreadable,
+    };
+    let token = match provider {
+        Provider::Claude => claude_token_from_credentials_json(&raw),
+        Provider::Codex => serde_json::from_str(&raw)
+            .ok()
+            .and_then(|json| codex_token_from_credentials_json(&json)),
+        _ => None,
+    };
+    match token {
+        Some(token) if !token.access_token.is_empty() => CredentialPresence::Present,
+        _ => CredentialPresence::Unreadable,
+    }
+}
+
 pub(crate) async fn prepare_provider_account_access_token(
     provider: Provider,
     provider_home: &Path,
@@ -1657,6 +1805,7 @@ impl AuthBroker for DopplerAuthBroker {
         // a pre-completed handle so the lifecycle task picks it up immediately.
         if let Ok(AuthStatus::Active { .. }) = self.check_status().await {
             let response = AuthFlowResponse {
+                completion: AuthCompletion::Browser { manual_uri: None },
                 provider: Provider::Doppler,
                 verification_uri: String::new(),
                 verification_uri_complete: None,
@@ -1761,6 +1910,7 @@ impl AuthBroker for OpenCodeZenBroker {
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
         let response = AuthFlowResponse {
+            completion: AuthCompletion::Browser { manual_uri: None },
             provider: Provider::OpenCodeZen,
             verification_uri: OPENCODE_AUTH_URL.to_string(),
             verification_uri_complete: Some(OPENCODE_AUTH_URL.to_string()),
@@ -1816,126 +1966,6 @@ struct AuthFlowBuilder {
     expects_user_code: bool,
 }
 
-/// Read Claude's one-time handoff from its Chrome page on macOS.
-///
-/// Polling only checks for the matching window. Once it appears, Loopflow
-/// copies the addressed tab without activating Chrome or synthesizing input,
-/// restores the clipboard inside the same AppleScript command, and keeps the
-/// handoff only in process memory.
-///
-/// # Errors
-///
-/// Returns an error for an untrusted authorization URL or browser-control I/O
-/// failure. `Ok(None)` means native Chrome control is unavailable or timed out.
-pub async fn capture_claude_authorization_code_from_chrome(
-    verification_url: &str,
-    _browser_profile_label: &str,
-) -> Result<Option<SecretString>, AuthError> {
-    validate_claude_authorization_url(verification_url)?;
-
-    #[cfg(target_os = "macos")]
-    {
-        let deadline = Instant::now() + CLAUDE_BROWSER_AUTH_TIMEOUT;
-        while Instant::now() < deadline {
-            let output = ProcessCommand::new("osascript")
-                .args(["-e", CLAUDE_AUTH_WINDOW_SCRIPT, _browser_profile_label])
-                .output()
-                .map_err(|source| AuthError::CommandIo {
-                    provider: Provider::Claude,
-                    source,
-                })?;
-            if !output.status.success() {
-                return Ok(None);
-            }
-            if String::from_utf8_lossy(&output.stdout).trim() == "ready" {
-                let output = ProcessCommand::new("osascript")
-                    .args(["-e", CLAUDE_PAGE_HARVEST_SCRIPT, _browser_profile_label])
-                    .output()
-                    .map_err(|source| AuthError::CommandIo {
-                        provider: Provider::Claude,
-                        source,
-                    })?;
-                if !output.status.success() {
-                    return Ok(None);
-                }
-                let page = String::from_utf8_lossy(&output.stdout);
-                return Ok(claude_authorization_code_from_page(&page));
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-        Ok(None)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Ok(None)
-    }
-}
-
-#[cfg(target_os = "macos")]
-const CLAUDE_AUTH_WINDOW_SCRIPT: &str = r#"
-on run argv
-    set profileLabel to item 1 of argv
-    tell application "System Events"
-        if not (exists process "Google Chrome") then return ""
-        tell process "Google Chrome"
-            set authWindows to every window whose name contains "Authentication code | Claude Platform"
-            repeat with authWindow in authWindows
-                if name of authWindow contains "(" & profileLabel & ")" then return "ready"
-            end repeat
-        end tell
-    end tell
-    return ""
-end run
-"#;
-
-#[cfg(target_os = "macos")]
-const CLAUDE_PAGE_HARVEST_SCRIPT: &str = r#"
-on run argv
-    set savedClipboard to the clipboard
-    try
-        set profileLabel to item 1 of argv
-        tell application "Google Chrome"
-            set authWindows to every window whose name contains "Authentication code | Claude Platform"
-            set pageText to ""
-            repeat with authWindow in authWindows
-                if name of authWindow contains "(" & profileLabel & ")" then
-                    select all active tab of authWindow
-                    copy selection active tab of authWindow
-                    set pageText to the clipboard as text
-                    exit repeat
-                end if
-            end repeat
-        end tell
-        set the clipboard to savedClipboard
-        return pageText
-    on error
-        set the clipboard to savedClipboard
-        error
-    end try
-end run
-"#;
-
-#[cfg(any(target_os = "macos", test))]
-fn claude_authorization_code_from_page(page: &str) -> Option<SecretString> {
-    CLAUDE_AUTHORIZATION_CODE_SEARCH_RE
-        .find(page)
-        .map(|value| SecretString::new(value.as_str().to_string()))
-}
-
-fn validate_claude_authorization_url(verification_url: &str) -> Result<(), AuthError> {
-    let url = Url::parse(verification_url).map_err(|_| AuthError::CommandFailed {
-        provider: Provider::Claude,
-        message: "browser controller received an invalid authorization URL".to_string(),
-    })?;
-    if url.scheme() != "https" || url.host_str() != Some("claude.com") {
-        return Err(AuthError::CommandFailed {
-            provider: Provider::Claude,
-            message: "browser controller refused a non-Claude authorization URL".to_string(),
-        });
-    }
-    Ok(())
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AuthCommandInput {
     None,
@@ -1949,6 +1979,16 @@ async fn start_auth_command(
     input: AuthCommandInput,
     mut parse_line: impl FnMut(&str, &mut AuthFlowBuilder),
 ) -> Result<AuthFlowHandle, AuthError> {
+    #[cfg(unix)]
+    let mut handoff =
+        if provider == Provider::Claude && input == AuthCommandInput::AuthorizationCode {
+            Some(
+                browser_handoff::BrowserHandoff::new(&mut command)
+                    .map_err(|source| AuthError::CommandIo { provider, source })?,
+            )
+        } else {
+            None
+        };
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     match input {
         AuthCommandInput::None => command.stdin(Stdio::null()),
@@ -1974,7 +2014,7 @@ async fn start_auth_command(
         }
     };
 
-    let process_group = crate::engine::process::ProcessGroupGuard::new(
+    let process_group = crate::os_process::ProcessGroupGuard::new(
         child
             .id()
             .expect("newly spawned auth command should have a process id"),
@@ -2004,75 +2044,102 @@ async fn start_auth_command(
             message: "missing stderr pipe".to_string(),
         })?;
 
-    let (line_tx, mut line_rx) = mpsc::unbounded_channel::<String>();
+    let (line_tx, mut line_rx) = mpsc::channel::<String>(32);
     let stdout_task = spawn_line_reader(stdout, line_tx.clone());
     let stderr_task = spawn_line_reader(stderr, line_tx);
-
+    let readers = AuthReaders(vec![stdout_task, stderr_task]);
     let started_at = Instant::now();
     let mut builder = AuthFlowBuilder::default();
-
-    loop {
-        if started_at.elapsed() >= AUTH_URL_TIMEOUT {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-            drop(process_group);
-            let _ = stdout_task.await;
-            let _ = stderr_task.await;
+    let mut callback_url = None;
+    let response = loop {
+        // Read queued bytes before judging a fast-exiting provider. Closing both
+        // pipes, not child exit alone, establishes that all output was received.
+        for _ in 0..32 {
+            let Ok(line) = line_rx.try_recv() else {
+                break;
+            };
+            parse_line(&strip_ansi_escape_codes(&line), &mut builder);
+        }
+        #[cfg(unix)]
+        if let Some(handoff) = handoff.as_mut() {
+            callback_url = handoff
+                .read_url()
+                .map_err(|source| AuthError::CommandIo { provider, source })?;
+        }
+        let expired = started_at.elapsed() >= AUTH_URL_TIMEOUT;
+        let exited = child
+            .try_wait()
+            .map_err(|source| AuthError::CommandIo { provider, source })?;
+        let drained = exited.is_some() && line_rx.is_closed() && line_rx.is_empty();
+        let capture_pending = cfg!(unix)
+            && provider == Provider::Claude
+            && input == AuthCommandInput::AuthorizationCode;
+        if callback_url.is_some() || !capture_pending || expired || drained {
+            let manual = builder.verification_uri_complete.clone();
+            if let Some(url) = &callback_url {
+                builder.verification_uri = Some(strip_query(url).to_string());
+                builder.verification_uri_complete = Some(url.clone());
+            }
+            if let Some(mut response) = build_graph_response(provider, &builder) {
+                if input == AuthCommandInput::AuthorizationCode {
+                    response.completion = if callback_url.is_some() {
+                        AuthCompletion::Browser { manual_uri: manual }
+                    } else {
+                        AuthCompletion::Manual
+                    };
+                }
+                break response;
+            }
+        }
+        if drained {
+            return Err(AuthError::CommandFailed {
+                provider,
+                message: format!(
+                    "URL discovery: provider exited before emitting an authorization URL ({})",
+                    exited.expect("drained output requires child exit")
+                ),
+            });
+        }
+        if expired {
             return Err(AuthError::MissingVerificationUrl {
                 provider,
                 timeout_secs: AUTH_URL_TIMEOUT.as_secs(),
             });
         }
-
-        if let Some(status) = child.try_wait().map_err(|err| AuthError::CommandIo {
-            provider,
-            source: err,
-        })? {
-            if let Some(response) = build_flow_response(provider, &builder) {
-                let monitor = tokio::spawn(async move {
-                    let _ = stdout_task.await;
-                    let _ = stderr_task.await;
-                    process_group.disarm();
-                    command_exit_result(provider, status)
-                });
-                return Ok(match authorization_code_input {
-                    Some(input) => {
-                        AuthFlowHandle::with_authorization_code_input(response, monitor, input)
-                    }
-                    None => AuthFlowHandle::new(response, monitor),
-                });
-            }
-
-            drop(process_group);
-            let _ = stdout_task.await;
-            let _ = stderr_task.await;
-            return Err(AuthError::CommandFailed {
-                provider,
-                message: format!("auth command exited before emitting verification URL: {status}"),
-            });
+        if line_rx.is_closed() {
+            tokio::time::sleep(AUTH_URL_POLL_INTERVAL).await;
+        } else if let Ok(Some(line)) =
+            tokio::time::timeout(AUTH_URL_POLL_INTERVAL, line_rx.recv()).await
+        {
+            parse_line(&strip_ansi_escape_codes(&line), &mut builder);
         }
+    };
+    let monitor = tokio::spawn(async move {
+        let _readers = readers;
+        // The private FIFO and helper live exactly as long as the provider.
+        #[cfg(unix)]
+        let _handoff = handoff;
+        let status = child
+            .wait()
+            .await
+            .map_err(|source| AuthError::CommandIo { provider, source })?;
+        if status.success() {
+            process_group.disarm();
+        }
+        command_exit_result(provider, status)
+    });
+    Ok(match authorization_code_input {
+        Some(input) => AuthFlowHandle::with_authorization_code_input(response, monitor, input),
+        None => AuthFlowHandle::new(response, monitor),
+    })
+}
 
-        if let Ok(Some(line)) = tokio::time::timeout(AUTH_URL_POLL_INTERVAL, line_rx.recv()).await {
-            let normalized_line = strip_ansi_escape_codes(&line);
-            parse_line(&normalized_line, &mut builder);
-            if let Some(response) = build_flow_response(provider, &builder) {
-                let monitor = tokio::spawn(async move {
-                    let status = child.wait().await.map_err(|err| AuthError::CommandIo {
-                        provider,
-                        source: err,
-                    })?;
-                    let _ = stdout_task.await;
-                    let _ = stderr_task.await;
-                    process_group.disarm();
-                    command_exit_result(provider, status)
-                });
-                return Ok(match authorization_code_input {
-                    Some(input) => {
-                        AuthFlowHandle::with_authorization_code_input(response, monitor, input)
-                    }
-                    None => AuthFlowHandle::new(response, monitor),
-                });
-            }
+struct AuthReaders(Vec<JoinHandle<()>>);
+
+impl Drop for AuthReaders {
+    fn drop(&mut self) {
+        for reader in &self.0 {
+            reader.abort();
         }
     }
 }
@@ -2091,16 +2158,35 @@ fn command_exit_result(
     }
 }
 
-fn spawn_line_reader<R>(reader: R, tx: mpsc::UnboundedSender<String>) -> JoinHandle<()>
+fn spawn_line_reader<R>(mut reader: R, tx: mpsc::Sender<String>) -> JoinHandle<()>
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
     tokio::spawn(async move {
-        let mut lines = BufReader::new(reader).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            if tx.send(line).is_err() {
-                return;
+        let mut buffer = Vec::new();
+        let mut chunk = [0; 4096];
+        let mut oversized = false;
+        loop {
+            let count = match reader.read(&mut chunk).await {
+                Ok(0) | Err(_) => break,
+                Ok(count) => count,
+            };
+            for byte in &chunk[..count] {
+                if *byte == b'\n' {
+                    if !oversized {
+                        let _ = tx.send(String::from_utf8_lossy(&buffer).into_owned()).await;
+                    }
+                    buffer.clear();
+                    oversized = false;
+                } else if buffer.len() < 64 * 1024 {
+                    buffer.push(*byte);
+                } else {
+                    oversized = true;
+                }
             }
+        }
+        if !oversized && !buffer.is_empty() {
+            let _ = tx.send(String::from_utf8_lossy(&buffer).into_owned()).await;
         }
     })
 }
@@ -2129,7 +2215,7 @@ fn parse_github_auth_line(line: &str, builder: &mut AuthFlowBuilder) {
 
 /// A loopback URL is the provider CLI's local callback listener, never the
 /// page for authorizing access. codex prints its `localhost:1455` server line
-/// before the real authorization URL, and the first URL parsed wins the flow —
+/// before the real authorization URL, and the first URL parsed wins the graph —
 /// treating loopback as a verification URL opened a dead "Not Found" tab and
 /// returned before the real URL was ever read.
 fn is_loopback_url(url: &str) -> bool {
@@ -2170,7 +2256,7 @@ fn parse_generic_auth_line(line: &str, builder: &mut AuthFlowBuilder) {
     }
 }
 
-fn build_flow_response(provider: Provider, builder: &AuthFlowBuilder) -> Option<AuthFlowResponse> {
+fn build_graph_response(provider: Provider, builder: &AuthFlowBuilder) -> Option<AuthFlowResponse> {
     let verification_uri = builder.verification_uri.clone().or_else(|| {
         builder
             .verification_uri_complete
@@ -2194,6 +2280,7 @@ fn build_flow_response(provider: Provider, builder: &AuthFlowBuilder) -> Option<
     }
 
     Some(AuthFlowResponse {
+        completion: AuthCompletion::Browser { manual_uri: None },
         provider,
         verification_uri,
         verification_uri_complete,
@@ -2217,7 +2304,17 @@ fn extract_url(line: &str) -> Option<String> {
 }
 
 fn strip_ansi_escape_codes(line: &str) -> String {
-    ANSI_ESCAPE_RE.replace_all(line, "").to_string()
+    static OSC_RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"\x1b\]([^\x07\x1b]*)(?:\x07|\x1b\\)").expect("OSC regex"));
+    let decoded = OSC_RE.replace_all(line, |captures: &regex::Captures<'_>| {
+        captures[1]
+            .strip_prefix("8;")
+            .and_then(|link| link.split_once(';'))
+            .filter(|(_, url)| !url.is_empty())
+            .map(|(_, url)| format!(" {url} "))
+            .unwrap_or_else(|| " ".to_string())
+    });
+    ANSI_ESCAPE_RE.replace_all(&decoded, "").to_string()
 }
 
 fn strip_query(url: &str) -> &str {
@@ -2348,13 +2445,115 @@ pub(crate) fn extract_claude_token(home_dir: &Path) -> Option<ProviderToken> {
 }
 
 fn extract_claude_token_from_config_dir(config_dir: &Path) -> Option<ProviderToken> {
-    let cred_path = config_dir.join(".credentials.json");
-    if let Ok(content) = fs::read_to_string(cred_path) {
-        if let Some(token) = claude_token_from_credentials_json(&content) {
-            return Some(token);
+    let credential = read_claude_login(config_dir).ok().flatten()?;
+    claude_token_from_credentials_json(credential.expose_secret())
+}
+
+/// Claude's native homes keep their login in the Keychain on macOS; a stored
+/// account's own home keeps it in a file everywhere. Tests stay on files.
+#[cfg(all(target_os = "macos", not(test)))]
+fn claude_login_in_keychain(config_dir: &Path) -> bool {
+    !crate::provider_account::activation::is_account_home(config_dir)
+}
+
+/// The login a Claude started in `config_dir` would read: the Keychain item
+/// first where there is one, as Claude itself prefers it, then the file.
+///
+/// # Errors
+///
+/// Returns an error when a store exists but cannot be read.
+pub(crate) fn read_claude_login(config_dir: &Path) -> Result<Option<SecretString>, AuthError> {
+    #[cfg(all(target_os = "macos", not(test)))]
+    if claude_login_in_keychain(config_dir) {
+        if let Some(credential) = read_claude_keychain_credential_for_config(config_dir)? {
+            return Ok(Some(credential.blob));
         }
     }
-    None
+    match fs::read_to_string(config_dir.join(".credentials.json")) {
+        Ok(content) => Ok(Some(SecretString::new(content))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(AuthError::Filesystem(format!(
+            "read Claude credential file: {error}"
+        ))),
+    }
+}
+
+/// Install `credential` where a Claude started in `config_dir` reads it.
+///
+/// # Errors
+///
+/// Returns an error when the credential is not a Claude login or its store
+/// cannot be written.
+pub(crate) fn write_claude_login(
+    config_dir: &Path,
+    credential: &SecretString,
+) -> Result<(), AuthError> {
+    #[cfg(all(target_os = "macos", not(test)))]
+    if claude_login_in_keychain(config_dir) {
+        return write_claude_keychain_credential(config_dir, credential);
+    }
+    write_claude_profile_credentials(config_dir, credential)
+}
+
+/// Replace the Keychain item Claude reads for `config_dir`, as Claude writes
+/// it: `security add-generic-password -U`, fed on stdin so the login never
+/// appears in a process listing.
+#[cfg(all(target_os = "macos", not(test)))]
+fn write_claude_keychain_credential(
+    config_dir: &Path,
+    credential: &SecretString,
+) -> Result<(), AuthError> {
+    if claude_token_from_credentials_json(credential.expose_secret()).is_none() {
+        return Err(AuthError::Filesystem(
+            "Claude credential has an unknown format".to_string(),
+        ));
+    }
+    let scoped = claude_keychain_service(config_dir);
+    // The default home's item carries no suffix unless Claude already keeps a
+    // suffixed one for it.
+    let (service, existing) = match read_claude_keychain_account_with_security(&scoped)? {
+        Some(account) => (scoped, Some(account)),
+        None if config_dir == home_dir_or_cwd().join(".claude") => (
+            LEGACY_CLAUDE_KEYCHAIN_SERVICE.to_string(),
+            read_claude_keychain_account_with_security(LEGACY_CLAUDE_KEYCHAIN_SERVICE)?,
+        ),
+        None => (scoped, None),
+    };
+    let account = existing
+        .or_else(|| std::env::var("USER").ok())
+        .filter(|account| !account.is_empty() && !account.contains(['"', '\\', '\n']))
+        .ok_or_else(|| {
+            AuthError::Filesystem("no usable account name for the Claude Keychain item".to_string())
+        })?;
+    let failed = |error: std::io::Error| {
+        AuthError::Filesystem(format!("write Claude Keychain credential: {error}"))
+    };
+    let mut security = ProcessCommand::new("security")
+        .arg("-i")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(failed)?;
+    let script = format!(
+        "add-generic-password -U -a \"{account}\" -s \"{service}\" -X {}\n",
+        hex::encode(credential.expose_secret().as_bytes())
+    );
+    security
+        .stdin
+        .take()
+        .expect("security stdin is piped")
+        .write_all(script.as_bytes())
+        .map_err(failed)?;
+    let status = security.wait().map_err(failed)?;
+    // `security -i` reports a failed command only through what it stored.
+    let stored = read_claude_keychain_blob_with_security(&service).ok();
+    if !status.success() || stored.as_deref() != Some(credential.expose_secret().as_bytes()) {
+        return Err(AuthError::Filesystem(
+            "write Claude Keychain credential: the item did not take the login".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Parse a `.claude/.credentials.json` payload. The access token sits at the top
@@ -2466,7 +2665,7 @@ fn claude_keychain_service(config_dir: &Path) -> String {
     format!("Claude Code-credentials-{}", &suffix[..8])
 }
 
-fn write_claude_profile_credentials(
+pub(crate) fn write_claude_profile_credentials(
     config_dir: &Path,
     credential: &SecretString,
 ) -> Result<(), AuthError> {
@@ -2647,6 +2846,10 @@ fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
     let auth_path = codex_home.join("auth.json");
     let content = fs::read_to_string(auth_path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    codex_token_from_credentials_json(&json)
+}
+
+fn codex_token_from_credentials_json(json: &serde_json::Value) -> Option<ProviderToken> {
     // Store OAuth access tokens only.
     // Never capture manual API keys from Codex auth state.
     let token = json
@@ -2658,7 +2861,7 @@ fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
                 .and_then(|v| v.as_str())
         })?;
     let expires_at = read_json_expires_at(
-        &json,
+        json,
         &[
             "expires_at",
             "expiresAt",
@@ -2667,7 +2870,7 @@ fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
         ],
     )
     .or_else(|| jwt_claims(token)?.get("exp")?.as_i64());
-    let login = codex_login_from_auth(&json);
+    let login = codex_login_from_auth(json);
     Some(ProviderToken {
         provider: "codex".to_string(),
         access_token: token.to_string(),
@@ -2678,6 +2881,82 @@ fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
         updated_at: now_unix(),
         credential_type: CredentialType::OAuth,
     })
+}
+
+pub(crate) fn codex_identity_from_home(
+    home: &Path,
+) -> Option<crate::provider_account::identity::AccountIdentity> {
+    let raw = fs::read(home.join("auth.json")).ok()?;
+    let json: serde_json::Value = serde_json::from_slice(&raw).ok()?;
+    let id_token = json
+        .get("id_token")
+        .or_else(|| json.pointer("/tokens/id_token"))?
+        .as_str()?;
+    let claims = jwt_claims(id_token)?;
+    let email = claims.get("email")?.as_str()?.trim();
+    let subject = claims
+        .get("sub")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            claims
+                .get("https://api.openai.com/auth")?
+                .get("chatgpt_user_id")?
+                .as_str()
+        })?
+        .trim();
+    if email.is_empty() || subject.is_empty() {
+        return None;
+    }
+    Some(crate::provider_account::identity::AccountIdentity {
+        email: email.into(),
+        subject: subject.into(),
+        credential_digest: None,
+    })
+}
+
+pub(crate) async fn verify_codex_identity(
+    home: &Path,
+) -> Result<
+    (
+        crate::provider_account::identity::AccountIdentity,
+        Option<String>,
+    ),
+    AuthError,
+> {
+    let broker = CodexAuthBroker::for_profile(home.to_path_buf());
+    let response = codex::refresh(&mut broker.command("app-server")).await?;
+    let identity = codex_identity_from_account(home, &response).map_err(|message| {
+        AuthError::CommandFailed {
+            provider: Provider::Codex,
+            message,
+        }
+    })?;
+    let plan = response
+        .pointer("/account/planType")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    Ok((identity, plan))
+}
+
+pub(crate) fn codex_identity_from_account(
+    home: &Path,
+    response: &serde_json::Value,
+) -> Result<crate::provider_account::identity::AccountIdentity, String> {
+    let identity = codex_identity_from_home(home).ok_or_else(|| {
+        "Codex credential has no email and per-user identity; reconnect".to_string()
+    })?;
+    let email = response
+        .pointer("/account/email")
+        .and_then(serde_json::Value::as_str);
+    if !email.is_some_and(|email| email.eq_ignore_ascii_case(&identity.email)) {
+        return Err(format!(
+            "Codex account/read reports {}; credential reports {}; reconnect",
+            email.unwrap_or("no login"),
+            identity.email
+        ));
+    }
+    Ok(identity)
 }
 
 fn codex_login_from_auth(json: &serde_json::Value) -> Option<String> {
@@ -2696,153 +2975,15 @@ fn codex_login_from_auth(json: &serde_json::Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn jwt_claims(token: &str) -> Option<serde_json::Value> {
+pub(crate) fn jwt_claims(token: &str) -> Option<serde_json::Value> {
     let payload = token.split('.').nth(1)?.trim_end_matches('=');
-    let claims = URL_SAFE_NO_PAD.decode(payload).ok()?;
+    let claims = BASE64_URL_SAFE_NO_PAD.decode(payload).ok()?;
     serde_json::from_slice(&claims).ok()
 }
 
 async fn refresh_codex_access_token(codex_home: &Path) -> Result<(), AuthError> {
     let broker = CodexAuthBroker::for_profile(codex_home.to_path_buf());
     broker.refresh_access_token().await
-}
-
-async fn refresh_codex_access_token_with_command(command: &mut Command) -> Result<(), AuthError> {
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    #[cfg(unix)]
-    command.process_group(0);
-
-    let mut child = command.spawn().map_err(|source| {
-        if source.kind() == std::io::ErrorKind::NotFound {
-            AuthError::CommandUnavailable {
-                provider: Provider::Codex,
-                command: "codex".to_string(),
-            }
-        } else {
-            AuthError::CommandSpawn {
-                provider: Provider::Codex,
-                source,
-            }
-        }
-    })?;
-    let _process_group = crate::engine::process::ProcessGroupGuard::new(
-        child
-            .id()
-            .expect("newly spawned Codex command should have a process id"),
-    );
-    let mut stdin = child.stdin.take().ok_or_else(|| AuthError::CommandFailed {
-        provider: Provider::Codex,
-        message: "app-server did not expose stdin".to_string(),
-    })?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| AuthError::CommandFailed {
-            provider: Provider::Codex,
-            message: "app-server did not expose stdout".to_string(),
-        })?;
-    let mut stdout = BufReader::new(stdout);
-
-    write_codex_auth_request(
-        &mut stdin,
-        &serde_json::json!({
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "clientInfo": {
-                    "name": "loopflow",
-                    "title": "loopflow",
-                    "version": env!("CARGO_PKG_VERSION"),
-                }
-            }
-        }),
-    )
-    .await?;
-    read_codex_auth_response(&mut stdout, 1).await?;
-    write_codex_auth_request(&mut stdin, &serde_json::json!({"method": "initialized"})).await?;
-    write_codex_auth_request(
-        &mut stdin,
-        &serde_json::json!({
-            "id": 2,
-            "method": "account/read",
-            "params": {"refreshToken": true},
-        }),
-    )
-    .await?;
-    read_codex_auth_response(&mut stdout, 2).await
-}
-
-async fn write_codex_auth_request(
-    stdin: &mut tokio::process::ChildStdin,
-    request: &serde_json::Value,
-) -> Result<(), AuthError> {
-    let mut line = serde_json::to_vec(request).map_err(|error| AuthError::CommandFailed {
-        provider: Provider::Codex,
-        message: format!("failed to encode app-server request: {error}"),
-    })?;
-    line.push(b'\n');
-    stdin
-        .write_all(&line)
-        .await
-        .map_err(|source| AuthError::CommandIo {
-            provider: Provider::Codex,
-            source,
-        })?;
-    stdin.flush().await.map_err(|source| AuthError::CommandIo {
-        provider: Provider::Codex,
-        source,
-    })
-}
-
-async fn read_codex_auth_response(
-    stdout: &mut BufReader<tokio::process::ChildStdout>,
-    request_id: i64,
-) -> Result<(), AuthError> {
-    tokio::time::timeout(Duration::from_secs(15), async {
-        loop {
-            let mut line = String::new();
-            let bytes =
-                stdout
-                    .read_line(&mut line)
-                    .await
-                    .map_err(|source| AuthError::CommandIo {
-                        provider: Provider::Codex,
-                        source,
-                    })?;
-            if bytes == 0 {
-                return Err(AuthError::CommandFailed {
-                    provider: Provider::Codex,
-                    message: "app-server disconnected before refreshing auth".to_string(),
-                });
-            }
-            let Ok(message) = serde_json::from_str::<serde_json::Value>(&line) else {
-                continue;
-            };
-            if message.get("id").and_then(serde_json::Value::as_i64) != Some(request_id) {
-                continue;
-            }
-            if message.get("error").is_some() {
-                return Err(AuthError::CommandFailed {
-                    provider: Provider::Codex,
-                    message: "app-server rejected the proactive token refresh".to_string(),
-                });
-            }
-            return Ok(());
-        }
-    })
-    .await
-    .map_err(|_| AuthError::CommandFailed {
-        provider: Provider::Codex,
-        message: "timed out waiting for app-server auth refresh".to_string(),
-    })?
-}
-
-pub(crate) fn extract_codex_access_token(home_dir: &Path) -> Option<String> {
-    extract_codex_token(home_dir).map(|token| token.access_token)
 }
 
 /// Canonical key under which OpenCode stores credentials in auth.json.
@@ -3120,14 +3261,14 @@ pub async fn refresh_stored_provider_token(
     current_token: &ProviderToken,
 ) -> Result<ProviderToken, TokenRefreshError> {
     let mut refreshed = match provider {
-        Provider::Linear => {
+        Provider::Linear | Provider::Asana | Provider::Notion => {
             let refresh_token = current_token
                 .refresh_token
                 .as_deref()
                 .filter(|token| !token.trim().is_empty())
                 .ok_or(TokenRefreshError::OAuth {
                     provider,
-                    reason: LinearRefreshError::MissingRefreshGrant,
+                    reason: PmRefreshError::MissingRefreshGrant,
                 })?;
             refresh_pm_oauth_token(
                 provider,
@@ -3182,14 +3323,9 @@ async fn refresh_provider_token_with_runner(
                 provider: Provider::OpenCodeZen,
             })
         }
-        Provider::Linear | Provider::Doppler => Err(TokenRefreshError::MissingToken { provider }),
-    }
-}
-
-fn pm_oauth_endpoint(provider: Provider) -> Option<&'static str> {
-    match provider {
-        Provider::Linear => Some(LINEAR_OAUTH_TOKEN_URL),
-        _ => None,
+        Provider::Linear | Provider::Asana | Provider::Notion | Provider::Doppler => {
+            Err(TokenRefreshError::MissingToken { provider })
+        }
     }
 }
 
@@ -3282,15 +3418,12 @@ fn extract_oauth_code_from_request(request: &str) -> Option<String> {
     let first_line = request.lines().next()?;
     let path = first_line.split_whitespace().nth(1)?;
     let query = path.split_once('?')?.1;
-    for pair in query.split('&') {
-        if let Some(value) = pair.strip_prefix("code=") {
-            let value = value.trim();
-            if !value.is_empty() {
-                return Some(value.to_string());
-            }
-        }
-    }
-    None
+    // Asana's codes carry `/` and `:`, so the value arrives percent-encoded.
+    serde_urlencoded::from_str::<Vec<(String, String)>>(query)
+        .ok()?
+        .into_iter()
+        .find(|(key, value)| key == "code" && !value.trim().is_empty())
+        .map(|(_, value)| value.trim().to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -3300,27 +3433,7 @@ struct OAuthRefreshResponse {
     expires_in: Option<i64>,
 }
 
-fn encode_pm_refresh_request(
-    provider: Provider,
-    client_id: &str,
-    client_secret: Option<&str>,
-    refresh_token: &str,
-) -> Result<String, AuthError> {
-    let mut params = vec![
-        ("grant_type", "refresh_token"),
-        ("client_id", client_id),
-        ("refresh_token", refresh_token),
-    ];
-    if let Some(client_secret) = client_secret {
-        params.push(("client_secret", client_secret));
-    }
-    serde_urlencoded::to_string(params).map_err(|err| AuthError::OAuthRequest {
-        provider,
-        message: format!("failed to encode refresh request: {err}"),
-    })
-}
-
-/// Exchange a Linear refresh grant without retaining provider error bodies.
+/// Exchange a planning provider's refresh grant without retaining provider error bodies.
 ///
 /// # Errors
 /// Returns a sanitized protocol or configuration category. The caller owns retry
@@ -3329,38 +3442,38 @@ pub async fn refresh_pm_oauth_token(
     provider: Provider,
     refresh_token: &str,
     stored_client_id: Option<&str>,
-) -> Result<ProviderToken, LinearRefreshError> {
-    let endpoint =
-        pm_oauth_endpoint(provider).ok_or(LinearRefreshError::ClientConfigurationUnavailable)?;
+) -> Result<ProviderToken, PmRefreshError> {
+    let spec = pm_oauth(provider).ok_or(PmRefreshError::ClientConfigurationUnavailable)?;
     let (client_id, client_secret) = match stored_client_id {
-        Some(id) if !id.trim().is_empty() => (id.trim().to_string(), None),
+        Some(id) if !id.trim().is_empty() && !spec.refresh_requires_secret => {
+            (id.trim().to_string(), None)
+        }
         _ => {
-            let (id, secret) = linear_refresh_client_config().await?;
+            let (id, secret) = pm_refresh_client_config(spec).await?;
             (id, Some(secret))
         }
     };
-    let body = encode_pm_refresh_request(
-        provider,
+    let url = spec.token_url.to_string();
+    #[cfg(test)]
+    let url = PM_REFRESH_URL.try_with(Clone::clone).unwrap_or(url);
+    let request = spec.token_request(
+        &url,
         &client_id,
         client_secret.as_deref(),
-        refresh_token,
-    )
-    .map_err(|_| LinearRefreshError::ClientConfigurationUnavailable)?;
-    let url = endpoint.to_string();
-    #[cfg(test)]
-    let url = LINEAR_REFRESH_URL.try_with(Clone::clone).unwrap_or(url);
+        &[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+        ],
+    );
 
     let attempt = async {
-        let response = reqwest::Client::new()
-            .post(url)
-            .header("content-type", "application/x-www-form-urlencoded")
-            .body(body)
+        let response = request
             .send()
             .await
-            .map_err(|_| LinearRefreshError::Unavailable { status: None })?;
+            .map_err(|_| PmRefreshError::Unavailable { status: None })?;
         let status = response.status();
         if status.as_u16() == 408 || status.as_u16() == 429 || status.is_server_error() {
-            return Err(LinearRefreshError::Unavailable {
+            return Err(PmRefreshError::Unavailable {
                 status: Some(status.as_u16()),
             });
         }
@@ -3373,9 +3486,9 @@ pub async fn refresh_pm_oauth_token(
                     .and_then(|body| body.get("error"))
                     .and_then(|v| v.as_str())
                 {
-                    Some("invalid_grant") => LinearRefreshError::InvalidGrant,
-                    Some("invalid_client") => LinearRefreshError::InvalidClient,
-                    _ => LinearRefreshError::Rejected {
+                    Some("invalid_grant") => PmRefreshError::InvalidGrant,
+                    Some("invalid_client") => PmRefreshError::InvalidClient,
+                    _ => PmRefreshError::Rejected {
                         status: status.as_u16(),
                     },
                 },
@@ -3384,19 +3497,23 @@ pub async fn refresh_pm_oauth_token(
         let payload = response
             .json::<OAuthRefreshResponse>()
             .await
-            .map_err(|_| LinearRefreshError::InvalidResponse)?;
-        let refresh = payload
+            .map_err(|_| PmRefreshError::InvalidResponse)?;
+        let refresh = match payload
             .refresh_token
             .filter(|value| !value.trim().is_empty())
-            .ok_or(LinearRefreshError::InvalidResponse)?;
+        {
+            Some(refresh) => refresh,
+            None if !spec.rotates_refresh_token => refresh_token.to_string(),
+            None => return Err(PmRefreshError::InvalidResponse),
+        };
         let now = now_unix();
         let expires_at = payload
             .expires_in
             .filter(|seconds| *seconds > 0)
             .and_then(|seconds| now.checked_add(seconds))
-            .ok_or(LinearRefreshError::InvalidResponse)?;
+            .ok_or(PmRefreshError::InvalidResponse)?;
         if payload.access_token.trim().is_empty() {
-            return Err(LinearRefreshError::InvalidResponse);
+            return Err(PmRefreshError::InvalidResponse);
         }
         Ok(ProviderToken {
             provider: provider.as_str().to_string(),
@@ -3411,21 +3528,21 @@ pub async fn refresh_pm_oauth_token(
     };
     tokio::time::timeout(Duration::from_secs(2), attempt)
         .await
-        .unwrap_or(Err(LinearRefreshError::Unavailable { status: None }))
+        .unwrap_or(Err(PmRefreshError::Unavailable { status: None }))
 }
 
-async fn linear_refresh_client_config() -> Result<(String, String), LinearRefreshError> {
+async fn pm_refresh_client_config(spec: &PmOAuthSpec) -> Result<(String, String), PmRefreshError> {
     #[cfg(test)]
-    if let Ok(config) = LINEAR_REFRESH_CONFIG.try_with(Clone::clone) {
+    if let Ok(config) = PM_REFRESH_CONFIG.try_with(Clone::clone) {
         return config;
     }
     Ok((
-        linear_refresh_secret(LINEAR_CLIENT_ID_ENV).await?,
-        linear_refresh_secret(LINEAR_CLIENT_SECRET_ENV).await?,
+        pm_refresh_secret(spec.client_id_env).await?,
+        pm_refresh_secret(spec.client_secret_env).await?,
     ))
 }
 
-async fn linear_refresh_secret(name: &'static str) -> Result<String, LinearRefreshError> {
+async fn pm_refresh_secret(name: &'static str) -> Result<String, PmRefreshError> {
     if let Some(value) = read_nonempty_env(name) {
         return Ok(value);
     }
@@ -3434,19 +3551,19 @@ async fn linear_refresh_secret(name: &'static str) -> Result<String, LinearRefre
         .kill_on_drop(true)
         .output()
         .await;
-    linear_refresh_secret_output(output)
+    pm_refresh_secret_output(output)
 }
 
-fn linear_refresh_secret_output(
+fn pm_refresh_secret_output(
     output: std::io::Result<std::process::Output>,
-) -> Result<String, LinearRefreshError> {
-    let output = output.map_err(|_| LinearRefreshError::ConfigurationLookupFailed)?;
+) -> Result<String, PmRefreshError> {
+    let output = output.map_err(|_| PmRefreshError::ConfigurationLookupFailed)?;
     if !output.status.success() {
-        return Err(LinearRefreshError::ConfigurationLookupFailed);
+        return Err(PmRefreshError::ConfigurationLookupFailed);
     }
     let value = std::str::from_utf8(&output.stdout)
-        .map_err(|_| LinearRefreshError::ConfigurationLookupFailed)?;
-    read_nonempty_value(value).ok_or(LinearRefreshError::ClientConfigurationUnavailable)
+        .map_err(|_| PmRefreshError::ConfigurationLookupFailed)?;
+    read_nonempty_value(value).ok_or(PmRefreshError::ClientConfigurationUnavailable)
 }
 
 async fn refresh_github_token(
@@ -3584,10 +3701,14 @@ pub fn api_key_env_allowed_for_program(program: &str, env_name: &str) -> bool {
     if !is_api_key_env_name(&env_name) {
         return true;
     }
-    if normalize_program_name(program) != "opencode" {
-        return false;
+    match normalize_program_name(program).as_str() {
+        "pi" => matches!(
+            env_name.as_str(),
+            "ANTHROPIC_API_KEY" | "OPENAI_API_KEY" | "GEMINI_API_KEY" | "MOONSHOT_API_KEY"
+        ),
+        "opencode" => matches!(env_name.as_str(), "OPENCODE_API_KEY" | "MOONSHOT_API_KEY"),
+        _ => false,
     }
-    matches!(env_name.as_str(), "OPENCODE_API_KEY" | "MOONSHOT_API_KEY")
 }
 
 pub fn api_key_env_names() -> &'static [&'static str] {
@@ -3865,7 +3986,7 @@ mod tests {
             &mut builder,
         );
 
-        let response = build_flow_response(Provider::GitHub, &builder).expect("response");
+        let response = build_graph_response(Provider::GitHub, &builder).expect("response");
         assert_eq!(response.verification_uri, "https://github.com/login/device");
         assert_eq!(response.user_code, Some("ABCD-1234".to_string()));
         assert!(response
@@ -3882,7 +4003,7 @@ mod tests {
             &mut builder,
         );
 
-        let response = build_flow_response(Provider::Codex, &builder).expect("response");
+        let response = build_graph_response(Provider::Codex, &builder).expect("response");
         assert_eq!(response.verification_uri, "https://example.com/device");
         assert_eq!(
             response.verification_uri_complete,
@@ -3894,7 +4015,7 @@ mod tests {
     /// `codex login` announces its localhost callback server before printing
     /// the real authorization URL. The listener is not a page someone can
     /// authorize on — taking it as the verification URL opened a dead
-    /// "Not Found" tab and ended the flow before the real URL arrived.
+    /// "Not Found" tab and ended the graph before the real URL arrived.
     #[test]
     fn generic_parser_waits_past_the_loopback_callback_listener() {
         let mut builder = AuthFlowBuilder::default();
@@ -3903,15 +4024,15 @@ mod tests {
             &mut builder,
         );
         assert!(
-            build_flow_response(Provider::Codex, &builder).is_none(),
-            "a loopback URL alone must not complete the flow"
+            build_graph_response(Provider::Codex, &builder).is_none(),
+            "a loopback URL alone must not complete the graph"
         );
 
         parse_generic_auth_line(
             "If your browser did not open, navigate to https://auth.openai.com/oauth/authorize?client_id=abc&state=xyz",
             &mut builder,
         );
-        let response = build_flow_response(Provider::Codex, &builder).expect("response");
+        let response = build_graph_response(Provider::Codex, &builder).expect("response");
         assert_eq!(
             response.verification_uri,
             "https://auth.openai.com/oauth/authorize"
@@ -3929,7 +4050,7 @@ mod tests {
             &mut builder,
         );
 
-        let response = build_flow_response(Provider::Claude, &builder).expect("response");
+        let response = build_graph_response(Provider::Claude, &builder).expect("response");
         assert_eq!(
             response.verification_uri,
             "https://claude.com/cai/oauth/authorize"
@@ -3997,7 +4118,8 @@ mod tests {
         .await
         .expect("start fake auth command");
 
-        assert!(handle.requires_authorization_code());
+        assert!(handle.supports_authorization_code());
+        assert_eq!(handle.response.completion, AuthCompletion::Manual);
         handle
             .submit_authorization_code("expected-code")
             .await
@@ -4005,51 +4127,152 @@ mod tests {
         handle.wait().await.expect("auth command should complete");
     }
 
-    #[test]
-    fn visible_claude_page_parser_extracts_only_a_complete_handoff() {
-        let expected = "abcdefghijklmnopqrstuvwxyz#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        let page = format!("Authorization complete\n{expected}\nCopy this code");
-
-        let code = claude_authorization_code_from_page(&page).expect("authorization handoff");
-
-        assert_eq!(code.expose_secret(), expected);
-        assert!(claude_authorization_code_from_page("short#code").is_none());
+    #[tokio::test]
+    async fn discovery_timeout_kills_only_the_owned_provider_group() {
+        let tmp = tempdir().unwrap();
+        let pid_path = tmp.path().join("pid");
+        let mut unrelated = Command::new("sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut command = Command::new("sh");
+        command
+            .env("AUTH_PID_PATH", &pid_path)
+            .args(["-c", "echo $$ > \"$AUTH_PID_PATH\"; sleep 30"]);
+        let result = tokio::time::timeout(
+            Duration::from_millis(200),
+            start_auth_command(
+                Provider::Claude,
+                "sh",
+                command,
+                AuthCommandInput::AuthorizationCode,
+                parse_generic_auth_line,
+            ),
+        )
+        .await;
+        assert!(result.is_err());
+        let pid: i32 = fs::read_to_string(pid_path)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                // SAFETY: signal zero probes only this recorded fixture pid.
+                if unsafe { libc::kill(pid, 0) } != 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(unrelated.try_wait().unwrap().is_none());
+        unrelated.kill().await.unwrap();
+        unrelated.wait().await.unwrap();
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
-    fn claude_browser_automation_compiles_without_focus_or_keyboard_control() {
-        for script in [CLAUDE_AUTH_WINDOW_SCRIPT, CLAUDE_PAGE_HARVEST_SCRIPT] {
-            assert!(!script.contains("activate"));
-            assert!(!script.contains("AXRaise"));
-            assert!(!script.contains("keystroke"));
+    fn terminal_links_preserve_targets_without_escape_bytes() {
+        let expected = "https://example.com/authorize?state=synthetic";
+        for ending in ["\x07", "\x1b\\"] {
+            for label in ["Sign in", expected] {
+                let line =
+                    format!("\x1b[32m\x1b]8;;{expected}{ending}{label}\x1b]8;;{ending}\x1b[0m");
+                // The base CSI-only decoder leaves OSC bytes on the token.
+                assert!(extract_url(&ANSI_ESCAPE_RE.replace_all(&line, "")).is_none());
+                assert_eq!(
+                    extract_url(&strip_ansi_escape_codes(&line)).as_deref(),
+                    Some(expected)
+                );
+            }
         }
-        assert!(!CLAUDE_AUTH_WINDOW_SCRIPT.contains("clipboard"));
-        assert!(CLAUDE_PAGE_HARVEST_SCRIPT.contains("select all active tab"));
-        assert!(CLAUDE_PAGE_HARVEST_SCRIPT.contains("copy selection active tab"));
+    }
 
-        let compiled = tempdir().expect("AppleScript compile output");
-        for (name, script) in [
-            ("window", CLAUDE_AUTH_WINDOW_SCRIPT),
-            ("harvest", CLAUDE_PAGE_HARVEST_SCRIPT),
-        ] {
-            // Resolve the installed app by path so this headless test can load
-            // Chrome's scripting dictionary without launching Chrome.
-            let script = script.replace(
-                "tell application \"Google Chrome\"",
-                "tell application \"/Applications/Google Chrome.app\"",
-            );
-            let output = ProcessCommand::new("/usr/bin/osacompile")
-                .args(["-e", &script, "-o"])
-                .arg(compiled.path().join(format!("{name}.scpt")))
-                .output()
-                .expect("compile Claude Chrome AppleScript");
-            assert!(
-                output.status.success(),
-                "{name} script did not compile: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn native_browser_handoff_wins_over_earlier_manual_link_and_needs_no_input() {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            r#"
+            printf '\033]8;;https://example.com/manual?state=synthetic\007Sign in\033]8;;\007\n'
+            sleep 0.05
+            "$BROWSER" 'https://example.com/native?redirect_uri=http%3A%2F%2Flocalhost%3A19222'
+        "#,
+        ]);
+        let handle = start_auth_command(
+            Provider::Claude,
+            "sh",
+            command,
+            AuthCommandInput::AuthorizationCode,
+            parse_generic_auth_line,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            handle.response.completion,
+            AuthCompletion::Browser {
+                manual_uri: Some("https://example.com/manual?state=synthetic".to_string())
+            }
+        );
+        assert!(handle
+            .response
+            .verification_uri_complete
+            .as_ref()
+            .unwrap()
+            .contains("/native?"));
+        assert!(!format!("{handle:?}").contains("https://"));
+        tokio::time::timeout(Duration::from_secs(2), handle.wait())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn fragmented_hyperlink_survives_immediate_provider_exit() {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            r#"
+            printf '\033]8;;https://example.com/author'
+            sleep 0.05
+            printf 'ize\033\\Sign in\033]8;;\033\\'
+        "#,
+        ]);
+        let handle = start_auth_command(
+            Provider::Codex,
+            "sh",
+            command,
+            AuthCommandInput::None,
+            parse_generic_auth_line,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            handle.response.verification_uri_complete.as_deref(),
+            Some("https://example.com/authorize")
+        );
+        handle.wait().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn fast_provider_failure_drains_output_but_does_not_claim_success() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "echo https://example.com/authorize; exit 7"]);
+        let handle = start_auth_command(
+            Provider::Codex,
+            "sh",
+            command,
+            AuthCommandInput::None,
+            parse_generic_auth_line,
+        )
+        .await
+        .unwrap();
+        let error = handle.wait().await.unwrap_err().to_string();
+        assert!(error.contains('7'));
+        assert!(!error.contains("https://"));
     }
 
     #[test]
@@ -4130,7 +4353,7 @@ mod tests {
             &mut builder,
         );
 
-        let response = build_flow_response(Provider::Codex, &builder).expect("response");
+        let response = build_graph_response(Provider::Codex, &builder).expect("response");
         assert_eq!(
             response.verification_uri,
             "https://auth.openai.com/codex/device"
@@ -4146,7 +4369,7 @@ mod tests {
             &mut builder,
         );
 
-        let response = build_flow_response(Provider::Codex, &builder).expect("response");
+        let response = build_graph_response(Provider::Codex, &builder).expect("response");
         assert_eq!(
             response.verification_uri,
             "https://auth.openai.com/oauth/authorize"
@@ -4167,7 +4390,7 @@ mod tests {
             &mut builder,
         );
 
-        let response = build_flow_response(Provider::GitHub, &builder).expect("response");
+        let response = build_graph_response(Provider::GitHub, &builder).expect("response");
         assert_eq!(response.user_code, Some("09FB-AAD5".to_string()));
         assert_eq!(response.verification_uri, "https://github.com/login/device");
     }
@@ -4297,7 +4520,7 @@ attributes:
     }
 
     #[tokio::test]
-    async fn service_reports_pending_when_flow_running() {
+    async fn service_reports_pending_when_graph_running() {
         #[derive(Debug)]
         struct FakeBroker;
 
@@ -4309,6 +4532,7 @@ attributes:
 
             async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
                 let response = AuthFlowResponse {
+                    completion: AuthCompletion::Browser { manual_uri: None },
                     provider: Provider::GitHub,
                     verification_uri: "https://github.com/login/device".to_string(),
                     verification_uri_complete: None,
@@ -4335,7 +4559,7 @@ attributes:
 
         let service = ProviderAuthService::with_brokers(vec![Arc::new(FakeBroker)]);
         service
-            .start_auth(Provider::GitHub, no_event_sink())
+            .start_auth(Provider::GitHub)
             .await
             .expect("start auth");
 
@@ -4343,7 +4567,7 @@ attributes:
         assert_eq!(status.status, AuthStatus::Pending);
         assert!(
             !service
-                .pending_requires_authorization_code(Provider::GitHub)
+                .pending_supports_authorization_code(Provider::GitHub)
                 .await
         );
     }
@@ -4363,7 +4587,7 @@ attributes:
                 let mut command = Command::new("sh");
                 command.args([
                     "-c",
-                    "echo https://example.com/oauth/authorize; IFS= read -r code; test \"$code\" = expected-code",
+                    r#"echo https://example.com/oauth/authorize; "$BROWSER" https://example.com/native; IFS= read -r code; test "$code" = expected-code"#,
                 ]);
                 start_auth_command(
                     Provider::Claude,
@@ -4386,12 +4610,12 @@ attributes:
 
         let service = ProviderAuthService::with_brokers(vec![Arc::new(CommandBroker)]);
         service
-            .start_auth(Provider::Claude, no_event_sink())
+            .start_auth(Provider::Claude)
             .await
             .expect("start auth");
         assert!(
             service
-                .pending_requires_authorization_code(Provider::Claude)
+                .pending_supports_authorization_code(Provider::Claude)
                 .await
         );
         service
@@ -4404,6 +4628,18 @@ attributes:
             assert!(Instant::now() < deadline, "auth lifecycle did not finish");
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+        service.wait_for_auth(Provider::Claude).await.unwrap();
+        service.start_auth(Provider::Claude).await.unwrap();
+        service
+            .complete_auth(Provider::Claude, "rejected-code")
+            .await
+            .unwrap();
+        assert!(service.wait_for_auth(Provider::Claude).await.is_err());
+        // An independently active credential cannot turn this failed attempt green.
+        assert!(matches!(
+            service.status(Provider::Claude).await.unwrap().status,
+            AuthStatus::Active { .. }
+        ));
     }
 
     #[derive(Debug, Clone)]
@@ -4420,6 +4656,7 @@ attributes:
 
         async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
             let response = AuthFlowResponse {
+                completion: AuthCompletion::Browser { manual_uri: None },
                 provider: self.provider,
                 verification_uri: "https://github.com/login/device".to_string(),
                 verification_uri_complete: None,
@@ -4456,7 +4693,7 @@ attributes:
     }
 
     #[tokio::test]
-    async fn start_auth_persists_extracted_token_and_reports_events() {
+    async fn start_auth_completes_after_persisting_extracted_token() {
         let store = temp_sqlite_store().await;
         let token = ProviderToken {
             provider: "github".to_string(),
@@ -4477,44 +4714,26 @@ attributes:
             Some(store.clone()),
         );
 
-        let events: Arc<StdMutex<Vec<AuthEvent>>> = Arc::new(StdMutex::new(Vec::new()));
-        let events_for_sink = events.clone();
-        let sink: AuthEventSink = Arc::new(move |event| {
-            events_for_sink.lock().expect("events mutex").push(event);
-        });
-
         service
-            .start_auth(Provider::GitHub, sink)
+            .start_auth(Provider::GitHub)
             .await
             .expect("start auth");
-
-        // Wait for the background lifecycle to persist the token.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            if !service.is_pending(Provider::GitHub).await {
-                break;
-            }
-            assert!(Instant::now() < deadline, "auth lifecycle did not finish");
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            service.wait_for_auth(Provider::GitHub),
+        )
+        .await
+        .expect("auth lifecycle should finish")
+        .expect("login and persistence should succeed");
 
         let stored = store
             .get_provider_token("github")
             .await
             .expect("get token")
-            .expect("token persisted by flow");
+            .expect("token persisted by graph");
         assert_eq!(stored.access_token, "gho_flow123");
         assert_eq!(stored.login.as_deref(), Some("jackdanger"));
         assert_eq!(stored.credential_type, CredentialType::OAuth);
-
-        let events = events.lock().expect("events mutex");
-        assert!(matches!(
-            events.first(),
-            Some(AuthEvent::FlowStarted { .. })
-        ));
-        assert!(events
-            .iter()
-            .any(|event| matches!(event, AuthEvent::Connected { .. })));
     }
 
     #[tokio::test]
@@ -4679,7 +4898,7 @@ attributes:
         let tmp = tempdir().expect("tempdir");
         let codex_dir = tmp.path().join(".codex");
         fs::create_dir_all(&codex_dir).expect("create codex dir");
-        let claims = URL_SAFE_NO_PAD.encode(r#"{"email":"engineering@example.com"}"#);
+        let claims = BASE64_URL_SAFE_NO_PAD.encode(r#"{"email":"engineering@example.com"}"#);
         let id_token = format!("header.{claims}.signature");
         fs::write(
             codex_dir.join("auth.json"),
@@ -4702,7 +4921,7 @@ attributes:
         let tmp = tempdir().expect("tempdir");
         let codex_dir = tmp.path().join(".codex");
         fs::create_dir_all(&codex_dir).expect("create codex dir");
-        let claims = URL_SAFE_NO_PAD.encode(r#"{"exp":4102444800}"#);
+        let claims = BASE64_URL_SAFE_NO_PAD.encode(r#"{"exp":4102444800}"#);
         let access_token = format!("header.{claims}.signature");
         fs::write(
             codex_dir.join("auth.json"),
@@ -4752,19 +4971,19 @@ attributes:
 
     #[test]
     fn linear_oauth_authorization_url_uses_loopback_redirect_and_pkce() {
-        let app = LinearOAuthApp {
+        let app = PmOAuthApp {
+            spec: &LINEAR_OAUTH,
             client_id: "client-123".to_string(),
             client_secret: "secret-456".to_string(),
-            scope: LINEAR_OAUTH_DEFAULT_SCOPE.to_string(),
         };
 
-        let url = LinearOAuthBroker::build_authorization_url(&app, "verifier-123", "state-abc");
+        let url = PmOAuthBroker::build_authorization_url(&app, "verifier-123", "state-abc");
         let parsed = Url::parse(&url).expect("linear oauth url should parse");
         let query = parsed.query_pairs().collect::<HashMap<_, _>>();
 
         assert_eq!(
             parsed.as_str().split('?').next(),
-            Some(LINEAR_OAUTH_AUTHORIZE_URL)
+            Some(LINEAR_OAUTH.authorize_url)
         );
         assert_eq!(
             query.get("client_id").map(|value| value.as_ref()),
@@ -4772,7 +4991,7 @@ attributes:
         );
         assert_eq!(
             query.get("redirect_uri").map(|value| value.as_ref()),
-            Some(LINEAR_OAUTH_REDIRECT_URI)
+            Some(LINEAR_OAUTH.redirect_uri().as_str())
         );
         assert_eq!(
             query.get("scope").map(|value| value.as_ref()),
@@ -4795,19 +5014,34 @@ attributes:
         assert!(!Provider::Linear.api_key_bills_per_token());
         assert_eq!(
             Provider::Linear.api_key_configure_error(),
-            Some("Linear requires OAuth. Run 'lf auth linear' to connect.")
+            Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
         );
         // Refresh is wired: Linear resolves a PM OAuth endpoint.
-        assert!(pm_oauth_endpoint(Provider::Linear).is_some());
+        assert!(pm_oauth(Provider::Linear).is_some());
         assert!(Provider::Linear.supports_automatic_refresh());
     }
 
     #[test]
-    fn linear_broker_registered_in_default_brokers() {
-        let has_linear = default_brokers(None)
-            .iter()
-            .any(|broker| broker.provider() == Provider::Linear);
-        assert!(has_linear, "`lf auth linear` needs a registered broker");
+    fn planning_brokers_registered_in_default_brokers() {
+        for provider in [Provider::Linear, Provider::Asana, Provider::Notion] {
+            assert!(
+                default_brokers(None)
+                    .iter()
+                    .any(|broker| broker.provider() == provider),
+                "`lf account connect {provider}` needs a registered broker"
+            );
+        }
+    }
+
+    #[test]
+    fn asana_provider_parses_and_refreshes_through_its_oauth_app() {
+        assert_eq!("asana".parse::<Provider>(), Ok(Provider::Asana));
+        assert_eq!(Provider::Asana.as_str(), "asana");
+        assert_eq!(
+            pm_oauth(Provider::Asana).map(|spec| spec.token_url),
+            Some("https://app.asana.com/-/oauth_token")
+        );
+        assert!(Provider::Asana.supports_automatic_refresh());
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -4917,19 +5151,35 @@ attributes:
     #[test]
     fn pm_oauth_endpoint_maps_only_pm_providers() {
         assert_eq!(
-            pm_oauth_endpoint(Provider::Linear),
-            Some(LINEAR_OAUTH_TOKEN_URL)
+            pm_oauth(Provider::Linear).map(|spec| spec.token_url),
+            Some(LINEAR_OAUTH.token_url)
         );
-        assert!(pm_oauth_endpoint(Provider::GitHub).is_none());
+        assert!(pm_oauth(Provider::GitHub).is_none());
+    }
+
+    fn token_request_body(request: reqwest::RequestBuilder) -> (reqwest::Request, Vec<u8>) {
+        let request = request.build().expect("token request builds");
+        let body = request
+            .body()
+            .and_then(reqwest::Body::as_bytes)
+            .expect("token request has a body")
+            .to_vec();
+        (request, body)
     }
 
     #[test]
     fn pkce_refresh_request_uses_client_id_without_secret() {
-        let body =
-            encode_pm_refresh_request(Provider::Linear, "linear-client", None, "refresh-token")
-                .expect("encode refresh request");
+        let (_, body) = token_request_body(LINEAR_OAUTH.token_request(
+            LINEAR_OAUTH.token_url,
+            "linear-client",
+            None,
+            &[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", "refresh-token"),
+            ],
+        ));
         let params: HashMap<String, String> =
-            serde_urlencoded::from_str(&body).expect("decode refresh request");
+            serde_urlencoded::from_bytes(&body).expect("decode refresh request");
 
         assert_eq!(
             params.get("grant_type").map(String::as_str),
@@ -4944,6 +5194,36 @@ attributes:
             Some("refresh-token")
         );
         assert!(!params.contains_key("client_secret"));
+    }
+
+    #[test]
+    fn notion_token_requests_use_basic_auth_and_json() {
+        let (request, body) = token_request_body(NOTION_OAUTH.token_request(
+            NOTION_OAUTH.token_url,
+            "notion-client",
+            Some("notion-secret"),
+            &[("grant_type", "authorization_code"), ("code", "abc")],
+        ));
+        let authorization = request.headers()["authorization"].to_str().unwrap();
+        assert!(authorization.starts_with("Basic "));
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({"grant_type": "authorization_code", "code": "abc"})
+        );
+        assert_eq!(
+            NOTION_OAUTH.redirect_uri(),
+            "http://localhost:19223/oauth/callback"
+        );
+    }
+
+    #[test]
+    fn callback_code_is_percent_decoded() {
+        let request = "GET /oauth/callback?code=1%2F1213%3Aab%2Bc&state=s HTTP/1.1\r\n\r\n";
+        assert_eq!(
+            extract_oauth_code_from_request(request).as_deref(),
+            Some("1/1213:ab+c")
+        );
     }
 
     #[test]
@@ -5097,50 +5377,32 @@ attributes:
     async fn codex_refresh_uses_app_server_managed_auth_flow() {
         let tmp = tempdir().expect("tempdir");
         let script = tmp.path().join("codex-app-server");
-        let trace = tmp.path().join("requests.jsonl");
         fs::write(
             &script,
             r#"#!/bin/sh
-trace="$1"
-IFS= read -r line
-printf '%s\n' "$line" >> "$trace"
+IFS= read -r initialize
 printf '{"id":1,"result":{}}\n'
-IFS= read -r line
-printf '%s\n' "$line" >> "$trace"
-IFS= read -r line
-printf '%s\n' "$line" >> "$trace"
-printf '{"id":2,"result":{"account":null}}\n'
+IFS= read -r initialized
+IFS= read -r request
+case "$request" in
+  *'"method":"account/read"'*'"refreshToken":true'*)
+    echo '{"id":2,"result":{"account":{"email":"operator@example.com"}}}';;
+  *) exit 90;;
+esac
 "#,
         )
         .expect("write fake app-server");
-        let mut permissions = fs::metadata(&script)
-            .expect("script metadata")
-            .permissions();
-        permissions.set_mode(0o700);
-        fs::set_permissions(&script, permissions).expect("make script executable");
-
-        let mut command = Command::new(&script);
-        command.arg(&trace);
-        refresh_codex_access_token_with_command(&mut command)
+        let response = codex::refresh(Command::new("/bin/sh").arg(script))
             .await
             .expect("refresh through fake app-server");
-
-        let requests = fs::read_to_string(trace).expect("read request trace");
-        let requests = requests
-            .lines()
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("request json"))
-            .collect::<Vec<_>>();
-        assert_eq!(requests[0]["method"], "initialize");
-        assert_eq!(requests[1]["method"], "initialized");
-        assert_eq!(requests[2]["method"], "account/read");
-        assert_eq!(requests[2]["params"]["refreshToken"], true);
+        assert_eq!(response["account"]["email"], "operator@example.com");
     }
 
     #[tokio::test]
     async fn codex_refresh_reports_missing_cli() {
         let tmp = tempdir().expect("tempdir");
         let mut command = Command::new(tmp.path().join("missing-codex"));
-        let error = refresh_codex_access_token_with_command(&mut command)
+        let error = codex::refresh(&mut command)
             .await
             .expect_err("missing app-server should fail");
         assert!(matches!(error, AuthError::CommandUnavailable { .. }));
@@ -5211,7 +5473,7 @@ printf '{"id":2,"result":{"account":null}}\n'
     fn pm_provider_configure_errors_point_to_oauth() {
         assert_eq!(
             Provider::Linear.api_key_configure_error(),
-            Some("Linear requires OAuth. Run 'lf auth linear' to connect.")
+            Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
         );
         assert_eq!(Provider::Claude.api_key_configure_error(), None);
     }
@@ -5300,20 +5562,20 @@ printf '{"id":2,"result":{"account":null}}\n'
 
 #[cfg(test)]
 mod linear_oauth_config_tests {
-    use super::{linear_refresh_secret_output, LinearRefreshError};
+    use super::{pm_refresh_secret_output, PmRefreshError};
     use std::os::unix::process::ExitStatusExt;
 
     #[test]
     fn linear_oauth_config_lookup_does_not_treat_command_failure_as_missing() {
         for (status, stdout, expected) in [
-            (0, "", LinearRefreshError::ClientConfigurationUnavailable),
+            (0, "", PmRefreshError::ClientConfigurationUnavailable),
             (
                 1,
                 "synthetic-secret-output",
-                LinearRefreshError::ConfigurationLookupFailed,
+                PmRefreshError::ConfigurationLookupFailed,
             ),
         ] {
-            let error = linear_refresh_secret_output(Ok(std::process::Output {
+            let error = pm_refresh_secret_output(Ok(std::process::Output {
                 status: std::process::ExitStatus::from_raw(status << 8),
                 stdout: stdout.as_bytes().to_vec(),
                 stderr: b"synthetic-secret-stderr".to_vec(),
@@ -5323,13 +5585,53 @@ mod linear_oauth_config_tests {
             assert!(!error.to_string().contains("synthetic-secret"));
         }
         assert_eq!(
-            linear_refresh_secret_output(Err(std::io::ErrorKind::NotFound.into())).unwrap_err(),
-            LinearRefreshError::ConfigurationLookupFailed
+            pm_refresh_secret_output(Err(std::io::ErrorKind::NotFound.into())).unwrap_err(),
+            PmRefreshError::ConfigurationLookupFailed
         );
         assert_eq!(
-            linear_refresh_secret_output(Err(std::io::ErrorKind::PermissionDenied.into()))
-                .unwrap_err(),
-            LinearRefreshError::ConfigurationLookupFailed
+            pm_refresh_secret_output(Err(std::io::ErrorKind::PermissionDenied.into())).unwrap_err(),
+            PmRefreshError::ConfigurationLookupFailed
         );
+    }
+}
+
+#[cfg(test)]
+mod credential_presence_tests {
+    use super::{provider_account_credential_presence, CredentialPresence, Provider};
+
+    #[test]
+    fn managed_credential_presence_distinguishes_missing_unreadable_and_present() {
+        for (provider, filename, contents) in [
+            (
+                Provider::Claude,
+                ".credentials.json",
+                r#"{"claudeAiOauth":{"accessToken":"fixture"}}"#,
+            ),
+            (
+                Provider::Codex,
+                "auth.json",
+                r#"{"tokens":{"access_token":"fixture"}}"#,
+            ),
+        ] {
+            let home = tempfile::tempdir().unwrap();
+            assert_eq!(
+                provider_account_credential_presence(provider, home.path()),
+                CredentialPresence::Missing
+            );
+            std::fs::write(home.path().join(filename), "malformed fixture").unwrap();
+            assert_eq!(
+                provider_account_credential_presence(provider, home.path()),
+                CredentialPresence::Unreadable
+            );
+            std::fs::write(home.path().join(filename), contents).unwrap();
+            assert_eq!(
+                provider_account_credential_presence(provider, home.path()),
+                CredentialPresence::Present
+            );
+            assert_eq!(
+                std::fs::read_to_string(home.path().join(filename)).unwrap(),
+                contents
+            );
+        }
     }
 }

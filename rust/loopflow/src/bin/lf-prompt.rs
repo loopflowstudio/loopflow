@@ -2,10 +2,12 @@ use std::error::Error;
 use std::path::PathBuf;
 
 use clap::Parser;
-use loopflow::engine::{
-    drop_native_instruction_docs, format_prompt, gather_context, GatherContextOpts,
-    PromptFormatMode, Surface,
-};
+use loopflow::prompt::drop_duplicate_docs;
+use loopflow::prompt::format_prompt;
+use loopflow::prompt::gather_context;
+use loopflow::prompt::ClipboardContext;
+use loopflow::prompt::GatherContextOpts;
+use loopflow::prompt::Surface;
 
 #[derive(Parser, Debug)]
 #[command(name = "lf-prompt")]
@@ -43,6 +45,10 @@ struct Args {
     #[arg(long, default_value = "false", action = clap::ArgAction::Set)]
     clipboard: bool,
 
+    /// Task association for prompt fixtures; does not resolve or create Work
+    #[arg(long)]
+    work_task: Option<String>,
+
     /// Wave name
     #[arg(long)]
     wave: Option<String>,
@@ -53,29 +59,30 @@ fn main() -> Result<(), Box<dyn Error>> {
     let wave = args
         .wave
         .or_else(loopflow::work::wave::context::resolve_ambient_wave_name);
-    let wave_memory = wave
-        .as_deref()
-        .and_then(|wave| loopflow::work::wave::context::gather_wave_memory(&args.repo, wave));
 
     let opts = GatherContextOpts {
         repo_root: args.repo.clone(),
         skill: args.skill,
         message: None,
         operate: !args.no_loopflow,
+        work: args.work_task.map(loopflow::prompt::WorkContext::Task),
         surface: args.surface.unwrap_or_default(),
         docs: args.docs,
         files: Vec::new(),
         include_diff: args.diff,
         include_diff_files: args.diff_files,
-        include_clipboard: args.clipboard,
+        clipboard: if args.clipboard {
+            ClipboardContext::Required
+        } else {
+            ClipboardContext::Off
+        },
         wave,
-        wave_memory,
         related_repos: Vec::new(),
     };
 
     let mut components = gather_context(&opts)?;
-    let _ = drop_native_instruction_docs(&mut components, &args.repo);
-    let prompt = format_prompt(PromptFormatMode::Full, &components);
+    let _ = drop_duplicate_docs(&mut components, &args.repo);
+    let prompt = format_prompt(&components);
     println!("{prompt}");
 
     Ok(())

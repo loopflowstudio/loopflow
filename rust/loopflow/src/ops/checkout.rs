@@ -1,4 +1,4 @@
-//! Checkout freshness shared by interactive rebases and unattended installs.
+//! Checkout freshness shared by interactive syncs and unattended installs.
 
 use std::fs::{File, OpenOptions};
 use std::path::Path;
@@ -6,11 +6,11 @@ use std::process::Command;
 
 use fs2::FileExt;
 
-use crate::engine::git::{
-    absolute_git_dir, current_branch, fetch, find_worktree_for_branch, get_default_branch,
+use crate::git::{
+    absolute_git_dir, current_branch, find_worktree_for_branch, get_default_branch,
     intervention_state, is_ancestor, rev_parse,
 };
-use crate::ops::git_operation::begin_rebase_operation;
+use crate::ops::git_operation::begin_sync_operation;
 use crate::ops::{OpsError, OpsResult, Progress};
 
 fn git(repo: &Path, args: &[&str]) -> OpsResult<String> {
@@ -34,9 +34,73 @@ fn lock_shared(repo: &Path, name: &str) -> OpsResult<File> {
         .truncate(false)
         .read(true)
         .write(true)
-        .open(crate::engine::worktrees::git_common_dir(repo)?.join(name))?;
+        .open(crate::git::worktrees::git_common_dir(repo)?.join(name))?;
     FileExt::lock_exclusive(&lock)?;
     Ok(lock)
+}
+
+// The resolver can write notes while the caller's untracked files are stashed.
+// Move collisions aside before apply: a failed apply can already have restored
+// tracked edits, so retrying the whole stash afterward is not safe.
+fn preserve_untracked_collisions(repo: &Path, stash: &str) -> OpsResult<()> {
+    if rev_parse(repo, &format!("{stash}^3")).is_err() {
+        return Ok(());
+    }
+    let paths: Vec<_> = git(
+        repo,
+        &["ls-tree", "-rz", "--name-only", &format!("{stash}^3")],
+    )?
+    .split('\0')
+    .filter(|path| !path.is_empty())
+    .map(|path| repo.join(path))
+    .collect();
+    for path in &paths {
+        let ancestors: Vec<_> = path.ancestors().take_while(|path| *path != repo).collect();
+        let Some(collision) = ancestors.into_iter().rev().find(|ancestor| {
+            std::fs::symlink_metadata(ancestor)
+                .is_ok_and(|metadata| *ancestor == path || !metadata.is_dir())
+        }) else {
+            continue;
+        };
+        let relative_collision = collision
+            .strip_prefix(repo)
+            .expect("path belongs to checkout");
+        if !git(
+            repo,
+            &[
+                "ls-files",
+                "-z",
+                "--",
+                &relative_collision.to_string_lossy(),
+            ],
+        )?
+        .is_empty()
+        {
+            return Err(OpsError::Message(format!(
+                "tracked path {} collides with stashed untracked files",
+                collision.display()
+            )));
+        }
+        let mut suffix = 1;
+        let destination = loop {
+            let mut name = collision.as_os_str().to_os_string();
+            name.push(format!(".lf-sync-{suffix}"));
+            let candidate = std::path::PathBuf::from(name);
+            if !paths.iter().any(|path| path.starts_with(&candidate))
+                && !candidate.try_exists()?
+                && std::fs::symlink_metadata(&candidate).is_err()
+            {
+                break candidate;
+            }
+            suffix += 1;
+        };
+        std::fs::rename(collision, &destination)?;
+        eprintln!(
+            "Preserved checkout update file at {}",
+            destination.display()
+        );
+    }
+    Ok(())
 }
 
 /// Restore index, working edits and untracked files even when an update fails.
@@ -85,7 +149,8 @@ pub fn with_preserved_edits<T>(repo: &Path, update: impl FnOnce() -> OpsResult<T
             "Git operation needs resolution".to_string(),
         ))
     } else {
-        git(repo, &["stash", "apply", "--index", &stash]).map(|_| ())
+        preserve_untracked_collisions(repo, &stash)
+            .and_then(|()| git(repo, &["stash", "apply", "--index", &stash]).map(|_| ()))
     };
     if let Err(error) = restore {
         return Err(OpsError::Message(format!(
@@ -110,14 +175,17 @@ pub fn refresh_main(repo: &Path, progress: &impl Progress) -> OpsResult<String> 
     // independent. Wait for the other refresh, then fetch again for this call.
     let _lock = lock_shared(repo, "lf-main-refresh.lock")?;
     let branch = get_default_branch(repo)?;
-    let target = format!("origin/{branch}");
+    let target = crate::git::integration_base(repo)?;
+    if target == branch {
+        return Ok(branch);
+    }
     let checkout = if current_branch(repo)?.as_deref() == Some(&branch) {
         Some(repo.to_path_buf())
     } else {
         find_worktree_for_branch(repo, &branch)?
     };
     let Some(checkout) = checkout else {
-        fetch(repo, "origin", &branch)?;
+        crate::git::fetch_tracking_ref(repo, &target)?;
         let upstream = rev_parse(repo, &target)?;
         let local = rev_parse(repo, &branch)?;
         if is_ancestor(repo, &upstream, &local)? {
@@ -154,8 +222,8 @@ pub fn refresh_main(repo: &Path, progress: &impl Progress) -> OpsResult<String> 
         )?;
         return Ok(branch);
     };
-    let mut operation = begin_rebase_operation(&checkout, &target)?;
-    fetch(&checkout, "origin", &branch)?;
+    let mut operation = begin_sync_operation(&checkout, &target)?;
+    crate::git::fetch_tracking_ref(&checkout, &target)?;
     let upstream = rev_parse(&checkout, &target)?;
     operation.pin_target(upstream.clone())?;
     if is_ancestor(&checkout, &upstream, "HEAD")? {
@@ -179,7 +247,7 @@ pub fn refresh_main(repo: &Path, progress: &impl Progress) -> OpsResult<String> 
             git(&checkout, &["merge", "--abort"])?;
         }
         merge.map_err(|error| OpsError::Message(format!(
-            "could not update {branch} in {}; original commits retained. Resolve the upstream/local conflict before retrying `lf rebase`: {error}", checkout.display()
+            "could not update {branch} in {}; original commits retained. Resolve the upstream/local conflict before retrying `lf sync`: {error}", checkout.display()
         )))?;
         if !is_ancestor(&checkout, &upstream, "HEAD")? {
             return Err(OpsError::Message(format!(

@@ -1,4 +1,4 @@
-//! Machine-global lock serializing `lf` promotion.
+//! Installation lock serializing `lf` promotion.
 
 use std::fs::{self, File, OpenOptions};
 use std::io;
@@ -16,7 +16,7 @@ pub(crate) fn acquire_exclusive() -> io::Result<PromotionLock> {
 }
 
 fn lock_path() -> PathBuf {
-    crate::machine_install::account_home()
+    crate::installation::account_home()
         .expect("resolve OS account home directory for promotion lock")
         .join(".lf/promotion.lock")
 }

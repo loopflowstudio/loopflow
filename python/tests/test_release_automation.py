@@ -42,7 +42,7 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
     assert "tar czf" in commands
     assert "package-smoke/lf --version" in commands
     assert "package-smoke/lf --help" in commands
-    assert "package-smoke/lf --list" in commands
+    assert "package-smoke/lf list" in commands
     assert 'test "$(package-smoke/lf --version)" = "lf ${expected}"' in commands
 
     forbidden = [
@@ -190,15 +190,13 @@ def test_host_publisher_owns_credentialed_release_steps():
     assert publisher.index('"latest_dmg_uploaded"') < publisher.index('"--finalize"')
 
 
-def test_infrastructure_cron_runs_the_host_release_after_telemetry():
-    goal = (ROOT / "wave/infrastructure/GOAL.md").read_text()
-    frontmatter = yaml.safe_load(goal.split("---", 2)[1])
-    assert frontmatter["crons"] == [
-        {"flow": "telemetry-daily", "schedule": "0 0 9 * * *"},
-        {"flow": "release-run", "schedule": "0 0 10 * * *"},
+def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
+    config = yaml.safe_load((ROOT / ".lf/config.yaml").read_text())
+    assert "crons" not in config
+    assert yaml.safe_load((ROOT / ".lf/graphs/release-run.yaml").read_text()) == [
+        {"cmd": "repo release run patch"}
     ]
 
-    config = yaml.safe_load((ROOT / ".lf/config.yaml").read_text())
     assert config["release"]["targets"]["default"]["publisher"] == [
         "loopflow-release-publisher",
         "uv",
@@ -209,28 +207,29 @@ def test_infrastructure_cron_runs_the_host_release_after_telemetry():
 
     bootstrap = (ROOT / "scripts/bootstrap-cron-host.sh").read_text()
     assert "--remote-native" not in bootstrap
-    assert 'local_home="$(lf home id)"' in bootstrap
-    assert 'placed_home="$(lf status "$wave" --json' in bootstrap
+    assert 'local_machine="$(lf machine id)"' in bootstrap
+    assert 'placed_machine="$(lf wave status "$wave" --json' in bootstrap
     assert "--git-common-dir" in bootstrap
-    assert 'lf cron preflight --wave "$wave"' in bootstrap
-    assert '"${minimal_env[@]}" lf cron sync --wave "$wave"' in bootstrap
+    assert '"${minimal_env[@]}" lf cron add telemetry-daily --schedule "0 0 9 * * *"' in bootstrap
+    assert '"${minimal_env[@]}" lf cron add release-run --schedule "0 0 10 * * *"' in bootstrap
+    assert "-- --wave \"$wave\" --batch graph release-run" in bootstrap
     assert 'lf cron list --wave "$wave" --json' in bootstrap
     assert "lf cron trigger" in bootstrap
-    assert "--flow telemetry-daily --wait --timeout 15m" in bootstrap
-    assert "--flow release-run --wait --timeout 3h" in bootstrap
+    assert "--graph telemetry-daily --wait --timeout 15m" in bootstrap
+    assert "--graph release-run --wait --timeout 3h" in bootstrap
     assert 'lf cron history --wave "$wave" --days 35' in bootstrap
     assert "env -i" in bootstrap
     assert "DOPPLER_TOKEN" not in bootstrap
     assert "loopflow-release-publisher" in bootstrap
-    assert "not local Home %s" not in bootstrap
-    assert "printf '%s\\n' \"$local_home\"" not in bootstrap
+    assert "not local Machine %s" not in bootstrap
+    assert "printf '%s\\n' \"$local_machine\"" not in bootstrap
     assert "bootstrap complete: %s owns" not in bootstrap
-    assert "wrong Home in installed cron: {entry!r}" not in bootstrap
-    assert bootstrap.index('lf cron preflight --wave "$wave"') < bootstrap.index(
-        "scripts/publish_release.py check"
-    )
+    assert "wrong Machine in installed cron: {entry!r}" not in bootstrap
     assert bootstrap.index("scripts/publish_release.py check") < bootstrap.index(
-        'lf cron sync --wave "$wave"'
+        "lf cron add telemetry-daily"
+    )
+    assert bootstrap.index("lf cron add telemetry-daily") < bootstrap.index(
+        "lf cron add release-run"
     )
 
     public_contract = "\n".join(
@@ -255,33 +254,33 @@ def test_release_installer_uses_the_promotion_boundary_to_activate_the_binary():
 
     assert '"$src" install promote \\' in installer
     assert '--cli-target "$dst"' in installer
-    assert '--daemon-source "$daemon_src"' in installer
-    assert '--daemon-target "$daemon_dst"' in installer
     assert 'mv -f "$tmp" "$dst"' not in installer
 
 
 def test_loopflow_ui_gate_keeps_mac_test_runners_signed():
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    ci_build = (ROOT / "scripts/build_xcode_ci.py").read_text()
     test_script = (ROOT / "scripts/test.py").read_text()
     screenshot_script = (ROOT / "scripts/generate_screenshots.py").read_text()
 
-    for text in (ci, test_script, screenshot_script):
+    for text in (ci, ci_build, test_script, screenshot_script):
         assert "CODE_SIGNING_ALLOWED=NO" not in text
         assert "CODE_SIGNING_REQUIRED=NO" not in text
 
-    assert "CODE_SIGN_IDENTITY=-" in ci
+    assert "uv run python scripts/build_xcode_ci.py" in ci
+    assert '"CODE_SIGN_IDENTITY=-"' in ci_build
     assert '"CODE_SIGN_IDENTITY=-"' in test_script
     assert '"CODE_SIGN_IDENTITY=-"' in screenshot_script
-    assert "-disableAutomaticPackageResolution" in ci
+    assert "-disableAutomaticPackageResolution" in ci_build
 
 
-def test_rust_ci_materializes_drafts_before_running_tests():
+def test_rust_ci_materializes_drafts_before_building_tests():
     ci = yaml.load((ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader)
-    steps = ci["jobs"]["rust-test"]["steps"]
+    steps = ci["jobs"]["rust-build"]["steps"]
     names = [step.get("name") for step in steps]
 
     materialize = names.index("Materialize draft migrations for tests")
-    test = names.index("Run Rust tests")
+    test = names.index("Build and archive Rust tests")
     command = steps[materialize]["run"]
 
     assert materialize < test
@@ -309,8 +308,9 @@ def test_changed_aware_runner_includes_ci_static_checks():
 
     assert "cargo fmt --all -- --check" in result.stdout
     assert "cargo clippy --all-targets --jobs 4 -- -D warnings" in result.stdout
-    assert "scripts/materialize_rust_tests.py -- cargo" in result.stdout
-    assert "cargo nextest run --all" in result.stdout or "cargo test --all" in result.stdout
+    assert "scripts/materialize_rust_tests.py" in result.stdout
+    assert "--prepare-cli" in result.stdout
+    assert "nextest run --all" in result.stdout or "test --all" in result.stdout
     assert "uv run python scripts/check_swift_multiplatform_boundaries.py" in result.stdout
 
     full = subprocess.run(
@@ -327,5 +327,5 @@ def test_changed_aware_runner_includes_ci_static_checks():
         text=True,
         capture_output=True,
     )
-    assert "$ uv run pytest python/tests/" in full.stdout
+    assert "scripts/test_network.py uv run --no-sync pytest python/tests/" in full.stdout
     assert "python/tests/test_release_automation.py" not in full.stdout.split("Plan:", 1)[1]

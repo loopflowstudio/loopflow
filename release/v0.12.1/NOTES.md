@@ -23,7 +23,7 @@ Agent verification time was being spent on proofs nobody was waiting for: full s
 - `scripts/test.py --reuse-passing` reuses a prior pass only when tracked content, untracked content, the worktree, and the command plan are all identical — an exact-tree fingerprint, not a time window.
 - `scripts/test_time.py --days N` reports where verification time actually went, merging parallel intervals per launch and printing only aggregate categories and skills — never commands, prompts, or output.
 - The durable gate budget machinery (`GATE_BUDGET.md`, `--history`, HOLDING/NOT HOLDING verdicts) is removed; exact-tree and plan fingerprints replace it.
-- A new `testing-audit` builtin skill finds low-value tests and redundant verification. TESTING.md is rewritten around focused proofs and the nine-job `tests-result` aggregate; the Verification Cadence doctrine lands in STYLE.md and the build skills.
+- A new `testing-audit` builtin skill finds low-value tests and redundant verification. TESTING.md is rewritten around focused proofs and the nine-job `tests-result` aggregate; the Verification Cadence doctrine lands in the repository guide (now AGENTS.md) and the build skills.
 - Nightly package smoke now exercises `lf --help` and `lf --list`.
 
 ## Operational notes

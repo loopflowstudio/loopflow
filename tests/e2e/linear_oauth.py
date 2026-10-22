@@ -100,7 +100,10 @@ class LinearHandler(BaseHTTPRequestHandler):
                                             "id": "project-1",
                                             "name": "Product — Reliability",
                                             "description": "",
-                                            "content": "## KRs\n\n- [ ] Fresh proof",
+                                            "content": (
+                                                "workflow: feature\n\n## KRs\n\n- [ ] Fresh proof"
+                                            ),
+                                            "status": {"type": "started"},
                                             "initiatives": {"nodes": [{"id": "initiative-1"}]},
                                             "teams": {"nodes": [{"id": "team-1"}]},
                                         }
@@ -193,15 +196,15 @@ def _tls_context(root: Path) -> ssl.SSLContext:
 def _exercise(lf: Path, root: Path, selection: dict, server: LinearServer) -> list[dict]:
     repo = root / "repo"
     (repo / ".lf").mkdir(parents=True)
-    (repo / "wave/product").mkdir(parents=True)
+    (repo / ".lf/wave/product").mkdir(parents=True)
     for args in [
         ["init", "-q"],
         ["remote", "add", "origin", "https://github.com/loopflowstudio/fixture.git"],
     ]:
         assert _run(["git", *args], cwd=repo).returncode == 0
-    (repo / ".lf/config.yaml").write_text("pm:\n  provider: linear\n  linear_team: team-1\n")
-    (repo / "wave/product/GOAL.md").write_text(
-        "---\npm:\n  linear_initiative: initiative-1\n---\nKeep working.\n"
+    (repo / ".lf/config.yaml").write_text("planning:\n  provider: linear\n  team: team-1\n")
+    (repo / ".lf/wave/product/GOAL.md").write_text(
+        "---\nlinear:\n  initiative: initiative-1\n---\nKeep working.\n"
     )
     key = AESGCM.generate_key(bit_length=256)
     key_path = root / "fixture.key"
@@ -230,7 +233,7 @@ def _exercise(lf: Path, root: Path, selection: dict, server: LinearServer) -> li
             "project_id": "project-1",
             "content": {
                 "metric_targets": [],
-                "flows": {"recommended": None},
+                "graphs": {"recommended": None},
                 "krs": [],
             },
             "predecessors": [],
@@ -285,7 +288,7 @@ def _exercise(lf: Path, root: Path, selection: dict, server: LinearServer) -> li
             ).fetchall()
             started = time.monotonic()
             result = _run(
-                [str(lf), "pm", "show", "--wave", "product", "--sync", "--json"], cwd=repo, env=env
+                [str(lf), "status", "product", "--sync", "--json"], cwd=repo, env=env
             )
             elapsed = time.monotonic() - started
             assert elapsed < 8, "planning read exceeded its bounded failure allowance"
@@ -324,7 +327,7 @@ def _exercise(lf: Path, root: Path, selection: dict, server: LinearServer) -> li
                 assert result.returncode != 0
                 assert not result.stdout.strip(), "failed fresh read returned planning output"
                 assert "invalid_grant" in result.stderr
-                assert "doppler run -- lf auth linear" in result.stderr
+                assert "doppler run -- lf account connect linear" in result.stderr
                 assert current == token_before
                 assert (
                     db.execute("SELECT * FROM pm_snapshots WHERE wave_id=?", (wave_id,)).fetchall()
@@ -349,7 +352,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lf", type=Path, default=Path("/root/.local/bin/lf"))
     args = parser.parse_args()
-    # This fixture seeds the selected installed Home; never run against a user's account.
+    # This fixture seeds the selected installed Machine; never run against a user's account.
     if not Path("/.dockerenv").exists() or socket.gethostbyname("api.linear.app") != "127.0.0.1":
         parser.error("run in a disposable Linux container with api.linear.app mapped to 127.0.0.1")
     active = json.loads((Path.home() / ".lf-machine/install/active.json").read_text())

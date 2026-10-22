@@ -1,7 +1,7 @@
 //! `lf install` — authorize global `lf` promotion against the shared migration
 //! frontier.
 //!
-//! A branch-local build must never silently become the Home-global command:
+//! A branch-local build must never silently become the installed command:
 //! on 2026-07-17 a `--use` promotion repointed `~/.local/bin/lf` at a binary
 //! whose migration registry ended at `0.11.026` while the shared store was at
 //! `0.11.027`, and subsequent invocations hit a store their binary could not
@@ -11,7 +11,7 @@
 //! applied frontier and its own migration registry, applies its migrations to
 //! an isolated snapshot, resolves every placed open Work's
 //! executable lifecycle, and renders a verdict. `promote` consumes that verdict
-//! under the machine-global promotion lock, retains immutable rollback bytes,
+//! under the installation promotion lock, retains immutable rollback bytes,
 //! and activates the candidate before any migration advances the frontier.
 //!
 //! Compatibility is not re-derived: `classify_compatibility` calls the exact
@@ -28,7 +28,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
-use rusqlite::{OpenFlags, OptionalExtension};
+use rusqlite::OpenFlags;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -44,59 +44,6 @@ pub use agent::install_agent;
 pub use bundle::{activate_app, app_destination};
 pub use published::{latest, schedule};
 pub use shell_path::configure as configure_shell_path;
-
-/// Bounds re-exec depth in the local-promotion delegation chain.
-///
-/// Local promotion hands the job between the candidate build and the machine's
-/// active install coordinator. When those two binaries are built from divergent
-/// revisions their routing rules can disagree — one sends the job to the
-/// coordinator, the other bounces it back to the candidate — and, absent a
-/// bound, they re-exec each other forever and fork-bomb the machine. This
-/// counter rides every promotion re-exec through the process environment (even
-/// across a non-cooperating older binary, which inherits and forwards it), so
-/// the chain fails closed with a legible diagnostic instead of running away.
-pub const INSTALL_PROMOTE_HOP_ENV: &str = "LF_INSTALL_PROMOTE_HOP";
-
-/// How many delegation re-execs to tolerate before declaring non-convergence.
-/// A healthy promotion converges in one hop; anything past a handful is two
-/// binaries disagreeing about who owns the switch.
-const MAX_PROMOTE_HOPS: u32 = 6;
-
-/// The current delegation depth, read from the inherited environment.
-fn current_promote_hop() -> u32 {
-    std::env::var(INSTALL_PROMOTE_HOP_ENV)
-        .ok()
-        .and_then(|value| value.trim().parse().ok())
-        .unwrap_or(0)
-}
-
-/// The pure convergence decision: reject once the chain has re-exec'd past the
-/// bound. Split from the environment read so it is testable without touching
-/// process-global state.
-fn check_promote_hop(hop: u32) -> Result<u32> {
-    if hop >= MAX_PROMOTE_HOPS {
-        return Err(anyhow!(
-            "local promotion did not converge after {hop} delegation hops; the machine's \
-             active install coordinator and this candidate disagree on routing (usually because \
-             the active dev install was built from a divergent branch). Reset to a published \
-             install with `lf install`, then promote again."
-        ));
-    }
-    Ok(hop)
-}
-
-/// Fail closed if the promotion delegation chain is not converging. Called at
-/// the top of every `promote` entry so a routing disagreement between divergent
-/// builds terminates instead of fork-bombing.
-fn guard_promote_hop() -> Result<u32> {
-    check_promote_hop(current_promote_hop())
-}
-
-/// Stamp the next hop count on a promotion re-exec so the depth accumulates
-/// across the delegation chain.
-fn stamp_next_promote_hop(command: &mut Command, hop: u32) {
-    command.env(INSTALL_PROMOTE_HOP_ENV, (hop + 1).to_string());
-}
 
 /// The candidate binary's identity. The process running `lf install` *is* the
 /// candidate, so every field comes from its own compiled-in build metadata.
@@ -143,6 +90,15 @@ pub enum Compatibility {
     AheadPending {
         applied_frontier: String,
         latest_known: String,
+        /// The reader floor the pending migrations raise the store to; lf below
+        /// it can no longer open the store. `None` when no reader is locked out.
+        raised_reader_floor: Option<String>,
+    },
+    /// A newer release migrated the store, and its reader floor still admits the
+    /// candidate. Selecting it applies nothing, so rollback stays possible.
+    Behind {
+        applied_frontier: String,
+        reader_floor: String,
     },
     /// The store carries a migration, checksum, or schema the candidate does not
     /// recognize — the 2026-07-17 case. Reason is `store::migrations`' own text.
@@ -157,7 +113,7 @@ pub enum Compatibility {
 pub struct ExecutableFailure {
     pub work_kind: String,
     pub work_id: String,
-    pub flow: String,
+    pub graph: String,
     pub catalog_root: String,
     pub reason: String,
 }
@@ -207,8 +163,6 @@ struct PromotionPreviewWire<'a> {
 pub struct PreparedArtifacts {
     pub cli_binary: PathBuf,
     pub cli_target: PathBuf,
-    pub daemon_binary: PathBuf,
-    pub daemon_target: PathBuf,
     pub app_source: Option<PathBuf>,
     pub app_target: Option<PathBuf>,
     pub app_superseded: Option<PathBuf>,
@@ -218,18 +172,9 @@ pub struct PreparedArtifacts {
 #[derive(Debug, Clone, Copy)]
 pub struct PromotionArtifacts<'a> {
     pub cli_target: &'a Path,
-    pub daemon_source: &'a Path,
-    pub daemon_target: &'a Path,
     pub app_source: Option<&'a Path>,
     pub app_target: Option<&'a Path>,
     pub legacy_app_target: Option<&'a Path>,
-}
-
-#[derive(Debug)]
-struct PausedHome {
-    keeper_mode: crate::lfd::service::KeeperMode,
-    home_id: Option<crate::durable::HomeId>,
-    repo: Option<PathBuf>,
 }
 
 /// The pure promotion decision. Given the candidate's authority, its
@@ -267,7 +212,7 @@ pub fn decide(
         Compatibility::Incompatible { reason } => reasons.push(format!(
             "candidate cannot operate the shared store: {reason}"
         )),
-        Compatibility::Exact { .. } => {}
+        Compatibility::Exact { .. } | Compatibility::Behind { .. } => {}
         Compatibility::AheadPending { .. } => match authority {
             MigrationAuthority::Published => migrate = true,
             MigrationAuthority::ValidationOnly => {}
@@ -281,10 +226,10 @@ pub fn decide(
                 .first()
                 .map(|failure| {
                     format!(
-                        "{} {} flow {:?} in {}: {}",
+                        "{} {} graph {:?} in {}: {}",
                         failure.work_kind,
                         failure.work_id,
-                        failure.flow,
+                        failure.graph,
                         failure.catalog_root,
                         failure.reason
                     )
@@ -327,14 +272,31 @@ fn classify_compatibility(conn: &rusqlite::Connection) -> Compatibility {
             }
         }
     };
-    match migrations::validate_sqlite(conn) {
-        Ok(()) => {
+    let newer_floor =
+        migrations::validate_sqlite(conn).and_then(|()| migrations::newer_store_floor(conn));
+    match newer_floor {
+        Ok(Some(reader_floor)) => {
+            return Compatibility::Behind {
+                applied_frontier: frontier.unwrap_or_default(),
+                reader_floor,
+            }
+        }
+        Ok(None) => {}
+        Err(error) => {
+            return Compatibility::Incompatible {
+                reason: error.to_string(),
+            }
+        }
+    }
+    match migrations::raised_reader_floor(conn) {
+        Ok(raised_reader_floor) => {
             let latest_known = migrations::latest_known_version();
             match frontier {
                 Some(frontier) if frontier == latest_known => Compatibility::Exact { frontier },
                 Some(applied_frontier) => Compatibility::AheadPending {
                     applied_frontier,
                     latest_known,
+                    raised_reader_floor,
                 },
                 // `validate_sqlite` refuses an empty store ("a validation-only
                 // lf cannot initialize the release database"), so `Ok` with no
@@ -342,6 +304,7 @@ fn classify_compatibility(conn: &rusqlite::Connection) -> Compatibility {
                 None => Compatibility::AheadPending {
                     applied_frontier: "(uninitialized)".to_string(),
                     latest_known,
+                    raised_reader_floor: None,
                 },
             }
         }
@@ -358,6 +321,7 @@ fn read_store_evidence(store_path: &Path) -> Compatibility {
         return Compatibility::AheadPending {
             applied_frontier: "(uninitialized)".to_string(),
             latest_known: migrations::latest_known_version(),
+            raised_reader_floor: None,
         };
     }
     let conn = match rusqlite::Connection::open_with_flags(
@@ -383,11 +347,12 @@ fn _copy_store_for_candidate(source_path: &Path, destination_path: &Path) -> Res
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     source.busy_timeout(Duration::from_secs(5))?;
+    let snapshot = source.unchecked_transaction()?;
+    // BEGIN is deferred: read a page to pin the WAL snapshot before backing up.
+    // Otherwise every intervening writer can restart the incremental backup.
+    snapshot.query_row("SELECT count(*) FROM sqlite_schema", [], |_| Ok(()))?;
     let mut destination = rusqlite::Connection::open(destination_path)?;
-    let backup = rusqlite::backup::Backup::new(&source, &mut destination)?;
-    // Finish a typical Home snapshot between controller writes. Tiny chunks
-    // repeatedly restart against the live WAL and can make a read-only
-    // preflight effectively unbounded.
+    let backup = rusqlite::backup::Backup::new(&snapshot, &mut destination)?;
     backup.run_to_completion(4096, Duration::from_millis(1), None)?;
     Ok(())
 }
@@ -397,10 +362,8 @@ fn _read_executable_references(
 ) -> rusqlite::Result<Vec<(String, String, String, String)>> {
     let mut statement = conn.prepare(
         "SELECT 'wave', w.id, 'wave/operate', w.repo
-         FROM work_placements placement
-         JOIN waves w ON w.id=placement.wave_id
-         WHERE placement.enabled=1
-           AND w.work_state='ready'
+         FROM waves w
+         WHERE w.work_state='ready'
            AND w.retired_at IS NULL
          ORDER BY 1, 2, 3, 4",
     )?;
@@ -412,21 +375,21 @@ fn _read_executable_references(
     references
 }
 
-fn _validate_executable_skill(skill: &crate::engine::Skill) -> Result<()> {
+fn _validate_executable_skill(skill: &crate::graph::Skill) -> Result<()> {
     if skill.content.is_none() {
         return Err(anyhow!("skill not found: {}", skill.name));
     }
     Ok(())
 }
 
-fn _validate_executable_steps(steps: &[crate::engine::ConcreteStep]) -> Result<()> {
+fn _validate_executable_steps(steps: &[crate::graph::ConcreteStep]) -> Result<()> {
     for step in steps {
         match step {
-            crate::engine::ConcreteStep::Skill(skill) => {
+            crate::graph::ConcreteStep::Skill(skill) => {
                 _validate_executable_skill(&skill.skill)?;
             }
-            crate::engine::ConcreteStep::Op(_) => {}
-            crate::engine::ConcreteStep::Xor(branch) => {
+            crate::graph::ConcreteStep::Command(_) => {}
+            crate::graph::ConcreteStep::Xor(branch) => {
                 _validate_executable_skill(&branch.router)?;
                 for path in branch.paths.values() {
                     _validate_executable_steps(&path.steps)?;
@@ -437,10 +400,31 @@ fn _validate_executable_steps(steps: &[crate::engine::ConcreteStep]) -> Result<(
     Ok(())
 }
 
-/// Validate installed-state semantics against a migrated snapshot, never the
-/// live database. A migration may repair a persisted flow name, so checking the
-/// pre-migration rows would reject the candidate the migration makes valid.
-fn _read_executable_compatibility(store_path: &Path) -> ExecutableCompatibility {
+/// Validate installed-state semantics against the schema this candidate will
+/// run on. A migration may repair a persisted graph name, so checking the
+/// pre-migration rows would reject the candidate the migration makes valid:
+/// a pending frontier is migrated in a private snapshot, never the live
+/// database. An exact frontier has nothing to apply, so it is read in place —
+/// copying a multi-gigabyte store on every preflight outlived callers'
+/// deadlines and stranded the partial copies in the temporary directory.
+fn _read_executable_compatibility(
+    store_path: &Path,
+    compatibility: &Compatibility,
+) -> ExecutableCompatibility {
+    if matches!(
+        compatibility,
+        Compatibility::Exact { .. } | Compatibility::Behind { .. }
+    ) {
+        return match rusqlite::Connection::open_with_flags(
+            store_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ) {
+            Ok(connection) => _executable_compatibility(&connection),
+            Err(error) => ExecutableCompatibility::Unreadable {
+                reason: format!("open shared store for candidate validation: {error}"),
+            },
+        };
+    }
     let directory = match tempfile::tempdir() {
         Ok(directory) => directory,
         Err(error) => {
@@ -471,54 +455,6 @@ fn _read_executable_compatibility(store_path: &Path) -> ExecutableCompatibility 
     _executable_compatibility(&connection)
 }
 
-fn _read_local_executable_compatibility(store_path: &Path) -> ExecutableCompatibility {
-    let directory = match tempfile::tempdir() {
-        Ok(directory) => directory,
-        Err(error) => {
-            return ExecutableCompatibility::Unreadable {
-                reason: format!("create local candidate validation directory: {error}"),
-            }
-        }
-    };
-    let candidate_path = directory.path().join("candidate.db");
-    if let Err(error) = _copy_store_for_candidate(store_path, &candidate_path) {
-        return ExecutableCompatibility::Unreadable {
-            reason: format!("copy disposable store for candidate validation: {error}"),
-        };
-    }
-    let connection = match rusqlite::Connection::open(&candidate_path) {
-        Ok(connection) => connection,
-        Err(error) => {
-            return ExecutableCompatibility::Unreadable {
-                reason: format!("open local candidate validation store: {error}"),
-            }
-        }
-    };
-    if let Err(error) = migrations::apply_installed_development_sqlite(
-        &connection,
-        build_info::migration_draft_manifest(),
-    ) {
-        return ExecutableCompatibility::Unreadable {
-            reason: format!("apply local candidate migrations to validation store: {error}"),
-        };
-    }
-    _executable_compatibility(&connection)
-}
-
-fn _local_store_is_exact(store_path: &Path) -> Result<String> {
-    let connection = rusqlite::Connection::open_with_flags(
-        store_path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .with_context(|| format!("open local promotion store {}", store_path.display()))?;
-    migrations::validate_installed_development_sqlite(
-        &connection,
-        build_info::migration_draft_manifest(),
-    )?;
-    Ok(migrations::latest_applied_version_sqlite(&connection)?
-        .unwrap_or_else(|| "uninitialized".to_string()))
-}
-
 fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCompatibility {
     let references = match _read_executable_references(connection) {
         Ok(references) => references,
@@ -531,25 +467,25 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
     let mut failures = Vec::new();
     let mut validated = 0usize;
     let mut absent = 0usize;
-    for (work_kind, work_id, flow, catalog_root) in &references {
+    for (work_kind, work_id, graph, catalog_root) in &references {
         let catalog_path = Path::new(catalog_root);
         // A placed ref whose catalog root is gone — the worktree or checkout was
         // cleaned up, but the durable Work row was never retired — can never run
-        // its flow again under *any* binary. It therefore says nothing about
+        // its graph again under *any* binary. It therefore says nothing about
         // whether this candidate is safe, so it is out of scope for candidate
         // compatibility. Excluding it (rather than failing the whole promotion)
         // is not a loosening of the safety intent: every ref whose catalog root
         // still exists is validated exactly as before, so a build that dropped or
-        // renamed a flow is still caught by every live worktree. We only stop
+        // renamed a graph is still caught by every live worktree. We only stop
         // treating "the world moved on" as "the candidate is broken."
         if !catalog_path.is_dir() {
             absent += 1;
             continue;
         }
-        let result = crate::engine::load_flow(flow, catalog_path)
+        let result = crate::graph::load_graph(graph, catalog_path)
             .map_err(anyhow::Error::from)
             .and_then(|loaded| {
-                crate::engine::expand_flow(&loaded, catalog_path)
+                crate::graph::compile_graph(&loaded, catalog_path)
                     .map_err(anyhow::Error::from)
                     .and_then(|steps| _validate_executable_steps(&steps))
             });
@@ -558,7 +494,7 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
             Err(error) => failures.push(ExecutableFailure {
                 work_kind: work_kind.clone(),
                 work_id: work_id.clone(),
-                flow: flow.clone(),
+                graph: graph.clone(),
                 catalog_root: catalog_root.clone(),
                 reason: error.to_string(),
             }),
@@ -566,7 +502,7 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
     }
     if absent > 0 {
         // Never silent: a large count is a signal the registry has drifted from
-        // the filesystem and wants a `lf prune`/reconcile sweep.
+        // the filesystem and wants a `lf monitor prune`/reconcile sweep.
         eprintln!(
             "note: skipped {absent} placed Work reference(s) whose catalog root is gone \
              (dead worktrees); they cannot run and do not gate promotion"
@@ -587,44 +523,11 @@ pub fn build_preview(store_path: &Path) -> PromotionPreview {
     let candidate = CandidateIdentity::current();
     let database_path = store_path.display().to_string();
     let compatibility = read_store_evidence(store_path);
-    let executable_compatibility = _read_executable_compatibility(store_path);
+    let executable_compatibility = _read_executable_compatibility(store_path, &compatibility);
     let pending_migration_drafts = build_info::pending_migration_drafts();
     let verdict = decide(
         candidate.authority,
         &pending_migration_drafts,
-        &compatibility,
-        &executable_compatibility,
-    );
-    PromotionPreview {
-        candidate,
-        database_path,
-        compatibility,
-        executable_compatibility,
-        verdict,
-    }
-}
-
-fn build_local_preview(store_path: &Path) -> PromotionPreview {
-    let candidate = CandidateIdentity::current();
-    let database_path = store_path.display().to_string();
-    let executable_compatibility = _read_local_executable_compatibility(store_path);
-    let compatibility = match (_local_store_is_exact(store_path), &executable_compatibility) {
-        (Ok(frontier), _) => Compatibility::Exact { frontier },
-        (Err(_), ExecutableCompatibility::Unreadable { reason }) => Compatibility::Incompatible {
-            reason: reason.clone(),
-        },
-        (Err(_), _) => Compatibility::AheadPending {
-            applied_frontier: migrations::latest_known_version(),
-            latest_known: format!(
-                "{} plus {} development draft(s)",
-                migrations::latest_known_version(),
-                build_info::migration_draft_manifest().len()
-            ),
-        },
-    };
-    let verdict = decide(
-        MigrationAuthority::Published,
-        &[],
         &compatibility,
         &executable_compatibility,
     );
@@ -656,8 +559,20 @@ fn render_human(preview: &PromotionPreview) {
         Compatibility::AheadPending {
             applied_frontier,
             latest_known,
+            raised_reader_floor,
+        } => {
+            println!(
+                "  store frontier {applied_frontier}; candidate is ahead through {latest_known}"
+            );
+            if let Some(floor) = raised_reader_floor {
+                println!("  lf < {floor} can no longer open the store");
+            }
+        }
+        Compatibility::Behind {
+            applied_frontier,
+            reader_floor,
         } => println!(
-            "  store frontier {applied_frontier}; candidate is ahead through {latest_known}"
+            "  store frontier {applied_frontier}; candidate is behind\n  reader floor {reader_floor} admits it"
         ),
         Compatibility::Incompatible { reason } => println!("  INCOMPATIBLE: {reason}"),
         Compatibility::Unreadable { reason } => println!("  UNREADABLE: {reason}"),
@@ -673,10 +588,10 @@ fn render_human(preview: &PromotionPreview) {
             );
             for failure in failures.iter().take(10) {
                 println!(
-                    "    - {} {} flow {:?} in {}: {}",
+                    "    - {} {} graph {:?} in {}: {}",
                     failure.work_kind,
                     failure.work_id,
-                    failure.flow,
+                    failure.graph,
                     failure.catalog_root,
                     failure.reason
                 );
@@ -708,10 +623,10 @@ fn serde_authority(authority: MigrationAuthority) -> &'static str {
     }
 }
 
-/// Run `lf install preflight`. Read-only: opens the store only through the
-/// read-only preview and emits no journal event, so a frontier-incompatible
-/// candidate reaches the refusal here rather than failing in trace/store
-/// capture. Exits non-zero on a refusal so a caller can gate on it.
+/// Validate through a read-only preview. The CLI may append its Process to an
+/// existing compatible process ledger, but observation never initializes or
+/// migrates it. A frontier-incompatible candidate still reaches this refusal.
+/// Exits non-zero on refusal so a caller can gate on it.
 pub fn preflight(json: bool) -> Result<()> {
     let preview = build_preview(&crate::store::production_database_path());
     if json {
@@ -721,19 +636,6 @@ pub fn preflight(json: bool) -> Result<()> {
     }
     match preview.verdict {
         Verdict::Reject { .. } => Err(anyhow!("promotion preflight refused")),
-        Verdict::Promote | Verdict::PromoteAndMigrate => Ok(()),
-    }
-}
-
-pub fn local_preflight(store_path: &Path, json: bool) -> Result<()> {
-    let preview = build_local_preview(store_path);
-    if json {
-        println!("{}", promotion_preview_json(&preview)?);
-    } else {
-        render_human(&preview);
-    }
-    match preview.verdict {
-        Verdict::Reject { .. } => Err(anyhow!("local promotion preflight refused")),
         Verdict::Promote | Verdict::PromoteAndMigrate => Ok(()),
     }
 }
@@ -748,10 +650,75 @@ fn promotion_preview_json(preview: &PromotionPreview) -> Result<String> {
 #[cfg(test)]
 mod compatibility_tests {
     use super::{
-        _read_local_executable_compatibility, build_preview, decide, promotion_preview_json,
-        read_store_evidence, store_is_exact, Compatibility, ExecutableCompatibility, Verdict,
+        build_preview, decide, promotion_preview_json, read_store_evidence, store_is_exact,
+        Compatibility, ExecutableCompatibility, Verdict,
     };
     use crate::build_info::MigrationAuthority::{Published, ValidationOnly};
+
+    #[test]
+    fn candidate_snapshot_finishes_while_wal_writes_continue() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc, Arc,
+        };
+        use std::time::{Duration, Instant};
+
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.db");
+        let destination = directory.path().join("candidate.db");
+        let writer = rusqlite::Connection::open(&source).unwrap();
+        writer
+            .execute_batch(
+                "PRAGMA journal_mode=WAL;
+             CREATE TABLE history (id INTEGER PRIMARY KEY, value INTEGER, payload BLOB);
+             INSERT INTO history VALUES (0, 0, zeroblob(67108864));",
+            )
+            .unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let finished = Arc::new(AtomicBool::new(false));
+        let (ready, started) = mpsc::channel();
+        let stop_writer = Arc::clone(&stop);
+        let writer_finished = Arc::clone(&finished);
+        let handle = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            writer
+                .execute("UPDATE history SET value=value+1 WHERE id=0", [])
+                .unwrap();
+            ready.send(()).unwrap();
+            while !stop_writer.load(Ordering::Relaxed) && Instant::now() < deadline {
+                writer
+                    .execute("UPDATE history SET value=value+1 WHERE id=0", [])
+                    .unwrap();
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            writer_finished.store(true, Ordering::Relaxed);
+        });
+        started.recv().unwrap();
+        let result = super::_copy_store_for_candidate(&source, &destination);
+        let completed_during_writes = !finished.load(Ordering::Relaxed);
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+        result.unwrap();
+        assert!(
+            completed_during_writes,
+            "snapshot waited for the writer to stop"
+        );
+        let copy = rusqlite::Connection::open(&destination).unwrap();
+        let (version, bytes): (i64, i64) = copy
+            .query_row(
+                "SELECT value, length(payload) FROM history WHERE id=0",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(version > 0);
+        assert_eq!(bytes, 67108864);
+        assert_eq!(
+            copy.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+    }
 
     fn executable() -> ExecutableCompatibility {
         ExecutableCompatibility::Compatible { references: 0 }
@@ -775,6 +742,7 @@ mod compatibility_tests {
         let compatibility = Compatibility::AheadPending {
             applied_frontier: "older".to_string(),
             latest_known: "current".to_string(),
+            raised_reader_floor: None,
         };
         assert_eq!(
             decide(Published, &[], &compatibility, &executable()),
@@ -814,50 +782,36 @@ mod compatibility_tests {
     }
 
     #[test]
-    fn local_candidate_schema_is_validated_on_an_isolated_copy() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = directory.path().join("loopflow.db");
-        crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store).unwrap();
-        let conn = rusqlite::Connection::open(&store).unwrap();
-        conn.execute(
-            "INSERT INTO waves (id, name, repo, created_at, work_state)
-             VALUES ('w-ready', 'ready', ?1, 0, 'ready')",
-            [directory.path().to_str().unwrap()],
+    fn executable_references_include_ready_unretired_waves() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE waves(id TEXT,name TEXT,repo TEXT,work_state TEXT,retired_at INTEGER);
+            INSERT INTO waves VALUES('ready','ready','/repo','ready',NULL),
+                ('retired','retired','/repo','ready',1);",
         )
         .unwrap();
-        conn.execute(
-            "INSERT INTO work_placements (wave_id, home_id, enabled, placed_at)
-             SELECT 'w-ready', id, 1, 0 FROM homes WHERE route='local'",
-            [],
-        )
-        .unwrap();
-        drop(conn);
-        let compatibility = _read_local_executable_compatibility(&store);
-        assert!(
-            matches!(
-                compatibility,
-                ExecutableCompatibility::Compatible { references: 1 }
-            ),
-            "{compatibility:?}"
+        assert_eq!(
+            super::_read_executable_references(&conn).unwrap(),
+            vec![(
+                "wave".into(),
+                "ready".into(),
+                "wave/operate".into(),
+                "/repo".into()
+            )]
         );
     }
 
     #[test]
-    fn a_placed_ref_whose_catalog_root_is_gone_does_not_block_promotion() {
+    fn a_ref_whose_catalog_root_is_gone_does_not_block_promotion() {
         let directory = tempfile::tempdir().unwrap();
         let store = directory.path().join("loopflow.db");
         crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store).unwrap();
 
-        // A placed, ready wave whose repo (its catalog root) was deleted: the
+        // A ready wave whose repo (its catalog root) was deleted: the
         // durable row outlived the checkout. Before the fix this failed the whole
         // promotion with "catalog root does not exist"; it must not, because the
         // ref can never execute again regardless of which binary is installed.
         let conn = rusqlite::Connection::open(&store).unwrap();
-        let home_id: String = conn
-            .query_row("SELECT id FROM homes WHERE route='local'", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
         let gone = directory.path().join("deleted-worktree");
         conn.execute(
             "INSERT INTO waves (id, name, repo, created_at, work_state)
@@ -865,21 +819,76 @@ mod compatibility_tests {
             [gone.to_str().unwrap()],
         )
         .unwrap();
-        conn.execute(
-            "INSERT INTO work_placements (wave_id, home_id, enabled, placed_at)
-             VALUES ('w-gone', ?1, 1, 0)",
-            [home_id],
-        )
-        .unwrap();
         // Fold the write into the main db file so the backup-API copy sees it.
         conn.pragma_update(None, "wal_checkpoint", "TRUNCATE")
             .unwrap();
         drop(conn);
 
-        let compatibility = _read_local_executable_compatibility(&store);
+        let connection = rusqlite::Connection::open(&store).unwrap();
+        let compatibility = super::_executable_compatibility(&connection);
         assert!(
             matches!(compatibility, ExecutableCompatibility::Compatible { .. }),
             "a dead-worktree ref must be skipped, not fail promotion: {compatibility:?}"
+        );
+    }
+
+    #[test]
+    fn rollback_stays_open_within_the_reader_floor() {
+        let directory = tempfile::tempdir().unwrap();
+        let additive = directory.path().join("additive.db");
+        let connection = rusqlite::Connection::open(&additive).unwrap();
+        crate::store::migrations::apply_sqlite(&connection).unwrap();
+        crate::store::migrations::apply_newer_release(
+            &connection,
+            "ALTER TABLE waves ADD COLUMN colour TEXT;",
+            true,
+        )
+        .unwrap();
+        let compatibility = read_store_evidence(&additive);
+        assert!(
+            matches!(compatibility, Compatibility::Behind { .. }),
+            "{compatibility:?}"
+        );
+        let executable = super::_read_executable_compatibility(&additive, &compatibility);
+        assert_eq!(
+            decide(Published, &[], &compatibility, &executable),
+            Verdict::Promote
+        );
+
+        let breaking = directory.path().join("breaking.db");
+        let connection = rusqlite::Connection::open(&breaking).unwrap();
+        crate::store::migrations::apply_sqlite(&connection).unwrap();
+        let release = crate::store::migrations::apply_newer_release(
+            &connection,
+            "ALTER TABLE waves ADD COLUMN colour TEXT;",
+            false,
+        )
+        .unwrap();
+        assert!(matches!(
+            read_store_evidence(&breaking),
+            Compatibility::Incompatible { reason }
+                if reason.contains(&format!("this store needs lf {release} or newer (it has "))
+        ));
+    }
+
+    #[test]
+    fn an_exact_store_is_validated_in_place() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = directory.path().join("loopflow.db");
+        // An exact installation has the canonical frontier, without local drafts.
+        let connection = rusqlite::Connection::open(&store).unwrap();
+        crate::store::migrations::apply_sqlite(&connection).unwrap();
+        let compatibility = super::read_store_evidence(&store);
+        assert!(
+            matches!(compatibility, Compatibility::Exact { .. }),
+            "{compatibility:?}"
+        );
+
+        let executable = super::_read_executable_compatibility(&store, &compatibility);
+
+        assert_eq!(
+            executable,
+            ExecutableCompatibility::Compatible { references: 0 }
         );
     }
 }
@@ -887,14 +896,14 @@ mod compatibility_tests {
 // -- Promotion publication (PR2) ---------------------------------------------
 //
 // The mutating half consumes the merged `decide()` verdict and performs every
-// machine-global install mutation under the same exclusive promotion lock.
+// installation mutation under the same exclusive promotion lock.
 // Python stages
 // branch-local artifacts only; Rust owns CLI activation, app replacement,
 // migration advancement, rollback validation, and post-commit skill sync.
 
-/// The machine-global, content-addressed binary store.
+/// The installation’s content-addressed binary store.
 fn lf_bin_dir() -> PathBuf {
-    crate::machine_install::account_home()
+    crate::installation::account_home()
         .expect("resolve OS account home directory for immutable install artifacts")
         .join(".lf/bin")
 }
@@ -906,11 +915,11 @@ fn binary_digest(path: &Path) -> Result<String> {
 }
 
 fn tree_digest(path: &Path) -> Result<String> {
-    crate::machine_install::tree_sha256(path)
+    crate::installation::tree_sha256(path)
 }
 
-fn artifact_set_digest(cli: &Path, daemon: &Path, app: Option<&Path>) -> Result<String> {
-    crate::machine_install::artifact_set_sha256(cli, daemon, app)
+fn artifact_set_digest(cli: &Path, app: Option<&Path>) -> Result<String> {
+    crate::installation::artifact_set_sha256(cli, None, app)
 }
 
 /// Copy `source` into `bin_dir` under its byte digest and return the path.
@@ -961,10 +970,6 @@ fn stage_binary(source: &Path, bin_dir: &Path) -> Result<PathBuf> {
     stage_binary_as(source, bin_dir, "lf")
 }
 
-fn stage_daemon_binary(source: &Path, bin_dir: &Path) -> Result<PathBuf> {
-    stage_binary_as(source, bin_dir, "lfd")
-}
-
 fn prepare_artifacts(
     artifacts: &PromotionArtifacts<'_>,
     candidate_binary: &Path,
@@ -982,9 +987,6 @@ fn prepare_artifacts(
             preview.candidate.source_revision
         ));
     }
-    validate_daemon_candidate(artifacts.daemon_source, &preview.candidate)?;
-    let daemon_binary = stage_daemon_binary(artifacts.daemon_source, &bin_dir)?;
-    validate_daemon_candidate(&daemon_binary, &preview.candidate)?;
     let app_source = match (artifacts.app_source, artifacts.app_target) {
         (Some(source), Some(target)) => Some(stage_app_bundle(&AppPromotion {
             source,
@@ -1013,8 +1015,6 @@ fn prepare_artifacts(
     Ok(PreparedArtifacts {
         cli_binary,
         cli_target: artifacts.cli_target.to_path_buf(),
-        daemon_binary,
-        daemon_target: artifacts.daemon_target.to_path_buf(),
         app_source,
         app_target: artifacts.app_target.map(Path::to_path_buf),
         app_superseded,
@@ -1028,10 +1028,6 @@ fn prepare_artifacts(
 /// mutable worktree or a target that is about to be replaced.
 fn preserve_prior_binary(cli_target: &Path, bin_dir: &Path) -> Result<Option<PathBuf>> {
     preserve_prior_binary_as(cli_target, bin_dir, "lf")
-}
-
-fn preserve_prior_daemon(daemon_target: &Path, bin_dir: &Path) -> Result<Option<PathBuf>> {
-    preserve_prior_binary_as(daemon_target, bin_dir, "lfd")
 }
 
 fn preserve_prior_binary_as(target: &Path, bin_dir: &Path, name: &str) -> Result<Option<PathBuf>> {
@@ -1098,68 +1094,46 @@ fn commit_cli_symlink(cli_target: &Path, dest_binary: &Path) -> Result<()> {
 fn entry_gate_targets(
     root: &Path,
     cli_source: &Path,
-    daemon_source: &Path,
-    activation: &crate::machine_install::ActivationTargets,
+    activation: &crate::installation::ActivationTargets,
 ) -> Result<()> {
-    let cli_gate = crate::machine_install::install_entry_gate(
+    let cli_gate = crate::installation::install_entry_gate(
         root,
-        &crate::machine_install::ArtifactRole::Cli,
+        &crate::installation::ArtifactRole::Cli,
         cli_source,
     )?;
-    let daemon_gate = crate::machine_install::install_entry_gate(
-        root,
-        &crate::machine_install::ArtifactRole::Daemon,
-        daemon_source,
-    )?;
     commit_cli_symlink(&activation.cli, &cli_gate)?;
-    commit_cli_symlink(&activation.daemon, &daemon_gate)?;
     verify_entry_gate_targets(root, activation)
 }
 
 fn verify_entry_gate_targets(
     root: &Path,
-    activation: &crate::machine_install::ActivationTargets,
+    activation: &crate::installation::ActivationTargets,
 ) -> Result<()> {
-    for (role, target) in [
-        (
-            crate::machine_install::ArtifactRole::Cli,
-            activation.cli.as_path(),
-        ),
-        (
-            crate::machine_install::ArtifactRole::Daemon,
-            activation.daemon.as_path(),
-        ),
-    ] {
-        let expected = fs::canonicalize(crate::machine_install::entry_gate_path(root, &role)?)?;
-        let actual = fs::canonicalize(target).with_context(|| {
-            format!(
-                "resolve {:?} public entry target {}",
-                role,
-                target.display()
-            )
-        })?;
-        if actual != expected {
-            return Err(anyhow!(
-                "public {:?} target {} bypasses machine entry gate {}",
-                role,
-                target.display(),
-                expected.display()
-            ));
-        }
+    let role = crate::installation::ArtifactRole::Cli;
+    let target = &activation.cli;
+    let expected = fs::canonicalize(crate::installation::entry_gate_path(root, &role)?)?;
+    let actual = fs::canonicalize(target)
+        .with_context(|| format!("resolve public CLI target {}", target.display()))?;
+    if actual != expected {
+        return Err(anyhow!(
+            "public CLI target {} bypasses installation entry gate {}",
+            target.display(),
+            expected.display()
+        ));
     }
     Ok(())
 }
 
 fn verify_selected_app_bundle(
     app: &Path,
-    artifact_set: &crate::machine_install::ArtifactSet,
+    artifact_set: &crate::installation::ArtifactSet,
 ) -> Result<()> {
     let expected = artifact_set
-        .artifact(&crate::machine_install::ArtifactRole::App)
+        .artifact(&crate::installation::ArtifactRole::App)
         .ok_or_else(|| anyhow!("artifact set {} has no app executable", artifact_set.id))?;
     expected.verify()?;
-    let active = crate::machine_install::ArtifactIdentity::capture(
-        crate::machine_install::ArtifactRole::App,
+    let active = crate::installation::ArtifactIdentity::capture(
+        crate::installation::ArtifactRole::App,
         &app.join("Contents/MacOS/Loopflow"),
     )?;
     if active.sha256 != expected.sha256 {
@@ -1170,8 +1144,8 @@ fn verify_selected_app_bundle(
         ));
     }
     let retained = bundle_for_app_artifact(&expected.path)?;
-    let retained_digest = crate::machine_install::tree_sha256(retained)?;
-    let active_digest = crate::machine_install::tree_sha256(app)?;
+    let retained_digest = crate::installation::tree_sha256(retained)?;
+    let active_digest = crate::installation::tree_sha256(app)?;
     if active_digest != retained_digest {
         return Err(anyhow!(
             "installed app {} resources do not match artifact set {}",
@@ -1182,9 +1156,9 @@ fn verify_selected_app_bundle(
     Ok(())
 }
 
-fn activate_prepared_machine_switch(
+fn activate_prepared_installation_switch(
     root: &Path,
-    receipt: &crate::machine_install::SwitchReceipt,
+    receipt: &crate::installation::SwitchReceipt,
     prepared: &PreparedArtifacts,
     candidate: &CandidateIdentity,
     verdict: &Verdict,
@@ -1204,17 +1178,7 @@ fn activate_prepared_machine_switch(
             },
         )?;
     }
-    entry_gate_targets(
-        root,
-        &receipt.candidate.path,
-        &receipt
-            .target
-            .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Daemon)
-            .ok_or_else(|| anyhow!("install switch {} target has no daemon", receipt.id))?
-            .path,
-        &receipt.activation,
-    )?;
+    entry_gate_targets(root, &receipt.candidate.path, &receipt.activation)?;
     if let Some(app) = receipt.activation.app.as_deref() {
         verify_selected_app_bundle(app, &receipt.target.artifact_set)?;
     }
@@ -1409,14 +1373,10 @@ fn read_binary_preflight(binary: &Path) -> Result<BinaryPreflight> {
 
 fn isolate_candidate_command(command: &mut Command) {
     for name in [
-        crate::machine_install::INSTALL_SWITCH_ENV,
-        crate::durable::RUN_ID_ENV,
+        crate::installation::INSTALL_SWITCH_ENV,
+        crate::session_record::CAPTURE_KEY_ENV,
         "LF_BIN",
         "LF_HOME",
-        "LF_DB_PATH",
-        crate::store::CONTROL_BIN_ENV,
-        crate::store::CONTROL_HOME_ENV,
-        crate::store::CONTROL_DB_PATH_ENV,
     ] {
         command.env_remove(name);
     }
@@ -1439,25 +1399,6 @@ fn read_binary_preview(binary: &Path) -> Result<PromotionPreview> {
     })
 }
 
-fn read_local_binary_preview(binary: &Path, store_path: &Path) -> Result<PromotionPreview> {
-    let mut command = Command::new(binary);
-    isolate_candidate_command(&mut command);
-    let output = command
-        .args(["install", "local-preflight", "--store"])
-        .arg(store_path)
-        .arg("--json")
-        .output()
-        .with_context(|| format!("run local binary {} preflight", binary.display()))?;
-    serde_json::from_slice(&output.stdout).with_context(|| {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        format!(
-            "binary {} did not return a local promotion preview: {}",
-            binary.display(),
-            stderr.trim()
-        )
-    })
-}
-
 fn validate_staged_app_helper(
     staged_app: &Path,
     expected_candidate: &CandidateIdentity,
@@ -1474,29 +1415,6 @@ fn validate_staged_app_helper(
             expected_verdict,
             preflight.candidate.source_revision,
             preflight.verdict
-        ));
-    }
-    validate_daemon_candidate(&staged_app.join("Contents/MacOS/lfd"), expected_candidate)
-}
-
-fn validate_daemon_candidate(daemon: &Path, expected_candidate: &CandidateIdentity) -> Result<()> {
-    let output = Command::new(daemon)
-        .arg("--version")
-        .output()
-        .with_context(|| format!("run daemon candidate {}", daemon.display()))?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "daemon candidate {} did not report its version: {}",
-            daemon.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    let actual = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let expected = format!("lfd {}", expected_candidate.display_version());
-    if actual != expected {
-        return Err(anyhow!(
-            "daemon candidate {} is not the promoted candidate: expected {expected:?}, got {actual:?}",
-            daemon.display()
         ));
     }
     Ok(())
@@ -1547,59 +1465,26 @@ fn retained_binary_path(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
     retained_binary_path_as(candidate, bin_dir, "lf")
 }
 
-fn retained_daemon_path(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
-    retained_binary_path_as(candidate, bin_dir, "lfd")
-}
-
-fn read_home_context(
-    store_path: &Path,
-) -> Result<(Option<crate::durable::HomeId>, Option<PathBuf>)> {
-    if !store_path.exists() {
-        return Ok((None, None));
-    }
-    let connection = rusqlite::Connection::open_with_flags(
-        store_path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    let home_id = connection
-        .query_row("SELECT id FROM homes WHERE route='local'", [], |row| {
-            row.get::<_, String>(0)
-        })
-        .optional()?;
-    let home_id = home_id
-        .map(|id| crate::durable::HomeId::parse(&id).map_err(anyhow::Error::from))
-        .transpose()?;
-    let repo = connection
-        .query_row(
-            "SELECT repo FROM waves ORDER BY created_at LIMIT 1",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .map(PathBuf::from);
-    Ok((home_id, repo))
-}
-
 fn app_executable_paths(
-    selection: Option<&crate::machine_install::InstallSelection>,
+    selection: Option<&crate::installation::InstallSelection>,
     app_target: Option<&Path>,
 ) -> Vec<PathBuf> {
+    let Some(bundle) = app_target else {
+        return Vec::new();
+    };
     let mut paths = selection
         .into_iter()
         .flat_map(|selection| &selection.artifact_set.artifacts)
         .filter(|artifact| {
             matches!(
                 artifact.role,
-                crate::machine_install::ArtifactRole::App
-                    | crate::machine_install::ArtifactRole::AppHelper(_)
+                crate::installation::ArtifactRole::App
+                    | crate::installation::ArtifactRole::AppHelper(_)
             )
         })
         .map(|artifact| artifact.path.clone())
         .collect::<Vec<_>>();
-    if let Some(bundle) = app_target {
-        paths
-            .extend(["Loopflow", "lf", "lfd"].map(|name| bundle.join("Contents/MacOS").join(name)));
-    }
+    paths.extend(["Loopflow", "lf"].map(|name| bundle.join("Contents/MacOS").join(name)));
     paths.sort();
     paths.dedup();
     paths
@@ -1611,28 +1496,23 @@ unsafe extern "C" {
     fn proc_pidpath(pid: libc::c_int, buffer: *mut libc::c_void, size: u32) -> libc::c_int;
 }
 
+/// Every process as `(pid, launched name, executable path)`. The path is absent
+/// when the kernel refuses it.
 #[cfg(target_os = "macos")]
-fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)>> {
+fn process_executables() -> Result<Vec<(libc::pid_t, String, Option<PathBuf>)>> {
     use std::ffi::CStr;
 
-    if paths.is_empty() {
-        return Ok(Vec::new());
-    }
-    let names = paths
-        .iter()
-        .filter_map(|path| path.file_name())
-        .collect::<std::collections::HashSet<_>>();
     let output = Command::new("/bin/ps")
-        .args(["-axo", "pid=,comm="])
+        .args(["-wwaxo", "pid=,comm="])
         .output()
-        .context("enumerate macOS processes before app activation")?;
+        .context("enumerate macOS processes")?;
     if !output.status.success() {
         return Err(anyhow!(
-            "enumerate macOS processes before app activation: {}",
+            "enumerate macOS processes: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    let mut matches = Vec::new();
+    let mut processes = Vec::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let mut fields = line.trim().splitn(2, char::is_whitespace);
         let Some(pid) = fields
@@ -1648,11 +1528,6 @@ fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)
         else {
             continue;
         };
-        // `comm` is only a hint when the kernel refuses the executable path;
-        // exact path identity still has to be checked for every live process.
-        let command_may_match = Path::new(command)
-            .file_name()
-            .is_some_and(|name| names.contains(name));
         let mut buffer = vec![0_u8; 4096];
         // SAFETY: `buffer` is writable for its reported size and `pid` came
         // from the kernel-backed process table emitted by `/bin/ps`.
@@ -1663,25 +1538,137 @@ fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)
                 buffer.len() as u32,
             )
         };
-        if length <= 0 {
+        let executable = if length <= 0 {
             // SAFETY: signal zero does not mutate the process and only probes
             // whether the pid observed above still exists.
-            let live = unsafe { libc::kill(pid, 0) } == 0;
-            if live && command_may_match {
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                continue;
+            }
+            None
+        } else {
+            let executable = CStr::from_bytes_until_nul(&buffer)
+                .map_err(|error| anyhow!("read executable identity for process {pid}: {error}"))?;
+            Some(PathBuf::from(executable.to_string_lossy().as_ref()))
+        };
+        processes.push((pid, command.to_string(), executable));
+    }
+    Ok(processes)
+}
+
+#[cfg(target_os = "macos")]
+fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)>> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let names = paths
+        .iter()
+        .filter_map(|path| path.file_name())
+        .collect::<std::collections::HashSet<_>>();
+    let mut matches = Vec::new();
+    for (pid, command, executable) in process_executables()? {
+        let Some(executable) = executable else {
+            // Deleted development binaries can keep running after proc_pidpath
+            // loses their path. An unrelated absolute launch path is not an app
+            // helper merely because it shares the name `lf`. Never signal a
+            // process from this hint alone.
+            let launched = Path::new(&command);
+            let could_be_app = if launched.is_absolute() {
+                paths.iter().any(|path| path == launched)
+            } else {
+                launched
+                    .file_name()
+                    .is_some_and(|name| names.contains(name))
+            };
+            if could_be_app {
                 return Err(anyhow!(
-                    "cannot prove executable identity for live app/helper process {pid}"
+                    "cannot prove executable identity for live app/helper process {pid} ({command})"
                 ));
             }
             continue;
-        }
-        let executable = CStr::from_bytes_until_nul(&buffer)
-            .map_err(|error| anyhow!("read executable identity for process {pid}: {error}"))?;
-        let executable = PathBuf::from(executable.to_string_lossy().as_ref());
+        };
         if paths.iter().any(|path| path == &executable) {
             matches.push((pid, executable));
         }
     }
     Ok(matches)
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod app_process_tests {
+    use super::running_app_processes;
+    use std::fs;
+    use std::io::{BufRead, BufReader};
+    use std::process::{Child, Command, Stdio};
+    use std::time::Duration;
+
+    struct TestProcess(Child);
+
+    impl Drop for TestProcess {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    #[test]
+    #[ignore = "entry point for the process-discovery fixture"]
+    fn app_process_fixture() {
+        println!("ready");
+        std::thread::sleep(Duration::from_secs(60));
+    }
+
+    #[test]
+    fn deleted_cli_does_not_block_app_upgrade() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let cli = root.join("lf");
+        // A copied Apple platform binary is killed under the network sandbox.
+        // Use this test executable so the fixture also runs in isolated CI.
+        fs::copy(std::env::current_exe().unwrap(), &cli).unwrap();
+        let mut child = TestProcess(
+            Command::new(&cli)
+                .args([
+                    "--ignored",
+                    "--nocapture",
+                    "--exact",
+                    "lf::commands::install::app_process_tests::app_process_fixture",
+                ])
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        // Wait until the copied executable has entered the fixture before
+        // unlinking it; spawn alone does not establish completed startup.
+        let mut output = BufReader::new(child.0.stdout.take().unwrap());
+        loop {
+            let mut line = String::new();
+            assert_ne!(
+                output.read_line(&mut line).unwrap(),
+                0,
+                "fixture exited before startup"
+            );
+            if line.trim_end().ends_with("ready") {
+                break;
+            }
+        }
+        let pid = child.0.id() as libc::pid_t;
+        let app_helper = root.join("Loopflow.app/Contents/MacOS/lf");
+
+        // A known helper must still be found by its exact executable path.
+        assert!(running_app_processes(std::slice::from_ref(&cli))
+            .unwrap()
+            .contains(&(pid, cli.clone())));
+        fs::remove_file(&cli).unwrap();
+
+        assert!(running_app_processes(&[app_helper]).unwrap().is_empty());
+        // An unresolved process launched from the actual target still blocks;
+        // its launch name alone never grants permission to signal it.
+        assert!(running_app_processes(&[cli])
+            .unwrap_err()
+            .to_string()
+            .contains(&pid.to_string()));
+        assert!(child.0.try_wait().unwrap().is_none());
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -1736,22 +1723,19 @@ fn quiesce_app_processes(_paths: &[PathBuf]) -> Result<()> {
     Ok(())
 }
 
-fn quiesce_switch_app(
-    root: &Path,
-    receipt: &mut crate::machine_install::SwitchReceipt,
-) -> Result<()> {
+fn quiesce_switch_app(root: &Path, receipt: &mut crate::installation::SwitchReceipt) -> Result<()> {
     let paths = app_executable_paths(receipt.prior.as_ref(), receipt.activation.app.as_deref());
     // Helpers alone do not mean a window was open. Preserve an earlier
     // observation when recovering after the app has already stopped.
     receipt.app_was_running |= running_app_processes(&paths)?
         .iter()
         .any(|(_, path)| path.file_name().is_some_and(|name| name == "Loopflow"));
-    crate::machine_install::write_switch(root, receipt)?;
+    crate::installation::write_switch(root, receipt)?;
     quiesce_app_processes(&paths)
 }
 
 #[cfg(any(target_os = "macos", test))]
-fn app_to_resume(receipt: &crate::machine_install::SwitchReceipt) -> Result<Option<&Path>> {
+fn app_to_resume(receipt: &crate::installation::SwitchReceipt) -> Result<Option<&Path>> {
     if !receipt.app_was_running {
         return Ok(None);
     }
@@ -1772,7 +1756,7 @@ fn app_to_resume(receipt: &crate::machine_install::SwitchReceipt) -> Result<Opti
 }
 
 #[cfg(target_os = "macos")]
-fn resume_switch_app(receipt: &crate::machine_install::SwitchReceipt) -> Result<()> {
+fn resume_switch_app(receipt: &crate::installation::SwitchReceipt) -> Result<()> {
     let Some(app) = app_to_resume(receipt)? else {
         return Ok(());
     };
@@ -1818,162 +1802,16 @@ fn open_installed_app(_app: &Path) -> Result<()> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn resume_switch_app(_receipt: &crate::machine_install::SwitchReceipt) -> Result<()> {
+fn resume_switch_app(_receipt: &crate::installation::SwitchReceipt) -> Result<()> {
     Ok(())
 }
 
-fn pause_home(store_path: &Path) -> Result<PausedHome> {
-    let (home_id, repo) = read_home_context(store_path)?;
-    let runtime = tokio::runtime::Runtime::new().context("create Home quiesce runtime")?;
-    let keeper_mode = crate::lfd::service::pause().context("pause the installed Home keeper")?;
-    let fallback_session = home_id.as_ref().map(|home_id| {
-        format!(
-            "lfd-{}",
-            crate::engine::process::tmux_session_slug(home_id.as_str())
-        )
-    });
-    if let Some(session) = fallback_session.as_deref() {
-        let _ = Command::new("tmux")
-            .args(["kill-session", "-t", session])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-    }
-    if let Some(home_id) = home_id.as_ref() {
-        let lf_home = store_path
-            .parent()
-            .expect("Home store has a parent directory");
-        let stopped = runtime.block_on(async {
-            let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-            while tokio::time::Instant::now() < deadline {
-                if !crate::lfd::home_is_live_at(home_id, lf_home).await {
-                    return Ok(());
-                }
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-            Err(anyhow!("the old Home keeper remained live after stop"))
-        });
-        if let Err(error) = stopped {
-            let _ = crate::lfd::service::resume(keeper_mode);
-            return Err(error);
-        }
-    }
-    Ok(PausedHome {
-        keeper_mode,
-        home_id,
-        repo,
-    })
-}
-
-fn resume_home_for_switch(
-    home: &PausedHome,
-    receipt: &crate::machine_install::SwitchReceipt,
-) -> Result<()> {
-    resume_home_with_selection(home, Some(&receipt.target), Some(&receipt.id))
-}
-
-fn resume_home_for_install_selection(
-    home: &PausedHome,
-    selection: &crate::machine_install::InstallSelection,
-) -> Result<()> {
-    resume_home_with_selection(home, Some(selection), None)
-}
-
-fn reload_home_for_install_selection(
-    home: &PausedHome,
-    selection: &crate::machine_install::InstallSelection,
-) -> Result<()> {
-    crate::lfd::service::pause()?;
-    resume_home_for_install_selection(home, selection)
-}
-
-fn resume_home_with_selection(
-    home: &PausedHome,
-    selection: Option<&crate::machine_install::InstallSelection>,
-    switch_id: Option<&str>,
-) -> Result<()> {
-    crate::lfd::service::resume(home.keeper_mode).context("restart the installed Home keeper")?;
-    let (Some(home_id), Some(repo)) = (home.home_id.as_ref(), home.repo.as_deref()) else {
-        return Ok(());
-    };
-    let runtime = tokio::runtime::Runtime::new().context("create Home restart runtime")?;
-    runtime.block_on(async {
-        if home.keeper_mode != crate::lfd::service::KeeperMode::None {
-            let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-            while tokio::time::Instant::now() < deadline {
-                let live = match selection.and_then(|selection| selection.store.parent()) {
-                    Some(lf_home) => crate::lfd::home_is_live_at(home_id, lf_home).await,
-                    None => crate::lfd::home_is_live(home_id).await,
-                };
-                if live {
-                    return Ok(());
-                }
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-            return Err(anyhow!(
-                "installed Home keeper did not become healthy within 10s"
-            ));
-        }
-        match (selection, switch_id) {
-            (_, Some(switch_id)) => crate::lfd::ensure_for_switch(home_id, repo, switch_id).await,
-            (Some(selection), None) => {
-                crate::lfd::ensure_install_selection(home_id, repo, selection).await
-            }
-            (None, None) => crate::lfd::ensure(home_id, repo).await,
-        }
-    })
-}
-
-fn verify_switch_home(
-    home: &PausedHome,
-    receipt: &crate::machine_install::SwitchReceipt,
-) -> Result<()> {
-    let Some(home_id) = home.home_id.as_ref() else {
-        return Ok(());
-    };
-    let lf_home = receipt
-        .target
-        .store
-        .parent()
-        .expect("install target store has a Home directory");
-    let runtime = tokio::runtime::Runtime::new().context("create install identity runtime")?;
-    let identity = runtime.block_on(async {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        while tokio::time::Instant::now() < deadline {
-            if let Some(identity) = crate::lfd::home_health_identity_at(home_id, lf_home).await {
-                return Some(identity);
-            }
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-        None
-    });
-    let identity = identity.ok_or_else(|| anyhow!("installed Home did not report its identity"))?;
-    let store = crate::store::canonicalize_with_missing_tail(&identity.store)
-        .with_context(|| format!("resolve keeper store {}", identity.store.display()))?;
-    if store != receipt.target.store
-        || identity.source_revision != receipt.target.artifact_set.source_revision
-    {
-        return Err(anyhow!(
-            "installed Home identity mismatch: expected revision {} store {}, got revision {} store {}",
-            receipt.target.artifact_set.source_revision,
-            receipt.target.store.display(),
-            identity.source_revision,
-            store.display()
-        ));
-    }
-    Ok(())
-}
-
-fn required_machine_artifact_roles(has_app: bool) -> Vec<crate::machine_install::ArtifactRole> {
-    let mut roles = vec![
-        crate::machine_install::ArtifactRole::Cli,
-        crate::machine_install::ArtifactRole::Daemon,
-    ];
+fn required_installation_artifact_roles(has_app: bool) -> Vec<crate::installation::ArtifactRole> {
+    let mut roles = vec![crate::installation::ArtifactRole::Cli];
     if has_app {
         roles.extend([
-            crate::machine_install::ArtifactRole::App,
-            crate::machine_install::ArtifactRole::AppHelper("lf".to_string()),
-            crate::machine_install::ArtifactRole::AppHelper("lfd".to_string()),
+            crate::installation::ArtifactRole::App,
+            crate::installation::ArtifactRole::AppHelper("lf".to_string()),
         ]);
     }
     roles
@@ -1984,7 +1822,7 @@ fn retain_bundle_artifacts(
     root: &Path,
     set_id: &str,
     candidate: &CandidateIdentity,
-) -> Result<Vec<crate::machine_install::ArtifactIdentity>> {
+) -> Result<Vec<crate::installation::ArtifactIdentity>> {
     let Some(source) = source else {
         return Ok(Vec::new());
     };
@@ -2025,10 +1863,9 @@ fn retain_bundle_artifacts(
 fn capture_bundle_artifacts(
     bundle: &Path,
     candidate: &CandidateIdentity,
-) -> Result<Vec<crate::machine_install::ArtifactIdentity>> {
+) -> Result<Vec<crate::installation::ArtifactIdentity>> {
     let app = bundle.join("Contents/MacOS/Loopflow");
     let cli = bundle.join("Contents/MacOS/lf");
-    let daemon = bundle.join("Contents/MacOS/lfd");
     let helper = read_binary_preflight(&cli)
         .with_context(|| format!("validate retained app helper {}", cli.display()))?;
     if helper.candidate != *candidate {
@@ -2038,19 +1875,14 @@ fn capture_bundle_artifacts(
             candidate.source_revision
         ));
     }
-    validate_daemon_candidate(&daemon, candidate)?;
     Ok(vec![
-        crate::machine_install::ArtifactIdentity::capture(
-            crate::machine_install::ArtifactRole::App,
+        crate::installation::ArtifactIdentity::capture(
+            crate::installation::ArtifactRole::App,
             &app,
         )?,
-        crate::machine_install::ArtifactIdentity::capture(
-            crate::machine_install::ArtifactRole::AppHelper("lf".to_string()),
+        crate::installation::ArtifactIdentity::capture(
+            crate::installation::ArtifactRole::AppHelper("lf".to_string()),
             &cli,
-        )?,
-        crate::machine_install::ArtifactIdentity::capture(
-            crate::machine_install::ArtifactRole::AppHelper("lfd".to_string()),
-            &daemon,
         )?,
     ])
 }
@@ -2068,32 +1900,25 @@ fn verify_matching_bundles(source: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
-fn machine_artifact_set(
+fn installation_artifact_set(
     root: &Path,
-    source: crate::machine_install::InstallSource,
+    source: crate::installation::InstallSource,
     candidate: &CandidateIdentity,
     cli: &Path,
-    daemon: &Path,
     app: Option<&Path>,
-) -> Result<crate::machine_install::ArtifactSet> {
-    let digest = artifact_set_digest(cli, daemon, app)?;
+) -> Result<crate::installation::ArtifactSet> {
+    let digest = artifact_set_digest(cli, app)?;
     let label = match source {
-        crate::machine_install::InstallSource::Published => "published",
-        crate::machine_install::InstallSource::Development => "development",
+        crate::installation::InstallSource::Published => "published",
+        crate::installation::InstallSource::Development => "development",
     };
     let id = format!("{label}-{digest}");
-    let mut artifacts = vec![
-        crate::machine_install::ArtifactIdentity::capture(
-            crate::machine_install::ArtifactRole::Cli,
-            cli,
-        )?,
-        crate::machine_install::ArtifactIdentity::capture(
-            crate::machine_install::ArtifactRole::Daemon,
-            daemon,
-        )?,
-    ];
+    let mut artifacts = vec![crate::installation::ArtifactIdentity::capture(
+        crate::installation::ArtifactRole::Cli,
+        cli,
+    )?];
     artifacts.extend(retain_bundle_artifacts(app, root, &id, candidate)?);
-    let set = crate::machine_install::ArtifactSet {
+    let set = crate::installation::ArtifactSet {
         id,
         source,
         source_revision: candidate.source_revision.clone(),
@@ -2101,14 +1926,14 @@ fn machine_artifact_set(
         content_sha256: digest,
         artifacts,
     };
-    set.verify(&required_machine_artifact_roles(app.is_some()))?;
+    set.verify(&required_installation_artifact_roles(app.is_some()))?;
     Ok(set)
 }
 
 fn bootstrap_published_install(
     root: &Path,
     artifacts: &PromotionArtifacts<'_>,
-) -> Result<crate::machine_install::ActiveInstall> {
+) -> Result<crate::installation::ActiveInstall> {
     let repair = "run `lf install`";
     let store = crate::store::production_database_path();
     if !store.is_file() {
@@ -2119,8 +1944,6 @@ fn bootstrap_published_install(
     }
     let cli = preserve_prior_binary(artifacts.cli_target, &lf_bin_dir())?
         .ok_or_else(|| anyhow!("the published CLI fallback is missing; {repair}"))?;
-    let daemon = preserve_prior_daemon(artifacts.daemon_target, &lf_bin_dir())?
-        .ok_or_else(|| anyhow!("the published daemon fallback is missing; {repair}"))?;
     let preflight = read_binary_preflight(&cli)
         .with_context(|| format!("validate published CLI fallback; {repair}"))?;
     if preflight.candidate.authority != MigrationAuthority::Published {
@@ -2131,137 +1954,46 @@ fn bootstrap_published_install(
     validate_rollback_verdict(&preflight.verdict).with_context(|| {
         format!("the published fallback does not recognize its store; {repair}")
     })?;
-    validate_daemon_candidate(&daemon, &preflight.candidate)
-        .with_context(|| format!("validate published daemon fallback; {repair}"))?;
-    let fallback = machine_artifact_set(
+    let fallback = installation_artifact_set(
         root,
-        crate::machine_install::InstallSource::Published,
+        crate::installation::InstallSource::Published,
         &preflight.candidate,
         &cli,
-        &daemon,
         artifacts.app_target,
     )
     .with_context(|| format!("retain the complete published fallback; {repair}"))?;
     let active_set = fallback.clone();
     if let Some(app_target) = artifacts.app_target {
         let retained_app = fallback
-            .artifact(&crate::machine_install::ArtifactRole::App)
+            .artifact(&crate::installation::ArtifactRole::App)
             .expect("complete published fallback has an app");
         verify_matching_bundles(bundle_for_app_artifact(&retained_app.path)?, app_target)?;
     }
-    let selection = crate::machine_install::InstallSelection {
+    let selection = crate::installation::InstallSelection {
         installation_id: format!("published-{}", &fallback.id[fallback.id.len() - 16..]),
-        source: crate::machine_install::InstallSource::Published,
+        source: crate::installation::InstallSource::Published,
         artifact_set: active_set,
         store,
     };
-    let active = crate::machine_install::ActiveInstall {
+    let active = crate::installation::ActiveInstall {
         schema_version: 1,
         selection,
         published_fallback: fallback.clone(),
         retained_published_sets: vec![fallback],
-        activation: Some(crate::machine_install::ActivationTargets {
+        activation: Some(crate::installation::ActivationTargets {
             cli: artifacts.cli_target.to_path_buf(),
-            daemon: artifacts.daemon_target.to_path_buf(),
+            daemon: None,
             app: artifacts.app_target.map(Path::to_path_buf),
             legacy_app: None,
         }),
     };
-    crate::machine_install::write_active(root, &active)?;
+    crate::installation::write_active(root, &active)?;
     Ok(active)
-}
-
-fn restore_selected_app_bundle(
-    target: &Path,
-    artifact_set: &crate::machine_install::ArtifactSet,
-    preflight: &BinaryPreflight,
-) -> Result<()> {
-    artifact_set.verify(&required_machine_artifact_roles(true))?;
-    if preflight.candidate.source_revision != artifact_set.source_revision
-        || preflight.candidate.source_identity != artifact_set.source_identity
-    {
-        return Err(anyhow!(
-            "artifact set {} CLI does not match its recorded source",
-            artifact_set.id
-        ));
-    }
-    let app = artifact_set
-        .artifact(&crate::machine_install::ArtifactRole::App)
-        .expect("validated app artifact set has an app");
-    let source = bundle_for_app_artifact(&app.path)?;
-    let plan = AppPromotion {
-        source,
-        target,
-        superseded: None,
-        expected_candidate: &preflight.candidate,
-        expected_verdict: &preflight.verdict,
-    };
-    let staged = stage_app_copy(source, target)?;
-    if let Some(superseded) = commit_app_bundle(&staged, &plan)? {
-        remove_path(&superseded)?;
-    }
-    verify_selected_app_bundle(target, artifact_set)
-}
-
-fn active_install_for_local_promotion(
-    root: &Path,
-    artifacts: &PromotionArtifacts<'_>,
-) -> Result<crate::machine_install::ActiveInstall> {
-    let active = match crate::machine_install::read_state(root)? {
-        crate::machine_install::MachineInstallState::Legacy => {
-            bootstrap_published_install(root, artifacts)?
-        }
-        crate::machine_install::MachineInstallState::Settled(active) => *active,
-        crate::machine_install::MachineInstallState::Switching(receipt) => {
-            return Err(anyhow!(
-                "install switch {} is unsettled; recover it before another promotion",
-                receipt.id
-            ))
-        }
-    };
-    active.selection.artifact_set.verify(&[
-        crate::machine_install::ArtifactRole::Cli,
-        crate::machine_install::ArtifactRole::Daemon,
-    ])?;
-    active
-        .published_fallback
-        .verify(&required_machine_artifact_roles(
-            artifacts.app_source.is_some(),
-        ))
-        .with_context(|| "the complete published fallback is unavailable; run `lf install`")?;
-    Ok(active)
-}
-
-fn active_keeper_matches(
-    selection: &crate::machine_install::InstallSelection,
-    candidate: &CandidateIdentity,
-) -> Result<bool> {
-    if crate::lfd::service::configured_mode()? == crate::lfd::service::KeeperMode::None {
-        return Ok(true);
-    }
-    let (Some(home_id), _) = read_home_context(&selection.store)? else {
-        return Ok(false);
-    };
-    let lf_home = selection
-        .store
-        .parent()
-        .expect("validated install store has a Home directory");
-    let runtime = tokio::runtime::Runtime::new().context("create install identity runtime")?;
-    let Some(identity) = runtime.block_on(crate::lfd::home_health_identity_at(&home_id, lf_home))
-    else {
-        return Ok(false);
-    };
-    let store = crate::store::canonicalize_with_missing_tail(&identity.store)
-        .with_context(|| format!("resolve keeper store {}", identity.store.display()))?;
-    Ok(store == selection.store
-        && identity.build_version == candidate.display_version()
-        && identity.source_revision == candidate.source_revision
-        && identity.migration_frontier == candidate.latest_known_migration)
 }
 
 fn active_selection_has_settled_receipt(
     root: &Path,
-    selection: &crate::machine_install::InstallSelection,
+    selection: &crate::installation::InstallSelection,
 ) -> Result<bool> {
     let receipts = match fs::read_dir(root.join("receipts")) {
         Ok(receipts) => receipts,
@@ -2276,9 +2008,9 @@ fn active_selection_has_settled_receipt(
             continue;
         }
         let bytes = fs::read(entry.path())?;
-        let receipt: crate::machine_install::SwitchReceipt = serde_json::from_slice(&bytes)
+        let receipt: crate::installation::SwitchReceipt = serde_json::from_slice(&bytes)
             .with_context(|| format!("parse settled install receipt {}", entry.path().display()))?;
-        if receipt.phase == crate::machine_install::SwitchPhase::Settled
+        if receipt.phase == crate::installation::SwitchPhase::Settled
             && receipt.active_selection_committed
             && receipt.target == *selection
         {
@@ -2290,7 +2022,7 @@ fn active_selection_has_settled_receipt(
 
 fn active_install_matches_candidate(
     root: &Path,
-    active: &crate::machine_install::ActiveInstall,
+    active: &crate::installation::ActiveInstall,
     artifacts: &PromotionArtifacts<'_>,
     candidate_binary: &Path,
     candidate: &CandidateIdentity,
@@ -2298,8 +2030,8 @@ fn active_install_matches_candidate(
     store: &Path,
 ) -> Result<bool> {
     let source = match candidate.authority {
-        MigrationAuthority::Published => crate::machine_install::InstallSource::Published,
-        MigrationAuthority::ValidationOnly => crate::machine_install::InstallSource::Development,
+        MigrationAuthority::Published => crate::installation::InstallSource::Published,
+        MigrationAuthority::ValidationOnly => crate::installation::InstallSource::Development,
     };
     if active.selection.source != source || active.selection.store != store {
         return Ok(false);
@@ -2313,7 +2045,6 @@ fn active_install_matches_candidate(
     {
         return Ok(false);
     }
-    validate_daemon_candidate(artifacts.daemon_source, candidate)?;
     match (artifacts.app_source, artifacts.app_target) {
         (Some(app_source), Some(_)) => {
             validate_staged_app_helper(app_source, candidate, helper_verdict)?;
@@ -2325,20 +2056,16 @@ fn active_install_matches_candidate(
             ))
         }
     }
-    let digest = artifact_set_digest(
-        candidate_binary,
-        artifacts.daemon_source,
-        artifacts.app_source,
-    )?;
+    let digest = artifact_set_digest(candidate_binary, artifacts.app_source)?;
     if set.content_sha256 != digest {
         return Ok(false);
     }
-    set.verify(&required_machine_artifact_roles(
+    set.verify(&required_installation_artifact_roles(
         artifacts.app_source.is_some(),
     ))?;
-    let activation = crate::machine_install::ActivationTargets {
+    let activation = crate::installation::ActivationTargets {
         cli: artifacts.cli_target.to_path_buf(),
-        daemon: artifacts.daemon_target.to_path_buf(),
+        daemon: None,
         app: artifacts.app_target.map(Path::to_path_buf),
         legacy_app: artifacts.legacy_app_target.map(Path::to_path_buf),
     };
@@ -2360,485 +2087,22 @@ fn active_install_matches_candidate(
             }
         }
     }
-    active_keeper_matches(&active.selection, candidate)
+    Ok(true)
 }
 
-fn discard_unadvanced_disposable_store(
-    receipt: &crate::machine_install::SwitchReceipt,
-) -> Result<()> {
-    if !receipt.disposable_store_owned {
-        return Ok(());
-    }
-    if receipt.target_store_advance_started {
-        return Err(anyhow!(
-            "install switch {} cannot discard its target after candidate handoff",
-            receipt.id
-        ));
-    }
-    let directory = receipt
-        .target
-        .store
-        .parent()
-        .ok_or_else(|| anyhow!("disposable store has no installation directory"))?;
-    let expected = crate::machine_install::account_home()?.join(".lf-dev/installed");
-    if directory.parent() != Some(expected.as_path()) {
-        return Err(anyhow!(
-            "refusing to discard receipt-owned store outside {}: {}",
-            expected.display(),
-            directory.display()
-        ));
-    }
-    remove_path(directory)
-}
-
-fn restore_before_local_advance(
+fn restore_before_advance(
     root: &Path,
-    receipt: &crate::machine_install::SwitchReceipt,
-    paused: &PausedHome,
+    receipt: &crate::installation::SwitchReceipt,
     lock: crate::promotion_lock::PromotionLock,
     error: anyhow::Error,
 ) -> anyhow::Error {
-    let restore = (|| {
-        discard_unadvanced_disposable_store(receipt)?;
-        resume_home_with_selection(paused, receipt.prior.as_ref(), None)?;
-        cancel_unadvanced_switch(root, receipt)
-    })();
+    let restore = cancel_unadvanced_switch(root, receipt);
     drop(lock);
     match restore {
         Ok(()) => error,
         Err(restore) => {
             anyhow!("{error}; prior installation recovery remains pending: {restore:#}")
         }
-    }
-}
-
-fn promote_local_candidate(
-    artifacts: PromotionArtifacts<'_>,
-    candidate_binary: &Path,
-    sync_skills: bool,
-    preview_only: bool,
-    fresh: bool,
-    reuse_home: Option<&str>,
-) -> Result<()> {
-    let lock = crate::promotion_lock::acquire_exclusive()
-        .context("acquire the exclusive promotion lock")?;
-    let root = crate::machine_install::root()?;
-    let state = crate::machine_install::read_state(&root)?;
-    let retained = reuse_home
-        .map(|id| crate::machine_install::retained_development_home(&root, id))
-        .transpose()?;
-    let preview_store = match (&state, &retained) {
-        (crate::machine_install::MachineInstallState::Switching(receipt), _) => {
-            return Err(anyhow!(
-                "install switch {} is unsettled; recover it before another promotion",
-                receipt.id
-            ));
-        }
-        (_, Some(selection)) => selection.store.clone(),
-        (crate::machine_install::MachineInstallState::Settled(active), None)
-            if active.selection.source == crate::machine_install::InstallSource::Development
-                && !fresh =>
-        {
-            active.selection.store.clone()
-        }
-        _ => crate::store::production_database_path(),
-    };
-    let preview = read_local_binary_preview(candidate_binary, &preview_store)?;
-    if preview.candidate.authority != MigrationAuthority::ValidationOnly {
-        return Err(anyhow!(
-            "--from-build requires an unpublished development build"
-        ));
-    }
-    render_human(&preview);
-    if let Verdict::Reject { reasons } = &preview.verdict {
-        return Err(anyhow!(
-            "local promotion refused; every target is unchanged:\n  - {}",
-            reasons.join("\n  - ")
-        ));
-    }
-    if preview_only {
-        println!("  (preview only: no target changed)");
-        return Ok(());
-    }
-
-    let prior = active_install_for_local_promotion(&root, &artifacts)?;
-    let standard_preflight = read_binary_preflight(candidate_binary)?;
-    if standard_preflight.candidate != preview.candidate {
-        return Err(anyhow!(
-            "local candidate identity changed between preflights: expected revision {}, got {}",
-            preview.candidate.source_revision,
-            standard_preflight.candidate.source_revision
-        ));
-    }
-    let prior_app_preflight = artifacts
-        .app_target
-        .map(|_| {
-            let cli = prior
-                .selection
-                .artifact_set
-                .artifact(&crate::machine_install::ArtifactRole::Cli)
-                .expect("validated active install has a CLI");
-            read_binary_preflight(&cli.path)
-        })
-        .transpose()?;
-    if !fresh
-        && retained
-            .as_ref()
-            .is_none_or(|home| home.installation_id == prior.selection.installation_id)
-        && matches!(preview.verdict, Verdict::Promote)
-        && active_install_matches_candidate(
-            &root,
-            &prior,
-            &artifacts,
-            candidate_binary,
-            &preview.candidate,
-            &standard_preflight.verdict,
-            &preview_store,
-        )?
-    {
-        println!(
-            "development {} is already installed (store {})",
-            preview.candidate.display_version(),
-            prior.selection.store.display()
-        );
-        return Ok(());
-    }
-    let switch_id = format!("switch-{}", Uuid::new_v4().simple());
-    let prepared = prepare_artifacts(
-        &artifacts,
-        candidate_binary,
-        &preview,
-        &switch_id,
-        Some(&standard_preflight.verdict),
-    )?;
-    let target_set = machine_artifact_set(
-        &root,
-        crate::machine_install::InstallSource::Development,
-        &preview.candidate,
-        &prepared.cli_binary,
-        &prepared.daemon_binary,
-        artifacts.app_source,
-    )?;
-    let reused_home = retained.as_ref().or_else(|| {
-        (prior.selection.source == crate::machine_install::InstallSource::Development && !fresh)
-            .then_some(&prior.selection)
-    });
-    let reuse = reused_home.is_some();
-    let installation_id = if reuse {
-        reused_home
-            .expect("reuse has an existing Home")
-            .installation_id
-            .clone()
-    } else {
-        format!("local-{}", Uuid::new_v4().simple())
-    };
-    let target_store = if reuse {
-        reused_home
-            .expect("reuse has an existing Home")
-            .store
-            .clone()
-    } else {
-        crate::machine_install::account_home()?
-            .join(".lf-dev/installed")
-            .join(&installation_id)
-            .join("loopflow.db")
-    };
-    let target = crate::machine_install::InstallSelection {
-        installation_id,
-        source: crate::machine_install::InstallSource::Development,
-        artifact_set: target_set,
-        store: target_store.clone(),
-    };
-    let mut switch = crate::machine_install::SwitchReceipt {
-        schema_version: 1,
-        id: switch_id,
-        prior: Some(prior.selection.clone()),
-        target: target.clone(),
-        published_fallback: Some(prior.published_fallback.clone()),
-        target_published_fallback: None,
-        phase: crate::machine_install::SwitchPhase::Planned,
-        recovery_owner: crate::machine_install::RecoveryOwner::Coordinator,
-        target_store_advance_started: false,
-        target_store_advanced: false,
-        active_selection_committed: false,
-        coordinator: target
-            .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Cli)
-            .expect("validated local candidate has a CLI")
-            .clone(),
-        candidate: target
-            .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Cli)
-            .expect("validated local candidate has a CLI")
-            .clone(),
-        activation: crate::machine_install::ActivationTargets {
-            cli: artifacts.cli_target.to_path_buf(),
-            daemon: artifacts.daemon_target.to_path_buf(),
-            app: artifacts.app_target.map(Path::to_path_buf),
-            legacy_app: artifacts.legacy_app_target.map(Path::to_path_buf),
-        },
-        app_was_running: false,
-        disposable_store_owned: false,
-    };
-    crate::machine_install::write_switch(&root, &switch)?;
-
-    let paused = match pause_home(&prior.selection.store) {
-        Ok(paused) => paused,
-        Err(error) => {
-            crate::machine_install::clear_switch(&root, &switch.id)?;
-            return Err(error);
-        }
-    };
-    if let Err(error) = quiesce_switch_app(&root, &mut switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
-    }
-    let repair = (|| {
-        if let Some(app) = switch.activation.app.as_deref() {
-            if verify_selected_app_bundle(app, &prior.selection.artifact_set).is_err() {
-                restore_selected_app_bundle(
-                    app,
-                    &prior.selection.artifact_set,
-                    prior_app_preflight
-                        .as_ref()
-                        .expect("app promotion captured prior app preflight"),
-                )?;
-            }
-        }
-        let target_daemon = switch
-            .target
-            .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Daemon)
-            .expect("validated local candidate has a daemon");
-        entry_gate_targets(
-            &root,
-            &switch.candidate.path,
-            &target_daemon.path,
-            &switch.activation,
-        )?;
-        if let Some(app) = switch.activation.app.as_deref() {
-            verify_selected_app_bundle(app, &prior.selection.artifact_set)?;
-        }
-        Ok(())
-    })();
-    if let Err(error) = repair {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
-    }
-    switch.phase = crate::machine_install::SwitchPhase::Quiesced;
-    if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
-    }
-
-    if !reuse {
-        let parent = target_store
-            .parent()
-            .expect("disposable store has an installation directory");
-        let installed = parent
-            .parent()
-            .expect("disposable installation directory has a root");
-        if let Err(error) = fs::create_dir_all(installed) {
-            return Err(restore_before_local_advance(
-                &root,
-                &switch,
-                &paused,
-                lock,
-                error.into(),
-            ));
-        }
-        if parent.exists() {
-            return Err(restore_before_local_advance(
-                &root,
-                &switch,
-                &paused,
-                lock,
-                anyhow!(
-                    "new disposable store directory {} already exists",
-                    parent.display()
-                ),
-            ));
-        }
-        if let Err(error) = fs::create_dir(parent) {
-            return Err(restore_before_local_advance(
-                &root,
-                &switch,
-                &paused,
-                lock,
-                error.into(),
-            ));
-        }
-        switch.disposable_store_owned = true;
-        if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-            return Err(restore_before_local_advance(
-                &root, &switch, &paused, lock, error,
-            ));
-        }
-        if let Err(error) =
-            _copy_store_for_candidate(&crate::store::production_database_path(), &target_store)
-        {
-            return Err(restore_before_local_advance(
-                &root, &switch, &paused, lock, error,
-            ));
-        }
-    }
-    switch.phase = crate::machine_install::SwitchPhase::TargetPrepared;
-    if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
-    }
-    switch = advance_switch_store(&root, switch, &preview.verdict)?;
-
-    activate_prepared_machine_switch(
-        &root,
-        &switch,
-        &prepared,
-        &preview.candidate,
-        &standard_preflight.verdict,
-    )?;
-    switch.phase = crate::machine_install::SwitchPhase::Activated;
-    crate::machine_install::write_switch(&root, &switch)?;
-    let active = active_install_from_switch(&root, &switch)?;
-    crate::lfd::service::prepare_install_switch(
-        paused.keeper_mode,
-        &switch.activation.daemon,
-        &switch.id,
-    )?;
-    resume_home_for_switch(&paused, &switch)?;
-    verify_switch_home(&paused, &switch)?;
-    settle_app_artifacts(&prepared)?;
-    crate::lfd::service::finish_install_switch(paused.keeper_mode, &switch.activation.daemon)?;
-    commit_switch_selection(&root, &mut switch, &active)?;
-    reload_home_for_install_selection(&paused, &active.selection)?;
-    verify_switch_home(&paused, &switch)?;
-    finish_switch(&root, &switch, &active)?;
-    println!(
-        "promoted local {}: {} -> {} (store {})",
-        preview.candidate.display_version(),
-        prepared.cli_target.display(),
-        switch.candidate.path.display(),
-        target_store.display()
-    );
-    if sync_skills {
-        if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false) {
-            eprintln!(
-                "warning: skill sync failed ({error:#}); binaries installed, skills unchanged"
-            );
-        }
-    }
-    drop(lock);
-    Ok(())
-}
-
-fn delegate_local_promotion(
-    build: &Path,
-    artifacts: &PromotionArtifacts<'_>,
-    sync_skills: bool,
-    preview_only: bool,
-    fresh: bool,
-    reuse_home: Option<&str>,
-) -> Result<()> {
-    let mut command = Command::new(build);
-    command
-        .args(["install", "promote", "--from-build"])
-        .arg(build)
-        .arg("--cli-target")
-        .arg(artifacts.cli_target)
-        .arg("--daemon-source")
-        .arg(artifacts.daemon_source)
-        .arg("--daemon-target")
-        .arg(artifacts.daemon_target);
-    if let (Some(source), Some(target)) = (artifacts.app_source, artifacts.app_target) {
-        command
-            .arg("--app-source")
-            .arg(source)
-            .arg("--app-target")
-            .arg(target);
-    }
-    if let Some(target) = artifacts.legacy_app_target {
-        command.arg("--legacy-app-target").arg(target);
-    }
-    if sync_skills {
-        command.arg("--sync-skills");
-    }
-    if preview_only {
-        command.arg("--preview");
-    }
-    if fresh {
-        command.arg("--fresh");
-    }
-    if let Some(home) = reuse_home {
-        command.arg("--reuse-home").arg(home);
-    }
-    stamp_next_promote_hop(&mut command, current_promote_hop());
-    let status = command
-        .status()
-        .with_context(|| format!("run local promotion candidate {}", build.display()))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow!("local promotion candidate exited {status}"))
-    }
-}
-
-fn delegate_to_active_coordinator(
-    coordinator: &Path,
-    candidate: &Path,
-    artifacts: &PromotionArtifacts<'_>,
-    sync_skills: bool,
-    preview_only: bool,
-    fresh: bool,
-    reuse_home: Option<&str>,
-) -> Result<()> {
-    let mut command = Command::new(coordinator);
-    command
-        .args(["install", "promote", "--coordinated-build"])
-        .arg(candidate)
-        .arg("--from-build")
-        .arg(candidate)
-        .arg("--cli-target")
-        .arg(artifacts.cli_target)
-        .arg("--daemon-source")
-        .arg(artifacts.daemon_source)
-        .arg("--daemon-target")
-        .arg(artifacts.daemon_target);
-    if let (Some(source), Some(target)) = (artifacts.app_source, artifacts.app_target) {
-        command
-            .arg("--app-source")
-            .arg(source)
-            .arg("--app-target")
-            .arg(target);
-    }
-    if let Some(target) = artifacts.legacy_app_target {
-        command.arg("--legacy-app-target").arg(target);
-    }
-    if sync_skills {
-        command.arg("--sync-skills");
-    }
-    if preview_only {
-        command.arg("--preview");
-    }
-    if fresh {
-        command.arg("--fresh");
-    }
-    if let Some(home) = reuse_home {
-        command.arg("--reuse-home").arg(home);
-    }
-    stamp_next_promote_hop(&mut command, current_promote_hop());
-    let status = command.status().with_context(|| {
-        format!(
-            "run receipt-pinned install coordinator {}",
-            coordinator.display()
-        )
-    })?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow!("active install coordinator exited {status}"))
     }
 }
 
@@ -2854,42 +2118,19 @@ fn bundle_for_app_artifact(path: &Path) -> Result<&Path> {
         })
 }
 
-fn resume_store_home(
-    selection: &crate::machine_install::InstallSelection,
-    switch: Option<&crate::machine_install::SwitchReceipt>,
-) -> Result<PausedHome> {
-    let (home_id, repo) = read_home_context(&selection.store)?;
-    let home = PausedHome {
-        keeper_mode: crate::lfd::service::configured_mode()?,
-        home_id,
-        repo,
-    };
-    match switch {
-        Some(receipt) => resume_home_for_switch(&home, receipt),
-        None => resume_home_for_install_selection(&home, selection),
-    }?;
-    Ok(home)
-}
-
 fn activate_switch_targets(
     root: &Path,
-    receipt: &mut crate::machine_install::SwitchReceipt,
+    receipt: &mut crate::installation::SwitchReceipt,
     candidate: &CandidateIdentity,
 ) -> Result<()> {
     let mut superseded_app = None;
-    let daemon = receipt
-        .target
-        .artifact_set
-        .artifact(&crate::machine_install::ArtifactRole::Daemon)
-        .ok_or_else(|| anyhow!("install switch {} target has no daemon", receipt.id))?;
-    daemon.verify()?;
     receipt.candidate.verify()?;
 
     if let Some(app_target) = receipt.activation.app.as_deref() {
         let retained_app = receipt
             .target
             .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::App)
+            .artifact(&crate::installation::ArtifactRole::App)
             .ok_or_else(|| anyhow!("install switch {} target has no app", receipt.id))?;
         let retained_bundle = bundle_for_app_artifact(&retained_app.path)?.to_path_buf();
         let active_app = verify_selected_app_bundle(app_target, &receipt.target.artifact_set);
@@ -2911,12 +2152,7 @@ fn activate_switch_targets(
             superseded_app = commit_app_bundle(&staged, &plan)?;
         }
     }
-    entry_gate_targets(
-        root,
-        &receipt.candidate.path,
-        &daemon.path,
-        &receipt.activation,
-    )?;
+    entry_gate_targets(root, &receipt.candidate.path, &receipt.activation)?;
     if let Some(app_target) = receipt.activation.app.as_deref() {
         verify_selected_app_bundle(app_target, &receipt.target.artifact_set)?;
     }
@@ -2929,8 +2165,8 @@ fn activate_switch_targets(
     Ok(())
 }
 
-fn delegate_switch_recovery(receipt: &crate::machine_install::SwitchReceipt) -> Result<()> {
-    let recovery = if receipt.recovery_owner == crate::machine_install::RecoveryOwner::Coordinator
+fn delegate_switch_recovery(receipt: &crate::installation::SwitchReceipt) -> Result<()> {
+    let recovery = if receipt.recovery_owner == crate::installation::RecoveryOwner::Coordinator
         && !receipt.target_store_advance_started
     {
         &receipt.coordinator
@@ -2944,6 +2180,8 @@ fn delegate_switch_recovery(receipt: &crate::machine_install::SwitchReceipt) -> 
     if current == recovery.path {
         return recover_switch(&receipt.id);
     }
+    // The pinned owner can predate the machine rename; resolve the operation
+    // without coupling recovery to its command group.
     let status = Command::new(&recovery.path)
         .args(["install", "recover-switch", "--switch", &receipt.id])
         .status()
@@ -2961,16 +2199,17 @@ fn delegate_switch_recovery(receipt: &crate::machine_install::SwitchReceipt) -> 
 }
 
 pub fn advance_switch(switch_id: &str) -> Result<()> {
+    // The initiating promotion checked Task ownership before writing this
+    // receipt. Continuation uses its pinned authority, not ordinary selection:
+    // a first installation has no selected runtime until this operation finishes.
     crate::promotion_lock::require_exclusive_holder()
         .context("verify the receipt-pinned promotion coordinator")?;
-    let root = crate::machine_install::root()?;
-    let mut receipt = match crate::machine_install::read_state(&root)? {
-        crate::machine_install::MachineInstallState::Switching(receipt)
-            if receipt.id == switch_id =>
-        {
+    let root = crate::installation::root()?;
+    let mut receipt = match crate::installation::read_state(&root)? {
+        crate::installation::InstallationState::Switching(receipt) if receipt.id == switch_id => {
             *receipt
         }
-        crate::machine_install::MachineInstallState::Switching(receipt) => {
+        crate::installation::InstallationState::Switching(receipt) => {
             return Err(anyhow!(
                 "install switch {} is active, not {switch_id}",
                 receipt.id
@@ -2989,12 +2228,12 @@ pub fn advance_switch(switch_id: &str) -> Result<()> {
         ));
     }
     receipt.candidate.verify()?;
-    crate::machine_install::authorize_current_for_switch(
-        &crate::machine_install::ArtifactRole::Cli,
+    crate::installation::authorize_current_for_switch(
+        &crate::installation::ArtifactRole::Cli,
         Some(&receipt.id),
     )?;
-    if receipt.phase != crate::machine_install::SwitchPhase::Advancing
-        || receipt.recovery_owner != crate::machine_install::RecoveryOwner::Candidate
+    if receipt.phase != crate::installation::SwitchPhase::Advancing
+        || receipt.recovery_owner != crate::installation::RecoveryOwner::Candidate
         || !receipt.target_store_advance_started
     {
         return Err(anyhow!(
@@ -3015,19 +2254,10 @@ pub fn advance_switch(switch_id: &str) -> Result<()> {
         ));
     }
     match receipt.target.source {
-        crate::machine_install::InstallSource::Development => {
-            if candidate.authority != MigrationAuthority::ValidationOnly {
-                return Err(anyhow!(
-                    "install switch {} development target has published candidate authority",
-                    receipt.id
-                ));
-            }
-            crate::store::sqlite::SqliteStore::open_as_local_promotion_boundary(
-                &receipt.target.store,
-            )
-            .map_err(|error| anyhow!("advance disposable development store: {error}"))?;
+        crate::installation::InstallSource::Development => {
+            return Err(anyhow!("development installations are retired; install a published release with `lf install`"));
         }
-        crate::machine_install::InstallSource::Published => {
+        crate::installation::InstallSource::Published => {
             if candidate.authority != MigrationAuthority::Published {
                 return Err(anyhow!(
                     "install switch {} published target lacks published candidate authority",
@@ -3039,17 +2269,14 @@ pub fn advance_switch(switch_id: &str) -> Result<()> {
         }
     }
     receipt.target_store_advanced = true;
-    crate::machine_install::write_switch(&root, &receipt)
+    crate::installation::write_switch(&root, &receipt)
 }
 
-fn run_switch_candidate(receipt: &crate::machine_install::SwitchReceipt) -> Result<()> {
+fn run_switch_candidate(receipt: &crate::installation::SwitchReceipt) -> Result<()> {
     receipt.candidate.verify()?;
     let status = Command::new(&receipt.candidate.path)
         .args(["install", "advance-switch", "--switch", &receipt.id])
-        .env(
-            crate::machine_install::INSTALL_SWITCH_ENV,
-            receipt.id.as_str(),
-        )
+        .env(crate::installation::INSTALL_SWITCH_ENV, receipt.id.as_str())
         .status()
         .with_context(|| {
             format!(
@@ -3066,20 +2293,20 @@ fn run_switch_candidate(receipt: &crate::machine_install::SwitchReceipt) -> Resu
 
 fn advance_switch_store(
     root: &Path,
-    mut receipt: crate::machine_install::SwitchReceipt,
+    mut receipt: crate::installation::SwitchReceipt,
     verdict: &Verdict,
-) -> Result<crate::machine_install::SwitchReceipt> {
-    receipt.recovery_owner = crate::machine_install::RecoveryOwner::Candidate;
+) -> Result<crate::installation::SwitchReceipt> {
+    receipt.recovery_owner = crate::installation::RecoveryOwner::Candidate;
     receipt.target_store_advance_started = true;
     receipt.target_store_advanced = store_is_exact(verdict);
-    receipt.phase = crate::machine_install::SwitchPhase::Advancing;
-    crate::machine_install::write_switch(root, &receipt)?;
+    receipt.phase = crate::installation::SwitchPhase::Advancing;
+    crate::installation::write_switch(root, &receipt)?;
 
     if !receipt.target_store_advanced {
         run_switch_candidate(&receipt)?;
     }
-    match crate::machine_install::read_state(root)? {
-        crate::machine_install::MachineInstallState::Switching(current)
+    match crate::installation::read_state(root)? {
+        crate::installation::InstallationState::Switching(current)
             if current.id == receipt.id && current.target_store_advanced =>
         {
             Ok(*current)
@@ -3092,9 +2319,9 @@ fn advance_switch_store(
 }
 
 fn exact_published_switch_candidate(
-    receipt: &crate::machine_install::SwitchReceipt,
+    receipt: &crate::installation::SwitchReceipt,
 ) -> Result<Option<CandidateIdentity>> {
-    if receipt.target.source != crate::machine_install::InstallSource::Published {
+    if receipt.target.source != crate::installation::InstallSource::Published {
         return Ok(None);
     }
     let preflight = read_binary_preflight(&receipt.candidate.path)?;
@@ -3115,86 +2342,176 @@ fn exact_published_switch_candidate(
 
 fn active_install_from_switch(
     root: &Path,
-    receipt: &crate::machine_install::SwitchReceipt,
-) -> Result<crate::machine_install::ActiveInstall> {
-    let recorded = crate::machine_install::active_install(root)?;
-    if let Some(active) = &recorded {
+    receipt: &crate::installation::SwitchReceipt,
+) -> Result<crate::installation::ActiveInstall> {
+    // A replacement coordinator keeps the record an earlier one already wrote.
+    if let Some(active) = crate::installation::active_install(root)? {
         if active.selection == receipt.target {
-            return Ok(active.clone());
+            return Ok(active);
         }
     }
     let published_fallback = match receipt.target.source {
-        crate::machine_install::InstallSource::Published => receipt
+        crate::installation::InstallSource::Published => receipt
             .target_published_fallback
             .clone()
             .expect("validated published switch retains its target fallback"),
-        crate::machine_install::InstallSource::Development => receipt
+        crate::installation::InstallSource::Development => receipt
             .published_fallback
             .clone()
             .expect("validated development switch retains a published fallback"),
     };
-    let mut retained = recorded
-        .map(|active| active.retained_published_sets)
-        .unwrap_or_default();
-    for fallback in receipt
-        .published_fallback
-        .iter()
-        .chain([&published_fallback])
-    {
-        if !retained.contains(fallback) {
-            retained.push(fallback.clone());
-        }
-    }
-    Ok(crate::machine_install::ActiveInstall {
+    Ok(crate::installation::ActiveInstall {
         schema_version: 1,
         selection: receipt.target.clone(),
+        retained_published_sets: retained_published_sets(
+            &published_fallback,
+            receipt.published_fallback.as_ref(),
+        ),
         published_fallback,
-        retained_published_sets: retained,
         activation: Some(receipt.activation.clone()),
     })
 }
 
+/// A settled install keeps its published fallback and the one it replaced.
+fn retained_published_sets(
+    fallback: &crate::installation::ArtifactSet,
+    prior_fallback: Option<&crate::installation::ArtifactSet>,
+) -> Vec<crate::installation::ArtifactSet> {
+    let mut retained = vec![fallback.clone()];
+    retained.extend(prior_fallback.filter(|prior| *prior != fallback).cloned());
+    retained
+}
+
 fn commit_switch_selection(
     root: &Path,
-    receipt: &mut crate::machine_install::SwitchReceipt,
-    active: &crate::machine_install::ActiveInstall,
+    receipt: &mut crate::installation::SwitchReceipt,
+    active: &crate::installation::ActiveInstall,
 ) -> Result<()> {
     receipt.published_fallback = Some(active.published_fallback.clone());
-    receipt.phase = crate::machine_install::SwitchPhase::Settled;
+    receipt.phase = crate::installation::SwitchPhase::Settled;
     receipt.active_selection_committed = true;
     // Ordinary app/helper startup now routes to the target, while the active
-    // receipt still owns unfinished Home restart and app reopen work.
-    crate::machine_install::write_switch(root, receipt)
+    // receipt still owns the unfinished app reopen.
+    crate::installation::write_switch(root, receipt)
 }
 
 fn finish_switch(
     root: &Path,
-    receipt: &crate::machine_install::SwitchReceipt,
-    active: &crate::machine_install::ActiveInstall,
+    receipt: &crate::installation::SwitchReceipt,
+    active: &crate::installation::ActiveInstall,
 ) -> Result<()> {
     resume_switch_app(receipt)?;
-    crate::machine_install::settle_switch(root, receipt, active)
+    crate::installation::settle_switch(root, receipt, active)?;
+    prune_superseded_artifacts(root, &lf_bin_dir(), active);
+    Ok(())
 }
 
 fn cancel_unadvanced_switch(
     root: &Path,
-    receipt: &crate::machine_install::SwitchReceipt,
+    receipt: &crate::installation::SwitchReceipt,
 ) -> Result<()> {
     resume_switch_app(receipt)?;
-    crate::machine_install::clear_switch(root, &receipt.id)
+    crate::installation::clear_switch(root, &receipt.id)
+}
+
+fn is_content_addressed(name: &str, labels: &[&str]) -> bool {
+    name.split_once('-').is_some_and(|(label, digest)| {
+        labels.contains(&label)
+            && digest.len() == 64
+            && digest
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    })
+}
+
+/// Every install stages a CLI and an app bundle under their content address,
+/// and nothing removed them. Once a switch settles, only the active install's
+/// own sets can be selected again, so the rest goes: staged binaries (and the
+/// retired daemon's) and retained bundles that no set names and no live process
+/// executes. Other names are left alone. Failure leaves files for the next
+/// settlement and never fails the install.
+fn prune_superseded_artifacts(
+    root: &Path,
+    bin_dir: &Path,
+    active: &crate::installation::ActiveInstall,
+) {
+    let running = match running_executables() {
+        Ok(running) => running,
+        Err(error) => {
+            tracing::warn!(%error, "superseded install artifacts were kept: live executables are unknown");
+            return;
+        }
+    };
+    let kept: Vec<PathBuf> = [&active.selection.artifact_set, &active.published_fallback]
+        .into_iter()
+        .chain(&active.retained_published_sets)
+        .flat_map(|set| &set.artifacts)
+        .map(|artifact| artifact.path.clone())
+        .chain(running)
+        .map(|path| fs::canonicalize(&path).unwrap_or(path))
+        .collect();
+    for (directory, labels) in [
+        (bin_dir.to_path_buf(), ["lf", "lfd"]),
+        (root.join("artifacts"), ["published", "development"]),
+    ] {
+        let Ok(directory) = fs::canonicalize(&directory) else {
+            continue;
+        };
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            let superseded = entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| is_content_addressed(name, &labels))
+                && !kept.iter().any(|kept| kept.starts_with(&path));
+            if !superseded {
+                continue;
+            }
+            match remove_path(&path) {
+                Ok(()) => {
+                    tracing::info!(path = %path.display(), "removed superseded install artifact")
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "superseded install artifact was not removed")
+                }
+            }
+        }
+    }
+}
+
+/// Executable paths of every live process this account can see.
+#[cfg(target_os = "macos")]
+fn running_executables() -> Result<Vec<PathBuf>> {
+    Ok(process_executables()?
+        .into_iter()
+        // A process whose path the kernel withholds keeps the name it was launched as.
+        .map(|(_, command, executable)| executable.unwrap_or_else(|| PathBuf::from(command)))
+        .collect())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn running_executables() -> Result<Vec<PathBuf>> {
+    let mut running = Vec::new();
+    for entry in fs::read_dir("/proc").context("enumerate processes")? {
+        if let Ok(executable) = fs::read_link(entry?.path().join("exe")) {
+            running.push(executable);
+        }
+    }
+    Ok(running)
 }
 
 pub fn recover_switch(switch_id: &str) -> Result<()> {
     let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock for install recovery")?;
-    let root = crate::machine_install::root()?;
-    let mut receipt = match crate::machine_install::read_state(&root)? {
-        crate::machine_install::MachineInstallState::Switching(receipt)
-            if receipt.id == switch_id =>
-        {
+    let root = crate::installation::root()?;
+    let mut receipt = match crate::installation::read_state(&root)? {
+        crate::installation::InstallationState::Switching(receipt) if receipt.id == switch_id => {
             *receipt
         }
-        crate::machine_install::MachineInstallState::Switching(receipt) => {
+        crate::installation::InstallationState::Switching(receipt) => {
             return Err(anyhow!(
                 "install switch {} is active, not {switch_id}",
                 receipt.id
@@ -3205,7 +2522,7 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     let current = fs::canonicalize(
         std::env::current_exe().context("resolve running install recovery owner")?,
     )?;
-    let expected = if receipt.recovery_owner == crate::machine_install::RecoveryOwner::Coordinator
+    let expected = if receipt.recovery_owner == crate::installation::RecoveryOwner::Coordinator
         && !receipt.target_store_advance_started
     {
         &receipt.coordinator
@@ -3222,22 +2539,16 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     }
     expected.verify()?;
 
-    if receipt.phase == crate::machine_install::SwitchPhase::Settled
+    if receipt.phase == crate::installation::SwitchPhase::Settled
         && receipt.active_selection_committed
     {
         let active = active_install_from_switch(&root, &receipt)?;
-        let home = resume_store_home(&active.selection, None)?;
-        verify_switch_home(&home, &receipt)?;
         finish_switch(&root, &receipt, &active)?;
         drop(lock);
         return Ok(());
     }
 
     if !receipt.target_store_advance_started {
-        discard_unadvanced_disposable_store(&receipt)?;
-        if let Some(prior) = &receipt.prior {
-            resume_store_home(prior, None)?;
-        }
         cancel_unadvanced_switch(&root, &receipt)?;
         drop(lock);
         return Ok(());
@@ -3245,18 +2556,17 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
 
     if !receipt.target_store_advanced {
         if exact_candidate.is_none() {
-            crate::machine_install::authorize_current_for_switch(
-                &crate::machine_install::ArtifactRole::Cli,
+            crate::installation::authorize_current_for_switch(
+                &crate::installation::ArtifactRole::Cli,
                 Some(&receipt.id),
             )?;
             match receipt.target.source {
-                crate::machine_install::InstallSource::Development => {
-                    crate::store::sqlite::SqliteStore::open_as_local_promotion_boundary(
-                        &receipt.target.store,
-                    )
-                    .map_err(|error| anyhow!("recover disposable development store: {error}"))?;
+                crate::installation::InstallSource::Development => {
+                    return Err(anyhow!(
+                        "development installations are disposable and cannot be recovered"
+                    ));
                 }
-                crate::machine_install::InstallSource::Published => {
+                crate::installation::InstallSource::Published => {
                     crate::store::sqlite::SqliteStore::open_as_promotion_boundary(
                         &receipt.target.store,
                     )
@@ -3265,55 +2575,33 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
             }
         }
         receipt.target_store_advanced = true;
-        crate::machine_install::write_switch(&root, &receipt)?;
+        crate::installation::write_switch(&root, &receipt)?;
     }
 
     let activation_phase = matches!(
         receipt.phase,
-        crate::machine_install::SwitchPhase::Advancing
-            | crate::machine_install::SwitchPhase::TargetPrepared
-            | crate::machine_install::SwitchPhase::Quiesced
-            | crate::machine_install::SwitchPhase::Planned
+        crate::installation::SwitchPhase::Advancing
+            | crate::installation::SwitchPhase::TargetPrepared
+            | crate::installation::SwitchPhase::Quiesced
+            | crate::installation::SwitchPhase::Planned
     );
     let mut paths = app_executable_paths(receipt.prior.as_ref(), receipt.activation.app.as_deref());
-    paths.extend(app_executable_paths(Some(&receipt.target), None));
+    paths.extend(app_executable_paths(
+        Some(&receipt.target),
+        receipt.activation.app.as_deref(),
+    ));
     paths.sort();
     paths.dedup();
     quiesce_app_processes(&paths)?;
-    let exact_recovery = exact_candidate.is_some();
     let candidate = exact_candidate.unwrap_or_else(CandidateIdentity::current);
     activate_switch_targets(&root, &mut receipt, &candidate)?;
     if activation_phase {
-        receipt.phase = crate::machine_install::SwitchPhase::Activated;
-        crate::machine_install::write_switch(&root, &receipt)?;
+        receipt.phase = crate::installation::SwitchPhase::Activated;
+        crate::installation::write_switch(&root, &receipt)?;
     }
 
     let active = active_install_from_switch(&root, &receipt)?;
-    if exact_recovery {
-        let keeper_mode = crate::lfd::service::pause()?;
-        crate::lfd::service::finish_install_switch(keeper_mode, &receipt.activation.daemon)?;
-        commit_switch_selection(&root, &mut receipt, &active)?;
-        let home = resume_store_home(&active.selection, None)?;
-        verify_switch_home(&home, &receipt)?;
-        finish_switch(&root, &receipt, &active)?;
-        if let Some(legacy) = receipt.activation.legacy_app.as_deref() {
-            remove_path(legacy)?;
-        }
-        drop(lock);
-        return Ok(());
-    }
-    let keeper_mode = crate::lfd::service::configured_mode()?;
-    crate::lfd::service::prepare_install_switch(
-        keeper_mode,
-        &receipt.activation.daemon,
-        &receipt.id,
-    )?;
-    let home = resume_store_home(&active.selection, Some(&receipt))?;
-    verify_switch_home(&home, &receipt)?;
-    crate::lfd::service::finish_install_switch(keeper_mode, &receipt.activation.daemon)?;
     commit_switch_selection(&root, &mut receipt, &active)?;
-    reload_home_for_install_selection(&home, &active.selection)?;
-    verify_switch_home(&home, &receipt)?;
     finish_switch(&root, &receipt, &active)?;
     if let Some(legacy) = receipt.activation.legacy_app.as_deref() {
         remove_path(legacy)?;
@@ -3322,7 +2610,7 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn promote_published_from_machine_install(
+fn promote_published_from_installation(
     artifacts: PromotionArtifacts<'_>,
     candidate_binary: &Path,
     sync_skills: bool,
@@ -3330,35 +2618,47 @@ fn promote_published_from_machine_install(
 ) -> Result<()> {
     let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
-    let root = crate::machine_install::root()?;
-    let mut prior = match crate::machine_install::read_state(&root)? {
-        crate::machine_install::MachineInstallState::Settled(active) => Some(*active),
-        crate::machine_install::MachineInstallState::Switching(receipt) => {
+    let root = crate::installation::root()?;
+    let mut prior = match crate::installation::read_state(&root)? {
+        crate::installation::InstallationState::Settled(active) => Some(*active),
+        crate::installation::InstallationState::Switching(receipt) => {
             return Err(anyhow!(
                 "install switch {} became active while waiting for the promotion lock; rerun promotion to recover it",
                 receipt.id
             ))
         }
-        crate::machine_install::MachineInstallState::Legacy => None,
+        crate::installation::InstallationState::Legacy => None,
     };
     if let Some(prior) = &prior {
-        prior.selection.artifact_set.verify(&[
-            crate::machine_install::ArtifactRole::Cli,
-            crate::machine_install::ArtifactRole::Daemon,
-        ])?;
-        prior.published_fallback.verify(&[
-            crate::machine_install::ArtifactRole::Cli,
-            crate::machine_install::ArtifactRole::Daemon,
-        ])?;
+        prior
+            .selection
+            .artifact_set
+            .verify(&[crate::installation::ArtifactRole::Cli])?;
+        prior
+            .published_fallback
+            .verify(&[crate::installation::ArtifactRole::Cli])?;
     }
     let store_path = crate::store::production_database_path();
     let preview = read_binary_preview(candidate_binary)?;
     if preview.candidate.authority != MigrationAuthority::Published {
         return Err(anyhow!(
-            "only a published candidate may advance a machine-managed install"
+            "only a published candidate may advance a receipt-managed installation"
         ));
     }
-    render_human(&preview);
+    // Newcomers see only the outcome; a refusal lists its reasons below.
+    if preview_only {
+        render_human(&preview);
+    }
+    if let Some(prior) = &prior {
+        if prior.selection.store != store_path {
+            eprintln!(
+                "Published installation would select database {} in place of {}. Tasks and history in the previous database remain there; they are not transferred. Retained installation: {}.",
+                store_path.display(),
+                prior.selection.store.display(),
+                prior.selection.installation_id,
+            );
+        }
+    }
     if let Verdict::Reject { reasons } = &preview.verdict {
         return Err(anyhow!(
             "published return refused; every target is unchanged:\n  - {}",
@@ -3398,30 +2698,29 @@ fn promote_published_from_machine_install(
     }
     let switch_id = format!("switch-{}", Uuid::new_v4().simple());
     let prepared = prepare_artifacts(&artifacts, candidate_binary, &preview, &switch_id, None)?;
-    let target_set = machine_artifact_set(
+    let target_set = installation_artifact_set(
         &root,
-        crate::machine_install::InstallSource::Published,
+        crate::installation::InstallSource::Published,
         &preview.candidate,
         &prepared.cli_binary,
-        &prepared.daemon_binary,
         artifacts.app_source,
     )?;
     let target_published_fallback = target_set.clone();
-    let target = crate::machine_install::InstallSelection {
+    let target = crate::installation::InstallSelection {
         installation_id: format!("published-{}", Uuid::new_v4().simple()),
-        source: crate::machine_install::InstallSource::Published,
+        source: crate::installation::InstallSource::Published,
         artifact_set: target_set,
         store: store_path.clone(),
     };
-    let mut switch = crate::machine_install::SwitchReceipt {
+    let mut switch = crate::installation::SwitchReceipt {
         schema_version: 1,
         id: switch_id,
         prior: prior.as_ref().map(|prior| prior.selection.clone()),
         target: target.clone(),
         published_fallback: prior.as_ref().map(|prior| prior.published_fallback.clone()),
         target_published_fallback: Some(target_published_fallback),
-        phase: crate::machine_install::SwitchPhase::Planned,
-        recovery_owner: crate::machine_install::RecoveryOwner::Coordinator,
+        phase: crate::installation::SwitchPhase::Planned,
+        recovery_owner: crate::installation::RecoveryOwner::Coordinator,
         target_store_advance_started: false,
         target_store_advanced: false,
         active_selection_committed: false,
@@ -3430,82 +2729,48 @@ fn promote_published_from_machine_install(
             .map(|prior| &prior.selection)
             .unwrap_or(&target)
             .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Cli)
-            .expect("validated machine install has a CLI")
+            .artifact(&crate::installation::ArtifactRole::Cli)
+            .expect("validated installation has a CLI")
             .clone(),
         candidate: target
             .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Cli)
+            .artifact(&crate::installation::ArtifactRole::Cli)
             .expect("validated published candidate has a CLI")
             .clone(),
-        activation: crate::machine_install::ActivationTargets {
+        activation: crate::installation::ActivationTargets {
             cli: artifacts.cli_target.to_path_buf(),
-            daemon: artifacts.daemon_target.to_path_buf(),
+            daemon: None,
             app: artifacts.app_target.map(Path::to_path_buf),
             legacy_app: artifacts.legacy_app_target.map(Path::to_path_buf),
         },
         app_was_running: false,
         disposable_store_owned: false,
     };
-    crate::machine_install::write_switch(&root, &switch)?;
-    let paused = match pause_home(
-        prior
-            .as_ref()
-            .map(|prior| prior.selection.store.as_path())
-            .unwrap_or(&store_path),
-    ) {
-        Ok(paused) => paused,
-        Err(error) => {
-            crate::machine_install::clear_switch(&root, &switch.id)?;
-            return Err(error);
-        }
-    };
+    crate::installation::write_switch(&root, &switch)?;
     if let Err(error) = quiesce_switch_app(&root, &mut switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
+        return Err(restore_before_advance(&root, &switch, lock, error));
     }
-    switch.phase = crate::machine_install::SwitchPhase::Quiesced;
-    if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
+    switch.phase = crate::installation::SwitchPhase::Quiesced;
+    if let Err(error) = crate::installation::write_switch(&root, &switch) {
+        return Err(restore_before_advance(&root, &switch, lock, error));
     }
-    switch.phase = crate::machine_install::SwitchPhase::TargetPrepared;
-    if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
+    switch.phase = crate::installation::SwitchPhase::TargetPrepared;
+    if let Err(error) = crate::installation::write_switch(&root, &switch) {
+        return Err(restore_before_advance(&root, &switch, lock, error));
     }
     switch = advance_switch_store(&root, switch, &preview.verdict)?;
-    activate_prepared_machine_switch(
+    activate_prepared_installation_switch(
         &root,
         &switch,
         &prepared,
         &preview.candidate,
         &preview.verdict,
     )?;
-    switch.phase = crate::machine_install::SwitchPhase::Activated;
-    crate::machine_install::write_switch(&root, &switch)?;
+    switch.phase = crate::installation::SwitchPhase::Activated;
+    crate::installation::write_switch(&root, &switch)?;
     let active = active_install_from_switch(&root, &switch)?;
     settle_app_artifacts(&prepared)?;
-    if store_is_exact(&preview.verdict) {
-        crate::lfd::service::finish_install_switch(paused.keeper_mode, &switch.activation.daemon)?;
-        commit_switch_selection(&root, &mut switch, &active)?;
-        resume_home_for_install_selection(&paused, &active.selection)?;
-    } else {
-        crate::lfd::service::prepare_install_switch(
-            paused.keeper_mode,
-            &switch.activation.daemon,
-            &switch.id,
-        )?;
-        resume_home_for_switch(&paused, &switch)?;
-        verify_switch_home(&paused, &switch)?;
-        crate::lfd::service::finish_install_switch(paused.keeper_mode, &switch.activation.daemon)?;
-        commit_switch_selection(&root, &mut switch, &active)?;
-        reload_home_for_install_selection(&paused, &active.selection)?;
-        verify_switch_home(&paused, &switch)?;
-    }
+    commit_switch_selection(&root, &mut switch, &active)?;
     finish_switch(&root, &switch, &active)?;
     println!(
         "promoted published {}: {} -> {} (store {})",
@@ -3515,7 +2780,7 @@ fn promote_published_from_machine_install(
         store_path.display()
     );
     if sync_skills {
-        if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false) {
+        if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false, false) {
             eprintln!(
                 "warning: skill sync failed ({error:#}); binaries installed, skills unchanged"
             );
@@ -3529,300 +2794,276 @@ pub fn promote(
     artifacts: PromotionArtifacts<'_>,
     sync_skills: bool,
     preview_only: bool,
-    from_build: Option<&Path>,
-    coordinated_build: Option<&Path>,
-    fresh: bool,
-    reuse_home: Option<&str>,
 ) -> Result<()> {
-    if (fresh || reuse_home.is_some()) && from_build.is_none() && coordinated_build.is_none() {
-        return Err(anyhow!(
-            "--fresh and --reuse-home require --from-build during local promotion"
-        ));
-    }
-    guard_promote_hop()?;
-    // A published app update without an explicit destination replaces the
-    // copy this machine recorded, never a second one in /Applications.
-    let resolved_app_target;
-    let resolved_legacy_target;
-    let mut artifacts = artifacts;
-    if artifacts.app_source.is_some() && artifacts.app_target.is_none() {
-        resolved_app_target = app_destination()?;
-        let parent = resolved_app_target
-            .parent()
-            .expect("an app destination has a parent directory");
-        fs::create_dir_all(parent)
-            .with_context(|| format!("create application directory {}", parent.display()))?;
-        resolved_legacy_target = parent.join("Concerto.app");
-        artifacts.app_target = Some(&resolved_app_target);
-        artifacts.legacy_app_target = artifacts
-            .legacy_app_target
-            .or(Some(&resolved_legacy_target));
-    }
-    let root = crate::machine_install::root()?;
-    let state = crate::machine_install::read_state(&root)?;
-    if let crate::machine_install::MachineInstallState::Switching(receipt) = &state {
-        return delegate_switch_recovery(receipt);
-    }
-    let current = fs::canonicalize(
-        std::env::current_exe().context("resolve running promotion coordinator")?,
-    )?;
-    // A published helper invoked from the app must leave the bundle before
-    // quiescing its processes or replacing its files. Keep the same PID and
-    // invocation, now backed by retained bytes outside the activation target.
-    if !preview_only && from_build.is_none() && coordinated_build.is_none() {
-        let in_bundle = [artifacts.app_source, artifacts.app_target]
-            .into_iter()
-            .flatten()
-            .map(crate::store::canonicalize_with_missing_tail)
-            .collect::<std::io::Result<Vec<_>>>()?
-            .iter()
-            .any(|bundle| current.starts_with(bundle));
-        if in_bundle {
-            let retained = stage_binary(&current, &lf_bin_dir())?;
-            let mut command = Command::new(&retained);
-            command.args(std::env::args_os().skip(1));
-            stamp_next_promote_hop(&mut command, current_promote_hop());
-            return Err(command.exec()).context("continue promotion outside the app bundle");
-        }
-    }
-    if let (Some(from_build), Some(coordinated_build)) = (from_build, coordinated_build) {
-        let from_build = fs::canonicalize(from_build)
-            .with_context(|| format!("resolve promotion build {}", from_build.display()))?;
-        let coordinated_build = fs::canonicalize(coordinated_build).with_context(|| {
-            format!(
-                "resolve coordinated promotion build {}",
-                coordinated_build.display()
-            )
-        })?;
-        if from_build != coordinated_build {
-            return Err(anyhow!(
-                "--from-build and --coordinated-build must name the same candidate"
-            ));
-        }
-    }
-    let requested = coordinated_build.or(from_build);
-    let candidate = requested
-        .map(|build| {
-            fs::canonicalize(build)
-                .with_context(|| format!("resolve promotion build {}", build.display()))
-        })
-        .transpose()?
-        .unwrap_or_else(|| current.clone());
-
-    if reuse_home.is_some()
-        && read_binary_preflight(&candidate)?.candidate.authority
-            != MigrationAuthority::ValidationOnly
+    if let crate::installation::InstallationState::Switching(receipt) =
+        crate::installation::read_state(&crate::installation::root()?)?
     {
-        return Err(anyhow!(
-            "--reuse-home requires an unpublished development build"
-        ));
+        delegate_switch_recovery(&receipt)?;
+    } else {
+        // A published app update without an explicit destination replaces the
+        // copy this machine recorded, never a second one in /Applications.
+        let resolved_app_target;
+        let resolved_legacy_target;
+        let mut artifacts = artifacts;
+        if artifacts.app_source.is_some() && artifacts.app_target.is_none() {
+            resolved_app_target = app_destination()?;
+            let parent = resolved_app_target
+                .parent()
+                .expect("an app destination has a parent directory");
+            fs::create_dir_all(parent)
+                .with_context(|| format!("create application directory {}", parent.display()))?;
+            resolved_legacy_target = parent.join("Concerto.app");
+            artifacts.app_target = Some(&resolved_app_target);
+            artifacts.legacy_app_target = artifacts
+                .legacy_app_target
+                .or(Some(&resolved_legacy_target));
+        }
+        let current = fs::canonicalize(std::env::current_exe()?)?;
+        // A published helper invoked from the app must leave the bundle before
+        // quiescing its processes or replacing its files. Keep the same PID and
+        // invocation, now backed by retained bytes outside the activation target.
+        if !preview_only {
+            let in_bundle = [artifacts.app_source, artifacts.app_target]
+                .into_iter()
+                .flatten()
+                .map(crate::store::canonicalize_with_missing_tail)
+                .collect::<std::io::Result<Vec<_>>>()?
+                .iter()
+                .any(|bundle| current.starts_with(bundle));
+            if in_bundle {
+                let retained = stage_binary(&current, &lf_bin_dir())?;
+                return Err(Command::new(&retained)
+                    .args(std::env::args_os().skip(1))
+                    .exec())
+                .context("continue promotion outside the app bundle");
+            }
+        }
+        promote_published_from_installation(artifacts, &current, sync_skills, preview_only)?;
     }
+    if sync_skills && !preview_only {
+        install_link_receiver(artifacts.app_target);
+    }
+    Ok(())
+}
 
-    if let crate::machine_install::MachineInstallState::Settled(active) = &state {
-        if active.selection.source == crate::machine_install::InstallSource::Development {
-            let candidate_identity = read_binary_preflight(&candidate)?.candidate;
-            if candidate_identity.authority == MigrationAuthority::ValidationOnly {
-                if from_build.is_none() {
-                    return Err(anyhow!(
-                        "promoting a development candidate requires --from-build"
-                    ));
-                }
-                if current != candidate {
-                    return delegate_local_promotion(
-                        &candidate,
-                        &artifacts,
-                        sync_skills,
-                        preview_only,
-                        fresh,
-                        reuse_home,
-                    );
-                }
-                return promote_local_candidate(
-                    artifacts,
-                    &candidate,
-                    sync_skills,
-                    preview_only,
-                    fresh,
-                    reuse_home,
-                );
-            }
-            let coordinator = active
-                .selection
-                .artifact_set
-                .artifact(&crate::machine_install::ArtifactRole::Cli)
-                .expect("validated active development install has a CLI");
-            coordinator.verify()?;
-            if current != coordinator.path {
-                if coordinated_build.is_some() {
-                    return Err(anyhow!(
-                        "only active install coordinator {} may consume --coordinated-build",
-                        coordinator.path.display()
-                    ));
-                }
-                return delegate_to_active_coordinator(
-                    &coordinator.path,
-                    &candidate,
-                    &artifacts,
-                    sync_skills,
-                    preview_only,
-                    fresh,
-                    reuse_home,
-                );
-            }
-            return promote_published_from_machine_install(
-                artifacts,
-                &candidate,
-                sync_skills,
-                preview_only,
-            );
+/// Keep `loopflow:` links clickable without Desktop; failure leaves `lf open URL`.
+fn install_link_receiver(desktop: Option<&Path>) {
+    use crate::work::link_receiver::{self, Receiver};
+    let located = crate::installation::account_home()
+        .and_then(|home| Ok((home, crate::os_process::resolve_lf_binary()?)));
+    let (home, lf) = match located {
+        Ok(located) => located,
+        Err(error) => {
+            eprintln!("warning: link receiver installation failed ({error:#}); `lf open URL` still opens links");
+            return;
         }
-    }
-    if coordinated_build.is_some() {
-        return Err(anyhow!(
-            "--coordinated-build requires an active development installation"
-        ));
-    }
-    if let Some(build) = from_build {
-        let build = fs::canonicalize(build)
-            .with_context(|| format!("resolve local promotion build {}", build.display()))?;
-        if build != current {
-            return delegate_local_promotion(
-                &build,
-                &artifacts,
-                sync_skills,
-                preview_only,
-                fresh,
-                reuse_home,
-            );
+    };
+    match link_receiver::install(&home, &lf, desktop) {
+        Ok(Receiver::Installed(path)) => {
+            println!("loopflow: links open through {}", path.display());
         }
-        return promote_local_candidate(
-            artifacts,
-            &build,
-            sync_skills,
-            preview_only,
-            fresh,
-            reuse_home,
-        );
+        Ok(Receiver::Desktop) => {}
+        Ok(Receiver::Other(handler)) => println!(
+            "loopflow: links stay with {handler}; `lf open URL` opens them from a terminal"
+        ),
+        Err(error) => eprintln!(
+            "warning: link receiver installation failed ({error:#}); `lf open URL` still opens links"
+        ),
     }
-    match state {
-        crate::machine_install::MachineInstallState::Settled(_) => {
-            return promote_published_from_machine_install(
-                artifacts,
-                &current,
-                sync_skills,
-                preview_only,
-            );
-        }
-        crate::machine_install::MachineInstallState::Switching(receipt) => {
-            return Err(anyhow!(
-                "install switch {} is unsettled; recover it before publishing another artifact set",
-                receipt.id
-            ));
-        }
-        _ => {}
+    if let Err(error) = link_receiver::install_herdr(&home, &lf) {
+        eprintln!("warning: Herdr link handler installation failed ({error:#})");
     }
-    promote_published_from_machine_install(artifacts, &current, sync_skills, preview_only)
 }
 
 /// Activate retained immutable bytes only when that binary's own preflight
 /// recognizes the current store exactly. The exclusive lock keeps artifact and
 /// store selection serialized through the symlink commit.
-pub fn rollback(
-    cli_target: &Path,
-    candidate: &Path,
-    daemon_target: &Path,
-    daemon_candidate: &Path,
-) -> Result<()> {
+pub fn rollback(cli_target: &Path, candidate: &Path) -> Result<()> {
     let _lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
-    match crate::machine_install::read_state(&crate::machine_install::root()?)? {
-        crate::machine_install::MachineInstallState::Legacy => {}
-        crate::machine_install::MachineInstallState::Settled(active) => {
+    match crate::installation::read_state(&crate::installation::root()?)? {
+        crate::installation::InstallationState::Legacy => {}
+        crate::installation::InstallationState::Settled(active) => {
             return Err(anyhow!(
-                "machine installation {} is receipt-managed; use published promotion or switch recovery instead of legacy rollback",
+                "installation {} is receipt-managed; use published promotion or switch recovery instead of legacy rollback",
                 active.selection.installation_id
             ))
         }
-        crate::machine_install::MachineInstallState::Switching(receipt) => {
+        crate::installation::InstallationState::Switching(receipt) => {
             return Err(anyhow!(
                 "install switch {} is unsettled; legacy rollback is fenced",
                 receipt.id
             ))
         }
     }
-    let (candidate, daemon_candidate) = rollback_from_store(
-        cli_target,
-        candidate,
-        daemon_target,
-        daemon_candidate,
-        &lf_bin_dir(),
-    )?;
+    let candidate = rollback_from_store(cli_target, candidate, &lf_bin_dir())?;
     println!(
         "rolled back: {} -> {}",
         cli_target.display(),
         candidate.display()
     );
-    println!(
-        "rolled back lfd: {} -> {}",
-        daemon_target.display(),
-        daemon_candidate.display()
-    );
     Ok(())
 }
 
-fn rollback_from_store(
-    cli_target: &Path,
-    candidate: &Path,
-    daemon_target: &Path,
-    daemon_candidate: &Path,
-    bin_dir: &Path,
-) -> Result<(PathBuf, PathBuf)> {
+fn rollback_from_store(cli_target: &Path, candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
     let candidate = retained_binary_path(candidate, bin_dir)?;
-    let daemon_candidate = retained_daemon_path(daemon_candidate, bin_dir)?;
     let preflight = read_binary_preflight(&candidate)?;
     validate_rollback_verdict(&preflight.verdict)?;
-    validate_daemon_candidate(&daemon_candidate, &preflight.candidate)?;
-
-    let current_daemon = preserve_prior_daemon(daemon_target, bin_dir)?;
-    commit_cli_symlink(daemon_target, &daemon_candidate)?;
-    if let Err(error) = activate_rollback(cli_target, &candidate, &preflight.verdict) {
-        let restored = match current_daemon.as_deref() {
-            Some(current) => commit_cli_symlink(daemon_target, current),
-            None => remove_path(daemon_target),
-        };
-        if let Err(restore_error) = restored {
-            return Err(anyhow!(
-                "{error}; restoring current lfd target also failed: {restore_error}"
-            ));
-        }
-        return Err(error);
-    }
-    Ok((candidate, daemon_candidate))
-}
-
-#[cfg(test)]
-mod hop_guard_tests {
-    use super::{check_promote_hop, MAX_PROMOTE_HOPS};
-
-    #[test]
-    fn a_converging_chain_is_allowed_and_a_runaway_fails_closed() {
-        // Every hop below the bound proceeds — a healthy promotion converges in one.
-        for hop in 0..MAX_PROMOTE_HOPS {
-            assert_eq!(check_promote_hop(hop).unwrap(), hop);
-        }
-        // At the bound the delegation is declared non-convergent and fails closed,
-        // so two divergent builds can never fork-bomb the machine.
-        let error = check_promote_hop(MAX_PROMOTE_HOPS).unwrap_err().to_string();
-        assert!(error.contains("did not converge"), "diagnostic: {error}");
-        assert!(check_promote_hop(MAX_PROMOTE_HOPS + 1).is_err());
-    }
+    activate_rollback(cli_target, &candidate, &preflight.verdict)?;
+    Ok(candidate)
 }
 
 #[cfg(test)]
 mod artifact_tests {
-    use super::{commit_cli_symlink, copy_tree, stage_app_copy, stage_binary, tree_digest};
+    use super::{
+        app_executable_paths, commit_cli_symlink, copy_tree, prune_superseded_artifacts,
+        retained_published_sets, stage_app_copy, stage_binary, tree_digest,
+    };
+    use crate::installation::{
+        ActiveInstall, ArtifactIdentity, ArtifactRole, ArtifactSet, InstallSelection, InstallSource,
+    };
     use std::fs;
+    use std::io::{BufRead, BufReader};
     use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+
+    fn published_set(id: &str, paths: &[&Path]) -> ArtifactSet {
+        ArtifactSet {
+            id: id.to_string(),
+            source: InstallSource::Published,
+            source_revision: id.to_string(),
+            source_identity: "release".to_string(),
+            content_sha256: id.to_string(),
+            artifacts: paths
+                .iter()
+                .map(|path| ArtifactIdentity {
+                    role: ArtifactRole::Cli,
+                    path: path.to_path_buf(),
+                    sha256: String::new(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn cli_only_switch_leaves_prior_app_processes_out_of_quiescence() {
+        let retained_app = Path::new("/retained/Loopflow.app/Contents/MacOS/Loopflow");
+        let retained_helper = Path::new("/retained/Loopflow.app/Contents/MacOS/lf");
+        let mut artifacts = published_set("prior", &[retained_app, retained_helper]);
+        artifacts.artifacts[0].role = ArtifactRole::App;
+        artifacts.artifacts[1].role = ArtifactRole::AppHelper("lf".into());
+        let selection = InstallSelection {
+            installation_id: "published-prior".into(),
+            source: InstallSource::Published,
+            artifact_set: artifacts,
+            store: "/store/loopflow.db".into(),
+        };
+
+        assert!(app_executable_paths(Some(&selection), None).is_empty());
+        let paths = app_executable_paths(
+            Some(&selection),
+            Some(Path::new("/Applications/Loopflow.app")),
+        );
+        assert_eq!(
+            paths,
+            [
+                Path::new("/Applications/Loopflow.app/Contents/MacOS/Loopflow"),
+                Path::new("/Applications/Loopflow.app/Contents/MacOS/lf"),
+                retained_app,
+                retained_helper,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_settled_install_keeps_only_what_it_can_select_or_is_running() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("install");
+        let bin = home.path().join("bin");
+        let artifacts = root.join("artifacts");
+        fs::create_dir_all(&bin).unwrap();
+        let binary = |label: &str, digit: char| {
+            let path = bin.join(format!("{label}-{}", digit.to_string().repeat(64)));
+            fs::write(&path, label).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o555)).unwrap();
+            path
+        };
+        let bundle = |label: &str, digit: char| {
+            let path = artifacts.join(format!("{label}-{}", digit.to_string().repeat(64)));
+            let helper = path.join("Loopflow.app/Contents/MacOS/lf");
+            fs::create_dir_all(helper.parent().unwrap()).unwrap();
+            fs::write(&helper, label).unwrap();
+            (path, helper)
+        };
+        let (selected, previous, superseded) =
+            (binary("lf", '1'), binary("lf", '2'), binary("lf", '3'));
+        let daemon = binary("lfd", '4');
+        let (selected_app, selected_helper) = bundle("published", '5');
+        let (superseded_app, _) = bundle("development", '6');
+        let running = bin.join(format!("lf-{}", "7".repeat(64)));
+        fs::copy(std::env::current_exe().unwrap(), &running).unwrap();
+        let mut process = std::process::Command::new(&running)
+            .args([
+                "--ignored",
+                "--exact",
+                "lf::commands::install::artifact_tests::artifact_keepalive",
+                "--nocapture",
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Spawn acceptance alone does not prove the child is observable at its
+        // new executable. Keep that exact executable running before pruning.
+        assert!(BufReader::new(process.stdout.take().unwrap())
+            .lines()
+            .any(|line| line.unwrap() == "ready"));
+        let by_hand = bin.join("hotfix-61609c56");
+        fs::write(&by_hand, "hotfix").unwrap();
+        let unfinished = artifacts.join("published-partial");
+        fs::create_dir_all(&unfinished).unwrap();
+
+        let fallback = published_set("new", &[&selected, &selected_helper]);
+        let prior = published_set("prior", &[&previous]);
+        let active = ActiveInstall {
+            schema_version: 1,
+            selection: InstallSelection {
+                installation_id: "published-new".to_string(),
+                source: InstallSource::Published,
+                artifact_set: fallback.clone(),
+                store: home.path().join("loopflow.db"),
+            },
+            retained_published_sets: retained_published_sets(&fallback, Some(&prior)),
+            published_fallback: fallback,
+            activation: None,
+        };
+        prune_superseded_artifacts(&root, &bin, &active);
+        let survived = running.exists();
+        process.kill().unwrap();
+        process.wait().unwrap();
+
+        assert!(selected.exists() && previous.exists() && selected_app.exists());
+        assert!(survived, "a binary a live process executes was removed");
+        assert!(by_hand.exists() && unfinished.exists());
+        assert!(!superseded.exists() && !daemon.exists() && !superseded_app.exists());
+    }
+
+    #[test]
+    #[ignore = "entry point for the artifact-retention fixture"]
+    fn artifact_keepalive() {
+        // A copied system shell is killed by macOS under network isolation.
+        println!("ready");
+        std::io::stdin().read_line(&mut String::new()).unwrap();
+    }
+
+    #[test]
+    fn a_reinstalled_fallback_is_retained_once() {
+        let fallback = published_set("new", &[]);
+        assert_eq!(
+            retained_published_sets(&fallback, Some(&fallback)),
+            [fallback]
+        );
+    }
 
     #[test]
     fn staging_is_content_addressed_and_rejects_replaced_bytes() {
@@ -3898,7 +3139,7 @@ mod app_activation_tests {
     use std::path::Path;
 
     use super::{app_to_resume, copy_tree};
-    use crate::machine_install::{
+    use crate::installation::{
         ActivationTargets, ArtifactIdentity, ArtifactRole, ArtifactSet, InstallSelection,
         InstallSource, RecoveryOwner, SwitchPhase, SwitchReceipt,
     };
@@ -3908,7 +3149,7 @@ mod app_activation_tests {
         let app = directory.join("Applications/Loopflow.app");
         let binaries = app.join("Contents/MacOS");
         fs::create_dir_all(&binaries).unwrap();
-        for name in ["Loopflow", "lf", "lfd"] {
+        for name in ["Loopflow", "lf"] {
             fs::copy("/bin/sleep", binaries.join(name)).unwrap();
         }
         fs::write(
@@ -3920,24 +3161,20 @@ mod app_activation_tests {
         fs::create_dir_all(retained.parent().unwrap()).unwrap();
         copy_tree(&app, &retained).unwrap();
         fs::write(directory.join("cli"), b"cli").unwrap();
-        fs::write(directory.join("daemon"), b"daemon").unwrap();
         let cli = ArtifactIdentity::capture(ArtifactRole::Cli, &directory.join("cli")).unwrap();
-        let daemon =
-            ArtifactIdentity::capture(ArtifactRole::Daemon, &directory.join("daemon")).unwrap();
         let set = ArtifactSet {
             id: "published-test".to_string(),
             source: InstallSource::Published,
             source_revision: "test-revision".to_string(),
             source_identity: "test-identity".to_string(),
-            content_sha256: crate::machine_install::artifact_set_sha256(
+            content_sha256: crate::installation::artifact_set_sha256(
                 &cli.path,
-                &daemon.path,
+                None,
                 Some(&retained),
             )
             .unwrap(),
             artifacts: vec![
                 cli.clone(),
-                daemon,
                 ArtifactIdentity::capture(
                     ArtifactRole::App,
                     &retained.join("Contents/MacOS/Loopflow"),
@@ -3946,11 +3183,6 @@ mod app_activation_tests {
                 ArtifactIdentity::capture(
                     ArtifactRole::AppHelper("lf".to_string()),
                     &retained.join("Contents/MacOS/lf"),
-                )
-                .unwrap(),
-                ArtifactIdentity::capture(
-                    ArtifactRole::AppHelper("lfd".to_string()),
-                    &retained.join("Contents/MacOS/lfd"),
                 )
                 .unwrap(),
             ],
@@ -3976,7 +3208,7 @@ mod app_activation_tests {
             candidate: cli,
             activation: ActivationTargets {
                 cli: directory.join("bin/lf"),
-                daemon: directory.join("bin/lfd"),
+                daemon: None,
                 app: Some(app),
                 legacy_app: None,
             },
@@ -3995,8 +3227,8 @@ mod app_activation_tests {
     }
 
     fn pending_switch(root: &Path) -> SwitchReceipt {
-        match crate::machine_install::read_state(root).unwrap() {
-            crate::machine_install::MachineInstallState::Switching(receipt) => *receipt,
+        match crate::installation::read_state(root).unwrap() {
+            crate::installation::InstallationState::Switching(receipt) => *receipt,
             state => panic!("expected pending recovery, got {state:?}"),
         }
     }
@@ -4006,10 +3238,9 @@ mod app_activation_tests {
         for (path, role) in [
             (receipt.candidate.path.clone(), ArtifactRole::Cli),
             (app.join("Contents/MacOS/lf"), ArtifactRole::Cli),
-            (app.join("Contents/MacOS/lfd"), ArtifactRole::Daemon),
         ] {
             assert_eq!(
-                crate::machine_install::authorize(root, &path, &role).unwrap(),
+                crate::installation::authorize(root, &path, &role).unwrap(),
                 Some(receipt.target.clone()),
             );
         }
@@ -4020,7 +3251,7 @@ mod app_activation_tests {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("machine");
         let mut receipt = activated_install(directory.path());
-        crate::machine_install::write_switch(&root, &receipt).unwrap();
+        crate::installation::write_switch(&root, &receipt).unwrap();
         let active = super::active_install_from_switch(&root, &receipt).unwrap();
         super::commit_switch_selection(&root, &mut receipt, &active).unwrap();
         assert_target_startup(&root, &pending_switch(&root));
@@ -4028,8 +3259,8 @@ mod app_activation_tests {
         super::finish_switch(&root, &receipt, &active).unwrap();
 
         assert!(matches!(
-            crate::machine_install::read_state(&root).unwrap(),
-            crate::machine_install::MachineInstallState::Settled(found) if *found == active
+            crate::installation::read_state(&root).unwrap(),
+            crate::installation::InstallationState::Settled(found) if *found == active
         ));
         assert!(!receipt.app_was_running);
     }
@@ -4094,8 +3325,8 @@ mod app_activation_tests {
         use std::time::{Duration, Instant};
 
         use super::{activated_install, assert_target_startup, first_install, pending_switch};
+        use crate::installation::{self, ArtifactRole, InstallSource, InstallationState};
         use crate::lf::commands::install::{quiesce_switch_app, running_app_processes};
-        use crate::machine_install::{self, ArtifactRole, InstallSource, MachineInstallState};
 
         struct FixtureProcess(Child);
 
@@ -4106,7 +3337,7 @@ mod app_activation_tests {
             }
         }
 
-        fn start_app(receipt: &machine_install::SwitchReceipt) -> FixtureProcess {
+        fn start_app(receipt: &installation::SwitchReceipt) -> FixtureProcess {
             let path = receipt
                 .activation
                 .app
@@ -4136,21 +3367,12 @@ mod app_activation_tests {
                 let root = directory.path().join("machine");
                 let mut receipt = activated_install(directory.path());
                 let prior_directory = tempfile::tempdir().unwrap();
-                let older_directory = tempfile::tempdir().unwrap();
                 let mut expected_releases = Vec::new();
                 if update {
                     let prior = first_install(prior_directory.path());
-                    let older = first_install(older_directory.path());
-                    expected_releases = vec![
-                        prior.target.artifact_set.clone(),
-                        older.target.artifact_set.clone(),
-                    ];
-                    let mut active =
-                        super::super::active_install_from_switch(&root, &prior).unwrap();
-                    active
-                        .retained_published_sets
-                        .push(older.target.artifact_set);
-                    machine_install::write_active(&root, &active).unwrap();
+                    expected_releases = vec![prior.target.artifact_set.clone()];
+                    let active = super::super::active_install_from_switch(&root, &prior).unwrap();
+                    installation::write_active(&root, &active).unwrap();
                     receipt.coordinator = prior.candidate;
                     receipt.published_fallback = Some(prior.target.artifact_set.clone());
                     receipt.prior = Some(prior.target);
@@ -4160,16 +3382,17 @@ mod app_activation_tests {
                 if source == InstallSource::Development {
                     receipt.target_published_fallback = None;
                 } else {
-                    expected_releases.push(receipt.target.artifact_set.clone());
+                    // A settled install keeps its fallback and the one it replaced.
+                    expected_releases.insert(0, receipt.target.artifact_set.clone());
                 }
                 receipt.app_was_running = true;
-                machine_install::write_switch(&root, &receipt).unwrap();
+                installation::write_switch(&root, &receipt).unwrap();
                 // Interruption before selection commit preserves ordinary startup's
                 // prior-store routing (and refuses an unfinished first install).
                 let mut receipt = pending_switch(&root);
                 if let Some(prior) = &receipt.prior {
                     assert_eq!(
-                        machine_install::authorize(
+                        installation::authorize(
                             &root,
                             &receipt.coordinator.path,
                             &ArtifactRole::Cli
@@ -4178,7 +3401,7 @@ mod app_activation_tests {
                         Some(prior.clone()),
                     );
                 } else {
-                    assert!(machine_install::authorize(
+                    assert!(installation::authorize(
                         &root,
                         &receipt.candidate.path,
                         &ArtifactRole::Cli
@@ -4208,21 +3431,21 @@ mod app_activation_tests {
                 super::super::finish_switch(&root, &receipt, &active).unwrap();
                 assert!(app.0.try_wait().unwrap().is_none());
                 assert!(matches!(
-                    machine_install::read_state(&root).unwrap(),
-                    MachineInstallState::Settled(found) if *found == active
+                    installation::read_state(&root).unwrap(),
+                    InstallationState::Settled(found) if *found == active
                 ));
                 assert_target_startup(&root, &receipt);
                 // Model an exit after active.json and the archive are durable,
                 // but before removal of the active switch. Recovery must keep
                 // the exact retained selections and accept the immutable archive.
-                machine_install::write_switch(&root, &receipt).unwrap();
+                installation::write_switch(&root, &receipt).unwrap();
                 let recovered = super::super::active_install_from_switch(&root, &receipt).unwrap();
                 assert_eq!(recovered, active);
                 super::super::finish_switch(&root, &receipt, &recovered).unwrap();
                 assert!(app.0.try_wait().unwrap().is_none());
                 assert!(matches!(
-                    machine_install::read_state(&root).unwrap(),
-                    MachineInstallState::Settled(_)
+                    installation::read_state(&root).unwrap(),
+                    InstallationState::Settled(_)
                 ));
                 // No active receipt remains for later startup to replay.
                 assert!(root
@@ -4240,18 +3463,18 @@ mod app_activation_tests {
             let prior_directory = tempfile::tempdir().unwrap();
             let prior = first_install(prior_directory.path());
             let active = super::super::active_install_from_switch(&root, &prior).unwrap();
-            machine_install::write_active(&root, &active).unwrap();
+            installation::write_active(&root, &active).unwrap();
             receipt.coordinator = prior.candidate;
             receipt.activation.app = prior.activation.app;
             receipt.published_fallback = Some(prior.target.artifact_set.clone());
             receipt.prior = Some(prior.target.clone());
             receipt.app_was_running = true;
-            machine_install::write_switch(&root, &receipt).unwrap();
+            installation::write_switch(&root, &receipt).unwrap();
 
             assert!(super::super::cancel_unadvanced_switch(&root, &receipt).is_err());
             let receipt = pending_switch(&root);
             assert_eq!(
-                machine_install::authorize(&root, &receipt.coordinator.path, &ArtifactRole::Cli)
+                installation::authorize(&root, &receipt.coordinator.path, &ArtifactRole::Cli)
                     .unwrap(),
                 Some(prior.target),
             );
@@ -4259,8 +3482,8 @@ mod app_activation_tests {
             super::super::cancel_unadvanced_switch(&root, &receipt).unwrap();
             assert!(app.0.try_wait().unwrap().is_none());
             assert!(matches!(
-                machine_install::read_state(&root).unwrap(),
-                MachineInstallState::Settled(found) if *found == active
+                installation::read_state(&root).unwrap(),
+                InstallationState::Settled(found) if *found == active
             ));
             assert!(!root.join("receipts").exists());
         }
@@ -4342,8 +3565,8 @@ mod app_activation_tests {
             assert!(unrelated.0.try_wait().unwrap().is_none());
             quiesce_switch_app(directory.path(), &mut receipt).unwrap();
             assert!(receipt.app_was_running, "retry lost the restart intent");
-            let saved = crate::machine_install::read_state(directory.path()).unwrap();
-            let crate::machine_install::MachineInstallState::Switching(saved) = saved else {
+            let saved = crate::installation::read_state(directory.path()).unwrap();
+            let crate::installation::InstallationState::Switching(saved) = saved else {
                 panic!("expected a recoverable switch");
             };
             assert!(saved.app_was_running);

@@ -1,0 +1,283 @@
+//! Native dispatch holds the per-Session OS lock while one transport write
+//! completes. Attachment validation releases SQLite before transport I/O, so
+//! history and unrelated database writes remain independent of that fence.
+//!
+//! Two rules keep the fence from joining a cycle with the runtime:
+//!
+//! - The write is driven and timed on the dispatching thread. A stalled
+//!   runtime cannot postpone the deadline, so the fence is always released.
+//! - Async transport writes run on blocking workers. Synchronous store work
+//!   yields a multithreaded runtime's worker; on a current-thread runtime it
+//!   runs inline, so it must not depend on that runtime making progress.
+
+use std::fmt::Display;
+use std::future::Future;
+use std::pin::pin;
+use std::sync::Arc;
+use std::task::{Context, Poll, Wake, Waker};
+use std::thread::{self, Thread};
+use std::time::{Duration, Instant};
+
+use futures_util::{Sink, SinkExt};
+use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::runtime::{Handle, RuntimeFlavor};
+
+use crate::store::{StoreError, StoreResult};
+
+/// Longest a native write may hold the Session fence.
+const DISPATCH_LIMIT: Duration = Duration::from_secs(2);
+
+struct Unpark(Thread);
+
+impl Wake for Unpark {
+    fn wake(self: Arc<Self>) {
+        self.0.unpark();
+    }
+}
+
+/// Drive `future` on this thread until it finishes or `limit` of real time
+/// passes. `None` means the limit passed; the future's effect is then unknown.
+fn within<F: Future>(limit: Duration, future: F) -> Option<F::Output> {
+    let waker = Waker::from(Arc::new(Unpark(thread::current())));
+    let mut context = Context::from_waker(&waker);
+    let mut future = pin!(future);
+    let deadline = Instant::now() + limit;
+    loop {
+        if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
+            return Some(output);
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return None;
+        }
+        thread::park_timeout(remaining);
+    }
+}
+
+/// Send one message from a blocking thread that holds the Session fence.
+pub(super) fn send_fenced<S, M>(sink: &mut S, message: M) -> StoreResult<()>
+where
+    S: Sink<M> + Unpin,
+    S::Error: Display,
+{
+    within(DISPATCH_LIMIT, sink.send(message))
+        .ok_or_else(|| {
+            StoreError::InvalidData("Native dispatch timed out; outcome is unknown".into())
+        })?
+        .map_err(|error| StoreError::InvalidData(format!("Native dispatch failed: {error}")))
+}
+
+/// Pipe writes obey the same real-time fence deadline as socket dispatch.
+pub(super) fn write_fenced<W: AsyncWrite + Unpin>(writer: &mut W, bytes: &[u8]) -> StoreResult<()> {
+    within(DISPATCH_LIMIT, async {
+        writer.write_all(bytes).await?;
+        writer.flush().await
+    })
+    .ok_or_else(|| StoreError::InvalidData("Native dispatch timed out; outcome is unknown".into()))?
+    .map_err(|error| StoreError::InvalidData(format!("Native dispatch failed: {error}")))
+}
+
+/// Yield a multithreaded runtime's worker during synchronous store work.
+/// Current-thread and non-runtime callers run inline; work must not require
+/// their reactor to make progress.
+pub(super) fn off_reactor<T>(work: impl FnOnce() -> T) -> T {
+    match Handle::try_current().map(|handle| handle.runtime_flavor()) {
+        Ok(RuntimeFlavor::MultiThread) => tokio::task::block_in_place(work),
+        _ => work(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{off_reactor, within};
+    use crate::id::LfProcessId;
+    use crate::process::SessionAttachment;
+    use crate::store::sqlite::SqliteStore;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{mpsc, Arc};
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UnixStream;
+
+    fn fenced_session(home: &tempfile::TempDir) -> (SqliteStore, SessionAttachment) {
+        let path = home.path().join("dispatch.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        store.test_session("conversation", "run_00000000000000000000000000000001");
+        let process = LfProcessId::new();
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [process.as_str()],
+            )
+            .unwrap();
+        let attachment = store
+            .claim_session_attachment("conversation", None, &process, false)
+            .unwrap();
+        (store, attachment)
+    }
+
+    /// One worker is the smallest runtime in which a waiting reader can stop
+    /// everything else. A hang fails here instead of stalling the suite.
+    fn on_one_worker<T: Send + 'static>(
+        scenario: impl std::future::Future<Output = T> + Send + 'static,
+    ) -> T {
+        let (done, outcome) = mpsc::channel();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .unwrap();
+            let _ = done.send(runtime.block_on(async { tokio::spawn(scenario).await.unwrap() }));
+        });
+        outcome
+            .recv_timeout(Duration::from_secs(20))
+            .expect("fenced dispatch and its reader deadlocked")
+    }
+
+    /// More bytes than a socket pair buffers, so the write waits for its peer.
+    const UNBUFFERED: usize = 8 << 20;
+
+    #[test]
+    fn startup_output_and_input_progress_while_takeover_waits_for_both() {
+        let home = tempfile::tempdir().unwrap();
+        let (store, attachment) = fenced_session(&home);
+        let (input_entered, input_ready) = mpsc::channel();
+        let (finish_input, input_finished) = mpsc::channel();
+        let input_store = store.clone();
+        let input_claim = attachment.clone();
+        let input = std::thread::spawn(move || {
+            input_store
+                .with_session_dispatch("conversation", &input_claim, || {
+                    input_entered.send(()).unwrap();
+                    input_finished.recv_timeout(Duration::from_secs(5)).unwrap();
+                    Ok(())
+                })
+                .unwrap();
+        });
+        input_ready.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        let (hook_entered, hook_ready) = mpsc::channel();
+        let (finish_hook, hook_finished) = mpsc::channel();
+        let hook_store = store.clone();
+        let hook_claim = attachment.clone();
+        let hook = std::thread::spawn(move || {
+            hook_store
+                .with_session_dispatch("conversation", &hook_claim, || {
+                    hook_entered.send(()).unwrap();
+                    hook_finished.recv_timeout(Duration::from_secs(5)).unwrap();
+                    Ok(())
+                })
+                .unwrap();
+        });
+        hook_ready
+            .recv_timeout(Duration::from_secs(1))
+            .expect("startup hook must finish before the provider drains input");
+
+        let transfer_store = store.clone();
+        let former = attachment.clone();
+        let (transferred, transfer) = mpsc::channel();
+        let takeover = std::thread::spawn(move || {
+            let next = transfer_store
+                .claim_session_attachment("conversation", Some(&former), &LfProcessId::new(), false)
+                .unwrap();
+            transferred.send(next).unwrap();
+        });
+        assert!(transfer.recv_timeout(Duration::from_millis(50)).is_err());
+        finish_input.send(()).unwrap();
+        input.join().unwrap();
+        assert!(transfer.recv_timeout(Duration::from_millis(50)).is_err());
+        finish_hook.send(()).unwrap();
+        hook.join().unwrap();
+        let next = transfer.recv_timeout(Duration::from_secs(2)).unwrap();
+        takeover.join().unwrap();
+        assert_ne!(next.token, attachment.token);
+        assert!(store
+            .with_session_dispatch::<()>("conversation", &attachment, || {
+                panic!("stale input wrote after takeover")
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn reader_waiting_for_the_fence_leaves_the_runtime_running() {
+        let home = tempfile::tempdir().unwrap();
+        let (store, attachment) = fenced_session(&home);
+        let (written, read, ticked) = on_one_worker(async move {
+            let (mut provider, mut peer) = UnixStream::pair().unwrap();
+            let (held, holding) = tokio::sync::oneshot::channel();
+            let ticked = Arc::new(AtomicBool::new(false));
+            let writer_store = store.clone();
+            let writer = tokio::task::spawn_blocking(move || {
+                writer_store.with_session_attachment("conversation", &attachment, || {
+                    held.send(()).unwrap();
+                    // Let the reader reach the fence before the write needs
+                    // the runtime.
+                    std::thread::sleep(Duration::from_millis(100));
+                    Ok(within(
+                        Duration::from_secs(10),
+                        provider.write_all(&vec![0; UNBUFFERED]),
+                    )
+                    .map(|written| written.is_ok()))
+                })
+            });
+            // The provider drains the socket and a timer fires only while the
+            // runtime keeps running behind the waiting reader.
+            let drain = tokio::spawn(async move {
+                let mut bytes = vec![0; UNBUFFERED];
+                peer.read_exact(&mut bytes).await.is_ok()
+            });
+            let tick = ticked.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                tick.store(true, Ordering::Release);
+            });
+            holding.await.unwrap();
+            // The notification reader records history from the runtime.
+            let read = off_reactor(|| store.session_thread("conversation"));
+            let written = writer.await.unwrap();
+            assert!(drain.await.unwrap());
+            (written, read, ticked.load(Ordering::Acquire))
+        });
+        assert_eq!(written.unwrap(), Some(true), "dispatch reached its peer");
+        assert_eq!(
+            read.unwrap(),
+            None,
+            "history read completed after the fence"
+        );
+        assert!(ticked, "the runtime made progress behind the reader");
+    }
+
+    #[test]
+    fn stalled_runtime_cannot_hold_the_fence_past_its_limit() {
+        let home = tempfile::tempdir().unwrap();
+        let (store, attachment) = fenced_session(&home);
+        let (written, read) = on_one_worker(async move {
+            let (mut provider, _unread_peer) = UnixStream::pair().unwrap();
+            let (held, holding) = tokio::sync::oneshot::channel();
+            let writer_store = store.clone();
+            let writer = tokio::task::spawn_blocking(move || {
+                writer_store.with_session_attachment("conversation", &attachment, || {
+                    held.send(()).unwrap();
+                    Ok(within(
+                        Duration::from_millis(300),
+                        provider.write_all(&vec![0; UNBUFFERED]),
+                    )
+                    .is_some())
+                })
+            });
+            holding.await.unwrap();
+            // The only worker waits here, so no runtime timer or I/O event
+            // can end the write; its own deadline must.
+            let read = store.session_thread("conversation");
+            (writer.await.unwrap(), read)
+        });
+        assert!(!written.unwrap(), "an unread write reports its timeout");
+        assert_eq!(
+            read.unwrap(),
+            None,
+            "the reader acquired the released fence"
+        );
+    }
+}

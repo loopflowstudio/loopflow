@@ -14,14 +14,14 @@ pub fn stderr_from_output(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).trim().to_string()
 }
 
-/// Normalize a Wave name: trim, strip a leading `wave/`, and reject empty.
+/// Normalize a Wave name: trim, strip a leading `.lf/wave/`, and reject empty.
 pub fn normalize_wave_name(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return None;
     }
     let normalized = trimmed
-        .strip_prefix("wave/")
+        .strip_prefix(".lf/wave/")
         .unwrap_or(trimmed)
         .trim_matches('/');
     if normalized.is_empty() {

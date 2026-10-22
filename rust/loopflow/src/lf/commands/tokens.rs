@@ -1,4 +1,4 @@
-//! `lf tokens` — how big is this codebase, in the units a model pays for.
+//! `lf repo tokens` — how big is this codebase, in the units a model pays for.
 //!
 //! Lines measure source size; tokens are what a run costs. They disagree
 //! wildly — a minified file or a lockfile is cheap in lines and ruinous in
@@ -22,9 +22,9 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 
-use crate::engine::prompt::count_tokens;
 use crate::journal::open_ledger;
 use crate::lf::output::{format_int, truncate, Colors};
+use crate::prompt::count_tokens;
 use crate::store::sqlite::SqliteStore;
 
 const NAME_WIDTH: usize = 44;
@@ -602,6 +602,6 @@ mod tests {
 
         let (lines, tokens) = measure(&link).expect("measure link");
         assert_eq!(lines, 1);
-        assert_eq!(tokens, crate::engine::prompt::count_tokens("target.txt"));
+        assert_eq!(tokens, crate::prompt::count_tokens("target.txt"));
     }
 }

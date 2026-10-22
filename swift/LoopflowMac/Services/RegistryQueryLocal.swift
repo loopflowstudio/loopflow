@@ -7,30 +7,51 @@ import Foundation
 import Loopflow
 
 enum RegistryQueryLocal {
-    static let shared = RegistryQuery(watchActiveRuns: {
+    static let shared = RegistryQuery(runWithInput: { args, cwd, input in
+        try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
+    }, watchFiles: { args, cwd in
         try await Task.detached(priority: .userInitiated) {
-            let configuration = try ActiveRunsLaunchConfiguration.current()
+            let configuration = try ReaderLaunchConfiguration.current()
+            let process = LocalWaveAgentLauncher.queryProcess([configuration.helper] + args)
+            process.environment = configuration.environment
+            if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
+            let reader = try LocalLineObservation<TaskFilesFrame>.start(
+                name: "Task files", process: process, frameLimit: 65536,
+                configurationChanged: { try ReaderLaunchConfiguration.current() != configuration },
+                decode: { try JSONDecoder().decode(TaskFilesFrame.self, from: $0) })
+            return TaskFilesObservation(frames: reader.frames, cancel: reader.cancel)
+        }.value
+    }, watchWork: {
+        try await Task.detached(priority: .userInitiated) {
+            let configuration = try ReaderLaunchConfiguration.current()
             let process = LocalWaveAgentLauncher.queryProcess(
-                [configuration.helper, "runs", "--active", "--watch", "--json"]
+                [configuration.helper, "monitor", "work", "--watch", "--json"]
             )
             process.environment = configuration.environment
-            return try LocalActiveRunsObservation.start(
+            return try LocalWorkObservation.start(
                 process: process,
-                configurationChanged: { try ActiveRunsLaunchConfiguration.current() != configuration }
+                configurationChanged: { try ReaderLaunchConfiguration.current() != configuration }
             )
+        }.value
+    }, start: { args, cwd in
+        try await Task.detached(priority: .userInitiated) {
+            try LocalWaveAgentLauncher.startLf(args, cwd: cwd)
         }.value
     }) { args, cwd in
         try await Perf.measure(Perf.lf, args.prefix(2).joined(separator: " ")) {
-            try await Task.detached(priority: .userInitiated) {
-                try LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
-            }.value
+            let started = ContinuousClock.now
+            var ok = false
+            defer { LaunchJournal.home.read(args, ms: started.elapsedMs, ok: ok) }
+            let output = try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
+            ok = true
+            return output
         }
     }
 }
 
-/// Invalidate on replacement; let lf resolve the selected Home/store itself.
+/// Invalidate on replacement; let lf resolve the selected Machine/store itself.
 /// Metadata is sufficient here: these installation files are atomically replaced.
-private struct ActiveRunsLaunchConfiguration: Equatable {
+private struct ReaderLaunchConfiguration: Equatable {
     let helper: String
     let environment: [String: String]
     let files: [String]

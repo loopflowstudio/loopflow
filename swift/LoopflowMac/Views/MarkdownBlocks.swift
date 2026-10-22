@@ -45,7 +45,7 @@ struct MarkdownBlocks: View, Equatable {
             }
         }
         .textSelection(.enabled)
-        .tint(palette.accentInk)
+        .tint(palette.linkInk)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -54,7 +54,7 @@ struct MarkdownBlocks: View, Equatable {
         switch block.kind {
         case .heading(let level):
             Text(block.text)
-                .font(Typography.body(level <= 1 ? 17 : level == 2 ? 15 : 13).weight(.bold))
+                .font(Typography.strong(level <= 1 ? 17 : level == 2 ? 15 : 13))
                 .padding(.top, Spacing.xs)
         case .paragraph:
             Text(block.text)

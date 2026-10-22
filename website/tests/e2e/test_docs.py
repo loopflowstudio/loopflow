@@ -50,19 +50,21 @@ def test_docs_sidebar_navigation(page: Page, base_url: str):
     assert "/docs/config" in page.url
 
 
-def test_docs_security_page_states_forwarded_authority_guarantees(
+def test_docs_security_page_states_resident_login_guarantees(
     page: Page, base_url: str
 ):
     page.goto(f"{base_url}/docs/security")
     content = page.locator(".docs-content")
     assert content.is_visible()
-    text = content.inner_text()
+    text = " ".join(content.inner_text().split())
     assert "Only the first is general containment" in text
     assert "workspace-write" in text
-    assert "fail closed" in text
-    assert "Doppler master credential never" in text
-    assert "second SSH" in text
-    assert "per-process control capability" in text
+    assert "Only explicitly added machines receive credentials" in text
+    assert "Credential bytes travel through SSH stdin" in text
+    assert "Existing matching logins are retained and unrelated accounts remain" in text
+    assert "No Doppler master credential is sent" in text
+    assert "SSH agent forwarding remains opt-in" in text
+    assert "--forward-agent" in text
 
 
 def test_docs_subscriptions_page_owns_account_selection(
@@ -71,11 +73,13 @@ def test_docs_subscriptions_page_owns_account_selection(
     page.goto(f"{base_url}/docs/subscriptions")
     content = page.locator(".docs-content")
     assert content.is_visible()
-    text = content.inner_text()
+    text = " ".join(content.inner_text().split())
     assert "--only-account" in text
     assert "repository account route" in text
-    assert "target-side --account" in text
-    assert "local or forwarded provenance" in text
+    assert "lf --machine mini --account codex=work@ implement" in text
+    assert "Invocation selectors resolve against the laptop's managed logins" in text
+    assert "cannot fall back to a different login" in text
+    assert "Route candidates belong to the executing machine" in text
 
 
 def test_docs_nonexistent_redirects(page: Page, base_url: str):
@@ -114,7 +118,7 @@ def test_architecture_area_routes_render(page: Page, base_url: str):
         "execution",
         "planning",
         "delivery",
-        "homes",
+        "machines",
         "data",
         "codebase",
         "reference",

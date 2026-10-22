@@ -2,7 +2,7 @@
 """Changed-aware test runner.
 
 Runs only the CI suites the branch actually touches, so the iterative
-`lf gate` loop (rebase -> gate -> bugfix -> gate) doesn't pay for the whole
+`lf gate` loop (sync -> gate -> bugfix -> gate) doesn't pay for the whole
 matrix every pass. Stdlib only.
 
     uv run python scripts/test.py            # run suites the branch touched
@@ -51,7 +51,10 @@ XCODE_DERIVED_DATA = ".build/xcode-derived-data"
 GATE_ARTIFACT_ROOT = REPO_ROOT / ".lf" / "tmp" / "gate"
 GATE_EVIDENCE_SCHEMA = 3
 RESOURCE_SCRIPT = REPO_ROOT / "scripts" / "resource_envelope.py"
-RESOURCE_POLICY_PATH = REPO_ROOT / "performance" / "budgets.json"
+# Recovery includes a 120s build prune, cache cleanup and before/after inventory.
+RESOURCE_RECOVERY_TIMEOUT = 300
+RESOURCE_READ_TIMEOUT = 60
+RESOURCE_POLICY_PATH = REPO_ROOT / "scripts" / "performance-budgets.json"
 HOST_SECURITY_PROCESSES = {"amfid", "syspolicyd", "taskgated", "trustd"}
 
 
@@ -73,7 +76,7 @@ def _run_artifact_root() -> Path:
     Scoping it by pid keeps successive gate runs from colliding — notably the
     UI-host `.xcresult`, which `xcodebuild test` refuses to overwrite (it exits
     64 on an existing `-resultBundlePath`). A fresh pid-scoped path per run means
-    `--ui-host` can run back-to-back, which the 5/5 host proof requires.
+    optional `--ui-host` diagnostics can run back-to-back.
     """
     return GATE_ARTIFACT_ROOT / f"run-{os.getpid()}"
 
@@ -90,8 +93,6 @@ PHASE_BUDGETS: dict[str, int] = {
     "website": 900,
     "swift": 1200,
     "swift-boundaries": 120,
-    "swift-build": 900,
-    "swift-surface": 900,
     "xcodegen": 180,
     "xcodebuild": 1200,
     "e2e-smoke": 600,
@@ -193,10 +194,10 @@ class Suite:
     # gate never over-claims (e.g. loopflow compiles the app; it does not run
     # hosted UI). None => a pass means the suite's commands passed, nothing more.
     proves: Optional[str] = None
-    # A required gate that runs only when named explicitly (never under --all),
+    # An optional diagnostic that runs only when named explicitly (never under --all),
     # because it needs a permissioned host. Absence of that host is a failure,
     # never a silent skip.
-    host_gate: bool = False
+    explicit_only: bool = False
     # Runs before the suite's commands. A returned string is an immediate,
     # actionable failure (e.g. wrong platform, simulated capability gap).
     precheck: Optional[Callable[[], Optional[str]]] = None
@@ -231,6 +232,7 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
             "nextest",
             "run",
             "--all",
+            "--no-fail-fast",
             "--build-jobs",
             str(MAX_PARALLEL_JOBS),
             "--test-threads",
@@ -241,13 +243,27 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
             "cargo",
             "test",
             "--all",
+            "--no-fail-fast",
             "--jobs",
             str(MAX_PARALLEL_JOBS),
             "--",
             "--test-threads",
             str(MAX_PARALLEL_JOBS),
         ]
-    return [
+    macos = platform.system() == "Darwin"
+    if macos:
+        if "nextest" in test_argv:
+            test_argv.extend(["-E", "not test(data_clones::)"])
+        else:
+            test_argv.extend(["--skip", "data_clones::"])
+    runner = ["uv", "run", "--no-sync", "python", str(REPO_ROOT / "scripts/test_network.py")]
+    test_argv[1:1] = ["--config", 'target."cfg(all())".runner = ' + json.dumps(runner)]
+    commands = [
+        Command(
+            ["uv", "run", "--no-sync", "python", "scripts/check_rust_test_inventory.py"],
+            REPO_ROOT,
+            "rust-test-inventory",
+        ),
         Command(["cargo", "fmt", "--all", "--", "--check"], REPO_ROOT, "rustfmt"),
         Command(
             [
@@ -269,6 +285,7 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
                 "run",
                 "python",
                 "scripts/materialize_rust_tests.py",
+                "--prepare-cli",
                 "--",
                 *test_argv,
             ],
@@ -276,6 +293,41 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
             "rust",
         ),
     ]
+    if macos:
+        # Clone fixtures install their own sandbox, which cannot nest with the
+        # network runner's unsandboxed ps exception. Match macOS CI's boundary.
+        selector = "data_clones::"
+        if int(platform.mac_ver()[0].split(".")[0]) < 26:
+            selector += (
+                "clone_creation_refuses_an_incompatible_parent_sandbox_before_copying_source"
+            )
+        commands.append(
+            Command(
+                [
+                    "uv",
+                    "run",
+                    "python",
+                    "scripts/materialize_rust_tests.py",
+                    "--prepare-cli",
+                    "--",
+                    "cargo",
+                    "test",
+                    "-p",
+                    "loopflow",
+                    "--test",
+                    "integration",
+                    "--jobs",
+                    str(MAX_PARALLEL_JOBS),
+                    selector,
+                    "--",
+                    "--test-threads",
+                    str(MAX_PARALLEL_JOBS),
+                ],
+                REPO_ROOT,
+                "rust-clones",
+            )
+        )
+    return commands
 
 
 def _python_commands(changed: list[str]) -> list[Command]:
@@ -294,10 +346,36 @@ def _python_commands(changed: list[str]) -> list[Command]:
         or _touches_exact(changed, "pyproject.toml", "uv.lock")
     )
     if test_files and not touches_source:
-        argv = ["uv", "run", "pytest", *test_files]
+        argv = ["uv", "run", "--no-sync", "pytest", *test_files]
     else:
-        argv = ["uv", "run", "pytest", "python/tests/"]
-    return [Command(argv, REPO_ROOT, "python")]
+        argv = ["uv", "run", "--no-sync", "pytest", "python/tests/"]
+    commands = [
+        Command(["uv", "sync"], REPO_ROOT, "python-dependencies"),
+        Command(
+            ["uv", "run", "--no-sync", "python", "scripts/test_network.py", *argv],
+            REPO_ROOT,
+            "python",
+        ),
+    ]
+    # macOS refuses nested Seatbelt profiles. This fixture installs its own
+    # network-denying, read-only policy around the observed subprocesses.
+    if platform.system() == "Darwin" and (
+        not test_files or touches_source or "python/tests/test_desktop_performance.py" in test_files
+    ):
+        commands.append(
+            Command(
+                [
+                    "uv",
+                    "run",
+                    "--no-sync",
+                    "pytest",
+                    "python/tests/test_desktop_performance.py::test_checkout_observation_preserves_read_boundary_and_detects_changes",
+                ],
+                REPO_ROOT,
+                "python-sandbox",
+            )
+        )
+    return commands
 
 
 def _website_commands(_changed: list[str]) -> list[Command]:
@@ -313,17 +391,22 @@ def _website_commands(_changed: list[str]) -> list[Command]:
 def _swift_commands(_changed: list[str]) -> list[Command]:
     return [
         Command(
-            ["cargo", "build", "-p", "loopflow", "--bin", "lf", "--jobs", str(MAX_PARALLEL_JOBS)],
+            [
+                "cargo",
+                "build",
+                "-p",
+                "loopflow",
+                "--bin",
+                "lf",
+                "--jobs",
+                str(MAX_PARALLEL_JOBS),
+            ],
             REPO_ROOT,
             "swift-cli",
         ),
         Command(
             [
-                "swift",
-                "test",
-                "--package-path",
-                "swift",
-                "--no-parallel",
+                "scripts/test_desktop.sh",
                 "--jobs",
                 str(MAX_PARALLEL_JOBS),
                 "-Xswiftc",
@@ -336,25 +419,6 @@ def _swift_commands(_changed: list[str]) -> list[Command]:
             ["uv", "run", "python", "scripts/check_swift_multiplatform_boundaries.py"],
             REPO_ROOT,
             "swift-boundaries",
-        ),
-        Command(
-            [
-                "swift",
-                "build",
-                "--package-path",
-                "swift",
-                "--product",
-                "LoopflowMac",
-                "--jobs",
-                str(MAX_PARALLEL_JOBS),
-            ],
-            REPO_ROOT,
-            "swift-build",
-        ),
-        Command(
-            ["scripts/prove_wave_surface_states.sh"],
-            REPO_ROOT,
-            "swift-surface",
         ),
     ]
 
@@ -388,18 +452,28 @@ def _loopflow_commands(_changed: list[str]) -> list[Command]:
 
 def _e2e_commands(_changed: list[str]) -> list[Command]:
     return [
-        Command(["tests/e2e/test_smoke.sh"], REPO_ROOT, "e2e-smoke"),
+        Command(["cargo", "build", "-p", "loopflow", "--bins"], REPO_ROOT, "e2e-build"),
+        Command(
+            [
+                "uv",
+                "run",
+                "--no-sync",
+                "python",
+                "scripts/test_network.py",
+                "tests/e2e/test_smoke.sh",
+            ],
+            REPO_ROOT,
+            "e2e-smoke",
+        ),
     ]
 
 
-# --- Required-host UI gate ----------------------------------------------
+# --- Optional hosted UI diagnostics ---------------------------------------
 #
-# The ordinary gate compiles the app but never runs a hosted UI test: the test
-# host launches the real app and needs macOS UI-automation permission, which a
-# headless/unpermissioned host lacks. Rather than silently skip UI behaviour,
-# the real run lives here as a separately named REQUIRED gate: it runs only when
-# invoked explicitly (`--ui-host`), never under `--all`, and its absence is a
-# failure that names the missing capability, not a silent pass.
+# Required Desktop checks build the app and inspect production views headless.
+# These extra integration tests launch the app and need a permissioned display
+# session. They run only with --ui-host; capability failure is diagnostic, never
+# a requirement for a headless Task Graph.
 
 # Markers in xcodebuild output that mean the test *runner* failed to bootstrap
 # (a capability gap) rather than a test assertion failing (a real red).
@@ -612,11 +686,23 @@ SUITES: list[Suite] = [
     Suite(
         name="swift",
         slow=False,
-        trigger_desc="swift/ or the headless surface proof",
+        trigger_desc="swift/ (headless app build and view tests)",
         match=lambda c: (
-            _touches(c, "swift/") or _touches_exact(c, "scripts/prove_wave_surface_states.sh")
+            _touches(
+                c,
+                "swift/",
+                "rust/loopflow/src/store/sqlite/sessions.rs",
+                "rust/loopflow/src/naming.rs",
+            )
+            or _touches_exact(
+                c,
+                "scripts/test_desktop.sh",
+                "scripts/swift_test_limit.py",
+                "scripts/desktop-headless.sb",
+            )
         ),
         build=_swift_commands,
+        proves="app builds; model and view/interaction tests run without a display session.",
     ),
     Suite(
         name="e2e",
@@ -625,7 +711,7 @@ SUITES: list[Suite] = [
         match=lambda c: _touches(
             c,
             "rust/loopflow/src/store",
-            "rust/loopflow/src/engine/worktrees",
+            "rust/loopflow/src/git/worktrees",
             "tests/e2e/",
         ),
         build=_e2e_commands,
@@ -641,7 +727,7 @@ SUITES: list[Suite] = [
         build=_loopflow_commands,
         proves=(
             "app + UI-test runners COMPILE (build-for-testing). Hosted UI "
-            "behaviour is NOT run here; the required `--ui-host` gate owns it."
+            "behaviour is optional via `--ui-host`; headless view tests run in swift."
         ),
     ),
     Suite(
@@ -650,8 +736,8 @@ SUITES: list[Suite] = [
         trigger_desc="never auto-selected; explicit --ui-host only",
         match=lambda _c: False,
         build=_ui_host_commands,
-        proves="hosted LoopflowUITests actually EXECUTE on a permissioned host.",
-        host_gate=True,
+        proves="optional hosted LoopflowUITests execute on a permissioned display host.",
+        explicit_only=True,
         precheck=_ui_host_precheck,
         classify=_ui_host_classify,
         machine_lock="ui-host",
@@ -678,11 +764,16 @@ def build_plan(changed: list[str], run_all: bool, forced: set[str]) -> list[Plan
         if suite.name in forced:
             plans.append(Plan(suite, True, f"forced (--{suite.name})", suite.build(changed)))
             continue
-        if suite.host_gate:
-            # Required host gate: never auto-run (not even under --all); it
+        if suite.explicit_only:
+            # Optional host diagnostic: never auto-run (not even under --all); it
             # needs a permissioned host and is named explicitly.
             plans.append(
-                Plan(suite, False, f"required host gate (run --{suite.name} on its host)", [])
+                Plan(
+                    suite,
+                    False,
+                    f"optional display diagnostic (run --{suite.name} on its host)",
+                    [],
+                )
             )
             continue
         if run_all:
@@ -744,8 +835,24 @@ def _run_resource_check(recover: bool) -> tuple[Optional[dict[str, object]], Opt
     if recover:
         argv.append("--recover")
     try:
-        result = subprocess.run(argv, cwd=REPO_ROOT, capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        with subprocess.Popen(
+            argv,
+            cwd=REPO_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        ) as process:
+            try:
+                stdout, stderr = process.communicate(
+                    timeout=RESOURCE_RECOVERY_TIMEOUT if recover else RESOURCE_READ_TIMEOUT
+                )
+            except subprocess.TimeoutExpired as exc:
+                _kill_group(process, "resource-preflight")
+                process.communicate()
+                return None, f"RESOURCE MEASUREMENT FAILED: {exc}"
+            result = subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+    except OSError as exc:
         return None, f"RESOURCE MEASUREMENT FAILED: {exc}"
     try:
         report = json.loads(result.stdout)
@@ -783,10 +890,19 @@ def _resource_summary(report: dict[str, object], label: str) -> str:
     nice = after.get("process_nice")
     if not isinstance(free, int) or not isinstance(floor, int):
         return f"Resource {label}: UNKNOWN"
-    return (
-        f"Resource {label}: PASS · {free / 2**30:.1f} GiB free / "
+    status = "PASS" if report.get("ok") is True else "FAIL"
+    summary = (
+        f"Resource {label}: {status} · {free / 2**30:.1f} GiB free / "
         f"{floor / 2**30:.1f} GiB floor · {jobs} workers · nice +{nice}"
     )
+    lines = [summary]
+    for action in report.get("recovery", []):
+        lines.append(
+            f"recover: {action['source']} · {action['removed_bytes'] / 2**30:.1f} GiB · "
+            f"{action['status']}: {action['detail']}"
+        )
+    lines.extend(f"warning: {warning}" for warning in after.get("warnings", []))
+    return "\n".join(lines)
 
 
 # --- Durable evidence ----------------------------------------------------
@@ -1326,6 +1442,7 @@ def _run_command(cmd: Command, artifact_dir: Path, suite: str) -> PhaseOutcome:
                 start_new_session=True,  # own process group for a clean group-kill
                 bufsize=1,
                 text=True,
+                env={**os.environ, "GIT_ALLOW_PROTOCOL": "file"},
             )
         except FileNotFoundError:
             return _finish(
@@ -1435,8 +1552,7 @@ def _run_command(cmd: Command, artifact_dir: Path, suite: str) -> PhaseOutcome:
     failure_kind = None
     if over_budget:
         failure = (
-            f"VERIFICATION BUDGET: phase '{cmd.label}' ran "
-            f"{elapsed:.1f}s / {budget}s wall limit"
+            f"VERIFICATION BUDGET: phase '{cmd.label}' ran {elapsed:.1f}s / {budget}s wall limit"
         )
         failure_kind = "verification_budget"
     return _finish("passed", failure, failure_kind, over_budget)
@@ -1482,9 +1598,7 @@ def _run_suite(
             if leak is not None:
                 print(f"\n[{plan.suite.name}] {leak}", flush=True)
                 result.ok = False
-                result.failure = (
-                    leak if result.failure is None else f"{result.failure}\n{leak}"
-                )
+                result.failure = leak if result.failure is None else f"{result.failure}\n{leak}"
     finally:
         if lock is not None:
             lock.close()
@@ -1522,16 +1636,10 @@ def run_plans(
     kind: str = "changed",
     reuse_passing: bool = False,
 ) -> int:
-    artifact_root = _run_artifact_root()
-    total_budget = sum(_plan_budget(p) for p in plans if p.run)
     running = [p.suite.name for p in plans if p.run]
-    if running:
-        print(f"Gate budget: {total_budget}s across {len(running)} suites ({', '.join(running)})")
-        print(f"Artifacts on failure: {artifact_root}")
-
-    preflight, preflight_failure = _run_resource_check(True)
-    if preflight is not None and preflight_failure is None:
-        print(_resource_summary(preflight, "preflight"))
+    if not running:
+        print("No suites ran (nothing changed). Use --all to force the full matrix.")
+        return 0
 
     try:
         tree_fingerprint = _tree_fingerprint()
@@ -1539,6 +1647,28 @@ def run_plans(
         tree_fingerprint = None
         print(f"MEASUREMENT WARNING: cannot fingerprint the working tree: {exc}", file=sys.stderr)
     plan_fingerprint = _plan_fingerprint(plans)
+
+    if reuse_passing and kind == "changed" and tree_fingerprint is not None:
+        try:
+            reusable = _find_reusable_run(tree_fingerprint, plan_fingerprint)
+        except (OSError, subprocess.SubprocessError) as exc:
+            reusable = None
+            print(f"MEASUREMENT WARNING: cannot read passing gate evidence: {exc}", file=sys.stderr)
+        if reusable is not None:
+            print(
+                "Result: REUSED passing affected-suite evidence for the identical "
+                f"tree and plan ({reusable.name})"
+            )
+            return 0
+
+    artifact_root = _run_artifact_root()
+    total_budget = sum(_plan_budget(p) for p in plans if p.run)
+    print(f"Gate budget: {total_budget}s across {len(running)} suites ({', '.join(running)})")
+    print(f"Artifacts on failure: {artifact_root}")
+
+    preflight, preflight_failure = _run_resource_check(True)
+    if preflight is not None:
+        print(_resource_summary(preflight, "preflight"))
 
     initial_resources = _resource_receipt(preflight, None, [])
     if preflight_failure is not None:
@@ -1556,19 +1686,6 @@ def run_plans(
         print(f"\n{preflight_failure}")
         print("\nResult: FAIL (resource preflight; product suites not run)")
         return 1
-
-    if reuse_passing and kind == "changed" and running and tree_fingerprint is not None:
-        try:
-            reusable = _find_reusable_run(tree_fingerprint, plan_fingerprint)
-        except (OSError, subprocess.SubprocessError) as exc:
-            reusable = None
-            print(f"MEASUREMENT WARNING: cannot read passing gate evidence: {exc}", file=sys.stderr)
-        if reusable is not None:
-            print(
-                "Result: REUSED passing affected-suite evidence for the identical "
-                f"tree and plan ({reusable.name})"
-            )
-            return 0
 
     recorder = _start_recorder(
         kind,
@@ -1594,7 +1711,7 @@ def run_plans(
     phases = [phase for outcome in outcomes.values() for phase in outcome.phases]
     postflight, postflight_failure = _run_resource_check(False)
     resource_breach = postflight_failure if postflight is not None else None
-    if postflight is not None and postflight_failure is None:
+    if postflight is not None:
         print(_resource_summary(postflight, "postflight"))
     elif postflight is None and postflight_failure is not None:
         print(f"MEASUREMENT WARNING: {postflight_failure}", file=sys.stderr)
@@ -1637,9 +1754,6 @@ def run_plans(
     passed = [name for name, o in outcomes.items() if o.ok]
     total_elapsed = sum(o.elapsed_s for o in outcomes.values())
     print()
-    if not outcomes and resource_breach is None:
-        print("No suites ran (nothing changed). Use --all to force the full matrix.")
-        return 0
     if failed or resource_breach is not None:
         for name, outcome in failed:
             print(f"[{name}] {outcome.failure}")
@@ -1715,7 +1829,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.all:
         kind = "full"
     elif "ui-host" in forced:
-        kind = "required_host"
+        kind = "hosted_ui"
     else:
         kind = "changed"
     return run_plans(plans, kind=kind, reuse_passing=args.reuse_passing)

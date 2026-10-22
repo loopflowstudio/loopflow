@@ -1,5 +1,30 @@
 use std::io::IsTerminal;
 
+/// Local wall-clock time for a Unix timestamp, e.g. `Oct 21 14:02`.
+pub(crate) fn format_time(unix: i64) -> String {
+    chrono::DateTime::from_timestamp(unix, 0)
+        .map(|utc| {
+            utc.with_timezone(&chrono::Local)
+                .format("%b %-d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_else(|| unix.to_string())
+}
+
+pub(crate) fn print_process(process: &crate::process::LfProcess) {
+    let command = process.command.as_deref().unwrap_or("unknown command");
+    let display = serde_json::from_str::<Vec<String>>(command)
+        .map(|argv| argv.join(" "))
+        .unwrap_or_else(|_| command.to_string());
+    println!(
+        "{}  {}  {}  {}",
+        process.id,
+        process.started_at,
+        process.outcome.as_deref().unwrap_or("unknown"),
+        display
+    );
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Colors {
     pub cyan: &'static str,
@@ -44,7 +69,7 @@ impl Default for Colors {
     }
 }
 
-use crate::engine::prompt::PromptComponents;
+use crate::prompt::PromptComponents;
 use crate::trace::PreparedTurnContext;
 
 /// Format the context header table for stderr output.
@@ -152,8 +177,7 @@ pub fn format_reproducible_command(
     wave: Option<&str>,
     docs: &[String],
     clipboard: bool,
-    no_loopflow: bool,
-    model: Option<&str>,
+    agent: Option<&str>,
 ) -> String {
     let mut parts = vec!["lf".to_string()];
     if let Some(s) = skill {
@@ -168,11 +192,8 @@ pub fn format_reproducible_command(
     if clipboard {
         parts.push("-c".to_string());
     }
-    if no_loopflow {
-        parts.push("--no-loopflow".to_string());
-    }
-    if let Some(m) = model {
-        parts.push(format!("-m {}", m));
+    if let Some(agent) = agent {
+        parts.push(format!("-a {}", agent));
     }
     parts.join(" ")
 }
@@ -226,7 +247,7 @@ mod tests {
     fn format_context_header_with_content() {
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "task");
         let components = PromptComponents {
-            skill: Some(crate::engine::Skill::named("implement")),
+            skill: Some(crate::graph::Skill::named("implement")),
             wave: Some("intelligence".to_string()),
             ..Default::default()
         };
@@ -245,7 +266,7 @@ mod tests {
 
     #[test]
     fn format_reproducible_command_minimal() {
-        let cmd = format_reproducible_command(Some("debug"), None, &[], false, false, None);
+        let cmd = format_reproducible_command(Some("debug"), None, &[], false, None);
         assert_eq!(cmd, "lf debug");
     }
 
@@ -256,12 +277,11 @@ mod tests {
             Some("rust"),
             &["src/".to_string()],
             true,
-            true,
             Some("claude:opus"),
         );
         assert_eq!(
             cmd,
-            "lf implement --wave rust --docs src/ -c --no-loopflow -m claude:opus"
+            "lf implement --wave rust --docs src/ -c -a claude:opus"
         );
     }
 }

@@ -1,10 +1,31 @@
-[test-groups]
-machine-promotion = { max-threads = 1 }
-
-[[profile.default.overrides]]
-filter = 'test(local_promotion_controller_bootstraps_reuses_dev_and_returns_to_published) | test(switch_recovery_obeys_every_persisted_phase_owner)'
-test-group = 'machine-promotion'
-
 [[profile.default.overrides]]
 filter = 'test(every_receipt_at_fleet_fanout_is_recorded_exactly_once)'
 threads-required = "num-test-threads"
+
+# Pull requests: a test that runs past 2 minutes fails on the PR that made it
+# slow, naming itself. The merge queue and main use `default`, which only
+# reports slow tests, so runner variance never ejects ready work.
+[profile.pr]
+slow-timeout = { period = "60s", terminate-after = 2 }
+
+[[profile.pr.overrides]]
+filter = 'test(every_receipt_at_fleet_fanout_is_recorded_exactly_once)'
+threads-required = "num-test-threads"
+
+# Tests already slower than the budget on 2026-10-22, each allowed about 1.5x
+# its slowest of five merge-queue runs. Make one fast, then delete its entry
+# (LOO-566).
+[[profile.pr.overrides]]
+# 288-350 s: drives a real native runner through a full turn.
+filter = 'test(native_runner_is_quiet_until_its_turn_ends)'
+slow-timeout = { period = "60s", terminate-after = 8 }
+
+[[profile.pr.overrides]]
+# 246-253 s.
+filter = 'test(linear_on_demand_native_hooks_share_freshness_across_processes) | test(linear_on_demand_shares_checks_and_excludes_finished_tasks)'
+slow-timeout = { period = "60s", terminate-after = 6 }
+
+[[profile.pr.overrides]]
+# 150 s.
+filter = 'test(process_membership_does_not_read_events_that_name_no_process)'
+slow-timeout = { period = "60s", terminate-after = 4 }

@@ -1,9 +1,13 @@
+mod support;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use loopflow::engine::{
-    format_prompt, gather_context, GatherContextOpts, PromptFormatMode, Surface,
-};
+use loopflow::prompt::format_prompt;
+use loopflow::prompt::gather_context;
+use loopflow::prompt::ClipboardContext;
+use loopflow::prompt::GatherContextOpts;
+use loopflow::prompt::Surface;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -40,6 +44,19 @@ fn load_cases() -> Vec<PathBuf> {
     cases
 }
 
+fn copy_fixture(source: &Path, target: &Path) {
+    fs::create_dir_all(target).unwrap();
+    for entry in fs::read_dir(source).unwrap() {
+        let entry = entry.unwrap();
+        let destination = target.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_fixture(&entry.path(), &destination);
+        } else {
+            fs::copy(entry.path(), destination).unwrap();
+        }
+    }
+}
+
 fn normalize_prompt(prompt: &str, repo: &Path) -> String {
     prompt
         .replace("\r\n", "\n")
@@ -49,43 +66,54 @@ fn normalize_prompt(prompt: &str, repo: &Path) -> String {
 }
 
 #[test]
-fn golden_prompts_match_python() {
+fn golden_prompts_match() {
+    let _env = support::EnvGuard::new(&[]);
     // Goldens are hermetic fixture renders: a run inside a managed wave
     // test process (workers run this suite) must not leak ambient Wave context
     // into them. Safe to set here — this binary runs exactly one test.
     std::env::remove_var("LF_WAVE_ID");
+    std::env::set_var("LF_USER_NAME", "Fixture Participant");
+
+    let home = tempfile::tempdir().unwrap();
+    std::env::set_var("LF_HOME", home.path());
 
     let root = repo_root();
     for case_path in load_cases() {
         let yaml = fs::read_to_string(&case_path).expect("read golden yaml");
         let case: GoldenCase = serde_yaml_ng::from_str(&yaml).expect("parse golden yaml");
 
-        let repo = root.join(&case.repo);
-        let wave_memory = case
-            .wave
-            .as_deref()
-            .and_then(|wave| loopflow::work::wave::context::gather_wave_memory(&repo, wave));
+        let fixture = tempfile::tempdir().unwrap();
+        let repo = fixture.path().canonicalize().unwrap();
+        copy_fixture(&root.join(&case.repo), &repo);
         let opts = GatherContextOpts {
             repo_root: repo.clone(),
             skill: case.skill.clone(),
             message: None,
             operate: !case.no_loopflow,
+            work: None,
             surface: case.surface.unwrap_or_default(),
             docs: case.docs.clone(),
             files: Vec::new(),
             include_diff: case.diff,
             include_diff_files: case.diff_files,
-            include_clipboard: case.clipboard,
+            clipboard: if case.clipboard {
+                ClipboardContext::IfAvailable
+            } else {
+                ClipboardContext::Off
+            },
             wave: case.wave.clone(),
-            wave_memory,
             related_repos: Vec::new(),
         };
 
         let components = gather_context(&opts).expect("gather context");
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = format_prompt(&components);
         let actual = normalize_prompt(&prompt, &repo);
 
         let expected_path = case_path.with_extension("md");
+        if std::env::var("LOOPFLOW_UPDATE_GOLDENS").as_deref() == Ok("1") {
+            fs::write(&expected_path, format!("{actual}\n")).expect("update golden prompt");
+            continue;
+        }
         let expected = fs::read_to_string(&expected_path).unwrap_or_else(|_| {
             panic!(
                 "missing golden file {} (run tests/goldens/update_goldens.py)",

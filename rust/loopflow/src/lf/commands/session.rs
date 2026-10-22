@@ -1,96 +1,303 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{bail, Context};
 
 use crate::lf::SessionCommand;
-use crate::ops::human_session::{OpenMode, SessionKind, SessionRecord, SessionState};
-use crate::run_record::SessionTitleSource;
+use crate::lf::SessionConnectionArgs;
+use crate::ops::human_session::{OpenMode, SessionState};
+use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
-pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
+pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
-    let session_id = match command {
-        SessionCommand::Complete { id } => Some(id),
-        _ => None,
-    };
-    let Some(session_id) = session_id else {
-        return runtime.block_on(run_async(command));
-    };
-    let store = runtime.block_on(open_shared_store())?;
-    let Some(worktree) = runtime.block_on(crate::ops::human_session::completion_worktree(
-        &store, session_id,
-    ))?
-    else {
-        return runtime.block_on(run_async(command));
-    };
-    let argv = std::env::args().collect::<Vec<_>>();
-    crate::journal::with_runtime(&worktree, &argv, || runtime.block_on(run_async(command)))
+    if matches!(
+        command,
+        SessionCommand::Connect {
+            connection: SessionConnectionArgs { prepare: false, .. },
+            ..
+        }
+    ) {
+        let cwd = crate::repo::working_directory()?;
+        let argv = std::env::args().collect::<Vec<_>>();
+        crate::journal::with_runtime(&cwd, &argv, || runtime.block_on(run_async(command, cli)))
+    } else {
+        runtime.block_on(run_async(command, cli))
+    }
 }
 
-async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
+async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     match command {
-        SessionCommand::List { json, all } => {
+        SessionCommand::Attach {
+            id,
+            observe,
+            if_free,
+            prepare,
+            json,
+        } => {
             let store = open_shared_store().await?;
-            list(&store, *json, *all).await
+            let session = crate::ops::human_session::session_by_id(&store, id)
+                .await?
+                .context("Session not found")?;
+            if *prepare {
+                let record = crate::ops::human_session::prepare_attachment(
+                    &store, &session, *observe, *if_free,
+                )
+                .await?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&record)?);
+                } else {
+                    let record = record.with_context(|| {
+                        format!(
+                            "Nothing is running to attach to; `lf resume {}` reopens its history",
+                            session.id
+                        )
+                    })?;
+                    println!(
+                        "{}",
+                        shlex::try_join(record.open_argv.iter().map(String::as_str))?
+                    );
+                }
+                return Ok(());
+            }
+            let owner = store
+                .sqlite
+                .session_transport(&session.id)?
+                .context("Session has no retained execution")?;
+            crate::transport::attach(&owner, *observe, !*if_free)
         }
-        SessionCommand::Open {
+        SessionCommand::Steer { id, message } => {
+            let store = open_shared_store().await?;
+            let session = crate::ops::human_session::session_by_id(&store, id)
+                .await?
+                .context("Session not found")?;
+            let author = crate::config::participant_name()?
+                .unwrap_or_else(|| "attribution unresolved".into());
+            let steer = store
+                .sqlite
+                .save_session_steer(&session.id, &author, message)?;
+            println!("Saved {}", steer.id);
+            Ok(())
+        }
+        SessionCommand::Steers {
             id,
             json,
-            replace,
-            try_open,
+            retry,
+            after,
+            limit,
+            source,
         } => {
-            let mode = if *replace {
-                OpenMode::Replace
-            } else if *try_open {
-                OpenMode::Try
+            let store = open_shared_store().await?;
+            let session = crate::ops::human_session::session_by_id(&store, id)
+                .await?
+                .context("Session not found")?;
+            if let Some(steer) = retry {
+                store
+                    .sqlite
+                    .retry_session_steer(&session.id, &crate::id::SteerId::parse(steer)?)?;
+            }
+            if let Some(source) = source {
+                let steer = store
+                    .sqlite
+                    .session_steer_source(&session.id, &crate::id::SteerId::parse(source)?)?;
+                println!("{}", serde_json::to_string_pretty(&steer)?);
+                return Ok(());
+            }
+            let status = store.sqlite.session_steers(&session.id, *after, *limit)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&status)?);
             } else {
-                OpenMode::Refuse
-            };
-            open(id, *json, mode).await
+                println!("{}; {} pending", status.capability, status.pending);
+                if let Some(after) = status.next_after {
+                    println!("Next page: --after {after}");
+                }
+                for row in status.items {
+                    println!("{} {}", row.steer.id, row.evidence);
+                }
+            }
+            Ok(())
         }
-        SessionCommand::Complete { id } => complete(id).await,
+        SessionCommand::ObserveStatus {
+            id,
+            terminal,
+            agent_process,
+        } => {
+            let store = open_shared_store().await?;
+            let agent_process = agent_process
+                .as_deref()
+                .map(crate::id::LfProcessId::parse)
+                .transpose()?;
+            crate::ops::human_session::observe_program_status(
+                &store,
+                id,
+                terminal,
+                agent_process.as_ref(),
+            )
+            .await
+        }
+        SessionCommand::History {
+            id,
+            json,
+            after,
+            limit,
+        } => {
+            let store = open_shared_store().await?;
+            let Some(session) = crate::ops::human_session::session_by_id(&store, id).await? else {
+                bail!("Session {id} was not found");
+            };
+            let events = store.sqlite.session_history(&session.id, *after, *limit)?;
+            if *json {
+                println!("{}", serde_json::to_string(&events)?);
+            } else {
+                for event in events {
+                    println!(
+                        "{} {} {} {}",
+                        event.seq,
+                        event.provider_turn.as_deref().unwrap_or("unknown-turn"),
+                        event.kind.as_str(),
+                        event.payload
+                    );
+                }
+            }
+            Ok(())
+        }
+        SessionCommand::List {
+            json,
+            all,
+            interactive,
+            history,
+            available,
+            limit,
+            offset,
+            page,
+            after,
+            task,
+            orphan,
+            search,
+        } => {
+            let store = open_shared_store().await?;
+            list(
+                &store,
+                *json,
+                &crate::session::SessionFilter {
+                    available: *available,
+                    repo: if *all {
+                        None
+                    } else {
+                        crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string())
+                    },
+                    task: task.clone(),
+                    orphan: *orphan,
+                    search: search.clone(),
+                    interactive: interactive.interactive(),
+                    history: *history,
+                    limit: *limit,
+                    offset: *offset,
+                    after: page.then(|| after.clone().unwrap_or_default()),
+                },
+            )
+            .await
+        }
+        SessionCommand::Connect {
+            all: true,
+            connection,
+            ..
+        } => {
+            let store = open_shared_store().await?;
+            let resumed = crate::ops::human_session::restore::resume_all(&store).await?;
+            if connection.json || cli.json {
+                println!("{}", serde_json::to_string_pretty(&resumed)?);
+            } else {
+                println!("{}", crate::ops::human_session::restore::render(&resumed));
+            }
+            Ok(())
+        }
+        SessionCommand::Connect {
+            id,
+            connection,
+            takeover,
+            try_open,
+            all: false,
+        } => {
+            connect(
+                cli,
+                connection,
+                connection.target(cli, id.as_deref())?,
+                OpenMode::from_flags(*takeover, *try_open),
+            )
+            .await
+        }
         SessionCommand::Rename {
             id,
             name,
             suggest,
             json,
         } => rename(id, name, *suggest, *json).await,
-        SessionCommand::Ready { summary } => {
-            let text = required_text(summary, "ready summary")?;
-            let store = open_shared_store().await?;
-            crate::ops::human_session::mark_ready(&store, &text).await?;
-            println!("Session is ready for your review.");
-            Ok(())
-        }
-        SessionCommand::ServeFlow {
-            task_id,
-            invocation_id,
-            flow,
-            node_id,
-            skill,
-            iteration,
+        SessionCommand::Bind {
+            id,
+            task,
+            dry_run,
+            json,
         } => {
             let store = open_shared_store().await?;
-            crate::ops::human_session::serve_flow(
-                store,
-                task_id.clone(),
-                invocation_id.clone(),
-                flow.clone(),
-                node_id.clone(),
-                skill.clone(),
-                *iteration,
-            )
-            .await
+            if *dry_run {
+                let preview = crate::ops::human_session::preview_binding(&store, id, task).await?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&preview)?);
+                } else {
+                    println!(
+                        "{} → {} ({}) [{}]. Not assigned.",
+                        preview.session_id, preview.identifier, preview.title, preview.task_id
+                    );
+                }
+                return Ok(());
+            }
+            let session = crate::ops::human_session::bind(&store, id, task).await?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&session)?);
+            } else {
+                println!(
+                    "Session {} belongs to {}.",
+                    session.id,
+                    session.work_path.as_deref().unwrap_or(task)
+                );
+            }
+            Ok(())
         }
-        SessionCommand::ServeAsk { id } => crate::ops::human_session::serve_ask(id).await,
-        SessionCommand::StopRun { run_id } => crate::ops::human_session::stop_run(run_id),
     }
 }
 
-async fn list(store: &Arc<Store>, json: bool, all: bool) -> anyhow::Result<()> {
-    let mut sessions = crate::ops::human_session::list(store).await?;
-    sessions = scope_to_repo(sessions, all)?;
+async fn list(
+    store: &Arc<Store>,
+    json: bool,
+    filter: &crate::session::SessionFilter,
+) -> anyhow::Result<()> {
+    if filter.after.is_some() {
+        anyhow::ensure!(
+            filter.limit > 0,
+            "paged Session inventory requires a positive limit"
+        );
+        let mut selection = filter.clone();
+        selection.limit = filter
+            .limit
+            .checked_add(1)
+            .context("Session page limit is too large")?;
+        let mut entries = crate::ops::human_session::list(store, &selection).await?;
+        let next = if entries.len() > filter.limit {
+            entries.pop();
+            entries.last().map(|session| session.id.to_string())
+        } else {
+            None
+        };
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&crate::ops::human_session::SessionPage {
+                entries,
+                next
+            })?
+        );
+        return Ok(());
+    }
+    let sessions = crate::ops::human_session::list(store, filter).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
     } else if sessions.is_empty() {
@@ -101,9 +308,9 @@ async fn list(store: &Arc<Store>, json: bool, all: bool) -> anyhow::Result<()> {
                 "{}  {:<7} {}  {}",
                 session.id,
                 match session.state {
-                    SessionState::Waiting => "waiting",
+                    _ if session.availability.is_some() => "available",
+                    SessionState::Unknown => "unknown",
                     SessionState::Active => "active",
-                    SessionState::Ready => "ready",
                     SessionState::Closed => "closed",
                 },
                 session.work_path.as_deref().unwrap_or("Repository"),
@@ -121,30 +328,60 @@ async fn list(store: &Arc<Store>, json: bool, all: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn open(id: &str, json: bool, mode: OpenMode) -> anyhow::Result<()> {
+async fn connect(
+    cli: &crate::lf::Cli,
+    connection: &SessionConnectionArgs,
+    target: crate::ops::human_session::SessionTarget<'_>,
+    mode: OpenMode,
+) -> anyhow::Result<()> {
+    let SessionConnectionArgs {
+        message,
+        prepare,
+        json,
+        ..
+    } = connection;
+    anyhow::ensure!(
+        !*prepare || message.is_none(),
+        "--prepare cannot be used with --message"
+    );
+    anyhow::ensure!(
+        message.is_none() || cli.batch,
+        "a next-turn message requires -b"
+    );
+    anyhow::ensure!(
+        !cli.batch || *prepare || message.is_some(),
+        "a headless connection requires --message TEXT"
+    );
+    anyhow::ensure!(
+        *prepare || cli.batch || cli.output_schema.is_none(),
+        "response schemas require a headless Session (-b)"
+    );
+    let progress = crate::startup::Startup::new("Finding conversation");
     let store = open_shared_store().await?;
-    let session = crate::ops::human_session::open(&store, id, mode, !json).await?;
-    if json {
-        println!("{}", serde_json::to_string_pretty(&session)?);
+    let id = crate::ops::human_session::select_connection(
+        &store,
+        &std::env::current_dir()?,
+        target,
+        connection.fresh,
+    )
+    .await?;
+    drop(progress);
+    if let Some(message) = message {
+        let session = crate::ops::human_session::session_by_id(&store, &id)
+            .await?
+            .context("Session not found")?;
+        let session = crate::ops::human_session::admit_workspace(&store, session).await?;
+        let id = session.id;
+        return tokio::task::block_in_place(|| crate::lf::commands::run::resume(&id, message, cli));
     }
-    Ok(())
-}
-
-async fn complete(id: &str) -> anyhow::Result<()> {
-    let store = open_shared_store().await?;
-    let session = crate::ops::human_session::complete(&store, id).await?;
-    match session.kind {
-        SessionKind::Interactive => println!(
-            "Session {} completed; its provider history remains resumable.",
-            session.id
-        ),
-        SessionKind::Ask => println!(
-            "Ask session completed: {}",
-            session
-                .ready_summary
-                .expect("completed Ask Session has a ready summary")
-        ),
-        SessionKind::Flow => println!("Review completed; feedback returned to the Flow."),
+    let session = crate::ops::human_session::open(&store, &id, mode, !*prepare).await?;
+    if *json || cli.json {
+        println!("{}", serde_json::to_string_pretty(&session)?);
+    } else if *prepare {
+        println!(
+            "{}",
+            shlex::try_join(session.open_argv.iter().map(String::as_str))?
+        );
     }
     Ok(())
 }
@@ -171,19 +408,6 @@ async fn rename(id: &str, name: &[String], suggest: bool, json: bool) -> anyhow:
     Ok(())
 }
 
-fn scope_to_repo(sessions: Vec<SessionRecord>, all: bool) -> anyhow::Result<Vec<SessionRecord>> {
-    if all {
-        return Ok(sessions);
-    }
-    let Some(scope) = crate::repository::CanonicalRepo::current()? else {
-        return Ok(sessions);
-    };
-    Ok(sessions
-        .into_iter()
-        .filter(|session| scope.contains(Path::new(&session.cwd)))
-        .collect())
-}
-
 fn required_text(args: &[String], label: &str) -> anyhow::Result<String> {
     let text = args.join(" ").trim().to_string();
     if text.is_empty() {
@@ -199,14 +423,4 @@ async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
             .await
             .context("open the shared Loopflow store")?,
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::scope_to_repo;
-
-    #[test]
-    fn an_empty_session_list_stays_empty() {
-        assert!(scope_to_repo(Vec::new(), true).unwrap().is_empty());
-    }
 }

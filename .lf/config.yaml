@@ -1,8 +1,9 @@
 exclude:
 - uv.lock
-pm:
+planning:
   provider: linear
-  linear_team: 3871bed0-8c95-4077-ab72-728327d615b3
+linear:
+  team: 3871bed0-8c95-4077-ab72-728327d615b3
 release:
   targets:
     default:
@@ -13,6 +14,7 @@ release:
       # Release cuts belong here; local migration proof uses an isolated source
       # snapshot. See TESTING.md for shared-checkout and Git-fixture limits.
       - uv run python scripts/canonicalize_migrations.py {version} --release-cut
+      - uv run python scripts/third_party.py refresh
       completion: github-release
       publisher:
       - loopflow-release-publisher

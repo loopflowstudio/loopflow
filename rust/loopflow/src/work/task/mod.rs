@@ -1,7 +1,9 @@
-//! Durable state for one Linear Task.
+//! Durable state for one Task.
 //!
-//! A Task owns one durable worktree, serial PR chain, and Flow progression.
-//! Runs are transient executors of that state.
+//! A Task owns one durable checkout, an optional PR, and Workflow progression.
+//! Sessions, Graphs and Processes record work against that state.
+
+pub mod comment;
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -9,12 +11,33 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::child::{prefixed_uuid_id, AbandonIntent};
+use crate::child::AbandonIntent;
 pub use crate::durable::TaskId;
+use crate::id::prefixed_uuid_id;
 use crate::id::WaveId;
-use crate::planning::TaskPlan;
+use crate::linear::{LinearBindingError, LinearIssueId};
 use crate::pr_landing::PrLandingId;
 use crate::work::project::ProjectId;
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TaskUpdate {
+    pub rank: Option<u32>,
+    /// Omitted preserves assignment; explicit None clears it.
+    pub assignee: Option<Option<String>>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+}
+
+/// The caller retains this identity across a retry; a separate create mints another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewTask {
+    pub due_date: Option<String>,
+    pub id: crate::durable::TaskId,
+    pub repository_id: crate::durable::RepositoryId,
+    pub project_id: Option<crate::durable::ProjectId>,
+    pub title: String,
+    pub description: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TaskDataError {
@@ -57,40 +80,12 @@ impl CiState {
     }
 }
 
-/// The required check `lf pr land` greens itself, by clearing `scratch/`.
-///
-/// See [`CiCheck::land_time_precondition`] for what this class means and the one
-/// rule for admitting a name to it. `crate::ops::land::clear_scratch` is the step
-/// that resolves this check; `land_time_precondition_names_a_real_ci_job` pins
-/// this literal against `.github/workflows/ci.yml`.
-const LAND_TIME_PRECONDITION_CHECK: &str = "scratch-clear";
-
 /// One required check that is not passing, named so the `ci-fix` skill can
 /// resolve the exact failure from its logs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CiCheck {
     pub name: String,
     pub url: Option<String>,
-}
-
-impl CiCheck {
-    /// Whether this check asserts a *land-time precondition* — a condition
-    /// `lf pr land` establishes itself, so no repair turn can green it.
-    ///
-    /// This is the one class of required check a Task body cannot act on.
-    /// `scratch-clear` fails whenever `scratch/` holds anything but `.gitkeep`,
-    /// which is true of a PR carrying its own design doc before delivery, and
-    /// `crate::ops::land::clear_scratch` is what greens it, not a code change. A
-    /// body woken to "repair" it could only delete the Task's design artifact,
-    /// to green a check land greens anyway.
-    ///
-    /// A name belongs here only when an `lf pr land` step is what resolves it.
-    /// This is not a catalogue of CI jobs, and it is not a mute button for checks
-    /// that are merely hard to fix: a check anyone *could* fix by changing the
-    /// tree does not belong here, however annoying it is.
-    pub fn land_time_precondition(&self) -> bool {
-        self.name == LAND_TIME_PRECONDITION_CHECK
-    }
 }
 
 /// The required-check reading for one PR head. `head_sha` pins it: a reading is
@@ -101,69 +96,6 @@ pub struct CiObservation {
     pub state: CiState,
     pub failing_checks: Vec<CiCheck>,
     pub observed_at: OffsetDateTime,
-}
-
-impl CiObservation {
-    /// The current failing required checks by name, sorted — the content half of
-    /// a [`CiIncident`]'s identity. Empty unless `state` is `Failing`.
-    pub fn failure_set(&self) -> Vec<String> {
-        let mut names: Vec<String> = self
-            .failing_checks
-            .iter()
-            .map(|check| check.name.clone())
-            .collect();
-        names.sort();
-        names.dedup();
-        names
-    }
-
-    /// Whether this reading makes a `ci-fix` repair *legal*: the current head is
-    /// failing a required check that a repair turn could actually act on.
-    ///
-    /// The landing supervisor owns execution; CI incidents record responses
-    /// without limiting how often the current failure can be repaired.
-    ///
-    /// A head whose failures are *all* land-time preconditions is red and not
-    /// repairable ([`CiCheck::land_time_precondition`]): waking a body there
-    /// spends a full turn on work whose only successful action is destructive.
-    /// The reading still reports the failure — this refuses the wake, it does not
-    /// deny the red — so `lf ci` and `lf task status` are unchanged.
-    pub fn repair_legal(&self) -> bool {
-        if self.state != CiState::Failing {
-            return false;
-        }
-        // An unnamed failure is one we could not classify, not one proven
-        // harmless, so it still repairs: a filter that swallows unknown failures is
-        // a mute button. Only a non-empty set whose every member land resolves is
-        // provably not a repair.
-        self.failing_checks.is_empty()
-            || self
-                .failing_checks
-                .iter()
-                .any(|check| !check.land_time_precondition())
-    }
-
-    /// Whether this head is red *only* on land-time preconditions — failing, with
-    /// at least one named failure, and every named failure one that
-    /// [`CiCheck::land_time_precondition`] resolves at land.
-    ///
-    /// This is the dual of [`CiObservation::repair_legal`] within the failing
-    /// state: such a head holds nothing a Task body could repair (`lf pr land`
-    /// greens it by clearing `scratch/`), so it does not belong to CI repair.
-    /// The action model and Waves supervision read it to stop recommending a
-    /// doomed Resume or labelling settlement preparation as "fixing CI".
-    ///
-    /// False for a passing or pending head, and false the moment any failure is a
-    /// real leaf or an unclassified one — the same anti-mute-button rule as
-    /// `repair_legal`: an unnamed failure keeps the head owned by CI.
-    pub fn only_land_time_preconditions(&self) -> bool {
-        self.state == CiState::Failing
-            && !self.failing_checks.is_empty()
-            && self
-                .failing_checks
-                .iter()
-                .all(|check| check.land_time_precondition())
-    }
 }
 
 /// One failed CI head carried forward after the PR's current observation moves
@@ -262,36 +194,6 @@ impl PrPhase {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AfterMerge {
-    ContinueTask,
-    CompleteTask,
-}
-
-impl AfterMerge {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::ContinueTask => "continue_task",
-            Self::CompleteTask => "complete_task",
-        }
-    }
-}
-
-impl FromStr for AfterMerge {
-    type Err = TaskDataError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "continue_task" => Ok(Self::ContinueTask),
-            "complete_task" => Ok(Self::CompleteTask),
-            _ => Err(TaskDataError::InvalidInvariant(format!(
-                "invalid after-merge disposition: {value}"
-            ))),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum PrMergeMode {
     User,
     Auto,
@@ -325,8 +227,6 @@ pub struct PrMergeRequest {
     pub mode: PrMergeMode,
     pub requested_at: OffsetDateTime,
     pub head_sha: String,
-    pub after_merge: AfterMerge,
-    pub next_slug: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -352,9 +252,10 @@ pub struct TaskPr {
     pub slug: String,
     pub branch: String,
     pub base_commit: String,
-    /// Another Task's PR this worktree was placed on, or `None` when rooted on
-    /// the default branch. `base_commit` is that parent's exact fork commit; the
-    /// link clears after the parent merges and this PR collapses onto main.
+    /// Selected parent PR, or `None` when rooted on the default branch.
+    /// Selection does not move Git: `base_commit` remains the child's last
+    /// recorded fork until sync succeeds. The link clears after the parent
+    /// merges and this PR collapses onto main.
     pub parent_pr_id: Option<TaskPrId>,
     pub publication: Option<PrPublication>,
     pub merge_commit: Option<String>,
@@ -369,9 +270,11 @@ pub struct TaskPr {
     /// Id of the first-class Linear attachment linking this PR on its owning
     /// issue. `None` until the PR is first published; carried forward so later
     /// publishes update the same attachment in place.
+    #[serde(deserialize_with = "crate::id::deserialize_uuid_option")]
     pub linear_attachment_id: Option<String>,
     /// Id of the loopflow-managed Linear comment carrying the PR URL and state.
     /// Its presence switches the writeback from `commentCreate` to `commentUpdate`.
+    #[serde(deserialize_with = "crate::id::deserialize_uuid_option")]
     pub linear_comment_id: Option<String>,
     /// `None` when the last Linear linkage writeback succeeded; the last error
     /// string when it degraded. The GitHub publication still succeeded — this only
@@ -421,18 +324,6 @@ impl TaskPr {
     pub fn merge_request(&self) -> Option<&PrMergeRequest> {
         let request = self.publication.as_ref()?.merge.as_ref()?;
         (self.head_sha() == Some(request.head_sha.as_str())).then_some(request)
-    }
-
-    /// Settlement disposition. A PR merged without an explicit request safely
-    /// continues the Task; only a head-pinned request may complete it.
-    pub fn after_merge(&self) -> AfterMerge {
-        self.merge_request()
-            .map_or(AfterMerge::ContinueTask, |request| request.after_merge)
-    }
-
-    pub fn next_slug(&self) -> Option<&str> {
-        self.merge_request()
-            .and_then(|request| request.next_slug.as_deref())
     }
 
     /// The CI reading, but only while it still describes the PR's current head.
@@ -523,23 +414,6 @@ impl TaskPr {
                     }
                     Some(_) | None => {}
                 }
-                if request.next_slug.as_deref().is_some_and(|slug| {
-                    slug.split('-').any(|word| {
-                        word.is_empty()
-                            || !word
-                                .bytes()
-                                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-                    })
-                }) {
-                    return Err(TaskDataError::InvalidInvariant(
-                        "next branch slug must be lowercase kebab-case".to_string(),
-                    ));
-                }
-                if request.after_merge == AfterMerge::CompleteTask && request.next_slug.is_some() {
-                    return Err(TaskDataError::InvalidInvariant(
-                        "a completing pull request cannot name a next branch".to_string(),
-                    ));
-                }
                 let github = publication.github.as_ref().ok_or_else(|| {
                     TaskDataError::InvalidInvariant(
                         "merge request requires a GitHub PR".to_string(),
@@ -571,16 +445,18 @@ impl TaskPr {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum PmWritebackOperation {
+pub enum LinearWritebackOperation {
     CompleteTask,
+    ReopenTask,
+    CancelTask,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
-pub enum PmWritebackState {
+pub enum LinearWritebackState {
     Current,
     Pending {
-        operation: PmWritebackOperation,
+        operation: LinearWritebackOperation,
         error: String,
     },
 }
@@ -589,7 +465,7 @@ pub enum PmWritebackState {
 /// The durable attempt metadata lives on `TaskPr`; this derived view tells one
 /// caller whether it read GitHub, reused a recent reading, or opened a degraded
 /// circuit while preserving the cached PR fields.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "freshness", rename_all = "snake_case")]
 pub enum Observation {
     /// No remote read applies, as for an unpublished working PR.
@@ -611,16 +487,35 @@ pub enum Observation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub id: TaskId,
-    /// Current planning facts from the PM system.
-    pub plan: TaskPlan,
-    pub pm_writeback: PmWritebackState,
-    /// Root ownership. Wave name and checkout are resolved from this id.
-    pub wave_id: WaveId,
-    /// Required runtime parent. Every Task reports through one durable Project
-    /// Work; its Wave retains root inspection and override authority.
-    pub project_id: ProjectId,
-    pub worktree: PathBuf,
+    /// Local optimistic-write revision; independent of Linear observation age.
+    pub revision: u64,
+    pub identifier: String,
+    pub title: String,
+    pub description: String,
+    /// Shared planning fields; independent of local execution and Workflow position.
+    pub rank: u32,
+    pub assignee: Option<String>,
+    pub due_date: Option<String>,
+    pub state: Option<String>,
+    pub completed: bool,
+    pub completed_at: Option<String>,
+    /// Optional Linear binding, not a second owner of this record.
+    pub linear_id: Option<LinearIssueId>,
+    /// Acquisition time of the retained Linear observation, never a write clock.
+    pub pm_snapshot_synced_at: Option<i64>,
+    pub pm_writeback: LinearWritebackState,
+    /// Read projection from the Project join, validated against the Project on save.
+    pub wave_id: Option<WaveId>,
+    /// Stable repository identity, independent of planning membership.
+    pub repository_id: crate::durable::RepositoryId,
+    pub project_id: Option<ProjectId>,
+    pub worktree: Option<PathBuf>,
     pub workspace_slug: String,
+    pub branch: String,
+    pub base_commit: String,
+    pub parent_pr_id: Option<TaskPrId>,
+    /// Explicit choice for every Graph step; None uses the step/config defaults.
+    pub agent: Option<String>,
     /// Set when abandonment is *requested*, not when it is applied. No launch
     /// path may start a Run for Task Work carrying this.
     pub abandon_intent: Option<AbandonIntent>,
@@ -632,8 +527,23 @@ pub struct Task {
 }
 
 impl Task {
+    pub fn linear_id(&self) -> Result<&LinearIssueId, LinearBindingError> {
+        self.linear_id
+            .as_ref()
+            .ok_or(LinearBindingError::NoLinearMapping)
+    }
+
+    pub fn worktree(&self) -> Result<&PathBuf, TaskDataError> {
+        self.worktree.as_ref().ok_or_else(|| {
+            TaskDataError::InvalidInvariant(format!(
+                "Task {} has no checkout; place it with `lf checkout {}`",
+                self.id, self.id
+            ))
+        })
+    }
+
     pub fn validate(&self) -> Result<(), TaskDataError> {
-        if self.workspace_slug.trim().is_empty() {
+        if self.worktree.is_some() && self.workspace_slug.trim().is_empty() {
             return Err(TaskDataError::InvalidInvariant(format!(
                 "Task {} requires a workspace slug",
                 self.id
@@ -643,9 +553,47 @@ impl Task {
     }
 }
 
+/// Historical keep-open scope, retained for event decoding only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskFollowUp {
+    pub outcome: String,
+    pub evidence: String,
+    pub check_at: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskEventKind {
+    // Historical follow-through events remain readable; no current writers.
+    FollowThroughIntent {
+        intent: serde_json::Value,
+    },
+    FollowThroughLinked {
+        link: serde_json::Value,
+    },
+    FollowThroughRelationConfirmed {
+        #[serde(deserialize_with = "crate::id::deserialize_uuid")]
+        relation_id: String,
+        #[serde(deserialize_with = "crate::id::deserialize_task_or_uuid")]
+        source_issue_id: String,
+        #[serde(deserialize_with = "crate::id::deserialize_task_or_uuid")]
+        target_issue_id: String,
+    },
+    FollowThroughDisposition {
+        reason: String,
+    },
+    FollowThroughConversion {
+        reason: String,
+    },
+    CheckoutInitializing {
+        branch: String,
+        path: String,
+        base_commit: String,
+    },
+    CheckoutReady {
+        branch: String,
+        base_commit: String,
+    },
     WorktreeInitializing {
         pr_id: TaskPrId,
         sequence: u32,
@@ -660,17 +608,26 @@ pub enum TaskEventKind {
     Progress {
         summary: String,
     },
-    FlowFinished {
+    // Historical keep-open decision; no current writer.
+    FollowUp {
+        remaining: Option<TaskFollowUp>,
+        reason: String,
+    },
+    // Retained for reading recorded decisions; no current writer.
+    HistoricalUncertaintyAccepted {
+        #[serde(alias = "exec_ids")] // Append-only decisions keep their original bytes.
+        lf_process_ids: Vec<crate::id::LfProcessId>,
+        reason: String,
+    },
+    GraphFinished {
+        #[serde(deserialize_with = "crate::id::deserialize_uuid")]
         invocation_id: String,
-        flow: String,
+        graph: String,
         summary: String,
     },
-    /// A durable steer: direction handed to the Task. Folded into the run's
-    /// seed and injected into a live turn; not a report out, so it never
-    /// crosses to the parent Project.
+    /// Historical authored direction; the immutable publication owns its text.
     Steer {
-        author: crate::durable::Author,
-        text: String,
+        steer_id: crate::id::SteerId,
     },
     /// A request to end the Task's current turn so the next one re-reads its
     /// direction immediately. A live run acts on interrupts issued after it
@@ -695,6 +652,9 @@ pub enum TaskEventKind {
         url: String,
         merge_commit: String,
     },
+    CompletionRequested {
+        reason: Option<String>,
+    },
     Completed {
         summary: String,
     },
@@ -709,10 +669,13 @@ impl TaskEventKind {
     pub fn is_wave_observable(&self) -> bool {
         !matches!(
             self,
-            Self::WorktreeInitializing { .. }
+            Self::CheckoutInitializing { .. }
+                | Self::CheckoutReady { .. }
+                | Self::WorktreeInitializing { .. }
                 | Self::Started
                 | Self::Progress { .. }
-                | Self::FlowFinished { .. }
+                | Self::HistoricalUncertaintyAccepted { .. }
+                | Self::GraphFinished { .. }
                 | Self::Steer { .. }
                 | Self::Interrupt
         )
@@ -725,29 +688,6 @@ pub struct TaskEvent {
     pub task_id: TaskId,
     pub kind: TaskEventKind,
     pub created_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskObservation {
-    pub task_id: TaskId,
-    pub issue_identifier: String,
-    pub event_id: i64,
-    pub event: TaskEventKind,
-}
-
-impl TaskObservation {
-    pub fn inbox_id(&self) -> String {
-        format!("task-{}-{}", self.task_id, self.event_id)
-    }
-
-    pub fn prompt(&self) -> String {
-        let payload = serde_json::to_string(&self.event)
-            .expect("Task observation always serializes to structured JSON");
-        format!(
-            "<task_observation task_id=\"{}\" issue=\"{}\" event_id=\"{}\">\n{}\n</task_observation>",
-            self.task_id, self.issue_identifier, self.event_id, payload
-        )
-    }
 }
 
 /// The durable cursor for streaming Linear edits by participants into one Task.
@@ -769,36 +709,11 @@ pub struct TaskLinearObservation {
     pub updated_at: OffsetDateTime,
 }
 
-/// One Linear observation, ready to persist atomically as Task direction. The
-/// directive is applied only if the stored title/description still differ
-/// (compare-and-set), and each follow-up becomes a command only on its first
-/// entry into the ledger — so overlapping polls, restarts, and out-of-order
-/// responses never duplicate direction.
-#[derive(Debug, Clone)]
-pub struct LinearObservationApply {
-    pub task_id: TaskId,
-    pub revision: String,
-    pub title: String,
-    pub description: String,
-    pub observed_at: OffsetDateTime,
-    /// A title/description edit to persist as one authored Steer.
-    pub content_steer: Option<String>,
-    /// Participant comments observed this pass, oldest first.
-    pub follow_ups: Vec<LinearFollowUp>,
-}
-
-#[derive(Debug, Clone)]
-pub struct LinearFollowUp {
-    pub comment_id: String,
-    pub text: String,
-}
-
-/// What one [`LinearObservationApply`] actually wrote — enough for the caller to
-/// report receipts without re-reading the store.
+/// Direction persisted from one observation, without re-reading the store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinearObservationOutcome {
     /// The Task had no cursor yet: this observation seeded the baseline and
-    /// emitted no direction (existing comments are marked seen, not replayed).
+    /// emitted no content Steer; participant comments are still imported.
     pub baselined: bool,
     pub content_steer_applied: bool,
     /// Event ids of the steer comments this observation appended.
@@ -808,32 +723,58 @@ pub struct LinearObservationOutcome {
 #[cfg(test)]
 mod tests {
     use super::{
-        AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication, Task,
-        TaskId, TaskObservation, TaskPr, TaskPrId,
+        GithubPr, LinearWritebackOperation, LinearWritebackState, PrPhase, PrPublication, Task,
+        TaskId, TaskPr, TaskPrId,
     };
-    use crate::planning::{LinearIssueId, TaskPlan};
+    use crate::linear::LinearIssueId;
 
     fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();
         Task {
+            repository_id: crate::durable::RepositoryId::new(),
             id: TaskId::new(),
-            plan: TaskPlan {
-                id: LinearIssueId::new("issue-1").unwrap(),
-                identifier: "INF-123".to_string(),
-                title: "Ship it".to_string(),
-                description: String::new(),
-                pm_snapshot_synced_at: 1,
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: crate::id::WaveId::new(),
-            project_id: crate::work::project::ProjectId::new(),
-            worktree: "/tmp/task".into(),
+
+            revision: 0,
+            linear_id: Some(LinearIssueId::new("issue-1").unwrap()),
+            identifier: "INF-123".to_string(),
+            title: "Ship it".to_string(),
+            description: String::new(),
+            pm_snapshot_synced_at: Some(1),
+
+            pm_writeback: LinearWritebackState::Current,
+            wave_id: Some(crate::id::WaveId::new()),
+            project_id: Some(crate::work::project::ProjectId::new()),
+            worktree: Some("/tmp/task".into()),
             workspace_slug: "ship-it".to_string(),
+            branch: "jack/ship-it".to_string(),
+            base_commit: "abc".to_string(),
+            parent_pr_id: None,
+            agent: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            rank: 0,
+            assignee: None,
+            due_date: None,
+            state: None,
+            completed: false,
+            completed_at: None,
             observation: crate::work::task::Observation::NotRequired,
         }
+    }
+
+    #[test]
+    fn task_content_round_trip_keeps_binding_revision_and_observation_age() {
+        let mut task = task();
+        task.revision = 17;
+        task.pm_snapshot_synced_at = Some(42);
+        let value = serde_json::to_value(&task).unwrap();
+        assert!(value.get("plan").is_none());
+        assert_eq!(value["title"], "Ship it");
+        assert_eq!(value["revision"], 17);
+        assert_eq!(value["linear_id"], "issue-1");
+        assert_eq!(value["pm_snapshot_synced_at"], 42);
+        assert_eq!(serde_json::from_value::<Task>(value).unwrap(), task);
     }
 
     #[test]
@@ -845,26 +786,9 @@ mod tests {
     }
 
     #[test]
-    fn task_observation_has_a_stable_structured_inbox_identity() {
-        let observation = TaskObservation {
-            task_id: TaskId::from_raw("ts_example"),
-            issue_identifier: "INF-123".to_string(),
-            event_id: 42,
-            event: super::TaskEventKind::Failed {
-                error: "provider stopped".to_string(),
-                resumable: true,
-            },
-        };
-
-        assert_eq!(observation.inbox_id(), "task-ts_example-42");
-        assert!(observation.prompt().contains("<task_observation"));
-        assert!(observation.prompt().contains("\"kind\":\"failed\""));
-    }
-
-    #[test]
     fn pending_pm_writeback_has_a_stable_json_shape() {
-        let state = PmWritebackState::Pending {
-            operation: PmWritebackOperation::CompleteTask,
+        let state = LinearWritebackState::Pending {
+            operation: LinearWritebackOperation::CompleteTask,
             error: "offline".to_string(),
         };
 
@@ -927,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn merge_request_contains_its_disposition() {
+    fn merge_request_retains_exact_head_and_publication_evidence() {
         let now = time::OffsetDateTime::now_utc();
         let mut pr = TaskPr {
             id: TaskPrId::new(),
@@ -953,8 +877,6 @@ mod tests {
                     mode: super::PrMergeMode::User,
                     requested_at: now,
                     head_sha: "head".to_string(),
-                    after_merge: AfterMerge::ContinueTask,
-                    next_slug: Some("released_upgrade".to_string()),
                 }),
             }),
             merge_commit: None,
@@ -967,10 +889,6 @@ mod tests {
             linear_comment_id: None,
             linear_link_error: None,
         };
-        assert!(pr.validate().is_err());
-
-        let merge = pr.publication.as_mut().unwrap().merge.as_mut().unwrap();
-        merge.next_slug = Some("released-upgrade".to_string());
         assert!(pr.validate().is_ok());
         assert!(pr.presentation().is_some());
 
@@ -996,14 +914,8 @@ mod tests {
             .unwrap()
             .head_sha = Some("head".to_string());
 
-        pr.publication
-            .as_mut()
-            .unwrap()
-            .merge
-            .as_mut()
-            .unwrap()
-            .after_merge = AfterMerge::CompleteTask;
-        assert!(pr.validate().is_err());
+        assert!(pr.validate().is_ok());
+        assert!(pr.merge_request().is_some());
     }
 
     fn open_pr(head_sha: &str, observation: Option<super::CiObservation>) -> TaskPr {
@@ -1087,134 +999,11 @@ mod tests {
         assert!(!open_pr("current", None).merge_checks_passed());
     }
 
-    fn failing(head: &str, checks: &[&str]) -> super::CiObservation {
-        super::CiObservation {
-            head_sha: head.to_string(),
-            state: super::CiState::Failing,
-            failing_checks: checks
-                .iter()
-                .map(|name| super::CiCheck {
-                    name: name.to_string(),
-                    url: None,
-                })
-                .collect(),
-            observed_at: time::OffsetDateTime::now_utc(),
-        }
-    }
-
-    /// The observation answers whether this head is repairable now. Admission is
-    /// keyed separately by the landing generation and incident identity.
-    #[test]
-    fn ci_repair_legality_follows_only_the_current_reading() {
-        let obs = failing("h1", &["build", "lint"]);
-        assert!(obs.repair_legal());
-
-        // The failing set is order-independent and deduplicated: it is the content
-        // half of the incident identity, so two readings of one failure must hash
-        // the same however GitHub ordered them.
-        assert_eq!(
-            obs.failure_set(),
-            vec!["build".to_string(), "lint".to_string()]
-        );
-        assert_eq!(
-            failing("h1", &["lint", "build"]).failure_set(),
-            obs.failure_set()
-        );
-        assert_eq!(
-            failing("h1", &["build", "build"]).failure_set(),
-            vec!["build".to_string()]
-        );
-
-        // A passing or pending reading is never legal to wake on.
-        let mut green = obs.clone();
-        green.state = super::CiState::Passing;
-        assert!(!green.repair_legal());
-        let mut pending = obs.clone();
-        pending.state = super::CiState::Pending;
-        assert!(!pending.repair_legal());
-    }
-
-    /// A head red *only* on a land-time precondition is not a repair a body can
-    /// perform: `lf pr land` clears `scratch/`, and the only action a woken body
-    /// could take is deleting the Task's design doc.
-    ///
-    /// The direction that matters is the second half. Suppression fires only when
-    /// every named failure is land-resolved — a real leaf alongside it still
-    /// arms, and an *unnamed* failure still arms, because a filter that swallows
-    /// failures it cannot classify is a mute button rather than a classifier.
-    #[test]
-    fn a_head_red_only_on_a_land_time_precondition_is_not_repairable() {
-        assert!(!failing("h1", &["scratch-clear"]).repair_legal());
-
-        // A real leaf alongside it is still a repair worth waking for.
-        assert!(failing("h1", &["scratch-clear", "rust-test"]).repair_legal());
-        assert!(failing("h1", &["rust-test"]).repair_legal());
-
-        // Failing with nothing named: unclassified, not proven harmless.
-        assert!(failing("h1", &[]).repair_legal());
-
-        // The reading stays honest — this refuses the wake, it does not deny the
-        // red. Status and `lf ci` still name the failure.
-        let obs = failing("h1", &["scratch-clear"]);
-        assert_eq!(obs.state, super::CiState::Failing);
-        assert_eq!(obs.failure_set(), vec!["scratch-clear".to_string()]);
-    }
-
-    /// The land-resolved predicate is the exact dual of `repair_legal` within the
-    /// failing state, so the two must never both refuse the same head.
-    #[test]
-    fn only_land_time_preconditions_is_the_dual_of_repair_legal() {
-        // Red only on scratch-clear: land-resolved, and no wake.
-        let scratch = failing("h1", &["scratch-clear"]);
-        assert!(scratch.only_land_time_preconditions());
-        assert!(!scratch.repair_legal());
-
-        // A real leaf beside it (or alone): not land-resolved, wake arms.
-        for obs in [
-            failing("h1", &["scratch-clear", "rust-test"]),
-            failing("h1", &["rust-test"]),
-        ] {
-            assert!(!obs.only_land_time_preconditions());
-            assert!(obs.repair_legal());
-        }
-
-        // Unclassified (empty) failure: not "only preconditions", still repairs.
-        let empty = failing("h1", &[]);
-        assert!(!empty.only_land_time_preconditions());
-        assert!(empty.repair_legal());
-
-        // Passing/pending is never "only preconditions".
-        let mut green = scratch.clone();
-        green.state = super::CiState::Passing;
-        assert!(!green.only_land_time_preconditions());
-        let mut pending = scratch.clone();
-        pending.state = super::CiState::Pending;
-        assert!(!pending.only_land_time_preconditions());
-    }
-
-    /// The one literal, pinned against the workflow that defines it. A rename of
-    /// the CI job turns this red *at the const* instead of silently re-arming
-    /// repairs in production — the anti-rot guard for a name that cannot be derived.
-    #[test]
-    fn land_time_precondition_names_a_real_ci_job() {
-        let workflow =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/workflows/ci.yml");
-        let yaml = std::fs::read_to_string(&workflow)
-            .unwrap_or_else(|e| panic!("read {}: {e}", workflow.display()));
-        let job = format!("\n  {}:", super::LAND_TIME_PRECONDITION_CHECK);
-        assert!(
-            yaml.contains(&job),
-            "no job named `{}` in {} — the landing preflight classification drifted",
-            super::LAND_TIME_PRECONDITION_CHECK,
-            workflow.display()
-        );
-    }
-
     #[test]
     fn pending_pm_writeback_is_valid_without_a_controller() {
         let mut task = task();
-        task.pm_writeback = PmWritebackState::Pending {
-            operation: PmWritebackOperation::CompleteTask,
+        task.pm_writeback = LinearWritebackState::Pending {
+            operation: LinearWritebackOperation::CompleteTask,
             error: "too early".to_string(),
         };
         assert!(task.validate().is_ok());

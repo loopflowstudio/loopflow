@@ -5,10 +5,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILL = ROOT / "skills/loopflow/SKILL.md"
-LOOPFLOW = ROOT / "rust/loopflow/src/engine/builtins/LOOPFLOW.md"
+LOOPFLOW = ROOT / "rust/loopflow/src/builtins/LOOPFLOW.md"
+WORK = ROOT / "rust/loopflow/src/builtins/ops/skill/work.md"
 
 
-def test_skill_frontmatter_is_valid():
+def test_skill_frontmatter_is_valid() -> None:
     text = SKILL.read_text()
     match = re.match(r"\A---\n(.*?)\n---\n", text, re.DOTALL)
     assert match, "SKILL.md must open with YAML frontmatter"
@@ -18,7 +19,7 @@ def test_skill_frontmatter_is_valid():
     assert description and len(description.group(1)) > 20
 
 
-def test_skill_is_self_contained():
+def test_skill_is_self_contained() -> None:
     """A published skill runs in repos that aren't this one: no repo-relative
     references outside the maintainer comment."""
     text = SKILL.read_text()
@@ -27,31 +28,36 @@ def test_skill_is_self_contained():
     assert "scratch/website-docs-redo" not in body
 
 
-def test_external_user_and_internal_worker_authority_are_distinct():
+def test_external_user_and_internal_worker_authority_are_distinct() -> None:
     skill = SKILL.read_text()
     agent_api = (ROOT / "docs/agent-api.md").read_text()
     readme = (ROOT / "README.md").read_text()
 
-    for text in (skill, agent_api):
-        assert "external harness" in text
-        assert "Loopflow-launched" in text
-        assert "User" in text
-        assert "lf chat" in text
+    assert "external harness" in skill
+    assert "Never invent Work identity or claim another caller's authority" in skill
+    assert "external harness" in agent_api
+    assert "Loopflow-launched" in agent_api
+    assert "Session" in skill
 
     install = "npx skills add loopflowstudio/loopflow --skill loopflow -g -y"
     assert install in agent_api
     assert install in readme
 
 
-def test_agent_surfaces_share_the_inspection_commands():
+def test_launcher_surfaces_load_the_shared_work_contract() -> None:
     surfaces = [
         SKILL.read_text(),
         LOOPFLOW.read_text(),
         (ROOT / "docs/agent-api.md").read_text(),
-        (ROOT / "docs/lf.md").read_text(),
     ]
 
     for text in surfaces:
-        assert "lf ls --json" in text
-        assert "lf status <wave> --json" in text
-        assert "lf roadmap --json" in text
+        assert "lf help skill work" in text
+
+    for text in (SKILL.read_text(), LOOPFLOW.read_text()):
+        assert "lf wave list --json" not in text
+
+    work = WORK.read_text()
+    assert "lf wave list --json" in work
+    assert "lf wave status <wave> --json" in work
+    assert "lf wave show --json" in work

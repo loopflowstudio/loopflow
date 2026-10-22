@@ -1,7 +1,7 @@
 # Authoring
 
 The prompt library lives in your repo and is reviewed like code: skills
-and flows under `.lf/`, goals under `wave/`. This page is how to
+and graphs under `.lf/`, goals under `.lf/wave/`. This page is how to
 write each one well. Where they resolve and what ships builtin is reference —
 see [`lf` → Skills](lf.md#skills).
 
@@ -22,81 +22,127 @@ Fix any issues you find.
 ```
 
 ```bash
-lf audit                      # run it
-lf audit: focus on auth       # {args} in the file receives "focus on auth"
+lf audit                               # run it
+lf audit: focus on auth                # {args} in the file receives "focus on auth"
 ```
+
+```bash
+lf skill customize pr-message          # copy the builtin into .lf/skills/ and print its path
+```
+
+A repository skill replaces the builtin with the same name. Customize copies the
+builtin once, then keeps printing the existing local file.
 
 Write skills direct and imperative — state what to do, not what the skill
 is. One skill, one job: `design` writes the spec, `implement` builds from
 it, `gate` judges ship-readiness. Chain them rather than writing one skill
 that does everything.
 
-Direct launch from a TTY runs interactively. `--batch` and automated
-flow execution run the same skill headlessly, so write a bounded contract for
-both surfaces when the work involves judgment or conversation:
+Direct launch from a TTY runs interactively. Graph steps run headlessly unless
+the caller passes `-i`. Define the inputs
+and useful change independently of the caller. When judgment is unavailable, make supported
+corrections and leave consequential choices explicit. Use a reviewer protocol
+only when the caller supplies one.
 
-```markdown
-## Reviewer mode
+Pass work between skills through its existing owner: code, a working plan,
+or findings. Use `scratch/` for plans and evidence that later steps need;
+update them in place rather than creating a report per pass. Test skills
+standalone, midstream, and on repeated use.
 
-- **Interactive reviewer:** explore the problem in the current conversation.
-- **Parent reviewer:** answer the assigned question from supplied evidence and
-  return without waiting for a person.
-```
-
-Skills chain through `scratch/`: a step writes `scratch/<branch>.md`, the
-next step reads it. That contract is what makes flows work — if your skill
-produces something a later step needs, write it to `scratch/`, not to chat.
-
-Use `concept-review` to reconsider the product mid-task with a human, or after
-`review-slice` for an autonomous assessment. Draft the affected usage docs and
-skill guidance first, then follow the simpler interaction through types, APIs,
-and infrastructure. Product clarity is valuable even without deleting code.
+Use `concept-review` to reconsider the product with someone present, on request
+or in the ongoing Wave conversation; `pursue` also runs it headless (below).
+Realign reconciles the plan, code, and identified Wave memory.
+Draft the affected usage docs and skill guidance first, then follow the simpler
+interaction through types, APIs, and infrastructure. Product clarity is valuable
+even without deleting code.
 Keep proposed alternatives distinct from accepted requirements and verified
-behavior. The review supplies evidence; `loop-decide` owns navigation when the
-Flow declares a decision step.
+behavior. The work and updated plan supply evidence; `loop-or-next` owns navigation
+when the Graph declares a decision step.
 
-## Flows
+## Graphs
 
-A flow is a YAML list of steps — each step names a skill, an op, or another
-flow — with commits between them:
+A graph is a YAML list of steps — each step names a skill, an op, or another
+graph — with commits between them:
 
 ```yaml
-# .lf/flows/ship-api.yaml
+# .lf/graphs/ship-api.yaml
 - implement
 - compress
 - gate
 ```
 
+Bare names and `graph: NAME` select an exact literal name before considering
+slash/dash fallbacks. When a skill and Graph share that literal name, the Graph
+wins; an exact skill still wins over a fallback Graph. Use `step: NAME` to select
+the skill explicitly; this also lets a Graph call its own same-named skill
+without a cycle. An invalid selected Graph reports its error instead of falling
+back to the skill. Unlike YAML `graph: NAME`, CLI `lf graph show NAME` selects only
+Graphs.
+
 Skills that need another Work's perspective launch it directly with
-`lf --as <work> : "<prompt>"`. Skills that genuinely need a decision from the user use
-`lf ask "<request>"`; the Run blocks while a durable session works in the
-same checkout, then resumes when the user completes that conversation.
+`lf --task <task> : "<prompt>"`. Headless skills missing required input
+explain the failure in ordinary output and stop. The Wave operator
+reads existing logs and discusses unresolved judgment in its own chat.
 
-Run a step interactively with `human: true`. Give it an `id` stable within
-its expanded Flow so the conversation can be reopened:
+Keep design and review in the Task conversation. Operational Graphs reject
+`human: true` steps, including inside composed Graphs and XOR alternatives, before
+launching work. Save agreed feedback and remaining work in the conversation;
+Session completion controls are retired. Inspect the exact
+Graph and its effects before selecting further work.
 
-```yaml
-- kickoff
-- step:
-    id: review_design
-    name: review-design
-    human: true
-```
-
-The human and agent clarify the design in that conversation. The agent saves
-feedback with `lf session ready "feedback and remaining work"`; the human ends
-the review with `lf session complete <session-id>`. The Flow carries that
-feedback to its next step. Provider exit or readiness alone leaves it waiting.
-Human steps have no navigation verdict or backward edge. Put a deciding step
-after the review when its feedback should choose between continuing and more work.
-
-Mechanical git/PR operations ride along as `op:` steps:
+Mechanical git/PR operations ride along as `cmd:` steps:
 
 ```yaml
 - implement
 - gate
-- op: pr land
+- cmd: pr land
 ```
+
+`cmd:` invokes a builtin command with its arguments. Named skills and graphs
+remain separate targets; `lf skill NAME` and `lf graph NAME` select their kind. Use
+`cmd:` in authored YAML; the former `op:` spelling is no longer accepted.
+
+### Graphs in chat
+
+```bash
+lf sync-skills --repo
+```
+
+Select the Graph's name as a native skill. Its `SKILL.md` contains a direct
+checklist: ordinary steps run `lf -b implement` and wait for the result;
+`human: true` steps execute the skill in the current conversation and wait for
+the participant's response.
+
+```yaml
+- step: {name: implement, id: build}
+- loop: build
+- step: {name: demo, id: review, human: true}
+```
+
+Default loops use natural-language instructions: continue when this boundary's
+requirements are met, repeat the named range when useful work remains, or explain
+what prevents progress and stop. Custom decision skills execute in the
+conversation with their own criteria. XOR chooses one declared path and rejoins
+afterward. Reviews stay in the conversation; no substitute reviewer or assumed
+approval. Skill bodies and JSON verdict schemas are not bundled into recipes.
+
+Skills and Graphs keep exact literal names. Slash and dash definitions can coexist;
+normalization is a fallback when the exact name is absent. Codex retains both
+names; Claude uses the literal dashed name when flattening would collide.
+Recipes retain source paths for conversational skills so a flattened name cannot
+silently select another definition. Native controls and resource bases still apply;
+a user-only native skill requires invocation by the participant. Loopflow skill
+exports allow model invocation; Graph entry points remain user-invoked in Claude.
+
+Headless commands retain normal LF execution records and agent settings. The
+coordinating conversation creates no outer Graph process or Task Workflow move.
+After interruption, inspect results before repeating a successful command.
+
+Native names have no Graph prefix. If a skill already owns the same native name,
+sync skips the Graph export and preserves the skill. Recipes capture topology at
+sync time: run `sync-skills --repo` after adding, editing or overriding a repository
+Graph. Repository recipes stay in the checkout; global sync exports builtin Graphs.
+Headless commands load their skills normally when launched.
 
 ### Working notes and feedback
 
@@ -113,119 +159,177 @@ useful action with its proof. Link related notes. Update the relevant account
 and mark superseded conclusions while preserving useful evidence. Notes remain
 available across steps, regardless of which skill wrote them or runs next.
 
-A review's ready summary points to that material:
-
-```sh
-lf session ready "See scratch/search-feedback.md: implement the agreed empty state; verify recovery after clearing the query"
-```
-
-Loop-decide starts at those paths, then reconciles the current design and other
-relevant scratch evidence. A note recommends work; the deciding occurrence
-records navigation through the Flow protocol. There is no required handoff
-filename or control file. Recursive scratch Markdown is assembled into fresh
-Run context; a running agent can reread files updated since its launch.
+Discuss the review's note paths and takeaway in the ongoing conversation. A note
+recommends work; the caller selects the next action after inspecting its evidence.
+There is no required handoff filename or control file. Recursive scratch Markdown
+is assembled into fresh context; a running agent can reread updated files.
 
 ### Branching (xor)
 
-Branches route a flow on an agent's assessment of the current state. Exactly
+Branches route a graph on an agent's assessment of the current state. Exactly
 one path runs:
 
 ```yaml
-# flow: garden
-- scan
-- assess
+# .lf/graphs/assess-change.yaml
+- qa
 - xor:
-    router: assess
+    router: triage
     paths:
-      act:
-        flow: garden-act
-        description: "Adjustments needed — mutate waves, then review"
+      repair:
+        graph: code
+        description: "Reproduced defects within the change need repair"
       silence:
-        description: "Everything is healthy"
+        description: "No actionable defect in the supplied change"
 ```
 
-The `router:` skill reads the available evidence and records one choice with
-`lf flow route PATH`. Routing instructions and path descriptions are appended
-to its captured prompt. The choice belongs to the active Run and takes effect
-when it succeeds; failed Runs discard their candidates. A path
-with no `flow:`, `skill:`, or inline `steps:` (like `silence`) is a clean no-op
+The `router:` skill reads the available evidence and returns `{"path":"NAME"}`
+as its message asks. Routing instructions and path descriptions are appended
+to its captured prompt. The choice belongs to the selected native turn and takes effect
+when it succeeds; a retry must supply its own candidate. A path
+with no `graph:`, `skill:`, or inline `steps:` (like `silence`) is a clean no-op
 exit. With no `router:`, a generic routing agent picks from `scratch/` contents.
 
 ### Loopflows
 
-A **loopflow** is a Flow with one or more backward edges. Use the same Flow
-commands; Task binding adds context and Task authority. Task and ordinary Flow
+A **loopflow** is a Graph with one or more backward edges. Use the same Graph
+commands; Task binding adds context and Task authority. Task and ordinary Graph
 execution interpret backward edges through the same transition rules.
 
 ```bash
-lf feature
-lf task run DES-123 --flow feature
+lf pursue
+lf task run DES-123 pursue
 ```
 
-A loop is a backward edge in that Flow. It returns from a deciding step to an
-earlier step; the intervening steps form its body. Give the destination and
-deciding step stable ids:
+A loop is a backward edge in that Graph. `loop: <target>` runs a deciding step
+last and returns to an earlier step; the steps between form its body:
 
 ```yaml
-- step:
-    id: implement
-    name: implement
+- implement
 - compress
-- review-slice
-- step:
-    id: review_concepts
-    name: concept-review
-- step:
-    id: decide
-    name: loop-decide
-    repeat:
-      from: implement
-- step:
-    id: review_delivery
-    name: demo
-    human: true
-- step:
-    id: decide_delivery
-    name: loop-decide
-    repeat:
-      from: implement
+- graph: refresh
+- loop: implement
+- pr-publish
 ```
 
-One pass runs implement, compress, review-slice, concept-review, and loop-decide.
-The reviews supply evidence; loop-decide chooses Advance or Iterate through the
-[decision protocol](lf.md#flow-decisions-and-recovery). Iterate returns to `from`
-with direction; Advance reaches the human demo. Complete returns the demo's
-feedback and revised design to the second loop-decide. Its own explicit edge
-also targets implement: the outer loop repeats implementation, both reviews,
-the inner decision loop, and demo. Review completion itself chooses no edge.
+`loop` names a preceding step by its skill. When that skill runs more than once,
+give one occurrence an `id` and loop to that. `step:` replaces the default
+`loop-or-next` decider:
 
-At the deciding occurrence, use `lf flow decide advance "evidence"` or
-`lf flow decide iterate "next action and proof"`. The current decision Run owns
-that choice; its candidate takes effect only after the Run succeeds. A review's
-final prose or a successful process exit cannot substitute for the decision.
+```yaml
+- step: {name: implement, id: first}
+- implement
+- loop: first
+  step: my-decider
+```
+
+One pass runs implement, compress, refresh (sync → realign), and loop-or-next.
+The work and updated plan supply evidence; loop-or-next chooses Advance or Iterate through the
+[decision protocol](lf-reference.md#graph-decisions-and-recovery). Iterate returns to the target
+with direction. This is `pursue`: Advance leaves the implementation loop for
+`concept-review`, whose own loop-or-next iterates to implement when the review
+changed the design, blocks on an open product choice, and otherwise publishes.
+No step waits for a person.
+
+At the deciding occurrence, return `{"decision":"advance","summary":"evidence","reason":null}`
+or `{"decision":"iterate","summary":"next action and proof","reason":null}`, or
+`{"decision":"blocked","summary":null,"reason":"question and evidence"}`. The contract
+travels in the step's message, not as a provider schema. The Graph reads the final answer of the turn its
+step captured; invalid output gets at most two corrective turns in the same
+conversation, then the Graph fails. A failed turn cannot navigate.
 
 Backward edges have no pass limit. Iterate follows the edge as long as the
 decision calls for more work; human revision needs no budget reset. Pass counts
 describe history. Missing decisions stop execution. Blocked is a stopped
-execution outcome: report it with
-`lf flow blocked "reason, attempted direction, evidence, and question"`.
-The runtime keys one Ask to the exact invocation, occurrence, and pass. Retries
-join that Ask or recover its saved completion. Its Session runs `unblock`, using
-concept-review with the human by default. Completion returns evidence to
-loop-decide for reassessment without choosing a navigation decision. If the blocker
-remains unresolved, report it; do not open identical Asks automatically.
+decision: return it with a required reason in the final structured result.
+Existing logs and outcomes provide the evidence. The Wave operator resolves
+impediments or discusses missing judgment in its ongoing chat. A stopped Graph
+is never retried or resumed; its caller launches fresh work explicitly.
 
-Resume the saved invocation to preserve its captured definition, position,
-direction, and accepted decisions. Edits to the source apply to new invocations.
-Finishing a Flow grants no implicit merge or Task-completion authority and
-does not choose another Flow; author delivery explicitly.
+Inspect a Graph's Processes and effects before launching further work.
+Edits to the source apply to new Graphs.
+Finishing a Graph grants no implicit merge or Task-completion authority and
+does not choose another Graph; author delivery explicitly.
 
-`feature` combines design review with this loop; `pursue` starts at
-implementation. Ordinary and Task invocations capture every XOR router and path
+`pursue` starts at implementation. Ordinary and Task Graphs compile every XOR router and path
 before execution and use the same cursor for nested paths and backward edges.
-Recovery reads that captured definition, including paths not yet selected.
 The implementation and recovery fixtures do not establish live provider/Session
 handoff parity; that still requires a configured end-to-end demonstration.
+
+## Workflows
+
+A workflow is a Task's outer shape: nodes where you take part in the Task
+conversation, joined by edges that each run one Graph.
+
+```yaml
+# .lf/workflows/feature.yaml
+nodes:
+  design: review-design      # the skill the conversation uses at this node
+  demo: demo
+edges:
+  - { from: start,  to: design, graph: task-design }
+  - { from: design, to: design, graph: task-design }  # revise the design
+  - { from: design, to: demo,   graph: pursue }
+  - { from: demo,   to: demo,   graph: pursue }       # another pass
+  - { from: demo,   to: end,    graph: ship }         # land
+```
+
+```bash
+lf task run DES-123            # start: the only edge, task-design
+lf task run DES-123 pursue     # at design: build it
+lf task run DES-123 ship       # at demo: land it
+lf task status DES-123         # node, or the edge it is on
+lf task workflow move DES-123 design    # go back without running anything
+```
+
+`start` and `end` are implicit. A node may say what you do there:
+`design: { skill: review-design, description: you review the plan }`;
+without one, the skill's first line stands in. An edge names a Graph or skill; Task launch resolves it and uses the explicit
+`graph` or `skill` invocation. Only an edge into `end` may omit `graph:`; take it with
+`lf task run ISSUE end`. A Task with no PR is a workflow with no landing edge,
+like builtin `research`. An edge is named by what it runs, so two edges
+leaving one node run different things.
+
+On its first `lf task run`, a Task selects the Workflow you name, then its Wave
+default, then repository `workflow:`. It keeps the graph as it was then.
+The Task's position is stored. Choosing an edge puts the Task on it; the
+process that ran the edge puts the Task at its target when the Graph succeeds.
+A Graph that stops or fails leaves the Task on the edge, shown as stopped:
+choose that edge again, choose another one leaving the same node, or
+`lf task workflow move ISSUE NODE`. `task workflow move` puts the Task at any node and runs
+nothing: go back for another round, skip ahead, or record a landing that
+settled after its Graph stopped. An edge cannot be chosen while another is
+running. `lf task status ISSUE --json` carries the position, the edges that
+can be chosen now and every move with who made it and its `--reason`. There
+is no approve or complete command. Give feedback in the Task conversation,
+which is told its node's skill and the command for each edge leaving it. `lf --task ISSUE graph GRAPH` runs a Graph without moving the Task.
+
+Builtins are `feature` (design, demo, land), `code` (demo, land) and
+`research` (findings, no PR). `lf wave workflow list` lists Workflows;
+`lf graph list` lists autonomous Graphs. To edit a Workflow, copy its source into
+`.lf/workflows/`, edit and commit it, then select it for the Wave:
+
+```bash
+lf wave workflow source feature > .lf/workflows/feature.yaml
+# Edit .lf/workflows/feature.yaml and commit it.
+lf wave workflow set feature WAVE
+```
+
+A Wave stores only the selected name. Teammates run your definition once they
+have your commit; until then `lf task run` names the missing file.
+
+`lf graph customize NAME` copies a builtin into `.lf/graphs/`, reusing an
+existing local file and printing its path.
+Overrides stay within their kind: a Graph and a Workflow can share a name.
+An invalid local source stays unavailable and never exposes a hidden builtin.
+
+`lf wave workflow set NAME WAVE` changes what future Tasks take up.
+Existing Tasks retain their captured graph. `lf task workflow restart ISSUE`
+moves that graph to `start`, retaining its move and execution history; it
+neither reloads the definition nor executes work.
+
+Each Session receives applicable steers independently, in bounded batches.
+Repeating a Graph step creates another Session; continuing or compacting the same
+Session preserves its delivery history.
 
 ## Goals
 
@@ -233,16 +337,11 @@ handoff parity; that still requires a configured end-to-end demonstration.
 body is the prompt the wave runs each wake.
 
 ```markdown
-<!-- wave/infra/GOAL.md -->
----
-crons:
-  - flow: sync
-    schedule: "0 0 0 1 * * *"
----
+<!-- .lf/wave/infra/GOAL.md -->
 
 ## Objective
 
-Keep the runtime architecture legible. Each loop: read Linear tasks and
+Keep the runtime architecture legible. Each loop: read the Wave's Tasks and
 memory, pick the next useful move, resolve its local blocker, spin off
 independent work only when parallelism earns it, and fold what shipped into
 memory.
@@ -255,44 +354,44 @@ blast radius crosses storage, auth, or public APIs.
 
 The two sections carry different weight. **Objective** is identity — what this
 wave is for and how it moves. **Process** is constraint — when to design first,
-what never to touch. Project definitions and KRs live in Linear. Official live
-measurement lives in reviewed `wave/<wave>/metrics/*.md` contracts, not a
+what never to touch. Project definitions and KRs live in the plan. Official live
+measurement lives in reviewed `.lf/wave/<wave>/metrics/*.md` contracts, not a
 `GOAL.md` Measures section.
 
 ### Frontmatter
 
 | Field | What it does |
 |-------|-------------|
-| `owner` | Optional OS user allowed to start the Wave automatically |
-| `home` | Optional HomeId, hostname, or IP allowed to start the Wave automatically |
 | `agent` | Preferred agent harness/model |
-| `crons` | Supplementary flow schedules, fired by the wave's resident loop |
-| `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf pm init`) |
+| `linear.initiative` | Linear Initiative id backing the wave (written by `lf repo connect`) |
 
-The repository owns PM provider and Team authority in `.lf/config.yaml`:
+Schedules live in the repository configuration as ordinary command arguments;
+see [Schedule ordinary commands](lf.md#schedule-ordinary-commands).
+
+Planning syncs through Git by default. To plan in Linear, bind the repository to a Linear Team in `.lf/config.yaml`:
 
 ```yaml
-pm:
+planning:
   provider: linear
-  linear_team: "stable-team-uuid"
+  team: "stable-team-uuid"
 ```
 
-Do not copy provider or Team bindings into Wave frontmatter. Every Wave reuses
-the repository Team and owns only its Initiative.
+Every Wave uses the repository Team and binds only its Initiative.
 
-`owner` and `home` say where automatic startup is wanted. Both are optional and
-independent. They are policy, not authorization or observed runtime state.
-Execution placement remains durable state: use
-`lf work place wave <wave-id> <home-id>`. Bare `lf start` and `lfd` require both
-the authored policy and recorded placement to match; named `lf start <wave>` is
-an explicit local override.
-Whether this machine may pursue Work is Home-local registry state. Change it
-with `lf work enable|disable <wave|project|task> <id>`; these commands never edit
-the goal or another repository file.
+Which Machine runs your work for a Wave is your choice, never repository content:
+
+```bash
+lf machine use mini product  # your Machine for this Wave's new Tasks and Session
+lf machine use mini --repo   # this repository's default
+lf machine list              # each Machine with the defaults naming it
+```
+
+It does not edit the goal or launch work. It moves your Wave Session to the new
+Machine and leaves existing Tasks where they are.
 
 ### Writing KRs
 
-Project KRs live in Linear, but writing them begins one level above the
+Project KRs live in the plan, but writing them begins one level above the
 measurement. State who the Project serves and what becomes easier, safer,
 faster, clearer, or newly possible in their real work. For internal Projects,
 the beneficiary may be an operator, maintainer, or agent; still name the
@@ -343,12 +442,16 @@ lf design: plan infrastructure hardening for the runtime
 
 Seed `MEMORY.md` with the load-bearing context a first run needs. After that,
 agents edit the same reviewed file through the ordinary repository workflow;
-`update-wave` owns deliberate end-of-work curation.
+`realign` reconciles memory with the plan and code.
+
+Before curating a parent, realign discovers immediate-child `MEMORY.md` files
+with filesystem tools, reads relevant sections, and promotes shared lessons
+while keeping local detail in the child. Unread coverage stays explicit.
 
 ## Adaptation
 
 Curate durable lessons and decisions in the owning Wave's
-`wave/<name>/MEMORY.md`. Identify the owner from the work's context and Wave
+`.lf/wave/<name>/MEMORY.md`. Identify the owner from the work's context and Wave
 objectives. A repository with no Waves gets one named for the repository, with
 a repo-wide GOAL grounded in its purpose and a MEMORY for durable lessons.
 This local setup needs no PM binding or running Wave. If existing Waves leave

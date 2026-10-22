@@ -2,15 +2,15 @@ import Charts
 import Loopflow
 import SwiftUI
 
-/// Direct Run usage evidence beside codebase size and local ledger health.
+/// Session usage evidence beside codebase size and local ledger health.
 struct TelemetryDashboardView: View {
     @Environment(\.palette) private var palette
 
-    /// The codebase moves on a slower clock than a day's runs: a year shows the
+    /// The codebase moves on a slower clock than a day's Sessions: a year shows the
     /// shape of the thing (a rewrite, a vendored tree), where a month shows noise.
     private static let codebaseDays = 365
 
-    @State private var usage: [RunSnapshot] = []
+    @State private var usage: [SessionHistory] = []
     @State private var doctor: DoctorReport?
     @State private var codebase: CodeNode?
     @State private var growth: [CodeSnapshot] = []
@@ -22,7 +22,7 @@ struct TelemetryDashboardView: View {
     @State private var codebaseError: String?
     @State private var isLoading = true
 
-    /// Repos recent Run manifests name, by absolute path.
+    /// Repos recent capture manifests name, by absolute path.
     private var repos: [String] {
         Array(Set(usage.compactMap(\.repo))).sorted()
     }
@@ -36,10 +36,10 @@ struct TelemetryDashboardView: View {
                     ledgerHealth
 
                     chartCard(
-                        "Direct Run usage · 30 days",
+                        "Session usage · 30 days",
                         subtitle: "Provider-authored cumulative counters. Dashes are unknown; final receipts and evidence gaps remain explicit."
                     ) {
-                        DirectRunUsageList(runs: usage, repo: selectedRepo)
+                        DirectSessionUsageList(history: usage, repo: selectedRepo)
                     }
 
                     chartCard(
@@ -182,7 +182,7 @@ struct TelemetryDashboardView: View {
 
     private var totalLabel: String {
         let gaps = usage.reduce(0) { $0 + $1.evidenceGaps }
-        return "\(usage.count) Runs · \(gaps) evidence gaps"
+        return "\(usage.count) Sessions · \(gaps) evidence gaps"
     }
 
     @ViewBuilder
@@ -190,7 +190,7 @@ struct TelemetryDashboardView: View {
         if let errorMessage {
             Text(errorMessage)
                 .font(Typography.caption())
-                .foregroundStyle(Color.statusError)
+                .foregroundStyle(palette.failure)
         } else if let doctor {
             HStack(spacing: Spacing.sm) {
                 ForEach(doctor.checks) { check in
@@ -290,25 +290,25 @@ struct TelemetryDashboardView: View {
 
     private func healthColor(_ status: String) -> Color {
         switch status {
-        case "ok": .statusSuccess
-        case "warn": .statusWarning
-        default: .statusError
+        case "ok": palette.success
+        case "warn": palette.warning
+        default: palette.failure
         }
     }
 }
 
-private struct DirectRunUsageList: View {
+private struct DirectSessionUsageList: View {
     @Environment(\.palette) private var palette
-    let runs: [RunSnapshot]
+    let history: [SessionHistory]
     let repo: String?
 
-    private var visible: [RunSnapshot] {
-        runs.filter { repo == nil || $0.repo == repo }.prefix(30).map { $0 }
+    private var visible: [SessionHistory] {
+        history.filter { repo == nil || $0.repo == repo }.prefix(30).map { $0 }
     }
 
     var body: some View {
         if visible.isEmpty {
-            EmptyChartHint(message: "No direct Run usage in this window")
+            EmptyChartHint(message: "No provider usage in this window")
         } else {
             VStack(spacing: 0) {
                 row("WORK", "RUN", "INPUT", "OUTPUT", "FINAL", "GAPS", heading: true)
@@ -333,15 +333,8 @@ private struct DirectRunUsageList: View {
         value?.formatted() ?? "—"
     }
 
-    private func work(_ run: RunSnapshot) -> String {
-        for kind in ["task", "project", "wave"] {
-            if let subject = run.subjects.first(where: {
-                $0.selector.hasPrefix("\(kind):")
-            })?.selector.dropFirst(kind.count + 1) {
-                return "\(kind)/\(subject)"
-            }
-        }
-        return "—"
+    private func work(_ run: SessionHistory) -> String {
+        run.workLabel
     }
 
     private func row(
@@ -419,7 +412,7 @@ private struct CodebaseGrowthChart: View {
         if points.isEmpty {
             EmptyChartHint(
                 message: failure ?? "No git history in this window",
-                hint: "`lf tokens --days 30` walks the repo's commits"
+                hint: "`lf repo tokens --days 30` walks the repo's commits"
             )
         } else {
             Chart(points) { point in
@@ -465,7 +458,7 @@ private struct CodeFlame: View {
         } else {
             EmptyChartHint(
                 message: failure ?? "No codebase measured",
-                hint: "`lf tokens` measures the selected repo"
+                hint: "`lf repo tokens` measures the selected repo"
             )
         }
     }
@@ -554,7 +547,7 @@ private struct IcicleNode: View {
     }
 
     private var depthColor: Color {
-        let ramp: [Color] = [.loopflowBurgundy, .statusInfo, .statusSuccess, .statusWarning]
+        let ramp: [Color] = [palette.emphasisInk, palette.working, palette.success, palette.warning]
         return ramp[min(depth, ramp.count - 1)]
     }
 }

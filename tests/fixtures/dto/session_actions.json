@@ -1,24 +1,16 @@
 [
   {
-    "kind": "interactive",
-    "state": "waiting",
+    "state": "unknown",
     "actions": [
       {
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
-        "unavailable_reason": null
       }
     ]
   },
   {
-    "kind": "interactive",
     "state": "active",
     "actions": [
       {
@@ -30,37 +22,12 @@
       {
         "kind": "move_here",
         "label": "Move here",
-        "help": "Stop the other client and resume here; unsent text there is lost",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
+        "help": "Transfer control here; unsent text in the previous terminal is not transferred",
         "unavailable_reason": null
       }
     ]
   },
   {
-    "kind": "interactive",
-    "state": "ready",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
-        "unavailable_reason": null
-      }
-    ]
-  },
-  {
-    "kind": "interactive",
     "state": "closed",
     "actions": [
       {
@@ -68,156 +35,6 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
-        "unavailable_reason": null
-      }
-    ]
-  },
-  {
-    "kind": "ask",
-    "state": "waiting",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Complete the conversation and resume its blocked caller",
-        "unavailable_reason": "The session agent has not marked this ready"
-      }
-    ]
-  },
-  {
-    "kind": "ask",
-    "state": "active",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Complete the conversation and resume its blocked caller",
-        "unavailable_reason": "The session agent has not marked this ready"
-      }
-    ]
-  },
-  {
-    "kind": "ask",
-    "state": "ready",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Complete the conversation and resume its blocked caller",
-        "unavailable_reason": null
-      }
-    ]
-  },
-  {
-    "kind": "ask",
-    "state": "closed",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Complete the conversation and resume its blocked caller",
-        "unavailable_reason": "The session agent has not marked this ready"
-      }
-    ]
-  },
-  {
-    "kind": "flow",
-    "state": "waiting",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Complete the review and return feedback to the next Flow step",
-        "unavailable_reason": "The session agent has not marked this ready"
-      }
-    ]
-  },
-  {
-    "kind": "flow",
-    "state": "active",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Complete the review and return feedback to the next Flow step",
-        "unavailable_reason": "The session agent has not marked this ready"
-      }
-    ]
-  },
-  {
-    "kind": "flow",
-    "state": "ready",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Complete the review and return feedback to the next Flow step",
-        "unavailable_reason": null
-      }
-    ]
-  },
-  {
-    "kind": "flow",
-    "state": "closed",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Complete the review and return feedback to the next Flow step",
-        "unavailable_reason": "The session agent has not marked this ready"
       }
     ]
   }

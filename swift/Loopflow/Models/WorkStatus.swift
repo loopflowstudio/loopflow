@@ -43,6 +43,20 @@ public enum WorkStatus: Codable, Sendable, Hashable {
     }
 }
 
+/// Durable completion and abandonment, with Workflow readiness for unfinished Tasks.
+public enum TaskState: String, Codable, Sendable, Hashable {
+    case paused
+    /// The Task has taken up no Workflow.
+    case notReady = "not_ready"
+    case ready
+    case active
+    case done
+    case abandoned
+
+    public var label: String { rawValue.replacingOccurrences(of: "_", with: " ") }
+    public var isTerminal: Bool { self == .done || self == .abandoned }
+}
+
 public struct WorkReference: Codable, Sendable, Hashable {
     public enum Kind: String, Codable, Sendable, Hashable {
         case wave
@@ -55,7 +69,11 @@ public struct WorkReference: Codable, Sendable, Hashable {
 
     public init(kind: Kind, id: String) {
         self.kind = kind
-        self.id = id
+        self.id = switch kind {
+        case .wave: StructuredIdentity.uuid(id)
+        case .project: StructuredIdentity.prefixed(id, "proj_")
+        case .task: StructuredIdentity.prefixed(id, "task_")
+        }
     }
 
     public static func wave(id: String) -> WorkReference {
@@ -74,14 +92,16 @@ public struct WorkReference: Codable, Sendable, Hashable {
 /// The durable author shared by Answers and Steers.
 public enum WorkAuthor: Codable, Sendable, Hashable {
     case user
-    case run(id: String)
+    case named(id: String)
+    case captured(id: Int64)
+    case imported(id: String)
 
     private enum CodingKeys: String, CodingKey {
         case kind, id
     }
 
     private enum Kind: String, Codable {
-        case user, run
+        case user, named, captured, imported
     }
 
     public init(from decoder: Decoder) throws {
@@ -89,8 +109,12 @@ public enum WorkAuthor: Codable, Sendable, Hashable {
         switch try container.decode(Kind.self, forKey: .kind) {
         case .user:
             self = .user
-        case .run:
-            self = .run(id: try container.decode(String.self, forKey: .id))
+        case .named:
+            self = .named(id: try container.decode(String.self, forKey: .id))
+        case .captured:
+            self = .captured(id: try container.decode(Int64.self, forKey: .id))
+        case .imported:
+            self = .imported(id: try container.decode(String.self, forKey: .id))
         }
     }
 
@@ -99,9 +123,22 @@ public enum WorkAuthor: Codable, Sendable, Hashable {
         switch self {
         case .user:
             try container.encode(Kind.user, forKey: .kind)
-        case .run(let id):
-            try container.encode(Kind.run, forKey: .kind)
+        case .named(let id):
+            try container.encode(Kind.named, forKey: .kind)
+            try container.encode(id, forKey: .id)
+        case .captured(let id):
+            try container.encode(Kind.captured, forKey: .kind)
+            try container.encode(id, forKey: .id)
+        case .imported(let id):
+            try container.encode(Kind.imported, forKey: .kind)
             try container.encode(id, forKey: .id)
         }
+    }
+}
+
+extension WorkReference {
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(kind: try values.decode(Kind.self, forKey: .kind), id: try values.decode(String.self, forKey: .id))
     }
 }

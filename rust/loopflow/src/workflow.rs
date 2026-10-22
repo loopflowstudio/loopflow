@@ -1,0 +1,452 @@
+//! A workflow definition: the nodes where a person takes part in the Task
+//! conversation, joined by edges that are operational Graphs. `start` and `end`
+//! are implicit. A workflow executes nothing; `lf task run` traverses it by
+//! running an edge's Graph like any other.
+
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::LoadError;
+use crate::graph::{compile_graph, load_graph, load_skill};
+use crate::skills::first_prose_line;
+
+pub const START: &str = "start";
+pub const END: &str = "end";
+
+const BUILTIN_WORKFLOWS: [(&str, &str); 3] = [
+    ("code", include_str!("builtins/task/workflow/code.yaml")),
+    (
+        "feature",
+        include_str!("builtins/task/workflow/feature.yaml"),
+    ),
+    (
+        "research",
+        include_str!("builtins/task/workflow/research.yaml"),
+    ),
+];
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowNode {
+    pub name: String,
+    /// The skill the Task conversation uses at this node.
+    pub skill: String,
+    /// One line saying what the person does here: authored, else the
+    /// skill's first line of prose.
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowEdge {
+    pub from: String,
+    pub to: String,
+    /// The Graph that carries the Task along this edge. Only an edge into
+    /// `end` may name none.
+    pub graph: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowDefinition {
+    pub name: String,
+    pub nodes: Vec<WorkflowNode>,
+    pub edges: Vec<WorkflowEdge>,
+}
+
+impl WorkflowEdge {
+    /// What `lf task run ISSUE <name>` calls this edge: its Graph, or the node
+    /// it enters when it runs none.
+    pub fn name(&self) -> &str {
+        self.graph.as_deref().unwrap_or(&self.to)
+    }
+}
+
+impl WorkflowDefinition {
+    /// Edges leaving `node`, with their index in the authored order.
+    pub fn outgoing<'a>(
+        &'a self,
+        node: &'a str,
+    ) -> impl Iterator<Item = (u32, &'a WorkflowEdge)> + 'a {
+        self.edges
+            .iter()
+            .enumerate()
+            .filter(move |(_, edge)| edge.from == node)
+            .map(|(index, edge)| (index as u32, edge))
+    }
+
+    pub fn node(&self, name: &str) -> Option<&WorkflowNode> {
+        self.nodes.iter().find(|node| node.name == name)
+    }
+}
+
+/// The workflow of a Task that reached `end` without taking one up: nothing
+/// between `start` and `end`.
+pub fn unplanned() -> WorkflowDefinition {
+    WorkflowDefinition {
+        name: "unplanned".to_string(),
+        nodes: Vec::new(),
+        edges: vec![WorkflowEdge {
+            from: START.to_string(),
+            to: END.to_string(),
+            graph: None,
+        }],
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthoredWorkflow {
+    #[serde(default)]
+    nodes: serde_yaml_ng::Mapping,
+    edges: Vec<WorkflowEdge>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthoredNode {
+    skill: String,
+    description: Option<String>,
+}
+
+/// The repository file that defines workflow `name`.
+pub fn workflow_path(name: &str, repo: &Path) -> Option<PathBuf> {
+    ["yaml", "yml"]
+        .iter()
+        .map(|extension| repo.join(format!(".lf/workflows/{name}.{extension}")))
+        .find(|path| path.is_file())
+}
+
+/// The builtin Workflow; Graph definitions occupy a separate namespace.
+pub(crate) fn builtin_workflow(name: &str) -> Option<&'static str> {
+    BUILTIN_WORKFLOWS
+        .iter()
+        .find(|(builtin, _)| *builtin == name)
+        .map(|(_, content)| *content)
+}
+
+/// Every Workflow available in the repository, including invalid local overrides.
+pub fn available_workflow_names(repo: &Path) -> Result<Vec<String>, LoadError> {
+    let mut names: BTreeSet<String> = BUILTIN_WORKFLOWS
+        .iter()
+        .map(|(name, _)| name.to_string())
+        .collect();
+    let entries = match fs::read_dir(repo.join(".lf/workflows")) {
+        Ok(entries) => Some(entries),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    for entry in entries.into_iter().flatten() {
+        let path = entry?.path();
+        let authored = matches!(
+            path.extension().and_then(|extension| extension.to_str()),
+            Some("yaml" | "yml")
+        );
+        if let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) {
+            if authored && path.is_file() {
+                names.insert(name.to_string());
+            }
+        }
+    }
+    Ok(names.into_iter().collect())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowCatalogEntry {
+    pub name: String,
+    pub source: Option<String>,
+    pub workflow: Option<WorkflowDefinition>,
+    pub unavailable: Option<String>,
+}
+
+pub fn workflow_catalog(repo: &Path) -> Result<Vec<WorkflowCatalogEntry>, LoadError> {
+    Ok(available_workflow_names(repo)?
+        .into_iter()
+        .map(|name| {
+            let (workflow, unavailable) = match load_workflow(&name, repo) {
+                Ok(workflow) => (workflow, None),
+                Err(error) => (None, Some(error.to_string())),
+            };
+            WorkflowCatalogEntry {
+                source: workflow_path(&name, repo).map(|path| {
+                    path.strip_prefix(repo)
+                        .unwrap_or(&path)
+                        .to_string_lossy()
+                        .into_owned()
+                }),
+                name,
+                workflow,
+                unavailable,
+            }
+        })
+        .collect())
+}
+
+pub fn names_workflow(name: &str, repo: &Path) -> bool {
+    workflow_path(name, repo).is_some() || builtin_workflow(name).is_some()
+}
+
+/// Load a Workflow; a local Workflow overrides only a builtin Workflow.
+pub fn load_workflow(name: &str, repo: &Path) -> Result<Option<WorkflowDefinition>, LoadError> {
+    let Some(content) = read_workflow_source(name, repo)? else {
+        return Ok(None);
+    };
+    parse_workflow(name, &content, repo)
+        .map(Some)
+        .map_err(|error| LoadError::InvalidGraph(format!("workflow {name}: {error}")))
+}
+
+/// Name the committed file a teammate's Workflow selection needs.
+pub fn missing_workflow(name: &str) -> String {
+    format!(
+        "Workflow {name:?} is unavailable: add .lf/workflows/{name}.yaml \
+         (a teammate's definition arrives when its commit is merged or pulled)"
+    )
+}
+
+pub fn read_workflow_source(name: &str, repo: &Path) -> Result<Option<String>, LoadError> {
+    for extension in ["yaml", "yml"] {
+        let path = repo
+            .join(".lf/workflows")
+            .join(format!("{name}.{extension}"));
+        match fs::read_to_string(path) {
+            Ok(content) => return Ok(Some(content)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(builtin_workflow(name).map(str::to_owned))
+}
+
+pub(crate) fn validate_workflow_name(name: &str) -> Result<(), String> {
+    if name.is_empty() || name.chars().any(char::is_whitespace) || name.contains([':', '/', '\\']) {
+        return Err("invalid Workflow name".into());
+    }
+    Ok(())
+}
+
+pub fn parse_workflow(
+    name: &str,
+    content: &str,
+    repo: &Path,
+) -> Result<WorkflowDefinition, String> {
+    let authored: AuthoredWorkflow =
+        serde_yaml_ng::from_str(content).map_err(|error| error.to_string())?;
+    let mut nodes = Vec::new();
+    for (node, authored) in &authored.nodes {
+        let malformed = "each node is `name: skill` or `name: {skill, description}`";
+        let node = node.as_str().ok_or(malformed)?;
+        let AuthoredNode { skill, description } = match authored.as_str() {
+            Some(skill) => AuthoredNode {
+                skill: skill.to_string(),
+                description: None,
+            },
+            None => serde_yaml_ng::from_value(authored.clone())
+                .map_err(|error| format!("node {node}: {malformed}: {error}"))?,
+        };
+        if node == START || node == END {
+            return Err(format!("{node} is implicit and cannot be a node"));
+        }
+        let loaded = load_skill(&skill, repo).map_err(|error| format!("node {node}: {error}"))?;
+        nodes.push(WorkflowNode {
+            name: node.to_string(),
+            description: description
+                .or_else(|| loaded.content.as_deref().and_then(first_prose_line)),
+            skill,
+        });
+    }
+    let workflow = WorkflowDefinition {
+        name: name.to_string(),
+        nodes,
+        edges: authored.edges,
+    };
+    let known = |node: &str| workflow.node(node).is_some();
+    for edge in &workflow.edges {
+        let label = format!("edge {} → {}", edge.from, edge.to);
+        if edge.from != START && !known(&edge.from) {
+            return Err(format!("{label} leaves an unknown node"));
+        }
+        if edge.to != END && !known(&edge.to) {
+            return Err(format!("{label} enters an unknown node"));
+        }
+        match &edge.graph {
+            Some(graph) => {
+                let definition =
+                    load_graph(graph, repo).map_err(|error| format!("{label}: {error}"))?;
+                compile_graph(&definition, repo).map_err(|error| format!("{label}: {error}"))?;
+            }
+            None if edge.to != END => {
+                return Err(format!("{label} names no graph; only an edge into end may"))
+            }
+            None => {}
+        }
+        if workflow
+            .outgoing(&edge.from)
+            .filter(|(_, other)| other.name() == edge.name())
+            .count()
+            > 1
+        {
+            return Err(format!(
+                "{} has two outgoing edges named {}",
+                edge.from,
+                edge.name()
+            ));
+        }
+    }
+    if workflow.outgoing(START).next().is_none() {
+        return Err("no edge leaves start".into());
+    }
+    let mut reached = BTreeSet::from([START]);
+    let mut frontier = vec![START];
+    while let Some(node) = frontier.pop() {
+        for (_, edge) in workflow.outgoing(node) {
+            if reached.insert(edge.to.as_str()) {
+                frontier.push(edge.to.as_str());
+            }
+        }
+    }
+    if let Some(node) = workflow
+        .nodes
+        .iter()
+        .find(|node| !reached.contains(node.name.as_str()))
+    {
+        return Err(format!("node {} is unreachable from start", node.name));
+    }
+    Ok(workflow)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::workflow_catalog;
+    use super::{load_workflow, names_workflow, END, START};
+
+    fn write(repo: &std::path::Path, path: &str, content: &str) {
+        let path = repo.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn builtin_workflows_join_conversation_nodes_with_operational_graphs() {
+        let repo = tempfile::tempdir().unwrap();
+        let feature = load_workflow("feature", repo.path()).unwrap().unwrap();
+        let nodes: Vec<_> = feature.nodes.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(nodes, ["design", "demo"]);
+        assert_eq!(
+            feature.nodes[0].description.as_deref(),
+            Some("you review the plan")
+        );
+        let from_demo: Vec<_> = feature
+            .outgoing("demo")
+            .map(|(_, edge)| (edge.to.as_str(), edge.graph.as_deref()))
+            .collect();
+        assert_eq!(from_demo, [("demo", Some("pursue")), (END, Some("ship"))]);
+        // A Task with no PR: its last edge runs nothing.
+        let research = load_workflow("research", repo.path()).unwrap().unwrap();
+        assert!(research
+            .edges
+            .iter()
+            .any(|edge| edge.to == END && edge.graph.is_none()));
+        assert!(load_workflow("code", repo.path()).unwrap().is_some());
+        assert!(load_workflow("pursue", repo.path()).unwrap().is_none());
+        // A repository Graph does not hide the same-named builtin Workflow.
+        write(repo.path(), ".lf/graphs/feature.yaml", "- implement\n");
+        assert!(load_workflow("feature", repo.path()).unwrap().is_some());
+        assert!(names_workflow("feature", repo.path()));
+        assert!(names_workflow("code", repo.path()));
+    }
+
+    #[test]
+    fn an_authored_workflow_must_be_a_connected_graph_of_known_graphs() {
+        let repo = tempfile::tempdir().unwrap();
+        let load = |content: &str| {
+            write(repo.path(), ".lf/workflows/proof.yaml", content);
+            load_workflow("proof", repo.path()).map(|workflow| workflow.unwrap())
+        };
+        let valid = load(
+            "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: pursue}\n  - {from: review, to: end}\n",
+        )
+        .unwrap();
+        assert_eq!(valid.outgoing(START).count(), 1);
+        // A node that says nothing about itself is described by its skill.
+        let described = valid.nodes[0].description.clone().unwrap();
+        assert!(!described.is_empty() && !described.contains('\n'));
+        let authored = load(
+            "nodes:\n  review: {skill: demo, description: you try it}\nedges:\n  - {from: start, to: review, graph: pursue}\n  - {from: review, to: end}\n",
+        )
+        .unwrap();
+        assert_eq!(authored.nodes[0].description.as_deref(), Some("you try it"));
+        for (content, expected) in [
+            (
+                "nodes:\n  review: demo\n  lost: demo\nedges:\n  - {from: start, to: review, graph: pursue}\n",
+                "unreachable",
+            ),
+            (
+                "edges:\n  - {from: start, to: end, graph: no-such-graph}\n",
+                "no-such-graph",
+            ),
+            (
+                "nodes:\n  review: demo\nedges:\n  - {from: start, to: review}\n",
+                "names no graph",
+            ),
+            (
+                "edges:\n  - {from: start, to: missing, graph: pursue}\n",
+                "unknown node",
+            ),
+            (
+                "nodes:\n  review: no-such-skill\nedges:\n  - {from: start, to: review, graph: pursue}\n",
+                "no-such-skill",
+            ),
+            (
+                "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: pursue}\n  - {from: start, to: end, graph: pursue}\n",
+                "two outgoing edges",
+            ),
+        ] {
+            let error = load(content).unwrap_err().to_string();
+            assert!(error.contains(expected), "{expected}: {error}");
+        }
+    }
+
+    #[test]
+    fn repository_workflow_overrides_stay_listed_when_invalid() {
+        let repo = tempfile::tempdir().unwrap();
+        let entry = |name: &str| {
+            workflow_catalog(repo.path())
+                .unwrap()
+                .into_iter()
+                .find(|entry| entry.name == name)
+        };
+        let builtin = entry("feature").unwrap();
+        assert_eq!(builtin.source, None);
+        assert_eq!(builtin.workflow.unwrap().nodes.len(), 2);
+        // Listing creates nothing, including when a repository override is invalid.
+        assert!(!repo.path().join(".lf").exists());
+        write(
+            repo.path(),
+            ".lf/workflows/feature.yaml",
+            "edges:\n  - {from: start, to: end, graph: no-such-graph}\n",
+        );
+        let invalid = entry("feature").unwrap();
+        assert_eq!(
+            invalid.source.as_deref(),
+            Some(".lf/workflows/feature.yaml")
+        );
+        assert!(invalid.workflow.is_none());
+        assert!(invalid.unavailable.unwrap().contains("no-such-graph"));
+        assert!(
+            std::fs::read_to_string(repo.path().join(".lf/workflows/feature.yaml"))
+                .unwrap()
+                .contains("no-such-graph")
+        );
+
+        let graph = crate::graph::customize("pursue", repo.path()).unwrap();
+        assert_eq!(graph, repo.path().join(".lf/graphs/pursue.yaml"));
+        let pursue = crate::graph::compiled::graph_catalog(repo.path())
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.name == "pursue")
+            .unwrap();
+        assert_eq!(pursue.source.as_deref(), Some(".lf/graphs/pursue.yaml"));
+        assert!(pursue.compiled.is_some());
+    }
+}

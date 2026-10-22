@@ -1,4 +1,4 @@
-// RegistryQuery decodes the `lf ls/status/roadmap/runs --json` wire snapshots. The
+// RegistryQuery decodes the `lf wave list/status/roadmap/usage --json` wire snapshots. The
 // runner is injected, so these exercise parsing without spawning `lf`.
 
 import Foundation
@@ -7,7 +7,71 @@ import Testing
 
 @Suite("RegistryQuery")
 struct RegistryQueryTests {
-    @Test("lf ls decodes and scopes to the repo")
+    @Test("Graph logs read captured execution from the content Machine, never a peer path locally")
+    func contentRoutedGraphLog() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let detail = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/graph_detail.json"), encoding: .utf8)
+        let expected = try JSONDecoder().decode(GraphProcessDetail.self, from: Data(detail.utf8))
+        let entry = String(decoding: try JSONEncoder().encode(expected.entry), as: UTF8.self)
+        let query = RegistryQuery { args, cwd in
+            guard args.starts(with: ["--machine", "peer", "--repository", "plan"]), cwd == nil else {
+                throw RegistryQueryError("A peer Graph log must never use local execution")
+            }
+            let command = Array(args.dropFirst(4))
+            if command.starts(with: ["graph", "list"]) {
+                return "{\"entries\":[\(entry)],\"next\":null}"
+            }
+            if command == ["graph", "show", expected.entry.id, "--processes", "--json"] { return detail }
+            throw RegistryQueryError("Unexpected execution")
+        }
+        let graphs = try await query.onMachine("peer", repository: "plan").taskGraphProcesses(task: "task", cwd: "/peer/checkout")
+        #expect(graphs == [expected])
+    }
+
+    @Test("Recording a remote reading preserves its Machine and transport", arguments: [false, true])
+    func recordingRemoteQuery(recordFirst: Bool) async throws {
+        let json = #"{"id":"peer"}"#
+        let local = RegistryQuery { args, cwd in
+            guard args.starts(with: ["--machine", "peer", "--repository", "plan"]), cwd == nil else {
+                throw RegistryQueryError("The reading lost its remote selectors")
+            }
+            return json
+        }
+        let record: @Sendable (String) -> Void = { #expect($0 == json) }
+        let query = recordFirst
+            ? local.recording(record).onMachine("peer", repository: "plan")
+            : local.onMachine("peer", repository: "plan").recording(record)
+        #expect(query.remoteMachine == "peer")
+        #expect(try await query.localMachineId() == "peer")
+        #expect(!query.streamsWork)
+        #expect(local.remoteMachine == nil)
+    }
+
+    @Test("Session pages return a stable continuation and preserve renamed records")
+    func sessionsReadPages() async throws {
+        let row = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: sessionFixtureURL())) as? [String: Any])
+        var first = row
+        first["id"] = "session-a"
+        var last = row
+        last["id"] = "session-z"
+        last["title"] = "AAA renamed"
+        let firstJSON = String(decoding: try JSONSerialization.data(withJSONObject:
+            ["entries": [first], "next": "session-a"]), as: UTF8.self)
+        let lastJSON = String(decoding: try JSONSerialization.data(withJSONObject:
+            ["entries": [last], "next": NSNull()]), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            args.contains("--after") ? lastJSON : firstJSON
+        }
+        let page = try await query.sessionPage(cwd: "/tmp/repo")
+        let final = try await query.sessionPage(after: page.next, cwd: "/tmp/repo")
+        #expect(page.entries.map(\.id) == ["session-a"])
+        #expect(page.next == "session-a")
+        #expect(final.entries.map(\.id) == ["session-z"])
+        #expect(final.entries.first?.title == "AAA renamed")
+        #expect(final.next == nil)
+    }
+
+    @Test("lf wave list decodes and scopes to the repo")
     func wavesDecodeAndScope() async throws {
         let json = """
         [
@@ -18,13 +82,9 @@ struct RegistryQueryTests {
             "goal": "ship the roadmap",
             "repo": "/tmp/repo-a",
             "active_tasks": 1,
-            "live": true,
-            "paused": true,
-            "enabled": true,
-            "endpoint": "127.0.0.1:5678",
             "created_at": null,
             "parent_wave_id": null,
-            "home": {
+            "machine": {
               "id": "home_00000000000000000000000000000001",
               "route": "local",
               "created_at": "1970-01-01T00:00:00Z",
@@ -38,13 +98,9 @@ struct RegistryQueryTests {
             "goal": "g",
             "repo": "/tmp/repo-b",
             "active_tasks": 0,
-            "live": false,
-            "paused": false,
-            "enabled": false,
-            "endpoint": null,
             "created_at": null,
             "parent_wave_id": null,
-            "home": {
+            "machine": {
               "id": "home_00000000000000000000000000000001",
               "route": "local",
               "created_at": "1970-01-01T00:00:00Z",
@@ -54,7 +110,7 @@ struct RegistryQueryTests {
         ]
         """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["ls", "--all", "--current", "--json"])
+            #expect(args == ["wave", "list", "--all", "--current", "--json"])
             return json
         }
 
@@ -62,11 +118,9 @@ struct RegistryQueryTests {
         #expect(waves.map(\.id) == ["goals"])
         #expect(waves[0].status == .ready)
         #expect(waves[0].repo == "/tmp/repo-a")
-        #expect(waves[0].paused)
-        #expect(waves[0].enabled)
     }
 
-    @Test("lf ls can be decoded once for every repo")
+    @Test("lf wave list can be decoded once for every repo")
     func allWavesDecode() async throws {
         let json = """
         [
@@ -77,13 +131,9 @@ struct RegistryQueryTests {
             "goal": "ship the roadmap",
             "repo": "/tmp/repo-a",
             "active_tasks": 1,
-            "live": true,
-            "paused": true,
-            "enabled": true,
-            "endpoint": "127.0.0.1:5678",
             "created_at": null,
             "parent_wave_id": null,
-            "home": {
+            "machine": {
               "id": "home_00000000000000000000000000000001",
               "route": "local",
               "created_at": "1970-01-01T00:00:00Z",
@@ -97,13 +147,9 @@ struct RegistryQueryTests {
             "goal": "g",
             "repo": "/tmp/repo-b",
             "active_tasks": 0,
-            "live": false,
-            "paused": false,
-            "enabled": false,
-            "endpoint": null,
             "created_at": null,
             "parent_wave_id": null,
-            "home": {
+            "machine": {
               "id": "home_00000000000000000000000000000001",
               "route": "local",
               "created_at": "1970-01-01T00:00:00Z",
@@ -115,212 +161,197 @@ struct RegistryQueryTests {
         let counter = CallCounter()
         let query = RegistryQuery { args, _ in
             await counter.increment()
-            #expect(args == ["ls", "--all", "--current", "--json"])
+            #expect(args == ["wave", "list", "--all", "--current", "--json"])
             return json
         }
 
         let waves = try await query.allWaves()
         #expect(await counter.value == 1)
         #expect(waves.map(\.id) == ["goals", "other"])
-        #expect(waves.map(\.enabled) == [true, false])
     }
 
-
-    @Test("lf status maps the work hierarchy onto the wave")
+    @Test("lf wave status maps the work hierarchy onto the wave")
     func statusMapsWork() async throws {
         let json = """
-        {
-          "wave": {
-            "id": "goals",
-            "name": "goals",
-            "status": "ready",
-            "goal": "g",
-            "repo": "/tmp/repo-a",
-            "active_tasks": 1,
-            "live": false,
-            "paused": false,
-            "enabled": true,
-            "endpoint": null,
-            "created_at": null,
-            "parent_wave_id": null,
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "local",
-              "created_at": "1970-01-01T00:00:00Z",
-              "observed_at": "1970-01-01T00:00:00Z"
-            }
+{
+  "wave": {
+    "id": "goals",
+    "name": "goals",
+    "status": "ready",
+    "goal": "g",
+    "repo": "/tmp/repo-a",
+    "active_tasks": 1,
+    "created_at": null,
+    "parent_wave_id": null,
+    "machine": {
+      "id": "home_00000000000000000000000000000001",
+      "route": "local",
+      "created_at": "1970-01-01T00:00:00Z",
+      "observed_at": "1970-01-01T00:00:00Z"
+    }
+  },
+  "history": {
+    "state": "ok",
+    "truncated": false,
+    "items": [
+      {
+        "repo": "/src/loopflow",
+        "worktree": "/src/loopflow.task",
+        "skill": "task/pursue",
+        "usage": {
+          "streams": 1,
+          "final_streams": 1,
+          "gaps": 0,
+          "input_tokens": 1000,
+          "output_tokens": 200,
+          "total_input_tokens": 1000,
+          "peak_input_tokens": 900,
+          "context_window_tokens": 200000,
+          "reasoning_tokens": null,
+          "cache_read_tokens": 800,
+          "cache_write_tokens": null,
+          "cost_usd": 0.25
+        },
+        "evidence_gaps": 0,
+        "harness": "claude",
+        "model": "opus",
+        "surface": "headless",
+        "session_id": "run_00000000000000000000000000000001",
+        "captured": 12,
+    "artifact_key": "run_00000000000000000000000000000001",
+        "caller_artifact_key": null,
+        "observed_at": 100,
+        "recorded_outcome": "completed",
+    "recorded_at": 110,
+        "providers": [],
+        "task_id": "task_22222222222222222222222222222222",
+        "wave_id": "11111111-1111-4111-8111-111111111111",
+        "task_identifier": "INF-123",
+        "wave_name": "goals"
+      }
+    ]
+  },
+  "metric_portfolio": {
+    "metrics": [],
+    "contract_issues": []
+  },
+  "project_readiness": {"state": "ready", "project_id": "project-1", "observed_at": null, "pending_successor": null, "activation": null},
+  "projects": {
+    "state": "ok",
+    "items": [
+      {
+        "id": "project-1",
+        "linear_id": null,
+        "sync": {"connected": false, "changes": []},
+        "slug": "release-feedback",
+        "name": "current",
+        "workflow": "task-design",
+        "status": "started", "current": true,
+        "metric_targets": [],
+        "krs": [
+          {
+            "text": "Fast loops",
+            "holds": false
+          }
+        ]
+      }
+    ],
+    "truncated": false
+  },
+  "tasks": {
+    "state": "ok",
+    "items": [
+      {
+        "task": {
+          "repository_id": "repo_00000000000040008000000000000001",
+          "repo": "/tmp/repo-a",
+          "project_id": "project-1",
+          "wave_id": "goals",
+          "id": "issue-1",
+          "identifier": "INF-123",
+          "name": "Wire it",
+          "description": "",
+          "rank": 1,
+          "completed": false, "state": "unstarted", "completed_at": null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},
+          "assignee": null
+        },
+        "reference": {
+          "issue_url": "https://linear.app/loopflow/issue/INF-123/wire-it",
+          "workspace": {
+            "slug": "wire-it",
+            "branch": "jack/inf-123", "base_commit": "fixture-base",
+            "worktree": "/task-wt"
+          }
+        },
+        "runtime": {
+          "work_id": "issue-1",
+          "status": "ready",
+          "reason": "ready",
+          "updated_at": "2026-07-06T00:00:00Z",
+          "provider": "codex",
+          "owner": {"person": "Jack Heart", "machine": {"id": null, "label": null}}
+        },
+        "directive": null,
+        "workflow_name":"feature","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},
+        "next_move": {
+          "owner": "task",
+          "reason": "ready"
+        },
+        "condition": {
+          "state": "clear",
+          "reason": "ready",
+          "observed_at": "2026-07-06T00:01:00Z",
+          "evidence_age_secs": 60,
+          "local_progress": {
+            "state": "observed",
+            "unsettled": false,
+            "dirty": false,
+            "authored_commits": false,
+            "recovery_required": false,
+            "reason": null
           },
-          "loop_state": "turning",
-          "runs": {
-            "state": "ok",
-            "truncated": false,
-            "items": [
-              {
-                "id": "run_00000000000000000000000000000001",
-                "parent_run_id": null,
-                "repo": "/src/loopflow",
-                "worktree": "/src/loopflow.task",
-                "subjects": [
-                  {
-                    "selector": "wave:goals",
-                    "source": "declared"
-                  },
-                  {
-                    "selector": "task:INF-123",
-                    "source": "declared"
-                  }
-                ],
-                "skill": "task/pursue",
-                "outcome": "completed",
-                "started": 100,
-                "ended": 110,
-                "usage": {
-                  "streams": 1,
-                  "final_streams": 1,
-                  "gaps": 0,
-                  "input_tokens": 1000,
-                  "output_tokens": 200,
-                  "total_input_tokens": 1000,
-                  "peak_input_tokens": 900,
-                  "context_window_tokens": 200000,
-                  "reasoning_tokens": null,
-                  "cache_read_tokens": 800,
-                  "cache_write_tokens": null,
-                  "cost_usd": 0.25
-                },
-                "evidence_gaps": 0,
-                "harness": "claude",
-                "model": "opus",
-                "surface": "headless"
-              }
-            ]
-          },
-          "metric_portfolio": {
-            "metrics": [],
-            "contract_issues": []
-          },
-          "home_runtime": {
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "local",
-              "created_at": "1970-01-01T00:00:00Z",
-              "observed_at": "1970-01-01T00:00:00Z"
-            },
-            "state": "stopped",
-            "reason": "no resident is serving",
-            "endpoint": null,
-            "action": {
-              "kind": "start",
-              "home_id": "home_00000000000000000000000000000001"
-            }
-          },
-          "chapter": {
-            "id": "current",
-            "source_project_id": "project-1",
-          "source_project_slug": "release-feedback",
-            "metric_targets": [],
-            "flows": {
-              "recommended": "task-design"
-            },
-            "krs": [
-              {
-                "text": "Fast loops",
-                "holds": false
-              }
-            ],
-            "phase": "complete",
-            "error": null
-          },
-          "tasks": {
-            "state": "ok",
-            "items": [
-              {
-                "task": {
-                  "id": "issue-1",
-                  "identifier": "INF-123",
-                  "name": "Wire it",
-                  "description": "",
-                  "rank": 1,
-                  "completed": false,
-                  "assignee": null
-                },
-                "reference": {
-                  "issue_url": "https://linear.app/loopflow/issue/INF-123/wire-it",
-                  "workspace": {
-                    "slug": "wire-it",
-                    "branch": "jack/inf-123",
-                    "worktree": "/task-wt"
-                  }
-                },
-                "runtime": {
-                  "work_id": "issue-1",
-                  "status": "ready",
-                  "reason": "ready",
-                  "updated_at": "2026-07-06T00:00:00Z",
-                  "provider": "codex",
-                  "started": true
-                },
-                "directive": null,
-                "next_move": {
-                  "owner": "task",
-                  "reason": "ready"
-                },
-                "condition": {
-                  "state": "clear",
-                  "reason": "ready",
-                  "observed_at": "2026-07-06T00:01:00Z",
-                  "evidence_age_secs": 60,
-                  "local_progress": {
-                    "state": "observed",
-                    "unsettled": false,
-                    "dirty": false,
-                    "authored_commits": false,
-                    "recovery_required": false,
-                    "reason": null
-                  }
-                },
-                "actions": {
-                  "recommended": "resume",
-                  "reason": "resume the parked Task"
-                },
-                "prs": [],
-                "active_pr": null
-              }
-            ],
-            "truncated": false
-          },
-          "unavailable_tasks": []
-        }
-        """
+          "unresolved_execution": true
+        },
+        "actions": {
+          "recommended": "resume",
+          "reason": "resume the parked Task"
+        },
+        "pr": null
+      }
+    ],
+    "truncated": false
+  },
+  "unavailable_tasks": []
+}
+"""
         let query = RegistryQuery { args, _ in
-            #expect(args == ["status", "goals", "--json"])
+            #expect(args == ["wave", "status", "goals", "--json"])
             return json
         }
 
         let result = try await query.status(wave: "goals", cwd: nil)
         #expect(result.wave.id == "goals")
         #expect(result.wave.goal == "g")
-        #expect(result.homeRuntime.state == .stopped)
-        #expect(result.homeRuntime.action == .start(homeId: "home_00000000000000000000000000000001"))
-        #expect(result.loopState == "turning")
-        #expect(result.workMap.chapter?.flows.recommended == "task-design")
+
+
+
         #expect(result.workMap.tasks.items[0].task.identifier == "INF-123")
         #expect(result.workMap.tasks.items[0].reference.issueUrl?.absoluteString.contains("INF-123") == true)
         #expect(result.workMap.tasks.items[0].reference.workspace?.slug == "wire-it")
         #expect(result.workMap.tasks.items[0].reference.workspace?.worktree == "/task-wt")
         #expect(result.workMap.tasks.items[0].reference.workspace?.branch == "jack/inf-123")
-        #expect(result.runs.items[0].skill == "task/pursue")
-        #expect(result.runs.items[0].usage.inputTokens == 1000)
+        #expect(result.history.items[0].skill == "task/pursue")
+        #expect(result.history.items[0].usage.inputTokens == 1000)
         #expect(result.workMap.tasks.items[0].condition.state == .clear)
         #expect(result.workMap.tasks.items[0].actions.recommended == .resume)
     }
 
-    @Test("lf roadmap is one optionally scoped machine query")
+    @Test("lf wave show is one optionally scoped machine query")
     func roadmapUsesOneMachineQuery() async throws {
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["roadmap", "--wave", "product", "--json"])
+            #expect(args == ["wave", "show", "product", "--json"])
             #expect(cwd == nil)
-            return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[]}"#
+            return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#
         }
 
         let result = try await query.roadmap(wave: "product")
@@ -328,24 +359,24 @@ struct RegistryQueryTests {
         #expect(result.waves.isEmpty)
     }
 
-    @Test("lf roadmap requests every repository when no Wave narrows it")
+    @Test("lf wave show requests every repository when no Wave narrows it")
     func roadmapRequestsAllRepositories() async throws {
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["roadmap", "--all", "--json"])
+            #expect(args == ["wave", "show", "--all", "--json"])
             #expect(cwd == nil)
-            return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[]}"#
+            return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#
         }
 
         let result = try await query.roadmap()
         #expect(result.waves.isEmpty)
     }
 
-    @Test("lf activity composes Work filters before the bounded result")
+    @Test("lf history composes Work filters before the bounded result")
     func workActivityUsesOneFilteredQuery() async throws {
         let json = try String(contentsOf: workActivityFixtureURL(), encoding: .utf8)
         let query = RegistryQuery { args, cwd in
             #expect(args == [
-                "activity", "--since", "7d", "--limit", "50",
+                "history", "--since", "7d", "--limit", "50",
                 "--wave", "product", "--project", "mac-surface-ux",
                 "--task", "W2-144", "--json",
             ])
@@ -361,172 +392,6 @@ struct RegistryQueryTests {
         #expect(result.items[0].subject == "W2-144")
     }
 
-    @Test("Wave Chat history uses the backing-aware DTO")
-    func chatHistoryUsesBackingAwareDTO() async throws {
-        let query = RegistryQuery { args, cwd in
-            #expect(args == [
-                "chat", "--history", "--json", "--limit", "12", "--wave", "product",
-            ])
-            #expect(cwd == "/tmp/repo")
-            return #"{"epochs":[],"selected_epoch_id":null,"state":"missing","detail":"No durable Wave Chat history exists yet.","messages":[],"truncated":false}"#
-        }
-
-        let snapshot = try await query.chatHistory(
-            wave: "product",
-            limit: 12,
-            cwd: "/tmp/repo"
-        )
-        #expect(snapshot.state == .missing)
-        #expect(snapshot.messages.isEmpty)
-        #expect(!snapshot.truncated)
-    }
-
-    @Test("lf home probe decodes the state and the one contextual action")
-    func homeProbeDecodesStateAndAction() async throws {
-        let json = #"""
-        {
-          "home": {
-            "id": "home_00000000000000000000000000000001",
-            "route": "local",
-            "created_at": "1970-01-01T00:00:00Z",
-            "observed_at": "1970-01-01T00:00:00Z"
-          },
-          "state": "stopped",
-          "reason": "reachable, no resident",
-          "endpoint": null,
-          "action": {
-            "kind": "start",
-            "home_id": "home_00000000000000000000000000000001"
-          }
-        }
-        """#
-        let query = RegistryQuery { args, cwd in
-            #expect(args == ["home", "probe", "product", "--json"])
-            #expect(cwd == "/tmp/repo")
-            return json
-        }
-
-        let runtime = try await query.homeProbe(wave: "product", cwd: "/tmp/repo")
-        #expect(runtime.state == .stopped)
-        #expect(runtime.endpoint == nil)
-        #expect(runtime.action == .start(homeId: "home_00000000000000000000000000000001"))
-    }
-
-    @Test("lf start returns the existing Wave status contract")
-    func startReturnsWaveStatus() async throws {
-        let json = #"""
-        [
-          {
-            "id": "wave-1",
-            "name": "product",
-            "status": "ready",
-            "goal": "Ship product",
-            "repo": "/tmp/repo",
-            "active_tasks": 1,
-            "live": true,
-            "paused": false,
-            "enabled": true,
-            "endpoint": "127.0.0.1:7777",
-            "created_at": "2026-07-17T00:00:00Z",
-            "parent_wave_id": null,
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "local",
-              "created_at": "2026-07-17T00:00:00Z",
-              "observed_at": "2026-07-17T00:00:00Z"
-            }
-          }
-        ]
-        """#
-        let query = RegistryQuery { args, cwd in
-            #expect(args == ["start", "product", "--json"])
-            #expect(cwd == "/tmp/repo")
-            return json
-        }
-
-        let result = try await query.start(wave: "product", cwd: "/tmp/repo")
-        #expect(result[0].live)
-        #expect(result[0].endpoint == "127.0.0.1:7777")
-        #expect(result[0].home.id == "home_00000000000000000000000000000001")
-    }
-
-    @Test("lf start rejects a non-live receipt")
-    func startRejectsNonLiveReceipt() async {
-        let json = #"""
-        [
-          {
-            "id": "wave-1",
-            "name": "product",
-            "status": "ready",
-            "goal": "Ship product",
-            "repo": "/tmp/repo",
-            "active_tasks": 1,
-            "live": false,
-            "paused": false,
-            "enabled": true,
-            "endpoint": null,
-            "created_at": "2026-07-17T00:00:00Z",
-            "parent_wave_id": null,
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "local",
-              "created_at": "2026-07-17T00:00:00Z",
-              "observed_at": "2026-07-17T00:00:00Z"
-            }
-          }
-        ]
-        """#
-        let query = RegistryQuery { _, _ in json }
-
-        await #expect(throws: RegistryQueryError.self) {
-            try await query.start(wave: "product", cwd: "/tmp/repo")
-        }
-    }
-
-    @Test("lf start surfaces an actionable preflight failure")
-    func startSurfacesPreflightFailure() async {
-        let query = RegistryQuery { _, _ in
-            throw RegistryQueryError("Wave broken failed preflight: invalid chat policy")
-        }
-
-        do {
-            _ = try await query.start(wave: "broken", cwd: "/tmp/repo")
-            Issue.record("expected the preflight failure")
-        } catch {
-            #expect(error.localizedDescription.contains("failed preflight"))
-            #expect(error.localizedDescription.contains("invalid chat policy"))
-        }
-    }
-
-    @Test("lf pause and resume return the authored turn intent")
-    func setWavePausedUsesIntentVerbs() async throws {
-        let query = RegistryQuery { args, cwd in
-            #expect(cwd == "/tmp/repo")
-            switch args {
-            case ["pause", "product", "--json"]:
-                return #"{"wave":"product","paused":true}"#
-            case ["resume", "product", "--json"]:
-                return #"{"wave":"product","paused":false}"#
-            default:
-                throw RegistryQueryError("unexpected argv: \(args)")
-            }
-        }
-
-        let paused = try await query.setWavePaused(
-            wave: "product",
-            paused: true,
-            cwd: "/tmp/repo"
-        )
-        #expect(paused == WaveIntentReceipt(wave: "product", paused: true))
-
-        let resumed = try await query.setWavePaused(
-            wave: "product",
-            paused: false,
-            cwd: "/tmp/repo"
-        )
-        #expect(resumed == WaveIntentReceipt(wave: "product", paused: false))
-    }
-
     /// Unreadable evidence must reach the surface as its reason, never as an
     /// empty list — a broken ledger is not a quiet wave.
     @Test("lf status keeps unavailable evidence unavailable")
@@ -540,44 +405,28 @@ struct RegistryQueryTests {
             "goal": "g",
             "repo": "/tmp/repo-a",
             "active_tasks": 0,
-            "live": false,
-            "paused": false,
-            "enabled": true,
-            "endpoint": null,
             "created_at": null,
             "parent_wave_id": null,
-            "home": {
+            "machine": {
               "id": "home_00000000000000000000000000000001",
               "route": "local",
               "created_at": "1970-01-01T00:00:00Z",
               "observed_at": "1970-01-01T00:00:00Z"
             }
           },
-          "loop_state": null,
-          "runs": {
+          "history": {
             "state": "unavailable",
-            "reason": "run ledger unavailable: disk is gone"
+            "reason": "Session history unavailable: disk is gone"
           },
           "metric_portfolio": {
             "metrics": [],
             "contract_issues": []
           },
-          "home_runtime": {
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "local",
-              "created_at": "1970-01-01T00:00:00Z",
-              "observed_at": "1970-01-01T00:00:00Z"
-            },
-            "state": "stopped",
-            "reason": "no resident is serving",
-            "endpoint": null,
-            "action": {
-              "kind": "start",
-              "home_id": "home_00000000000000000000000000000001"
-            }
+          "project_readiness": {"state": "unavailable", "project_id": null, "observed_at": null, "pending_successor": null, "activation": null},
+          "projects": {
+            "state": "unavailable",
+            "reason": "Project planning unavailable"
           },
-          "chapter": null,
           "tasks": {
             "state": "ok",
             "items": [],
@@ -589,8 +438,8 @@ struct RegistryQueryTests {
         let query = RegistryQuery { _, _ in json }
 
         let result = try await query.status(wave: "goals", cwd: nil)
-        #expect(result.runs.unavailableReason == "run ledger unavailable: disk is gone")
-        #expect(result.runs.items.isEmpty)
+        #expect(result.history.unavailableReason == "Session history unavailable: disk is gone")
+        #expect(result.history.items.isEmpty)
     }
 
     @Test("Task workspace queries preserve paths and binary/truncation evidence")
@@ -598,12 +447,12 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, cwd in
             #expect(cwd == "/tmp/repo")
             switch args {
-            case ["task", "changes", "INF-123", "--json"]:
-                return #"{"issue_identifier":"INF-123","task_id":"ts_1","base_commit":"abc","head_commit":"def","files":[{"path":"src/parser.rs","committed":true,"staged":false,"unstaged":true,"untracked":false}]}"#
-            case ["task", "diff", "INF-123", "src/parser.rs", "--json"]:
-                return #"{"issue_identifier":"INF-123","task_id":"ts_1","path":"src/parser.rs","patch":"@@ -1 +1 @@","binary":false,"truncated":false}"#
+            case ["task", "diff", "INF-123", "--files", "--base", "parent", "--json"]:
+                return #"{"issue_identifier":"INF-123","task_id":"ts_1","base_commit":"abc","head_commit":"def","files":[{"path":"src/parser.rs","old_path":null,"committed":true,"staged":false,"unstaged":true,"untracked":false}],"scratch":[],"scratch_truncated":false}"#
+            case ["task", "diff", "INF-123", "src/parser.rs", "--base", "parent", "--json"]:
+                return #"{"issue_identifier":"INF-123","task_id":"ts_1","path":"src/parser.rs","base_commit":"abc","patch":"@@ -1 +1 @@","binary":false,"truncated":false}"#
             case ["task", "file", "INF-123", "src/parser.rs", "--json"]:
-                return #"{"issue_identifier":"INF-123","task_id":"ts_1","path":"src/parser.rs","content":"fn parse() {}\n","binary":false,"size_bytes":14,"truncated":false}"#
+                return #"{"issue_identifier":"INF-123","task_id":"ts_1","path":"src/parser.rs","content":"fn parse() {}\n","state":"text","revision":"hash","recoveries": [], "size_bytes":14}"#
             default:
                 throw RegistryQueryError("unexpected argv: \(args)")
             }
@@ -650,98 +499,73 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, cwd in
             #expect(cwd == "/tmp/repo")
             switch args {
-            case ["session", "list", "--json"]:
-                return sessionsJSON
-            case ["session", "open", session.id, "--json"]:
+            case ["session", "list", "--json", "--page", "--limit", "100"]:
+                return #"{"entries":\#(sessionsJSON),"next":null}"#
+            case ["session", "connect", session.id, "--prepare", "--json", "--try"],
+                 ["session", "connect", "--task", "INF-123", "--prepare", "--json", "--try"]:
                 return sessionJSON
             default:
                 throw RegistryQueryError("unexpected argv: \(args)")
             }
         }
 
-        let listed = try await query.sessions(cwd: "/tmp/repo")
-        let opened = try await query.openSession(id: session.id, cwd: "/tmp/repo")
+        let listed = try await query.sessionPage(cwd: "/tmp/repo").entries
+        let opened = try await query.prepareSession(id: session.id, cwd: "/tmp/repo")
 
         #expect(listed == sessions)
         #expect(opened == session)
+        let primary = try await query.prepareTaskSession(issue: "INF-123", cwd: "/tmp/repo")
+        #expect(primary == session)
     }
 
-    @Test("lf ps decodes the shared live activity snapshot")
-    func activityDecodes() async throws {
-        let fixture = try String(contentsOf: activityFixtureURL(), encoding: .utf8)
-        let query = RegistryQuery { args, cwd in
-            #expect(args == ["ps", "--json"])
-            #expect(cwd == nil)
-            return fixture
-        }
-
-        let snapshot = try await query.processActivity()
-
-        #expect(snapshot.nodes.count == 3)
-        #expect(snapshot.nodes.filter { $0.kind == .providerProcess }.count == 2)
-        #expect(snapshot.providerProcesses[0].claim == .orphaned)
-    }
-
-    @Test("lf activity accepts invocation identity from the installed Home")
-    func invocationActivityDecodes() async throws {
-        let json = #"{"generated_at":1784606400,"since":1784001600,"limit":50,"truncated":false,"items":[{"id":"run:finished:1","recorded_at":1784606300,"summary":"Run completed","work":{"kind":"task","id":"task-1"},"subject":"LOO-1","fact":{"kind":"run_finished","invocation_id":"invocation-1","trace_id":"trace-1","exec_id":"exec-1","status":"ok"}}]}"#
-        let query = RegistryQuery { args, _ in
-            #expect(args == ["activity", "--since", "7d", "--limit", "50", "--json"])
-            return json
-        }
-
-        let snapshot = try await query.workActivity()
-
-        if case .runFinished(let identity, let status) = snapshot.items[0].fact {
-            #expect(identity.invocationId == "invocation-1")
-            #expect(identity.traceId == "trace-1")
-            #expect(identity.execId == "exec-1")
-            #expect(status == "ok")
-        } else {
-            Issue.record("expected a Run finish")
-        }
+    @Test("Activity requires Session and input identity instead of unrelated process fallbacks")
+    func invocationActivityIsNotSessionHistory() async throws {
+        let json = #"{"generated_at":1784606400,"since":1784001600,"limit":50,"truncated":false,"items":[{"id":"event","recorded_at":1784606300,"summary":"Input completed","work":{"kind":"task","id":"task-1"},"subject":"LOO-1","fact":{"kind":"input_completion_recorded","graph_lf_process_id":"invocation-1","trace_id":"trace-1","lf_process_id":"process-1","status":"ok"}}]}"#
+        let query = RegistryQuery { _, _ in json }
+        await #expect(throws: (any Error).self) { try await query.workActivity() }
     }
 
     @Test("lf usage preserves direct Run evidence through a Work drill")
     func usageDecodes() async throws {
         let json = """
-        [
-          {
-            "id": "run_00000000000000000000000000000001",
-            "parent_run_id": null,
-            "repo": "/src/loopflow",
-            "worktree": null,
-            "subjects": [
-              {
-                "selector": "task:LOO-265",
-                "source": "declared"
-              }
-            ],
-            "skill": "implement",
-            "outcome": "completed",
-            "started": 100,
-            "ended": 110,
-            "usage": {
-              "streams": 2,
-              "final_streams": 1,
-              "gaps": 1,
-              "input_tokens": 120,
-              "output_tokens": null,
-              "total_input_tokens": 120,
-              "peak_input_tokens": 100,
-              "context_window_tokens": 200000,
-              "reasoning_tokens": null,
-              "cache_read_tokens": 80,
-              "cache_write_tokens": null,
-              "cost_usd": 0.25
-            },
-            "evidence_gaps": 1,
-            "harness": "codex",
-            "model": "gpt",
-            "surface": "headless"
-          }
-        ]
-        """
+[
+  {
+    "repo": "/src/loopflow",
+    "worktree": null,
+    "skill": "implement",
+    "usage": {
+      "streams": 2,
+      "final_streams": 1,
+      "gaps": 1,
+      "input_tokens": 120,
+      "output_tokens": null,
+      "total_input_tokens": 120,
+      "peak_input_tokens": 100,
+      "context_window_tokens": 200000,
+      "reasoning_tokens": null,
+      "cache_read_tokens": 80,
+      "cache_write_tokens": null,
+      "cost_usd": 0.25
+    },
+    "evidence_gaps": 1,
+    "harness": "codex",
+    "model": "gpt",
+    "surface": "headless",
+    "session_id": "run_00000000000000000000000000000001",
+    "captured": 12,
+    "artifact_key": "run_00000000000000000000000000000001",
+    "caller_artifact_key": null,
+    "observed_at": 100,
+    "recorded_outcome": "completed",
+    "recorded_at": 110,
+    "providers": [],
+    "task_id": "task_22222222222222222222222222222222",
+    "wave_id": null,
+    "task_identifier": "LOO-265",
+    "wave_name": null
+  }
+]
+"""
         let query = RegistryQuery { args, _ in
             #expect(args == [
                 "usage", "--days", "7", "--json",
@@ -795,13 +619,13 @@ struct RegistryQueryTests {
         let json = try String(contentsOf: fixture, encoding: .utf8)
         let query = RegistryQuery { args, cwd in
             #expect(cwd == "/tmp/repo")
-            if args == ["pm", "sync", "--wave", "infrastructure"] { return "" }
-            #expect(args == ["status", "infrastructure", "--json"])
+            if args == ["repo", "refresh", "infrastructure"] { return "" }
+            #expect(args == ["wave", "status", "infrastructure", "--json"])
             return json
         }
         let plan = try await query.plan(wave: "infrastructure", objective: "Ship it.", cwd: "/tmp/repo", sync: true)
         #expect(plan.objective == "Ship it.")
-        #expect(plan.chapter?.krs.count == 1)
+        #expect(plan.currentProject?.krs.count == 1)
     }
 
     @Test("a failed lf query surfaces as an error")
@@ -811,14 +635,6 @@ struct RegistryQueryTests {
             _ = try await query.waves(repoPath: "/tmp/repo-a")
         }
     }
-}
-
-private func activityFixtureURL(sourceFile: String = #filePath) -> URL {
-    URL(fileURLWithPath: sourceFile)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .appendingPathComponent("tests/fixtures/dto/activity_snapshot.json")
 }
 
 private func workActivityFixtureURL(sourceFile: String = #filePath) -> URL {

@@ -5,73 +5,13 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::id::WaveId;
 use crate::work::project::ProjectId;
 use crate::work::task::TaskId;
-
-macro_rules! prefixed_uuid_id {
-    ($name:ident, $prefix:literal, $error:ty, $invalid:path) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-        #[serde(transparent)]
-        pub struct $name(String);
-
-        impl $name {
-            pub fn new() -> Self {
-                Self(format!("{}{}", $prefix, uuid::Uuid::new_v4().simple()))
-            }
-
-            pub fn parse(value: &str) -> Result<Self, $error> {
-                let suffix = value
-                    .strip_prefix($prefix)
-                    .ok_or_else(|| $invalid(format!("expected {} id", $prefix)))?;
-                uuid::Uuid::parse_str(suffix).map_err(|error| $invalid(error.to_string()))?;
-                Ok(Self::from_raw(value.to_string()))
-            }
-
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-
-            pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-                Self(value.into())
-            }
-        }
-
-        impl Default for $name {
-            fn default() -> Self {
-                Self::new()
-            }
-        }
-
-        impl std::fmt::Display for $name {
-            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str(&self.0)
-            }
-        }
-
-        impl std::str::FromStr for $name {
-            type Err = $error;
-
-            fn from_str(value: &str) -> Result<Self, Self::Err> {
-                Self::parse(value)
-            }
-        }
-    };
-}
-
-pub(crate) use prefixed_uuid_id;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ChildDataError {
     #[error("invalid child Work id: {0}")]
     InvalidId(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ObservationRecipient {
-    Wave { wave_id: WaveId },
-    Project { project_id: ProjectId },
 }
 
 /// Typed audit record for a body handoff. Work and Run identity are intentionally
@@ -85,13 +25,12 @@ pub struct ChildBodyHandoff {
     pub reason: String,
 }
 
-/// The `lf` binary, store, and home a child Work launch uses, resolved fresh at
-/// the launch boundary from the current Home — never persisted as Work state.
+/// The `lf` binary and Machine a child Work launch uses, resolved fresh at
+/// the launch boundary from the current Machine — never persisted as Work state.
 /// Work no longer pins a binary of its own.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChildExecutionContext {
     pub lf_bin: PathBuf,
-    pub db_path: PathBuf,
     pub lf_home: PathBuf,
 }
 

@@ -1,148 +1,344 @@
 use std::path::Path;
-use std::sync::Arc;
 
-use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
 use crate::ops::{OpsError, OpsResult};
-use crate::planning::{LinearProjectId, ProjectPlan};
-use crate::store::{open_existing_store, SharedStore};
+use crate::store::planning_sync::PlanningSyncStatus;
+use crate::store::{PlanningLocks, Store};
 use crate::work::project::Project;
+use crate::work::project::ProjectStatus;
+use crate::work::wave::Wave;
 
-fn project_error(message: impl Into<String>) -> OpsError {
-    OpsError::Message(message.into())
+fn project_error(message: impl ToString) -> OpsError {
+    OpsError::Message(message.to_string())
 }
 
-fn block_on_project<T>(future: impl std::future::Future<Output = OpsResult<T>>) -> OpsResult<T> {
-    tokio::runtime::Runtime::new()
-        .map_err(|error| project_error(format!("failed to build project runtime: {error}")))?
-        .block_on(future)
+pub(crate) fn current_project(store: &Store, wave: &Wave) -> OpsResult<Project> {
+    let project = store
+        .sqlite
+        .selected_project(wave.id())
+        .map_err(project_error)?
+        .ok_or_else(|| project_error(format!("Wave {} has no configured Project", wave.slug())))?;
+    if matches!(
+        project.status,
+        ProjectStatus::Completed | ProjectStatus::Canceled
+    ) {
+        return Err(project_error(format!(
+            "configured Project {} is terminal; its history is unchanged",
+            project.id
+        )));
+    }
+    Ok(project)
 }
 
-async fn project_store() -> OpsResult<SharedStore> {
-    open_existing_store().await.map(Arc::new).ok_or_else(|| {
-        project_error("no Loopflow registry on this machine; start the owning Wave first")
-    })
+/// Explicitly seed a Wave's shared selection with an existing Project UUID.
+/// Switching an established binding belongs to Project rotation.
+pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResult<Project> {
+    let store = super::planning_sync::planning_store().await?;
+    let wave = crate::work::wave::context::resolve_managed_wave(
+        Some(&store),
+        Some(repo),
+        Some(name),
+        None,
+    )
+    .await
+    .map_err(project_error)?;
+    let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
+    import_binding(&store, &wave, &acquisition)?;
+    store
+        .sqlite
+        .bind_project(wave.id(), project_id)
+        .map_err(project_error)
 }
 
-pub(crate) fn ensure_project_for_task(
+/// Explicit activation; ordinary planning reads never call this operation.
+pub async fn ensure(repo: &Path, name: &str) -> OpsResult<Project> {
+    let store = super::planning_sync::planning_store().await?;
+    let wave = crate::work::wave::ensure_wave_row(&store, repo, name)
+        .await
+        .map_err(project_error)?;
+    store
+        .sqlite
+        .record_project_activation(wave.id(), crate::journal::current_lf_process_id().as_ref())
+        .map_err(project_error)?;
+    let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
+    import_binding(&store, &wave, &acquisition)?;
+    let id = store
+        .sqlite
+        .ensure_project(wave.id(), wave.slug())
+        .map_err(project_error)?;
+    store
+        .sqlite
+        .project(&id)
+        .map_err(project_error)?
+        .ok_or_else(|| project_error("selected Project is missing"))
+}
+
+pub async fn update_plan(
     repo: &Path,
-    resolved: &crate::ops::task_pm::ResolvedTask,
-) -> OpsResult<Project> {
-    let locator = crate::work::wave::WaveLocator::discover(repo, &resolved.snapshot.wave)
-        .map_err(|error| project_error(error.to_string()))?;
-    block_on_project(async move {
-        let store = project_store().await?;
+    wave: Option<&str>,
+    krs: &[crate::work::project::ProjectKR],
+    metric_targets: &[crate::work::wave::metrics::MetricTarget],
+) -> OpsResult<(Project, PlanningSyncStatus)> {
+    let store = super::planning_sync::planning_store().await?;
+    let ambient = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok();
+    let wave = crate::work::wave::context::resolve_managed_wave(
+        Some(&store),
+        Some(repo),
+        wave,
+        ambient.as_deref(),
+    )
+    .await
+    .map_err(project_error)?;
+    let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
+    let project = current_project(&store, &wave)?;
+    super::metrics::validate_chapter_targets(&wave, metric_targets).map_err(project_error)?;
+    store
+        .sqlite
+        .update_project_content(&project.id, krs, metric_targets)
+        .map_err(project_error)?;
+    drop(_acquisition);
+    super::planning_sync::sync_after_save(&store, wave.repo()).await;
+    read_saved(&store, &project.id)
+}
+
+/// One-time supported import at an explicit mutation boundary. A failed read is
+/// never permission to create; the original bytes remain durable evidence.
+pub(crate) fn import_binding(store: &Store, wave: &Wave, guard: &PlanningLocks) -> OpsResult<()> {
+    if store
+        .sqlite
+        .project_binding_imported(wave.id())
+        .map_err(project_error)?
+    {
+        return Ok(());
+    }
+    let path = store
+        .sqlite
+        .home_dir()
+        .map_err(project_error)?
+        .join("waves")
+        .join(wave.id().as_str())
+        .join("config.yaml");
+    let original = match std::fs::read_to_string(&path) {
+        Ok(content) => Some(content),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(project_error(format!(
+                "Project binding import at {}: {error}",
+                path.display()
+            )))
+        }
+    };
+    #[derive(serde::Deserialize)]
+    struct Config {
+        pm: Option<Binding>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Binding {
+        linear_project: Option<String>,
+    }
+    let selected = original
+        .as_deref()
+        .map(serde_yaml_ng::from_str::<Config>)
+        .transpose()
+        .map_err(project_error)?
+        .and_then(|config| config.pm)
+        .and_then(|pm| pm.linear_project);
+    store
+        .sqlite
+        .import_project_binding(wave.id(), original.as_deref(), selected.as_deref(), guard)
+        .map_err(project_error)
+}
+
+/// Address a retained Project by durable ID, provider ID, or unique slug/name.
+async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResult<Project> {
+    let repo = crate::repository::CanonicalRepo::discover(repo)
+        .map_err(project_error)?
+        .to_string();
+    if let Ok(id) = crate::durable::ProjectId::parse(selector) {
+        let project = store
+            .get_project_by_project(id.as_str())
+            .await
+            .map_err(project_error)?
+            .ok_or_else(|| project_error(format!("Project {selector:?} not found")))?;
         let wave = store
-            .get_wave_at(&locator)
+            .get_wave(&project.wave_id)
             .await
-            .map_err(|cause| project_error(cause.to_string()))?
-            .ok_or_else(|| project_error("owning Wave is not initialized"))?;
-        let current = store
-            .chapter(wave.id(), None)
-            .await
-            .map_err(|cause| project_error(cause.to_string()))?
-            .ok_or_else(|| project_error("Wave has no chapter; run `lf wave new-chapter`"))?;
-        if current.project_id != resolved.project.id {
-            return Err(project_error(
-                "this plan is chapter history; use the Wave's current chapter",
-            ));
-        }
-        store
-            .get_project_by_project(&current.project_id)
-            .await
-            .map_err(|cause| project_error(cause.to_string()))?
-            .ok_or_else(|| {
-                project_error(
-                    "current chapter record is unavailable; resume its chapter transition",
-                )
-            })
+            .map_err(project_error)?;
+        return if wave.is_some_and(|wave| wave.repo() == repo) {
+            Ok(project)
+        } else {
+            Err(project_error(format!(
+                "Project {selector:?} not found in this repository"
+            )))
+        };
+    }
+    let waves = store.list_waves(None).await.map_err(project_error)?;
+    let projects = store.list_projects(None).await.map_err(project_error)?;
+    let projects: Vec<_> = projects
+        .into_iter()
+        .filter(|project| {
+            waves
+                .iter()
+                .any(|wave| wave.id() == &project.wave_id && wave.repo() == repo)
+        })
+        .collect();
+    if let Some(project) = projects.iter().find(|project| {
+        project
+            .linear_id
+            .as_ref()
+            .is_some_and(|id| id.as_str() == crate::id::canonical_uuid(selector))
+    }) {
+        return Ok(project.clone());
+    }
+    let mut matches = projects
+        .into_iter()
+        .filter(|project| project.slug == selector || project.name == selector);
+    let project = matches
+        .next()
+        .ok_or_else(|| project_error(format!("Project {selector:?} not found")))?;
+    if matches.next().is_some() {
+        return Err(project_error("Project name is ambiguous; use its ID"));
+    }
+    Ok(project)
+}
+
+/// Current chapter selection and exact historical lookup are distinct addresses.
+#[derive(Debug, Clone, Copy)]
+pub enum PlanTarget<'a> {
+    Wave(Option<&'a str>),
+    Project(&'a str),
+}
+
+/// Resolve on the operation's store; never ensure a Project or start work.
+async fn resolve_plan(store: &Store, repo: &Path, target: PlanTarget<'_>) -> OpsResult<Project> {
+    let selector = match target {
+        PlanTarget::Project(project) => return resolve_project(store, repo, project).await,
+        PlanTarget::Wave(wave) => wave,
+    };
+    let wave = crate::work::wave::context::resolve_managed_wave(
+        Some(store),
+        Some(repo),
+        selector,
+        std::env::var("LF_WAVE_ID").ok().as_deref(),
+    )
+    .await
+    .map_err(project_error)?;
+    let selected = store
+        .sqlite
+        .selected_project(wave.id())
+        .map_err(project_error)?
+        .ok_or_else(|| project_error(format!("Wave {} has no configured Project", wave.slug())))?;
+    resolve_project(store, repo, selected.id.as_str()).await
+}
+
+fn read_store() -> OpsResult<Store> {
+    #[cfg(test)]
+    if let Ok(store) = super::linear::LINEAR_TEST_CONTEXT
+        .try_with(|ctx| Store::from_sqlite_for_test(ctx.store.sqlite.clone()))
+    {
+        return Ok(store);
+    }
+    crate::store::read_existing_registry()
+        .map_err(project_error)?
+        .ok_or_else(|| project_error("Planning unavailable: local registry is absent"))
+}
+
+async fn workflow_wave(store: &Store, repo: &Path, wave: Option<&str>) -> OpsResult<Wave> {
+    crate::work::wave::context::resolve_managed_wave(
+        Some(store),
+        Some(repo),
+        wave,
+        std::env::var("LF_WAVE_ID").ok().as_deref(),
+    )
+    .await
+    .map_err(project_error)
+}
+
+pub async fn edit(
+    repo: &Path,
+    target: PlanTarget<'_>,
+    name: Option<&str>,
+    summary: Option<&str>,
+    description: Option<&str>,
+) -> OpsResult<(Project, PlanningSyncStatus)> {
+    if name.is_none() && summary.is_none() && description.is_none() {
+        return Err(project_error(
+            "wave edit-plan requires --name, --summary or --description",
+        ));
+    }
+    let store = super::planning_sync::planning_store().await?;
+    let project = resolve_plan(&store, repo, target).await?;
+    let wave = store
+        .get_wave(&project.wave_id)
+        .await
+        .map_err(project_error)?
+        .ok_or_else(|| project_error("Project Wave is unavailable"))?;
+    let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
+    store
+        .sqlite
+        .edit_project(&project.id, name, summary, description)
+        .map_err(project_error)?;
+    drop(_acquisition);
+    super::planning_sync::sync_after_save(&store, wave.repo()).await;
+    read_saved(&store, &project.id)
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct WaveWorkflow {
+    pub wave_id: crate::id::WaveId,
+    pub wave: String,
+    pub workflow: Option<String>,
+}
+
+pub async fn workflow(repo: &Path, selector: Option<&str>) -> OpsResult<WaveWorkflow> {
+    let store = read_store()?;
+    let wave = workflow_wave(&store, repo, selector).await?;
+    Ok(WaveWorkflow {
+        workflow: store
+            .sqlite
+            .selected_wave_workflow(wave.id())
+            .map_err(project_error)?,
+        wave_id: wave.id().clone(),
+        wave: wave.slug().into(),
     })
 }
 
-pub(crate) fn project_plan(
-    project: &crate::pm::PmProject,
-    pm_snapshot_synced_at: i64,
-) -> OpsResult<ProjectPlan> {
-    Ok(ProjectPlan {
-        id: LinearProjectId::new(project.id.clone())
-            .map_err(|error| project_error(error.to_string()))?,
-        slug: project.slug.clone(),
-        name: project.name.clone(),
-        prompt_context: crate::ops::task::project_context(project),
-        pm_snapshot_synced_at,
+pub async fn set_workflow(
+    repo: &Path,
+    selector: Option<&str>,
+    name: &str,
+) -> OpsResult<WaveWorkflow> {
+    let store = super::planning_sync::planning_store().await?;
+    let wave = workflow_wave(&store, repo, selector).await?;
+    if crate::workflow::load_workflow(name, repo)
+        .map_err(project_error)?
+        .is_none()
+    {
+        return Err(project_error(crate::workflow::missing_workflow(name)));
+    }
+    let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
+    store
+        .sqlite
+        .select_wave_workflow(wave.id(), name)
+        .map_err(project_error)?;
+    Ok(WaveWorkflow {
+        wave_id: wave.id().clone(),
+        wave: wave.slug().into(),
+        workflow: Some(name.into()),
     })
 }
 
-pub(crate) fn ensure_clean_main(repo: &Path, subject: &str) -> OpsResult<std::path::PathBuf> {
-    let worktree = worktree_root(repo).map_err(|error| project_error(error.to_string()))?;
-    let main = crate::engine::worktrees::main_repo_root(repo)
-        .map_err(|error| project_error(error.to_string()))?;
-    let worktree = std::fs::canonicalize(&worktree).unwrap_or(worktree);
-    let main = std::fs::canonicalize(&main).unwrap_or(main);
-    if worktree != main {
-        return Err(project_error(format!(
-            "cannot run {subject} from {}: Wave turns require the canonical main checkout; run existing work with `lf task run <issue-id>` or create it with `lf task start --wave <wave> \"<title>\"`",
-            worktree.display()
-        )));
-    }
-    let default_branch =
-        get_default_branch(&main).map_err(|error| project_error(error.to_string()))?;
-    let branch = current_branch(&main).map_err(|error| project_error(error.to_string()))?;
-    if branch.as_deref() != Some(default_branch.as_str()) {
-        return Err(project_error(format!(
-            "cannot run {subject}: canonical checkout is on {}, expected {default_branch}",
-            branch.as_deref().unwrap_or("detached HEAD")
-        )));
-    }
-    if !is_clean(&main).map_err(|error| project_error(error.to_string()))? {
-        return Err(project_error(format!(
-            "cannot run {subject}: canonical {default_branch} checkout is dirty; Wave turns never edit repository files"
-        )));
-    }
-    Ok(main)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ensure_clean_main;
-    use std::process::Command;
-
-    #[test]
-    fn control_plane_requires_a_clean_canonical_main() {
-        let tmp = tempfile::tempdir().unwrap();
-        for args in [
-            vec!["init", "-b", "main"],
-            vec!["config", "user.email", "test@example.com"],
-            vec!["config", "user.name", "Test"],
-        ] {
-            assert!(Command::new("git")
-                .args(args)
-                .current_dir(tmp.path())
-                .status()
-                .unwrap()
-                .success());
-        }
-        std::fs::write(tmp.path().join("README.md"), "hello\n").unwrap();
-        assert!(Command::new("git")
-            .args(["add", "."])
-            .current_dir(tmp.path())
-            .status()
-            .unwrap()
-            .success());
-        assert!(Command::new("git")
-            .args(["commit", "-m", "initial"])
-            .current_dir(tmp.path())
-            .status()
-            .unwrap()
-            .success());
-
-        assert_eq!(
-            ensure_clean_main(tmp.path(), "Project").unwrap(),
-            std::fs::canonicalize(tmp.path()).unwrap()
-        );
-        std::fs::write(tmp.path().join("README.md"), "changed\n").unwrap();
-        let error = ensure_clean_main(tmp.path(), "Project").unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("canonical main checkout is dirty"));
-    }
+fn read_saved(
+    store: &Store,
+    id: &crate::durable::ProjectId,
+) -> OpsResult<(Project, PlanningSyncStatus)> {
+    let project = store
+        .sqlite
+        .project(id)
+        .map_err(project_error)?
+        .ok_or_else(|| project_error("Project is unavailable"))?;
+    let sync = store
+        .sqlite
+        .project_planning_sync(id)
+        .map_err(project_error)?;
+    Ok((project, sync))
 }

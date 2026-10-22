@@ -12,7 +12,7 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context, Result};
 use reqwest::blocking::Client;
 
-use crate::engine::agent::{guided_agent, GuidedAgent, GUIDED_AGENTS};
+use crate::agent::{guided_agent, GuidedAgent, GUIDED_AGENTS};
 
 pub fn install_agent(name: &str) -> Result<()> {
     let agent = guided_agent(name).ok_or_else(|| {
@@ -36,7 +36,7 @@ pub fn install_agent(name: &str) -> Result<()> {
         .with_context(|| format!("download the {} installer", agent.display_name))?;
     let executable = run_installer(&agent, &script, &home)?;
     println!(
-        "{} is installed: {}\nNext: lf auth connect {}",
+        "{} is installed: {}\nNext: lf account connect {}",
         agent.display_name,
         executable.display(),
         agent.name
@@ -97,7 +97,7 @@ fn installed_executable(name: &str, home: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{install_agent, run_installer};
-    use crate::engine::agent::guided_agent;
+    use crate::agent::guided_agent;
 
     #[test]
     fn verified_executable_is_the_success_signal() {

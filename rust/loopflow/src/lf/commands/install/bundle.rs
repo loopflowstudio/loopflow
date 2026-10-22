@@ -27,7 +27,7 @@ pub fn app_destination() -> Result<PathBuf> {
         .map(PathBuf::from);
     let recorded = match &explicit {
         Some(_) => None,
-        None => crate::machine_install::active_install(&crate::machine_install::root()?)?
+        None => crate::installation::active_install(&crate::installation::root()?)?
             .and_then(|active| active.activation)
             .and_then(|activation| activation.app),
     };
@@ -35,7 +35,7 @@ pub fn app_destination() -> Result<PathBuf> {
         explicit,
         recorded,
         is_writable_directory(Path::new(DEFAULT_APPLICATIONS)),
-        &crate::machine_install::account_home()?,
+        &crate::installation::account_home()?,
     ))
 }
 
@@ -168,7 +168,6 @@ pub fn activate_app(bundle: &Path) -> Result<()> {
         .with_context(|| format!("resolve opened app {}", bundle.display()))?;
     check_placement(&bundle)?;
     let helper = bundle.join("Contents/MacOS/lf");
-    let daemon = bundle.join("Contents/MacOS/lfd");
     // The opened bundle's own helper owns activation, whether it runs inside
     // the bundle or from the retained copy promotion re-execs.
     let current = std::env::current_exe().context("resolve the activating helper")?;
@@ -181,12 +180,11 @@ pub fn activate_app(bundle: &Path) -> Result<()> {
     }
     // Published promotion verifies the signature before any target changes.
     let opened = super::CandidateIdentity::current();
-    if let Some(active) = crate::machine_install::active_install(&crate::machine_install::root()?)?
-    {
+    if let Some(active) = crate::installation::active_install(&crate::installation::root()?)? {
         let cli = active
             .selection
             .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Cli)
+            .artifact(&crate::installation::ArtifactRole::Cli)
             .expect("validated active install has a CLI");
         if let Ok(installed) = super::read_binary_preflight(&cli.path) {
             refuse_downgrade(
@@ -200,22 +198,15 @@ pub fn activate_app(bundle: &Path) -> Result<()> {
     fs::create_dir_all(&directory)
         .with_context(|| format!("create install directory {}", directory.display()))?;
     let cli_target = directory.join("lf");
-    let daemon_target = directory.join("lfd");
     super::promote(
         super::PromotionArtifacts {
             cli_target: &cli_target,
-            daemon_source: &daemon,
-            daemon_target: &daemon_target,
             app_source: Some(&bundle),
             app_target: Some(&bundle),
             legacy_app_target: None,
         },
         true,
         false,
-        None,
-        None,
-        false,
-        None,
     )?;
     let file = shell_path::persist(&directory)?;
     println!("Terminal: new zsh windows find lf ({})", file.display());

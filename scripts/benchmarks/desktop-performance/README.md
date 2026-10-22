@@ -1,52 +1,82 @@
 # Desktop performance
 
 ```sh
-# Real usage on this machine: record the running app for a minute, then read the report.
-uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60
-uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60 --process LoopflowMac   # dev build
-uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60 --no-xctrace           # signposts + RSS only
-uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60 --template 'Time Profiler'   # attribute main-thread hangs; open hitches.trace in Instruments
-uv run python scripts/benchmarks/desktop-performance/record_live.py summarize /tmp/loopflow-live-20260926-1200
+# Read timing records from ordinary launches.
+uv run python scripts/benchmarks/desktop-performance/timings.py
+uv run python scripts/benchmarks/desktop-performance/timings.py --json
 
-# The older capture/OCR journeys and their hash-pinned baseline.
-uv run python scripts/desktop_performance.py run --output /tmp/desktop-after --baseline scripts/benchmarks/desktop-performance/20260924-capture-input
+# Observe the running app without sending input.
+uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60
+uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60 --process LoopflowMac
+uv run python scripts/benchmarks/desktop-performance/record_live.py summarize /tmp/loopflow-live-recording
+
+# Compare native workspace journeys on the same host and build mode.
+cargo build -p loopflow --bin lf --bin lf-world
+uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-baseline
+uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-after --baseline /tmp/desktop-baseline
 ```
 
-`record_live.py record` attaches to the app you are already using (`Loopflow` from
-/Applications, or `LoopflowMac` from `swift/.build`), waits `--seconds`, then writes
-one directory: `signposts.ndjson` (the app's own `studio.loopflow`/`perf` intervals
-from the unified log), `hitches.trace` plus exported `hitches.xml` and
-`potential-hangs.xml` (Instruments' Animation Hitches template attached to the pid),
-`rss.jsonl` (one `ps` sample per second), and `report.md`/`report.json` with
-per-interval p50/p95/max, superseded counts, hitch ms/s, hangs and RSS growth.
-Nothing is sent anywhere; delete the directory when done. Use the app normally
-while it records — the intervals are named after what you did.
+Keep recordings, snapshots and reports outside the checkout. Snapshots contain
+private history and credentials. Use disposable Homes and matching source,
+fixtures, populations and build modes for comparisons. A successful command is
+not evidence of a speedup; incomplete attempts and failures remain in reports.
 
-| Interval | Begins | Ends |
-|---|---|---|
-| `cold_start` | `LoopflowApp.init` (message carries `pre_main_ms`) | next main-queue callback after non-empty rows are observed |
-| `hierarchy_interaction` | fold, presentation, filter keystroke, repository switch | next main-queue callback after changed rows are observed |
-| `task_workspace_ready` | `scenario=wave` / `task`: selection; `scenario=session`: Session opened | next main-queue callback after detail/focus is observed |
-| `lf` | one `lf` subprocess read (message = verb) | stdout decoded |
-| `markdown_parse` | one Description/Comment parse | blocks built |
-| `terminal_key_to_draw` | key press in a Ghostty pane | next display-link draw |
+## Ordinary-use observations
 
-The navigation intervals end in a queued main-thread callback. They measure
-scheduling after the view observes a change, not completed layout, drawing or
-presentation. No one-frame presentation bound is established. Instruments
-measures hitches and hangs separately for the same period. An interval ended `superseded` means a newer interaction replaced it
-before it finished; the report counts those separately for each scenario, even
-when none finished. Missing trace tables are unmeasured (`null` in JSON), not
-zero hitches or hangs.
+The app retains bounded launch/read journals under
+`<Home>/desktop-cache/timings/`. `timings.py` reads those journals without
+launching the app. Records contain durations, command names and app versions,
+not arguments, prompts or output.
 
-`xctrace` needs Xcode; `--no-xctrace` still gives intervals and RSS. `leaks <pid>`
-against the signed app reports "not debuggable" and sees read-only memory only;
-for a full leak graph use the dev build.
+`record_live.py` collects signposts, process RSS/CPU samples and, when available,
+Instruments hitch/hang traces. `--no-xctrace` keeps signposts and resource samples
+without Instruments. `--template 'Time Profiler'` selects another Instruments
+view. Missing trace tables are unmeasured, not zero. p95 requires twenty samples.
+Navigation signposts end after the view observes a change; they do not prove
+completed layout or on-screen presentation. CPU samples cover the app process,
+not its children.
 
-An in-process XCTest harness measuring the same intervals on fixture data
-(`XCTOSSignpostMetric`, clock and memory metrics, 4 Waves × 50 Tasks) is
-LOO-300's work; it is not in this tree.
+## Isolated startup and workspace checks
 
-`20260924-capture-input/` is the earlier bitmap-capture/OCR baseline for
-`scripts/desktop_performance.py`; its README explains why it is not comparable
-with signpost intervals.
+```sh
+uv run python scripts/benchmarks/desktop-performance/launch.py run --work /tmp/desktop-launch --output /tmp/desktop-launch/run
+uv run python scripts/benchmarks/desktop-performance/startup.py capture --repo /path/to/repo --output /tmp/startup-capture
+uv run python scripts/benchmarks/desktop-performance/startup.py run --capture /tmp/startup-capture --output /tmp/startup-run
+
+uv run python scripts/desktop_performance.py snapshot --database /path/to/Home/loopflow.db --output /tmp/task-snapshot
+uv run python scripts/desktop_performance.py run --snapshot /tmp/task-snapshot --lf /path/to/lf --repo /path/to/repo --issue TASK-ID --samples 21 --output /tmp/task-before
+uv run python scripts/desktop_performance.py report /tmp/task-before
+```
+
+`launch.py` builds an isolated app bundle and measures uncached, saved and failed
+startup reads against copied state. `--built` reuses its bundle; `--home` selects
+a prior private fixture. Native launches need a display host. `startup.py`
+replays captured reader responses without a display and makes no rendering claim.
+
+The owned Task and Session come from an `lf-world` one-task world built by the
+`lf-world` beside `--cli`/`--lf`; its stub `claude` resumes the world transcript
+and echoes input, so no account or network is involved.
+
+Workspace journeys use mounted controls, bitmap capture and text recognition.
+They cover hierarchy interactions, retained panes, Task details and file editing.
+Session return also checks focus, draft submission and PTY replies. Capture/OCR
+adds observer overhead; these endpoints are not compositor-paint measurements.
+Use `--samples 1` for a short behavioral check and `--soak-seconds 3600` for the
+longer recorder. Reports retain failed and interrupted attempts and distinguish
+planned observations that never started. Source drift or mismatched populations
+invalidates comparison. `report` reconstructs results after interruption.
+
+Snapshots are copied before each run. Copied production records permit local
+reads only; provider connection and execution are refused. If only indexes
+differ from the candidate schema, prepare a separate fixture:
+
+```sh
+uv run python scripts/desktop_performance.py prepare-snapshot --snapshot /tmp/task-snapshot --schema-database /tmp/candidate/loopflow.db --output /tmp/task-compatible
+```
+
+Preparation verifies typed row equivalence and exact candidate schema. It does
+not convert tables/history or migrate the installed store. Use the same prepared
+fixture on both sides of a comparison. Build and disk capacity are prerequisites
+for the native test runners, not performance results.
+
+For focused input profiling, see [agent-input.md](agent-input.md).

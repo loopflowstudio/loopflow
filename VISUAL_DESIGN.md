@@ -1,6 +1,51 @@
 # Loopflow Visual Design System
 
-The unified design system for loopflow (Swift app) and loopflowstudio (website).
+Desktop uses the semantic roles in `LoopflowPalette`. The website shares
+typography, with separate fixed marketing colors below.
+
+## Desktop semantics
+
+Select Work: the theme’s solid selection fill and contrasting text mark the destination,
+including its Needs you entry. File selection keeps its neutral tint and edge.
+Tab to a control: the theme’s separate focus outline marks keyboard focus, including
+on a selected row with an error. Ordinary controls use neutral ink; only an explicitly
+emphasized action uses the theme’s accent. Repo identity uses emphasis ink. Links use
+secondary ink and underline on hover/focus in navigation and control chrome.
+
+| Role | Source / behavior |
+|------|-------------------|
+| Structure and text | `background`, surface ladder, `text`, `textSecondary`, `textTertiary` |
+| Work selection | `workSelectedFill`, `workSelectedText`, `workSelectedSecondaryText`; independent of failure |
+| File and option selection | `selectionFill`, `selectionEdge` |
+| Keyboard focus | `keyboardFocus`; visible with selection |
+| Links | `linkInk`, `linkHover`; separate from status |
+| Actions | `actionInk`, `actionHover`; `accentInk` for emphasized actions; `emphasisInk` for headings |
+| Program activity | `working`, `waiting`, `failure`, `success`; labels and shapes retain state meaning |
+
+Unknown and client-liveness-only observations have no activity label or dot. Shared
+Waiting remains explicitly inferred; reported Blocked is not renamed Waiting.
+Program Done is not Task completion. Workflow position uses neutral marking; a
+stopped edge alone is not a red error. Read failures remain inspectable.
+
+`ThemeDefinition` owns explicit sRGB terminal colors and the semantic
+`LoopflowPalette` used by app and pane chrome. Ghostty receives a normalized color
+overlay after personal non-color configuration. Retained surfaces update in place.
+Each bundled/imported record supplies every palette role; missing roles fail decoding.
+`GhosttyThemeMapping` converts imports once: ANSI 4/3/1/2 supply accent/Working,
+Waiting, failure and success colors. Work selection is calibrated separately.
+Application text/surfaces adjust for readability without altering terminal ANSI.
+Ordinary app text is desaturated independently; terminal syntax is preserved.
+State selects the role; color never invents activity. Focus aliases accent ink,
+links/actions alias text roles, and status stroke/text alias status ink.
+Solid controls have distinct base/hover/pressed fills. Ghostty owns terminal cell
+fills and contrast; the app owns gutter/header chrome.
+
+Built-ins and imported Desktop appearances have explicit roles. `WorkPaletteTests`
+resolves actual SwiftUI colors and composites selection fills over each surface: ordinary text
+must reach 4.5:1, meaningful indicators 3:1. Static marketing hex examples below
+are not Desktop status colors or contrast evidence.
+
+## Marketing reference
 
 ---
 
@@ -401,5 +446,5 @@ Before merging UI changes:
 - [ ] Respects `prefers-reduced-motion` / `reduceMotion`
 - [ ] Icon-only buttons have accessibility labels
 - [ ] Color contrast meets WCAG AA (4.5:1 for text)
-- [ ] Headings use burgundy color
+- [ ] Desktop headings remain neutral; marketing headings may use burgundy
 - [ ] Test with VoiceOver/screen reader enabled

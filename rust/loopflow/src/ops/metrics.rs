@@ -5,12 +5,12 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use time::OffsetDateTime;
 
-use crate::controller::wave::metrics::{
+use crate::store::Store;
+use crate::work::wave::metrics::{
     compose_metric_portfolio, discover_metric_contracts, load_metric_contract,
     MetricContractDiscovery, MetricContractIssueDto, MetricObservation, MetricPortfolioDto,
     ObservationAcceptance,
 };
-use crate::store::Store;
 use crate::work::wave::Wave;
 
 pub(crate) async fn wave_metric_portfolio(
@@ -18,29 +18,27 @@ pub(crate) async fn wave_metric_portfolio(
     wave: &Wave,
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricPortfolioDto> {
-    let targets = if store.chapter(wave.id(), None).await?.is_some() {
-        match super::chapter::current_project(store, wave).await {
-            Ok(project) => project.metric_targets,
-            Err(error) => {
-                return Ok(MetricPortfolioDto {
-                    metrics: Vec::new(),
-                    contract_issues: vec![MetricContractIssueDto::ChapterUnavailable {
-                        wave_id: wave.id().to_string(),
-                        reason: error.to_string(),
-                    }],
-                })
-            }
+    match super::project::current_project(store, wave) {
+        Ok(project) => {
+            chapter_metric_portfolio(store, wave, &project.metric_targets, evaluation_time).await
         }
-    } else {
-        Vec::new()
-    };
-    chapter_metric_portfolio(store, wave, &targets, evaluation_time).await
+        Err(error) => {
+            let mut discovery = discover_wave_contracts(wave)?;
+            discovery
+                .contract_issues
+                .push(MetricContractIssueDto::ChapterUnavailable {
+                    wave_id: wave.id().to_string(),
+                    reason: error.to_string(),
+                });
+            compose_persisted_portfolio(store, discovery, None, evaluation_time).await
+        }
+    }
 }
 
 pub(crate) async fn chapter_metric_portfolio(
     store: &Store,
     wave: &Wave,
-    targets: &[crate::pm::ChapterMetricTarget],
+    targets: &[crate::work::wave::metrics::MetricTarget],
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricPortfolioDto> {
     let mut discovery = discover_wave_contracts(wave)?;
@@ -58,12 +56,12 @@ pub(crate) async fn chapter_metric_portfolio(
                 });
         }
     }
-    compose_persisted_portfolio(store, discovery, targets, evaluation_time).await
+    compose_persisted_portfolio(store, discovery, Some(targets), evaluation_time).await
 }
 
 pub(crate) fn validate_chapter_targets(
     wave: &Wave,
-    targets: &[crate::pm::ChapterMetricTarget],
+    targets: &[crate::work::wave::metrics::MetricTarget],
 ) -> Result<()> {
     let discovery = discover_wave_contracts(wave)?;
     for target in targets {
@@ -101,8 +99,8 @@ pub(crate) fn metric_prompt_section(tag: &str, portfolio: Result<MetricPortfolio
 
 fn discover_wave_contracts(wave: &Wave) -> Result<MetricContractDiscovery> {
     let metrics_dir = metric_contract_repo(wave, std::env::var_os("LOOPFLOW_DEV_WAVE_REPO"))
-        .join("wave")
-        .join(wave.name())
+        .join(".lf/wave")
+        .join(wave.slug())
         .join("metrics");
     discover_metric_contracts(&metrics_dir, wave.id().as_str()).map_err(|error| anyhow!(error))
 }
@@ -117,7 +115,7 @@ fn metric_contract_repo(wave: &Wave, dev_repo: Option<OsString>) -> PathBuf {
 async fn compose_persisted_portfolio(
     store: &Store,
     discovery: MetricContractDiscovery,
-    targets: &[crate::pm::ChapterMetricTarget],
+    targets: Option<&[crate::work::wave::metrics::MetricTarget]>,
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricPortfolioDto> {
     if discovery.contracts.is_empty() {
@@ -215,7 +213,7 @@ impl MetricProducerObservation {
 
     fn bind(
         self,
-        contract: &crate::controller::wave::metrics::MetricContract,
+        contract: &crate::work::wave::metrics::MetricContract,
     ) -> Result<MetricObservation> {
         let mut observation = match self {
             Self::Observed {
@@ -225,7 +223,7 @@ impl MetricProducerObservation {
                 complete,
                 ..
             } => MetricObservation::Observed {
-                identity: contract.identity.clone(),
+                identity: contract.identity.clone().into(),
                 contract_revision: contract.contract_revision.clone(),
                 instrument: contract.instrument.clone(),
                 observation_id: String::new(),
@@ -239,7 +237,7 @@ impl MetricProducerObservation {
                 reason,
                 ..
             } => MetricObservation::Unavailable {
-                identity: contract.identity.clone(),
+                identity: contract.identity.clone().into(),
                 contract_revision: contract.contract_revision.clone(),
                 instrument: contract.instrument.clone(),
                 observation_id: String::new(),
@@ -300,7 +298,7 @@ pub(crate) async fn publish_metric_observations(
         };
         let wave = waves
             .iter()
-            .find(|wave| wave.name() == wave_name)
+            .find(|wave| wave.slug() == wave_name)
             .with_context(|| {
                 format!("producer metric {wave_name}/{metric_id} has no registered Wave")
             })?;
@@ -312,7 +310,7 @@ pub(crate) async fn publish_metric_observations(
             bail!("producer metric id {metric_id:?} is not a direct contract filename");
         }
         let contract_path = repo
-            .join("wave")
+            .join(".lf/wave")
             .join(&wave_name)
             .join("metrics")
             .join(format!("{metric_id}.md"));
@@ -364,32 +362,35 @@ pub(crate) async fn publish_metric_observations(
 
 #[cfg(test)]
 mod tests {
+    use crate::test_linear_input::SeedLinear;
     use std::ffi::OsString;
     use std::fs;
 
     use tempfile::tempdir;
     use time::Duration;
 
-    use crate::controller::wave::metrics::{
+    use crate::id::WaveId;
+    use crate::store::StorageConfig;
+    use crate::work::project::ProjectKR;
+    use crate::work::wave::metrics::{
         load_metric_contract, MetricEvidenceDto, MetricObservation, MetricStage,
     };
-    use crate::id::WaveId;
-    use crate::pm::{PmKr, ProjectFlowPlan};
-    use crate::store::StorageConfig;
 
     use super::*;
-    use crate::pm::PmProject;
+    use crate::linear::LinearProject;
 
-    fn project(id: &str, slug: &str) -> PmProject {
-        PmProject {
+    fn project(id: &str, slug: &str) -> LinearProject {
+        LinearProject {
+            description: None,
+            revision: None,
             id: id.to_string(),
             slug: slug.to_string(),
             name: slug.replace('-', " "),
             summary: String::new(),
 
             metric_targets: Vec::new(),
-            flows: Some(ProjectFlowPlan::empty()),
-            krs: vec![PmKr {
+            status: crate::work::project::ProjectStatus::Started,
+            krs: vec![ProjectKR {
                 text: "Proof holds for one week".to_string(),
                 holds: false,
             }],
@@ -414,11 +415,11 @@ mod tests {
     }
 
     fn observed(
-        contract: &crate::controller::wave::metrics::MetricContract,
+        contract: &crate::work::wave::metrics::MetricContract,
         end: OffsetDateTime,
     ) -> MetricObservation {
         let mut observation = MetricObservation::Observed {
-            identity: contract.identity.clone(),
+            identity: contract.identity.clone().into(),
             contract_revision: contract.contract_revision.clone(),
             instrument: contract.instrument.clone(),
             observation_id: String::new(),
@@ -460,7 +461,7 @@ mod tests {
     async fn shared_portfolio_joins_persisted_evidence_without_changing_krs() {
         let directory = tempdir().unwrap();
         let repo = directory.path().join("repo");
-        let metrics_dir = repo.join("wave/product/metrics");
+        let metrics_dir = repo.join(".lf/wave/product/metrics");
         fs::create_dir_all(&metrics_dir).unwrap();
         let trust_path = metrics_dir.join("task-loop-trust.md");
         fs::write(
@@ -499,7 +500,7 @@ mod tests {
         );
         store.create_wave(&wave).await.unwrap();
         let projects = [
-            project("project-api", "loopflow-api"),
+            project("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3", "loopflow-api"),
             project("project-surface", "mac-surface"),
         ];
         let unchanged_krs = projects
@@ -521,15 +522,86 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(portfolio.metrics.len(), 2);
-        assert!(portfolio.contract_issues.is_empty());
-        assert!(portfolio
-            .metrics
-            .iter()
-            .any(|metric| { matches!(metric.evidence, MetricEvidenceDto::Untargeted { .. }) }));
+        assert!(matches!(
+            portfolio.contract_issues.as_slice(),
+            [MetricContractIssueDto::ChapterUnavailable { .. }]
+        ));
+        assert!(portfolio.metrics.iter().any(|metric| {
+            matches!(
+                metric.evidence,
+                MetricEvidenceDto::Unknown {
+                    cause: crate::work::wave::metrics::MetricUnknownCauseDto::TargetUnavailable {
+                        value: 1.0,
+                        ..
+                    }
+                }
+            )
+        }));
         assert!(portfolio
             .metrics
             .iter()
             .any(|metric| { matches!(metric.evidence, MetricEvidenceDto::Unknown { .. }) }));
+
+        let mut snapshot = crate::test_linear_input::InventoryFixture {
+            wave_id: wave.id().clone(),
+            provider: "linear".into(),
+            initiative: "initiative-1".into(),
+            synced_at: 1,
+            snapshot: crate::test_linear_input::Inventory {
+                projects: vec![projects[0].clone()],
+                items: vec![],
+            },
+        };
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
+            wave.id(),
+            None,
+            &projects[0].id,
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
+        let untargeted = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
+            .await
+            .unwrap();
+        assert!(untargeted.contract_issues.is_empty());
+        assert!(untargeted.metrics.iter().any(|metric| matches!(
+            metric.evidence,
+            MetricEvidenceDto::Untargeted { value: 1.0, .. }
+        )));
+        let mut targeted_project = projects[0].clone();
+        targeted_project.revision = Some("2026-09-30T00:00:01Z".into());
+        targeted_project
+            .metric_targets
+            .push(crate::work::wave::metrics::MetricTarget {
+                metric_id: "task-loop-trust".into(),
+                target: crate::work::wave::metrics::Threshold::AtLeast { value: 1.0 },
+            });
+        snapshot.snapshot = crate::test_linear_input::Inventory {
+            projects: vec![targeted_project],
+            items: vec![],
+        };
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
+        let targeted = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
+            .await
+            .unwrap();
+        assert!(targeted
+            .metrics
+            .iter()
+            .any(|metric| matches!(metric.evidence, MetricEvidenceDto::Met { value: 1.0, .. })));
+        snapshot.snapshot = crate::test_linear_input::Inventory {
+            projects: projects.to_vec(),
+            items: vec![],
+        };
+        snapshot.snapshot.projects[0].revision = Some("2026-09-30T00:00:02Z".into());
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
+        let before = store.list_projects(Some(wave.id())).await.unwrap();
+        let selected = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
+            .await
+            .unwrap();
+        assert_eq!(selected.metrics, untargeted.metrics);
+        assert!(selected.contract_issues.is_empty());
+        assert_eq!(store.list_projects(Some(wave.id())).await.unwrap(), before);
 
         let owned = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await
@@ -551,7 +623,7 @@ mod tests {
     async fn source_build_without_draft_storage_keeps_installed_metric_visible() {
         let directory = tempdir().unwrap();
         let repo = directory.path().join("repo");
-        let metrics_dir = repo.join("wave/product/metrics");
+        let metrics_dir = repo.join(".lf/wave/product/metrics");
         fs::create_dir_all(&metrics_dir).unwrap();
         fs::write(
             metrics_dir.join("task-loop-trust.md"),
@@ -595,7 +667,7 @@ mod tests {
     async fn lifecycle_producer_persists_the_reading_consumers_project() {
         let directory = tempdir().unwrap();
         let repo = directory.path().join("repo");
-        let metrics_dir = repo.join("wave/product/metrics");
+        let metrics_dir = repo.join(".lf/wave/product/metrics");
         fs::create_dir_all(&metrics_dir).unwrap();
         fs::write(
             metrics_dir.join("task-loop-trust.md"),
@@ -647,7 +719,12 @@ mod tests {
         assert!(portfolio.metrics[0].instrumented);
         assert!(matches!(
             portfolio.metrics[0].evidence,
-            MetricEvidenceDto::Untargeted { value: 1.0, .. }
+            MetricEvidenceDto::Unknown {
+                cause: crate::work::wave::metrics::MetricUnknownCauseDto::TargetUnavailable {
+                    value: 1.0,
+                    ..
+                }
+            }
         ));
     }
 }

@@ -1,0 +1,306 @@
+diff --git a/include/ghostty.h b/include/ghostty.h
+--- a/include/ghostty.h
++++ b/include/ghostty.h
+@@ -1023,7 +1023,28 @@
+   GHOSTTY_ACTION_COPY_TITLE_TO_CLIPBOARD,
+   GHOSTTY_ACTION_MOVE_TAB_TO_NEW_WINDOW,
+   GHOSTTY_ACTION_RESIZE_WINDOW,
++  GHOSTTY_ACTION_PROGRAM_STATUS,
+ } ghostty_action_tag_e;
++
++// Loopflow embedder bridge. Strings are validated UTF-8, never markup.
++// Copy all values before returning from the action callback.
++typedef enum {
++  GHOSTTY_PROGRAM_STATUS_REPORT,
++  GHOSTTY_PROGRAM_STATUS_PROMPT,
++  GHOSTTY_PROGRAM_STATUS_RESET,
++  GHOSTTY_PROGRAM_STATUS_EXIT,
++} ghostty_program_status_event_e;
++
++typedef struct {
++  ghostty_program_status_event_e event;
++  int state; // idle=0, working=1, done=2, blocked=3, error=4, clear=5; -1 for boundaries
++  int kind; // permission=0, question=1, auth=2; -1 when absent
++  int16_t progress; // 0..100, -1 when absent
++  const char* id; // empty string is root
++  const char* app; // optional strings are NULL when absent
++  const char* title;
++  const char* msg;
++} ghostty_action_program_status_s;
+
+ typedef union {
+   ghostty_action_split_direction_e new_split;
+@@ -1067,6 +1088,7 @@
+   ghostty_action_search_selected_s search_selected;
+   ghostty_action_readonly_e readonly;
+   ghostty_action_open_config_e open_config;
++  const ghostty_action_program_status_s* program_status;
+ } ghostty_action_u;
+
+ typedef struct {
+diff --git a/src/apprt/action.zig b/src/apprt/action.zig
+--- a/src/apprt/action.zig
++++ b/src/apprt/action.zig
+@@ -363,6 +363,9 @@
+     /// and apprts may ignore it, for example if the surface is in a
+     /// split or the window is fullscreen.
+     resize_window: ResizeWindow,
++
++    /// Validated report or lifecycle boundary. The pointer lives for the callback only.
++    program_status: @import("program_status.zig").Action,
+
+     /// Sync with: ghostty_action_tag_e
+     pub const Key = enum(c_int) {
+@@ -436,6 +439,7 @@
+         copy_title_to_clipboard,
+         move_tab_to_new_window,
+         resize_window,
++        program_status,
+
+         test "ghostty.h Action.Key" {
+             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");
+@@ -1081,4 +1085,5 @@
+
+ test {
+     _ = compat_testing.refAllDeclsRecursive(@This());
++    _ = @import("program_status.zig");
+ }
+diff --git a/src/apprt/surface.zig b/src/apprt/surface.zig
+--- a/src/apprt/surface.zig
++++ b/src/apprt/surface.zig
+@@ -136,6 +136,9 @@
+
+     /// The terminal encountered a bell character.
+     ring_bell,
++
++    /// Owned data copied before the terminal parser consumes its next byte.
++    program_status: @import("program_status.zig"),
+
+     /// Report the progress of an action using a GUI element
+     progress_report: terminal.osc.Command.ProgressReport,
+diff --git a/src/apprt/program_status.zig b/src/apprt/program_status.zig
+--- /dev/null
++++ b/src/apprt/program_status.zig
+@@ -0,0 +1,118 @@
++//! Owned bridge from validated terminal reports to the embedded action callback.
++//! No record storage, parsing, or process authority lives here.
++const std = @import("std");
++const terminal = @import("../terminal/main.zig");
++const lib = @import("../lib/main.zig");
++const ProgramStatus = @This();
++
++pub const Action = struct {
++    value: *const ProgramStatus.C,
++    pub const C = *const ProgramStatus.C;
++    pub fn cval(self: Action) Action.C {
++        return self.value;
++    }
++};
++
++pub const Event = enum(c_int) { report, prompt, reset, exit };
++
++// Callback-lifetime pointers; null optional strings mean absent, id="" is root.
++pub const C = extern struct {
++    event: Event,
++    state: c_int,
++    kind: c_int,
++    progress: i16,
++    id: [*:0]const u8,
++    app: ?[*:0]const u8,
++    title: ?[*:0]const u8,
++    msg: ?[*:0]const u8,
++};
++
++event: Event,
++state: c_int = -1,
++kind: c_int = -1,
++progress: i16 = -1,
++id: [128:0]u8 = @splat(0),
++app: [32:0]u8 = @splat(0),
++title: [192:0]u8 = @splat(0),
++msg: [2048:0]u8 = @splat(0),
++has_app: bool = false,
++has_title: bool = false,
++has_msg: bool = false,
++
++pub fn init(report: terminal.osc.Command.ProgramStatus.Report) !ProgramStatus {
++    var result: ProgramStatus = .{ .event = .report, .state = @intFromEnum(report.state) };
++    if (report.readOption(.kind)) |kind| result.kind = @intFromEnum(kind);
++    if (report.readOption(.progress)) |progress| result.progress = progress;
++    if (report.readOption(.id)) |id| @memcpy(result.id[0..id.len], id);
++    if (report.readOption(.app)) |app| {
++        @memcpy(result.app[0..app.len], app);
++        result.has_app = true;
++    }
++    if (report.readOption(.title) != null) {
++        var writer: std.Io.Writer = .fixed(result.title[0..192]);
++        try report.writeText(.title, &writer);
++        result.has_title = true;
++    }
++    if (report.readOption(.msg) != null) {
++        var writer: std.Io.Writer = .fixed(result.msg[0..2048]);
++        try report.writeText(.msg, &writer);
++        result.has_msg = true;
++    }
++    return result;
++}
++
++pub fn cval(self: *const ProgramStatus) C {
++    return .{
++        .event = self.event,
++        .state = self.state,
++        .kind = self.kind,
++        .progress = self.progress,
++        .id = &self.id,
++        .app = if (self.has_app) &self.app else null,
++        .title = if (self.has_title) &self.title else null,
++        .msg = if (self.has_msg) &self.msg else null,
++    };
++}
++
++test "program status embedded owns decoded payload through parser reuse" {
++    var parser: terminal.osc.Parser = .init(std.testing.allocator);
++    defer parser.deinit();
++    parser.nextSlice("7501;state=blocked:kind=question:id=lf/job:app=fixture:progress=25:msg=PG9rPj8=:title=QnVpbGQ=");
++    const command = parser.end(0x07).?;
++    var owned = try init(command.program_status.report);
++    parser.reset();
++    parser.nextSlice("7501;state=working:id=other");
++    _ = parser.end(0x07);
++    const c = owned.cval();
++    const action: @import("action.zig").Action = .{ .program_status = .{ .value = &c } };
++    const wire = action.cval();
++    try std.testing.expectEqual(@import("action.zig").Action.Key.program_status, wire.key);
++    try std.testing.expect(wire.value.program_status == &c);
++    try std.testing.expectEqual(@sizeOf(@import("ghostty.h").ghostty_action_program_status_s), @sizeOf(C));
++    try std.testing.expectEqual(@as(c_int, 3), c.state);
++    try std.testing.expectEqual(@as(c_int, 1), c.kind);
++    try std.testing.expectEqual(@as(i16, 25), c.progress);
++    try std.testing.expectEqualStrings("lf/job", std.mem.span(c.id));
++    try std.testing.expectEqualStrings("fixture", std.mem.span(c.app.?));
++    try std.testing.expectEqualStrings("<ok>?", std.mem.span(c.msg.?));
++    try std.testing.expectEqualStrings("Build", std.mem.span(c.title.?));
++}
++
++test "program status embedded omitted values and boundary ABI" {
++    var parser: terminal.osc.Parser = .init(std.testing.allocator);
++    defer parser.deinit();
++    parser.nextSlice("7501;state=clear");
++    var owned = try init(parser.end(0x07).?.program_status.report);
++    const c = owned.cval();
++    try std.testing.expectEqualStrings("", std.mem.span(c.id));
++    try std.testing.expectEqual(@as(c_int, 5), c.state);
++    try std.testing.expectEqual(@as(c_int, -1), c.kind);
++    try std.testing.expectEqual(@as(i16, -1), c.progress);
++    try std.testing.expect(c.app == null and c.title == null and c.msg == null);
++    try lib.checkGhosttyHEnum(Event, "GHOSTTY_PROGRAM_STATUS_");
++    inline for (.{ Event.prompt, Event.reset, Event.exit }) |event| {
++        const boundary: ProgramStatus = .{ .event = event };
++        try std.testing.expectEqual(event, boundary.cval().event);
++        try std.testing.expectEqual(@as(c_int, -1), boundary.cval().state);
++    }
++}
+diff --git a/src/termio/stream_handler.zig b/src/termio/stream_handler.zig
+--- a/src/termio/stream_handler.zig
++++ b/src/termio/stream_handler.zig
+@@ -348,6 +348,7 @@
+             .report_pwd => try self.reportPwd(value.url),
+             .show_desktop_notification => try self.showDesktopNotification(value.title, value.body),
+             .progress_report => self.progressReport(value),
++            .program_status => try self.programStatus(value),
+             .start_hyperlink => try self.startHyperlink(value.uri, value.id),
+             .clipboard_contents => try self.clipboardContents(value.kind, value.data),
+             .semantic_prompt => try self.semanticPrompt(value),
+@@ -388,7 +389,6 @@
+             .title_pop,
+             .kitty_dnd,
+             .osc_unknown,
+-            .program_status,
+             => {},
+         }
+     }
+@@ -916,6 +916,8 @@
+         self: *StreamHandler,
+     ) !void {
+         self.terminal.fullReset();
++        if (comptime build_config.artifact == .lib)
++            self.surfaceMessageWriter(.{ .program_status = .{ .event = .reset } });
+         try self.setMouseShape(.text);
+
+         // Full reset clears Kitty clipboard session grants.
+@@ -1478,13 +1480,16 @@
+                 self.surfaceMessageWriter(.{ .stop_command = code });
+             },
+
++            .fresh_line_new_prompt, .prompt_start => {
++                if (comptime build_config.artifact == .lib)
++                    self.surfaceMessageWriter(.{ .program_status = .{ .event = .prompt } });
++            },
++
+             // Handled by Terminal, no special handling by us
+             .end_prompt_start_input,
+             .end_prompt_start_input_terminate_eol,
+             .fresh_line,
+-            .fresh_line_new_prompt,
+             .new_command,
+-            .prompt_start,
+             => {},
+         }
+
+@@ -1922,6 +1927,19 @@
+         // the read() syscall.
+     }
+
++    fn programStatus(self: *StreamHandler, command: terminal.osc.Command.ProgramStatus) !void {
++        if (comptime build_config.artifact != .lib) return;
++        switch (command) {
++            .query => |terminator| self.messageWriter(.{ .write_stable = switch (terminator) {
++                .bel => "\x1b]7501;?\x07",
++                .st => "\x1b]7501;?\x1b\\",
++            } }),
++            .report => |report| self.surfaceMessageWriter(.{
++                .program_status = try @import("../apprt/program_status.zig").init(report),
++            }),
++        }
++    }
++
+     /// Display a GUI progress report.
+     fn progressReport(self: *StreamHandler, report: terminal.osc.Command.ProgressReport) void {
+         self.surfaceMessageWriter(.{ .progress_report = report });
+diff --git a/src/Surface.zig b/src/Surface.zig
+--- a/src/Surface.zig
++++ b/src/Surface.zig
+@@ -17,6 +17,7 @@
+
+ const std = @import("std");
+ const builtin = @import("builtin");
++const build_config = @import("build_config.zig");
+ const assert = @import("quirks.zig").inlineAssert;
+ const Allocator = std.mem.Allocator;
+ const ArenaAllocator = std.heap.ArenaAllocator;
+@@ -1144,6 +1145,13 @@
+             };
+         },
+
++        .program_status => |*v| {
++            if (comptime build_config.artifact == .lib) {
++                const value = v.cval();
++                _ = try self.rt_app.performAction(.{ .surface = self }, .program_status, .{ .value = &value });
++            }
++        },
++
+         .progress_report => |v| {
+             _ = self.rt_app.performAction(
+                 .{ .surface = self },
+@@ -1265,6 +1273,11 @@
+ fn childExited(self: *Surface, info: apprt.surface.Message.ChildExited) void {
+     // Mark our flag that we exited immediately
+     self.child_exited = true;
++    if (comptime build_config.artifact == .lib) {
++        const status: @import("apprt/program_status.zig") = .{ .event = .exit };
++        const value = status.cval();
++        _ = self.rt_app.performAction(.{ .surface = self }, .program_status, .{ .value = &value }) catch false;
++    }
+
+     // If our runtime was below some threshold then we assume that this
+     // was an abnormal exit and we show an error message.

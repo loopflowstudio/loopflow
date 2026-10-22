@@ -1,0 +1,10 @@
+{"type": "session.execution.started", "data": {"sessionID": "ses_trace"}}
+{"type": "session.tool.called", "data": {"sessionID": "ses_trace", "id": "call_read"}}
+{"type": "permission.asked", "data": {"sessionID": "ses_trace", "id": "per_1"}}
+{"type": "session.tool.success", "data": {"sessionID": "ses_trace", "id": "call_read"}}
+{"type": "session.tool.called", "data": {"sessionID": "ses_trace", "id": "call_question"}}
+{"type": "form.created", "data": {"form": {"sessionID": "ses_trace", "id": "form_1"}}}
+{"type": "session.execution.succeeded", "data": {"sessionID": "ses_other"}}
+{"type": "form.replied", "data": {"sessionID": "ses_trace", "id": "form_1"}}
+{"type": "session.tool.success", "data": {"sessionID": "ses_trace", "id": "call_question"}}
+{"type": "session.execution.succeeded", "data": {"sessionID": "ses_trace"}}

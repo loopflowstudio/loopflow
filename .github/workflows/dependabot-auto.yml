@@ -13,14 +13,46 @@ permissions:
 
 jobs:
   enable-auto-merge:
-    if: github.event_name == 'pull_request_target' && github.actor == 'dependabot[bot]'
+    if: >-
+      (github.event_name == 'pull_request_target' && github.event.pull_request.user.login == 'dependabot[bot]') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request')
     runs-on: ubuntu-latest
     steps:
       - name: Enable auto-merge
-        run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+          # GITHUB_TOKEN can enable auto-merge but cannot enter a merge queue.
+          GH_TOKEN: ${{ secrets.DEPENDABOT_MERGE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Configure DEPENDABOT_MERGE_TOKEN with repository Contents and Pull requests write access."
+            exit 1
+          fi
+          if [ -n "$HEAD_SHA" ]; then
+            PR_URL=$(gh pr list --repo "$REPO" --state open --author "app/dependabot" \
+              --limit 1000 --json url,headRefOid \
+              --jq ".[] | select(.headRefOid == \"$HEAD_SHA\") | .url")
+          fi
+          if [ -z "$PR_URL" ]; then
+            echo "No open Dependabot PR for this CI run."
+            exit 0
+          fi
+          gh pr merge --repo "$REPO" --auto --squash --match-head-commit "$EXPECTED_HEAD" "$PR_URL"
+          if [ -n "$HEAD_SHA" ]; then
+            PR_ID=$(gh pr view "$PR_URL" --repo "$REPO" --json id --jq .id)
+            QUEUED=$(gh api graphql \
+              -f query='query($id:ID!){node(id:$id){... on PullRequest{mergeQueueEntry{id}}}}' \
+              -f id="$PR_ID" --jq '.data.node.mergeQueueEntry != null')
+            if [ "$QUEUED" = false ]; then
+              gh api graphql \
+                -f query='mutation($id:ID!,$head:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head}){mergeQueueEntry{position}}}' \
+                -f id="$PR_ID" -f head="$EXPECTED_HEAD"
+            fi
+          fi
 
   close-on-red:
     if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'pull_request'

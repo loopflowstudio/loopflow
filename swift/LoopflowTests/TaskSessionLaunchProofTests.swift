@@ -10,14 +10,14 @@ import ViewInspector
 
 private final class SessionLaunchBundleMarker: NSObject {}
 
-@Suite("Task Session preparation subprocess proof", .serialized)
+@Suite("Task Session preparation subprocess proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskSessionLaunchProofTests {
     @Test("Delayed preparation and launch failures stay with the requesting Task; retry uses its prepared checkout")
     func delayedPreparationKeepsItsTask() async throws {
         // SwiftPM's main bundle is its SDK helper. Re-enter this one test in
         // an owned copy, retaining SwiftPM's framework search environment.
-        // The development configuration below must never touch the SDK.
+        // The bundled helper below must never touch the SDK.
         if ProcessInfo.processInfo.environment["LOOPFLOW_PREPARATION_TEST_HOST"] == nil {
             let host = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             try FileManager.default.createDirectory(at: host, withIntermediateDirectories: true)
@@ -26,8 +26,6 @@ struct TaskSessionLaunchProofTests {
             try #require(executable.lastPathComponent == "swiftpm-testing-helper")
             let owned = host.appendingPathComponent(executable.lastPathComponent)
             try FileManager.default.copyItem(at: executable, to: owned)
-            try JSONSerialization.data(withJSONObject: ["lf_path": host.appendingPathComponent("fixture/lf").path])
-                .write(to: host.appendingPathComponent("LoopflowDevControl.json"))
             let process = Process()
             process.executableURL = owned
             process.arguments = ["--test-bundle-path", try #require(Bundle(for: SessionLaunchBundleMarker.self).executablePath),
@@ -55,21 +53,15 @@ struct TaskSessionLaunchProofTests {
         try fm.createDirectory(at: checkout, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: directory) }
 
-        // Configure only the generated SwiftPM test bundle, through the same
-        // explicit helper configuration used by a development app.
+        // Install beside the owned test executable, just like the app bundle.
         let resources = try #require(Bundle.main.resourceURL)
         try #require(resources.resolvingSymlinksInPath().path == URL(fileURLWithPath: ownedHost).resolvingSymlinksInPath().path)
-        let config = resources.appendingPathComponent("LoopflowDevControl.json")
-        let original = try? Data(contentsOf: config)
-        defer {
-            if let original { try? original.write(to: config) }
-            else { try? fm.removeItem(at: config) }
-        }
-        let helper = directory.appendingPathComponent("lf")
+        let helper = resources.appendingPathComponent("lf")
+        defer { try? fm.removeItem(at: helper) }
         let script = #"""
         #!/bin/sh
-        fixture_dir=$(dirname "$0")
-        if [ "$1" = "task" ] && [ "$2" = "prepare" ]; then
+        fixture_dir="$(dirname "$0")/fixture"
+        if [ "$1" = "task" ] && [ "$2" = "checkout" ]; then
             printf '%s\n' "$@" > "$fixture_dir/prepare-args"
             pwd > "$fixture_dir/prepare-cwd"
             attempt=0
@@ -95,9 +87,8 @@ struct TaskSessionLaunchProofTests {
         """#
         try script.write(to: helper, atomically: true, encoding: .utf8)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
-        try JSONSerialization.data(withJSONObject: ["lf_path": helper.path]).write(to: config)
         try #require(try LocalWaveAgentLauncher.controlLfPath() == helper.path)
-        try JSONSerialization.data(withJSONObject: ["worktree": checkout.path]).write(
+        try JSONSerialization.data(withJSONObject: ["worktree": checkout.path, "machine_id": fixtureMachineId]).write(
             to: directory.appendingPathComponent("receipt.json"))
 
         let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -109,44 +100,49 @@ struct TaskSessionLaunchProofTests {
             var wave = try #require(waves[wi]["wave"] as? [String: Any])
             if wave["repo"] as? String == "/src/loopflow" { wave["repo"] = directory.path }
             waves[wi]["wave"] = wave
-            var evidence = try #require(waves[wi]["tasks"] as? [String: Any])
-            guard var items = evidence["items"] as? [[String: Any]] else { continue }
-            for ti in items.indices {
-                var reference = try #require(items[ti]["reference"] as? [String: Any])
-                reference["workspace"] = NSNull()
-                items[ti]["reference"] = reference
-            }
-            evidence["items"] = items; waves[wi]["tasks"] = evidence
         }
         plan["waves"] = waves
+        var evidence = try #require(plan["tasks"] as? [String: Any])
+        var items = try #require(evidence["items"] as? [[String: Any]])
+        for ti in items.indices {
+            var reference = try #require(items[ti]["reference"] as? [String: Any])
+            reference["workspace"] = NSNull()
+            items[ti]["reference"] = reference
+        }
+        evidence["items"] = items; plan["tasks"] = evidence
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "roadmap": return roadmap
-            case "ls", "session", "flow": return "[]"
-            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-            case "pm": return #"{"identifier":"W2-131","comments":[]}"#
+            case "wave" where args.dropFirst().first == "show": return roadmap
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            case "session", "graph": return "[]"
+            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "pm": return #"{"identifier":"W2-131","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}"#
             default: throw RegistryQueryError("Unexpected read in preparation proof")
             }
         }
         let repo = directory.path
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refresh()
         let origin = model.navigation
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: repo)
-        workspace.multiplexer.newShell()
-        let pane = workspace.multiplexer.focusedPaneId
-        let terminal = registry.surfaces.view(for: .shell(pane))
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let workspace = fixtureWork(registry, fixtureWorkspace(repo))
+        workspace.multiplexer.newShell(location: workspace.location)
+        let shell = try #require(workspace.multiplexer.focusedPane.content.selectedShell)
+        let terminal = registry.surfaces.view(for: try #require(shell.terminal))
         terminal.frame = CGRect(x: 0, y: 0, width: 600, height: 350)
         terminal.workingDirectory = repo
-        terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
+        terminal.command = buildWorkspaceShellCommand(id: shell.id, argv: ["/bin/cat"], env: [:])
         terminal.createSurface(manager: GhosttyManager.shared)
         let surface = try #require(terminal.surface)
         defer {
-            for path in registry.paths {
-                for pane in registry.workspace(for: path).multiplexer.layout.allPanes {
-                    registry.surfaces.release(.shell(pane.id))
+            for path in registry.keys {
+                for pane in registry.retained(path)!.multiplexer.layout.allPanes {
+                    if case .shell(let tabs, _) = pane.content {
+                        for tab in tabs {
+                            if let identity = tab.terminal { registry.surfaces.release(identity) }
+                        }
+                    }
                 }
             }
         }
@@ -170,7 +166,7 @@ struct TaskSessionLaunchProofTests {
             try await wait { fm.fileExists(atPath: directory.appendingPathComponent("prepare-args").path) }
             #expect(origin.startingTaskSessions.contains("issue-review"))
             #expect(try String(contentsOf: directory.appendingPathComponent("prepare-args"), encoding: .utf8)
-                == "task\nprepare\nW2-131\n--json\n")
+                == "task\ncheckout\nW2-131\n--json\n")
             if mode != "success" {
                 model.select(.task(id: "issue-available"))
                 try await settle(window)
@@ -189,16 +185,18 @@ struct TaskSessionLaunchProofTests {
             } else {
                 #expect(origin.taskSessionErrors.isEmpty)
                 #expect(model.selection == .task(id: "issue-review"))
+                #expect(origin.preparedTaskWorktrees["issue-review"] == fixtureWorkspace(checkout.path))
+                let selectedKey = try #require(registry.selectedWork)
+                #expect(registry.retained(selectedKey)?.location?.worktree == checkout.path)
                 try await wait { fm.fileExists(atPath: directory.appendingPathComponent("conversation-args").path) }
                 let args = try String(contentsOf: directory.appendingPathComponent("conversation-args"), encoding: .utf8)
-                #expect(args.hasPrefix("--interactive\n--task\nW2-131\n:\n"))
+                #expect(args.hasPrefix("--mode\ninteractive\n--task\nW2-131\n:\n"))
                 let cwd = try String(contentsOf: directory.appendingPathComponent("conversation-cwd"), encoding: .utf8)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 #expect(URL(fileURLWithPath: cwd).resolvingSymlinksInPath().path == checkout.resolvingSymlinksInPath().path)
             }
             #expect(terminal.surface == surface)
         }
-        registry.layout(for: repo).select(repo)
         model.navigation.content = .terminals
         try await settle(window)
         ghostty_surface_text(surface, "\n", 1)

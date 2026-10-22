@@ -1,0 +1,4 @@
+# Plan, implement and land without an intermediate conversation review.
+nodes: {}
+edges:
+  - { from: start, to: end, graph: autonomous }

@@ -6,23 +6,19 @@
     "goal": "Make releases boring.",
     "repo": "/src/loopflow",
     "active_tasks": 1,
-    "live": true,
-    "paused": false,
-    "enabled": true,
-    "endpoint": "127.0.0.1:7777",
     "created_at": "2026-07-01T00:00:00Z",
     "parent_wave_id": null,
     "retired_at": null,
     "superseded_by_wave_id": null,
     "retirement_reason": null,
-    "home": {
+    "machine": {
       "id": "home_00000000000000000000000000000001",
       "route": "ssh://jack@mini-heart",
       "created_at": "1970-01-01T00:00:00Z",
-      "observed_at": "1970-01-01T00:00:00Z"
+      "observed_at": "1970-01-01T00:00:00Z",
+      "label": "mini"
     }
   },
-  "loop_state": "idle",
   "metric_portfolio": {
     "metrics": [
       {
@@ -58,29 +54,14 @@
     ],
     "contract_issues": []
   },
-  "runs": {
+  "history": {
     "state": "ok",
     "truncated": false,
     "items": [
       {
-        "id": "run_00000000000000000000000000000001",
-        "parent_run_id": null,
         "repo": "/src/loopflow",
         "worktree": "/src/loopflow.task",
-        "subjects": [
-          {
-            "selector": "wave:infrastructure",
-            "source": "declared"
-          },
-          {
-            "selector": "task:INF-123",
-            "source": "declared"
-          }
-        ],
         "skill": "task/pursue",
-        "outcome": "completed",
-        "started": 1784052000,
-        "ended": 1784052600,
         "usage": {
           "streams": 1,
           "final_streams": 1,
@@ -98,48 +79,22 @@
         "evidence_gaps": 0,
         "harness": "codex",
         "model": "gpt-5",
-        "surface": "headless"
-      }
-    ]
-  },
-  "home_runtime": {
-    "home": {
-      "id": "home_00000000000000000000000000000001",
-      "route": "ssh://jack@mini-heart",
-      "created_at": "1970-01-01T00:00:00Z",
-      "observed_at": "1970-01-01T00:00:00Z"
-    },
-    "state": "running",
-    "reason": "resident is serving on the Home",
-    "endpoint": "127.0.0.1:7777",
-    "action": {
-      "kind": "attach",
-      "endpoint": "127.0.0.1:7777"
-    }
-  },
-  "chapter": {
-    "id": "current",
-    "source_project_id": "project-1",
-    "flows": {
-      "recommended": "task-design"
-    },
-    "krs": [
-      {
-        "text": "Every failed run has an owner",
-        "holds": false
-      }
-    ],
-    "phase": "complete",
-    "error": null,
-    "source_project_slug": "release-feedback",
-    "source_work_id": null,
-    "metric_targets": [
-      {
-        "metric_id": "task-loop-trust",
-        "target": {
-          "kind": "at_least",
-          "value": 1.0
-        }
+        "surface": "headless",
+        "first_provider_attempt_at": 1784052010,
+        "task_pr_id": "pr_33333333333333333333333333333333",
+        "session_id": "run_00000000000000000000000000000001",
+        "providers": [],
+        "task_id": "task_22222222222222222222222222222222",
+        "wave_id": "11111111-1111-4111-8111-111111111111",
+        "task_identifier": "INF-123",
+        "wave_name": "infrastructure",
+        "work_source": null,
+        "artifact_key": "run_00000000000000000000000000000001",
+        "captured": 12,
+        "caller_artifact_key": null,
+        "observed_at": 1784052000,
+        "recorded_outcome": "completed",
+        "recorded_at": 1784052600
       }
     ]
   },
@@ -148,30 +103,110 @@
     "items": [
       {
         "task": {
-          "id": "issue-1",
+          "id": "ts_22222222222222222222222222222222",
           "identifier": "INF-123",
           "name": "Surface nightly failures",
           "description": "Surface one focused failure.",
           "rank": 1,
           "completed": false,
-          "assignee": "user-1"
+          "assignee": "user-1",
+          "state": "unstarted",
+          "completed_at": null,
+          "due_date": null,
+          "sync": {
+            "connected": true,
+            "changes": [
+              {
+                "id": "create-task",
+                "field": "creation",
+                "state": "pending",
+                "local_value": {
+                  "title": "Saved offline"
+                },
+                "linear_value": null,
+                "error": null
+              },
+              {
+                "id": "order-project",
+                "field": "task_order",
+                "state": "uncertain",
+                "local_value": [
+                  "task-b",
+                  "task-a"
+                ],
+                "linear_value": null,
+                "error": "Reply lost; awaiting readback"
+              },
+              {
+                "id": "title-task",
+                "field": "task_title",
+                "state": "adopted_linear",
+                "local_value": "Local title",
+                "linear_value": "Linear title",
+                "error": null
+              },
+              {
+                "id": "assignee-task",
+                "field": "task_assignee",
+                "state": "adopted_linear",
+                "local_value": "person-id",
+                "linear_value": null,
+                "error": null
+              },
+              {
+                "id": "comment-task",
+                "field": "comment",
+                "state": "pending",
+                "local_value": {
+                  "body": "Saved comment",
+                  "author": {
+                    "kind": "person",
+                    "name": "Maya"
+                  },
+                  "created_at": "2026-10-08T12:00:00Z"
+                },
+                "linear_value": null,
+                "error": "Offline"
+              }
+            ]
+          },
+          "linear_id": "issue-1",
+          "acquisition": {
+            "state": "available",
+            "observed_at": null
+          },
+          "repository_id": "repo_00000000000040008000000000000001",
+          "repo": "/src/loopflow",
+          "project_id": "proj_0123456789ab40008000000000000001",
+          "wave_id": "wave-1"
         },
         "reference": {
           "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
           "workspace": {
+            "machine_id": "home_00000000000000000000000000000001",
+            "machine_label": "build-server",
             "slug": "infrastructure-task",
             "branch": "jack/infrastructure.task.20260713_1200",
             "worktree": "/src/loopflow.infrastructure.task",
-            "local_exists": true
+            "local_exists": true,
+            "base_commit": "1111111111111111111111111111111111111111"
           }
         },
         "runtime": {
           "work_id": "ts_22222222222222222222222222222222",
           "status": "ready",
+          "completion_pending": null,
           "reason": "ready",
           "updated_at": "2026-07-13T19:00:00Z",
           "provider": "codex",
-          "started": true
+          "owner": {
+            "person": "Jack Heart",
+            "person_key": "jack@loopflow.studio",
+            "machine": {
+              "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
+              "label": "mini"
+            }
+          }
         },
         "directive": {
           "version": 2,
@@ -185,218 +220,9 @@
           "owner": "user",
           "reason": "merge pull request head 333333333333 on GitHub"
         },
-        "prs": [
-          {
-            "id": "pr_33333333333333333333333333333333",
-            "sequence": 1,
-            "slug": "infrastructure-task",
-            "branch": "jack/infrastructure.task.20260713_1200",
-            "base_commit": "1111111111111111111111111111111111111111",
-            "phase": "open",
-            "empty": false,
-            "publication": {
-              "requested_at": "2026-07-13T18:45:00Z",
-              "presentation": {
-                "title": "Ship infrastructure task",
-                "body": "Explains the intent and proof for this head.",
-                "head_sha": "3333333333333333333333333333333333333333"
-              },
-              "github": {
-                "number": 912,
-                "url": "https://github.com/loopflowstudio/loopflow/pull/912"
-              },
-              "merge": {
-                "mode": "user",
-                "requested_at": "2026-07-13T18:46:00Z",
-                "head_sha": "3333333333333333333333333333333333333333",
-                "after_merge": "complete_task",
-                "next_slug": null
-              }
-            },
-            "merge_commit": null,
-            "abandoned_at": null
-          }
-        ],
-        "active_pr": "pr_33333333333333333333333333333333",
         "actions": {
           "recommended": "open_pr",
           "reason": "merge head 333333333333 on GitHub"
-        },
-        "flow": {
-          "recommended": "feature",
-          "record": {
-            "kind": "pinned",
-            "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
-            "graph": {
-              "name": "feature",
-              "steps": [
-                {
-                  "key": "0",
-                  "id": "design",
-                  "label": "task-design",
-                  "kind": "skill",
-                  "human": false,
-                  "returns_to": null,
-                  "parents": [
-                    "feature"
-                  ],
-                  "paths": []
-                },
-                {
-                  "key": "1",
-                  "id": "implement",
-                  "label": "implement",
-                  "kind": "skill",
-                  "human": false,
-                  "returns_to": null,
-                  "parents": [
-                    "feature",
-                    "pursue"
-                  ],
-                  "paths": []
-                },
-                {
-                  "key": "2",
-                  "id": null,
-                  "label": "review-slice",
-                  "kind": "skill",
-                  "human": false,
-                  "returns_to": null,
-                  "parents": [
-                    "feature",
-                    "pursue"
-                  ],
-                  "paths": []
-                },
-                {
-                  "key": "3",
-                  "id": "decide",
-                  "label": "loop-decide",
-                  "kind": "skill",
-                  "human": false,
-                  "returns_to": "1",
-                  "parents": [
-                    "feature",
-                    "pursue"
-                  ],
-                  "paths": []
-                },
-                {
-                  "key": "4",
-                  "id": "demo",
-                  "label": "demo",
-                  "kind": "skill",
-                  "human": true,
-                  "returns_to": null,
-                  "parents": [
-                    "feature",
-                    "pursue"
-                  ],
-                  "paths": []
-                },
-                {
-                  "key": "5",
-                  "id": "decide_delivery",
-                  "label": "loop-decide",
-                  "kind": "skill",
-                  "human": false,
-                  "returns_to": "1",
-                  "parents": [
-                    "feature",
-                    "pursue"
-                  ],
-                  "paths": []
-                },
-                {
-                  "key": "6",
-                  "id": null,
-                  "label": "xor-route",
-                  "kind": "xor",
-                  "human": false,
-                  "returns_to": null,
-                  "parents": [
-                    "feature"
-                  ],
-                  "paths": [
-                    {
-                      "name": "fix",
-                      "description": "Repair the failing check",
-                      "steps": [
-                        {
-                          "key": "6/fix/0",
-                          "id": "patch",
-                          "label": "patch",
-                          "kind": "skill",
-                          "human": false,
-                          "returns_to": null,
-                          "parents": [],
-                          "paths": []
-                        }
-                      ]
-                    },
-                    {
-                      "name": "skip",
-                      "description": "Nothing to repair",
-                      "steps": []
-                    }
-                  ]
-                },
-                {
-                  "key": "7",
-                  "id": null,
-                  "label": "pr land -c",
-                  "kind": "op",
-                  "human": false,
-                  "returns_to": null,
-                  "parents": [
-                    "feature",
-                    "queue"
-                  ],
-                  "paths": []
-                }
-              ]
-            },
-            "current": "4",
-            "completed": [
-              "0",
-              "1",
-              "2",
-              "3"
-            ],
-            "returns": [
-              {
-                "decider": "3",
-                "traversals": 1
-              },
-              {
-                "decider": "5",
-                "traversals": 1
-              }
-            ],
-            "execution": "human",
-            "reason": "Waiting for your review at demo",
-            "restart_required": false,
-            "iterations": [
-              [
-                1,
-                1
-              ]
-            ]
-          },
-          "controls": [
-            {
-              "kind": "start",
-              "unavailable": "A Flow is already pinned; resume it or stop and restart with another"
-            },
-            {
-              "kind": "resume",
-              "unavailable": "Waiting for your review at demo; continue it through its Session"
-            },
-            {
-              "kind": "restart",
-              "unavailable": null
-            }
-          ]
         },
         "condition": {
           "state": "waiting",
@@ -410,8 +236,347 @@
             "authored_commits": true,
             "recovery_required": false,
             "reason": null
-          }
-        }
+          },
+          "unresolved_execution": true
+        },
+        "workflow_name": "feature",
+        "latest_graph_process": {
+          "entry": {
+            "id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
+            "name": "feature",
+            "state": "stopped",
+            "task_id": null,
+            "wave_id": null,
+            "updated_at": 1,
+            "repo": "/src/loopflow",
+            "ended_at": null
+          },
+          "compiled": {
+            "name": "feature",
+            "steps": [
+              {
+                "key": 0,
+                "id": "design",
+                "label": "task-design",
+                "kind": "skill",
+                "human": false,
+                "returns_to": null,
+                "sources": [
+                  "feature"
+                ],
+                "paths": []
+              },
+              {
+                "key": 1,
+                "id": "implement",
+                "label": "implement",
+                "kind": "skill",
+                "human": false,
+                "returns_to": null,
+                "sources": [
+                  "feature",
+                  "pursue"
+                ],
+                "paths": []
+              },
+              {
+                "key": 2,
+                "id": null,
+                "label": "realign",
+                "kind": "skill",
+                "human": false,
+                "returns_to": null,
+                "sources": [
+                  "feature",
+                  "pursue"
+                ],
+                "paths": []
+              },
+              {
+                "key": 3,
+                "id": "decide",
+                "label": "loop-or-next",
+                "kind": "skill",
+                "human": false,
+                "returns_to": 1,
+                "sources": [
+                  "feature",
+                  "pursue"
+                ],
+                "paths": []
+              },
+              {
+                "key": 4,
+                "id": "demo",
+                "label": "demo",
+                "kind": "skill",
+                "human": true,
+                "returns_to": null,
+                "sources": [
+                  "feature",
+                  "pursue"
+                ],
+                "paths": []
+              },
+              {
+                "key": 5,
+                "id": "decide_delivery",
+                "label": "loop-or-next",
+                "kind": "skill",
+                "human": false,
+                "returns_to": 1,
+                "sources": [
+                  "feature",
+                  "pursue"
+                ],
+                "paths": []
+              },
+              {
+                "key": 6,
+                "id": null,
+                "label": "xor-route",
+                "kind": "xor",
+                "human": false,
+                "returns_to": null,
+                "sources": [
+                  "feature"
+                ],
+                "paths": [
+                  {
+                    "name": "fix",
+                    "description": "Repair the failing check",
+                    "steps": [
+                      {
+                        "key": 7,
+                        "id": "patch",
+                        "label": "patch",
+                        "kind": "skill",
+                        "human": false,
+                        "returns_to": null,
+                        "sources": [],
+                        "paths": []
+                      }
+                    ]
+                  },
+                  {
+                    "name": "skip",
+                    "description": "Nothing to repair",
+                    "steps": []
+                  }
+                ]
+              },
+              {
+                "key": 8,
+                "id": null,
+                "label": "pr land -c",
+                "kind": "op",
+                "human": false,
+                "returns_to": null,
+                "sources": [
+                  "feature",
+                  "queue"
+                ],
+                "paths": []
+              }
+            ],
+            "interactions": {
+              "stages": [
+                "4"
+              ],
+              "transitions": [
+                {
+                  "from": "@start",
+                  "to": "4",
+                  "nodes": [
+                    "0",
+                    "1",
+                    "2",
+                    "3"
+                  ],
+                  "routes": [
+                    {
+                      "from": "@start",
+                      "to": "0",
+                      "condition": null
+                    },
+                    {
+                      "from": "0",
+                      "to": "1",
+                      "condition": null
+                    },
+                    {
+                      "from": "1",
+                      "to": "2",
+                      "condition": null
+                    },
+                    {
+                      "from": "2",
+                      "to": "3",
+                      "condition": null
+                    },
+                    {
+                      "from": "3",
+                      "to": "4",
+                      "condition": "advance"
+                    },
+                    {
+                      "from": "3",
+                      "to": "1",
+                      "condition": "repeat"
+                    }
+                  ]
+                },
+                {
+                  "from": "4",
+                  "to": "4",
+                  "nodes": [
+                    "1",
+                    "2",
+                    "3",
+                    "5"
+                  ],
+                  "routes": [
+                    {
+                      "from": "4",
+                      "to": "5",
+                      "condition": null
+                    },
+                    {
+                      "from": "5",
+                      "to": "1",
+                      "condition": "repeat"
+                    },
+                    {
+                      "from": "1",
+                      "to": "2",
+                      "condition": null
+                    },
+                    {
+                      "from": "2",
+                      "to": "3",
+                      "condition": null
+                    },
+                    {
+                      "from": "3",
+                      "to": "4",
+                      "condition": "advance"
+                    },
+                    {
+                      "from": "3",
+                      "to": "1",
+                      "condition": "repeat"
+                    }
+                  ]
+                },
+                {
+                  "from": "4",
+                  "to": "@end",
+                  "nodes": [
+                    "5",
+                    "6",
+                    "7",
+                    "8"
+                  ],
+                  "routes": [
+                    {
+                      "from": "4",
+                      "to": "5",
+                      "condition": null
+                    },
+                    {
+                      "from": "5",
+                      "to": "6",
+                      "condition": "advance"
+                    },
+                    {
+                      "from": "6",
+                      "to": "7",
+                      "condition": "fix"
+                    },
+                    {
+                      "from": "6",
+                      "to": "8",
+                      "condition": "skip"
+                    },
+                    {
+                      "from": "8",
+                      "to": "@end",
+                      "condition": null
+                    },
+                    {
+                      "from": "7",
+                      "to": "8",
+                      "condition": null
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "current": 4,
+          "completed": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "returns": [
+            {
+              "decider": 3,
+              "traversals": 1
+            },
+            {
+              "decider": 5,
+              "traversals": 1
+            }
+          ],
+          "iterations": [
+            [
+              1,
+              1
+            ]
+          ],
+          "cwd": "/src/loopflow",
+          "steps": []
+        },
+        "execution": {
+          "state": "idle",
+          "reason": "Waiting for your review at demo",
+          "step": null,
+          "captured": null
+        },
+        "run_control": {
+          "unavailable": null
+        },
+        "pr": {
+          "id": "pr_33333333333333333333333333333333",
+          "sequence": 1,
+          "slug": "infrastructure-task",
+          "branch": "jack/infrastructure.task.20260713_1200",
+          "base_commit": "1111111111111111111111111111111111111111",
+          "phase": "open",
+          "empty": false,
+          "publication": {
+            "requested_at": "2026-07-13T18:45:00Z",
+            "presentation": {
+              "title": "Ship infrastructure task",
+              "body": "Explains the intent and proof for this head.",
+              "head_sha": "3333333333333333333333333333333333333333"
+            },
+            "github": {
+              "number": 912,
+              "url": "https://github.com/loopflowstudio/loopflow/pull/912"
+            },
+            "merge": {
+              "mode": "user",
+              "requested_at": "2026-07-13T18:46:00Z",
+              "head_sha": "3333333333333333333333333333333333333333"
+            }
+          },
+          "merge_commit": null,
+          "abandoned_at": null
+        },
+        "workflow_source": "task"
       },
       {
         "task": {
@@ -421,7 +586,76 @@
           "description": "",
           "rank": 2,
           "completed": false,
-          "assignee": null
+          "assignee": null,
+          "state": "unstarted",
+          "completed_at": null,
+          "due_date": null,
+          "sync": {
+            "connected": true,
+            "changes": [
+              {
+                "id": "create-task",
+                "field": "creation",
+                "state": "pending",
+                "local_value": {
+                  "title": "Saved offline"
+                },
+                "linear_value": null,
+                "error": null
+              },
+              {
+                "id": "order-project",
+                "field": "task_order",
+                "state": "uncertain",
+                "local_value": [
+                  "task-b",
+                  "task-a"
+                ],
+                "linear_value": null,
+                "error": "Reply lost; awaiting readback"
+              },
+              {
+                "id": "title-task",
+                "field": "task_title",
+                "state": "adopted_linear",
+                "local_value": "Local title",
+                "linear_value": "Linear title",
+                "error": null
+              },
+              {
+                "id": "assignee-task",
+                "field": "task_assignee",
+                "state": "adopted_linear",
+                "local_value": "person-id",
+                "linear_value": null,
+                "error": null
+              },
+              {
+                "id": "comment-task",
+                "field": "comment",
+                "state": "pending",
+                "local_value": {
+                  "body": "Saved comment",
+                  "author": {
+                    "kind": "person",
+                    "name": "Maya"
+                  },
+                  "created_at": "2026-10-08T12:00:00Z"
+                },
+                "linear_value": null,
+                "error": "Offline"
+              }
+            ]
+          },
+          "linear_id": null,
+          "acquisition": {
+            "state": "available",
+            "observed_at": null
+          },
+          "repository_id": "repo_00000000000040008000000000000001",
+          "repo": "/src/loopflow",
+          "project_id": "proj_0123456789ab40008000000000000001",
+          "wave_id": "wave-1"
         },
         "reference": {
           "issue_url": null,
@@ -433,31 +667,9 @@
           "owner": "wave",
           "reason": "Task is ready to start"
         },
-        "prs": [],
-        "active_pr": null,
         "actions": {
           "recommended": null,
           "reason": "Task is ready to start"
-        },
-        "flow": {
-          "recommended": "feature",
-          "record": {
-            "kind": "none"
-          },
-          "controls": [
-            {
-              "kind": "start",
-              "unavailable": null
-            },
-            {
-              "kind": "resume",
-              "unavailable": "No pinned Flow to resume; start one"
-            },
-            {
-              "kind": "restart",
-              "unavailable": "Task has no Work yet; start a Flow instead"
-            }
-          ]
         },
         "condition": {
           "state": "clear",
@@ -471,8 +683,22 @@
             "authored_commits": null,
             "recovery_required": null,
             "reason": null
-          }
-        }
+          },
+          "unresolved_execution": false
+        },
+        "workflow_name": "feature",
+        "latest_graph_process": null,
+        "execution": {
+          "state": "idle",
+          "reason": "No active execution",
+          "step": null,
+          "captured": null
+        },
+        "run_control": {
+          "unavailable": null
+        },
+        "pr": null,
+        "workflow_source": "task"
       }
     ],
     "truncated": false
@@ -485,7 +711,69 @@
       "status": "ready",
       "owner": "wave",
       "reason": "Task's owning Project is absent from the current PM snapshot",
-      "recovery": "lf work abandon task task_40fbeeaadfbca5367aa7391432ae84ff --reason \"Project is absent from the current PM snapshot\""
+      "recovery": "lf task status task_40fbeeaadfbca5367aa7391432ae84ff --json"
     }
-  ]
+  ],
+  "projects": {
+    "state": "ok",
+    "items": [
+      {
+        "id": "proj_0123456789ab40008000000000000001",
+        "slug": "release-feedback",
+        "name": "current",
+        "status": "started",
+        "current": true,
+        "metric_targets": [
+          {
+            "metric_id": "task-loop-trust",
+            "target": {
+              "kind": "at_least",
+              "value": 1.0
+            }
+          }
+        ],
+        "krs": [
+          {
+            "text": "Every failed run has an owner",
+            "holds": false
+          }
+        ],
+        "sync": {
+          "connected": true,
+          "changes": [
+            {
+              "id": "create-task",
+              "field": "creation",
+              "state": "pending",
+              "local_value": {
+                "title": "Saved offline"
+              },
+              "linear_value": null,
+              "error": null
+            },
+            {
+              "id": "order-project",
+              "field": "task_order",
+              "state": "uncertain",
+              "local_value": [
+                "task-b",
+                "task-a"
+              ],
+              "linear_value": null,
+              "error": "Reply lost; awaiting readback"
+            }
+          ]
+        },
+        "linear_id": "project-1"
+      }
+    ],
+    "truncated": false
+  },
+  "project_readiness": {
+    "state": "ready",
+    "project_id": "proj_0123456789ab40008000000000000001",
+    "observed_at": null,
+    "pending_successor": null,
+    "activation": null
+  }
 }

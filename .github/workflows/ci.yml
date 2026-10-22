@@ -6,20 +6,85 @@ on:
   pull_request:
   merge_group:
 
+# A new PR head supersedes its old proof. Main and merge-group runs each keep
+# their own identity so independent integration proofs do not cancel each other;
+# cancel-superseded ends a merge-queue entry's earlier runs instead.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  merge-proof:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      reuse: ${{ steps.proof.outputs.reuse }}
+      proof_url: ${{ steps.proof.outputs.proof_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Find the merge queue's proof for this exact commit
+        id: proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run python scripts/check_ci_proof.py
+
+  # The macOS jobs wait on hosted runners for most of a PR's proof. A change
+  # that cannot reach them skips them; an unknown diff or a failed classifier
+  # runs them.
+  macos-inputs:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      macos: ${{ steps.classify.outputs.macos }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Classify changed paths
+        id: classify
+        run: uv run python scripts/macos_inputs.py "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}"
+
+  # GitHub rebuilds the queue entries behind a removed pull request on new
+  # temporary branches; their earlier runs would keep holding macOS runners.
+  cancel-superseded:
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Cancel this pull request's earlier merge-queue runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run python scripts/cancel_merge_queue_runs.py "${{ github.event.merge_group.head_ref }}" --keep "${{ github.run_id }}"
+
   architecture-check:
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+      # Migrations need SQLite >= 3.47 (RAISE expressions); the runner's system Python is older.
       - name: Verify the architecture map
-        run: uv run python scripts/check_architecture.py
+        run: uv run --managed-python python scripts/check_architecture.py
 
+  # Scratch belongs to work in progress. Delivery clears it before publishing
+  # a landing candidate; queue/main runs must never accept that exemption.
   scratch-clear:
     runs-on: ubuntu-latest
+    outputs:
+      candidate: ${{ steps.scratch.outputs.candidate }}
     steps:
       - uses: actions/checkout@v7
-      - name: Verify scratch/ is clear
+      - name: Select landing candidates and enforce queue scratch cleanup
+        id: scratch
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           if [ ! -d scratch ]; then
             echo "scratch/ is missing"
@@ -28,31 +93,56 @@ jobs:
 
           EXTRA=$(find scratch -mindepth 1 ! -path 'scratch/.gitkeep' -print)
           if [ -n "$EXTRA" ]; then
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              echo "Checkpoint: hosted proof is deferred until scratch/ is clear." | tee -a "$GITHUB_STEP_SUMMARY"
+              echo "candidate=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             echo "scratch/ must be clear before landing"
             echo "$EXTRA"
             exit 1
           fi
+          echo "candidate=true" >> "$GITHUB_OUTPUT"
 
   # Lint and test are split so the clippy compile and the test compile run on
   # separate runners in parallel instead of back-to-back on one critical path.
   # Distinct cache keys keep the clippy-artifact and rustc-artifact caches apart.
   rust-lint:
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - uses: astral-sh/setup-uv@v7
+      - name: Fingerprint workspace build profiles
+        id: rust-profiles
+        run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
+        id: rust-cache
         with:
-          key: lint
+          key: lint-${{ steps.rust-profiles.outputs.key }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run cargo fmt check
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo fmt --all -- --check
       - name: Run cargo clippy
-        run: cargo clippy --all-targets -- -D warnings
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+        run: /usr/bin/time -v cargo clippy --all-targets -- -D warnings
 
-  rust-test:
+  rust-build:
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
     runs-on: ubuntu-latest
+    env:
+      # Archive executable code, not gigabytes of duplicated DWARF sections.
+      # Optimization and debug assertions retain the ordinary test profile.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    outputs:
+      archive: ${{ steps.archive.outcome == 'success' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -61,20 +151,146 @@ jobs:
         run: |
           VERSION=$(uv run python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
           uv run python scripts/canonicalize_migrations.py "$VERSION" --materialize-for-tests
+      - name: Fingerprint workspace build profiles
+        id: rust-profiles
+        run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
+        id: rust-cache
         with:
-          key: test
+          key: test-${{ steps.rust-profiles.outputs.key }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
       - uses: taiki-e/install-action@nextest
-      - name: Run Rust tests
-        run: cargo nextest run --all
-      - name: Prove checkout refresh through the CLI
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+      - name: Build and archive Rust tests
+        id: archive
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |
-          cargo build -p loopflow --bin lf
-          LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run pytest python/tests/test_checkout_refresh.py
+          uv run --no-sync python scripts/check_rust_test_inventory.py
+          /usr/bin/time -v cargo nextest archive --workspace \
+            -E 'kind(lib)' \
+            --archive-file "$RUNNER_TEMP/rust-library.tar.zst"
+          /usr/bin/time -v cargo nextest archive --workspace \
+            -E 'not kind(lib) & not binary(=planning_reconnect_tests)' \
+            --archive-file "$RUNNER_TEMP/rust-integration.tar.zst"
+      - uses: actions/upload-artifact@v7
+        if: steps.archive.outcome == 'success'
+        with:
+          name: rust-library
+          path: ${{ runner.temp }}/rust-library.tar.zst
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/upload-artifact@v7
+        if: steps.archive.outcome == 'success'
+        with:
+          name: rust-integration
+          path: ${{ runner.temp }}/rust-integration.tar.zst
+          compression-level: 0
+          retention-days: 1
+
+  rust-test:
+    needs: [merge-proof, scratch-clear, rust-build]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.rust-build.result == 'success' && needs.rust-build.outputs.archive == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep long observation on partition zero alongside checkout refresh.
+        # Other jobs download only their library or integration executables.
+        include:
+          - { suite: library, shard: 0, partitions: 5 }
+          - { suite: library, shard: 1, partitions: 5 }
+          - { suite: library, shard: 2, partitions: 5 }
+          - { suite: library, shard: 3, partitions: 5 }
+          - { suite: library, shard: 4, partitions: 5 }
+          - { suite: library, shard: 5, partitions: 5 }
+          - { suite: integration, shard: 1, partitions: 3 }
+          - { suite: integration, shard: 2, partitions: 3 }
+          - { suite: integration, shard: 3, partitions: 3 }
+    steps:
+      - uses: actions/checkout@v7
+      # Claims name their person by Git user.email; repository-local test identities win.
+      - name: Give tests a fallback Git identity
+        run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - uses: taiki-e/install-action@nextest
+      - name: Materialize the archived source's migration inputs
+        run: |
+          VERSION=$(uv run python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          uv run python scripts/canonicalize_migrations.py "$VERSION" --materialize-for-tests
+      - uses: actions/download-artifact@v8
+        with:
+          name: rust-${{ matrix.suite }}
+          path: ${{ runner.temp }}
+      - name: Extract the shared build
+        run: /usr/bin/time -v tar --zstd -xf "$RUNNER_TEMP/rust-${{ matrix.suite }}.tar.zst"
+      - name: Run Rust partition
+        if: matrix.shard != 0
+        run: |
+          LOOPFLOW_TEST_LF="$PWD/target/debug/lf" /usr/bin/time -v cargo --config "target.\"cfg(all())\".runner = [\"uv\", \"run\", \"--no-sync\", \"python\", \"$PWD/scripts/test_network.py\"]" nextest run \
+            --profile ${{ github.event_name == 'pull_request' && 'pr' || 'default' }} \
+            --binaries-metadata target/nextest/binaries-metadata.json \
+            --cargo-metadata target/nextest/cargo-metadata.json \
+            -E 'not test(native_runner_is_quiet_until_its_turn_ends)' \
+            --partition hash:${{ matrix.shard }}/${{ matrix.partitions }} --test-threads 6 --no-tests fail --no-fail-fast
+      - name: Prove quietness and checkout refresh concurrently
+        if: matrix.shard == 0
+        run: |
+          test -x "$PWD/target/debug/lf"
+          export LOOPFLOW_TEST_LF="$PWD/target/debug/lf"
+          /usr/bin/time -v uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/test_checkout_refresh.py > "$RUNNER_TEMP/checkout-refresh.log" 2>&1 &
+          checkout_pid=$!
+          status=0
+          /usr/bin/time -v cargo --config "target.\"cfg(all())\".runner = [\"uv\", \"run\", \"--no-sync\", \"python\", \"$PWD/scripts/test_network.py\"]" nextest run \
+            --profile ${{ github.event_name == 'pull_request' && 'pr' || 'default' }} \
+            --binaries-metadata target/nextest/binaries-metadata.json \
+            --cargo-metadata target/nextest/cargo-metadata.json \
+            -E 'test(native_runner_is_quiet_until_its_turn_ends)' --test-threads 4 --no-tests fail --no-fail-fast || status=$?
+          wait "$checkout_pid" || status=$?
+          cat "$RUNNER_TEMP/checkout-refresh.log"
+          exit "$status"
+
+  task-installation:
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Claims name their person by Git user.email; repository-local test identities win.
+      - name: Give tests a fallback Git identity
+        run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
+      - uses: astral-sh/setup-uv@v7
+      - name: Acquire and fingerprint the installation image
+        id: image
+        run: |
+          uv run python -c 'from scripts.test_task_installation import _prepare_image; _prepare_image("docker.io/library/rust:trixie")'
+          docker image inspect --format 'id={{.Id}}' docker.io/library/rust:trixie >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        id: installation-cache
+        with:
+          path: ${{ runner.temp }}/installation-cargo
+          key: installation-${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.id }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'scripts/test_task_installation.py') }}
+      - name: Prove managed Tasks in a disposable installation
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.installation-cache.outputs.cache-hit != 'true'
+        run: uv run python scripts/test_task_installation.py --cache-dir "$RUNNER_TEMP/installation-cargo"
+      - name: Prove populated released repository upgrade
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.installation-cache.outputs.cache-hit != 'true'
+        run: uv run python scripts/test_task_installation.py --cache-dir "$RUNNER_TEMP/installation-cargo" --repository-upgrade
+      - name: Return Cargo cache ownership to the runner
+        if: always() && steps.installation-cache.outcome == 'success'
+        run: |
+          if [ -d "$RUNNER_TEMP/installation-cargo" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/installation-cargo"
+          fi
 
   # Needs the full history: the check compares every migration against the last
   # release tag, which is how an edited shipped migration is caught before publish.
   migration-check:
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -89,14 +305,19 @@ jobs:
         run: uv run python scripts/check_migrations.py
 
   python-test:
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
-      - name: Run Python tests
-        run: uv run pytest python/tests/
+      - run: uv sync
+      - name: Run Python tests without external networking
+        run: uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/
 
   website-test:
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -106,135 +327,302 @@ jobs:
         working-directory: website
 
   e2e-smoke:
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Claims name their person by Git user.email; repository-local test identities win.
+      - name: Give tests a fallback Git identity
+        run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v7
-      - name: Run E2E smoke test
-        run: tests/e2e/test_smoke.sh
+      - name: Materialize draft migrations for tests
+        run: |
+          VERSION=$(uv run python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          uv run python scripts/canonicalize_migrations.py "$VERSION" --materialize-for-tests
+      - name: Fingerprint workspace build profiles
+        id: rust-profiles
+        run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@v2
+        id: rust-cache
+        with:
+          key: ${{ steps.rust-profiles.outputs.key }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@nextest
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+      - name: Run planning reconnect proofs and E2E smoke test
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+        run: |
+          LOOPFLOW_TEST_LF="$PWD/target/debug/lf" /usr/bin/time -v cargo --config "target.\"cfg(all())\".runner = [\"uv\", \"run\", \"--no-sync\", \"python\", \"$PWD/scripts/test_network.py\"]" nextest run \
+            -p loopflow --test planning_reconnect_tests --test-threads 2 --no-tests fail --no-fail-fast
+          /usr/bin/time -v uv run --no-sync python scripts/test_network.py tests/e2e/test_smoke.sh
 
   swift-test:
+    needs: [merge-proof, scratch-clear, macos-inputs]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.macos-inputs.outputs.macos != 'false' }}
     runs-on: macos-15
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # Claims name their person by Git user.email; repository-local test identities win.
+      - name: Give tests a fallback Git identity
+        run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
       - uses: astral-sh/setup-uv@v7
       - uses: dtolnay/rust-toolchain@stable
+      - name: Fingerprint workspace build profiles
+        id: rust-profiles
+        run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
+        id: rust-cache
         with:
-          key: swift-cli
-      - name: Build CLI for Swift transport tests
-        run: cargo build -p loopflow --bin lf
-      - name: Cache SwiftPM build
-        uses: actions/cache@v6
+          key: swift-cli-${{ steps.rust-profiles.outputs.key }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
+      - name: Fingerprint Swift build inputs
+        id: swift-inputs
+        run: uv run python scripts/swift_cache.py key >> "$GITHUB_OUTPUT"
+      - name: Restore SwiftPM build
+        id: swift-cache
+        uses: actions/cache/restore@v6
         with:
           path: |
             swift/.build
             ~/Library/Caches/org.swift.swiftpm
-          key: swiftpm-${{ runner.os }}-${{ hashFiles('swift/Package.resolved') }}
-          restore-keys: |
-            swiftpm-${{ runner.os }}-
-      - name: Run Swift tests
-        # -gnone skips debug-info generation; `swift test` here is ~95% compile,
-        # and CI never symbolicates. Failure locations come from #file/#line
-        # macros, not debug info, so they're preserved.
-        # Native proofs share AppKit's main actor; concurrent suites starve
-        # async observations and invalidate their timing budgets.
-        run: swift test --package-path swift --no-parallel -Xswiftc -gnone
-      - name: Check Swift multiplatform boundaries
-        run: uv run python scripts/check_swift_multiplatform_boundaries.py
-      - name: Prove the control room renders its four states distinctly
-        # Unlike the hosted XCUITest (which needs Automation permission and so
-        # lives behind the `--ui-host` gate), this launches the built app
-        # directly and renders each state's window through SnapshotService
-        # (cacheDisplay, no Screen Recording or Automation permission needed),
-        # then asserts the four states at two widths are pairwise distinct. It
-        # is the CI-runnable half of the control-room state proof — fixture
-        # lookup and state-forwarding regressions fail this step.
+          key: ${{ steps.swift-inputs.outputs.key }}
+          restore-keys: ${{ steps.swift-inputs.outputs.restore-prefix }}
+      - name: Restore unchanged Swift source timestamps
+        run: uv run python scripts/swift_cache.py restore
+      - name: Build CLI for Swift transport tests
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
+        run: /usr/bin/time -l cargo build -p loopflow --bin lf
+      - name: Test checkout observation's read-only sandbox
+        if: needs.merge-proof.outputs.reuse != 'true'
+        run: uv run pytest python/tests/test_desktop_performance.py::test_checkout_observation_preserves_read_boundary_and_detects_changes
+      - name: Build Desktop and its tests
+        # Reused trees build only to warm the cache; nothing below runs for them.
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
+        # Failure locations come from #file/#line, so debug info is unnecessary.
+        run: /usr/bin/time -l swift build --build-tests --package-path swift -Xswiftc -gnone
+        timeout-minutes: 30
+      - name: Run headless model and view tests
+        if: needs.merge-proof.outputs.reuse != 'true'
+        shell: bash
+        # Display-session diagnostics are opt-in; production view inspection
+        # and control actions need no app launch. The build above is reused.
         run: |
-          swift build --package-path swift --product LoopflowMac
-          scripts/prove_wave_surface_states.sh
-        timeout-minutes: 15
+          mkdir -p "$RUNNER_TEMP/swift-tests"
+          swift --version > "$RUNNER_TEMP/swift-tests/toolchain.txt"
+          /usr/bin/time -l scripts/test_desktop.sh -Xswiftc -gnone \
+            --event-stream-output-path "$RUNNER_TEMP/swift-tests/events.jsonl" \
+            --event-stream-version 0 \
+            2>&1 | tee "$RUNNER_TEMP/swift-tests/output.log"
+        # A pull request that makes the suite slower fails here, on its own PR,
+        # naming its slow tests below. The queue and main keep a hang guard so
+        # runner variance never ejects ready work; there, test_desktop.sh ends
+        # the run and names the test when one outlives its own limit. The suite
+        # took 161 s on 2026-10-22; raise this only together with a measured reason.
+        timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 20 }}
+      - name: Name unfinished and slowest Swift tests
+        if: failure()
+        run: python3 scripts/swift_test_report.py "$RUNNER_TEMP/swift-tests/events.jsonl" >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve Swift failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: swift-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/swift-tests
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Check Swift multiplatform boundaries
+        if: needs.merge-proof.outputs.reuse != 'true'
+        run: uv run python scripts/check_swift_multiplatform_boundaries.py
+      - name: Record Swift source timestamps
+        if: github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
+        run: uv run python scripts/swift_cache.py save
+      - name: Save SwiftPM build
+        if: github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            swift/.build
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ steps.swift-inputs.outputs.key }}
 
-  loopflow-ui-test:
-    runs-on: macos-15
+  macos-process-test:
+    needs: [merge-proof, scratch-clear, macos-inputs]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.macos-inputs.outputs.macos != 'false' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v7
+      # Claims name their person by Git user.email; repository-local test identities win.
+      - name: Give tests a fallback Git identity
+        run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
       - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - name: Fingerprint workspace build profiles
+        id: rust-profiles
+        run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
+        id: rust-cache
         with:
-          key: loopflow-ui-test
+          key: macos-process-${{ matrix.os }}-${{ steps.rust-profiles.outputs.key }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
+      - name: Build the macOS process tests
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+        run: |
+          /usr/bin/time -l cargo test -p loopflow --lib app_process_tests --no-run
+          /usr/bin/time -l cargo test -p loopflow --test integration data_clones:: --no-run
+      - name: Test macOS installation process discovery
+        if: needs.merge-proof.outputs.reuse != 'true'
+        run: uv run python scripts/test_network.py cargo test --offline -p loopflow --lib app_process_tests
+      - name: Test isolated data clones and native process identity
+        if: needs.merge-proof.outputs.reuse != 'true'
+        run: |
+          # These fixtures install their own inherited sandbox; the outer runner
+          # permits an unsandboxed system ps and cannot be nested with this policy.
+          if [ "${{ matrix.os }}" = macos-26 ]; then
+            cargo test --offline -p loopflow --test integration data_clones:: < /dev/null
+          else
+            cargo test --offline -p loopflow --test integration data_clones::clone_creation_refuses_an_incompatible_parent_sandbox_before_copying_source < /dev/null
+          fi
+          uv run python scripts/test_network.py cargo test --offline -p loopflow --lib journal::os_process::
+
+  loopflow-ui-test:
+    needs: [merge-proof, scratch-clear, macos-inputs]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.macos-inputs.outputs.macos != 'false' }}
+    runs-on: macos-15
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v7
+      # Claims name their person by Git user.email; repository-local test identities win.
+      - name: Give tests a fallback Git identity
+        run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - name: Fingerprint workspace build profiles
+        id: rust-profiles
+        run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@v2
+        id: rust-cache
+        with:
+          key: loopflow-ui-test-${{ steps.rust-profiles.outputs.key }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
           workspaces: . -> target/dev-app-control
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Fingerprint Xcode build inputs
+        id: xcode-inputs
+        run: uv run python scripts/swift_cache.py key --build-system xcode >> "$GITHUB_OUTPUT"
+      - name: Restore Xcode build
+        id: xcode-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: swift/.build/xcode-derived-data
+          # Only identical source and toolchain inputs may reuse signed build
+          # state. In particular, changed entitlements need fresh DerivedData.
+          key: ${{ steps.xcode-inputs.outputs.key }}
+      - name: Restore unchanged Xcode source timestamps
+        run: uv run python scripts/swift_cache.py restore --build-system xcode
       - name: Generate Xcode project
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.xcode-cache.outputs.cache-hit != 'true'
         run: xcodegen generate
         working-directory: swift
       - name: Build Loopflow for testing (compile check)
-        # The hosted test *run* is redundant: swift-test runs these same suites
-        # un-hosted. This job's only unique signal is that the Loopflow app
-        # target compiles. build-for-testing gives that without launching the
-        # app, so there is no test-host run loop to hang on — deterministically
-        # no hang, unlike relying on the app to terminate itself.
-        # The real hosted UI run is the separately named required gate
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.xcode-cache.outputs.cache-hit != 'true'
+        # Compile the app and signed test runners with the terminal fallback;
+        # SwiftPM exercises the suites with GhosttyKit. build-for-testing keeps
+        # that separate configuration's compile proof without launching a host.
+        # The real hosted UI run is an optional display diagnostic:
         # `scripts/test.py --ui-host`; see release/UI_HOST_GATE.md.
-        run: |
-          xcodebuild build-for-testing \
-            -project LoopflowSwift.xcodeproj \
-            -scheme LoopflowMac \
-            -destination platform=macOS \
-            -derivedDataPath DerivedData \
-            -disableAutomaticPackageResolution \
-            CODE_SIGNING_ALLOWED=YES \
-            CODE_SIGNING_REQUIRED=YES \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY=- \
-            DEVELOPMENT_TEAM=
+        env:
+          XCODE_CACHE_HIT: ${{ steps.xcode-cache.outputs.cache-hit }}
+        run: uv run python scripts/build_xcode_ci.py
         timeout-minutes: 12
-        working-directory: swift
+      - name: Record Xcode source timestamps
+        if: github.ref == 'refs/heads/main' && steps.xcode-cache.outputs.cache-hit != 'true'
+        run: uv run python scripts/swift_cache.py save --build-system xcode
+      - name: Save Xcode build
+        if: github.ref == 'refs/heads/main' && steps.xcode-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: swift/.build/xcode-derived-data
+          key: ${{ steps.xcode-inputs.outputs.key }}
 
   tests-result:
-    if: always()
+    # A skipped checkpoint is not proof. Only PR checkpoints may skip the
+    # aggregate; a failed classifier must still produce a failing required check.
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.scratch-clear.result != 'success' || needs.scratch-clear.outputs.candidate != 'false') }}
     runs-on: ubuntu-latest
     needs:
+      - merge-proof
+      - macos-inputs
       - architecture-check
       - scratch-clear
       - rust-lint
+      - rust-build
       - rust-test
       - migration-check
       - python-test
       - website-test
       - e2e-smoke
+      - task-installation
       - swift-test
+      - macos-process-test
       - loopflow-ui-test
     steps:
       - name: Aggregate test results
         env:
+          REUSED_PROOF: ${{ needs.merge-proof.outputs.proof_url }}
+          MACOS_INPUTS: ${{ needs.macos-inputs.outputs.macos }}
           ARCHITECTURE_CHECK: ${{ needs.architecture-check.result }}
           SCRATCH_CLEAR: ${{ needs.scratch-clear.result }}
           RUST_LINT: ${{ needs.rust-lint.result }}
+          RUST_BUILD: ${{ needs.rust-build.result }}
           RUST_TEST: ${{ needs.rust-test.result }}
           MIGRATION_CHECK: ${{ needs.migration-check.result }}
           PYTHON_TEST: ${{ needs.python-test.result }}
           WEBSITE_TEST: ${{ needs.website-test.result }}
           E2E_SMOKE: ${{ needs.e2e-smoke.result }}
+          TASK_INSTALLATION: ${{ needs.task-installation.result }}
           SWIFT_TEST: ${{ needs.swift-test.result }}
+          MACOS_PROCESS_TEST: ${{ needs.macos-process-test.result }}
           LOOPFLOW_UI_TEST: ${{ needs.loopflow-ui-test.result }}
         run: |
           failures=0
+          if [ -n "$REUSED_PROOF" ]; then
+            echo "Reused exact merge-group proof: $REUSED_PROOF"
+          fi
 
           check_result() {
             local name="$1"
             local result="$2"
+            local unaffected="${3:-}"
             case "$result" in
               success)
                 echo "PASS  $name"
                 ;;
               skipped)
-                echo "SKIP  $name"
+                if [ -n "$unaffected" ] && [ "$MACOS_INPUTS" = "false" ]; then
+                  echo "SKIP  $name (no macOS inputs changed)"
+                elif [ -n "$REUSED_PROOF" ]; then
+                  echo "PROVED  $name ($REUSED_PROOF)"
+                else
+                  echo "FAIL  $name (skipped without proof)"
+                  failures=1
+                fi
                 ;;
               *)
                 echo "FAIL  $name ($result)"
@@ -246,12 +634,15 @@ jobs:
           check_result "architecture-check" "$ARCHITECTURE_CHECK"
           check_result "scratch-clear" "$SCRATCH_CLEAR"
           check_result "rust-lint" "$RUST_LINT"
+          check_result "rust-build" "$RUST_BUILD"
           check_result "rust-test" "$RUST_TEST"
           check_result "migration-check" "$MIGRATION_CHECK"
           check_result "python-test" "$PYTHON_TEST"
           check_result "website-test" "$WEBSITE_TEST"
           check_result "e2e-smoke" "$E2E_SMOKE"
-          check_result "swift-test" "$SWIFT_TEST"
-          check_result "loopflow-ui-test" "$LOOPFLOW_UI_TEST"
+          check_result "task-installation" "$TASK_INSTALLATION"
+          check_result "swift-test" "$SWIFT_TEST" macos
+          check_result "macos-process-test" "$MACOS_PROCESS_TEST" macos
+          check_result "loopflow-ui-test" "$LOOPFLOW_UI_TEST" macos
 
           exit "$failures"

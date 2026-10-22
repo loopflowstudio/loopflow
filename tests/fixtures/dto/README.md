@@ -1,49 +1,113 @@
 # DTO wire fixtures
 
 Each fixture pins one live wire shape. Swift fixtures cover the per-Wave
-listener and `lf status` contracts consumed by the Mac app. Every absent field
+listener and `lf wave status` contracts consumed by the Mac app. Every absent field
 is a parse error or an explicit null.
 
-Carve-out: `resident_deltas.json` and `resident_door.json` are the wave
-listener↔resident wire (`POST /resident/deltas`, `POST /resident/attach`,
-`GET /resident/context` — see `rust/loopflow/src/wave/wire.rs`). Both ends are
-the same `lf` binary, so only the Rust fixture tests pin them. Swift does not
-consume this wire.
+`task_status.json` pins the planning/execution envelope for available, unavailable,
+invalid, removed and absent planning. Rust round-trips it. This CLI-only contract
+has no Swift mirror: the Mac app reads a Task's work from the workspace stream's
+`task` part (`work_frame.json`). These cases have no execution.
 
-`task_execution.json` pins the execution evidence in `lf task status --json`.
+`task_execution.json` pins the execution boundary inside the status envelope's
+optional Task snapshot (`execution.execution`).
 This CLI-only contract is tested in Rust. The Mac app receives its derived
 condition, reason, and actions through the existing Wave Task row.
 
-`session.json` pins `lf session open --json`: one unresolved Task FlowStep
-session, its explicit readiness state, and its exact Home-local attach route.
+`session.json` pins `lf connect --prepare --json`: one unresolved Task GraphStep
+session, its explicit readiness state, and its exact Machine-local attach route.
 
-`session_memberships.json` pins each Session's required `flow_membership`:
-the current Flow step, an earlier step, an independent conversation, a Run that
-predates recorded membership (unknown, never independent), and a remote Flow
-Session whose canonical name lives on its Home (`title_source: unavailable`).
+`session_memberships.json` pins each Session's required `graph_membership`:
+the current Graph step, an earlier step, an independent conversation, a Session that
+predates recorded membership (unknown, never independent), and a remote Graph
+Session whose canonical name lives on its Machine (`title_source: unavailable`).
 
 `task_condition_states.json` pins the Rust-owned Task condition fold for clean
 backlog, completion, external and review waits, local recovery blockers, and
 unavailable evidence. Rust and Swift decode the same Task rows; consumers never
 reconstruct the condition from process flags.
 
-`activity_snapshot.json` pins `lf ps --json`: exact live Exec and provider
+`activity_snapshot.json` pins `lf ps --json`: exact live Process and provider
 processes carry OS-derived state, while a provider without exact ownership
-stays separate from the call tree. Rust and Swift both round-trip it; The
-Podium derives no process state of its own.
+stays separate from the call tree. Desktop receives the same wire type through
+the Work observation stream; it does not poll `lf ps`.
 
-`wave_detail.json` embeds the `RunSnapshot` row shape shared by both bundle
-reads: `lf runs --json` and `lf usage --json`. Provider cumulative counters
-remain optional; stream finality and evidence gaps are required, explicit
-evidence.
+`session_history_summary.json` and `wave_detail.json` pin the `SessionHistory`
+shape used by `lf usage --json` and Wave detail. Captured event sequences
+and native thread/turn references retain distinct outcomes. Optional counters,
+missing capture/start membership, stream finality and evidence gaps stay explicit.
+The optional `task_pr_id` retains the PR captured by the managed Graph;
+`first_provider_attempt_at` differs from capture/import observation time.
 
-`work_activity_snapshot.json` pins `lf activity --json`: durable Work creation,
-Run, PR, and Steer facts retain their existing Work, Run, author, and GitHub
-identities. Rust and Swift both round-trip it; The Podium filters this one
-history instead of maintaining a second activity store.
+`work_activity_snapshot.json` pins `lf history --json`: durable Work creation,
+Session capture/provider history, PR and Steer facts retain their original
+identities. Rust and Swift round-trip this shared history.
 
-`pm_show.json` pins the repository-owned Linear hierarchy read by `lf pm show`
-and the app: a Project carries exactly one Wave Initiative and the repository
-Team; its Task carries the stable Project and Team ids used for ownership.
-The shared `LOO-*` identifier and canonical Project name remain presentation;
-the provider's Wave-qualified title is normalized before this wire boundary.
+`task_execution_stalled.json` retains stalled Session evidence. `graph_process_progress.json` retains ordinary execution graphs and loop coordinates; run legality lives on the Task projection.
+
+`task_files.json` pins `lf diff --files`, `lf diff`, `lf file` and `lf save` JSON:
+exact comparison bases,
+rename paths, scratch listing, and lossless content with a byte revision and
+explicit file state, Save outcome, recovery access and late-change disclosure.
+Rust round-trips the same fixture Swift decodes.
+
+`task_checkout.json` pins the prepared Task receipt, including owning Machine and
+resolved checkout. Rust round-trips the full Task snapshot; Swift reads the
+workspace identity used before the next roadmap refresh. Compiled graph fixtures
+include the derived interaction stages and route references alongside steps.
+
+`ask_session.json` keeps the caller capture separate from the Ask conversation.
+A waiting Ask is available before its summary permits Complete.
+
+`context_report.json` pins `lf usage --context --json`: each recorded step's
+submitted input by source, flagged against budgets, with Task totals. One step
+is LOO-298-shaped (384 steers over the goal budget); the other has no retained
+capture, so every source is `null` rather than zero. Rust round-trips it and
+Swift decodes it for the Task's Session history.
+
+`work_links.json` pins `lf open --link --json`: a readable label, the public Work
+address, its executable fallback, the resolved target (including a remote execution
+owner), the caller's conversation relation and the proposed route. Rust and Swift
+round-trip it; Desktop resolves incoming addresses through it. A link is not an
+opening receipt.
+
+`desktop_openings.json` distinguishes request acceptance, usable endpoints and failures;
+`desktop_inspection.json` requires top-level `openings` for failures before window
+registration. Optional window `view` contains the same shared selection plan,
+including hidden/suppressed occurrences. Window receipts own Task/Session outcomes. Fixture shape is not native
+readiness proof.
+
+`task_run_explanations.json` covers edge take-up, no-Graph completion, ad-hoc Graph
+selection and unavailable execution evidence. Explanation never claims ownership.
+
+`session_connect_explanations.json` preserves connection intent, preparation versus
+takeover, shared legal actions and unavailable evidence without client acquisition.
+
+`repository_identity.json` carries the selected plan and retained Machine-local locators.
+
+`task_move_explanations.json` preserves exact prior Workflow positions, move/restart intent and unperformed completion checks.
+
+`task_planning_explanations.json` preserves creation, edit revision/fields, comment
+append versus provider refresh, effects and explicit refused input.
+
+`task_checkout_explanations.json` retains proposed, reused and restored checkout intent separately from admission and unavailable evidence.
+
+`task_locations.json` covers request-bound Machine observations, retained paths,
+pathless execution, local absence and unavailable peers. Negative readings grant
+no ownership; execution locations never enter planning exchange.
+
+`task_files_frames.json` preserves request/Task/Machine/checkout identity and distinguishes filesystem invalidation from heartbeat.
+
+`dashboard.json` pins an independently identified Dashboard and its expression
+and arrangement; Task panes and drafts remain Work-owned. Rust and Swift round-trip
+it without manufacturing defaults.
+
+`view_plan.json` pins the shared headless selection/arrangement plan, including
+repeated Work, duplicate suppression and a backlog Task without a primary Session.
+Rust round-trips it; Swift decodes the same plan directly and in `work_frame.json`.
+
+`pane_layout.json` covers portable pane content, focus versus explicit zoom, hidden
+members, two Shell tabs, two Files tabs, selected-tab identities and file-draft
+base recovery. Shell identity is independent of its tool pane; saved intent never
+asserts a live native process. `view_plan.json` includes query discovery
+metadata, independent Dashboard identity and portable tile-face intent.

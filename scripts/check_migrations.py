@@ -13,7 +13,7 @@ a new forward migration.
 
     uv run python scripts/check_migrations.py
 
-Stdlib only, so `lf release` can run it directly without a Python environment.
+Stdlib only, so `lf repo release` can run it directly without a Python environment.
 """
 
 from __future__ import annotations
@@ -24,23 +24,23 @@ import subprocess
 import sys
 from pathlib import Path
 
+from canonicalize_migrations import _order, _read_drafts, breaking_drafts
+
 REPO_ROOT = Path(__file__).parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
 DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
-MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migrations.rs"
+MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migration_catalog.rs"
 MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(?:(\d+)\.)?(\d{3})_([a-z0-9_]+)\.sql$")
-# A draft file is `<name>__<id>.sql`; the readable name never contains `__`, and
-# the id is an immutable 128-bit token (32 hex chars).
-DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]{32})\.sql$")
+# A draft file is `<name>.sql`; the filename is the draft's identity.
+DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)\.sql$")
 # `[ \t]` rather than `\s`: `\s` matches newlines, so an empty `-- depends_on:`
 # value would swallow the newline and capture the next SQL line.
-DRAFT_HEADER_NAME = re.compile(r"^--[ \t]*name:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
 DRAFT_HEADER_DEPENDS = re.compile(r"^--[ \t]*depends_on:[ \t]*(.*)$", re.MULTILINE)
 DRAFT_MARKER = re.compile(r"^--[ \t]*draft:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
 VERSION_LINE = re.compile(r'^version = "([^"]+)"', re.MULTILINE)
 MigrationKey = tuple[int, int, int, int]
 
-# One `Migration { .. }` entry of the MIGRATIONS registry in migrations.rs.
+# One `Migration { .. }` entry of the MIGRATIONS registry in migration_catalog.rs.
 REGISTRY_ENTRY = re.compile(
     r"""Migration\s*\{\s*
         id:\s*MigrationId\s*\{\s*
@@ -51,6 +51,7 @@ REGISTRY_ENTRY = re.compile(
         \},\s*
         name:\s*"(?P<name>[a-z0-9_]+)",\s*
         sql:\s*include_str!\("migrations/(?P<file>[^"]+)"\),?\s*
+        (?:reader_floor:\s*(?:None|Some\("[^"]+"\)),?\s*)?
     \}""",
     re.VERBOSE,
 )
@@ -316,9 +317,9 @@ def _draft_cycle(drafts: dict[str, list[str]]) -> list[str] | None:
 
 
 def _check_drafts(released_names: set[str]) -> None:
-    """Draft migrations carry a stable name and no ordinal, so parallel branches
-    never contend for one. The release cut is what assigns canonical ids; this
-    only proves the drafts are well-formed and orderable before then."""
+    """Each Task keeps one draft, named by its file and carrying no ordinal. The
+    release cut assigns canonical ids; this only proves the drafts are
+    well-formed and orderable before then."""
     if not DRAFTS_DIR.is_dir():
         return
 
@@ -329,22 +330,14 @@ def _check_drafts(released_names: set[str]) -> None:
         match = DRAFT_FILE.match(path.name)
         if not match:
             _fail(
-                f"draft {path.name} is not `<snake_case_name>__<id>.sql` "
-                "— run scripts/new_migration.py"
+                f"draft {path.name} is not `<snake_case_name>.sql` — run scripts/new_migration.py"
             )
         name = match.group(1)
         text = path.read_text()
         if DRAFT_MARKER.search(text):
             _fail(f"draft {path.name} uses reserved `-- draft:` release provenance")
-        header = DRAFT_HEADER_NAME.search(text)
-        if not header:
-            _fail(f"draft {path.name} has no `-- name:` header")
-        if header.group(1) != name:
-            _fail(f"draft {path.name} header names {header.group(1)!r}, not {name!r}")
         if name in released_names:
             _fail(f"draft {name} collides with a released migration of the same name")
-        if name in drafts:
-            _fail(f"two drafts share the readable name {name!r} — rename one before releasing")
         depends = DRAFT_HEADER_DEPENDS.search(text)
         dependencies: list[str] = []
         if depends:
@@ -376,6 +369,20 @@ def _check_drafts(released_names: set[str]) -> None:
 def _fail(message: str) -> None:
     print(f"migration check failed: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+def _check_runtime_sql() -> None:
+    """An older lf writes a store a newer release extended additively, so runtime
+    SQL names its columns: no positional INSERT, no `SELECT *`."""
+    positional = re.compile(r"\bINSERT(?:\s+OR\s+\w+)?\s+INTO\s+\w+\s+VALUES\b", re.IGNORECASE)
+    wildcard = re.compile(r"\bSELECT\s+(?:\w+\.)?\*", re.IGNORECASE)
+    for path in sorted((REPO_ROOT / "rust/loopflow/src").rglob("*.rs")):
+        if "test" in path.stem:
+            continue
+        # Unit-test modules trail production code; their fixtures seed historical schemas.
+        source = path.read_text().split("#[cfg(test)]\nmod ", 1)[0]
+        if positional.search(source) or wildcard.search(source):
+            _fail(f"{path.relative_to(REPO_ROOT)} uses positional INSERT or SELECT *")
 
 
 def main() -> None:
@@ -412,9 +419,9 @@ def main() -> None:
                     f"{path.name} is namespaced ahead of the package version "
                     f"{active[0]}.{active[1]}.{active[2]}"
                 )
-            if key[3] != 1 or name != "release":
+            if key[3] < 1 or name != "release":
                 _fail(
-                    f"{path.name} is not the single `<version>.001_release.sql` "
+                    f"{path.name} is not a `<version>.<ordinal>_release.sql` "
                     "canonical batch for its package release"
                 )
         ids[key] = path.name
@@ -442,6 +449,11 @@ def main() -> None:
                 _fail(f"released draft identity {marker!r} appears more than once")
             released_names.add(marker)
     _check_drafts(released_names)
+    _check_runtime_sql()
+    drafts = _order(_read_drafts())
+    if drafts:
+        breaking = breaking_drafts(drafts)
+        print(f"reader floor raised by: {', '.join(breaking) if breaking else '(none)'}")
 
     # Deterministic order across namespaces is the numeric tuple, never the string:
     # `0.10.001` sorts before `0.9.001` lexically.

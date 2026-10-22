@@ -21,10 +21,7 @@
   # Never let an agent's ambient Run context or development ledger influence
   # the subprocesses this smoke test launches.
   export LF_HOME="$lf_home"
-  unset LF_DB_PATH LF_CONTROL_HOME LF_CONTROL_DB_PATH
-  unset LF_RUN_CONTEXT LF_RUN_ID LF_WAVE_ID
-  unset LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN
-  unset LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN
+  unset LF_RUN_ID LF_WAVE_ID
 
   git init --bare "$origin_dir" >/dev/null
   git clone "$origin_dir" "$repo_dir" >/dev/null
@@ -39,7 +36,7 @@
   mkdir -p .lf/skills
   echo "# Test" > .lf/skills/debug.md
 
-  cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf-prompt -- \
+  "$ROOT_DIR/target/debug/lf-prompt" \
     --repo "$repo_dir" \
     --skill debug \
     --surface headless \
@@ -47,7 +44,7 @@
     --diff false \
     | grep -q "Test"
 
-  cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf -- wt create smoke-test >/dev/null
+  "$ROOT_DIR/target/debug/lf" wt create smoke-test >/dev/null
 
   repo_name=$(basename "$repo_dir")
   wt_path="$(dirname "$repo_dir")/${repo_name}.smoke-test"
@@ -61,7 +58,7 @@
   echo "change" > file.txt
   git add file.txt
 
-  cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf -- \
+  "$ROOT_DIR/target/debug/lf" \
     commit -m "smoke test" >/dev/null
 
   git log -1 --pretty=%B | grep -q "smoke test"

@@ -2,6 +2,7 @@
 // development registry environment survives launch, and the not-running copy.
 
 #if os(macOS)
+import Darwin
 import Foundation
 import Testing
 @testable import Loopflow
@@ -9,109 +10,115 @@ import Testing
 
 @Suite("Local wave launcher")
 struct LocalWaveAgentLauncherTests {
+    @Test("clone terminals retain the isolated helper and provider selection")
+    func cloneEnvironmentStaysIsolated() {
+        let selected = [
+            "LF_CLONE_ROOT": "/tmp/clone", "LF_HOME": "/tmp/clone",
+            "LF_BIN": "/tmp/clone/bin/lf", "HOME": "/tmp/clone/home",
+            "CODEX_HOME": "/tmp/clone/home/.codex",
+            "CLAUDE_CONFIG_DIR": "/tmp/clone/home/.claude",
+            "PATH": "/tmp/clone/bin:/usr/bin:/bin",
+        ]
+        let environment = GUIProcessEnvironment.enriched(selected)
+        for (key, value) in selected { #expect(environment[key] == value) }
+    }
+
     // MARK: - Command construction
 
-    @Test("development launcher preserves the selected Home registry")
+    @Test("development launcher preserves the selected Machine registry")
     func launchEnvironmentPreservesRegistry() {
         let environment = GUIProcessEnvironment.enriched([
             "PATH": "/usr/bin:/bin",
             "LF_HOME": "/tmp/loopflow-development-home",
-            "LF_DB_PATH": "/tmp/loopflow-development-home/loopflow.db",
             "LF_WAVE_ID": "launching-wave",
+            "LF_GRAPH_ID": "launching-step",
             "LF_RUN_ID": "launching-run",
-            "LF_WORK_ADVANCE_CLAIM": "launching-task-claim",
         ])
 
         #expect(environment["LF_HOME"] == "/tmp/loopflow-development-home")
-        #expect(environment["LF_DB_PATH"] == "/tmp/loopflow-development-home/loopflow.db")
         #expect(environment["LF_WAVE_ID"] == nil)
+        #expect(environment["LF_GRAPH_ID"] == nil)
         #expect(environment["LF_RUN_ID"] == nil)
-        #expect(environment["LF_WORK_ADVANCE_CLAIM"] == nil)
     }
 
-    @Test("stop command uses the single-wave lifecycle verb")
-    func stopCommandShape() {
-        #expect(LocalWaveAgentLauncher.waveStopCommand(
-            lfPath: "/Applications/Loopflow.app/Contents/MacOS/lf",
-            waveName: "product"
-        ) == [
-            "/Applications/Loopflow.app/Contents/MacOS/lf", "stop", "product",
-        ])
+    @Test("the launcher's terminal and agent output policy are dropped; account authority stays")
+    func launchEnvironmentDropsLauncherTerminal() throws {
+        let kept = [
+            "PATH": "/usr/bin:/bin",
+            "HOME": "/Users/someone",
+            "LF_HOME": "/tmp/loopflow-development-home",
+            "LF_ACCOUNT": "work",
+            "CODEX_HOME": "/tmp/codex-home",
+            "CODEX_ACCESS_TOKEN": "codex-token",
+            "CODEX_API_KEY": "codex-key",
+            "CLAUDE_CODE_OAUTH_TOKEN": "claude-token",
+        ]
+        let leaked = [
+            "NO_COLOR": "1", "FORCE_COLOR": "0", "CLICOLOR": "0", "CLICOLOR_FORCE": "0",
+            "COLORTERM": "24bit", "TERM": "dumb", "TERM_PROGRAM": "WarpTerminal",
+            "TERM_PROGRAM_VERSION": "v0", "TMUX": "/tmp/tmux", "TMUX_PANE": "%1",
+            "CI": "1", "PAGER": "cat", "GIT_PAGER": "cat", "GH_PAGER": "cat",
+            "AI_AGENT": "codex", "CLAUDECODE": "1", "WARP_IS_LOCAL_SHELL_SESSION": "1",
+            "CLAUDE_CODE_ENTRYPOINT": "cli", "CODEX_CI": "1", "CODEX_THREAD_ID": "t",
+            "CMUX_WORKSPACE_ID": "launching-workspace", "CMUX_SURFACE_ID": "launching-surface",
+            "CMUX_SOCKET_PATH": "/tmp/cmux.sock", "HERDR_ENV": "1", "HERDR_SOCKET_PATH": "/tmp/herdr.sock",
+            "HERDR_PANE_ID": "w1:p1",
+        ]
+        let environment = GUIProcessEnvironment.enriched(kept.merging(leaked) { first, _ in first })
+
+        for (key, value) in kept where key != "PATH" { #expect(environment[key] == value) }
+        #expect(environment["PATH"]?.hasSuffix("/usr/bin:/bin") == true)
+        for key in leaked.keys { #expect(environment[key] == nil, "\(key) leaked") }
+        // `lf open` from a Desktop terminal opens in Desktop, not the launcher's host.
+        #expect(environment["LF_DESKTOP"] == "1")
     }
 
-    @Test("Task controls use the bounded worker commands")
-    func taskControlCommandShapes() {
-        let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
 
-        #expect(LocalWaveAgentLauncher.taskRunCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "task", "run", "W2-131",
-        ])
-        #expect(LocalWaveAgentLauncher.taskStartCommand(
-            lfPath: lf,
-            title: "Refine LOOPFLOW.md 5e41e69b",
-            wave: "context-lab",
-            directive: "Refine text for LOOPFLOW.md."
-        ) == [
-            lf, "task", "start", "--wave", "context-lab", "Refine LOOPFLOW.md 5e41e69b",
-            "--directive", "Refine text for LOOPFLOW.md.",
-            "--json",
-        ])
-        #expect(LocalWaveAgentLauncher.taskResumeCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "task", "resume", "W2-131",
-        ])
-        #expect(LocalWaveAgentLauncher.taskInterruptCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "task", "interrupt", "W2-131",
-        ])
-    }
-
-    @Test("PR review delegates to lf pr open rather than opening a URL itself")
-    func pullRequestReviewDelegatesToCLI() {
-        let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
-        let command = LocalWaveAgentLauncher.pullRequestReviewCommand(lfPath: lf)
-
-        // The one review-presentation action shells `lf pr open` — the single
-        // presentation boundary — and never constructs a github.com URL to open.
-        #expect(command == [lf, "pr", "open"])
-        #expect(!command.contains { $0.contains("github.com") })
-        #expect(!command.contains { $0.hasPrefix("http") })
-    }
-
-    @Test("Task start uses the exact CLI receipt as workspace identity")
-    func taskStartReceiptDecodes() throws {
-        let receipt = try LocalWaveAgentLauncher.taskStartReceipt("""
-        {
-          "issue_identifier": "W2-201",
-          "project": "auditability",
-          "wave": "product"
+    @Test("Prepared checkout receipts retain the owning Machine and require its evidence")
+    func checkoutIdentityFixture() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let json = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/task_checkout.json"), encoding: .utf8)
+        #expect(try LocalWaveAgentLauncher.taskCheckoutWorkspace(json) == fixtureWorkspace("/src/loopflow.workspace"))
+        #expect(throws: LocalLfError.self) {
+            try LocalWaveAgentLauncher.taskCheckoutWorkspace("{\"worktree\":\"/repo\"}")
         }
-        """)
-
-        #expect(receipt == TaskStartReceipt(
-            issueIdentifier: "W2-201",
-            project: "auditability",
-            wave: "product"
-        ))
     }
 
-    @Test("New session prepares Task Work without running its Flow and uses the returned checkout")
-    func taskPrepareUsesReceiptWorktree() throws {
-        #expect(LocalWaveAgentLauncher.taskPrepareCommand(lfPath: "/bin/lf", issue: "LOO-291")
-            == ["/bin/lf", "task", "prepare", "LOO-291", "--json"])
-        let worktree = try LocalWaveAgentLauncher.taskPrepareWorktree("""
-        {"id": "task_1", "issue": "LOO-291", "worktree": "/src/loopflow.main-view-task", "agent": "claude"}
+    @Test("New session prepares Task Work without running its Graph and uses the returned checkout")
+    func taskCheckoutUsesReceiptWorktree() throws {
+        #expect(LocalWaveAgentLauncher.taskCheckoutCommand(lfPath: "/bin/lf", issue: "LOO-291")
+            == ["/bin/lf", "task", "checkout", "LOO-291", "--json"])
+        let worktree = try LocalWaveAgentLauncher.taskCheckoutWorkspace("""
+        {"machine_id": "home_00000000000000000000000000000001", "id": "task_1", "issue": "LOO-291", "worktree": "/src/loopflow.main-view-task", "agent": "claude"}
         """)
-        #expect(worktree == "/src/loopflow.main-view-task")
-        #expect(throws: LocalLfError.self) { try LocalWaveAgentLauncher.taskPrepareWorktree("not json") }
+        #expect(worktree == fixtureWorkspace("/src/loopflow.main-view-task"))
+        #expect(throws: LocalLfError.self) { try LocalWaveAgentLauncher.taskCheckoutWorkspace("not json") }
     }
 
     // MARK: - Bundled binary boundary
+
+    @Test("a clone selects its own helper before bundled helpers")
+    func cloneSelectsPinnedHelper() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let bin = directory.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let helper = bin.appendingPathComponent("lf")
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: helper)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        let environment = ["LF_CLONE_ROOT": directory.path, "LF_HOME": directory.path, "LF_BIN": helper.path]
+        #expect(try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh"), environment: environment) == helper.path)
+        try FileManager.default.removeItem(at: helper)
+        #expect(throws: LocalLfError.self) {
+            try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh"), environment: environment)
+        }
+    }
 
     @Test("a missing bundled helper never falls through to PATH")
     func missingBundledHelperFails() {
         #expect {
             try LocalWaveAgentLauncher.controlLfPath(
-                bundled: nil,
-                developmentConfig: nil
+                bundled: nil
             )
         } throws: { error in
             guard error is LocalLfError else { return false }
@@ -120,53 +127,119 @@ struct LocalWaveAgentLauncherTests {
         }
     }
 
-    @Test("a development app uses its explicit machine lf gate")
-    func developmentAppUsesMachineGate() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let config = directory.appending(path: "LoopflowDevControl.json")
-        try Data(#"{"lf_path":"/bin/sh"}"#.utf8).write(to: config)
-
-        let path = try LocalWaveAgentLauncher.controlLfPath(
-            bundled: nil,
-            developmentConfig: config
-        )
-
-        #expect(path == "/bin/sh")
+    @Test("the app selects its bundled helper")
+    func appUsesBundledHelper() throws {
+        #expect(try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh")) == "/bin/sh")
     }
 
     #if !SWIFT_PACKAGE
-    @Test("the hosted app executes and decodes its bundled process activity")
-    func hostedBundleProcessActivityDecodes() async throws {
+    @Test("the hosted app executes its bundled lf and decodes the reply")
+    func hostedBundleExecutes() async throws {
         let helper = try LocalWaveAgentLauncher.controlLfPath()
         #expect(FileManager.default.isExecutableFile(atPath: helper))
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["ps", "--json"])
-            #expect(cwd == nil)
-            return try LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
+            try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
         }
 
-        let snapshot = try await query.processActivity()
-        #expect(snapshot.schemaVersion == 1)
-        #expect(snapshot.observedAt > 0)
+        #expect(try await !query.localMachineId().isEmpty)
     }
     #endif
 
-    // MARK: - Not-running copy
+    @Test("finite queries drain both full pipes while sending a large draft")
+    func queryDrainsWhileWriting() async throws {
+        let draft = String(repeating: "draft\n", count: 32768)
+        let result = try await LocalWaveAgentLauncher.run([
+            "/bin/sh", "-c",
+            "/usr/bin/head -c 131072 /dev/zero; /usr/bin/head -c 131072 /dev/zero >&2; /bin/cat"
+        ], input: draft)
+        #expect(result.status == 0)
+        #expect(result.stdout == String(repeating: "\0", count: 131072) + draft)
+        #expect(result.stderr == String(repeating: "\0", count: 131072))
+    }
 
-    @Test("start hint keeps the launch command intact as inline code")
-    func startHintFormatsCommandAsCode() {
-        let hint = waveStartHint(waveName: "goals")
+    @Test("canceling a request reaps only its CLI child")
+    func queryCancellationLeavesDescendant() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let request = Task {
+            try await LocalWaveAgentLauncher.run([
+                "/bin/sh", "-c",
+                "trap '' TERM; /bin/sleep 60 & echo $! > descendant; echo $$ > child; wait"
+            ], cwd: directory.path, input: String(repeating: "unread draft", count: 65536))
+        }
+        defer { request.cancel() }
+        let child = try await readPID(directory.appendingPathComponent("child"))
+        let descendant = try await readPID(directory.appendingPathComponent("descendant"))
+        defer { _ = Darwin.kill(descendant, SIGKILL) }
+        let started = ContinuousClock.now
+        request.cancel()
+        do {
+            _ = try await request.value
+            Issue.record("Canceled request returned success")
+        } catch is CancellationError {} // cancellation remains distinguishable from failure
+        #expect(started.duration(to: .now) < .seconds(5))
+        #expect(Darwin.kill(child, 0) == -1)
+        #expect(Darwin.kill(descendant, 0) == 0)
+    }
 
-        #expect(
-            String(hint.characters)
-                == "Start it here, or run lf start goals in a terminal — its conversation appears here live."
-        )
+    @Test("oversized CLI responses fail instead of retaining unbounded output",
+          arguments: [false, true])
+    func queryOutputLimit(stderr: Bool) async throws {
+        do {
+            _ = try await LocalWaveAgentLauncher.run([
+                "/bin/sh", "-c",
+                "exec /usr/bin/head -c 67108865 /dev/zero" + (stderr ? " >&2" : "")
+            ])
+            Issue.record("Oversized response returned success")
+        } catch {
+            #expect(error.localizedDescription.contains("CLI response exceeds 64 MiB"))
+        }
+    }
 
-        let codeRuns = hint.runs.filter { $0.inlinePresentationIntent == .code }
-        #expect(codeRuns.map { String(hint.characters[$0.range]) } == ["lf start goals"])
+    @Test("query completion does not await inherited pipes in surviving descendants")
+    func queryCompletesWithInheritedPipes() async throws {
+        let result = try await LocalWaveAgentLauncher.run([
+            "/bin/sh", "-c", "/bin/sleep 60 & echo $!; printf diagnostic >&2; exit 7"
+        ])
+        let descendant = try #require(Int32(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)))
+        defer { _ = Darwin.kill(descendant, SIGKILL) }
+        #expect(result.status == 7)
+        #expect(result.stderr == "diagnostic")
+        #expect(Darwin.kill(descendant, 0) == 0)
+    }
+
+    @Test("a stalled CLI request times out and reaps its child")
+    func queryDeadline() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let request = Task {
+            try await LocalWaveAgentLauncher.run([
+                "/bin/sh", "-c", "echo $$ > child; exec /bin/sleep 60"
+            ], cwd: directory.path)
+        }
+        let child = try await readPID(directory.appendingPathComponent("child"))
+        defer { request.cancel() }
+        do {
+            _ = try await request.value
+            Issue.record("Stalled request returned success")
+        } catch {
+            #expect(error.localizedDescription.contains("timed out after 30 seconds"))
+            #expect(error.localizedDescription.contains("result is unknown"))
+        }
+        #expect(Darwin.kill(child, 0) == -1)
+    }
+
+    private func readPID(_ url: URL) async throws -> Int32 {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while ContinuousClock.now < deadline {
+            if let text = try? String(contentsOf: url, encoding: .utf8),
+               let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)) { return pid }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw LocalLfError(errorDescription: "Query fixture did not start")
     }
 }
+
 #endif

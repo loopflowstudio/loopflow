@@ -13,7 +13,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/check_migrations.py"
 MIGRATIONS = "rust/loopflow/src/store/migrations"
-MIGRATIONS_RS = "rust/loopflow/src/store/migrations.rs"
+MIGRATIONS_RS = "rust/loopflow/src/store/migration_catalog.rs"
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -21,7 +21,7 @@ def _git(repo: Path, *args: str) -> None:
 
 
 def _registry(*entries: tuple) -> str:
-    """A MIGRATIONS registry in Rust, shaped as migrations.rs writes it."""
+    """A MIGRATIONS registry in Rust, shaped as migration_catalog.rs writes it."""
     rendered = []
     for entry in entries:
         if len(entry) == 4:
@@ -56,6 +56,9 @@ def repo(tmp_path: Path) -> Path:
     """A repo tagged v0.10.1 with one shipped migration, `0.10.001_initial.sql`."""
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts/check_migrations.py").write_bytes(SCRIPT.read_bytes())
+    (tmp_path / "scripts/canonicalize_migrations.py").write_bytes(
+        (ROOT / "scripts/canonicalize_migrations.py").read_bytes()
+    )
     (tmp_path / MIGRATIONS).mkdir(parents=True)
     (tmp_path / "Cargo.toml").write_text('[workspace.package]\nversion = "0.10.1"\n')
     (tmp_path / "pyproject.toml").write_text('[project]\nversion = "0.10.1"\n')
@@ -226,14 +229,14 @@ def test_a_new_legacy_three_part_migration_fails(repo: Path):
     assert "legacy three-part format" in result.stderr
 
 
-def test_a_release_cannot_publish_more_than_its_single_batch(repo: Path):
+def test_corrected_release_accepts_an_additional_batch(repo: Path):
+    (repo / MIGRATIONS / "0.10.1.001_release.sql").write_text("-- draft: first_cut\nSELECT 1;\n")
     (repo / MIGRATIONS / "0.10.1.002_release.sql").write_text("-- draft: add_note\nSELECT 1;\n")
-    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, 2, "release"))
+    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, 1, "release"), (0, 10, 1, 2, "release"))
 
     result = check(repo)
 
-    assert result.returncode == 1
-    assert "single `<version>.001_release.sql`" in result.stderr
+    assert result.returncode == 0, result.stderr
 
 
 def test_a_release_batch_requires_draft_provenance(repo: Path):
@@ -288,13 +291,8 @@ DRAFTS = MIGRATIONS + "/drafts"
 
 
 def _draft(repo: Path, name: str, depends_on: str = "", body: str = "SELECT 1;\n") -> None:
-    import hashlib
-
-    token = hashlib.sha256(name.encode()).hexdigest()[:32]
     (repo / DRAFTS).mkdir(parents=True, exist_ok=True)
-    (repo / DRAFTS / f"{name}__{token}.sql").write_text(
-        f"-- name: {name}\n-- id: {token}\n-- depends_on: {depends_on}\n{body}"
-    )
+    (repo / DRAFTS / f"{name}.sql").write_text(f"-- depends_on: {depends_on}\n{body}")
 
 
 def test_a_well_formed_draft_passes(repo: Path):
@@ -371,31 +369,26 @@ def test_a_draft_colliding_with_a_released_name_fails(repo: Path):
     assert "collides with a released migration" in result.stderr
 
 
-def test_a_draft_header_disagreeing_with_its_filename_fails(repo: Path):
-    (repo / DRAFTS).mkdir(parents=True)
-    (repo / DRAFTS / "add_wave_colour__deadbeefdeadbeefdeadbeefdeadbeef.sql").write_text(
-        "-- name: something_else\n-- id: deadbeefdeadbeefdeadbeefdeadbeef\n-- depends_on: \n"
-    )
-
-    result = check(repo)
-    assert result.returncode == 1
-    assert "not 'add_wave_colour'" in result.stderr
-
-
-def test_a_draft_without_a_name_header_fails(repo: Path):
-    (repo / DRAFTS).mkdir(parents=True)
-    (repo / DRAFTS / "add_wave_colour__deadbeefdeadbeefdeadbeefdeadbeef.sql").write_text(
-        "ALTER TABLE waves ADD colour TEXT;\n"
-    )
-
-    result = check(repo)
-    assert result.returncode == 1
-    assert "no `-- name:` header" in result.stderr
-
-
 def test_the_drafts_readme_is_ignored(repo: Path):
     _draft(repo, "add_wave_colour")
     (repo / DRAFTS / "README.md").write_text("# Draft migrations\n")
 
     result = check(repo)
     assert result.returncode == 0, result.stderr
+
+
+def test_runtime_sql_names_its_columns(repo: Path) -> None:
+    source = repo / "rust/loopflow/src/store/rows.rs"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text('const ROW: &str = "INSERT INTO waves VALUES (?1)";\n')
+
+    result = check(repo)
+
+    assert result.returncode == 1
+    assert "rows.rs uses positional INSERT or SELECT *" in result.stderr
+
+    source.write_text(
+        'const ROW: &str = "INSERT INTO waves (id) VALUES (?1)";\n'
+        '#[cfg(test)]\nmod tests {\n    const FIXTURE: &str = "SELECT * FROM waves";\n}\n'
+    )
+    assert check(repo).returncode == 0

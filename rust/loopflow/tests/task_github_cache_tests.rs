@@ -1,13 +1,13 @@
-mod support;
+use crate::support;
 
 use std::fs;
 use std::process::Command;
 
-use loopflow::durable::{WorkRef, WorkStatus};
+use loopflow::durable::WorkRef;
 use loopflow::ops::task::{task_interrupt, task_status};
-use loopflow::work::task::{GithubPr, Observation, PrPublication};
+use loopflow::work::task::{GithubObservationResult, GithubPr, Observation, PrPublication};
 use loopflow_test_support::TestRepo;
-use support::{register_task, EnvGuard, RegisteredTask};
+use support::{register_task_with_pr, EnvGuard, RegisteredTask};
 use time::{Duration, OffsetDateTime};
 
 fn publish_task(task: &mut RegisteredTask) {
@@ -57,14 +57,14 @@ if [ "$1 $2" = "pr list" ]; then
   echo "GraphQL: API rate limit already exceeded" >&2
   exit 1
 fi
+if [ "$1 $2" = "api graphql" ]; then
+  echo "GraphQL: API rate limit already exceeded" >&2
+  exit 1
+fi
 if [ "$1" = "api" ]; then
   cat <<'JSON'
 {{"merged":false,"state":"open","draft":false,"merge_commit_sha":null,"number":928,"html_url":"https://github.com/loopflowstudio/loopflow/pull/928","head":{{"sha":"head-928"}}}}
 JSON
-  exit 0
-fi
-if [ "$1 $2" = "pr checks" ]; then
-  echo '[]'
   exit 0
 fi
 echo "unexpected gh invocation: $*" >&2
@@ -94,13 +94,78 @@ exit 1
     )
 }
 
-fn github_reads(log: &str) -> Vec<String> {
+fn github_rest_reads(log: &str) -> Vec<String> {
     fs::read_to_string(log)
         .expect("read gh log")
         .lines()
-        .filter(|line| line.starts_with("api "))
+        .filter(|line| line.starts_with("api ") && !line.starts_with("api graphql"))
         .map(str::to_string)
         .collect()
+}
+
+#[test]
+fn reconciliation_skips_deleted_checkouts_without_losing_retained_work() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let checkout = repo.create_named_worktree("deleted-checkout");
+    point_origin_at_github(&repo);
+    let mut active = register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let deleted = support::register_sibling_task(&active, "INF-124", "deleted-checkout", &checkout);
+    publish_task(&mut active);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut retained = active.pr.clone();
+    retained.id = loopflow::work::task::TaskPrId::new();
+    retained.task_id = deleted.id.clone();
+    retained.slug = deleted.workspace_slug.clone();
+    retained.branch = deleted.branch.clone();
+    let github = retained
+        .publication
+        .as_mut()
+        .unwrap()
+        .github
+        .as_mut()
+        .unwrap();
+    github.number = 929;
+    github.url = "https://github.com/loopflowstudio/loopflow/pull/929".into();
+    runtime
+        .block_on(active.store.insert_task_pr(&retained))
+        .unwrap();
+    let retained = runtime
+        .block_on(active.store.active_task_pr(&deleted.id))
+        .unwrap();
+    let before = runtime
+        .block_on(active.store.get_task(&deleted.id))
+        .unwrap();
+    fs::remove_dir_all(&checkout).unwrap();
+    let log = home.path().join("gh.log");
+    let script = gh_success_script(log.to_str().unwrap());
+    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
+
+    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
+
+    assert!(report.errors.is_empty(), "{report:?}");
+    assert!(!checkout.exists());
+    assert_eq!(
+        runtime
+            .block_on(active.store.get_task(&deleted.id))
+            .unwrap(),
+        before
+    );
+    assert_eq!(
+        runtime
+            .block_on(active.store.active_task_pr(&deleted.id))
+            .unwrap(),
+        retained
+    );
+    let observed = runtime
+        .block_on(active.store.active_task_pr(&active.task.id))
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        observed.github_observation.unwrap().result,
+        GithubObservationResult::Fresh
+    ));
+    task_interrupt("INF-124").expect("interrupt survives external checkout deletion");
 }
 
 #[test]
@@ -110,7 +175,7 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
     repo.create_branch("jack/task-pr-proof");
     point_origin_at_github(&repo);
     let base = repo.head_sha();
-    let mut task = register_task(home.path(), repo.path(), "jack/task-pr-proof", &base);
+    let mut task = register_task_with_pr(home.path(), repo.path(), "jack/task-pr-proof", &base);
     publish_task(&mut task);
     let log = home.path().join("gh.log");
     let script = gh_success_script(log.to_string_lossy().as_ref());
@@ -119,12 +184,24 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
         home.path(),
     );
 
-    let first = task_status("INF-123").expect("REST status succeeds despite GraphQL exhaustion");
-    assert!(matches!(&first.observation, Observation::Fresh { .. }));
-    let status = loopflow::ops::task::task_snapshot(&first).expect("snapshot Task");
-    assert_eq!(status.status, WorkStatus::Ready, "{first:?}");
-
+    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
+    let observed = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .unwrap()
+        .unwrap();
+    let first = task_status(repo.path(), Some("INF-123"))
+        .expect("REST status succeeds despite GraphQL exhaustion")
+        .execution
+        .expect("execution");
+    assert!(report.errors.is_empty(), "{report:?}");
+    assert!(matches!(
+        observed.github_observation.as_ref().unwrap().result,
+        GithubObservationResult::Fresh
+    ));
+    assert!(matches!(&first.observation, Observation::NotRequired));
+    assert!(!first.status.is_terminal(), "{first:?}");
+
     let work = WorkRef::Task(task.task.id.clone());
     let previous_interrupt = runtime
         .block_on(task.store.latest_interrupt_id(&work))
@@ -137,28 +214,38 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
             .unwrap()
             > previous_interrupt
     );
-    assert!(runtime
-        .block_on(task.store.flow_position(&task.task.id))
-        .unwrap()
-        .is_none());
-    let cached = task_status("INF-123").expect("cached status succeeds");
-    assert!(matches!(cached.observation, Observation::Cached { .. }));
+    let cached = task_status(repo.path(), Some("INF-123"))
+        .expect("cached status succeeds")
+        .execution
+        .expect("execution");
+    assert!(
+        cached.work.graph_processes.is_empty(),
+        "an interrupt launches nothing"
+    );
+    assert!(matches!(cached.observation, Observation::NotRequired));
+    assert_eq!(
+        runtime
+            .block_on(task.store.active_task_pr(&task.task.id))
+            .unwrap()
+            .unwrap(),
+        observed
+    );
 
     let log_text = fs::read_to_string(&log).expect("read gh log");
     assert!(!log_text.lines().any(|line| line.starts_with("pr list")));
-    let reads = github_reads(log.to_string_lossy().as_ref());
+    let reads = github_rest_reads(log.to_string_lossy().as_ref());
     assert_eq!(reads.len(), 1, "rapid controls share one bounded REST read");
     assert!(reads[0].contains("repos/loopflowstudio/loopflow/pulls/928"));
 }
 
 #[test]
-fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
+fn rest_failure_is_retained_while_local_controls_continue() {
     let home = tempfile::tempdir().expect("task home");
     let repo = TestRepo::new();
     repo.create_branch("jack/task-pr-proof");
     point_origin_at_github(&repo);
     let base = repo.head_sha();
-    let mut task = register_task(home.path(), repo.path(), "jack/task-pr-proof", &base);
+    let mut task = register_task_with_pr(home.path(), repo.path(), "jack/task-pr-proof", &base);
     publish_task(&mut task);
     let cached_as_of = task.pr.updated_at;
     let log = home.path().join("gh.log");
@@ -168,26 +255,31 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
         home.path(),
     );
 
-    let first = task_status("INF-123").expect("REST failure degrades instead of failing");
-    let status = loopflow::ops::task::task_snapshot(&first).expect("snapshot Task");
-    assert_eq!(status.status, WorkStatus::Ready, "{first:?}");
-    let (reason, first_retry_at) = match first.observation {
-        Observation::Degraded {
-            reason,
-            cached_as_of: observed_cache,
-            retry_at,
-        } => {
-            assert_eq!(
-                observed_cache.unix_timestamp(),
-                cached_as_of.unix_timestamp()
-            );
-            (reason, retry_at)
-        }
-        other => panic!("expected degraded observation, got {other:?}"),
-    };
-    assert!(reason.contains("Internal Server Error"));
-
+    let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
+    let observed = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .unwrap()
+        .unwrap();
+    let first = task_status(repo.path(), Some("INF-123"))
+        .expect("REST failure degrades instead of failing")
+        .execution
+        .expect("execution");
+    assert!(!first.status.is_terminal(), "{first:?}");
+    assert!(report
+        .errors
+        .iter()
+        .any(|error| error.contains("Internal Server Error")));
+    assert_eq!(
+        observed.updated_at.unix_timestamp(),
+        cached_as_of.unix_timestamp()
+    );
+    assert!(
+        matches!(&observed.github_observation.as_ref().unwrap().result,
+        GithubObservationResult::Degraded { reason } if reason.contains("Internal Server Error"))
+    );
+    assert!(matches!(first.observation, Observation::NotRequired));
+
     let work = WorkRef::Task(task.task.id.clone());
     let previous_interrupt = runtime
         .block_on(task.store.latest_interrupt_id(&work))
@@ -200,22 +292,22 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
             .unwrap()
             > previous_interrupt
     );
-    let cached = task_status("INF-123").expect("cached degraded status succeeds");
-    match &cached.observation {
-        Observation::Degraded {
-            reason, retry_at, ..
-        } => {
-            assert!(reason.contains("Internal Server Error"));
-            assert_eq!(*retry_at, first_retry_at);
-        }
-        other => panic!("expected cached degradation, got {other:?}"),
-    }
-    let status =
-        loopflow::ops::task::task_snapshot(&cached).expect("snapshot Task after interrupt");
-    assert_eq!(status.status, WorkStatus::Ready);
+    let cached = task_status(repo.path(), Some("INF-123"))
+        .expect("cached degraded status succeeds")
+        .execution
+        .expect("execution");
+    assert!(matches!(cached.observation, Observation::NotRequired));
     assert_eq!(
-        github_reads(log.to_string_lossy().as_ref()).len(),
+        runtime
+            .block_on(task.store.active_task_pr(&task.task.id))
+            .unwrap()
+            .unwrap(),
+        observed
+    );
+    assert!(!cached.status.is_terminal());
+    assert_eq!(
+        github_rest_reads(log.to_string_lossy().as_ref()).len(),
         1,
-        "the degraded circuit suppresses repeat REST reads"
+        "local reads and controls never retry a degraded remote observation"
     );
 }

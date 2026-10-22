@@ -1,9 +1,7 @@
-// Starts and controls the local Wave backing a WaveChat pane.
-//
-// Loopflow uses the same `lf start <name>` lifecycle as the CLI. lfd owns the
-// detached listener; quitting the app never kills a wave.
+// Launch Tasks and local sessions through the CLI.
 
 #if os(macOS)
+import Darwin
 import Foundation
 import Loopflow
 
@@ -11,179 +9,50 @@ struct LocalLfError: LocalizedError {
     let errorDescription: String?
 }
 
-struct TaskStartReceipt: Decodable, Sendable, Equatable {
-    let issueIdentifier: String
-    let project: String
-    let wave: String
-}
-
-private struct DevelopmentControlConfig: Decodable {
-    let lfPath: String
-}
-
 enum LocalWaveAgentLauncher {
-    /// Stop the listener through the same `lf` lifecycle surface the CLI uses.
-    /// The server performs resident, registry, and discovery-file cleanup.
-    static func stopWave(repoPath: String, waveName: String) throws {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try controlLfPath()
-        try runChecked(waveStopCommand(lfPath: lfPath, waveName: waveName), cwd: origin)
-    }
-
-    static func waveStopCommand(lfPath: String, waveName: String) -> [String] {
-        [lfPath, "stop", waveName]
-    }
-
-    /// Start a filed Task through the same bounded worker command as the CLI.
-    /// `lf task run` owns Project lookup, worktree placement, Flow selection,
-    /// and the Task worker; the app does not reproduce those decisions.
+    /// Run a filed Task on its workflow. `lf task run` owns Workflow selection,
+    /// worktree placement and Graph selection; the app does not reproduce them.
     static func runTask(repoPath: String, issue: String) throws {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try controlLfPath()
-        try runChecked(taskRunCommand(lfPath: lfPath, issue: issue), cwd: origin)
+        try startLf(taskRunArguments(issue: issue), cwd: WaveOrigin.resolve(repoPath))
     }
 
-    /// Create one Task, then start its normal bounded worker path.
-    static func startTask(
-        repoPath: String,
-        title: String,
-        wave: String,
-        directive: String
-    ) throws -> TaskStartReceipt {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try controlLfPath()
-        let stdout = try runCheckedOutput(
-            taskStartCommand(
-                lfPath: lfPath,
-                title: title,
-                wave: wave,
-                directive: directive
-            ),
-            cwd: origin
-        )
-        return try taskStartReceipt(stdout)
-    }
-
-    /// Resume existing Task Flow state without creating another worktree.
-    static func resumeTask(repoPath: String, issue: String) throws {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try controlLfPath()
-        try runChecked(taskResumeCommand(lfPath: lfPath, issue: issue), cwd: origin)
-    }
-
-    /// Queue the audited Task interrupt. The Task worker decides how the live
-    /// provider turn is stopped and records the receipt in the shared store.
-    static func interruptTask(repoPath: String, issue: String) throws {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try controlLfPath()
-        try runChecked(taskInterruptCommand(lfPath: lfPath, issue: issue), cwd: origin)
-    }
-
-    /// Open the branch's PR for review from `worktree`. This delegates to
-    /// `lf pr open` — the single presentation boundary — instead of building a
-    /// GitHub URL and opening it here, so any later review-surface preference is
-    /// honored in one place. Only an explicit user review action calls this;
-    /// background app work publishes with `lf pr publish`.
-    static func reviewPullRequest(worktree: String) throws {
-        let lfPath = try controlLfPath()
-        try runChecked(pullRequestReviewCommand(lfPath: lfPath), cwd: worktree)
-    }
-
-    static func pullRequestReviewCommand(lfPath: String) -> [String] {
-        [lfPath, "pr", "open"]
-    }
-
-    /// Ensure Task Work and its checkout without starting a worker; returns
+    /// Ensure Task Work and its checkout without running a Graph; returns
     /// the authoritative worktree.
-    static func prepareTask(repoPath: String, issue: String) throws -> String {
-        let stdout = try runCheckedOutput(taskPrepareCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)
-        return try taskPrepareWorktree(stdout)
+    static func checkoutTask(repoPath: String, issue: String) async throws -> WorkspaceIdentity {
+        let stdout = try await runCheckedOutput(taskCheckoutCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)
+        return try taskCheckoutWorkspace(stdout)
     }
 
-    static func taskPrepareCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "task", "prepare", issue, "--json"]
+    static func taskCheckoutCommand(lfPath: String, issue: String) -> [String] {
+        [lfPath, "task", "checkout", issue, "--json"]
     }
 
-    static func taskPrepareWorktree(_ stdout: String) throws -> String {
-        struct Prepared: Decodable { let worktree: String }
+    static func taskCheckoutWorkspace(_ stdout: String) throws -> WorkspaceIdentity {
         do {
-            return try JSONDecoder().decode(Prepared.self, from: Data(stdout.utf8)).worktree
+            return try JSONDecoder().decode(WorkspaceIdentity.self, from: Data(stdout.utf8))
         } catch {
             throw LocalLfError(
-                errorDescription: "lf task prepare returned an invalid receipt: \(error.localizedDescription)"
+                errorDescription: "lf task checkout returned an invalid receipt: \(error.localizedDescription)"
             )
         }
     }
 
-    static func taskRunCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "task", "run", issue]
+    static func taskRunArguments(issue: String) -> [String] {
+        ["-b", "task", "run", issue]
     }
 
-    static func taskStartCommand(
-        lfPath: String,
-        title: String,
-        wave: String,
-        directive: String
-    ) -> [String] {
-        [
-            lfPath, "task", "start", "--wave", wave, title,
-            "--directive", directive,
-            "--json",
-        ]
-    }
-
-    static func taskStartReceipt(_ stdout: String) throws -> TaskStartReceipt {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        do {
-            return try decoder.decode(TaskStartReceipt.self, from: Data(stdout.utf8))
-        } catch {
-            throw LocalLfError(
-                errorDescription: "lf task start returned an invalid receipt: \(error.localizedDescription)"
-            )
-        }
-    }
-
-    static func taskResumeCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "task", "resume", issue]
-    }
-
-    static func taskInterruptCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "task", "interrupt", issue]
-    }
-
-    /// Return the CLI that owns the Home this Mac client controls.
-    ///
-    /// Installed apps use their registered bundled helper. A development app
-    /// carries an explicit pointer to the machine install gate so Finder and
-    /// scripted launches see the same selected Home as terminal `lf`.
+    /// Use the app's bundled CLI, or the pinned helper inside an offline clone.
     static func controlLfPath(
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
-        developmentConfig: URL? = Bundle.main.url(
-            forResource: "LoopflowDevControl",
-            withExtension: "json"
-        )
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> String {
-        if let developmentConfig {
-            let config: DevelopmentControlConfig
-            do {
-                let data = try Data(contentsOf: developmentConfig)
-                let decoder = JSONDecoder()
-                decoder.keyDecodingStrategy = .convertFromSnakeCase
-                config = try decoder.decode(DevelopmentControlConfig.self, from: data)
-            } catch {
-                throw LocalLfError(
-                    errorDescription: "Loopflow Dev has an invalid machine control configuration: "
-                        + error.localizedDescription
-                )
+        if let root = environment["LF_CLONE_ROOT"] {
+            let helper = URL(fileURLWithPath: root).appendingPathComponent("bin/lf").path
+            guard environment["LF_HOME"] == root, environment["LF_BIN"] == helper,
+                  FileManager.default.isExecutableFile(atPath: helper) else {
+                throw LocalLfError(errorDescription: "Clone helper or Machine selection is unavailable; relaunch with lf clone run.")
             }
-            guard FileManager.default.isExecutableFile(atPath: config.lfPath) else {
-                throw LocalLfError(
-                    errorDescription: "Loopflow Dev's machine lf is missing or not executable: "
-                        + config.lfPath
-                )
-            }
-            return config.lfPath
+            return helper
         }
         guard let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) else {
             throw LocalLfError(
@@ -194,17 +63,13 @@ enum LocalWaveAgentLauncher {
         return bundled.path
     }
 
-    /// Run an `lf` query verb (`ls`, `status`, `runs`, …) and return its
+    /// Run an `lf` query verb (`list`, `status`, `monitor`, …) and return its
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
-    /// facts by shelling the daemonless Home `lf` over the local store, not
+    /// facts by shelling the daemonless Machine `lf` over the local store, not
     /// by streaming a center. Throws on a spawn failure or a non-zero exit.
-    static func queryLf(_ subargs: [String], cwd: String?) throws -> String {
+    static func queryLf(_ subargs: [String], cwd: String?, input: String? = nil) async throws -> String {
         let lfPath = try controlLfPath()
-        guard let result = run([lfPath] + subargs, cwd: cwd) else {
-            throw LocalLfError(
-                errorDescription: "Failed to spawn: lf \(subargs.joined(separator: " "))"
-            )
-        }
+        let result = try await run([lfPath] + subargs, cwd: cwd, input: input)
         // `lf doctor --json` exits 1 when a check fails, but its stdout is the
         // report the telemetry dashboard must show. A red monitor cannot hide
         // itself behind the query runner's generic non-zero handling.
@@ -221,6 +86,36 @@ enum LocalWaveAgentLauncher {
         return result.stdout
     }
 
+    /// Start an `lf` command that runs for as long as its work does, such as
+    /// `lf -b task run`, and leave it running as this app's child. A refusal
+    /// exits within moments and is thrown; later output stays in lf's own logs.
+    static func startLf(_ subargs: [String], cwd: String?) throws {
+        let process = queryProcess([try controlLfPath()] + subargs, cwd: cwd)
+        let log = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loopflow-start-\(UUID().uuidString).log")
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        let output = try FileHandle(forWritingTo: log)
+        defer { try? output.close() }
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = output
+        process.standardError = output
+        do { try process.run() } catch {
+            throw LocalLfError(errorDescription: "Failed to spawn: lf \(subargs.joined(separator: " "))")
+        }
+        let deadline = Date().addingTimeInterval(startRefusalWindow)
+        while process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        guard !process.isRunning, process.terminationStatus != 0 else { return }
+        let detail = (try? String(contentsOf: log, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        try? FileManager.default.removeItem(at: log)
+        throw LocalLfError(errorDescription: detail.isEmpty
+            ? "lf \(subargs.joined(separator: " ")) failed (\(process.terminationStatus))"
+            : detail)
+    }
+
+    /// How long a started command is watched for an immediate refusal.
+    private static let startRefusalWindow: TimeInterval = 3
+
     // MARK: - Process plumbing
 
     static func queryProcess(_ args: [String], cwd: String? = nil) -> Process {
@@ -234,17 +129,15 @@ enum LocalWaveAgentLauncher {
         return process
     }
 
-    private static func runChecked(_ args: [String], cwd: String) throws {
-        _ = try runCheckedOutput(args, cwd: cwd)
+    static func queryGitHub(_ args: [String]) async throws -> String {
+        guard ProcessInfo.processInfo.environment["LF_CLONE_ROOT"] == nil else {
+            throw LocalLfError(errorDescription: "GitHub is unavailable in an offline data clone.")
+        }
+        return try await runCheckedOutput(["gh"] + args, cwd: nil)
     }
 
-    private static func runCheckedOutput(_ args: [String], cwd: String) throws -> String {
-        let result = run(args, cwd: cwd)
-        guard let result else {
-            throw LocalLfError(
-                errorDescription: "Failed to spawn: \(args.joined(separator: " "))"
-            )
-        }
+    private static func runCheckedOutput(_ args: [String], cwd: String?) async throws -> String {
+        let result = try await run(args, cwd: cwd)
         guard result.status == 0 else {
             let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             let message = detail.isEmpty
@@ -255,58 +148,123 @@ enum LocalWaveAgentLauncher {
         return result.stdout
     }
 
-    private static func run(
+    /// Finite CLI requests only. Cancellation ends this exact child, never its
+    /// descendants or an execution owner. Uncertain mutations must be reconciled.
+    static func run(
         _ args: [String],
-        cwd: String? = nil
-    ) -> (status: Int32, stdout: String, stderr: String)? {
+        cwd: String? = nil,
+        input: String? = nil
+    ) async throws -> (status: Int32, stdout: String, stderr: String) {
+        let worker = Task.detached(priority: .userInitiated) {
+            try await collect(args, cwd: cwd, input: input)
+        }
+        return try await withTaskCancellationHandler {
+            let result = try await worker.value
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            worker.cancel()
+        }
+    }
+
+    private static func collect(
+        _ args: [String], cwd: String?, input: String?
+    ) async throws -> (status: Int32, stdout: String, stderr: String) {
+        try Task.checkCancellation()
+        let deadline = ProcessInfo.processInfo.systemUptime + 30
         let process = queryProcess(args, cwd: cwd)
         let stdout = Pipe()
         let stderr = Pipe()
+        let stdin = input.map { _ in Pipe() }
         process.standardOutput = stdout
         process.standardError = stderr
-
-        let outHandle = stdout.fileHandleForReading
-        let errHandle = stderr.fileHandleForReading
-
-        do {
-            try process.run()
-        } catch {
-            return nil
+        process.standardInput = stdin.map { $0 as Any } ?? FileHandle.nullDevice
+        let out = stdout.fileHandleForReading
+        let err = stderr.fileHandleForReading
+        defer {
+            // Kill only the child we launched. A Session owner is independent;
+            // closing a query must not signal a provider or a process group.
+            if process.isRunning {
+                _ = Darwin.kill(process.processIdentifier, SIGKILL)
+                process.waitUntilExit()
+            }
+            for handle in [out, err, stdout.fileHandleForWriting, stderr.fileHandleForWriting,
+                           stdin?.fileHandleForReading, stdin?.fileHandleForWriting].compactMap({ $0 }) {
+                try? handle.close()
+            }
         }
+        do { try process.run() }
+        catch { throw LocalLfError(errorDescription: "Could not start CLI request: \(error.localizedDescription)") }
+        try stdout.fileHandleForWriting.close()
+        try stderr.fileHandleForWriting.close()
+        try stdin?.fileHandleForReading.close()
+        for handle in [out, err, stdin?.fileHandleForWriting].compactMap({ $0 }) {
+            let fd = handle.fileDescriptor
+            guard fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) != -1 else {
+                throw LocalLfError(errorDescription: "Could not configure CLI request pipes")
+            }
+            _ = fcntl(fd, F_SETNOSIGPIPE, 1)
+        }
+        var output = Data()
+        var diagnostics = Data()
+        let draft = Data((input ?? "").utf8)
+        var sent = 0
+        var writer = stdin?.fileHandleForWriting
+        var inputError: String?
+        while true {
+            try Task.checkCancellation()
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                throw LocalLfError(errorDescription: "CLI request timed out after 30 seconds. Its result is unknown; refresh before retrying a change.")
+            }
+            let running = process.isRunning
+            // Bound each drain so noisy output cannot starve input/cancellation.
+            let outputDrained = try drain(out, into: &output)
+            let diagnosticsDrained = try drain(err, into: &diagnostics)
+            if let handle = writer {
+                if sent < draft.count {
+                    let count = draft.withUnsafeBytes {
+                        Darwin.write(handle.fileDescriptor,
+                                     $0.baseAddress!.advanced(by: sent), min(draft.count - sent, 65536))
+                    }
+                    if count > 0 { sent += count }
+                    else if count < 0 && errno != EAGAIN && errno != EINTR {
+                        inputError = String(cString: strerror(errno))
+                    }
+                }
+                if sent == draft.count || inputError != nil {
+                    try handle.close()
+                    writer = nil
+                }
+            }
+            // An inherited pipe in a descendant cannot hold a completed query
+            // open. The child's buffered output has been drained at this point.
+            if !running, outputDrained, diagnosticsDrained { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        if process.terminationStatus == 0, sent != draft.count {
+            throw LocalLfError(errorDescription: "Could not send draft to lf: \(inputError ?? "request exited before reading the draft")")
+        }
+        return (process.terminationStatus, String(decoding: output, as: UTF8.self),
+                String(decoding: diagnostics, as: UTF8.self))
+    }
 
-        // Drain both pipes while the child is still writing. A pipe holds 64KB;
-        // waiting for exit first deadlocks the moment a command says more than
-        // that, and `lf tokens --json` says about 120KB. `lf runs`/`lf doctor`
-        // are small, which is why this only ever bit the largest reader.
-        let collector = OutputCollector()
-        let group = DispatchGroup()
-        let queue = DispatchQueue.global(qos: .userInitiated)
-        queue.async(group: group) { collector.setStdout(outHandle.readDataToEndOfFile()) }
-        queue.async(group: group) { collector.setStderr(errHandle.readDataToEndOfFile()) }
-
-        process.waitUntilExit()
-        group.wait()
-
-        return (
-            process.terminationStatus,
-            String(data: collector.stdout, encoding: .utf8) ?? "",
-            String(data: collector.stderr, encoding: .utf8) ?? ""
-        )
+    /// True once all currently buffered bytes have been read, including EOF.
+    private static func drain(_ handle: FileHandle, into data: inout Data) throws -> Bool {
+        var buffer = [UInt8](repeating: 0, count: 65536)
+        for _ in 0..<16 {
+            let count = Darwin.read(handle.fileDescriptor, &buffer, buffer.count)
+            if count == 0 { return true }
+            if count < 0 {
+                if errno == EAGAIN { return true }
+                if errno == EINTR { continue }
+                throw LocalLfError(errorDescription: "Could not read CLI response")
+            }
+            guard data.count + count <= 64 * 1024 * 1024 else {
+                throw LocalLfError(errorDescription: "CLI response exceeds 64 MiB")
+            }
+            data.append(contentsOf: buffer.prefix(count))
+        }
+        return false
     }
 }
-
-/// Two reader threads, one box. The pipes must be drained concurrently with the
-/// child's execution, so their results cross a thread boundary.
-private final class OutputCollector: @unchecked Sendable {
-    private let lock = NSLock()
-    private var out = Data()
-    private var err = Data()
-
-    var stdout: Data { lock.withLock { out } }
-    var stderr: Data { lock.withLock { err } }
-
-    func setStdout(_ data: Data) { lock.withLock { out = data } }
-    func setStderr(_ data: Data) { lock.withLock { err = data } }
-}
-
 #endif

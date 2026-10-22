@@ -3,13 +3,13 @@ use std::collections::BTreeMap;
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::controller::wave::metrics::{
-    MetricContract, MetricIdentity, MetricObservation, MetricObservationEvidence,
-    ObservationAcceptance,
-};
 #[cfg(test)]
 use crate::id::WaveId;
 use crate::store::{StoreError, StoreResult};
+use crate::work::wave::metrics::{
+    MetricContract, MetricIdentity, MetricObservation, MetricObservationEvidence,
+    ObservationAcceptance,
+};
 
 use super::SqliteStore;
 
@@ -45,7 +45,7 @@ impl SqliteStore {
              VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(wave_id, metric_id) DO NOTHING",
             params![
-                identity.wave_id,
+                identity.wave_id(),
                 identity.metric_id,
                 instrument,
                 registered_at.unix_timestamp()
@@ -57,7 +57,7 @@ impl SqliteStore {
         let registered = conn.query_row(
             "SELECT instrument FROM metric_instruments
              WHERE wave_id=?1 AND metric_id=?2",
-            params![identity.wave_id, identity.metric_id],
+            params![identity.wave_id(), identity.metric_id],
             |row| row.get::<_, String>(0),
         )?;
         if registered == instrument {
@@ -65,7 +65,10 @@ impl SqliteStore {
         } else {
             Err(StoreError::InvalidData(format!(
                 "metric {}/{} is already bound to {:?}, not {:?}",
-                identity.wave_id, identity.metric_id, registered, instrument
+                identity.wave_id(),
+                identity.metric_id,
+                registered,
+                instrument
             )))
         }
     }
@@ -88,7 +91,7 @@ impl SqliteStore {
             .query_row(
                 "SELECT instrument FROM metric_instruments
                  WHERE wave_id=?1 AND metric_id=?2",
-                params![contract.identity.wave_id, contract.identity.metric_id],
+                params![contract.identity.wave_id(), contract.identity.metric_id],
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
@@ -96,13 +99,13 @@ impl SqliteStore {
             None => {
                 return Err(StoreError::InvalidData(format!(
                     "metric {}/{} has no registered instrument",
-                    contract.identity.wave_id, contract.identity.metric_id
+                    contract.identity.wave_id(), contract.identity.metric_id
                 )))
             }
             Some(instrument) if instrument != contract.instrument => {
                 return Err(StoreError::InvalidData(format!(
                     "metric {}/{} contract instrument {:?} does not match registered instrument {:?}",
-                    contract.identity.wave_id,
+                    contract.identity.wave_id(),
                     contract.identity.metric_id,
                     contract.instrument,
                     instrument
@@ -119,8 +122,8 @@ impl SqliteStore {
              ON CONFLICT(observation_id) DO NOTHING",
             params![
                 observation.observation_id(),
-                observation.identity().wave_id,
-                observation.identity().metric_id,
+                contract.identity.wave_id(),
+                contract.identity.metric_id,
                 observation.contract_revision(),
                 observation.instrument(),
                 source_time.unix_timestamp(),
@@ -162,7 +165,7 @@ impl SqliteStore {
         )?;
         for identity in identities {
             if let Some(instrument) = statement
-                .query_row(params![identity.wave_id, identity.metric_id], |row| {
+                .query_row(params![identity.wave_id(), identity.metric_id], |row| {
                     row.get::<_, String>(0)
                 })
                 .optional()?
@@ -202,7 +205,7 @@ impl SqliteStore {
             let identity = &contract.identity;
             let (current, instrumented, graduation_qualified) = statement.query_row(
                 params![
-                    identity.wave_id,
+                    identity.wave_id(),
                     identity.metric_id,
                     contract.contract_revision
                 ],
@@ -255,8 +258,8 @@ mod tests {
     use tempfile::tempdir;
     use time::Duration;
 
-    use crate::controller::wave::metrics::{MetricContractDefinition, MetricDuration, MetricStage};
     use crate::id::WaveId;
+    use crate::work::wave::metrics::{MetricContractDefinition, MetricDuration, MetricStage};
     use crate::work::wave::Wave;
 
     use super::*;
@@ -278,7 +281,7 @@ mod tests {
 
     fn observed(contract: &MetricContract, end: OffsetDateTime) -> MetricObservation {
         let mut observation = MetricObservation::Observed {
-            identity: contract.identity.clone(),
+            identity: contract.identity.clone().into(),
             contract_revision: contract.contract_revision.clone(),
             instrument: contract.instrument.clone(),
             observation_id: String::new(),
@@ -308,10 +311,7 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).unwrap();
-        let identity = MetricIdentity {
-            wave_id: wave.id().as_str().to_string(),
-            metric_id: "task-loop-trust".to_string(),
-        };
+        let identity = MetricIdentity::new(wave.id().as_str(), "task-loop-trust".to_string());
         let contract = contract(identity.clone());
         let received_at = OffsetDateTime::from_unix_timestamp(2_000_000).unwrap();
         store
@@ -362,10 +362,7 @@ mod tests {
             directory.path().display().to_string(),
         );
         setup.create_wave(&wave).unwrap();
-        let identity = MetricIdentity {
-            wave_id: wave.id().as_str().to_string(),
-            metric_id: "task-loop-trust".to_string(),
-        };
+        let identity = MetricIdentity::new(wave.id().as_str(), "task-loop-trust".to_string());
         let contract = contract(identity.clone());
         let received_at = OffsetDateTime::from_unix_timestamp(2_000_000).unwrap();
         setup
@@ -424,10 +421,7 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).unwrap();
-        let identity = MetricIdentity {
-            wave_id: wave.id().as_str().to_string(),
-            metric_id: "task-loop-trust".to_string(),
-        };
+        let identity = MetricIdentity::new(wave.id().as_str(), "task-loop-trust".to_string());
         let contract = contract(identity.clone());
         let received_at = OffsetDateTime::from_unix_timestamp(3_000_000).unwrap();
         store
@@ -471,10 +465,10 @@ mod tests {
         let received_at = OffsetDateTime::from_unix_timestamp(3_000_000).unwrap();
         let contracts = (0..64)
             .map(|index| {
-                contract(MetricIdentity {
-                    wave_id: wave.id().as_str().to_string(),
-                    metric_id: format!("metric-{index}"),
-                })
+                contract(MetricIdentity::new(
+                    wave.id().as_str(),
+                    format!("metric-{index}"),
+                ))
             })
             .collect::<Vec<_>>();
         for contract in &contracts {
@@ -530,10 +524,7 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).unwrap();
-        let identity = MetricIdentity {
-            wave_id: wave.id().as_str().to_string(),
-            metric_id: "task-loop-trust".to_string(),
-        };
+        let identity = MetricIdentity::new(wave.id().as_str(), "task-loop-trust".to_string());
         let contract = contract(identity.clone());
         let format = &time::format_description::well_known::Rfc3339;
         let earlier = observed(
@@ -576,10 +567,7 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).unwrap();
-        let identity = MetricIdentity {
-            wave_id: wave.id().as_str().to_string(),
-            metric_id: "task-loop-trust".to_string(),
-        };
+        let identity = MetricIdentity::new(wave.id().as_str(), "task-loop-trust".to_string());
         let contract = contract(identity.clone());
         let format = &time::format_description::well_known::Rfc3339;
         let earlier = observed(
@@ -622,10 +610,7 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).unwrap();
-        let identity = MetricIdentity {
-            wave_id: wave.id().as_str().to_string(),
-            metric_id: "task-loop-trust".to_string(),
-        };
+        let identity = MetricIdentity::new(wave.id().as_str(), "task-loop-trust".to_string());
         let contract = contract(identity.clone());
         let received_at = OffsetDateTime::from_unix_timestamp(2_000_000).unwrap();
         store
@@ -652,10 +637,7 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).unwrap();
-        let identity = MetricIdentity {
-            wave_id: wave.id().as_str().to_string(),
-            metric_id: "task-loop-trust".to_string(),
-        };
+        let identity = MetricIdentity::new(wave.id().as_str(), "task-loop-trust".to_string());
         let registered_at = OffsetDateTime::from_unix_timestamp(2_000_000).unwrap();
 
         store

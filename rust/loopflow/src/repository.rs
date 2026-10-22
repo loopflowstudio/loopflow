@@ -5,7 +5,9 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// The Home-local identity of a repository checkout.
+pub mod location;
+
+/// The Machine-local identity of a repository checkout.
 ///
 /// Linked worktrees collapse to their main checkout and symlink spellings
 /// collapse to one absolute path. Provider repository identity remains
@@ -24,7 +26,7 @@ pub struct CanonicalRepoError {
 impl CanonicalRepo {
     pub fn discover(path: &Path) -> Result<Self, CanonicalRepoError> {
         let main =
-            crate::engine::worktrees::main_repo_root(path).unwrap_or_else(|_| path.to_path_buf());
+            crate::git::worktrees::main_repo_root(path).unwrap_or_else(|_| path.to_path_buf());
         let canonical = main.canonicalize().map_err(|error| CanonicalRepoError {
             path: main,
             message: error.to_string(),

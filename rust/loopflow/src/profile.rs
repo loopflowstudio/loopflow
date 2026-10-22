@@ -74,7 +74,7 @@ impl fmt::Display for EmailAddress {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LocalChromeProfile {
     pub directory: String,
     pub name: String,
@@ -102,50 +102,54 @@ pub fn resolve_local_chrome_profile(requested: &str) -> Result<LocalChromeProfil
     if requested.is_empty() {
         return Err("Chrome profile cannot be empty".to_string());
     }
-    let local_state_path = chrome_local_state_path()?;
-    let bytes = fs::read(&local_state_path)
-        .map_err(|error| format!("read {}: {error}", local_state_path.display()))?;
-    let local_state = serde_json::from_slice::<ChromeLocalState>(&bytes)
-        .map_err(|error| format!("parse {}: {error}", local_state_path.display()))?;
-    select_chrome_profile(local_state.profile.info_cache, requested)
+    select_chrome_profile(local_chrome_profiles()?, requested)
 }
 
 fn select_chrome_profile(
-    profiles: HashMap<String, ChromeProfileInfo>,
+    profiles: Vec<LocalChromeProfile>,
     requested: &str,
 ) -> Result<LocalChromeProfile, String> {
-    let mut matches = profiles
-        .into_iter()
-        .filter(|(directory, profile)| {
-            directory.eq_ignore_ascii_case(requested)
+    let matches = profiles
+        .iter()
+        .filter(|profile| {
+            profile.directory.eq_ignore_ascii_case(requested)
                 || profile.name.eq_ignore_ascii_case(requested)
                 || profile
-                    .user_name
+                    .login
                     .as_deref()
                     .is_some_and(|login| login.eq_ignore_ascii_case(requested))
         })
         .collect::<Vec<_>>();
     if matches.len() != 1 {
         return Err(format!(
-            "Chrome profile '{}' matched {} profiles",
-            requested,
-            matches.len()
+            "Chrome profile '{requested}' matched {} profiles. Choices: {}",
+            matches.len(),
+            profiles
+                .iter()
+                .map(|p| format!("{} ({})", p.name, p.directory))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
-    let (directory, profile) = matches
-        .pop()
-        .expect("one matched Chrome profile should exist");
-    let login = profile.user_name.filter(|login| !login.trim().is_empty());
-    validate_chrome_profile_identifier(&directory)?;
-    validate_chrome_profile_identifier(&profile.name)?;
-    if let Some(login) = &login {
-        validate_chrome_profile_identifier(login)?;
+    validate_chrome_profile_identifier(&matches[0].directory)?;
+    Ok(matches[0].clone())
+}
+
+pub fn local_chrome_profiles() -> Result<Vec<LocalChromeProfile>, String> {
+    let path = chrome_local_state_path()?;
+    let bytes = fs::read(&path).map_err(|error| format!("read Chrome profiles: {error}"))?;
+    let state = serde_json::from_slice::<ChromeLocalState>(&bytes)
+        .map_err(|_| "invalid Chrome profile catalog".to_string())?;
+    let mut profiles = Vec::new();
+    for (directory, profile) in state.profile.info_cache {
+        profiles.push(LocalChromeProfile {
+            directory,
+            name: profile.name,
+            login: profile.user_name.filter(|login| !login.trim().is_empty()),
+        });
     }
-    Ok(LocalChromeProfile {
-        directory,
-        name: profile.name,
-        login,
-    })
+    profiles.sort_by(|a, b| a.directory.cmp(&b.directory));
+    Ok(profiles)
 }
 
 fn validate_chrome_profile_identifier(value: &str) -> Result<(), String> {
@@ -172,19 +176,19 @@ fn chrome_local_state_path() -> Result<PathBuf, String> {
     Err("Chrome profile discovery is currently supported on macOS only".to_string())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AccessProfile {
     pub id: ProfileId,
     pub chrome_directory: String,
-    pub expected_login: EmailAddress,
+    pub expected_login: Option<EmailAddress>,
     pub created_at: i64,
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AccountAccessProfile {
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AuthBrowserBinding {
     pub provider: Provider,
-    pub account_id: ProviderAccountId,
+    pub account_id: Option<ProviderAccountId>,
     pub position: usize,
     pub profile_id: ProfileId,
 }
@@ -222,11 +226,7 @@ pub struct ProviderRoute {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use super::{
-        select_chrome_profile, ChromeProfileInfo, EmailAddress, LocalChromeProfile, ProfileId,
-    };
+    use super::{select_chrome_profile, EmailAddress, LocalChromeProfile, ProfileId};
 
     #[test]
     fn profile_ids_are_safe_printable_slugs() {
@@ -251,22 +251,18 @@ mod tests {
 
     #[test]
     fn chrome_profiles_resolve_by_signed_in_email() {
-        let profiles = HashMap::from([
-            (
-                "Profile 3".to_string(),
-                ChromeProfileInfo {
-                    name: "jackstah".to_string(),
-                    user_name: Some("jackstah@example.com".to_string()),
-                },
-            ),
-            (
-                "Profile 7".to_string(),
-                ChromeProfileInfo {
-                    name: "Loopflow".to_string(),
-                    user_name: Some("jack@example.com".to_string()),
-                },
-            ),
-        ]);
+        let profiles = vec![
+            LocalChromeProfile {
+                directory: "Profile 3".to_string(),
+                name: "Personal".to_string(),
+                login: Some("personal@example.com".to_string()),
+            },
+            LocalChromeProfile {
+                directory: "Profile 7".to_string(),
+                name: "Loopflow".to_string(),
+                login: Some("jack@example.com".to_string()),
+            },
+        ];
 
         assert_eq!(
             select_chrome_profile(profiles, "jack@example.com").unwrap(),

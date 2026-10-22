@@ -1,27 +1,63 @@
-//! Durable tracking for one Linear Project's KRs.
+//! Durable tracking for one Project's KRs.
 //!
-//! A Project coordinates Tasks from the owning Wave's clean
-//! control checkout. It owns no worktree, shipping branch, PR, permanent
+//! A Wave selects its current Project. A Project owns no worktree, shipping branch, PR, permanent
 //! memory, cadence, chat, or controller state.
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::child::{AbandonIntent, ChildRef, ObservationRecipient};
+use crate::child::AbandonIntent;
 pub use crate::durable::ProjectId;
 use crate::id::WaveId;
-use crate::planning::ProjectPlan;
+use crate::linear::{LinearBindingError, LinearProjectId};
 use crate::work::task::{TaskEventKind, TaskId};
 
+/// Shared Project status, independent of a provider’s display label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectStatus {
+    Backlog,
+    Planned,
+    Started,
+    Paused,
+    Completed,
+    Canceled,
+}
+
+impl ProjectStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Backlog => "backlog",
+            Self::Planned => "planned",
+            Self::Started => "started",
+            Self::Paused => "paused",
+            Self::Completed => "completed",
+            Self::Canceled => "canceled",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectKR {
+    pub text: String,
+    pub holds: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
     pub id: ProjectId,
-    /// Current planning facts from the PM system.
-    pub plan: ProjectPlan,
+    pub summary: String,
+    pub slug: String,
+    pub name: String,
+    pub description: String,
+    pub krs: Vec<ProjectKR>,
+    pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,
+    pub status: ProjectStatus,
+    /// Optional Linear binding, not a second owner of this record.
+    pub linear_id: Option<LinearProjectId>,
+    /// Acquisition time of the retained Linear observation, never a write clock.
+    pub pm_snapshot_synced_at: Option<i64>,
     /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
-    /// Completed Project judgment passes. This is durable domain progress, not
-    /// the lifetime of a Project process.
-    pub iteration: u32,
     /// Set when abandonment is *requested*, not when it is applied. No launch
     /// path may start a Run for Project Work carrying this.
     pub abandon_intent: Option<AbandonIntent>,
@@ -45,12 +81,9 @@ pub enum ProjectEventKind {
         iteration: u32,
         summary: String,
     },
-    /// A durable steer: direction handed to the Project. Folded into the run's
-    /// seed and injected into a live turn; not a report out, so it never
-    /// crosses to the parent Wave.
+    /// Historical authored direction; the immutable publication owns its text.
     Steer {
-        author: crate::durable::Author,
-        text: String,
+        steer_id: crate::id::SteerId,
     },
     /// A request to end the Project's current turn so the next re-reads its
     /// direction immediately. Acted on only by a live run, and not a report out.
@@ -104,42 +137,28 @@ impl HistoricalFailure {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectObservation {
-    pub project_id: ProjectId,
-    pub project: String,
-    pub event_id: i64,
-    pub event: ProjectEventKind,
-}
-
-impl ProjectObservation {
-    pub fn inbox_id(&self) -> String {
-        format!("project-{}-{}", self.project_id, self.event_id)
-    }
-
-    pub fn prompt(&self) -> String {
-        let payload = serde_json::to_string(&self.event)
-            .expect("Project observation always serializes to structured JSON");
-        format!(
-            "<project_observation project_id=\"{}\" project=\"{}\" event_id=\"{}\">\n{}\n</project_observation>",
-            self.project_id, self.project, self.event_id, payload
-        )
+impl Project {
+    pub fn linear_id(&self) -> Result<&LinearProjectId, LinearBindingError> {
+        self.linear_id
+            .as_ref()
+            .ok_or(LinearBindingError::NoLinearMapping)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ChildEventPayload {
-    Project { event: ProjectEventKind },
-    Task { event: TaskEventKind },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ObservationOutboxRow {
-    pub id: i64,
-    pub recipient: ObservationRecipient,
-    pub source: ChildRef,
-    pub event_id: i64,
-    pub payload: ChildEventPayload,
-    pub delivered_at: Option<OffsetDateTime>,
+pub(crate) fn validate_metric_targets(
+    targets: &[crate::work::wave::metrics::MetricTarget],
+) -> Result<(), String> {
+    let mut ids = std::collections::BTreeSet::new();
+    for metric in targets {
+        if metric.metric_id.trim().is_empty()
+            || !metric.target.value().is_finite()
+            || !ids.insert(&metric.metric_id)
+        {
+            return Err(
+                "Project metric targets require unique nonempty metric IDs and finite values"
+                    .into(),
+            );
+        }
+    }
+    Ok(())
 }

@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import Testing
+import ViewInspector
 @testable import Loopflow
 @testable import LoopflowMac
 
@@ -12,9 +13,10 @@ struct RoadmapViewTests {
         let wave = try #require(snapshot.waves.first)
         let tasks = wave.tasks.items
 
-        // No exact process evidence means planning offers Resume, never an
-        // inferred attach or interrupt action.
-        #expect(roadmapTaskAction(tasks[0]) == .resume)
+        // Continuing started work is a fresh Start, never an inferred attach
+        // or interrupt action.
+        #expect(tasks[0].actions.recommended == .resume)
+        #expect(roadmapTaskAction(tasks[0]) == .run)
 
         // An explicit User merge request advertises Open PR: the server
         // recommends the exact head, and the app does not re-derive it.
@@ -34,6 +36,20 @@ struct RoadmapViewTests {
 
         #expect(openingPR.recommended == .openPr)
         #expect(openingPR.reason == "merge head abc1234 on GitHub")
+    }
+
+    @Test @MainActor func portfolioTaskClickOpensItsRepositoryDestination() throws {
+        let snapshot = try loadRoadmapFixture()
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No read needed") })
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        var opened: (String, String)?
+        let view = RoadmapView(model: model, onOpenWave: { _ in }, onOpenTask: { opened = ($0, $1) })
+        let section = try view.inspect().find(NowSectionView.self).actualView()
+        let row = try #require(section.section.rows.first)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-task-\(row.task.id)").callOnTapGesture()
+        #expect(opened?.0 == row.wave!.repo)
+        #expect(opened?.1 == row.task.id)
+        #expect(model.selection == nil)
     }
 
     private func loadRoadmapFixture(sourceFile: String = #filePath) throws -> RoadmapSnapshot {

@@ -19,10 +19,11 @@ public struct WaveKeyResult: Sendable, Identifiable, Hashable {
 
 public struct WavePlan: Sendable, Hashable {
     public var objective: String
-    public var chapter: ChapterSummary?
+    public var projects: WorkEvidence<ProjectPlanningSnapshot>
+    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
 
-    public init(objective: String, chapter: ChapterSummary? = nil) {
+    public init(objective: String, projects: WorkEvidence<ProjectPlanningSnapshot> = .unavailable(reason: "Project planning has not been read")) {
         self.objective = objective
-        self.chapter = chapter
+        self.projects = projects
     }
 }

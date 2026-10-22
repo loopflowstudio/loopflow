@@ -3,59 +3,10 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::engine::invocation::{QueuedInvocation, StepKind, StepRef};
-use crate::engine::{ConcreteStep, OccurrencePolicy};
-use crate::id::{ExecId, TraceId, WaveId};
+use crate::id::WaveId;
+use crate::steer::Steer;
 
-/// The exact active Run named by an in-Run process.
-pub const RUN_ID_ENV: &str = "LF_RUN_ID";
-pub const TASK_WORKER_CLAIM_ENV: &str = "LF_WORK_ADVANCE_CLAIM";
-macro_rules! durable_id {
-    ($name:ident, $prefix:literal) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-        #[serde(transparent)]
-        pub struct $name(String);
-
-        impl $name {
-            pub fn new() -> Self {
-                Self(format!("{}{}", $prefix, uuid::Uuid::new_v4().simple()))
-            }
-
-            pub fn parse(value: &str) -> Result<Self, DurableDataError> {
-                let suffix = value.strip_prefix($prefix).ok_or_else(|| {
-                    DurableDataError::InvalidId(format!("expected {} id", $prefix))
-                })?;
-                uuid::Uuid::parse_str(suffix)
-                    .map_err(|error| DurableDataError::InvalidId(error.to_string()))?;
-                Ok(Self(value.to_string()))
-            }
-
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
-
-        impl Default for $name {
-            fn default() -> Self {
-                Self::new()
-            }
-        }
-
-        impl std::fmt::Display for $name {
-            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str(&self.0)
-            }
-        }
-
-        impl std::str::FromStr for $name {
-            type Err = DurableDataError;
-
-            fn from_str(value: &str) -> Result<Self, Self::Err> {
-                Self::parse(value)
-            }
-        }
-    };
-}
+use crate::id::prefixed_uuid_id;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DurableDataError {
@@ -63,22 +14,63 @@ pub enum DurableDataError {
     InvalidId(String),
 }
 
-durable_id!(ProjectId, "proj_");
-durable_id!(TaskId, "task_");
-durable_id!(RunId, "run_");
-durable_id!(HomeId, "home_");
-durable_id!(ToolResponseId, "response_");
-durable_id!(CronReceiptId, "cron_");
+// Identity of one selected repository plan, never derived from a code remote.
+prefixed_uuid_id!(
+    RepositoryId,
+    "repo_",
+    DurableDataError,
+    DurableDataError::InvalidId
+);
 
-impl ProjectId {
-    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
+/// One selected plan and its retained Machine-local locators, read together.
+/// Locators prove explicit association, not portable Work or execution authority.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepositoryIdentity {
+    pub id: RepositoryId,
+    pub locators: Vec<RepositoryId>,
 }
+prefixed_uuid_id!(
+    ProjectId,
+    "proj_",
+    DurableDataError,
+    DurableDataError::InvalidId
+);
+prefixed_uuid_id!(
+    TaskId,
+    "task_",
+    DurableDataError,
+    DurableDataError::InvalidId
+);
+// Machine identity retains its released home_ prefix; job labels are separate locators.
+prefixed_uuid_id!(
+    MachineId,
+    "home_",
+    DurableDataError,
+    DurableDataError::InvalidId
+);
+prefixed_uuid_id!(
+    ToolResponseId,
+    "response_",
+    DurableDataError,
+    DurableDataError::InvalidId
+);
+prefixed_uuid_id!(
+    CronReceiptId,
+    "cron_",
+    DurableDataError,
+    DurableDataError::InvalidId
+);
 
 impl TaskId {
-    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-        Self(value.into())
+    /// Linear UUIDs are also the creation UUID used by locally authored Tasks.
+    pub(crate) fn from_issue(id: &str) -> Self {
+        let uuid = uuid::Uuid::parse_str(id).unwrap_or_else(|_| {
+            uuid::Uuid::new_v5(
+                &uuid::Uuid::NAMESPACE_URL,
+                format!("https://linear.app/issue/{id}").as_bytes(),
+            )
+        });
+        Self(format!("task_{}", uuid.simple()))
     }
 }
 
@@ -108,9 +100,199 @@ impl WorkRef {
     }
 }
 
+/// A fresh, Machine-local observation, never replicated as planning or a start claim.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Home {
-    pub id: HomeId,
+pub struct TaskLocationObservation {
+    pub request: String,
+    pub repository_id: RepositoryId,
+    pub task_id: TaskId,
+    pub machine_id: MachineId,
+    pub observed_at: i64,
+    pub location: TaskLocation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TaskLocation {
+    Recorded {
+        task_id: TaskId,
+        checkout: Option<String>,
+    },
+    /// Only this Machine has no retained execution; this is not global absence.
+    Unrecorded,
+    Unavailable {
+        reason: String,
+    },
+}
+
+/// Where a Task's commands execute: its owner's Machine, or the Machine that
+/// may claim it when it is unowned or its owner's Machine is unknown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskExecutionRoute {
+    pub task_id: TaskId,
+    pub checkout: Option<String>,
+    pub repository_id: RepositoryId,
+    pub machine_id: MachineId,
+    pub source: TaskExecutionSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskExecutionSource {
+    Owner,
+    OwningMachine(OwningMachineSource),
+}
+
+/// Where your Machine for an unowned Task or a scope's Session came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "wave", rename_all = "snake_case")]
+pub enum OwningMachineSource {
+    /// `lf machine use <machine> <wave>`, set on the Task's Wave or a parent Wave.
+    Wave(String),
+    /// `lf machine use <machine> --repo`, set on the Task's repository.
+    Repository,
+    /// No default is set: the Machine running the command.
+    ThisMachine,
+}
+
+/// Where a person sets a default above a single Task. A Task's own Machine is
+/// its ownership claim, not a default. Resolution walks Wave → parent Waves →
+/// repository → the setting's fallback.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+pub enum DefaultScope {
+    Wave(crate::id::WaveId),
+    Repository(RepositoryId),
+}
+
+/// Which part of a Wave or repository a Machine default places.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MachineSetting {
+    /// Where the scope's new Tasks run.
+    Tasks,
+    /// Where the scope's primary Session runs.
+    Session,
+}
+
+/// One of your Machine defaults, with the scope's name on this Machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MachineDefault {
+    pub scope: DefaultScope,
+    /// The Wave's name, or the repository's path on this Machine.
+    pub name: String,
+    pub setting: MachineSetting,
+    pub machine_id: MachineId,
+}
+
+prefixed_uuid_id!(
+    OwnershipEntryId,
+    "own_",
+    DurableDataError,
+    DurableDataError::InvalidId
+);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OwnershipKind {
+    Claim,
+    /// Moves the claim to `machine_id`, keeping the person.
+    Handoff,
+    Unclaim,
+    /// What a Machine knew before ownership existed; never delivered.
+    Recorded,
+}
+
+impl OwnershipKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Claim => "claim",
+            Self::Handoff => "handoff",
+            Self::Unclaim => "unclaim",
+            Self::Recorded => "recorded",
+        }
+    }
+}
+
+/// One immutable entry in a Task's ownership log. `machine_id` names the
+/// claimant, the handoff target, or the unclaiming Machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskOwnershipEntry {
+    pub id: OwnershipEntryId,
+    pub task_id: TaskId,
+    pub kind: OwnershipKind,
+    pub person: Option<String>,
+    /// The person's stable key; names are display only.
+    pub person_key: Option<String>,
+    pub machine_id: Option<MachineId>,
+    /// The Machine's label when written, or as best known on this Machine.
+    pub machine_label: Option<String>,
+    pub at: i64,
+}
+
+/// A Machine for display; a missing id reads as "Machine unknown".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineRef {
+    pub id: Option<MachineId>,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskOwner {
+    pub person: Option<String>,
+    pub person_key: Option<String>,
+    pub machine: MachineRef,
+}
+
+/// A person for display: their name, else their key, else "Someone".
+pub fn person_text<'a>(person: Option<&'a str>, person_key: Option<&'a str>) -> &'a str {
+    person.or(person_key).unwrap_or("Someone")
+}
+
+impl TaskOwner {
+    pub fn who(&self) -> &str {
+        person_text(self.person.as_deref(), self.person_key.as_deref())
+    }
+}
+
+impl TaskOwnershipEntry {
+    /// The person and Machine this entry names.
+    pub fn owner(&self) -> TaskOwner {
+        TaskOwner {
+            person: self.person.clone(),
+            person_key: self.person_key.clone(),
+            machine: MachineRef {
+                id: self.machine_id.clone(),
+                label: self.machine_label.clone(),
+            },
+        }
+    }
+}
+
+impl std::fmt::Display for TaskOwner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let person = self.who();
+        match (&self.machine.label, &self.machine.id) {
+            (Some(label), _) => write!(f, "{person} on {label}"),
+            (None, Some(id)) => write!(f, "{person} on {id}"),
+            (None, None) => write!(f, "{person} (Machine unknown)"),
+        }
+    }
+}
+
+/// This Machine's reading of a Task's ownership. `superseded_by` names a later
+/// claim that every other Machine follows while this Machine keeps its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskOwnership {
+    pub owner: Option<TaskOwner>,
+    pub superseded_by: Option<TaskOwner>,
+    pub log: Vec<TaskOwnershipEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Machine {
+    pub label: Option<String>,
+    pub id: MachineId,
     pub route: String,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
@@ -119,172 +301,28 @@ pub struct Home {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Placement {
-    pub work: WorkRef,
-    pub home_id: HomeId,
-    pub enabled: bool,
-    #[serde(with = "time::serde::rfc3339")]
-    pub placed_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowPosition {
-    pub task_id: TaskId,
-    pub invocation: QueuedInvocation,
-    pub session_run_id: Option<RunId>,
-    pub ready_summary: Option<String>,
-    pub cursor: crate::engine::ExecutionCursor,
-    pub version: u64,
-    pub worker_generation: u64,
-    pub claim: Option<TaskWorkerClaim>,
-    pub failure: Option<TaskFlowBlocker>,
-    #[serde(with = "time::serde::rfc3339")]
-    pub updated_at: OffsetDateTime,
-}
-
-impl FlowPosition {
-    pub fn has_pending_decision(&self) -> bool {
-        let leaf = self.cursor.leaf();
-        (self.current().policy.repeat.is_some() && leaf.progress.verdict.is_some())
-            || (matches!(self.current_plan(), crate::engine::ConcreteStep::Xor(_))
-                && leaf.route.is_some())
-    }
-
-    pub fn work(&self) -> WorkRef {
-        WorkRef::Task(self.task_id.clone())
-    }
-
-    pub fn current_plan(&self) -> &crate::engine::ConcreteStep {
-        let (steps, cursor) = self.cursor.current_body(&self.invocation.steps);
-        steps
-            .get(cursor.index)
-            .expect("a persisted Flow position always selects a validated step")
-    }
-
-    pub fn current_checked(&self) -> Option<crate::engine::invocation::StepRef> {
-        let (steps, cursor) = self.cursor.current_body(&self.invocation.steps);
-        let (step, kind, policy) = match steps.get(cursor.index)? {
-            ConcreteStep::Skill(skill) => (
-                skill.skill.name.clone(),
-                StepKind::Skill,
-                skill.policy.clone(),
-            ),
-            ConcreteStep::Op(op) => (
-                op.item.display_name(),
-                StepKind::Op,
-                OccurrencePolicy::default(),
-            ),
-            ConcreteStep::Xor(branch) => (
-                branch.router.name.clone(),
-                StepKind::Xor,
-                OccurrencePolicy::default(),
-            ),
-        };
-        Some(StepRef {
-            invocation_id: self.invocation.id.clone(),
-            flow: self.invocation.flow.clone(),
-            step,
-            kind,
-            policy,
-            index: u32::try_from(self.cursor.index).ok()?,
-            total: u32::try_from(self.invocation.steps.len()).ok()?,
-            iteration: self.cursor.iteration,
-        })
-    }
-
-    pub fn current(&self) -> crate::engine::invocation::StepRef {
-        self.current_checked()
-            .expect("a persisted Flow position always selects a validated step")
-    }
-
-    pub fn is_human(&self) -> bool {
-        self.current().policy.human
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn test_flow_invocation(
-    flow: &str,
-    step_index: u32,
-    step: &str,
-    node_id: Option<&str>,
-    human: bool,
-) -> QueuedInvocation {
-    let steps = (0..=step_index)
-        .map(|index| {
-            let target = index == step_index;
-            let name = if target {
-                step.to_string()
-            } else {
-                format!("before-{index}")
-            };
-            crate::engine::ConcreteStep::Skill(crate::engine::ConcreteSkill {
-                skill: crate::engine::Skill::named(&name),
-                policy: crate::engine::OccurrencePolicy {
-                    id: target.then(|| node_id.map(str::to_string)).flatten(),
-                    human: target && human,
-                    repeat: None,
-                },
-                flow_parents: Vec::new(),
-            })
-        })
-        .collect();
-    QueuedInvocation::new(flow, steps).expect("test Flow invocation has a step")
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskWorkerOwner {
-    pub trace_id: TraceId,
-    pub exec_id: ExecId,
-    pub pid: u32,
-    pub started_at: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskWorkerClaim {
-    pub invocation_id: String,
-    pub generation: u64,
-    pub position_version: u64,
-    pub owner: TaskWorkerOwner,
-    pub worker_run_id: Option<RunId>,
-    #[serde(with = "time::serde::rfc3339")]
-    pub claimed_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskFlowBlocker {
-    pub reason: String,
-    pub restart_required: bool,
-    #[serde(with = "time::serde::rfc3339")]
-    pub observed_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum TaskWorkerClaimOutcome {
-    Claimed(TaskWorkerClaim),
-    Busy(TaskWorkerClaim),
-    Stale { actual_version: u64 },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum Author {
     User,
-    Run(RunId),
+    Named(String),
+    Captured(i64),
+    /// Historical selector preserved from pre-event attribution.
+    #[serde(alias = "run")]
+    Imported(String),
 }
 
-/// A steer projected from a Work's durable comment stream
-/// (`TaskEventKind::Steer` / `ProjectEventKind::Steer`). Not a durable entity —
-/// its identity is the event id, so ordering and change-detection use `id`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Steer {
-    pub id: i64,
-    pub author: Author,
-    pub text: String,
+impl std::fmt::Display for Author {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::User => f.write_str("attribution unresolved"),
+            Self::Named(name) => f.write_str(name),
+            Self::Captured(id) => write!(f, "session input {id}"),
+            Self::Imported(selector) => write!(f, "imported {selector}"),
+        }
+    }
 }
 
-/// A steer comment surfaced for the cross-Work `lf activity` timeline: the read
+/// A steer comment surfaced for the cross-Work `lf history` timeline: the read
 /// model plus the Work it targets and when it was issued.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SteerComment {
@@ -349,6 +387,68 @@ impl std::fmt::Display for WorkStatus {
     }
 }
 
+/// Durable completion and abandonment, with Workflow readiness for unfinished Tasks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskState {
+    /// Explicit hold; history and Workflow are retained.
+    Paused,
+    /// The Task has taken up no Workflow.
+    NotReady,
+    /// At `start`.
+    Ready,
+    /// Past start, including end with completion pending.
+    Active,
+    /// Completed independently of Workflow position.
+    Done,
+    Abandoned,
+}
+
+impl TaskState {
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            Self::Paused => "paused",
+            Self::NotReady => "not_ready",
+            Self::Ready => "ready",
+            Self::Active => "active",
+            Self::Done => "done",
+            Self::Abandoned => "abandoned",
+        }
+    }
+
+    pub(crate) fn parse(label: &str) -> Option<Self> {
+        [
+            Self::Paused,
+            Self::NotReady,
+            Self::Ready,
+            Self::Active,
+            Self::Done,
+            Self::Abandoned,
+        ]
+        .into_iter()
+        .find(|state| state.label() == label)
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Done | Self::Abandoned)
+    }
+
+    /// The Task as Work: open until it is done or abandoned.
+    pub(crate) fn work_status(&self) -> WorkStatus {
+        match self {
+            Self::Paused | Self::NotReady | Self::Ready | Self::Active => WorkStatus::Ready,
+            Self::Done => WorkStatus::Done,
+            Self::Abandoned => WorkStatus::Abandoned,
+        }
+    }
+}
+
+impl std::fmt::Display for TaskState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.label().replace('_', " "))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AbandonReceipt {
     pub work: WorkRef,
@@ -357,15 +457,83 @@ pub struct AbandonReceipt {
     pub abandoned_at: OffsetDateTime,
 }
 
+/// Query values for Graph discovery; none carries attachment authority.
+#[derive(Debug, Clone, Default)]
+pub struct GraphProcessFilter {
+    pub repo: Option<String>,
+    pub task_id: Option<TaskId>,
+    pub wave_id: Option<crate::id::WaveId>,
+    pub taskless: bool,
+    pub state: Option<crate::session::GraphProcessSummaryState>,
+    pub search: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphProcessInventoryEntry {
+    #[serde(flatten)]
+    pub summary: crate::session::GraphProcessSummary,
+    pub repo: Option<String>,
+    pub ended_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphProcessPage {
+    pub entries: Vec<GraphProcessInventoryEntry>,
+    pub next: Option<String>,
+}
+
+/// One Graph drawn from its Processes: the authored graph while its steps still fit
+/// it, else the sequence the steps recorded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphProcessDetail {
+    pub entry: GraphProcessInventoryEntry,
+    pub compiled: crate::graph::compiled::CompiledGraph,
+    pub current: Option<u32>,
+    pub completed: Vec<u32>,
+    pub returns: Vec<crate::graph::compiled::GraphReturn>,
+    /// Per-edge counts at each active nesting level, outermost first.
+    pub iterations: Vec<Vec<u32>>,
+    pub cwd: Option<std::path::PathBuf>,
+    /// Every step the Graph process launched, in order.
+    pub steps: Vec<GraphStepProcess>,
+}
+
+/// One launched step and how its process ended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphStepProcess {
+    pub lf_process_id: crate::id::LfProcessId,
+    pub label: String,
+    pub key: u32,
+    pub iterations: Vec<Vec<u32>>,
+    pub started_at: i64,
+    pub completed_at: Option<i64>,
+    pub outcome: Option<String>,
+    pub exit_code: Option<i32>,
+}
+
+impl GraphStepProcess {
+    /// The step's label with the pass any returned loop is on: "implement · pass 2".
+    pub fn position(&self) -> String {
+        match crate::graph::compiled::loop_passes(&self.iterations) {
+            Some(passes) => format!("{} · {passes}", self.label),
+            None => self.label.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{render_steers, Steer, WorkStatus};
+    use super::{render_steers, WorkStatus};
     use crate::durable::Author;
+    use crate::steer::Steer;
 
     #[test]
     fn ordered_steers_render_as_one_input_projection() {
-        let steer = |id: i64, text: &str| Steer {
-            id,
+        let steer = |sequence: i64, text: &str| Steer {
+            id: crate::id::SteerId::new(),
+            sequence,
+            source: format!("fixture:{sequence}"),
+            revision: "1".into(),
             author: Author::User,
             text: text.to_string(),
         };

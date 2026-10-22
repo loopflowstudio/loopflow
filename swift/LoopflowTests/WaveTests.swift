@@ -7,16 +7,16 @@ struct WaveTests {
     func exposesRegistryIdentity() {
         let wave = WaveViewModel(api: Wave(
             id: "wave-123",
-            name: "infrastructure",
+            name: "OpenAI-tools",
             repo: "/tmp/repo",
             status: .ready,
-            live: true
+            
         ))
 
         #expect(wave.id == "wave-123")
-        #expect(wave.displayName == "infrastructure")
+        #expect(wave.displayName == "OpenAI-tools")
         #expect(wave.repo == "/tmp/repo")
-        #expect(wave.lens.color == .green)
+        #expect(wave.lens.color == .black)
         #expect(wave.isRegistered)
     }
 

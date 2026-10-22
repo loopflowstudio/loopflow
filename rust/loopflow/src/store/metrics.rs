@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use time::OffsetDateTime;
 
-use crate::controller::wave::metrics::{
+use crate::work::wave::metrics::{
     MetricContract, MetricIdentity, MetricObservation, MetricObservationEvidence,
     ObservationAcceptance,
 };

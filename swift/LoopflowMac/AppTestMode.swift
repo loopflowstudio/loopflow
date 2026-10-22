@@ -13,7 +13,7 @@ enum CaptureTarget {
 
     /// Titles of every window that is not the primary surface, so a capture of
     /// the primary window cannot be won by one that merely opened later.
-    private static let secondaryTitles = ["Portfolio", "Telemetry"]
+    private static let secondaryTitles = ["Portfolio", "Telemetry", "Open Work"]
 
     private static func normalizedTitle(_ title: String) -> String {
         title.lowercased().filter(\.isLetter)
@@ -43,7 +43,6 @@ enum CaptureTarget {
 enum AppTestMode: String {
     case emptyWorkspaces = "empty-workspaces"
     case mockWaves = "mock-waves"
-    case sessionFixtures = "session-fixtures"
     /// Renders through the REAL `lf` registry — the same read path production
     /// uses — while keeping the snapshot/width test knobs armed. Every other
     /// mode bypasses the registry with fixture data; `live` is the honest
@@ -106,7 +105,7 @@ enum AppTestMode: String {
 
     /// Seconds the surface settles before the snapshot fires, from
     /// `LOOPFLOW_UI_TEST_DELAY`. The fixture legs render fast; the `live` leg
-    /// shells out to `lf ls`/`lf status`, so a real-data capture gives it more
+    /// shells out to `lf wave list`/`lf wave status`, so a real-data capture gives it more
     /// room. Defaults to 2.5s — the value the fixture distinctness proof tuned.
     static var snapshotDelay: TimeInterval {
         guard let raw = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_DELAY"],

@@ -1,30 +1,16 @@
-//! `lf doctor` — the ledger reports on itself.
-//!
-//! Every wave question is a query against the run ledger, so a ledger that is
-//! wrong, deaf, or ambiguous makes every downstream answer confidently wrong.
-//! These checks exist because each one failed silently at least once: a schema
-//! drift dropped 29 hours of writes while `debug!` swallowed the error, a
-//! column rename left `node='step'` and `node='skill'` meaning the same thing,
-//! and the old process-grained run view once spliced one process's label onto
-//! another's cost.
-//!
-//! Checks are pure functions of the rows, so they are tested without a store.
+//! Diagnose current storage, execution records and scheduled obligations.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
+use crate::ops::cron::calendar;
 use anyhow::{anyhow, Result};
-use chrono::{Datelike, Local, LocalResult, NaiveDate, TimeZone, Utc};
+use chrono::{Local, Utc};
 use time::{Duration, OffsetDateTime};
 
 use crate::lf::output::Colors;
 use crate::ops::{CronObligation, CronSource};
-use crate::store::RunEventRow;
-
-/// A node value the current binary understands. `step` is the pre-054 spelling
-/// of `skill`; rows carrying it are history the readers silently drop.
-const NODES: [&str; 3] = ["run", "flow", "skill"];
-const EVENTS: [&str; 4] = ["started", "completed", "errored", "escalated"];
+use crate::process::LfProcess;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -89,65 +75,69 @@ struct StoreReport {
 
 pub fn run(json: bool) -> Result<()> {
     let database_path = crate::store::database_path_from_env()?;
-    let opened = crate::store::sqlite::SqliteStore::new(&database_path);
-    let mut store_report = inspect_store(&database_path);
-    let (events, mut checks) = match opened {
-        Ok(store) => {
-            let events = store.list_run_events_since(0)?;
-            let now = OffsetDateTime::now_utc().unix_timestamp();
-            let checks = match crate::ops::default_launch_agents_dir()
-                .and_then(|directory| crate::ops::list_cron_obligations(&directory))
-            {
-                Ok(obligations) => audit_at(&events, &obligations, now),
-                Err(error) => {
-                    let mut checks = audit_at(&events, &[], now);
-                    let continuity = Check::fail(
-                        "continuity",
-                        format!("cannot read durable scheduler obligations: {error}"),
-                    );
-                    if let Some(existing) =
-                        checks.iter_mut().find(|check| check.name == "continuity")
-                    {
-                        *existing = continuity;
-                    } else {
-                        checks.insert(0, continuity);
-                    }
-                    checks
-                }
-            };
-            (events, checks)
-        }
+    let store_report = inspect_store(&database_path);
+    let mut checks = vec![match &store_report.migration_error {
+        Some(error) => Check::fail("store", error.clone()),
+        None => Check::ok("store", "selected database is compatible with this build"),
+    }];
+    let events = match crate::store::sqlite::SqliteStore::open_processes_read_only(&database_path)
+        .and_then(|store| store.processes_since(0))
+    {
+        Ok(events) => Some(events),
         Err(error) => {
-            let detail = error.to_string();
-            store_report.migration_error = Some(detail.clone());
-            (Vec::new(), vec![Check::fail("store", detail)])
+            checks.push(Check::fail(
+                "processes",
+                format!("cannot read Process evidence: {error}"),
+            ));
+            None
         }
     };
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    match crate::ops::default_launch_agents_dir()
+        .and_then(|directory| crate::ops::list_cron_obligations(&directory))
+    {
+        Ok(obligations) => checks.push(check_continuity(
+            events.as_deref().unwrap_or(&[]),
+            &obligations,
+            now,
+        )),
+        Err(error) => checks.push(Check::fail(
+            "continuity",
+            format!("cannot read durable scheduler obligations: {error}"),
+        )),
+    }
+    if let Some(events) = &events {
+        checks.extend([
+            check_attribution(events),
+            check_identity(events),
+            check_lineage(events),
+        ]);
+    }
+    let rows = events.as_ref().map_or(0, Vec::len);
     // Binary freshness remains useful when the store cannot open.
-    checks.extend(check_machine_install(&database_path));
+    checks.extend(check_installation(&database_path));
     checks.push(check_binary_freshness());
     if json {
         println!(
             "{}",
             serde_json::to_string(&DoctorReport {
                 store: store_report,
-                rows: events.len(),
+                rows,
                 checks: &checks,
             })?
         );
     } else {
-        print_checks(&store_report, &checks, events.len());
+        print_checks(&store_report, &checks, rows);
     }
 
     if checks.iter().any(|check| check.status == Status::Fail) {
-        return Err(anyhow!("run ledger audit failed"));
+        return Err(anyhow!("doctor checks failed"));
     }
     Ok(())
 }
 
 const FRESHNESS: &str = "binary-freshness";
 const UPSTREAM: &str = "origin/main";
-const UPSTREAM_REFSPEC: &str = "+refs/heads/main:refs/remotes/origin/main";
 
 /// Report whether the running binary predates merged upstream work.
 fn check_binary_freshness() -> Check {
@@ -164,24 +154,19 @@ fn check_binary_freshness() -> Check {
         );
     };
 
-    if let Err(error) = crate::engine::git::fetch(&repo, "origin", UPSTREAM_REFSPEC) {
-        return Check::warn(
-            FRESHNESS,
-            format!("cannot prove whether the running lf is current: could not refresh {UPSTREAM}: {error}"),
-        );
-    }
-
     match crate::build_info::classify_revision(revision, &repo, UPSTREAM) {
         crate::build_info::BuildFreshness::Current { revision } => Check::ok(
             FRESHNESS,
             format!(
-                "running lf is built from {}, current with {UPSTREAM}",
+                "running lf is built from {}, current with cached {UPSTREAM} (not refreshed)",
                 crate::build_info::short_revision(&revision)
             ),
         ),
         crate::build_info::BuildFreshness::Behind { revision, missing } => {
             let commits = missing
                 .iter()
+                .rev()
+                .take(3)
                 .map(|commit| {
                     format!(
                         "{} {}",
@@ -194,18 +179,17 @@ fn check_binary_freshness() -> Check {
             Check::warn(
                 FRESHNESS,
                 format!(
-                    "running lf is built from {} and is {} merged commit(s) behind {UPSTREAM}, so \
-                     these fixes are not running: {commits}. Rebuilding is an operator action; \
-                     this check installs nothing",
+                    "running lf is built from {} and is {} merged commit(s) behind cached {UPSTREAM} (not refreshed); \
+                     latest merged changes: {commits}. Run `lf install` to install the latest published release",
                     crate::build_info::short_revision(&revision),
                     missing.len(),
                 ),
             )
         }
-        crate::build_info::BuildFreshness::OffMain { revision } => Check::ok(
+        crate::build_info::BuildFreshness::OffMain { revision } => Check::warn(
             FRESHNESS,
             format!(
-                "running lf is built from {}, which is not on {UPSTREAM}; nothing to compare",
+                "running lf is built from {}, which is not on cached {UPSTREAM}; release freshness is unproven",
                 crate::build_info::short_revision(&revision)
             ),
         ),
@@ -242,17 +226,20 @@ fn inspect_store(path: &Path) -> StoreReport {
                     Ok(version) => latest_applied_migration = version,
                     Err(error) => migration_error = Some(error.to_string()),
                 }
-                let validation = match crate::machine_install::selection_for_current_executable() {
-                    Ok(Some(selection))
-                        if selection.source
-                            == crate::machine_install::InstallSource::Development =>
-                    {
-                        crate::store::migrations::validate_installed_development_sqlite(
-                            &connection,
-                            crate::build_info::migration_draft_manifest(),
-                        )
-                    }
-                    _ => crate::store::migrations::validate_sqlite(&connection),
+                let validation = if crate::store::custom_home_selected() {
+                    crate::store::migrations::validate_experimental_sqlite(
+                        &connection,
+                        crate::build_info::migration_draft_manifest(),
+                    )
+                } else {
+                    crate::store::migrations::validate_sqlite(&connection).and_then(|()| {
+                        if let Some(pending) = crate::store::migrations::pending_shared_migration(&connection)? {
+                            return Err(crate::store::StoreError::InvalidData(format!(
+                                "selected database is missing {pending}; run `lf install` to install a published release"
+                            )));
+                        }
+                        Ok(())
+                    })
                 };
                 if let Err(error) = validation {
                     migration_error.get_or_insert_with(|| error.to_string());
@@ -260,6 +247,9 @@ fn inspect_store(path: &Path) -> StoreReport {
             }
             Err(error) => migration_error = Some(error.to_string()),
         }
+    }
+    if !path.exists() {
+        migration_error = Some(format!("selected database {} does not exist; run `lf install` to initialize a published installation", path.display()));
     }
     StoreReport {
         build_provenance: crate::build_info::provenance(),
@@ -278,37 +268,36 @@ fn inspect_store(path: &Path) -> StoreReport {
     }
 }
 
-fn check_machine_install(database_path: &Path) -> Vec<Check> {
-    let root = match crate::machine_install::root() {
+fn check_installation(database_path: &Path) -> Vec<Check> {
+    let root = match crate::installation::root() {
         Ok(root) => root,
         Err(error) => {
             return vec![Check::fail(
                 "install-selection",
-                format!("cannot resolve machine install authority: {error}"),
+                format!("cannot resolve installation authority: {error}"),
             )]
         }
     };
-    match crate::machine_install::read_state(&root) {
-        Ok(crate::machine_install::MachineInstallState::Legacy) => vec![
+    match crate::installation::read_state(&root) {
+        Ok(crate::installation::InstallationState::Legacy) => vec![
             Check::warn(
                 "install-selection",
-                "no versioned machine install receipt; the next promotion will initialize it",
+                "no versioned installation receipt; the next promotion will initialize it",
             ),
             Check::warn(
                 "install-fallback",
-                "published fallback has not been retained by the machine install path yet",
+                "published fallback has not been retained by the installation path yet",
             ),
         ],
-        Ok(crate::machine_install::MachineInstallState::Switching(receipt)) => vec![Check::fail(
+        Ok(crate::installation::InstallationState::Switching(receipt)) => vec![Check::fail(
             "install-switch",
             format!(
                 "install switch {} is unsettled at {:?}; ordinary startup falls back to the prior install — recover or rerun the promotion to finish it",
                 receipt.id, receipt.phase
             ),
         )],
-        Ok(crate::machine_install::MachineInstallState::Settled(active)) => {
-            let selected = crate::machine_install::selection_for_current_executable();
-            let source_artifact = matches!(&selected, Ok(None));
+        Ok(crate::installation::InstallationState::Settled(active)) => {
+            let selected = crate::installation::selection_for_current_executable();
             let selection = match &selected {
                 Ok(Some(selection)) => Check::ok(
                     "install-selection",
@@ -321,7 +310,7 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
                 ),
                 Ok(None) => Check::ok(
                     "install-selection",
-                    "running source artifact is outside the pinned machine installation",
+                    "running source artifact is outside the pinned installation",
                 ),
                 Err(error) => Check::fail("install-selection", error.to_string()),
             };
@@ -330,10 +319,10 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
                     "install-store",
                     format!("running store matches {}", database_path.display()),
                 )
-            } else if source_artifact {
+            } else if crate::store::custom_home_selected() {
                 Check::ok(
                     "install-store",
-                    "source artifact keeps its own isolated store",
+                    "explicit disposable Machine; no upgrade or recovery contract",
                 )
             } else {
                 Check::fail(
@@ -346,19 +335,19 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
                 )
             };
             let mut fallback_roles = vec![
-                crate::machine_install::ArtifactRole::Cli,
-                crate::machine_install::ArtifactRole::Daemon,
+                crate::installation::ArtifactRole::Cli,
+
             ];
             if active
                 .selection
                 .artifact_set
-                .artifact(&crate::machine_install::ArtifactRole::App)
+                .artifact(&crate::installation::ArtifactRole::App)
                 .is_some()
             {
                 fallback_roles.extend([
-                    crate::machine_install::ArtifactRole::App,
-                    crate::machine_install::ArtifactRole::AppHelper("lf".to_string()),
-                    crate::machine_install::ArtifactRole::AppHelper("lfd".to_string()),
+                    crate::installation::ArtifactRole::App,
+                    crate::installation::ArtifactRole::AppHelper("lf".to_string()),
+
                 ]);
             }
             let fallback = match active.published_fallback.verify(&fallback_roles) {
@@ -377,12 +366,12 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
     }
 }
 
-pub fn audit(events: &[RunEventRow]) -> Vec<Check> {
+pub fn audit(events: &[LfProcess]) -> Vec<Check> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     audit_at(events, &[], now)
 }
 
-fn audit_at(events: &[RunEventRow], obligations: &[CronObligation], now: i64) -> Vec<Check> {
+fn audit_at(events: &[LfProcess], obligations: &[CronObligation], now: i64) -> Vec<Check> {
     if events.is_empty() && obligations.is_empty() {
         return vec![Check::warn("continuity", "ledger is empty")];
     }
@@ -391,7 +380,6 @@ fn audit_at(events: &[RunEventRow], obligations: &[CronObligation], now: i64) ->
     }
     vec![
         check_continuity(events, obligations, now),
-        check_vocabulary(events),
         check_attribution(events),
         check_identity(events),
         check_lineage(events),
@@ -404,7 +392,7 @@ struct ExpectedInterval {
     end: i64,
 }
 
-fn check_continuity(events: &[RunEventRow], obligations: &[CronObligation], now: i64) -> Check {
+fn check_continuity(events: &[LfProcess], obligations: &[CronObligation], now: i64) -> Check {
     let gaps = ledger_gap_days(events, now);
     if obligations.is_empty() {
         return Check::ok(
@@ -427,9 +415,8 @@ fn check_continuity(events: &[RunEventRow], obligations: &[CronObligation], now:
         let has_receipt = obligation.receipts.iter().any(|receipt| {
             receipt.source == CronSource::Scheduled
                 && receipt.wave == obligation.wave
-                && receipt.flow == obligation.flow
-                && receipt.target_kind == obligation.target_kind
-                && receipt.home_id == obligation.home_id
+                && receipt.graph == obligation.graph
+                && receipt.machine_id == obligation.machine_id
                 && receipt.schedule == obligation.schedule.expression()
                 && receipt.started_at >= interval.start
                 && receipt.started_at < interval.end
@@ -438,15 +425,29 @@ fn check_continuity(events: &[RunEventRow], obligations: &[CronObligation], now:
             satisfied += 1;
             continue;
         }
+        let wave = if obligation.wave.is_empty() {
+            "''"
+        } else {
+            &obligation.wave
+        };
+        let sync = if obligation.target_kind == crate::ops::CronTargetKind::Repository {
+            "lf cron sync --repo"
+        } else {
+            "lf cron sync"
+        };
         missing.push(format!(
-            "{}/{} on Home {} expected interval {} ({}) has no scheduled receipt; inspect `lf cron history --wave {} --flow {} --days 2`",
+            "{}/{} on Machine {} expected interval {} ({}) has no scheduled receipt; \
+             inspect `lf wave cron history --wave {wave} --graph {} --days 2`; \
+             configured executable {}; inspect log {}; reconcile with `{sync}` from repository {}",
             obligation.wave,
-            obligation.flow,
-            obligation.home_id,
+            obligation.graph,
+            obligation.machine_id,
             format_interval(interval),
             obligation.schedule.expression(),
-            obligation.wave,
-            obligation.flow,
+            obligation.graph,
+            obligation.lf_path.display(),
+            obligation.log_path.display(),
+            obligation.repo.display(),
         ));
     }
 
@@ -467,8 +468,8 @@ fn check_continuity(events: &[RunEventRow], obligations: &[CronObligation], now:
     )
 }
 
-fn ledger_gap_days(events: &[RunEventRow], now: i64) -> Vec<time::Date> {
-    let days: BTreeSet<_> = events.iter().filter_map(|e| day_of(e.ts)).collect();
+fn ledger_gap_days(events: &[LfProcess], now: i64) -> Vec<time::Date> {
+    let days: BTreeSet<_> = events.iter().filter_map(|e| day_of(e.started_at)).collect();
     let (Some(first), Some(last_event_day)) = (days.first(), days.last()) else {
         return Vec::new();
     };
@@ -529,7 +530,16 @@ fn format_gap_dates(gaps: &[&time::Date]) -> String {
 }
 
 fn latest_due_interval(obligation: &CronObligation, now: i64) -> Option<ExpectedInterval> {
-    let start = scheduled_at_or_before(
+    if obligation.schedule.every_minute() {
+        // The current minute's check may not have started; the last full minute counts.
+        let start = now - now.rem_euclid(60) - 60;
+        return (start >= obligation.activated_at).then_some(ExpectedInterval {
+            start,
+            end: start + 120,
+        });
+    }
+    let start = calendar::at_or_before(
+        &Local,
         now,
         obligation.schedule.hour(),
         obligation.schedule.minute(),
@@ -537,46 +547,13 @@ fn latest_due_interval(obligation: &CronObligation, now: i64) -> Option<Expected
     if start < obligation.activated_at {
         return None;
     }
-    let end = scheduled_after(
+    let end = calendar::after(
+        &Local,
         start,
         obligation.schedule.hour(),
         obligation.schedule.minute(),
     )?;
     Some(ExpectedInterval { start, end })
-}
-
-fn scheduled_at_or_before(now: i64, hour: u32, minute: u32) -> Option<i64> {
-    let mut date = Local.timestamp_opt(now, 0).single()?.date_naive();
-    for _ in 0..370 {
-        if let Some(timestamp) = scheduled_on(date, hour, minute) {
-            if timestamp <= now {
-                return Some(timestamp);
-            }
-        }
-        date = date.pred_opt()?;
-    }
-    None
-}
-
-fn scheduled_after(timestamp: i64, hour: u32, minute: u32) -> Option<i64> {
-    let mut date = Local.timestamp_opt(timestamp, 0).single()?.date_naive();
-    for _ in 0..370 {
-        date = date.succ_opt()?;
-        if let Some(next) = scheduled_on(date, hour, minute) {
-            if next > timestamp {
-                return Some(next);
-            }
-        }
-    }
-    None
-}
-
-fn scheduled_on(date: NaiveDate, hour: u32, minute: u32) -> Option<i64> {
-    match Local.with_ymd_and_hms(date.year(), date.month(), date.day(), hour, minute, 0) {
-        LocalResult::Single(value) => Some(value.timestamp()),
-        LocalResult::Ambiguous(first, _) => Some(first.timestamp()),
-        LocalResult::None => None,
-    }
 }
 
 fn format_interval(interval: ExpectedInterval) -> String {
@@ -593,97 +570,58 @@ fn format_local_timestamp(timestamp: i64) -> String {
         .unwrap_or_else(|| timestamp.to_string())
 }
 
-/// A half-landed rename leaves two spellings of one concept, and every query
-/// grouping on it silently drops history.
-fn check_vocabulary(events: &[RunEventRow]) -> Check {
-    let mut unknown: HashMap<String, usize> = HashMap::new();
-    for event in events {
-        if !NODES.contains(&event.node.as_str()) {
-            *unknown.entry(format!("node={}", event.node)).or_default() += 1;
-        }
-        if !EVENTS.contains(&event.event.as_str()) {
-            *unknown.entry(format!("event={}", event.event)).or_default() += 1;
-        }
-    }
-    if unknown.is_empty() {
-        return Check::ok("vocabulary", "node and event values are all known");
-    }
-    let mut parts: Vec<_> = unknown
-        .into_iter()
-        .map(|(value, count)| format!("{value} ({count} rows)"))
-        .collect();
-    parts.sort();
-    Check::fail(
-        "vocabulary",
-        format!("values outside the closed set: {}", parts.join(", ")),
-    )
-}
-
 /// A process may name only one command, and its terminal row names that work.
-fn check_attribution(events: &[RunEventRow]) -> Check {
-    let mut commands: HashMap<&str, HashSet<&str>> = HashMap::new();
-    let mut terminal = 0usize;
-    let mut terminal_unnamed = 0usize;
-
-    for event in events {
-        if let Some(command) = event.command.as_deref() {
-            commands
-                .entry(&event.process_id)
-                .or_default()
-                .insert(command);
-        }
-        if event.node == "run" && event.event != "started" {
-            terminal += 1;
-            if event.command.is_none() && event.flow.is_none() && event.skill.is_none() {
-                terminal_unnamed += 1;
-            }
-        }
+fn check_attribution(events: &[LfProcess]) -> Check {
+    let unnamed = events
+        .iter()
+        .filter(|process| process.completed_at.is_some() && process.command.is_none())
+        .count();
+    if unnamed == 0 {
+        Check::ok("attribution", "every completed Process names its command")
+    } else {
+        Check::fail(
+            "attribution",
+            format!("{unnamed} completed Processes name no command"),
+        )
     }
-
-    let ambiguous = commands.values().filter(|set| set.len() > 1).count();
-    if ambiguous == 0 && terminal_unnamed == 0 {
-        return Check::ok("attribution", "every terminal row names its work");
-    }
-    Check::fail(
-        "attribution",
-        format!(
-            "{ambiguous} process_id(s) carry >1 command; {terminal_unnamed}/{terminal} terminal rows name no command, flow, or skill"
-        ),
-    )
 }
 
-/// Repo identity is the absolute main-repo root, never a basename.
-fn check_identity(events: &[RunEventRow]) -> Check {
-    let repos: HashSet<Option<&str>> = events.iter().map(|event| event.repo.as_deref()).collect();
+/// Processes may be machine-scoped; recorded repositories must be absolute.
+fn check_identity(events: &[LfProcess]) -> Check {
+    let repos: HashSet<&str> = events
+        .iter()
+        .filter_map(|event| event.repo.as_deref())
+        .collect();
+    let unscoped = events.iter().filter(|event| event.repo.is_none()).count();
     let invalid = repos
         .iter()
-        .filter(|repo| repo.is_none_or(|repo| !Path::new(repo).is_absolute()))
+        .filter(|repo| !Path::new(repo).is_absolute())
         .count();
     if invalid == 0 {
         return Check::ok(
             "identity",
-            format!("{} repo value(s), all absolute", repos.len()),
+            format!(
+                "{} repo value(s), all absolute; {unscoped} Process(s) without repository scope",
+                repos.len()
+            ),
         );
     }
     Check::fail(
         "identity",
-        format!(
-            "{invalid}/{} repo value(s) are missing or not absolute",
-            repos.len()
-        ),
+        format!("{invalid}/{} repo value(s) are not absolute", repos.len()),
     )
 }
 
-fn check_lineage(events: &[RunEventRow]) -> Check {
+fn check_lineage(events: &[LfProcess]) -> Check {
     let processes: HashMap<&str, &str> = events
         .iter()
-        .map(|event| (event.process_id.as_str(), event.run_id.as_str()))
+        .map(|event| (event.id.as_str(), event.trace_id.as_str()))
         .collect();
     let dangling: HashSet<&str> = events
         .iter()
         .filter_map(|event| {
-            let parent = event.parent_process_id.as_deref()?;
-            (processes.get(parent).copied() != Some(event.run_id.as_str())).then_some(parent)
+            let parent = event.parent_lf_process_id.as_ref()?.as_str();
+            (processes.get(parent).copied() != Some(event.trace_id.as_str())).then_some(parent)
         })
         .collect();
     if dangling.is_empty() {
@@ -723,7 +661,7 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
     if let Some(error) = &store.migration_error {
         println!("migration error: {error}");
     }
-    println!("ledger: {rows} run events\n");
+    println!("ledger: {rows} Processes\n");
     for check in checks {
         let (mark, color) = match check.status {
             Status::Ok => ("ok  ", colors.green),
@@ -747,11 +685,11 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{audit, check_continuity, inspect_store, latest_due_interval, Status};
-    use crate::durable::{CronReceiptId, HomeId};
+    use crate::durable::{CronReceiptId, MachineId};
     use crate::ops::{
         parse_schedule, CronObligation, CronOutcome, CronReceipt, CronSource, CronTargetKind,
     };
-    use crate::store::RunEventRow;
+    use crate::process::LfProcess;
 
     const DAY: i64 = 86_400;
 
@@ -781,32 +719,36 @@ mod tests {
         assert!(error.contains("latest known"), "{error}");
     }
 
-    fn row(run_id: &str, ts: i64, node: &str, event: &str) -> RunEventRow {
-        RunEventRow {
-            run_id: run_id.to_string(),
-            process_id: run_id.to_string(),
-            parent_process_id: None,
-            seq: 0,
-            ts,
-            repo: Some("/src/loopflow".to_string()),
-            worktree: None,
-            wave: None,
-            node: node.to_string(),
-            event: event.to_string(),
+    fn row(ts: i64, event: &str) -> LfProcess {
+        LfProcess {
+            kind: crate::process::ProcessKind::Lf,
+            agent_session_id: None,
+            os_started_at: None,
+            id: crate::id::LfProcessId::new(),
+            pid: None,
+            trace_id: crate::id::TraceId::new(),
+            parent_lf_process_id: None,
+            via_agent: Some(false),
+            caller_session_id: None,
+            caller_agent_process_id: None,
             command: None,
-            flow: None,
-            skill: None,
-            step_index: None,
+            repo: Some("/src/loopflow".into()),
+            cwd: None,
+            started_at: ts,
+            completed_at: (event != "started").then_some(ts),
+            outcome: (event != "started").then(|| "succeeded".into()),
+            exit_code: None,
+            signal: None,
             error: None,
         }
     }
 
-    fn named(mut row: RunEventRow, command: &str) -> RunEventRow {
+    fn named(mut row: LfProcess, command: &str) -> LfProcess {
         row.command = Some(command.to_string());
         row
     }
 
-    fn status_of(rows: &[RunEventRow], name: &str) -> Status {
+    fn status_of(rows: &[LfProcess], name: &str) -> Status {
         audit(rows)
             .into_iter()
             .find(|check| check.name == name)
@@ -822,12 +764,15 @@ mod tests {
 
     fn obligation(activated_at: i64) -> CronObligation {
         CronObligation {
+            target_kind: CronTargetKind::Graph,
             wave: "infrastructure".to_string(),
-            flow: "telemetry-daily".to_string(),
-            target_kind: CronTargetKind::Flow,
+            graph: "telemetry-daily".to_string(),
             schedule: parse_schedule("0 0 9 * * *").unwrap(),
-            home_id: HomeId::parse("home_11111111111111111111111111111111").unwrap(),
+            machine_id: MachineId::parse("home_11111111111111111111111111111111").unwrap(),
             activated_at,
+            repo: PathBuf::from("/src/loopflow"),
+            lf_path: PathBuf::from("/usr/local/bin/lf"),
+            log_path: PathBuf::from("/src/loopflow/.lf/logs/cron.log"),
             receipts: Vec::new(),
         }
     }
@@ -837,10 +782,11 @@ mod tests {
             schema_version: 1,
             id: CronReceiptId::new(),
             runner_pid: 123,
-            home_id: obligation.home_id.clone(),
+            runner_started_at: None,
+            machine_id: obligation.machine_id.clone(),
             wave: obligation.wave.clone(),
-            flow: obligation.flow.clone(),
-            target_kind: obligation.target_kind,
+            graph: obligation.graph.clone(),
+            target_kind: CronTargetKind::Graph,
             source,
             schedule: obligation.schedule.expression().to_string(),
             repo: PathBuf::from("/src/loopflow"),
@@ -856,26 +802,14 @@ mod tests {
 
     #[test]
     fn august_ledger_gaps_predate_the_durable_cron_obligation() {
-        let mut rows = vec![row(
-            "august-03",
-            timestamp("2026-08-03T12:00:00Z"),
-            "run",
-            "completed",
-        )];
+        let mut rows = vec![row(timestamp("2026-08-03T12:00:00Z"), "completed")];
         for day in 12..=23 {
             rows.push(row(
-                &format!("august-{day}"),
                 timestamp(&format!("2026-08-{day:02}T12:00:00Z")),
-                "run",
                 "completed",
             ));
         }
-        rows.push(row(
-            "august-25",
-            timestamp("2026-08-25T12:00:00Z"),
-            "run",
-            "completed",
-        ));
+        rows.push(row(timestamp("2026-08-25T12:00:00Z"), "completed"));
         let now = timestamp("2026-08-25T23:00:00Z");
         let mut cron = obligation(timestamp("2026-08-22T16:00:00Z"));
         let interval = latest_due_interval(&cron, now).unwrap();
@@ -918,11 +852,14 @@ mod tests {
         assert_eq!(check.status, Status::Fail, "{}", check.detail);
         for expected in [
             "infrastructure/telemetry-daily",
-            "Home home_11111111111111111111111111111111",
+            "Machine home_11111111111111111111111111111111",
             "expected interval [",
             "0 0 9 * * *",
             "has no scheduled receipt",
-            "lf cron history --wave infrastructure --flow telemetry-daily --days 2",
+            "lf wave cron history --wave infrastructure --graph telemetry-daily --days 2",
+            "configured executable /usr/local/bin/lf",
+            "inspect log /src/loopflow/.lf/logs/cron.log",
+            "lf cron sync",
         ] {
             assert!(
                 check.detail.contains(expected),
@@ -930,6 +867,20 @@ mod tests {
                 check.detail
             );
         }
+    }
+
+    #[test]
+    fn repository_schedule_recovery_does_not_require_a_wave() {
+        let now = timestamp("2026-08-23T23:00:00Z");
+        let mut cron = obligation(timestamp("2026-08-20T00:00:00Z"));
+        cron.wave.clear();
+        cron.target_kind = CronTargetKind::Repository;
+        let check = check_continuity(&[], &[cron], now);
+        assert_eq!(check.status, Status::Fail);
+        assert!(check.detail.contains("lf cron sync --repo"));
+        assert!(check
+            .detail
+            .contains("lf wave cron history --wave '' --graph"));
     }
 
     #[test]
@@ -975,18 +926,8 @@ mod tests {
     fn a_later_receipt_restores_the_current_window_without_rewriting_history() {
         let now = timestamp("2026-08-23T23:00:00Z");
         let rows = vec![
-            row(
-                "before-gap",
-                timestamp("2026-08-03T12:00:00Z"),
-                "run",
-                "completed",
-            ),
-            row(
-                "after-gap",
-                timestamp("2026-08-12T12:00:00Z"),
-                "run",
-                "completed",
-            ),
+            row(timestamp("2026-08-03T12:00:00Z"), "completed"),
+            row(timestamp("2026-08-12T12:00:00Z"), "completed"),
         ];
         let original_rows = rows.clone();
         let mut cron = obligation(timestamp("2026-08-20T00:00:00Z"));
@@ -1012,73 +953,39 @@ mod tests {
     }
 
     #[test]
-    fn a_half_landed_rename_is_caught() {
-        // `step` is the pre-054 spelling of `skill`. Both in one ledger means
-        // every query grouping on node silently drops history.
-        let rows = [
-            row("a", DAY, "run", "completed"),
-            row("a", DAY, "step", "completed"),
-        ];
-        assert_eq!(status_of(&rows, "vocabulary"), Status::Fail);
-    }
-
-    #[test]
-    fn one_process_carrying_two_commands_is_unattributable() {
-        let rows = [
-            named(row("shared", DAY, "run", "started"), r#"["lf","wave"]"#),
-            named(row("shared", DAY, "run", "started"), r#"["lf","op","pm"]"#),
-            row("shared", DAY, "run", "completed"),
-        ];
-        let check = audit(&rows)
-            .into_iter()
-            .find(|c| c.name == "attribution")
-            .unwrap();
-        assert_eq!(check.status, Status::Fail);
-        assert!(check.detail.contains("1 process_id"), "{}", check.detail);
-    }
-
-    #[test]
     fn a_terminal_row_that_names_its_work_attributes_cleanly() {
-        let mut terminal = row("a", DAY, "run", "completed");
+        let mut terminal = row(DAY, "completed");
         terminal.command = Some(r#"["lf","code"]"#.to_string());
-        let rows = [
-            named(row("a", DAY, "run", "started"), r#"["lf","code"]"#),
-            terminal,
-        ];
+        let rows = [named(row(DAY, "started"), r#"["lf","code"]"#), terminal];
         assert_eq!(status_of(&rows, "attribution"), Status::Ok);
     }
 
     #[test]
-    fn two_processes_in_one_trace_are_attributable() {
-        let mut parent = named(row("shared", DAY, "run", "completed"), r#"["lf","wave"]"#);
-        parent.process_id = "parent".to_string();
-        let mut child = named(row("shared", DAY, "run", "completed"), r#"["lf","pm"]"#);
-        child.process_id = "child".to_string();
-        child.parent_process_id = Some("parent".to_string());
-        assert_eq!(status_of(&[parent, child], "attribution"), Status::Ok);
+    fn machine_scoped_processes_have_valid_identity() {
+        let mut event = named(row(DAY, "completed"), "lf help");
+        event.repo = None;
+        assert_eq!(status_of(&[event], "identity"), Status::Ok);
     }
 
     #[test]
     fn a_repo_basename_fails_identity() {
-        let mut event = row("a", DAY, "run", "completed");
+        let mut event = row(DAY, "completed");
         event.repo = Some("loopflow".to_string());
         assert_eq!(status_of(&[event], "identity"), Status::Fail);
     }
-
     #[test]
-    fn a_dangling_parent_process_id_fails_the_doctor() {
-        let mut event = row("a", DAY, "run", "completed");
-        event.parent_process_id = Some("missing".to_string());
-        assert_eq!(status_of(&[event], "lineage"), Status::Fail);
-    }
-
-    #[test]
-    fn a_parent_from_another_trace_fails_lineage() {
-        let mut parent = row("trace-a", DAY, "run", "completed");
-        parent.process_id = "parent".to_string();
-        let mut child = row("trace-b", DAY, "run", "completed");
-        child.process_id = "child".to_string();
-        child.parent_process_id = Some("parent".to_string());
-        assert_eq!(status_of(&[parent, child], "lineage"), Status::Fail);
+    fn skill_to_graph_cutover_preserves_firing_but_triggered_receipt_does_not_count() {
+        let now = timestamp("2026-08-23T23:00:00Z");
+        let mut cron = obligation(timestamp("2026-08-20T00:00:00Z"));
+        let interval = latest_due_interval(&cron, now).unwrap();
+        let mut prior = receipt(&cron, interval.start + 60, CronSource::Scheduled);
+        prior.target_kind = CronTargetKind::Skill;
+        cron.receipts.push(prior);
+        assert_eq!(
+            check_continuity(&[], &[cron.clone()], now).status,
+            Status::Ok
+        );
+        cron.receipts[0].source = CronSource::Triggered;
+        assert_eq!(check_continuity(&[], &[cron], now).status, Status::Fail);
     }
 }

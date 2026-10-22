@@ -3,12 +3,305 @@ use std::process::Command;
 use std::time::{Duration, SystemTime};
 use std::{fs, path::PathBuf};
 
-use loopflow::engine::git::{is_clean, worktree_move, worktree_remove};
-use loopflow::engine::worktrees::{
-    create_named_worktree, list_worktrees, list_worktrees_local, prune_worktrees,
-    sibling_worktree_name_with_main, WorktreePrunePolicy,
+use loopflow::git::worktrees::{
+    create_named_worktree, list_worktrees, main_repo_root, plan_placement, prune_worktrees,
+    push_branch_with_upstream, schedule_upstream_sync, sibling_worktree_name_with_main,
+    PlacementStrategy, WorktreePrunePolicy, WorktreeSegment,
 };
+use loopflow::git::{is_clean, origin_branch, worktree_add, worktree_remove, WorktreeBranch};
 use loopflow_test_support::TestRepo;
+
+#[test]
+fn placement_keeps_the_current_repo_prefix_after_renames() {
+    let source = TestRepo::new();
+    let directory = tempfile::tempdir().unwrap();
+    let directory = directory.path().canonicalize().unwrap();
+    let mut repo = directory.join("etude");
+    git_stdout(
+        source.path(),
+        &[
+            "clone",
+            source.path().to_str().unwrap(),
+            repo.to_str().unwrap(),
+        ],
+    );
+    git_stdout(&repo, &["config", "user.name", "Tester"]);
+    git_stdout(&repo, &["config", "user.email", "tester@example.com"]);
+    for name in ["first", "second"] {
+        worktree_add(
+            &repo,
+            &directory.join(format!("etude.{name}")),
+            &format!("teammate/{name}"),
+            WorktreeBranch::New {
+                start_point: "HEAD",
+            },
+        )
+        .unwrap();
+    }
+    let existing = directory.join("etude.first");
+    fs::write(existing.join("unfinished.txt"), "keep this work").unwrap();
+    let home = tempfile::tempdir().unwrap();
+
+    for name in ["fantasia", "manabot"] {
+        let renamed = directory.join(name);
+        fs::rename(&repo, &renamed).unwrap();
+        repo = renamed;
+        git_stdout(&repo, &["worktree", "repair"]);
+        let segment = format!("next-{name}");
+        let expected = directory.join(format!("{name}.{segment}"));
+        for caller in [&repo, &existing] {
+            let plan = plan_placement(caller, WorktreeSegment::parse(&segment).unwrap()).unwrap();
+            assert_eq!(plan.worktree_path, expected);
+        }
+        let output = lf_command(home.path())
+            .current_dir(&existing)
+            .args(["wt", "create", &segment])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(expected.join(".git").is_file());
+
+        // Include bare siblings left by the bug as well as old and new prefixes.
+        let bare = directory.join(format!("research-{name}"));
+        let plan = plan_placement(
+            &repo,
+            WorktreeSegment::parse(&format!("research-{name}")).unwrap(),
+        )
+        .unwrap();
+        worktree_add(
+            &repo,
+            &bare,
+            &plan.branch,
+            WorktreeBranch::New {
+                start_point: "HEAD",
+            },
+        )
+        .unwrap();
+        let reused = plan_placement(
+            &repo,
+            WorktreeSegment::parse(&format!("research-{name}")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(reused.strategy, PlacementStrategy::UseExistingWorktree);
+        assert_eq!(reused.worktree_path, bare);
+    }
+    assert_eq!(
+        fs::read_to_string(existing.join("unfinished.txt")).unwrap(),
+        "keep this work"
+    );
+}
+
+#[test]
+fn placement_follows_existing_layout_without_configuration() {
+    for (prefix, nested) in [("", true), ("project-", false)] {
+        let repo = TestRepo::new();
+        let directory = tempfile::tempdir().unwrap();
+        let directory = if nested {
+            repo.path().canonicalize().unwrap().join(".worktrees")
+        } else {
+            directory.path().canonicalize().unwrap()
+        };
+        for name in ["first", "second"] {
+            worktree_add(
+                repo.path(),
+                &directory.join(format!("{prefix}{name}")),
+                &format!("teammate/{name}"),
+                WorktreeBranch::New {
+                    start_point: "HEAD",
+                },
+            )
+            .unwrap();
+        }
+
+        // Detached and missing checkouts elsewhere are not layout examples.
+        let other = tempfile::tempdir().unwrap();
+        git_stdout(
+            repo.path(),
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                other.path().join("detached").to_str().unwrap(),
+            ],
+        );
+        let missing = other.path().join("missing");
+        worktree_add(
+            repo.path(),
+            &missing,
+            "missing",
+            WorktreeBranch::New {
+                start_point: "HEAD",
+            },
+        )
+        .unwrap();
+        fs::remove_dir_all(&missing).unwrap();
+
+        let plan = plan_placement(repo.path(), WorktreeSegment::parse("next").unwrap()).unwrap();
+        assert_eq!(plan.worktree_path, directory.join("next"));
+        let created = create_named_worktree(repo.path(), "next", None, &|_| {}).unwrap();
+        assert_eq!(created.path, plan.worktree_path);
+        let reused =
+            plan_placement(&created.path, WorktreeSegment::parse("next").unwrap()).unwrap();
+        assert_eq!(reused.strategy, PlacementStrategy::UseExistingWorktree);
+        assert_eq!(reused.worktree_path, created.path);
+
+        let home = tempfile::tempdir().unwrap();
+        let output = lf_command(home.path())
+            .current_dir(repo.path())
+            .args(["wt", "create", "cli-example"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(directory.join("cli-example").join(".git").is_file());
+        let output = lf_command(home.path())
+            .current_dir(repo.path())
+            .args(["wt", "switch", "next"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains(created.path.to_str().unwrap()));
+        assert!(list_worktrees(repo.path())
+            .unwrap()
+            .iter()
+            .any(|wt| wt.path == created.path));
+    }
+}
+
+#[test]
+fn placement_uses_host_directory_independently_of_branch_names() {
+    // Official host path conventions; these prove filesystem compatibility,
+    // not registration or setup in the host application.
+    for examples in [
+        [("warsaw", "alice/fix-login"), ("tokyo", "bob/add-search")],
+        [
+            ("feature-login", "feature/login"),
+            ("fix-search", "fix/search"),
+        ],
+        [("login", "worktree-login"), ("search", "worktree-search")],
+    ] {
+        let repo = TestRepo::new();
+        let directory = tempfile::tempdir().unwrap();
+        let directory = directory.path().canonicalize().unwrap();
+        for (folder, branch) in examples {
+            worktree_add(
+                repo.path(),
+                &directory.join(folder),
+                branch,
+                WorktreeBranch::New {
+                    start_point: "HEAD",
+                },
+            )
+            .unwrap();
+        }
+        let plan = plan_placement(repo.path(), WorktreeSegment::parse("next").unwrap()).unwrap();
+        assert_eq!(plan.worktree_path, directory.join("next"));
+        let created = create_named_worktree(repo.path(), "next", None, &|_| {}).unwrap();
+        assert_eq!(created.path, plan.worktree_path);
+    }
+}
+
+#[test]
+fn failed_checkout_hook_reports_failure_and_preserves_the_checkout() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = TestRepo::new();
+    let hook = repo.path().join(".git/hooks/post-checkout");
+    fs::write(
+        &hook,
+        "#!/bin/sh\necho 'dependency setup failed' >&2\nexit 1\n",
+    )
+    .unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let checkout = directory.path().join("kept");
+    let error = worktree_add(
+        repo.path(),
+        &checkout,
+        "kept",
+        WorktreeBranch::New {
+            start_point: "HEAD",
+        },
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("dependency setup failed"), "{error}");
+    assert!(error.contains("Checkout retained"), "{error}");
+    assert!(checkout.join(".git").is_file());
+    assert_eq!(git_stdout(&checkout, &["branch", "--show-current"]), "kept");
+}
+
+#[test]
+fn placement_defaults_for_isolated_or_conflicting_examples_and_reuses_existing_work() {
+    let repo = TestRepo::new();
+    let segment = || WorktreeSegment::parse("next").unwrap();
+    let default = plan_placement(repo.path(), segment())
+        .unwrap()
+        .worktree_path;
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    for (directory, name) in [(first.path(), "one"), (second.path(), "two")] {
+        worktree_add(
+            repo.path(),
+            &directory.join(name),
+            &format!("teammate/{name}"),
+            WorktreeBranch::New {
+                start_point: "HEAD",
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            plan_placement(repo.path(), segment())
+                .unwrap()
+                .worktree_path,
+            default
+        );
+    }
+    let plan = plan_placement(repo.path(), segment()).unwrap();
+    let existing = first
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("arbitrary-location");
+    worktree_add(
+        repo.path(),
+        &existing,
+        &plan.branch,
+        WorktreeBranch::New {
+            start_point: "HEAD",
+        },
+    )
+    .unwrap();
+    fs::write(existing.join("unfinished.txt"), "keep this work").unwrap();
+    let reused = plan_placement(repo.path(), segment()).unwrap();
+    assert_eq!(reused.strategy, PlacementStrategy::UseExistingWorktree);
+    assert_eq!(reused.worktree_path, existing);
+    assert_eq!(
+        fs::read_to_string(existing.join("unfinished.txt")).unwrap(),
+        "keep this work"
+    );
+}
+
+fn lf_command(home: &std::path::Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    command
+        .env_clear()
+        .env("HOME", home)
+        .env("LF_HOME", home)
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("PATH", std::env::var_os("PATH").unwrap());
+    command
+}
 
 fn git_stdout(repo: &std::path::Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -51,7 +344,7 @@ fn commit_worktree_at_age(path: &std::path::Path, age: Duration) {
 #[test]
 fn worktree_add_creates_directory() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, &|_| {}).expect("create");
     assert!(result.path.exists());
     assert!(
         result.branch.contains("feature"),
@@ -63,7 +356,7 @@ fn worktree_add_creates_directory() {
 #[test]
 fn worktree_add_is_on_correct_branch() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, &|_| {}).expect("create");
 
     let output = Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -75,9 +368,63 @@ fn worktree_add_is_on_correct_branch() {
 }
 
 #[test]
+fn new_branches_never_track_their_main_or_stack_base() {
+    let repo = TestRepo::new();
+    git_stdout(repo.path(), &["branch", "parent"]);
+    git_stdout(repo.path(), &["push", "origin", "parent"]);
+    // Even an explicit user preference for inherited tracking cannot turn a
+    // Task's base into its upstream.
+    git_stdout(repo.path(), &["config", "branch.autoSetupMerge", "always"]);
+    let trees = tempfile::tempdir().unwrap();
+    for base in ["main", "parent"] {
+        let branch = format!("child-of-{base}");
+        let path = trees.path().join(&branch);
+        worktree_add(
+            repo.path(),
+            &path,
+            &branch,
+            WorktreeBranch::New {
+                start_point: &format!("origin/{base}"),
+            },
+        )
+        .unwrap();
+        assert_eq!(origin_branch(&path).unwrap(), None);
+        push_branch_with_upstream(&path, &branch).unwrap();
+        assert_eq!(
+            origin_branch(&path).unwrap().as_deref(),
+            Some(branch.as_str())
+        );
+        assert_eq!(
+            git_stdout(&path, &["rev-parse", "HEAD"]),
+            git_stdout(repo.path(), &["rev-parse", &format!("origin/{base}")])
+        );
+    }
+}
+
+#[test]
+fn upstream_sync_replaces_base_tracking_with_the_own_remote_branch() {
+    let repo = TestRepo::new();
+    repo.create_branch("child");
+    git_stdout(repo.path(), &["branch", "--set-upstream-to", "origin/main"]);
+    schedule_upstream_sync(repo.path().to_path_buf(), "child".to_string());
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while origin_branch(repo.path()).unwrap().as_deref() != Some("child") {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "own upstream was not published"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        git_stdout(repo.path(), &["rev-parse", "origin/child"]),
+        repo.head_sha()
+    );
+}
+
+#[test]
 fn worktree_remove_deletes_directory() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, &|_| {}).expect("create");
     worktree_remove(repo.path(), &result.path).expect("remove");
     assert!(!result.path.exists());
 }
@@ -85,7 +432,7 @@ fn worktree_remove_deletes_directory() {
 #[test]
 fn worktree_list_includes_created() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, &|_| {}).expect("create");
     let worktrees = list_worktrees(repo.path()).expect("list");
     assert!(worktrees
         .iter()
@@ -108,7 +455,7 @@ fn worktree_list_preserves_namespaced_upstream_branch() {
         &["branch", "--set-upstream-to", "origin/jack/parent"],
     );
 
-    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let states = list_worktrees(repo.path()).expect("list");
     let child = states
         .iter()
         .find(|wt| wt.branch.as_deref() == Some("jack/child"))
@@ -119,7 +466,7 @@ fn worktree_list_preserves_namespaced_upstream_branch() {
 #[test]
 fn worktree_state_detects_dirty() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, &|_| {}).expect("create");
     std::fs::write(result.path.join("dirty.txt"), "dirty").expect("write");
     assert!(!is_clean(&result.path).expect("is_clean"));
 }
@@ -216,85 +563,61 @@ fn manual_prune_removes_recent_remote_gone_branch() {
 }
 
 #[test]
-fn worktree_move_preserves_content() {
+fn create_named_worktree_preserves_caller_and_uses_selected_source() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
-    let file_path = result.path.join("note.txt");
-    std::fs::write(&file_path, "content").expect("write");
-
-    let new_path = result.path.with_extension("moved");
-    worktree_move(repo.path(), &result.path, &new_path).expect("move");
-
-    assert!(!result.path.exists());
-    assert!(new_path.exists());
-    assert!(new_path.join("note.txt").exists());
-}
-
-#[test]
-fn create_named_worktree_synced_updates_main_before_creation() {
-    let repo = TestRepo::new();
-    let original_head = git_stdout(repo.path(), &["rev-parse", "HEAD"]);
-
     let clone_dir = tempfile::TempDir::new().expect("temp clone dir");
-    let status = Command::new("git")
-        .args([
+    git_stdout(
+        repo.path(),
+        &[
             "clone",
             repo.bare_path().to_str().expect("remote path"),
             clone_dir.path().to_str().expect("clone path"),
-        ])
-        .status()
-        .expect("clone remote");
-    assert!(status.success(), "clone should succeed");
-    let status = Command::new("git")
-        .args(["config", "user.email", "test@test.com"])
-        .current_dir(clone_dir.path())
-        .status()
-        .expect("set email");
-    assert!(status.success(), "git config user.email should succeed");
-    let status = Command::new("git")
-        .args(["config", "user.name", "test"])
-        .current_dir(clone_dir.path())
-        .status()
-        .expect("set name");
-    assert!(status.success(), "git config user.name should succeed");
-    std::fs::write(clone_dir.path().join("remote.txt"), "remote update").expect("write file");
-    let status = Command::new("git")
-        .args(["add", "."])
-        .current_dir(clone_dir.path())
-        .status()
-        .expect("git add");
-    assert!(status.success(), "git add should succeed");
-    let status = Command::new("git")
-        .args(["commit", "-m", "remote update"])
-        .current_dir(clone_dir.path())
-        .status()
-        .expect("git commit");
-    assert!(status.success(), "git commit should succeed");
-    let status = Command::new("git")
-        .args(["push", "origin", "main"])
-        .current_dir(clone_dir.path())
-        .status()
-        .expect("git push");
-    assert!(status.success(), "git push should succeed");
+        ],
+    );
+    git_stdout(clone_dir.path(), &["config", "user.email", "test@test.com"]);
+    git_stdout(clone_dir.path(), &["config", "user.name", "test"]);
+    fs::write(clone_dir.path().join("remote.txt"), "remote update").unwrap();
+    git_stdout(clone_dir.path(), &["add", "."]);
+    git_stdout(clone_dir.path(), &["commit", "-m", "remote update"]);
+    git_stdout(clone_dir.path(), &["push", "origin", "main"]);
+    git_stdout(repo.path(), &["fetch", "origin"]);
+    let source = git_stdout(repo.path(), &["rev-parse", "origin/main"]);
 
-    let _ = create_named_worktree(repo.path(), "sync-check", None, true).expect("create");
+    fs::write(repo.path().join("local.txt"), "unpublished work").unwrap();
+    git_stdout(repo.path(), &["add", "local.txt"]);
+    git_stdout(repo.path(), &["commit", "-m", "local work"]);
+    let caller_head = git_stdout(repo.path(), &["rev-parse", "HEAD"]);
+    let caller_branch = git_stdout(repo.path(), &["branch", "--show-current"]);
+    fs::write(repo.path().join("local.txt"), "staged work").unwrap();
+    git_stdout(repo.path(), &["add", "local.txt"]);
+    fs::write(repo.path().join("local.txt"), "unstaged work").unwrap();
+    fs::write(repo.path().join("untracked.txt"), "untracked work").unwrap();
+    let index = fs::read(repo.path().join(".git/index")).unwrap();
 
-    let updated_head = git_stdout(repo.path(), &["rev-parse", "HEAD"]);
-    let origin_head = git_stdout(repo.path(), &["rev-parse", "origin/main"]);
-    assert_ne!(
-        original_head, updated_head,
-        "main head should advance after sync"
+    let selected = create_named_worktree(repo.path(), "selected", Some(&source), &|_| {}).unwrap();
+    let local = create_named_worktree(repo.path(), "local", None, &|_| {}).unwrap();
+    assert_eq!(git_stdout(&selected.path, &["rev-parse", "HEAD"]), source);
+    assert_eq!(git_stdout(&local.path, &["rev-parse", "HEAD"]), caller_head);
+    assert_eq!(git_stdout(repo.path(), &["rev-parse", "HEAD"]), caller_head);
+    assert_eq!(
+        git_stdout(repo.path(), &["branch", "--show-current"]),
+        caller_branch
+    );
+    assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("local.txt")).unwrap(),
+        "unstaged work"
     );
     assert_eq!(
-        updated_head, origin_head,
-        "main should be reset to origin/main before worktree creation"
+        fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
+        "untracked work"
     );
 }
 
 #[test]
 fn wt_switch_finds_worktree_by_sibling_name() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "docs", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "docs", None, &|_| {}).expect("create");
 
     let worktrees = list_worktrees(repo.path()).expect("list");
     let name = sibling_worktree_name_with_main(&result.path, repo.path()).expect("sibling name");
@@ -327,7 +650,8 @@ fn wt_switch_prefers_exact_branch_match_over_sibling_name() {
     add_worktree(repo.path(), &sibling_path, other_branch);
 
     let directive_path = repo.path().join("directive.txt");
-    let status = Command::new(env!("CARGO_BIN_EXE_lf"))
+    let home = tempfile::tempdir().unwrap();
+    let status = lf_command(home.path())
         .args(["wt", "switch", exact_branch])
         .current_dir(repo.path())
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
@@ -359,7 +683,8 @@ fn wt_switch_finds_exact_branch_match() {
     add_worktree(repo.path(), &feature_path, "jack/feature");
 
     let directive_path = repo.path().join("directive.txt");
-    let status = Command::new(env!("CARGO_BIN_EXE_lf"))
+    let home = tempfile::tempdir().unwrap();
+    let status = lf_command(home.path())
         .args(["wt", "switch", "jack/feature"])
         .current_dir(repo.path())
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
@@ -397,7 +722,8 @@ fn wt_switch_does_not_map_branch_name_to_unrelated_worktree_path() {
         .expect("git branch");
     assert!(status.success(), "git branch should succeed");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+    let home = tempfile::tempdir().unwrap();
+    let output = lf_command(home.path())
         .args(["wt", "switch", "jack/feature"])
         .current_dir(repo.path())
         .output()
@@ -452,11 +778,11 @@ fn nested_worktree_not_recognized_as_wave() {
 fn branch_at_main_not_detected_as_squash_merged() {
     let repo = TestRepo::new();
     // Create a worktree whose branch points to the same commit as main.
-    let result = create_named_worktree(repo.path(), "fresh", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "fresh", None, &|_| {}).expect("create");
     // Make the worktree dirty (simulates lf ingest writing to scratch/).
     std::fs::write(result.path.join("scratch.txt"), "notes").expect("write");
 
-    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let states = list_worktrees(repo.path()).expect("list");
     let wt = states
         .iter()
         .find(|wt| wt.branch.as_deref() == Some(&result.branch))
@@ -475,9 +801,9 @@ fn branch_at_main_not_detected_as_squash_merged() {
 #[test]
 fn fresh_worktree_is_identified() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "newwave", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "newwave", None, &|_| {}).expect("create");
 
-    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let states = list_worktrees(repo.path()).expect("list");
     let wt = states
         .iter()
         .find(|wt| wt.branch.as_deref() == Some(&result.branch))
@@ -490,10 +816,10 @@ fn fresh_worktree_is_identified() {
 #[test]
 fn fresh_dirty_worktree_is_identified() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "wip", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "wip", None, &|_| {}).expect("create");
     std::fs::write(result.path.join("work.txt"), "in progress").expect("write");
 
-    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let states = list_worktrees(repo.path()).expect("list");
     let wt = states
         .iter()
         .find(|wt| wt.branch.as_deref() == Some(&result.branch))
@@ -506,12 +832,12 @@ fn fresh_dirty_worktree_is_identified() {
 #[test]
 fn worktree_with_commits_is_active_not_fresh() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "active", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "active", None, &|_| {}).expect("create");
     std::fs::write(result.path.join("feature.txt"), "work").expect("write");
     git_stdout(&result.path, &["add", "."]);
     git_stdout(&result.path, &["commit", "-m", "feature work"]);
 
-    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let states = list_worktrees(repo.path()).expect("list");
     let wt = states
         .iter()
         .find(|wt| wt.branch.as_deref() == Some(&result.branch))
@@ -526,7 +852,7 @@ fn branch_from_squash_merged_parent_stays_fresh() {
     let repo = TestRepo::new();
 
     let landed =
-        create_named_worktree(repo.path(), "rules-old", None, false).expect("create landed");
+        create_named_worktree(repo.path(), "rules-old", None, &|_| {}).expect("create landed");
     std::fs::write(landed.path.join("rules.txt"), "rule").expect("write");
     git_stdout(&landed.path, &["add", "."]);
     git_stdout(&landed.path, &["commit", "-m", "add rule"]);
@@ -541,11 +867,11 @@ fn branch_from_squash_merged_parent_stays_fresh() {
         repo.path(),
         "rules-new",
         Some(landed.branch.as_str()),
-        false,
+        &|_| {},
     )
     .expect("create fresh from landed");
 
-    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let states = list_worktrees(repo.path()).expect("list");
     let wt = states
         .iter()
         .find(|wt| wt.branch.as_deref() == Some(&fresh.branch))
@@ -580,7 +906,8 @@ fn repo_state(path: &std::path::Path) -> Vec<String> {
 fn run_wt_list(repo: &TestRepo, extra: &[&str]) -> std::process::Output {
     let mut args = vec!["wt", "list"];
     args.extend_from_slice(extra);
-    Command::new(env!("CARGO_BIN_EXE_lf"))
+    let home = tempfile::tempdir().unwrap();
+    lf_command(home.path())
         .args(&args)
         .current_dir(repo.path())
         .env("LOOPFLOW_DIRECTIVE_FILE", repo.path().join("directive.txt"))
@@ -654,4 +981,174 @@ fn wt_list_sync_flag_owns_the_fast_forward() {
         upstream,
         "--sync explicitly fetches and fast-forwards main to origin/main"
     );
+}
+
+#[test]
+fn placement_resolves_separate_git_directory_and_linked_subdirectory() {
+    let repo = TestRepo::new();
+    let metadata = tempfile::tempdir().unwrap();
+    let git_dir = metadata.path().join("repository.git");
+    git_stdout(
+        repo.path(),
+        &["init", "--separate-git-dir", git_dir.to_str().unwrap()],
+    );
+    let root = repo.path().canonicalize().unwrap();
+    assert_eq!(main_repo_root(repo.path()).unwrap(), root);
+    let checkout_root = tempfile::tempdir().unwrap();
+    let checkout = checkout_root.path().join("linked");
+    worktree_add(
+        repo.path(),
+        &checkout,
+        "linked",
+        WorktreeBranch::New {
+            start_point: "HEAD",
+        },
+    )
+    .unwrap();
+    fs::create_dir(checkout.join("nested")).unwrap();
+    // Git does not retain a backlink to a separate primary checkout. Use the
+    // registered working checkout, never the metadata directory's parent.
+    let linked_root = checkout.canonicalize().unwrap();
+    assert_eq!(
+        main_repo_root(&checkout.join("nested")).unwrap(),
+        linked_root
+    );
+    let alias = checkout_root.path().join("alias");
+    std::os::unix::fs::symlink(&checkout, &alias).unwrap();
+    assert_eq!(main_repo_root(&alias).unwrap(), linked_root);
+    assert!(plan_placement(&alias, WorktreeSegment::parse("next").unwrap()).is_ok());
+}
+
+#[test]
+fn bare_repository_placement_uses_a_working_checkout_not_metadata_parent() {
+    let repo = TestRepo::new();
+    let directory = tempfile::tempdir().unwrap();
+    let main = directory.path().join("main");
+    worktree_add(repo.bare_path(), &main, "main", WorktreeBranch::Existing).unwrap();
+    assert_eq!(main_repo_root(&main).unwrap(), main.canonicalize().unwrap());
+    let created = create_named_worktree(&main, "next", None, &|_| {}).unwrap();
+    assert!(created.path.join(".git").is_file());
+    assert_ne!(created.path.parent(), repo.bare_path().parent());
+}
+
+#[test]
+fn cli_creates_from_local_master_without_a_remote_or_lf_config() {
+    let repo = TestRepo::new();
+    git_stdout(repo.path(), &["remote", "remove", "origin"]);
+    git_stdout(repo.path(), &["branch", "-m", "master"]);
+    let home = tempfile::tempdir().unwrap();
+    let plan = lf_command(home.path())
+        .current_dir(repo.path())
+        .args(["wt", "create", "local", "--plan"])
+        .output()
+        .unwrap();
+    assert!(
+        plan.status.success(),
+        "{}",
+        String::from_utf8_lossy(&plan.stderr)
+    );
+    let plan = String::from_utf8(plan.stdout).unwrap();
+    assert!(plan.contains("base: master"), "{plan}");
+    let path = PathBuf::from(
+        plan.lines()
+            .find_map(|line| line.strip_prefix("worktree: "))
+            .unwrap(),
+    );
+    let created = lf_command(home.path())
+        .current_dir(repo.path())
+        .args(["wt", "create", "local"])
+        .output()
+        .unwrap();
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    assert_eq!(git_stdout(&path, &["rev-parse", "HEAD"]), repo.head_sha());
+    assert!(!repo.path().join(".lf/config.yaml").exists());
+}
+
+#[test]
+fn cli_reuses_dirty_worktree_when_origin_is_unavailable() {
+    let repo = TestRepo::new();
+    let created = create_named_worktree(repo.path(), "existing", None, &|_| {}).unwrap();
+    fs::write(created.path.join("unfinished.txt"), "keep my work").unwrap();
+    git_stdout(
+        repo.path(),
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "/nonexistent/lf-demo-remote.git",
+        ],
+    );
+    let home = tempfile::tempdir().unwrap();
+    let result = lf_command(home.path())
+        .current_dir(repo.path())
+        .args(["wt", "create", "existing"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.stdout).contains("Using existing worktree:"));
+    assert_eq!(
+        fs::read_to_string(created.path.join("unfinished.txt")).unwrap(),
+        "keep my work"
+    );
+    assert_eq!(list_worktrees(repo.path()).unwrap().len(), 2);
+}
+
+#[test]
+fn cli_creation_follows_named_remote_default_and_its_tracking_branch() {
+    let repo = TestRepo::new();
+    git_stdout(repo.path(), &["remote", "rename", "origin", "team"]);
+    git_stdout(repo.path(), &["branch", "-m", "trunk"]);
+    git_stdout(repo.path(), &["push", "-u", "team", "trunk"]);
+    git_stdout(repo.path(), &["remote", "set-head", "team", "trunk"]);
+    let remote_writer = tempfile::tempdir().unwrap();
+    git_stdout(
+        repo.path(),
+        &[
+            "clone",
+            "--branch",
+            "trunk",
+            repo.bare_path().to_str().unwrap(),
+            remote_writer.path().to_str().unwrap(),
+        ],
+    );
+    git_stdout(remote_writer.path(), &["config", "user.name", "Fixture"]);
+    git_stdout(
+        remote_writer.path(),
+        &["config", "user.email", "fixture@example.invalid"],
+    );
+    fs::write(remote_writer.path().join("remote.txt"), "new upstream work").unwrap();
+    git_stdout(remote_writer.path(), &["add", "remote.txt"]);
+    git_stdout(remote_writer.path(), &["commit", "-m", "remote work"]);
+    git_stdout(remote_writer.path(), &["push", "origin", "trunk"]);
+    let expected = git_stdout(remote_writer.path(), &["rev-parse", "HEAD"]);
+    let home = tempfile::tempdir().unwrap();
+    let result = lf_command(home.path())
+        .current_dir(repo.path())
+        .args(["wt", "create", "next"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(repo.head_sha(), expected, "refresh must follow team/trunk");
+    let states = list_worktrees(repo.path()).unwrap();
+    let next = states
+        .iter()
+        .find(|wt| {
+            wt.branch
+                .as_deref()
+                .is_some_and(|branch| branch.ends_with("/next"))
+        })
+        .unwrap();
+    assert_eq!(git_stdout(&next.path, &["rev-parse", "HEAD"]), expected);
 }

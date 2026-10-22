@@ -1,60 +1,46 @@
+use std::sync::Arc;
+
 use crate::durable::TaskId;
 use crate::id::WaveId;
-use crate::work::chapter::{Chapter, ChapterId, TaskStartEvidence};
-use crate::work::project::ProjectId;
+use crate::ops::chapter::TaskStartEvidence;
 
-use super::{run_sqlite, Store, StoreResult};
+use super::{run_planning_write, run_sqlite, PlanningLocks, Store, StoreResult};
 
 impl Store {
-    pub async fn chapter(
+    pub async fn projects_pending_adoption(
         &self,
         wave: &WaveId,
-        id: Option<&ChapterId>,
-    ) -> StoreResult<Option<Chapter>> {
+    ) -> StoreResult<Vec<(String, i64)>> {
         let wave = wave.clone();
-        let id = id.cloned();
-        run_sqlite(&self.sqlite, move |store| store.chapter(&wave, id.as_ref())).await
-    }
-
-    pub async fn chapters(&self, wave: &WaveId) -> StoreResult<Vec<Chapter>> {
-        let wave = wave.clone();
-        run_sqlite(&self.sqlite, move |store| store.chapters(&wave)).await
-    }
-
-    pub async fn save_chapter(&self, chapter: &Chapter, activate: bool) -> StoreResult<()> {
-        let chapter = chapter.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.save_chapter(&chapter, activate)
+            store.projects_pending_adoption(&wave)
         })
         .await
     }
 
-    pub async fn move_chapter_task(&self, task: &TaskId, project: &ProjectId) -> StoreResult<()> {
-        let task = task.clone();
-        let project = project.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.move_chapter_task(&task, &project)
+    pub async fn finish_project_adoption(
+        &self,
+        wave: &WaveId,
+        project: &str,
+        acquisition: Arc<PlanningLocks>,
+    ) -> StoreResult<()> {
+        let wave = wave.clone();
+        let project = project.to_owned();
+        run_planning_write(&self.sqlite, Some(acquisition), move |store| {
+            store.finish_project_adoption(&wave, &project)
         })
         .await
     }
 
-    pub async fn task_started(&self, task: &TaskId) -> StoreResult<bool> {
+    pub async fn task_owned(&self, task: &TaskId) -> StoreResult<bool> {
         let task = task.clone();
-        run_sqlite(&self.sqlite, move |store| store.task_started(&task)).await
+        run_sqlite(&self.sqlite, move |store| store.task_owned(&task)).await
     }
 
     pub async fn chapter_task_evidence(&self, task: &TaskId) -> StoreResult<TaskStartEvidence> {
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.chapter_task_evidence(&task)
-        })
-        .await
-    }
-
-    pub async fn retire_chapter_backlog(&self, task: &TaskId) -> StoreResult<bool> {
-        let task = task.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.retire_chapter_backlog(&task)
         })
         .await
     }

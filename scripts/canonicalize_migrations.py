@@ -5,19 +5,22 @@
     uv run python scripts/canonicalize_migrations.py 0.12.2 --check
 
 The release cut is the single publication boundary that turns drafts into
-canonical migrations. `lf release run` invokes this inside its release worktree,
+canonical migrations. `lf repo release run` invokes this inside its release worktree,
 after the version bump and before the commit, so the generated files are part of
 the release PR and run under real Rust CI before the queue merges and tags. It:
 
-  1. reads every `rust/loopflow/src/store/migrations/drafts/<name>__<id>.sql`;
-  2. rejects missing, cyclic, or self dependencies, and two drafts that share a
-     readable name in the same cut;
+  1. reads every `rust/loopflow/src/store/migrations/drafts/<name>.sql`;
+  2. rejects missing, cyclic, or self dependencies;
   3. topologically orders the set (dependency edges, ties broken by name), a
      total order that does not depend on merge timing, PR number, or wall clock;
-  4. concatenates the ordered SQL into the release's single canonical
-     `<major>.<minor>.<patch>.001_release.sql` batch, retaining `-- draft:`
+  4. concatenates the ordered SQL into one canonical
+     `<major>.<minor>.<patch>.<ordinal>_release.sql` batch, retaining `-- draft:`
      provenance markers;
-  5. installs the batch *atomically*: it plans everything in memory first, then
+  5. records the batch's reader floor — the oldest lf that can still open the
+     store. It stays put when every draft is proven additive and rises to this
+     release otherwise; the cut then writes `lf < X can no longer open the store`
+     to `release/unreleased/BREAKING.md` for the release notes and PR title;
+  6. installs the batch *atomically*: it plans everything in memory first, then
      writes the canonical file, replaces the MIGRATIONS registry, and deletes
      the drafts — and on any failure restores the tree byte-for-byte.
 
@@ -25,8 +28,8 @@ A dependency may name another draft in the cut or an already-released migration
 (a released upstream is an ancestor of the whole cut, so it imposes no in-cut
 ordering). Deterministic and retry-safe: the same draft set and version always
 produce the same ids, files, and diff, so an aborted release regenerates
-identically. The draft id is authoring-time identity only; it never appears in
-canonical output. An empty draft set is a no-op.
+identically. Corrections append a batch at the next ordinal in the same version;
+earlier canonical bytes remain immutable. An empty draft set is a no-op.
 
 Writing requires explicit release-cut authority. CI may materialize the same tree
 in its disposable checkout with `--materialize-for-tests`; when the active
@@ -40,6 +43,7 @@ from __future__ import annotations
 
 import os
 import re
+import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -47,21 +51,24 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
 DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
-MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migrations.rs"
+MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migration_catalog.rs"
 PACKAGE_MANIFEST = REPO_ROOT / "Cargo.toml"
+BREAKING_NOTE = REPO_ROOT / "release/unreleased/BREAKING.md"
 MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(?:(\d+)\.)?(\d{3})_([a-z0-9_]+)\.sql$")
-# `<name>__<id>.sql`; the readable name never contains `__`, so the last `__`
-# separates it from the immutable 128-bit token (32 hex chars).
-DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]{32})\.sql$")
-DRAFT_ID = re.compile(r"^[0-9a-f]{32}$")
+# `<name>.sql`; the filename is the draft's identity.
+DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)\.sql$")
 # `[ \t]` rather than `\s`: `\s` matches newlines, so an empty `-- depends_on:`
 # value would swallow the newline and capture the next SQL line.
-DRAFT_HEADER_NAME = re.compile(r"^--[ \t]*name:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
-DRAFT_HEADER_ID = re.compile(r"^--[ \t]*id:[ \t]*(.*)$", re.MULTILINE)
 DRAFT_HEADER_DEPENDS = re.compile(r"^--[ \t]*depends_on:[ \t]*(.*)$", re.MULTILINE)
-HEADER_LINE = re.compile(r"^--[ \t]*(name|id|depends_on):")
+HEADER_LINE = re.compile(r"^--[ \t]*depends_on:")
 DRAFT_MARKER = re.compile(r"^--[ \t]*draft:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
 VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+DRAFT_BREAKS = re.compile(r"^--[ \t]*breaks:", re.MULTILINE)
+SQL_TOKEN = re.compile(
+    r"--[^\n]*|/\*.*?\*/|'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|`(?:``|[^`])*`|\[[^]]*\]|[(),]|[^\s(),]+",
+    re.DOTALL,
+)
+TABLE_CONSTRAINT = re.compile(r"(?i)^(CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN)\b")
 
 
 class Draft:
@@ -99,7 +106,7 @@ def _released_names() -> set[str]:
 
 
 def _draft_body(text: str) -> str:
-    """The draft's SQL with its `-- name:` / `-- id:` / `-- depends_on:` header stripped."""
+    """The draft's SQL with its `-- depends_on:` header stripped."""
     body = "\n".join(line for line in text.splitlines() if not HEADER_LINE.match(line))
     body = body.strip("\n")
     return body + "\n" if body else ""
@@ -116,38 +123,14 @@ def _read_drafts() -> list[Draft]:
         if not match:
             _draft_fail(
                 "invalid_filename",
-                f"draft {path.name} is not `<snake_case_name>__<id>.sql` "
-                "— run scripts/new_migration.py"
+                f"draft {path.name} is not `<snake_case_name>.sql` — run scripts/new_migration.py",
             )
-        name, file_id = match.group(1), match.group(2)
+        name = match.group(1)
         text = path.read_text()
         if DRAFT_MARKER.search(text):
             _draft_fail(
                 "reserved_marker",
                 f"draft {path.name} uses reserved `-- draft:` release provenance",
-            )
-        header = DRAFT_HEADER_NAME.search(text)
-        if not header:
-            _draft_fail("missing_name", f"draft {path.name} has no `-- name:` header")
-        if header.group(1) != name:
-            _draft_fail(
-                "name_mismatch",
-                f"draft {path.name} header names {header.group(1)!r}, not {name!r}",
-            )
-        id_header = DRAFT_HEADER_ID.search(text)
-        if not id_header:
-            _draft_fail("missing_id", f"draft {path.name} has no `-- id:` header")
-        header_id = id_header.group(1).strip()
-        if not DRAFT_ID.fullmatch(header_id):
-            _draft_fail(
-                "invalid_id",
-                f"draft {path.name} id {header_id!r} is not a 128-bit token "
-                "(32 hex chars) — run scripts/new_migration.py"
-            )
-        if header_id != file_id:
-            _draft_fail(
-                "id_mismatch",
-                f"draft {path.name} header id {header_id!r} disagrees with its filename",
             )
         depends = DRAFT_HEADER_DEPENDS.search(text)
         dependencies: list[str] = []
@@ -166,15 +149,7 @@ def _order(drafts: list[Draft]) -> list[Draft]:
     migration name; a released upstream imposes no in-cut edge (it precedes the
     whole cut).
     """
-    by_name: dict[str, Draft] = {}
-    for draft in drafts:
-        if draft.name in by_name:
-            _draft_fail(
-                "duplicate_name",
-                f"two drafts share the readable name {draft.name!r} in this cut "
-                "— rename one before releasing"
-            )
-        by_name[draft.name] = draft
+    by_name = {draft.name: draft for draft in drafts}
 
     released = _released_names()
     for draft in drafts:
@@ -191,7 +166,7 @@ def _order(drafts: list[Draft]) -> list[Draft]:
             _draft_fail(
                 "missing_dependency",
                 f"draft {draft.name} depends on {dependency!r}, which is neither a "
-                "draft in this cut nor an already-released migration"
+                "draft in this cut nor an already-released migration",
             )
 
     indegree = {
@@ -216,23 +191,175 @@ def _order(drafts: list[Draft]) -> list[Draft]:
 
     if len(order) != len(drafts):
         stuck = sorted(set(by_name) - set(order))
-        _draft_fail(
-            "cycle", f"draft dependencies form a cycle among: {', '.join(stuck)}"
-        )
+        _draft_fail("cycle", f"draft dependencies form a cycle among: {', '.join(stuck)}")
     return [by_name[name] for name in order]
 
 
-def _entry(major: int, minor: int, patch: int) -> str:
+# -- Reader floor -------------------------------------------------------------
+#
+# A batch keeps the previous reader floor only when every draft is proven
+# additive against the released schema: old objects survive unchanged, new
+# objects are tables or non-unique indexes, new columns are nullable or
+# defaulted, and no existing row is written. `-- breaks: <reason>` forces a
+# semantic break; nothing declares a draft additive.
+
+
+def _schema(conn: sqlite3.Connection) -> dict[tuple[str, str], tuple[str, str]]:
+    return {
+        (kind, name): (table, sql or "")
+        for kind, name, table, sql in conn.execute(
+            "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+        )
+    }
+
+
+def _table_parts(sql: str) -> tuple[str, list[str], str] | None:
+    """A `CREATE TABLE` statement as its head, top-level definitions and suffix."""
+    depth = 0
+    start = 0
+    head = ""
+    parts = []
+    for token in SQL_TOKEN.finditer(sql):
+        if token[0] == "(":
+            if depth == 0:
+                head = sql[: token.start()].strip()
+                start = token.end()
+            depth += 1
+        elif token[0] == ")":
+            depth -= 1
+            if depth == 0:
+                parts.append(sql[start : token.start()].strip())
+                return head, parts, sql[token.end() :].strip()
+        elif token[0] == "," and depth == 1:
+            parts.append(sql[start : token.start()].strip())
+            start = token.end()
+    return None
+
+
+def _table_within(old: str, new: str) -> bool:
+    """SQLite splices `ADD COLUMN` in before table constraints; only columns may grow."""
+    before, after = _table_parts(old), _table_parts(new)
+    if before is None or after is None or before[0] != after[0] or before[2] != after[2]:
+        return False
+    if not all(part in after[1] for part in before[1]):
+        return False
+    return not any(TABLE_CONSTRAINT.match(part) for part in after[1] if part not in before[1])
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> list[tuple]:
+    return list(conn.execute(f'PRAGMA table_xinfo("{table.replace(chr(34), chr(34) * 2)}")'))
+
+
+def _is_additive(conn: sqlite3.Connection, sql: str) -> bool:
+    before = _schema(conn)
+    tables = {name for kind, name in before if kind == "table"}
+    columns = {table: _columns(conn, table) for table in tables}
+    writes = False
+
+    def authorize(action: int, table: str | None, *_: object) -> int:
+        nonlocal writes
+        if action in (sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE):
+            writes = writes or table in tables
+        return sqlite3.SQLITE_OK
+
+    conn.set_authorizer(authorize)
+    try:
+        conn.executescript(sql)
+    finally:
+        conn.set_authorizer(None)
+    if writes or DRAFT_BREAKS.search(sql):
+        return False
+    after = _schema(conn)
+    for key, (table, definition) in before.items():
+        if key not in after:
+            return False
+        if after[key] != (table, definition) and (
+            key[0] != "table" or not _table_within(definition, after[key][1])
+        ):
+            return False
+    for (kind, _name), (table, definition) in after.items():
+        if (kind, _name) in before:
+            continue
+        if kind == "index" and table in tables and re.match(r"(?i)CREATE\s+UNIQUE\b", definition):
+            return False
+        if kind not in ("table", "index"):
+            return False
+    for table, old in columns.items():
+        new = _columns(conn, table)
+        if new[: len(old)] != old:
+            return False
+        for _cid, _name, _type, required, default, primary, hidden in new[len(old) :]:
+            if (required and default in (None, "NULL")) or primary or hidden:
+                return False
+    return True
+
+
+def _released_migrations() -> list[Path]:
+    released = []
+    for path in MIGRATIONS_DIR.iterdir():
+        match = MIGRATION_NAME.match(path.name)
+        if match:
+            major, minor, patch, ordinal = (int(match[i]) if match[i] else -1 for i in range(1, 5))
+            released.append(((major, minor, patch, ordinal), path))
+    return [path for _key, path in sorted(released)]
+
+
+def breaking_drafts(drafts: list[Draft]) -> list[str]:
+    """The ordered drafts that raise the reader floor over the released schema."""
+    with sqlite3.connect(":memory:") as conn:
+        conn.execute(
+            "CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)"
+        )
+        for path in _released_migrations():
+            try:
+                conn.executescript(path.read_text())
+            except sqlite3.OperationalError as error:
+                # Unproven counts as breaking: an older interpreter SQLite cannot
+                # replay newer released syntax, so it cannot prove a draft additive.
+                print(
+                    f"SQLite {sqlite3.sqlite_version} cannot replay {path.name} ({error}); "
+                    "treating every draft as breaking",
+                    file=sys.stderr,
+                )
+                return [draft.name for draft in drafts]
+        return [draft.name for draft in drafts if not _is_additive(conn, draft.sql)]
+
+
+def _previous_floor() -> str:
+    """The released frontier's floor; releases cut before floors count as breaking."""
+    source = MIGRATIONS_RS.read_text()
+    entries = re.findall(
+        r'sql:\s*include_str!\("migrations/([^"\n]+)"\),\s*(?:reader_floor:\s*(?:None|Some\("([^"]+)"\)),)?',
+        source,
+    )
+    if not entries:
+        _fail("no released migration frontier")
+    filename, floor = entries[-1]
+    if floor:
+        return floor
+    match = MIGRATION_NAME.match(filename)
+    if match is None:
+        _fail(f"released migration {filename} has no canonical name")
+    return f"{match[1]}.{match[2]}.{match[3] or '0'}"
+
+
+def breaking_line(release: str, breaking: list[str]) -> str:
+    return f"lf < {release} can no longer open the store (raised by: {', '.join(breaking)})"
+
+
+def _entry(major: int, minor: int, patch: int, ordinal: int, floor: str) -> str:
+    filename = f"{major}.{minor}.{patch}.{ordinal:03}_release.sql"
     return (
         f"    Migration {{\n"
         f"        id: MigrationId {{\n"
         f"            major: {major},\n"
         f"            minor: {minor},\n"
         f"            patch: Some({patch}),\n"
-        f"            ordinal: 1,\n"
+        f"            ordinal: {ordinal},\n"
         f"        }},\n"
         f'        name: "release",\n'
-        f'        sql: include_str!("migrations/{major}.{minor}.{patch}.001_release.sql"),\n'
+        f'        sql: include_str!("migrations/{filename}"),\n'
+        f'        reader_floor: Some("{floor}"),\n'
         f"    }},\n"
     )
 
@@ -249,7 +376,7 @@ def _batch_sql(drafts: list[Draft]) -> str:
 
 
 def _new_registry_text(entries: str) -> str:
-    """The full migrations.rs source with `entries` appended to the registry."""
+    """The full migration_catalog.rs source with `entries` appended to the registry."""
     source = MIGRATIONS_RS.read_text()
     start = source.find("const MIGRATIONS: &[Migration] = &[")
     if start == -1:
@@ -315,6 +442,7 @@ def _install(
     drafts: list[Draft],
     registry_text: str,
     package_manifest_text: str | None,
+    breaking_note: str | None,
 ) -> None:
     """Write the planned batch atomically: on any failure, restore byte-for-byte.
 
@@ -324,6 +452,8 @@ def _install(
     """
     original_registry = MIGRATIONS_RS.read_bytes()
     original_manifest = PACKAGE_MANIFEST.read_bytes() if package_manifest_text else None
+    original_note = BREAKING_NOTE.read_bytes() if BREAKING_NOTE.exists() else None
+    note_written = False
     deleted: list[tuple[Path, bytes]] = []
     registry_written = False
     manifest_written = False
@@ -338,6 +468,10 @@ def _install(
         if package_manifest_text is not None:
             _atomic_write(PACKAGE_MANIFEST, package_manifest_text)
             manifest_written = True
+        if breaking_note is not None:
+            BREAKING_NOTE.parent.mkdir(parents=True, exist_ok=True)
+            note_written = True
+            _atomic_write(BREAKING_NOTE, (original_note or b"").decode() + breaking_note + "\n")
         for draft in drafts:
             path = DRAFTS_DIR / draft.filename
             data = path.read_bytes()
@@ -346,6 +480,11 @@ def _install(
     except BaseException as error:
         for path, data in deleted:
             path.write_bytes(data)
+        if note_written:
+            if original_note is None:
+                BREAKING_NOTE.unlink(missing_ok=True)
+            else:
+                BREAKING_NOTE.write_bytes(original_note)
         if manifest_written:
             assert original_manifest is not None
             PACKAGE_MANIFEST.write_bytes(original_manifest)
@@ -411,12 +550,13 @@ def main() -> None:
         if namespace == (major, minor, patch):
             release_files.append(path.name)
     package_manifest_text = None
-    if release_files:
-        if write_mode != "--materialize-for-tests":
-            _fail(
-                f"release {major}.{minor}.{patch} already has canonical migration(s): "
-                f"{', '.join(sorted(release_files))}"
-            )
+    ordinal = 1 + max(
+        (int(MIGRATION_NAME.fullmatch(name).group(4)) for name in release_files), default=0
+    )
+    if ordinal > 999:
+        _fail("release migration ordinal exhausted")
+    if release_files and write_mode == "--materialize-for-tests":
+        ordinal = 1
         current = f"{major}.{minor}.{patch}"
         patch += 1
         next_version = f"{major}.{minor}.{patch}"
@@ -426,16 +566,24 @@ def main() -> None:
         package_manifest_text = _test_package_manifest(current, next_version)
         print(f"test materialization advances the disposable package {current} -> {next_version}")
 
-    canonical = MIGRATIONS_DIR / f"{major}.{minor}.{patch}.001_release.sql"
-    print(f"canonicalizing {len(ordered)} draft(s) into {major}.{minor}.{patch}.001_release:")
+    canonical = MIGRATIONS_DIR / f"{major}.{minor}.{patch}.{ordinal:03}_release.sql"
+    print(
+        f"canonicalizing {len(ordered)} draft(s) into {major}.{minor}.{patch}.{ordinal:03}_release:"
+    )
     for draft in ordered:
         depends = ", ".join(draft.depends_on) if draft.depends_on else "(none)"
         print(f"  draft {draft.name} [{depends}]")
+    release = f"{major}.{minor}.{patch}"
+    breaking = breaking_drafts(ordered)
+    floor = release if breaking else _previous_floor()
+    line = breaking_line(release, breaking) if breaking else None
+    print(line or f"reader floor stays {floor}")
     if check:
         return
 
-    registry_text = _new_registry_text(_entry(major, minor, patch))
-    _install(canonical, _batch_sql(ordered), ordered, registry_text, package_manifest_text)
+    registry_text = _new_registry_text(_entry(major, minor, patch, ordinal, floor))
+    note = line if write_mode == "--release-cut" else None
+    _install(canonical, _batch_sql(ordered), ordered, registry_text, package_manifest_text, note)
     print(
         f"wrote 1 canonical migration from {len(ordered)} draft(s); "
         "run scripts/check_migrations.py to verify"

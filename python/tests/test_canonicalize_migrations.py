@@ -1,7 +1,7 @@
 """The release cut: drafts become one ordered, release-scoped batch."""
 
-import hashlib
 import json
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -15,7 +15,7 @@ SCRIPT = ROOT / "scripts/canonicalize_migrations.py"
 MANIFEST_FIXTURE = ROOT / "tests/fixtures/migrations/draft_manifest.json"
 MIGRATIONS = Path("rust/loopflow/src/store/migrations")
 DRAFTS = MIGRATIONS / "drafts"
-MIGRATIONS_RS = Path("rust/loopflow/src/store/migrations.rs")
+MIGRATIONS_RS = Path("rust/loopflow/src/store/migration_catalog.rs")
 
 REGISTRY = """const MIGRATIONS: &[Migration] = &[
     Migration {
@@ -43,36 +43,12 @@ def repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _token(name: str) -> str:
-    # Deterministic per name so re-run/two-repo tests build identical draft files.
-    # 128-bit (32 hex chars), matching the immutable id new_migration.py mints.
-    import hashlib
-
-    return hashlib.sha256(name.encode()).hexdigest()[:32]
-
-
-def draft(
-    repo: Path,
-    name: str,
-    depends_on: str = "",
-    body: str = "SELECT 1;\n",
-    token: str | None = None,
-) -> None:
-    token = token or _token(name)
-    (repo / DRAFTS / f"{name}__{token}.sql").write_text(
-        f"-- name: {name}\n-- id: {token}\n-- depends_on: {depends_on}\n{body}"
-    )
+def draft(repo: Path, name: str, depends_on: str = "", body: str = "SELECT 1;\n") -> None:
+    (repo / DRAFTS / f"{name}.sql").write_text(f"-- depends_on: {depends_on}\n{body}")
 
 
 def draft_names(repo: Path) -> set[str]:
-    import re
-
-    pattern = re.compile(r"^([a-z][a-z0-9_]*)__[0-9a-f]{32}\.sql$")
-    return {
-        match.group(1)
-        for path in (repo / DRAFTS).glob("*.sql")
-        if (match := pattern.match(path.name))
-    }
+    return {path.stem for path in (repo / DRAFTS).glob("*.sql")}
 
 
 def run(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -118,11 +94,9 @@ def test_draft_manifest_matches_shared_golden_cases(
         ordered = canonicalize_migrations._order(canonicalize_migrations._read_drafts())
         actual = [
             {
-                "id": draft.filename.rsplit("__", 1)[1].removesuffix(".sql"),
                 "name": draft.name,
                 "dependencies": draft.depends_on,
                 "sql": draft.sql,
-                "checksum": hashlib.sha256(draft.sql.encode()).hexdigest(),
             }
             for draft in ordered
         ]
@@ -181,7 +155,6 @@ def test_the_canonical_file_carries_the_body_without_the_header(repo: Path) -> N
 
     written = (repo / MIGRATIONS / "0.11.30.001_release.sql").read_text()
     assert written == ("-- draft: add_wave_colour\nALTER TABLE waves ADD COLUMN colour TEXT;\n")
-    assert "-- name:" not in written
 
 
 def test_a_minor_release_uses_its_full_package_version(repo: Path) -> None:
@@ -283,16 +256,38 @@ def test_re_running_the_same_release_is_deterministic(tmp_path: Path) -> None:
     assert (first / MIGRATIONS_RS).read_text() == (second / MIGRATIONS_RS).read_text()
 
 
-def test_a_release_cannot_publish_a_second_batch(repo: Path) -> None:
-    draft(repo, "add_wave_colour")
+def test_corrected_release_appends_late_drafts_without_changing_version(repo: Path) -> None:
+    draft(repo, "add_wave_colour", body="ALTER TABLE waves ADD COLUMN colour TEXT;\n")
     assert run(repo, "0.11.30").returncode == 0
-    draft(repo, "add_task_priority")
+    first = (repo / MIGRATIONS / "0.11.30.001_release.sql").read_bytes()
+    draft(
+        repo,
+        "add_task_priority",
+        depends_on="add_wave_colour",
+        body="ALTER TABLE waves ADD COLUMN priority INTEGER;\n",
+    )
 
     result = run(repo, "0.11.30")
 
-    assert result.returncode == 1
-    assert "already has canonical migration" in result.stderr
-    assert draft_names(repo) == {"add_task_priority"}
+    assert result.returncode == 0, result.stderr
+    assert (repo / MIGRATIONS / "0.11.30.001_release.sql").read_bytes() == first
+    assert (
+        "-- draft: add_task_priority" in (repo / MIGRATIONS / "0.11.30.002_release.sql").read_text()
+    )
+    assert "ordinal: 2" in (repo / MIGRATIONS_RS).read_text()
+    assert not draft_names(repo)
+    before = (repo / MIGRATIONS_RS).read_bytes()
+    assert run(repo, "0.11.30").returncode == 0
+    assert (repo / MIGRATIONS_RS).read_bytes() == before
+
+    with sqlite3.connect(":memory:") as database:
+        for name in canonical_files(repo):
+            database.executescript((repo / MIGRATIONS / name).read_text())
+        assert [row[1] for row in database.execute("PRAGMA table_info(waves)")] == [
+            "id",
+            "colour",
+            "priority",
+        ]
 
 
 def test_an_abandoned_release_leaves_drafts_regenerable(repo: Path) -> None:
@@ -348,20 +343,6 @@ def test_a_draft_cannot_forge_release_provenance(repo: Path) -> None:
     assert draft_names(repo) == {"add_wave_colour"}
 
 
-def test_two_drafts_sharing_a_readable_name_fail(repo: Path) -> None:
-    # Distinct tokens keep the files distinct at authoring; a shared readable
-    # name only ever surfaces as one release-cut failure, never a merge conflict.
-    draft(repo, "dup", token="a" * 32)
-    draft(repo, "dup", token="b" * 32)
-    before = (repo / MIGRATIONS_RS).read_text()
-
-    result = run(repo, "0.11.30")
-
-    assert result.returncode == 1
-    assert "share the readable name" in result.stderr
-    assert (repo / MIGRATIONS_RS).read_text() == before
-
-
 def test_a_write_failure_leaves_the_tree_byte_identical(repo: Path) -> None:
     # Force the atomic registry replace to fail (its parent dir is read-only)
     # after the canonical files are written, and prove the rollback restores the
@@ -383,3 +364,68 @@ def test_a_write_failure_leaves_the_tree_byte_identical(repo: Path) -> None:
     assert (repo / MIGRATIONS_RS).read_text() == before_registry
     assert canonical_files(repo) == before_canonical
     assert {p.name: p.read_text() for p in (repo / DRAFTS).glob("*.sql")} == before_drafts
+
+
+# -- Reader floor -------------------------------------------------------------
+
+BREAKING_NOTE = Path("release/unreleased/BREAKING.md")
+
+
+def released_floor(repo: Path) -> str:
+    return (repo / MIGRATIONS_RS).read_text().rsplit("reader_floor: ", 1)[1].split(",", 1)[0]
+
+
+def test_additive_drafts_keep_the_previous_reader_floor(repo: Path) -> None:
+    draft(repo, "wave_note", body="ALTER TABLE waves ADD COLUMN note TEXT;\n")
+    draft(repo, "wave_tags", body="CREATE TABLE wave_tags (wave_id TEXT, tag TEXT);\n"
+          "CREATE INDEX wave_tags_by_wave ON wave_tags(wave_id);\n")
+
+    result = run(repo, "0.11.30")
+
+    assert result.returncode == 0, result.stderr
+    assert "reader floor stays 0.11.0" in result.stdout
+    assert released_floor(repo) == 'Some("0.11.0")'
+    assert not (repo / BREAKING_NOTE).exists()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "ALTER TABLE waves RENAME COLUMN id TO wave_id;\n",
+        "DROP TABLE waves;\n",
+        "ALTER TABLE waves ADD COLUMN state TEXT NOT NULL DEFAULT 'ready';\nUPDATE waves SET state='done';\n",
+        "CREATE UNIQUE INDEX waves_by_id ON waves(id);\n",
+        "CREATE TRIGGER waves_stamp AFTER INSERT ON waves BEGIN SELECT 1; END;\n",
+        "-- breaks: older readers reject the new status value\nSELECT 1;\n",
+    ],
+)
+def test_unproven_drafts_raise_the_floor_and_name_themselves(repo: Path, body: str) -> None:
+    draft(repo, "wave_note", body="ALTER TABLE waves ADD COLUMN note TEXT;\n")
+    draft(repo, "wave_reshape", body=body)
+
+    result = run(repo, "0.11.30")
+
+    line = "lf < 0.11.30 can no longer open the store (raised by: wave_reshape)"
+    assert result.returncode == 0, result.stderr
+    assert line in result.stdout
+    assert released_floor(repo) == 'Some("0.11.30")'
+    assert (repo / BREAKING_NOTE).read_text() == line + "\n"
+
+
+def test_preview_and_test_materialization_write_no_breaking_note(repo: Path) -> None:
+    draft(repo, "drop_waves", body="DROP TABLE waves;\n")
+
+    assert "lf < 0.11.30" in run(repo, "0.11.30", "--check").stdout
+    assert run(repo, "0.11.30", "--materialize-for-tests").returncode == 0
+    assert not (repo / BREAKING_NOTE).exists()
+
+
+def test_an_unreplayable_released_history_proves_nothing_additive(repo: Path) -> None:
+    (repo / MIGRATIONS / "0.11.002_future.sql").write_text("CREATE TABLE future (id TEXT) STRICTER;\n")
+    draft(repo, "wave_note", body="ALTER TABLE waves ADD COLUMN note TEXT;\n")
+
+    result = run(repo, "0.11.30", "--check")
+
+    assert result.returncode == 0, result.stderr
+    assert "cannot replay 0.11.002_future.sql" in result.stderr
+    assert "lf < 0.11.30 can no longer open the store (raised by: wave_note)" in result.stdout

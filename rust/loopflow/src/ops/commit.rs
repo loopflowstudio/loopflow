@@ -1,17 +1,19 @@
 use std::path::Path;
+use std::process::Command;
 
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
-use crate::engine::config::load_config_or_default;
-use crate::engine::git::{
-    commit, current_branch, is_clean, push, push_with_upstream, rev_parse, stage_all,
+use crate::agent::{run_agent, AgentConfig, ProcessConfig};
+use crate::config::load_config_or_default;
+use crate::git::{
+    commit, current_branch, git_stdout, git_stdout_inheriting, is_clean, push, push_with_upstream,
+    stage_all,
 };
-use crate::engine::load_skill;
+use crate::graph::load_skill;
 
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::progress::{NullProgress, Progress};
+use crate::ops::progress::Progress;
 use crate::ops::trace::{MockResponses, Tracer};
 
 #[derive(Debug, Clone)]
@@ -20,7 +22,7 @@ pub struct CommitOptions {
     pub push: bool,
     pub create_draft_pr: bool,
     pub task: String,
-    pub flow_parents: Vec<String>,
+    pub sources: Vec<String>,
     pub message: Option<String>,
     pub agent: Option<String>,
 }
@@ -32,86 +34,74 @@ impl CommitOptions {
             push: false,
             create_draft_pr: false,
             task: task.into(),
-            flow_parents: Vec::new(),
+            sources: Vec::new(),
             message: None,
             agent: None,
         }
     }
 }
 
-/// Stage, commit, and push a Task worktree so its state survives this
-/// machine. Runs off the async worker thread because commit_workflow drives
-/// its own runtime for the push settlement fence.
-pub(crate) async fn checkpoint_task_worktree(
-    worktree: std::path::PathBuf,
-    task_identifier: String,
-    message: String,
-) -> anyhow::Result<()> {
-    let outcome = tokio::task::spawn_blocking(move || {
-        let options = CommitOptions {
-            add: true,
-            push: true,
-            create_draft_pr: false,
-            task: task_identifier,
-            flow_parents: Vec::new(),
-            message: Some(message),
-            agent: None,
-        };
-        commit_workflow(&worktree, &options, &NullProgress).map(|_| ())
-    })
-    .await
-    .map_err(|join_error| anyhow::anyhow!("Task worktree checkpoint panicked: {join_error}"))?;
-    outcome.map_err(anyhow::Error::from)
-}
-
-pub(crate) fn checkpoint_task_restart(worktree: &Path, task_identifier: &str) -> OpsResult<String> {
-    let _mutation = crate::ops::task::lock_task_pr_mutation(worktree)?;
-    if !is_clean(worktree)? {
-        stage_all(worktree)?;
-        verify_restart_preimage(worktree)?;
-    }
-    let options = CommitOptions {
-        add: false,
-        push: false,
-        create_draft_pr: false,
-        task: task_identifier.to_string(),
-        flow_parents: Vec::new(),
-        message: Some(format!("checkpoint: restart {task_identifier}")),
-        agent: None,
+/// Commit an explicit document selection using an independent index. The real
+/// index retains unrelated staged work, and scratch remains on disk.
+pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> OpsResult<()> {
+    let message =
+        message.ok_or_else(|| OpsError::Message("selected-path commits require -m".into()))?;
+    let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
+    restart_landed_persistent(repo)?;
+    let directory = tempfile::tempdir()?;
+    let index = directory.path().join("index");
+    let inherit_index = |command: &mut Command| {
+        command.env("GIT_INDEX_FILE", &index);
     };
-    commit_workflow(worktree, &options, &NullProgress)?;
-    crate::ops::task::clear_task_pr_merge_before_head_mutation(worktree, false)?;
-    push_with_upstream_if_needed_locked(worktree)?;
-    rev_parse(worktree, "HEAD").map_err(OpsError::Git)
+    let run = |args: &[&str]| git_stdout_inheriting(repo, args, &inherit_index);
+    run(&["read-tree", "HEAD"])?;
+    let selected = paths
+        .iter()
+        .map(|path| format!(":(literal){path}"))
+        .collect::<Vec<_>>();
+    if !paths.is_empty() {
+        let mut args = vec!["add", "-A", "--"];
+        args.extend(selected.iter().map(String::as_str));
+        run(&args)?;
+    }
+    if run(&["diff", "--cached", "--name-only"])?.trim().is_empty() {
+        return Err(OpsError::Message(
+            "Nothing selected to commit; edit the selected files or select changed paths.".into(),
+        ));
+    }
+    commit(repo, message, &inherit_index)?;
+    let mut reset = vec!["reset", "-q", "HEAD", "--"];
+    reset.extend(selected.iter().map(String::as_str));
+    git_stdout(repo, &reset).map_err(|error| {
+        OpsError::Message(format!("commit saved; index refresh failed: {error}"))
+    })?;
+    Ok(())
 }
 
-fn verify_restart_preimage(worktree: &Path) -> OpsResult<()> {
-    let unstaged = std::process::Command::new("git")
-        .args(["diff", "--quiet", "--no-ext-diff"])
-        .current_dir(worktree)
-        .status()?;
-    let untracked = std::process::Command::new("git")
-        .args(["ls-files", "--others", "--exclude-standard", "-z"])
-        .current_dir(worktree)
-        .output()?;
-    if !unstaged.success() || !untracked.stdout.is_empty() {
-        return Err(OpsError::Message(
-            "Task worktree changed while restart prepared its checkpoint; review the staged snapshot and retry"
-                .to_string(),
-        ));
+/// Whenever a persistent checkout is about to commit or publish, drop history
+/// its merged PRs already delivered. Nothing has to observe the merge itself.
+pub(crate) fn restart_landed_persistent(repo: &Path) -> OpsResult<()> {
+    if crate::git::worktrees::is_persistent_worktree(repo)?
+        && crate::ops::sync::restart_landed_branch(repo)?
+    {
+        eprintln!("Earlier commits have merged; restarted this branch from the default branch.");
     }
     Ok(())
 }
 
+/// Run the ordinary commit path, carrying caller-owned capabilities into Git mutations.
+/// Agent generation, draft PR creation and Task merge revocation have separate launch owners.
 pub fn commit_workflow(
     repo: &Path,
     options: &CommitOptions,
     progress: &impl Progress,
+    inherit_git: &impl Fn(&mut Command),
 ) -> OpsResult<bool> {
+    restart_landed_persistent(repo)?;
     if is_clean(repo)? {
         progress.status("Nothing to commit");
         if options.push {
-            push_with_upstream_if_needed(repo)?;
+            push_with_upstream_if_needed(repo, inherit_git)?;
             if options.create_draft_pr {
                 ensure_draft_pr(repo, progress)?;
             }
@@ -121,10 +111,13 @@ pub fn commit_workflow(
 
     if options.add {
         progress.status("Staging changes...");
-        stage_all(repo)?;
+        stage_all(repo, inherit_git)?;
     }
 
-    if !has_staged_changes(repo)? {
+    if git_stdout(repo, &["diff", "--cached", "--name-only"])?
+        .trim()
+        .is_empty()
+    {
         progress.status("Nothing staged to commit");
         return Ok(false);
     }
@@ -141,16 +134,16 @@ pub fn commit_workflow(
         let generated = generate_commit_message(repo, options.agent.as_deref());
         format_commit_message(
             &options.task,
-            &options.flow_parents,
+            &options.sources,
             generated.as_ref().map(|m| m.title.as_str()).ok(),
         )
     };
 
     progress.status("Committing...");
-    commit(repo, &message)?;
+    commit(repo, &message, inherit_git)?;
 
     if options.push {
-        push_with_upstream_if_needed(repo)?;
+        push_with_upstream_if_needed(repo, inherit_git)?;
         if options.create_draft_pr {
             ensure_draft_pr(repo, progress)?;
         }
@@ -159,21 +152,11 @@ pub fn commit_workflow(
     Ok(true)
 }
 
-fn has_staged_changes(repo: &Path) -> OpsResult<bool> {
-    let output = std::process::Command::new("git")
-        .arg("diff")
-        .arg("--cached")
-        .arg("--quiet")
-        .current_dir(repo)
-        .status()?;
-    Ok(!output.success())
-}
-
-fn format_commit_message(task: &str, flow_parents: &[String], title: Option<&str>) -> String {
-    let prefix = if flow_parents.is_empty() {
+fn format_commit_message(task: &str, sources: &[String], title: Option<&str>) -> String {
+    let prefix = if sources.is_empty() {
         format!("lf {task}")
     } else {
-        format!("lf {} {task}", flow_parents.join(" "))
+        format!("lf {} {task}", sources.join(" "))
     };
 
     match title {
@@ -195,7 +178,7 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
         .content
         .ok_or_else(|| OpsError::Message("commit-message skill has no content".to_string()))?;
 
-    let diff = staged_diff(repo)?;
+    let diff = git_stdout(repo, &["diff", "--cached"])?;
     let diff = truncate_chars(&diff, 20_000);
 
     let prompt = format!(
@@ -209,6 +192,7 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
     let agent = agent_override.unwrap_or_else(|| config.agent()).to_string();
 
     let launch = AgentConfig {
+        chrome: config.chrome,
         task_prompt: prompt,
         agent: Some(agent),
         cwd: Some(repo.to_path_buf()),
@@ -220,11 +204,8 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
         stream: false,
         ..Default::default()
     };
-    let capabilities = AgentCapabilities {
-        chrome: config.chrome,
-    };
 
-    let result = launch_agent(&launch, &process, &capabilities)
+    let result = run_agent(&launch, &process)
         .map_err(|err| OpsError::Message(format!("commit message generation failed: {err}")))?;
     if result.exit_code != 0 {
         return Err(OpsError::Message(format!(
@@ -237,14 +218,6 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
     let combined = format!("{}\n{}", result.stdout, result.stderr);
     parse_commit_message(&combined)
         .ok_or_else(|| OpsError::Message("failed to parse commit message from agent".to_string()))
-}
-
-fn staged_diff(repo: &Path) -> OpsResult<String> {
-    let output = std::process::Command::new("git")
-        .args(["diff", "--cached"])
-        .current_dir(repo)
-        .output()?;
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 fn parse_commit_message(raw: &str) -> Option<CommitMessage> {
@@ -283,15 +256,6 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     format!("{}\n\n[diff truncated]", &text[..end])
 }
 
-fn push_with_fallback(repo: &Path) -> OpsResult<()> {
-    if let Err(_err) = push(repo, false) {
-        if let Err(force_err) = push(repo, true) {
-            return Err(OpsError::Git(force_err));
-        }
-    }
-    Ok(())
-}
-
 fn ensure_draft_pr(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     if !crate::ops::pr::gh_available() {
         return Ok(());
@@ -320,17 +284,49 @@ fn ensure_draft_pr(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     Ok(())
 }
 
-pub(crate) fn push_with_upstream_if_needed(repo: &Path) -> OpsResult<()> {
+pub(crate) fn push_with_upstream_if_needed(
+    repo: &Path,
+    inherit_git: &impl Fn(&mut Command),
+) -> OpsResult<()> {
     // Every ordinary Loopflow branch push shares the Task settlement fence.
     // After a commit, a changed HEAD clears a head-pinned merge request (and
     // revokes Auto remotely) before Git can expose the new head. Same-head
     // publication remains a no-op and preserves the request.
     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
-    crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false)?;
-    push_with_upstream_if_needed_locked(repo)
+    crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false, inherit_git)?;
+    push_with_upstream_if_needed_locked(repo, inherit_git)
 }
 
-fn push_with_upstream_if_needed_locked(repo: &Path) -> OpsResult<()> {
+fn push_with_upstream_if_needed_locked(
+    repo: &Path,
+    inherit_git: &impl Fn(&mut Command),
+) -> OpsResult<()> {
+    let branch =
+        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".into()))?;
+    let remote_ref = format!("refs/remotes/origin/{branch}");
+    if let Ok(previous) = crate::git::rev_parse(repo, &remote_ref) {
+        if !crate::git::is_ancestor(repo, &previous, "HEAD")? {
+            let base = crate::git::integration_base(repo)?;
+            if crate::git::is_ancestor(repo, &base, "HEAD")?
+                && crate::ops::sync::landed_at(repo, &base, &previous)?
+            {
+                let reference = format!("refs/heads/{branch}");
+                let remote = git_stdout(repo, &["ls-remote", "--heads", "origin", &reference])?;
+                if remote.split_whitespace().next() == Some(previous.as_str()) {
+                    // Replace only the exact head delivered to a base retained
+                    // in HEAD. Divergent rewrites and concurrent pushes survive.
+                    let lease = format!("--force-with-lease={reference}:{previous}");
+                    return git_stdout_inheriting(
+                        repo,
+                        &["push", &lease, "-u", "origin", &reference],
+                        inherit_git,
+                    )
+                    .map(|_| ())
+                    .map_err(OpsError::from);
+                }
+            }
+        }
+    }
     let output = std::process::Command::new("git")
         .arg("rev-parse")
         .arg("--abbrev-ref")
@@ -340,13 +336,11 @@ fn push_with_upstream_if_needed_locked(repo: &Path) -> OpsResult<()> {
         .output()?;
 
     if output.status.success() {
-        push_with_fallback(repo)?;
+        push(repo, false, inherit_git)?;
         return Ok(());
     }
 
-    let branch =
-        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
-    push_with_upstream(repo, "origin", &branch)?;
+    push_with_upstream(repo, "origin", &branch, inherit_git)?;
     Ok(())
 }
 
@@ -424,11 +418,7 @@ pub fn commit_workflow_traced(options: &CommitOptions) -> String {
         message.to_string()
     } else {
         tracer.trace("commit:generate_message");
-        format_commit_message(
-            &options.task,
-            &options.flow_parents,
-            Some("generated title"),
-        )
+        format_commit_message(&options.task, &options.sources, Some("generated title"))
     };
 
     // Commit

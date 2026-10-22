@@ -7,15 +7,14 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::engine::git::{absolute_git_dir, current_branch, intervention_state, rev_parse};
+use crate::git::{absolute_git_dir, current_branch, intervention_state, rev_parse};
 use crate::ops::error::{OpsError, OpsResult};
 
-pub(crate) const LEGACY_WORKTREE_WRITER_ID_ENV: &str = "LF_WORKTREE_WRITER_ID";
 pub(crate) const LF_GIT_OPERATION_ID_ENV: &str = "LF_GIT_OPERATION_ID";
 
 /// Recorded as the target of a sequencer Loopflow adopted rather than started,
-/// where the real rebase target is unknowable after the fact.
-const RAW_TARGET_REF: &str = "unknown raw rebase target";
+/// where the real sync target is unknowable after the fact.
+const RAW_TARGET_REF: &str = "unknown raw sync target";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -36,7 +35,7 @@ impl GitOperationId {
     }
 }
 
-/// The owner of the one rebase sequencer a worktree may have in flight.
+/// The owner of the one sync sequencer a worktree may have in flight.
 ///
 /// `id` is the only authority: an exact match on `LF_GIT_OPERATION_ID`
 /// authorizes a recovery child to continue or abort. Everything else is
@@ -46,8 +45,11 @@ impl GitOperationId {
 pub(crate) struct GitOperationOwner {
     id: GitOperationId,
     root_pid: u32,
-    run_id: Option<String>,
-    process_id: Option<String>,
+    // Released sequencer receipts retain these field names on disk.
+    #[serde(rename = "run_id")]
+    trace_id: Option<String>,
+    #[serde(rename = "process_id")]
+    lf_process_id: Option<String>,
     pub(crate) worktree: PathBuf,
     pub(crate) branch: String,
     pub(crate) head: String,
@@ -55,20 +57,14 @@ pub(crate) struct GitOperationOwner {
     pub(crate) target_sha: Option<String>,
 }
 
-impl GitOperationOwner {
-    pub(crate) fn id(&self) -> &str {
-        self.id.as_str()
-    }
-}
-
 #[derive(Debug)]
-pub(crate) struct RebaseOperation {
+pub(crate) struct SyncOperation {
     file: File,
     path: PathBuf,
     owner: GitOperationOwner,
 }
 
-impl RebaseOperation {
+impl SyncOperation {
     pub(crate) fn owner(&self) -> &GitOperationOwner {
         &self.owner
     }
@@ -96,7 +92,7 @@ impl RebaseOperation {
 #[derive(Debug)]
 pub(crate) enum OperationAuthorization {
     Borrowed(GitOperationOwner),
-    Adopted(RebaseOperation),
+    Adopted(SyncOperation),
 }
 
 impl OperationAuthorization {
@@ -122,10 +118,7 @@ impl OperationAuthorization {
     }
 }
 
-pub(crate) fn begin_rebase_operation(
-    worktree: &Path,
-    target_ref: &str,
-) -> OpsResult<RebaseOperation> {
+pub(crate) fn begin_sync_operation(worktree: &Path, target_ref: &str) -> OpsResult<SyncOperation> {
     refuse_intervention(worktree)?;
 
     let worktree = canonical(worktree);
@@ -143,21 +136,21 @@ pub(crate) fn begin_rebase_operation(
     refuse_intervention(&worktree)?;
     if current_branch(&worktree)?.is_none() {
         return Err(OpsError::Message(
-            "refusing to rebase from detached HEAD".to_string(),
+            "refusing to sync from detached HEAD".to_string(),
         ));
     }
     let owner = new_owner(&worktree, target_ref)?;
     write_json(&mut file, &owner)?;
-    Ok(RebaseOperation { file, path, owner })
+    Ok(SyncOperation { file, path, owner })
 }
 
-pub(crate) fn authorize_rebase_control(
+pub(crate) fn authorize_sync_control(
     worktree: &Path,
     adopt_raw: bool,
 ) -> OpsResult<OperationAuthorization> {
-    if intervention_state(worktree)? != Some("rebase") {
+    if intervention_state(worktree)? != Some("merge") {
         return Err(OpsError::Message(
-            "no rebase is in progress in this worktree".to_string(),
+            "no sync is in progress in this worktree".to_string(),
         ));
     }
 
@@ -172,7 +165,7 @@ pub(crate) fn authorize_rebase_control(
             Err(error) if is_contended(&error) => {
                 let owner = read_json::<GitOperationOwner>(&mut file).map_err(|_| {
                     OpsError::Message(
-                        "a live rebase operation is starting; retry after its owner reports state"
+                        "a live sync operation is starting; retry after its owner reports state"
                             .to_string(),
                     )
                 })?;
@@ -191,7 +184,7 @@ pub(crate) fn authorize_rebase_control(
                     Err(_) if adopt_raw => None,
                     Err(_) => {
                         return Err(OpsError::Message(
-                            "the stale rebase owner record is unreadable; rerun with --adopt to claim the raw sequencer"
+                            "the stale sync owner record is unreadable; rerun with --adopt to claim the raw sequencer"
                                 .to_string(),
                         ));
                     }
@@ -203,7 +196,7 @@ pub(crate) fn authorize_rebase_control(
 
     if !adopt_raw {
         return Err(OpsError::Message(
-            "this rebase has no Loopflow owner; rerun with --adopt to continue or abort it"
+            "this sync has no Loopflow owner; rerun with --adopt to continue or abort it"
                 .to_string(),
         ));
     }
@@ -215,7 +208,7 @@ pub(crate) fn authorize_rebase_control(
     adopt_operation(worktree, path, file, None)
 }
 
-/// Take ownership of a rebase whose previous owner released its lock.
+/// Take ownership of a sync whose previous owner released its lock.
 ///
 /// Reuses the stale record's pinned branch, HEAD, and target when one survived;
 /// otherwise describes the raw sequencer found in the worktree. Either way the
@@ -233,10 +226,10 @@ fn adopt_operation(
     };
     owner.id = GitOperationId::new();
     owner.root_pid = std::process::id();
-    owner.run_id = std::env::var(crate::journal::LF_TRACE_ID_ENV).ok();
-    owner.process_id = std::env::var(crate::journal::LF_PROCESS_ID_ENV).ok();
+    owner.trace_id = std::env::var(crate::journal::LF_TRACE_ID_ENV).ok();
+    owner.lf_process_id = std::env::var(crate::journal::LF_PROCESS_ID_ENV).ok();
     write_json(&mut file, &owner)?;
-    Ok(OperationAuthorization::Adopted(RebaseOperation {
+    Ok(OperationAuthorization::Adopted(SyncOperation {
         file,
         path,
         owner,
@@ -247,8 +240,8 @@ fn new_owner(worktree: &Path, target_ref: &str) -> OpsResult<GitOperationOwner> 
     Ok(GitOperationOwner {
         id: GitOperationId::new(),
         root_pid: std::process::id(),
-        run_id: std::env::var(crate::journal::LF_TRACE_ID_ENV).ok(),
-        process_id: std::env::var(crate::journal::LF_PROCESS_ID_ENV).ok(),
+        trace_id: std::env::var(crate::journal::LF_TRACE_ID_ENV).ok(),
+        lf_process_id: std::env::var(crate::journal::LF_PROCESS_ID_ENV).ok(),
         worktree: canonical(worktree),
         branch: current_branch(worktree)?.unwrap_or_else(|| "HEAD".to_string()),
         head: rev_parse(worktree, "HEAD")?,
@@ -257,7 +250,7 @@ fn new_owner(worktree: &Path, target_ref: &str) -> OpsResult<GitOperationOwner> 
     })
 }
 
-pub(crate) fn prepare_agent_launch(
+pub(crate) fn prepare_agent_process(
     worktree: &Path,
     env: &BTreeMap<String, String>,
 ) -> OpsResult<()> {
@@ -271,20 +264,15 @@ pub(crate) fn prepare_agent_launch(
         .or_else(|| std::env::var(LF_GIT_OPERATION_ID_ENV).ok())
         .map(|value| GitOperationId::parse(&value))
         .transpose()?;
-    fence_agent_launch(worktree, requested_operation.as_ref())
+    fence_agent_process(worktree, requested_operation.as_ref())
 }
 
-fn fence_agent_launch(
+fn fence_agent_process(
     worktree: &Path,
     requested_operation: Option<&GitOperationId>,
 ) -> OpsResult<()> {
     let path = operation_path(worktree)?;
     if !path.exists() {
-        if let Some(state) = intervention_state(worktree)? {
-            return Err(OpsError::Message(format!(
-                "refusing to launch an agent while an unowned {state} operation is in progress"
-            )));
-        }
         return Ok(());
     }
 
@@ -299,17 +287,12 @@ fn fence_agent_launch(
         }
         Err(error) => Err(error.into()),
         Ok(()) => {
-            let owner = read_json::<GitOperationOwner>(&mut file).ok();
-            if intervention_state(worktree)?.is_some() {
-                return Err(OpsError::Message(format!(
-                    "refusing to launch an agent while stale {} owns a recoverable Git operation",
-                    owner
-                        .as_ref()
-                        .map(owner_label)
-                        .unwrap_or_else(|| "operation metadata".to_string())
-                )));
+            // An idle merge needs an agent to finish it. Retain its pinned
+            // evidence for adoption by sync --continue or --abort; only a live
+            // lock excludes an independent agent launch.
+            if intervention_state(worktree)?.is_none() {
+                fs::remove_file(path)?;
             }
-            fs::remove_file(path)?;
             Ok(())
         }
     }
@@ -318,13 +301,15 @@ fn fence_agent_launch(
 fn refuse_intervention(worktree: &Path) -> OpsResult<()> {
     if let Some(state) = intervention_state(worktree)? {
         return Err(OpsError::Message(format!(
-            "refusing to rebase: a {state} operation already exists; Loopflow did not start or abort it"
+            "refusing to sync: a {state} operation already exists; Loopflow did not start or abort it"
         )));
     }
     Ok(())
 }
 
 fn operation_path(worktree: &Path) -> OpsResult<PathBuf> {
+    // Keep the durable lock location: an older executable may still own it.
+    // Renaming the command must not introduce a second Git operation authority.
     Ok(absolute_git_dir(worktree)?
         .join("loopflow")
         .join("rebase-owner.json"))
@@ -391,7 +376,7 @@ fn live_operation_error(owner: Option<&GitOperationOwner>) -> OpsError {
 
 fn owner_label(owner: &GitOperationOwner) -> String {
     format!(
-        "rebase {} (pid {}, branch {})",
+        "sync {} (pid {}, branch {})",
         owner.id.as_str(),
         owner.root_pid,
         owner.branch
@@ -407,4 +392,27 @@ fn validate_id(value: &str, label: &str) -> OpsResult<()> {
         return Err(OpsError::Message(format!("invalid {label} id")));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GitOperationOwner;
+
+    #[test]
+    fn sequencer_receipt_preserves_released_process_reference() {
+        let receipt = serde_json::json!({
+            "id": "gitop_retained",
+            "root_pid": 4242,
+            "run_id": "retained-trace",
+            "process_id": "retained-process",
+            "worktree": "/repo/task",
+            "branch": "feature",
+            "head": "retained-head",
+            "target_ref": "origin/main",
+            "target_sha": null,
+        });
+        let owner: GitOperationOwner = serde_json::from_value(receipt.clone()).unwrap();
+        assert_eq!(owner.lf_process_id.as_deref(), Some("retained-process"));
+        assert_eq!(serde_json::to_value(owner).unwrap(), receipt);
+    }
 }

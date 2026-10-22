@@ -1,0 +1,1020 @@
+diff --git a/include/ghostty.h b/include/ghostty.h
+index ea03b1d..5ad0a94 100644
+--- a/include/ghostty.h
++++ b/include/ghostty.h
+@@ -1263,6 +1263,7 @@ GHOSTTY_API void ghostty_surface_complete_clipboard_request(
+ GHOSTTY_API void ghostty_surface_deny_clipboard_request(ghostty_surface_t,
+                                                            void*);
+ GHOSTTY_API bool ghostty_surface_has_selection(ghostty_surface_t);
++GHOSTTY_API void ghostty_surface_set_command_block_chrome(ghostty_surface_t, bool, int32_t);
+ GHOSTTY_API size_t ghostty_surface_command_blocks(ghostty_surface_t,
+                                                  ghostty_command_block_s*,
+                                                  size_t);
+@@ -1270,6 +1271,9 @@ GHOSTTY_API bool ghostty_surface_select_command_block(ghostty_surface_t, uint16_
+ GHOSTTY_API bool ghostty_surface_read_selected_command_block(ghostty_surface_t,
+                                                             ghostty_text_s*);
+ GHOSTTY_API bool ghostty_surface_read_selection(ghostty_surface_t, ghostty_text_s*);
++GHOSTTY_API bool ghostty_surface_read_selection_receipt(ghostty_surface_t, ghostty_text_s*, uint64_t*);
++GHOSTTY_API bool ghostty_surface_confirm_copy(ghostty_surface_t, uint64_t);
++GHOSTTY_API void ghostty_surface_set_feedback(ghostty_surface_t, bool, bool);
+ GHOSTTY_API bool ghostty_surface_read_text(ghostty_surface_t,
+                                               ghostty_selection_s,
+                                               ghostty_text_s*);
+diff --git a/src/apprt/embedded.zig b/src/apprt/embedded.zig
+index ec2a583..1d403eb 100644
+--- a/src/apprt/embedded.zig
++++ b/src/apprt/embedded.zig
+@@ -1652,14 +1652,7 @@ pub const CAPI = struct {
+         }
+     };
+ 
+-    // ghostty_command_block_s
+-    const CommandBlock = extern struct {
+-        start_row: u16,
+-        end_row: u16,
+-        /// The reported exit status, or -1 when the shell reported none.
+-        exit_code: i16,
+-        selected: bool,
+-    };
++    const CommandBlock = terminal.Screen.ViewportCommandBlock;
+ 
+     // Reference the conditional exports based on target platform
+     // so they're included in the C API.
+@@ -1885,54 +1878,17 @@ pub const CAPI = struct {
+         defer core_surface.renderer_state.mutex.unlock(global.io());
+ 
+         const screen = core_surface.renderer_state.terminal.screens.active;
+-        if (!screen.semantic_prompt.seen) return 0;
+-        const last_row: u16 = @intCast(screen.pages.rows - 1);
+-        const top = screen.pages.pin(.{ .viewport = .{} }) orelse return 0;
+-        const selected = screen.selectedCommandBlock();
+-
+-        // One upward search finds the block the viewport starts inside; the
+-        // rest is a single forward walk over the prompts below it.
+-        var prior = top.promptIterator(.left_up, null);
+-        var prompts = (prior.next() orelse top).promptIterator(.right_down, null);
+-        var prompt = prompts.next() orelse return 0;
+-        var count: usize = 0;
+-        while (count < capacity) {
+-            const start_row: u16 = if (screen.pages.pointFromPin(
+-                .viewport,
+-                prompt,
+-            )) |pt| start: {
+-                if (pt.viewport.y > last_row) break;
+-                break :start @intCast(pt.viewport.y);
+-            } else 0;
+-
+-            // The last prompt is the live one: not a block.
+-            const following = prompts.next() orelse break;
+-            defer prompt = following;
+-            const end_row: u16 = if (screen.pages.pointFromPin(
+-                .viewport,
+-                following,
+-            )) |pt| end: {
+-                if (pt.viewport.y == 0) continue;
+-                break :end @intCast(@min(pt.viewport.y - 1, last_row));
+-            } else continue;
+-
+-            // A prompt with no input (a bare Enter) is not a command.
+-            if (screen.pages.highlightSemanticContent(prompt, .input) == null) continue;
+-
+-            const row = prompt.rowAndCell().row;
+-            blocks[count] = .{
+-                .start_row = start_row,
+-                .end_row = end_row,
+-                .exit_code = if (row.command_exit_known) row.command_exit_code else -1,
+-                .selected = if (selected) |block|
+-                    block.prompt.node == prompt.node and block.prompt.y == prompt.y
+-                else
+-                    false,
+-            };
+-            count += 1;
+-        }
++        return screen.viewportCommandBlocks(blocks[0..capacity]);
++    }
+ 
+-        return count;
++    /// Presentation only; the screen remains the owner of blocks and selection.
++    export fn ghostty_surface_set_command_block_chrome(surface: *Surface, enabled: bool, hover_row: i32) void {
++        const core = &surface.core_surface;
++        core.renderer_state.mutex.lockUncancelable(global.io());
++        core.renderer_state.command_block_chrome = enabled;
++        core.renderer_state.command_block_hover = if (hover_row >= 0) @intCast(hover_row) else null;
++        core.renderer_state.mutex.unlock(global.io());
++        core.renderer_thread.wakeup.notify() catch {};
+     }
+ 
+     /// Select the completed command block at a viewport row, replacing any
+@@ -2043,6 +1999,47 @@ pub const CAPI = struct {
+         return true;
+     }
+ 
++    export fn ghostty_surface_read_selection_receipt(surface: *Surface, result: *Text, receipt: *u64) bool {
++        receipt.* = 0;
++        const core = &surface.core_surface;
++        core.renderer_state.mutex.lockUncancelable(global.io());
++        defer core.renderer_state.mutex.unlock(global.io());
++        const screen = core.renderer_state.terminal.screens.active;
++        const selection = screen.selection orelse if (screen.selectedCommandBlock()) |block| block.text else return false;
++        if (!readTextLocked(surface, selection, result)) return false;
++        if (result.text_len > 0) receipt.* = core.renderer_state.feedback.issue(screen);
++        return true;
++    }
++
++    export fn ghostty_surface_confirm_copy(surface: *Surface, receipt: u64) bool {
++        const core = &surface.core_surface;
++        core.renderer_state.mutex.lockUncancelable(global.io());
++        const confirmed = core.renderer_state.feedback.confirm(receipt, core.renderer_state.terminal.screens.active);
++        if (confirmed and core.config.selection_clear_on_copy) {
++            const screen = core.renderer_state.terminal.screens.active;
++            screen.clearSelection();
++            screen.clearCommandBlockSelection();
++            core.renderer_state.feedback.cancel();
++        }
++        core.renderer_state.mutex.unlock(global.io());
++        if (confirmed) core.renderer_thread.wakeup.notify() catch {};
++        return confirmed;
++    }
++
++    export fn ghostty_surface_set_feedback(surface: *Surface, visible: bool, reduce_motion: bool) void {
++        const core = &surface.core_surface;
++        core.renderer_state.mutex.lockUncancelable(global.io());
++        if (core.renderer_state.feedback.visible == visible and core.renderer_state.feedback.reduce_motion == reduce_motion) {
++            core.renderer_state.mutex.unlock(global.io());
++            return;
++        }
++        core.renderer_state.feedback.visible = visible;
++        core.renderer_state.feedback.reduce_motion = reduce_motion;
++        if (!visible) core.renderer_state.feedback.cancel();
++        core.renderer_state.mutex.unlock(global.io());
++        core.renderer_thread.wakeup.notify() catch {};
++    }
++
+     fn readTextLocked(
+         surface: *Surface,
+         core_sel: terminal.Selection,
+diff --git a/src/renderer/Feedback.zig b/src/renderer/Feedback.zig
+new file mode 100644
+index 0000000..9160ad9
+--- /dev/null
++++ b/src/renderer/Feedback.zig
+@@ -0,0 +1,158 @@
++//! Surface-local copy receipt and Find cue lifetime. No text or tracked pins.
++const Feedback = @This();
++const std = @import("std");
++const terminal = @import("../terminal/main.zig");
++
++receipt: u64 = 0,
++screen_id: usize = 0,
++revision: u64 = 0,
++viewport_node: usize = 0,
++viewport_y: usize = 0,
++viewport_serial: u64 = 0,
++cols: usize = 0,
++rows: usize = 0,
++started: ?std.Io.Timestamp = null,
++visible: bool = true,
++reduce_motion: bool = false,
++
++pub fn issue(self: *Feedback, screen: *const terminal.Screen) u64 {
++    self.cancel();
++    self.bind(screen);
++    return self.receipt;
++}
++
++pub fn bind(self: *Feedback, screen: *const terminal.Screen) void {
++    const top = screen.pages.pin(.{ .viewport = .{} }) orelse return;
++    self.screen_id = @intFromPtr(screen);
++    self.revision = screen.selection_revision;
++    self.viewport_node = @intFromPtr(top.node);
++    self.viewport_y = top.y;
++    self.viewport_serial = top.node.serial;
++    self.cols = screen.pages.cols;
++    self.rows = screen.pages.rows;
++}
++
++pub fn valid(self: *const Feedback, screen: *const terminal.Screen) bool {
++    if (!self.visible or self.screen_id != @intFromPtr(screen) or self.revision != screen.selection_revision or
++        self.cols != screen.pages.cols or self.rows != screen.pages.rows) return false;
++    const top = screen.pages.pin(.{ .viewport = .{} }) orelse return false;
++    return self.viewport_node == @intFromPtr(top.node) and self.viewport_y == top.y and self.viewport_serial == top.node.serial;
++}
++
++/// A successful copy acknowledges the selection without scheduling cell emphasis.
++pub fn confirm(self: *const Feedback, receipt: u64, screen: *const terminal.Screen) bool {
++    return receipt != 0 and receipt == self.receipt and self.valid(screen);
++}
++
++pub fn cancel(self: *Feedback) void {
++    self.started = null;
++    self.screen_id = 0;
++    self.receipt +%= 1;
++    if (self.receipt == 0) self.receipt = 1;
++}
++
++pub fn remaining(self: *const Feedback, now: std.Io.Timestamp) u64 {
++    const start = self.started orelse return 0;
++    const elapsed = @max(0, @divTrunc(start.durationTo(now).nanoseconds, std.time.ns_per_ms));
++    return 160 -| @as(u64, @intCast(elapsed));
++}
++
++/// Recompute the absolute expiry on every draw, including unrelated shader draws.
++/// A painted cue needs one final update to clear its cells after expiry.
++pub fn wakeDelay(self: *const Feedback, now: std.Io.Timestamp, painted: u8, interval: u64) ?u64 {
++    const left = self.remaining(now);
++    if (left == 0 and painted == 0) return null;
++    return if (self.reduce_motion) @max(left, interval) else interval;
++}
++
++pub fn opacity(self: *const Feedback, now: std.Io.Timestamp) u8 {
++    const left = self.remaining(now);
++    if (left == 0) return 0;
++    if (self.reduce_motion) return 180;
++    const fraction = @as(f32, @floatFromInt(left)) / 160;
++    return @intFromFloat(180 * fraction * fraction);
++}
++
++test "terminal feedback copy receipts reject selection replacement" {
++    const testing = std.testing;
++    var screen = try terminal.Screen.init(testing.io, testing.allocator, .{ .cols = 10, .rows = 3 });
++    defer screen.deinit();
++    const start = screen.pages.pin(.{ .active = .{} }).?;
++    const end = screen.pages.pin(.{ .active = .{ .x = 3, .y = 1 } }).?;
++    try screen.select(.init(start, end, false));
++    var cue: Feedback = .{};
++    const receipt = cue.issue(&screen);
++    const now: std.Io.Timestamp = .now(testing.io, .awake);
++    try testing.expect(cue.confirm(receipt, &screen));
++    try testing.expectEqual(@as(u8, 0), cue.opacity(now));
++    try testing.expect(cue.wakeDelay(now, 0, 8) == null);
++    screen.clearSelection();
++    try testing.expect(!cue.confirm(receipt, &screen));
++    cue.cancel();
++    try testing.expectEqual(@as(u64, 0), cue.remaining(now));
++}
++
++test "terminal feedback Find finite expiry and reduced motion" {
++    const testing = std.testing;
++    const start: std.Io.Timestamp = .zero;
++    const midway = start.addDuration(.fromMilliseconds(80));
++    const end = start.addDuration(.fromMilliseconds(160));
++    var cue: Feedback = .{ .started = start };
++    try testing.expectEqual(@as(u8, 180), cue.opacity(start));
++    try testing.expect(cue.opacity(midway) < cue.opacity(start));
++    cue.reduce_motion = true;
++    try testing.expectEqual(@as(u8, 180), cue.opacity(midway));
++    try testing.expectEqual(@as(u8, 0), cue.opacity(end));
++    try testing.expectEqual(@as(u64, 0), cue.remaining(end));
++    cue.started = midway;
++    try testing.expectEqual(@as(u64, 80), cue.remaining(end));
++    cue.cancel();
++    try testing.expectEqual(@as(u8, 0), cue.opacity(end));
++}
++
++test "terminal feedback reset and geometry invalidate receipts" {
++    const testing = std.testing;
++    var screen = try terminal.Screen.init(testing.io, testing.allocator, .{ .cols = 10, .rows = 3 });
++    defer screen.deinit();
++    const pin = screen.pages.pin(.{ .active = .{} }).?;
++    try screen.select(.init(pin, pin, false));
++    var cue: Feedback = .{};
++    const receipt = cue.issue(&screen);
++    try screen.resize(.{ .cols = 5, .rows = 3, .reflow = true });
++    try testing.expect(!cue.confirm(receipt, &screen));
++    try screen.resize(.{ .cols = 10, .rows = 3, .reflow = true });
++    try testing.expect(!cue.confirm(receipt, &screen));
++    screen.reset();
++    try testing.expect(!cue.confirm(receipt, &screen));
++}
++
++test "terminal feedback copy preserves wrapped wide and combining text" {
++    const testing = std.testing;
++    var screen = try terminal.Screen.init(testing.io, testing.allocator, .{ .cols = 7, .rows = 6 });
++    defer screen.deinit();
++    try screen.testWriteString("error 界 e\u{301} wrapped text");
++    const selection: terminal.Selection = .init(screen.pages.getTopLeft(.screen), screen.pages.getBottomRight(.screen).?, false);
++    try screen.select(selection);
++    const before = try screen.selectionString(testing.allocator, .{ .sel = screen.selection.?, .trim = false });
++    defer testing.allocator.free(before);
++    var cue: Feedback = .{};
++    const receipt = cue.issue(&screen);
++    try testing.expect(cue.confirm(receipt, &screen));
++    const after = try screen.selectionString(testing.allocator, .{ .sel = screen.selection.?, .trim = false });
++    defer testing.allocator.free(after);
++    try testing.expectEqualStrings("error 界 e\u{301} wrapped text", before);
++    try testing.expectEqualStrings(before, after);
++}
++
++test "terminal feedback redraws cannot postpone static cue expiry" {
++    const testing = std.testing;
++    var cue: Feedback = .{ .started = .zero, .reduce_motion = true };
++    for (0..21) |tick| {
++        const now = std.Io.Timestamp.zero.addDuration(.fromMilliseconds(@intCast(tick * 8)));
++        try testing.expectEqual(@max(@as(u64, 160) -| tick * 8, 8), cue.wakeDelay(now, 180, 8).?);
++    }
++    const expired = std.Io.Timestamp.zero.addDuration(.fromMilliseconds(168));
++    try testing.expect(cue.wakeDelay(expired, 0, 8) == null);
++    cue.cancel();
++    try testing.expect(cue.wakeDelay(.zero, 0, 8) == null);
++}
+diff --git a/src/renderer/State.zig b/src/renderer/State.zig
+index 1e38d64..0ef9e53 100644
+--- a/src/renderer/State.zig
++++ b/src/renderer/State.zig
+@@ -33,6 +33,11 @@ preedit: ?Preedit = null,
+ /// need about the mouse.
+ mouse: Mouse = .{},
+ 
++feedback: @import("Feedback.zig") = .{},
++
++command_block_chrome: bool = false,
++command_block_hover: ?u16 = null,
++
+ /// The number of threads currently waiting to acquire `mutex` via
+ /// `lockDemand`. This is not protected by the mutex; it is read by
+ /// hot lock/unlock loops (the IO parse thread) in `yieldToDemand` to
+diff --git a/src/renderer/Thread.zig b/src/renderer/Thread.zig
+index 95e7083..6a8965a 100644
+--- a/src/renderer/Thread.zig
++++ b/src/renderer/Thread.zig
+@@ -423,10 +423,22 @@ fn drainMailbox(self: *Thread) !void {
+             },
+ 
+             .search_selected_match => |v| {
++                const changed = if (v) |next| if (self.renderer.search_selected_match) |prior|
++                    next.match.top_x != prior.match.top_x or next.match.bot_x != prior.match.bot_x or
++                        !std.mem.eql(*terminalpkg.PageList.List.Node, next.match.chunks.items(.node), prior.match.chunks.items(.node)) or
++                        !std.mem.eql(u64, next.match.chunks.items(.serial), prior.match.chunks.items(.serial)) or
++                        !std.mem.eql(terminalpkg.size.CellCountInt, next.match.chunks.items(.start), prior.match.chunks.items(.start)) or
++                        !std.mem.eql(terminalpkg.size.CellCountInt, next.match.chunks.items(.end), prior.match.chunks.items(.end))
++                else
++                    true else false;
+                 // Note we don't free the new value because we expect our
+                 // allocators to match.
+                 if (self.renderer.search_selected_match) |*m| m.arena.deinit();
+                 self.renderer.search_selected_match = v;
++                if (changed) {
++                    self.renderer.search_feedback.cancel();
++                    self.renderer.search_feedback.started = .now(global.io(), .awake);
++                } else if (v == null) self.renderer.search_feedback.cancel();
+                 self.renderer.search_matches_dirty = true;
+             },
+ 
+diff --git a/src/renderer/cell.zig b/src/renderer/cell.zig
+index 8753d1a..cb3e812 100644
+--- a/src/renderer/cell.zig
++++ b/src/renderer/cell.zig
+@@ -128,7 +128,7 @@ pub const Contents = struct {
+ 
+     /// Reset the cell contents to an empty state without resizing.
+     pub fn reset(self: *Contents) void {
+-        @memset(self.bg_cells, .{ 0, 0, 0, 0 });
++        @memset(self.bg_cells, .{ 0, 0, 0, 0, 0, 0, 0, 0 });
+         for (self.fg_rows) |*row| row.clearRetainingCapacity();
+     }
+ 
+@@ -206,7 +206,7 @@ pub const Contents = struct {
+     pub fn clear(self: *Contents, y: terminal.size.CellCountInt) void {
+         assert(y < self.size.rows);
+ 
+-        @memset(self.bg_cells[@as(usize, y) * self.size.columns ..][0..self.size.columns], .{ 0, 0, 0, 0 });
++        @memset(self.bg_cells[@as(usize, y) * self.size.columns ..][0..self.size.columns], .{ 0, 0, 0, 0, 0, 0, 0, 0 });
+ 
+         // We have a special list containing the cursor cell at the start
+         // of our fg row collection, so we need to add 1 to the y to get
+@@ -361,7 +361,7 @@ test Contents {
+     for (0..rows) |y| {
+         try testing.expect(c.fg_rows[y + 1].items.len == 0);
+         for (0..cols) |x| {
+-            try testing.expectEqual(.{ 0, 0, 0, 0 }, c.bgCell(y, x).*);
++            try testing.expectEqual(.{ 0, 0, 0, 0, 0, 0, 0, 0 }, c.bgCell(y, x).*);
+         }
+     }
+     // And the cursor row should have a capacity of 1 and also be empty.
+@@ -369,7 +369,7 @@ test Contents {
+     try testing.expect(c.fg_rows[0].items.len == 0);
+ 
+     // Add some contents.
+-    const bg_cell: shaderpkg.CellBg = .{ 0, 0, 0, 1 };
++    const bg_cell: shaderpkg.CellBg = .{ 0, 0, 0, 1, 0, 0, 0, 0 };
+     const fg_cell: shaderpkg.CellText = .{
+         .atlas = .grayscale,
+         .grid_pos = .{ 4, 1 },
+@@ -386,7 +386,7 @@ test Contents {
+     for (0..rows) |y| {
+         try testing.expect(c.fg_rows[y + 1].items.len == 0);
+         for (0..cols) |x| {
+-            try testing.expectEqual(.{ 0, 0, 0, 0 }, c.bgCell(y, x).*);
++            try testing.expectEqual(.{ 0, 0, 0, 0, 0, 0, 0, 0 }, c.bgCell(y, x).*);
+         }
+     }
+ 
+@@ -426,11 +426,11 @@ test "Contents resize grows and shrinks" {
+         .color = .{ 0, 0, 0, 1 },
+     };
+     try c.add(alloc, .text, cell);
+-    c.bgCell(1, 1).* = .{ 0, 0, 0, 1 };
++    c.bgCell(1, 1).* = .{ 0, 0, 0, 1, 0, 0, 0, 0 };
+     c.setCursor(cell, .bar);
+ 
+     try c.resize(alloc, .{ .rows = 3, .columns = 4 });
+-    try testing.expectEqual(.{ 0, 0, 0, 0 }, c.bgCell(1, 1).*);
++    try testing.expectEqual(.{ 0, 0, 0, 0, 0, 0, 0, 0 }, c.bgCell(1, 1).*);
+     try testing.expectEqual(@as(usize, 0), c.fg_rows[2].items.len);
+     try testing.expectEqual(@as(?shaderpkg.CellText, null), c.getCursorGlyph());
+     cell.grid_pos = .{ 3, 2 };
+@@ -454,7 +454,7 @@ test "Contents clear retains other content" {
+ 
+     // Set some contents
+     // bg and fg cells in row 1
+-    const bg_cell_1: shaderpkg.CellBg = .{ 0, 0, 0, 1 };
++    const bg_cell_1: shaderpkg.CellBg = .{ 0, 0, 0, 1, 0, 0, 0, 0 };
+     const fg_cell_1: shaderpkg.CellText = .{
+         .atlas = .grayscale,
+         .grid_pos = .{ 4, 1 },
+@@ -463,7 +463,7 @@ test "Contents clear retains other content" {
+     c.bgCell(1, 4).* = bg_cell_1;
+     try c.add(alloc, .text, fg_cell_1);
+     // bg and fg cells in row 2
+-    const bg_cell_2: shaderpkg.CellBg = .{ 0, 0, 0, 1 };
++    const bg_cell_2: shaderpkg.CellBg = .{ 0, 0, 0, 1, 0, 0, 0, 0 };
+     const fg_cell_2: shaderpkg.CellText = .{
+         .atlas = .grayscale,
+         .grid_pos = .{ 4, 2 },
+@@ -494,7 +494,7 @@ test "Contents clear last added content" {
+ 
+     // Set some contents
+     // bg and fg cells in row 1
+-    const bg_cell_1: shaderpkg.CellBg = .{ 0, 0, 0, 1 };
++    const bg_cell_1: shaderpkg.CellBg = .{ 0, 0, 0, 1, 0, 0, 0, 0 };
+     const fg_cell_1: shaderpkg.CellText = .{
+         .atlas = .grayscale,
+         .grid_pos = .{ 4, 1 },
+@@ -503,7 +503,7 @@ test "Contents clear last added content" {
+     c.bgCell(1, 4).* = bg_cell_1;
+     try c.add(alloc, .text, fg_cell_1);
+     // bg and fg cells in row 2
+-    const bg_cell_2: shaderpkg.CellBg = .{ 0, 0, 0, 1 };
++    const bg_cell_2: shaderpkg.CellBg = .{ 0, 0, 0, 1, 0, 0, 0, 0 };
+     const fg_cell_2: shaderpkg.CellText = .{
+         .atlas = .grayscale,
+         .grid_pos = .{ 4, 2 },
+diff --git a/src/renderer/generic.zig b/src/renderer/generic.zig
+index 2e01d9b..b387c1f 100644
+--- a/src/renderer/generic.zig
++++ b/src/renderer/generic.zig
+@@ -258,6 +258,9 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+ 
+         /// The render state we update per loop.
+         terminal_state: terminal.RenderState = .empty,
++        block_styles: std.ArrayList(BlockStyle) = .empty,
++        search_feedback: @import("Feedback.zig") = .{},
++        search_opacity: u8 = 0,
+ 
+         /// The number of frames since the last terminal state reset.
+         /// We reset the terminal state after ~100,000 frames (about 10 to
+@@ -824,6 +827,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+         }
+ 
+         pub fn deinit(self: *Self) void {
++            self.block_styles.deinit(self.alloc);
+             // This only deinitializes and frees CPU-side state
+             // and does not free GPU resources like the swap chain and
+             // shaders. Those are freed with `releaseGpuResources`.
+@@ -1133,6 +1137,14 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+                 break :kitty @max(next -| now_ms, draw_interval_ms);
+             };
+ 
++            const now: std.Io.Timestamp = .now(global.io(), .awake);
++            const feedback_delay = self.search_feedback.wakeDelay(now, self.search_opacity, draw_interval_ms);
++            if (feedback_delay) |delay| {
++                if ((kitty_delay == null or delay <= kitty_delay.?) and
++                    (shader_delay == null or delay <= shader_delay.?))
++                    return .{ .delay_ms = delay, .kind = .update };
++            }
++
+             // An update wake includes a draw, so it wins ties.
+             if (kitty_delay) |k| {
+                 if (shader_delay == null or k <= shader_delay.?) {
+@@ -1393,6 +1405,20 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+ 
+                 // If we're in a synchronized output state, we pause all rendering.
+                 if (state.terminal.modes.get(.synchronized_output)) {
++                    // A paused producer must not leave a Find cue on screen
++                    // or keep an animation timer alive. Preserve its frozen text.
++                    state.feedback.cancel();
++                    self.search_feedback.cancel();
++                    if (self.search_opacity > 0) {
++                        self.draw_mutex.lockUncancelable(global.io());
++                        defer self.draw_mutex.unlock(global.io());
++                        for (self.cells.bg_cells) |*cell| {
++                            cell[4] = 0;
++                            cell[5] = 0;
++                        }
++                        self.cells_rebuilt = true;
++                        self.search_opacity = 0;
++                    }
+                     log.debug("synchronized output started, skipping render", .{});
+                     return;
+                 }
+@@ -1427,9 +1453,41 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+                     state.terminal,
+                 );
+ 
++                const terminal_dirty = self.terminal_state.dirty != .false;
++                const feedback_now: std.Io.Timestamp = .now(global.io(), .awake);
++                if (!state.feedback.valid(state.terminal.screens.active)) state.feedback.cancel();
++                self.search_feedback.visible = state.feedback.visible;
++                self.search_feedback.reduce_motion = state.feedback.reduce_motion;
++                if (self.search_feedback.started != null) {
++                    if (self.search_feedback.screen_id == 0) self.search_feedback.bind(state.terminal.screens.active);
++                    if (!self.search_feedback.valid(state.terminal.screens.active)) self.search_feedback.cancel();
++                }
++                if (!state.feedback.visible or state.feedback.reduce_motion) self.search_feedback.cancel();
++                const search_opacity = self.search_feedback.opacity(feedback_now);
++                if (search_opacity != self.search_opacity) self.terminal_state.dirty = .full;
++                self.search_opacity = search_opacity;
++
++                // Snapshot only visible block appearance, while the screen pins are locked.
++                const rows = self.terminal_state.rows;
++                const styles = try arena_alloc.alloc(BlockStyle, rows);
++                @memset(styles, .none);
++                if (state.command_block_chrome) {
++                    const blocks = try arena_alloc.alloc(terminal.Screen.ViewportCommandBlock, rows);
++                    const count = state.terminal.screens.active.viewportCommandBlocks(blocks);
++                    for (blocks[0..count]) |block| {
++                        const style = blockStyle(block, state.command_block_hover);
++                        for (block.start_row..@min(@as(usize, block.end_row) + 1, rows)) |y| styles[y] = style;
++                    }
++                }
++                if (!std.mem.eql(BlockStyle, self.block_styles.items, styles)) {
++                    try self.block_styles.resize(self.alloc, rows);
++                    @memcpy(self.block_styles.items, styles);
++                    self.terminal_state.dirty = .full;
++                }
++
+                 // If our terminal state is dirty at all we need to redo
+                 // the viewport search.
+-                if (self.terminal_state.dirty != .false) {
++                if (terminal_dirty) {
+                     state.terminal.flags.search_viewport_dirty = true;
+                 }
+ 
+@@ -3082,7 +3140,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+                 });
+ 
+                 // The final background color for the cell.
+-                const bg = switch (selected) {
++                var bg = switch (selected) {
+                     // If we have an explicit selection background color
+                     // specified in the config, use that.
+                     //
+@@ -3122,6 +3180,23 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+                         bg_style,
+                 };
+ 
++                // Compose shell fills before the shaders evaluate text contrast.
++                // Text selection and Find colors retain precedence over block chrome.
++                const block_style = if (y < self.block_styles.items.len) self.block_styles.items[y] else .none;
++                if (selected == .false and block_style != .none) {
++                    const tint: terminal.color.RGB = if (block_style == .failed)
++                        state.colors.palette[1]
++                    else
++                        state.colors.foreground;
++                    const amount: f32 = switch (block_style) {
++                        .failed => 0.14,
++                        .selected => 0.06,
++                        .hovered => 0.03,
++                        .none => 0,
++                    };
++                    bg = blendBlockBackground(bg orelse state.colors.background, tint, amount);
++                }
++
+                 const fg = fg: {
+                     // Our happy-path non-selection background color
+                     // is our style or our configured defaults.
+@@ -3174,6 +3249,8 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+                         // Cells that are selected should be fully opaque.
+                         if (selected != .false) break :bg_alpha default;
+ 
++                        if (block_style != .none) break :bg_alpha default;
++
+                         // Cells that are reversed should be fully opaque.
+                         if (style.flags.inverse) break :bg_alpha default;
+ 
+@@ -3194,10 +3271,20 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+                     };
+ 
+                     self.cells.bgCell(y, x).* = .{
+-                        rgb.r, rgb.g, rgb.b, bg_alpha,
++                        rgb.r, rgb.g, rgb.b, bg_alpha, 0, 0, 0, 0,
+                     };
+                 }
+ 
++                // Edges are drawn in the background pass, behind unchanged glyphs.
++                var edge: u8 = 0;
++                var emphasis: u8 = 0;
++                if (selected == .search_selected and self.search_opacity > emphasis) {
++                    edge = 3;
++                    emphasis = self.search_opacity;
++                }
++                self.cells.bgCell(y, x)[4] = edge;
++                self.cells.bgCell(y, x)[5] = emphasis;
++
+                 // If the invisible flag is set on this cell then we
+                 // don't need to render any foreground elements, so
+                 // we just skip all glyphs with this x coordinate.
+@@ -3659,3 +3746,46 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+         }
+     };
+ }
++
++fn blendBlockBackground(bg: terminal.color.RGB, tint: terminal.color.RGB, amount: f32) terminal.color.RGB {
++    var result: terminal.color.RGB = undefined;
++    inline for (.{ "r", "g", "b" }) |channel| {
++        const b: f32 = @floatFromInt(@field(bg, channel));
++        const t: f32 = @floatFromInt(@field(tint, channel));
++        @field(result, channel) = @intFromFloat(@round(b + (t - b) * amount));
++    }
++    return result;
++}
++
++test "terminal contrast composes block backgrounds before glyphs" {
++    const testing = std.testing;
++    const dark: terminal.color.RGB = .{ .r = 36, .g = 33, .b = 31 };
++    const cream: terminal.color.RGB = .{ .r = 237, .g = 231, .b = 223 };
++    try testing.expectEqual(dark, blendBlockBackground(dark, cream, 0));
++    try testing.expectEqual(terminal.color.RGB{ .r = 48, .g = 45, .b = 43 }, blendBlockBackground(dark, cream, 0.06));
++    const light = blendBlockBackground(cream, dark, 0.06);
++    try testing.expect(light.r < cream.r and light.g < cream.g and light.b < cream.b);
++}
++
++const BlockStyle = enum { none, failed, selected, hovered };
++
++fn blockStyle(block: terminal.Screen.ViewportCommandBlock, hover: ?u16) BlockStyle {
++    if (block.exit_code > 0) return .failed;
++    if (block.selected) return .selected;
++    if (hover) |row| if (row >= block.start_row and row <= block.end_row) return .hovered;
++    return .none;
++}
++
++test "terminal contrast block failure stays distinct from neutral selection" {
++    const testing = std.testing;
++    var block: terminal.Screen.ViewportCommandBlock = .{ .start_row = 2, .end_row = 4, .exit_code = -1, .selected = false };
++    try testing.expectEqual(BlockStyle.none, blockStyle(block, null));
++    try testing.expectEqual(BlockStyle.none, blockStyle(block, 5));
++    try testing.expectEqual(BlockStyle.hovered, blockStyle(block, 3));
++    block.selected = true;
++    try testing.expectEqual(BlockStyle.selected, blockStyle(block, 3));
++    block.exit_code = 1;
++    try testing.expectEqual(BlockStyle.failed, blockStyle(block, 3));
++    block.exit_code = 0;
++    try testing.expectEqual(BlockStyle.selected, blockStyle(block, null));
++}
+diff --git a/src/renderer/metal/shaders.zig b/src/renderer/metal/shaders.zig
+index 84d536c..42bf860 100644
+--- a/src/renderer/metal/shaders.zig
++++ b/src/renderer/metal/shaders.zig
+@@ -290,7 +290,7 @@ pub const CellText = extern struct {
+ };
+ 
+ /// This is a single parameter for the cell bg shader.
+-pub const CellBg = [4]u8;
++pub const CellBg = [8]u8;
+ 
+ /// Single parameter for the image shader. See shader for field details.
+ pub const Image = extern struct {
+diff --git a/src/renderer/opengl/shaders.zig b/src/renderer/opengl/shaders.zig
+index 2155e28..ff4845b 100644
+--- a/src/renderer/opengl/shaders.zig
++++ b/src/renderer/opengl/shaders.zig
+@@ -257,7 +257,7 @@ pub const CellText = extern struct {
+ };
+ 
+ /// This is a single parameter for the cell bg shader.
+-pub const CellBg = [4]u8;
++pub const CellBg = [8]u8;
+ 
+ /// Single parameter for the image shader. See shader for field details.
+ pub const Image = extern struct {
+diff --git a/src/renderer/shaders/glsl/cell_bg.f.glsl b/src/renderer/shaders/glsl/cell_bg.f.glsl
+index fa48c67..048ee13 100644
+--- a/src/renderer/shaders/glsl/cell_bg.f.glsl
++++ b/src/renderer/shaders/glsl/cell_bg.f.glsl
+@@ -49,10 +49,20 @@ vec4 cell_bg() {
+ 
+     // Load the color for the cell.
+     vec4 cell_color = load_color(
+-            unpack4u8(cells[grid_pos.y * grid_size.x + grid_pos.x]),
++            unpack4u8(cells[2 * (grid_pos.y * grid_size.x + grid_pos.x)]),
+             use_linear_blending
+         );
+ 
++    uvec4 cue = unpack4u8(cells[2 * (grid_pos.y * grid_size.x + grid_pos.x) + 1]);
++    vec2 p = gl_FragCoord.xy - grid_padding.wx - vec2(grid_pos) * cell_size;
++    bool edge = ((cue.x & 1u) != 0u && p.y < 1.0) || ((cue.x & 2u) != 0u && p.y >= cell_size.y - 1.0) ||
++                ((cue.x & 4u) != 0u && p.x < 1.0) || ((cue.x & 8u) != 0u && p.x >= cell_size.x - 1.0);
++    if (edge && cue.y > 0u) {
++        vec4 base = cell_color + load_color(unpack4u8(bg_color_packed_4u8), use_linear_blending) * (1.0 - cell_color.a);
++        float neutral = luminance(base.rgb) > 0.5 ? 0.0 : 1.0;
++        float alpha = float(cue.y) / 255.0;
++        return vec4(vec3(neutral) * alpha, alpha) + cell_color * (1.0 - alpha);
++    }
+     return cell_color;
+ }
+ 
+diff --git a/src/renderer/shaders/glsl/cell_text.v.glsl b/src/renderer/shaders/glsl/cell_text.v.glsl
+index 7e38e2f..307f8ce 100644
+--- a/src/renderer/shaders/glsl/cell_text.v.glsl
++++ b/src/renderer/shaders/glsl/cell_text.v.glsl
+@@ -117,7 +117,7 @@ void main() {
+     out_data.color = load_color(color, true);
+     // Get the BG color
+     out_data.bg_color = load_color(
+-            unpack4u8(bg_colors[grid_pos.y * grid_size.x + grid_pos.x]),
++            unpack4u8(bg_colors[2 * (grid_pos.y * grid_size.x + grid_pos.x)]),
+             true
+         );
+     // Blend it with the global bg color
+diff --git a/src/renderer/shaders/glsl/common.glsl b/src/renderer/shaders/glsl/common.glsl
+index 1a7ea03..0a9a4da 100644
+--- a/src/renderer/shaders/glsl/common.glsl
++++ b/src/renderer/shaders/glsl/common.glsl
+@@ -88,25 +88,35 @@ float contrast_ratio(vec3 color1, vec3 color2) {
+     return max(luminance1, luminance2) / min(luminance1, luminance2);
+ }
+ 
+-// Return the fg if the contrast ratio is greater than min, otherwise
+-// return a color that satisfies the contrast ratio. Currently, the color
+-// is always white or black, whichever has the highest contrast ratio.
+-//
+-// Takes colors in linear RGB space. If your colors are gamma
+-// encoded, linearize them before using them with this function.
++// Correct premultiplied linear foregrounds without discarding chroma or alpha.
+ vec4 contrasted_color(float min_ratio, vec4 fg, vec4 bg) {
+-    float ratio = contrast_ratio(fg.rgb, bg.rgb);
+-    if (ratio < min_ratio) {
+-        float white_ratio = contrast_ratio(vec3(1.0, 1.0, 1.0), bg.rgb);
+-        float black_ratio = contrast_ratio(vec3(0.0, 0.0, 0.0), bg.rgb);
+-        if (white_ratio > black_ratio) {
+-            return vec4(1.0);
+-        } else {
+-            return vec4(0.0, 0.0, 0.0, 1.0);
+-        }
++    if (min_ratio <= 1.0 || fg.a <= 0.0) return fg;
++    vec3 backdrop = bg.rgb;
++    vec3 visible = fg.rgb + backdrop * (1.0 - fg.a);
++    if (contrast_ratio(visible, backdrop) >= min_ratio) return fg;
++
++    float b = luminance(backdrop);
++    float f = luminance(fg.rgb);
++    float base = b * (1.0 - fg.a);
++    float dark_target = (b + 0.05) / min_ratio - 0.05 - base;
++    float light_target = min_ratio * (b + 0.05) - 0.05 - base;
++    bool dark_ok = dark_target >= 0.0 && dark_target < f;
++    bool light_ok = light_target <= fg.a && light_target > f;
++    vec3 dark = dark_ok ? fg.rgb * (dark_target / f) : vec3(0.0);
++    vec3 light = light_ok
++        ? mix(fg.rgb, vec3(fg.a), (light_target - f) / (fg.a - f))
++        : vec3(fg.a);
++    if (dark_ok && light_ok) {
++        vec3 d = dark - fg.rgb;
++        vec3 l = light - fg.rgb;
++        return vec4(dot(d, d) <= dot(l, l) ? dark : light, fg.a);
+     }
+-
+-    return fg;
++    if (dark_ok) return vec4(dark, fg.a);
++    if (light_ok) return vec4(light, fg.a);
++    // The requested ratio may be unattainable (especially for faint text).
++    return vec4(contrast_ratio(light + backdrop * (1.0 - fg.a), backdrop) >
++              contrast_ratio(dark + backdrop * (1.0 - fg.a), backdrop)
++                  ? light : dark, fg.a);
+ }
+ 
+ // Converts a color from sRGB gamma encoding to linear.
+diff --git a/src/renderer/shaders/shaders.metal b/src/renderer/shaders/shaders.metal
+index 4e02b63..635ea01 100644
+--- a/src/renderer/shaders/shaders.metal
++++ b/src/renderer/shaders/shaders.metal
+@@ -89,7 +89,7 @@ float unlinearize(float v) {
+ // Takes colors in linear RGB space. If your colors are gamma
+ // encoded, linearize them before using them with this function.
+ float luminance(float3 color) {
+-  return dot(color, float3(0.2126f, 0.7152f, 0.0722f));
++  return dot(color, float3(0.22897456f, 0.69173852f, 0.07928691f));
+ }
+ 
+ // https://www.w3.org/TR/2008/REC-WCAG20-20081211/#contrast-ratiodef
+@@ -102,25 +102,35 @@ float contrast_ratio(float3 color1, float3 color2) {
+   return (max(l1, l2) + 0.05f) / (min(l1, l2) + 0.05f);
+ }
+ 
+-// Return the fg if the contrast ratio is greater than min, otherwise
+-// return a color that satisfies the contrast ratio. Currently, the color
+-// is always white or black, whichever has the highest contrast ratio.
+-//
+-// Takes colors in linear RGB space. If your colors are gamma
+-// encoded, linearize them before using them with this function.
+-float4 contrasted_color(float min, float4 fg, float4 bg) {
+-  float ratio = contrast_ratio(fg.rgb, bg.rgb);
+-  if (ratio < min) {
+-    float white_ratio = contrast_ratio(float3(1.0f), bg.rgb);
+-    float black_ratio = contrast_ratio(float3(0.0f), bg.rgb);
+-    if (white_ratio > black_ratio) {
+-      return float4(1.0f);
+-    } else {
+-      return float4(0.0f, 0.0f, 0.0f, 1.0f);
++// Correct premultiplied linear foregrounds without discarding chroma or alpha.
++float4 contrasted_color(float min_ratio, float4 fg, float4 bg) {
++    if (min_ratio <= 1.0 || fg.a <= 0.0) return fg;
++    float3 backdrop = bg.rgb;
++    float3 visible = fg.rgb + backdrop * (1.0 - fg.a);
++    if (contrast_ratio(visible, backdrop) >= min_ratio) return fg;
++
++    float b = luminance(backdrop);
++    float f = luminance(fg.rgb);
++    float base = b * (1.0 - fg.a);
++    float dark_target = (b + 0.05) / min_ratio - 0.05 - base;
++    float light_target = min_ratio * (b + 0.05) - 0.05 - base;
++    bool dark_ok = dark_target >= 0.0 && dark_target < f;
++    bool light_ok = light_target <= fg.a && light_target > f;
++    float3 dark = dark_ok ? fg.rgb * (dark_target / f) : float3(0.0);
++    float3 light = light_ok
++        ? mix(fg.rgb, float3(fg.a), (light_target - f) / (fg.a - f))
++        : float3(fg.a);
++    if (dark_ok && light_ok) {
++        float3 d = dark - fg.rgb;
++        float3 l = light - fg.rgb;
++        return float4(dot(d, d) <= dot(l, l) ? dark : light, fg.a);
+     }
+-  }
+-
+-  return fg;
++    if (dark_ok) return float4(dark, fg.a);
++    if (light_ok) return float4(light, fg.a);
++    // The requested ratio may be unattainable (especially for faint text).
++    return float4(contrast_ratio(light + backdrop * (1.0 - fg.a), backdrop) >
++              contrast_ratio(dark + backdrop * (1.0 - fg.a), backdrop)
++                  ? light : dark, fg.a);
+ }
+ 
+ // Load a 4 byte RGBA non-premultiplied color and linearize
+@@ -488,20 +498,20 @@ fragment float4 cell_bg_fragment(
+   }
+ 
+   // Load the color for the cell.
+-  uchar4 cell_color = cells[grid_pos.y * uniforms.grid_size.x + grid_pos.x];
+-
+-  // Convert the color and return it.
+-  //
+-  // TODO: It might be a good idea to do a pass before this
+-  //       to convert all of the bg colors, so we don't waste
+-  //       a bunch of work converting the cell color in every
+-  //       fragment of each cell. It's not the most epxensive
+-  //       operation, but it is still wasted work.
+-  return load_color(
+-    cell_color,
+-    uniforms.use_display_p3,
+-    uniforms.use_linear_blending
+-  );
++  uchar4 cell_color = cells[2 * (grid_pos.y * uniforms.grid_size.x + grid_pos.x)];
++
++  float4 color = load_color(cell_color, uniforms.use_display_p3, uniforms.use_linear_blending);
++  uchar4 cue = cells[2 * (grid_pos.y * uniforms.grid_size.x + grid_pos.x) + 1];
++  float2 p = in.position.xy - uniforms.grid_padding.wx - float2(grid_pos) * uniforms.cell_size;
++  bool edge = ((cue.x & 1) && p.y < 1) || ((cue.x & 2) && p.y >= uniforms.cell_size.y - 1) ||
++              ((cue.x & 4) && p.x < 1) || ((cue.x & 8) && p.x >= uniforms.cell_size.x - 1);
++  if (edge && cue.y > 0) {
++    float4 base = color + load_color(uniforms.bg_color, uniforms.use_display_p3, uniforms.use_linear_blending) * (1 - color.a);
++    float neutral = luminance(base.rgb) > 0.5 ? 0.0 : 1.0;
++    float alpha = float(cue.y) / 255.0;
++    return float4(float3(neutral) * alpha, alpha) + color * (1 - alpha);
++  }
++  return color;
+ }
+ 
+ //-------------------------------------------------------------------
+@@ -635,7 +645,7 @@ vertex CellTextVertexOut cell_text_vertex(
+ 
+   // Get the BG color
+   out.bg_color = load_color(
+-    bg_colors[in.grid_pos.y * uniforms.grid_size.x + in.grid_pos.x],
++    bg_colors[2 * (in.grid_pos.y * uniforms.grid_size.x + in.grid_pos.x)],
+     uniforms.use_display_p3,
+     true
+   );
+diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
+index 7c47b5d..07b194d 100644
+--- a/src/terminal/Screen.zig
++++ b/src/terminal/Screen.zig
+@@ -60,6 +60,7 @@ saved_cursor: ?SavedCursor = null,
+ /// directly to set it, use the `select` function which will assert and
+ /// automatically setup tracking.
+ selection: ?Selection = null,
++selection_revision: u64 = 0,
+ 
+ /// The selected command block (if any), as a tracked pin on its prompt row.
+ /// A screen has a text selection or a selected command block, never both:
+@@ -2058,6 +2059,7 @@ pub inline fn resize(
+     self: *Screen,
+     opts: Resize,
+ ) Allocator.Error!void {
++    self.selection_revision +%= 1;
+     const tw = resize_tw;
+     defer self.assertIntegrity();
+ 
+@@ -2970,6 +2972,7 @@ pub fn select(self: *Screen, sel_: ?Selection) Allocator.Error!void {
+ 
+ /// Same as select(null) but can't fail.
+ pub fn clearSelection(self: *Screen) void {
++    self.selection_revision +%= 1;
+     if (self.selection) |*sel| {
+         sel.deinit(self);
+         self.dirty.selection = true;
+@@ -3519,6 +3522,65 @@ pub const CommandBlock = struct {
+     }
+ };
+ 
++/// Viewport geometry shared by the renderer and embedder; rows are inclusive.
++pub const ViewportCommandBlock = extern struct {
++    start_row: u16,
++    end_row: u16,
++    exit_code: i16,
++    selected: bool,
++};
++
++pub fn viewportCommandBlocks(self: *const Screen, blocks: []ViewportCommandBlock) usize {
++    if (!self.semantic_prompt.seen) return 0;
++    const last_row: u16 = @intCast(self.pages.rows - 1);
++    const top = self.pages.pin(.{ .viewport = .{} }) orelse return 0;
++    const selected = self.selectedCommandBlock();
++
++    // One upward search finds the block the viewport starts inside; the
++    // rest is a single forward walk over the prompts below it.
++    var prior = top.promptIterator(.left_up, null);
++    var prompts = (prior.next() orelse top).promptIterator(.right_down, null);
++    var prompt = prompts.next() orelse return 0;
++    var count: usize = 0;
++    while (count < blocks.len) {
++        const start_row: u16 = if (self.pages.pointFromPin(
++            .viewport,
++            prompt,
++        )) |pt| start: {
++            if (pt.viewport.y > last_row) break;
++            break :start @intCast(pt.viewport.y);
++        } else 0;
++
++        // The last prompt is the live one: not a block.
++        const following = prompts.next() orelse break;
++        defer prompt = following;
++        const end_row: u16 = if (self.pages.pointFromPin(
++            .viewport,
++            following,
++        )) |pt| end: {
++            if (pt.viewport.y == 0) continue;
++            break :end @intCast(@min(pt.viewport.y - 1, last_row));
++        } else continue;
++
++        // A prompt with no input (a bare Enter) is not a command.
++        if (self.pages.highlightSemanticContent(prompt, .input) == null) continue;
++
++        const row = prompt.rowAndCell().row;
++        blocks[count] = .{
++            .start_row = start_row,
++            .end_row = end_row,
++            .exit_code = if (row.command_exit_known) row.command_exit_code else -1,
++            .selected = if (selected) |block|
++                block.prompt.node == prompt.node and block.prompt.y == prompt.y
++            else
++                false,
++        };
++        count += 1;
++    }
++
++    return count;
++}
++
+ /// The completed command block containing the pin.
+ ///
+ /// An active command is not a block yet: a following prompt is the proof that
+@@ -3567,6 +3629,7 @@ pub fn selectCommandBlock(self: *Screen, pin: Pin) Allocator.Error!bool {
+ }
+ 
+ pub fn clearCommandBlockSelection(self: *Screen) void {
++    self.selection_revision +%= 1;
+     const tracked = self.selected_command orelse return;
+     self.pages.untrackPin(tracked);
+     self.selected_command = null;
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 52571ab..adc094c 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -2854,6 +2854,7 @@ pub const ScrollViewport = union(Tag) {
+ 
+ /// Scroll the viewport of the terminal grid.
+ pub fn scrollViewport(self: *Terminal, behavior: ScrollViewport) void {
++    self.screens.active.selection_revision +%= 1;
+     self.screens.active.scroll(switch (behavior) {
+         .top => .{ .top = {} },
+         .bottom => .{ .active = {} },

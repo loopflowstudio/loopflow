@@ -4,26 +4,16 @@
 //! appends an ordered Steer. This module maps one observation onto that input
 //! spine, and [`Store::apply_linear_observation`] persists it atomically.
 //! Exactly-once, the baseline, and the monotonic-revision guard all live in the
-//! store, so calling [`reconcile_linear_observation`] twice with the same read
-//! is safe.
+//! store; acquisition supplies observations without proposing a second write.
 
+use std::time::Duration;
+
+use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 use super::{OpsError, OpsResult};
-use crate::pm::linear::LinearClient;
-use crate::store::SharedStore;
-
-use crate::pm::{IssueComment, IssueObservation};
-use crate::store::{Store, StoreResult};
-use crate::work::task::{
-    LinearFollowUp, LinearObservationApply, LinearObservationOutcome, Task, TaskLinearObservation,
-};
-
-/// Explicit steering is eligible even when published by an integration. Participant-authored
-/// comments include the account used by Loopflow; exclude writebacks by content.
-pub(crate) fn is_human_comment(comment: &IssueComment, _viewer_id: &str) -> bool {
-    is_direction_comment(&comment.body, comment.author_id.as_deref())
-}
+use crate::store::{SharedStore, Store};
+use crate::work::task::Task;
 
 /// Explicit steering carries its marker, whichever account published it.
 pub(crate) fn is_steer(body: &str) -> bool {
@@ -31,6 +21,9 @@ pub(crate) fn is_steer(body: &str) -> bool {
 }
 
 pub(crate) fn is_direction_comment(body: &str, author: Option<&str>) -> bool {
+    if body.contains("<!-- loopflow-progress:") {
+        return false;
+    }
     if is_steer(body) {
         return true;
     }
@@ -42,65 +35,463 @@ pub(crate) fn is_direction_comment(body: &str, author: Option<&str>) -> bool {
         && !body.starts_with("[GitHub PR #")
 }
 
-/// Publish first; local events are a recoverable projection of Linear comments.
-pub(crate) async fn publish_task_steer(
-    store: &SharedStore,
-    task: &Task,
-    text: &str,
-) -> OpsResult<String> {
-    let text = text.trim();
-    if text.is_empty() {
-        return Err(OpsError::Message("Task direction cannot be empty".into()));
-    }
-    let client = super::pm::issue_client(&task.worktree).await?;
-    let marker = format!("<!-- loopflow-steer:{} -->", uuid::Uuid::new_v4());
-    let name = crate::engine::config::launch_user_name()
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let text = match name {
-        Some(name) => format!(
-            "{text}\n\n<!-- loopflow-requester:{} -->",
-            serde_json::to_string(&name)
-                .expect("name is serializable")
-                .replace('<', "\\u003c")
-                .replace('>', "\\u003e")
-        ),
-        None => text.to_string(),
-    };
-    let comment_id = publish_comment(&client, task.plan.id.as_str(), &text, &marker).await?;
-    refresh_task_comments(store, task).await.map_err(|error| OpsError::Message(format!(
-        "Posted Linear comment {comment_id}, but local delivery is pending: {error}. The worker will reconcile it from Linear."
-    )))?;
-    Ok(comment_id)
-}
-
-async fn publish_comment(
-    client: &LinearClient,
-    issue_id: &str,
-    text: &str,
-    marker: &str,
-) -> OpsResult<String> {
-    // One identity per authored instruction. Equal text can intentionally recur.
-    let body = format!("{text}\n\n{marker}");
-    match client.comment(issue_id, &body).await {
-        Ok(id) => Ok(id),
-        Err(error) => match client.find_comment_with_marker(issue_id, marker).await {
-            Ok(Some(id)) => Ok(id),
-            _ => Err(OpsError::Message(format!(
-                "Linear did not confirm this steering comment: {error}. Check Linear for {marker} before resubmitting; no local-only steer was accepted."
-            ))),
-        },
-    }
-}
-
 pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    let client = super::pm::issue_client(&task.worktree).await?;
-    let observation = client
-        .observe_issue(task.plan.id.as_str())
+    // A command can outlive export or a mapping change. Observe the current link;
+    // pending outbound writes do not own or pause this input stream.
+    let task = store
+        .get_task(&task.id)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .ok_or_else(|| OpsError::Message(format!("Task {} is missing", task.id)))?;
+    let Some(issue) = &task.linear_id else {
+        return Ok(());
+    };
+    let repository = super::task::repository_for_task(store, &task)?;
+    if !super::planning_client::connected(&repository.to_string_lossy()) {
+        return Ok(());
+    }
+    let client = super::planning_client::PlanningClient::for_items(&repository).await?;
+    // A coworker deleted the item: remove the Task from the plan, keeping its work.
+    let url = store.sqlite.task_issue_url(&task.id).map_err(message)?;
+    if client
+        .removed(issue.as_str(), url.as_deref())
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+    {
+        store
+            .sqlite
+            .observe_pm_issue_change(issue.as_str(), None, true)
+            .map_err(message)?;
+        return Ok(());
+    }
+    let mut observation = client
+        .observe_issue(issue.as_str())
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    reconcile_linear_observation(store, task, observation, "", OffsetDateTime::now_utc())
+    claim_local_comments(store, &task, &client, &mut observation)?;
+    // Linear's team feed accepts provider edits into Work. Asana and Notion have
+    // none, so this exact read is their acceptance: a renamed or completed task
+    // updates the Task, and an unsent local edit stays as a visible conflict.
+    if !matches!(client, super::planning_client::PlanningClient::Linear(_)) {
+        if let Some((item, project)) = client
+            .issue_ownership(issue.as_str())
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+        {
+            super::planning_delivery::ingest_task(
+                store,
+                &repository,
+                &item,
+                project.as_ref(),
+                OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .await?;
+        }
+    }
+    store
+        .apply_linear_observation(&task.id, observation, OffsetDateTime::now_utc())
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
+    Ok(())
+}
+
+/// Asana and Notion comments carry no caller identity. A comment showing a
+/// Loopflow comment's visible text is that comment: delivery settles and nothing
+/// echoes back.
+fn claim_local_comments(
+    store: &Store,
+    task: &Task,
+    client: &super::planning_client::PlanningClient,
+    observation: &mut crate::linear::LinearIssueObservation,
+) -> OpsResult<()> {
+    if matches!(client, super::planning_client::PlanningClient::Linear(_)) {
+        return Ok(());
+    }
+    let local = store
+        .sqlite
+        .task_comments(&task.id)
+        .map_err(message)?
+        .comments;
+    for comment in &mut observation.comments {
+        if let Some(saved) = local.iter().find(|saved| {
+            uuid::Uuid::parse_str(&saved.id).is_ok()
+                && client.claimed_comment(&saved.body).as_deref() == Some(comment.body.as_str())
+        }) {
+            comment.id = saved.id.clone();
+            comment.body = saved.body.clone();
+        }
+    }
+    Ok(())
+}
+
+fn message(error: impl std::fmt::Display) -> OpsError {
+    OpsError::Message(error.to_string())
+}
+
+pub(crate) async fn check_before_write(repo: &std::path::Path) -> OpsResult<()> {
+    let store = super::planning_sync::planning_store().await?;
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        check_repository(&store, &repo.to_string_lossy()),
+    )
+    .await
+    .map_err(message)??;
+    Ok(())
+}
+
+/// Bring the repository's planning scope (a Linear Team, Asana project or
+/// Notion database) up to date: items people created or edited there become or
+/// update Tasks. Freshness belongs to the scope, even when several repositories
+/// or processes share it.
+pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResult<bool> {
+    if !super::planning_client::connected(repository) {
+        return Ok(false);
+    }
+    let repo = std::path::Path::new(repository);
+    let team = super::planning_client::repository_scope(repo)?;
+    let mut live = Vec::new();
+    let mut finished = Vec::new();
+    let waves: Vec<_> = store
+        .list_waves(None)
+        .await
+        .map_err(message)?
+        .into_iter()
+        .filter(|wave| {
+            super::planning_client::repository_scope(std::path::Path::new(wave.repo()))
+                .ok()
+                .as_ref()
+                == Some(&team)
+        })
+        .collect();
+    for task in store.list_tasks(None).await.map_err(message)? {
+        let task_repo = super::task::repository_for_task(store, &task)?;
+        if super::planning_client::repository_scope(&task_repo)
+            .ok()
+            .as_ref()
+            != Some(&team)
+        {
+            continue;
+        }
+        let Some(issue) = task.linear_id else {
+            continue;
+        };
+        if store
+            .task_state(&task.id)
+            .await
+            .map_err(message)?
+            .is_terminal()
+        {
+            finished.push(issue.as_str().to_owned());
+        } else {
+            live.push(issue.as_str().to_owned());
+        }
+    }
+    let key = format!("{:x}", Sha256::digest(team.as_bytes()));
+    let path = store
+        .sqlite
+        .home_dir()
+        .map_err(message)?
+        .join("locks/linear-teams")
+        .join(key);
+    let Some(_lock) = super::planning_delivery::lock_delivery(&path)? else {
+        return Ok(false);
+    };
+    let now = OffsetDateTime::now_utc();
+    let Some(since) = store
+        .sqlite
+        .begin_linear_team_check(&team, now.unix_timestamp())
+        .map_err(message)?
+    else {
+        return Ok(false);
+    };
+    let through = now
+        .format(&time::format_description::well_known::Rfc3339)
+        .map_err(message)?;
+    let client = super::planning_client::PlanningClient::for_items(repo).await?;
+    let changes = client
+        .changes(&team, since.as_deref(), &through, &live, &finished)
+        .await
+        .map_err(message)?;
+    let changed = !changes.is_empty();
+    for (issue, project, observation) in changes {
+        // Provider filters limit traffic; the current local decision still wins
+        // when completion races the request.
+        let existing = store.get_task_by_issue(&issue.id).await.map_err(message)?;
+        if let Some(task) = &existing {
+            if store
+                .task_state(&task.id)
+                .await
+                .map_err(message)?
+                .is_terminal()
+            {
+                continue;
+            }
+        }
+        let owner = if let Some(task) = &existing {
+            Some(
+                super::task::repository_for_task(store, task)?
+                    .display()
+                    .to_string(),
+            )
+        } else {
+            // Ingestion resolves the returned Project against authored Wave mappings.
+            waves
+                .iter()
+                .find(|wave| {
+                    super::linear::read_initiative(std::path::Path::new(wave.repo()), wave.slug())
+                        .is_some_and(|initiative| {
+                            project
+                                .as_ref()
+                                .is_some_and(|project| project.initiative_ids.contains(&initiative))
+                        })
+                })
+                .map(|wave| wave.repo().to_owned())
+                // An item in no Wave Project is a standalone Task of this repository.
+                .or_else(|| Some(repository.to_owned()))
+        };
+        let Some(owner) = owner else { continue };
+        super::planning_delivery::ingest_task(
+            store,
+            std::path::Path::new(&owner),
+            &issue,
+            project.as_ref(),
+            now.unix_timestamp(),
+        )
+        .await?;
+        if let Some(task) = store.get_task_by_issue(&issue.id).await.map_err(message)? {
+            let mut observation = observation;
+            claim_local_comments(store, &task, &client, &mut observation)?;
+            store
+                .apply_linear_observation(&task.id, observation, now)
+                .await
+                .map_err(message)?;
+        }
+    }
+    store
+        .sqlite
+        .finish_linear_team_check(&team, &through)
+        .map_err(message)?;
+    Ok(changed)
+}
+
+/// Bound on-demand work and retain local planning when Linear is unavailable.
+pub(crate) async fn sync_repository(store: &Store, repository: &str) -> bool {
+    let check =
+        tokio::time::timeout(Duration::from_secs(5), check_repository(store, repository)).await;
+    let changed = match check {
+        Ok(Ok(changed)) => changed,
+        result => {
+            tracing::debug!(?result, "Linear team check pending");
+            false
+        }
+    };
+    // Each delivery has its own deadline. A shared deadline repeatedly canceled
+    // the first slow export and starved every later saved Task.
+    if let Err(error) = sync_repository_deliveries(store, repository).await {
+        tracing::debug!(%error, "planning delivery pending");
+    }
+    if let Err(error) = super::planning_export::sync_repository_exports(store, repository).await {
+        tracing::debug!(%error, "planning export pending");
+    }
+    if let Err(error) = super::planning_delivery::sync_repository_fields(store, repository).await {
+        tracing::debug!(%error, "planning field delivery pending");
+    }
+    changed
+}
+
+/// Only an attached watcher owns a Linear clock. Idle agents own no Linear timer.
+pub(super) async fn watch_repository(store: &Store, repo: &str) {
+    let mut delay = 30;
+    loop {
+        let changed = sync_repository(store, repo).await;
+        delay = if changed { 30 } else { (delay * 2).min(240) };
+        tracing::debug!(target: "loopflow::linear_watch", delay, "Linear watcher waiting");
+        tokio::time::sleep(Duration::from_secs(delay)).await;
+    }
+}
+
+pub(super) async fn sync_repository_deliveries(store: &Store, repository: &str) -> OpsResult<()> {
+    if !super::planning_client::connected(repository) {
+        return Ok(());
+    }
+    let pending = store
+        .sqlite
+        .pending_planning_tasks(repository)
+        .map_err(message)?;
+    futures_util::future::join_all(pending.iter().map(|task| async {
+        let (comments, state) = tokio::join!(
+            sync_task_comments(store, task),
+            sync_task_state(store, task)
+        );
+        for result in [comments, state] {
+            if let Err(error) = result {
+                tracing::debug!(%error, "planning delivery pending");
+            }
+        }
+    }))
+    .await;
+    Ok(())
+}
+
+pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()> {
+    deliver_task_state(store, task, false).await
+}
+
+pub(crate) async fn deliver_task_state(store: &Store, task: &Task, retry: bool) -> OpsResult<()> {
+    let path = store
+        .sqlite
+        .home_dir()
+        .map_err(message)?
+        .join("locks/task-state")
+        .join(format!("{}.lock", task.id));
+    let Some(_lock) = super::planning_delivery::lock_delivery(&path)? else {
+        return Ok(());
+    };
+    let Some(delivery) = store.sqlite.pending_task_state(&task.id).map_err(message)? else {
+        return Ok(());
+    };
+    let attempt = async {
+        let task = store
+            .get_task(&task.id)
+            .await
+            .map_err(message)?
+            .ok_or_else(|| OpsError::Message("Task is missing".into()))?;
+        let Some(issue) = &task.linear_id else {
+            return Ok(());
+        };
+        let project = match &task.project_id {
+            Some(id) => Some(
+                store
+                    .get_project(id)
+                    .await
+                    .map_err(message)?
+                    .ok_or_else(|| message("Task Project is missing"))?,
+            ),
+            None => None,
+        };
+        let repository = super::task::repository_for_task(store, &task)?;
+        let Some(provider) = super::planning_client::remote_name(&repository) else {
+            return Ok(());
+        };
+        let client = super::planning_client::PlanningClient::for_items(&repository).await?;
+        let (observed, _) = client
+            .issue_ownership(issue.as_str())
+            .await
+            .map_err(message)?
+            .ok_or_else(|| message(format!("Linked {provider} task is unavailable")))?;
+        if observed.project_id.as_deref()
+            != project
+                .as_ref()
+                .and_then(|p| p.linear_id.as_ref())
+                .map(|id| id.as_str())
+        {
+            return Err(message(format!(
+                "Task membership changed in {provider}; retained local decision"
+            )));
+        }
+        if observed.state.is_none() {
+            return Err(message(format!(
+                "{provider} state is unknown; saved decision retained"
+            )));
+        }
+        if !crate::linear::acceptance::observe_task_state(&store.sqlite, &delivery, &observed)
+            .map_err(message)?
+        {
+            return Ok(());
+        }
+        if delivery.attempted && !retry {
+            return Err(OpsError::Message(
+                "Prior state delivery remains uncertain; saved decision retained".into(),
+            ));
+        }
+        let state_id = client
+            .state_id(
+                super::planning_client::StateScope::Item(issue.as_str()),
+                &delivery.target,
+            )
+            .await
+            .map_err(message)?;
+        if !store
+            .sqlite
+            .attempt_task_state(&delivery, retry)
+            .map_err(message)?
+        {
+            return Ok(());
+        }
+        // Neither provider has an expected-revision guard here. A reopening between
+        // the observation and this mutation can be overwritten; its acknowledgement
+        // settles observed state, not the absence of an intervening edit.
+        let confirmed = match client.set_item_state(issue.as_str(), &state_id).await {
+            Ok(confirmed) => confirmed,
+            Err(error) => {
+                if !delivery.attempted
+                    && matches!(error, crate::linear::LinearError::RateLimited { .. })
+                {
+                    store.sqlite.reject_task_state(&delivery).map_err(message)?;
+                }
+                return Err(message(&error));
+            }
+        };
+        if crate::linear::acceptance::observe_task_state(&store.sqlite, &delivery, &confirmed)
+            .map_err(message)?
+        {
+            return Err(message(format!(
+                "{provider} state write remains uncertain; saved decision retained"
+            )));
+        }
+        Ok::<(), OpsError>(())
+    };
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), attempt).await;
+    let error = match result {
+        Ok(Ok(())) => return Ok(()),
+        Ok(Err(error)) => error.to_string(),
+        Err(_) => {
+            "Task state delivery timed out; saved decision and delivery identity retained".into()
+        }
+    };
+    store
+        .sqlite
+        .task_state_error(&delivery, &error)
+        .map_err(message)
+}
+
+pub(crate) async fn sync_task_comments(store: &Store, task: &Task) -> OpsResult<()> {
+    let task = store
+        .get_task(&task.id)
+        .await
+        .map_err(message)?
+        .ok_or_else(|| OpsError::Message("Task is missing".into()))?;
+    let Some(issue) = &task.linear_id else {
+        return Ok(());
+    };
+    let comments = store
+        .sqlite
+        .pending_task_comments(&task.id)
+        .map_err(message)?;
+    if comments.is_empty() {
+        return Ok(());
+    }
+    let repository = super::task::repository_for_task(store, &task)?;
+    if !super::planning_client::connected(&repository.to_string_lossy()) {
+        return Ok(());
+    }
+    let client = super::planning_client::PlanningClient::for_items(&repository).await?;
+    for comment in comments {
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.sync_comment(&comment.id, issue.as_str(), &comment.body),
+        )
+        .await;
+        let error = match result {
+            Ok(Ok(())) => None,
+            Ok(Err(error)) => Some(error.to_string()),
+            Err(_) => Some("Comment delivery timed out; its identity is retained".into()),
+        };
+        store
+            .sqlite
+            .record_comment_delivery(&comment.id, error.as_deref())
+            .map_err(message)?;
+    }
     Ok(())
 }
 
@@ -112,8 +503,7 @@ pub(crate) fn comment_revision_id(id: &str, revision: Option<&str>) -> String {
 }
 
 /// The person a comment speaks for. Explicit steering can be published through
-/// an integration account: its recorded requester wins, and an older anonymous
-/// steer stays anonymous.
+/// an integration account: its recorded requester wins over the Linear author.
 pub(crate) fn comment_requester(body: &str, author_name: Option<&str>) -> Option<String> {
     let requester = if is_steer(body) {
         body.split_once("<!-- loopflow-requester:")
@@ -124,7 +514,8 @@ pub(crate) fn comment_requester(body: &str, author_name: Option<&str>) -> Option
     };
     requester
         .as_deref()
-        .and_then(crate::engine::config::normalize_user_name)
+        .and_then(crate::config::normalize_user_name)
+        .or_else(|| author_name.and_then(crate::config::normalize_user_name))
 }
 
 pub(crate) fn render_comment(
@@ -144,324 +535,193 @@ pub(crate) fn render_comment(
     let source = author_id
         .map(|id| format!(" (provider user {id})"))
         .unwrap_or_default();
-    format!("Linear comment {id}{attribution}{source}:\n\n{body}")
-}
-
-fn content_steer_text(title: &str, description: &str) -> String {
-    format!(
-        "The linked Linear task was edited; use this current definition.\n\n\
-         Title: {title}\n\n{description}"
-    )
-}
-
-/// Read one Linear observation into durable, exactly-once Task direction.
-pub async fn reconcile_linear_observation(
-    store: &Store,
-    task: &Task,
-    observation: IssueObservation,
-    viewer_id: &str,
-    observed_at: OffsetDateTime,
-) -> StoreResult<LinearObservationOutcome> {
-    let cursor = store.task_linear_observation(&task.id).await?;
-    let apply = plan_apply(task, observation, viewer_id, observed_at, cursor.as_ref());
-    store.apply_linear_observation(apply).await
-}
-
-/// Build the durable apply from a read and the current cursor. A
-/// title/description edit becomes a Steer only when a baseline exists and the
-/// content changed; every user comment rides as a candidate Steer, and the
-/// store drops the ones already seen.
-pub(crate) fn plan_apply(
-    task: &Task,
-    observation: IssueObservation,
-    viewer_id: &str,
-    observed_at: OffsetDateTime,
-    cursor: Option<&TaskLinearObservation>,
-) -> LinearObservationApply {
-    let content_steer = match cursor {
-        Some(cursor)
-            if cursor.last_title != observation.title
-                || cursor.last_description != observation.description =>
-        {
-            Some(content_steer_text(
-                &observation.title,
-                &observation.description,
-            ))
-        }
-        _ => None,
-    };
-    let follow_ups = observation
-        .comments
-        .iter()
-        .filter(|comment| is_human_comment(comment, viewer_id))
-        .map(|comment| LinearFollowUp {
-            comment_id: comment_revision_id(&comment.id, comment.revision.as_deref()),
-            text: render_comment(
-                &comment.id,
-                &comment.body,
-                comment.author_id.as_deref(),
-                comment.author_name.as_deref(),
-            ),
-        })
-        .collect();
-    LinearObservationApply {
-        task_id: task.id.clone(),
-        revision: observation.revision,
-        title: observation.title,
-        description: observation.description,
-        observed_at,
-        content_steer,
-        follow_ups,
-    }
+    format!("Planning comment {id}{attribution}{source}:\n\n{body}")
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::{is_human_comment, plan_apply};
-    use crate::planning::{LinearIssueId, TaskPlan};
-    use crate::pm::{IssueComment, IssueObservation};
-    use crate::work::task::{Task, TaskId, TaskLinearObservation};
+mod tests {
+    use super::{is_direction_comment, render_comment};
 
-    use crate::pm::test_server::{self, json_response};
-    use crate::store::{CredentialType, ProviderToken, SharedStore};
-    use axum::http::StatusCode;
-    use serde_json::json;
-    use std::future::Future;
+    #[test]
+    fn linear_on_demand_watch_connection_acquires_and_closes() {
+        use crate::ops::linear::task_planning_tests::{mark_issue_updated, with_planning_task};
 
-    pub(crate) async fn with_posted_comment<T>(
-        store: &SharedStore,
-        task: &Task,
-        body: &str,
-        future: impl Future<Output = T>,
-    ) -> T {
-        let (url, _) = test_server::spawn(vec![
-            json_response(StatusCode::OK, json!({"data": {"commentCreate": {"comment": {"id": "comment-1"}}}})),
-            json_response(StatusCode::OK, json!({"data": {"issue": {
-                "updatedAt": "2026-09-23T00:00:00Z", "title": task.plan.title, "description": task.plan.description,
-                "comments": {"nodes": [{"id": "comment-1", "body": body, "updatedAt": "2026-09-23T00:00:00Z", "user": {"id": "user-loopflow"}}], "pageInfo": {"hasNextPage": false, "endCursor": null}}
-            }}})),
-        ]).await;
-        let file = tempfile::NamedTempFile::new().unwrap();
-        store
-            .upsert_provider_token(&ProviderToken {
-                provider: "linear".into(),
-                access_token: "fixture-token".into(),
-                refresh_token: None,
-                oauth_client_id: None,
-                expires_at: None,
-                login: Some("fixture".into()),
-                updated_at: 1,
-                credential_type: CredentialType::OAuth,
-            })
-            .await
-            .unwrap();
-        crate::ops::pm::PM_TEST_CONTEXT
-            .scope(
-                crate::ops::pm::PmTestContext {
-                    path: file.path().to_path_buf(),
-                    store: store.clone(),
-                    graphql_url: url,
-                },
-                future,
+        with_planning_task(|runtime, fixture, repo, task, state| {
+            runtime.block_on(async {
+                let mut provider = state.lock().await;
+                provider.issues[0]["title"] = serde_json::json!("Acquired by watcher");
+                mark_issue_updated(&mut provider.issues[0]);
+            });
+            let watch = crate::ops::planning_sync::PlanningSync::start_watch(
+                fixture.store.clone(),
+                repo.to_string_lossy().into_owned(),
             )
-            .await
-    }
-
-    #[tokio::test]
-    async fn uncertain_publication_reconciles_the_existing_linear_comment() {
-        let marker = "<!-- loopflow-steer:request-1 -->";
-        let page = |nodes| json!({"data": {"issue": {"comments": {"nodes": nodes, "pageInfo": {"hasNextPage": false, "endCursor": null}}}}});
-        let (url, _) = test_server::spawn(vec![
-            json_response(
-                StatusCode::OK,
-                json!({"errors": [{"message": "response interrupted"}]}),
-            ),
-            json_response(
-                StatusCode::OK,
-                page(
-                    json!([{"id": "posted-comment", "body": format!("keep the API\n\n{marker}")}]),
-                ),
-            ),
-        ])
-        .await;
-        let client =
-            crate::pm::linear::LinearClient::with_base_url("fixture-token".into(), None, url);
-        assert_eq!(
-            super::publish_comment(&client, "issue-1", "keep the API", marker)
+            .unwrap();
+            runtime.block_on(async {
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    while fixture
+                        .store
+                        .get_task(&task.id)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .title
+                        != "Acquired by watcher"
+                    {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                })
                 .await
-                .unwrap(),
-            "posted-comment"
-        );
+                .unwrap();
+            });
+            let closing = std::time::Instant::now();
+            drop(watch);
+            assert!(closing.elapsed() < std::time::Duration::from_secs(5));
+        });
     }
 
-    const VIEWER: &str = "user-loopflow";
+    #[test]
+    fn linear_on_demand_watcher_backs_off_and_resets_on_change() {
+        use crate::ops::linear::task_planning_tests::{mark_issue_updated, with_planning_task};
+        use tracing_subscriber::layer::SubscriberExt;
+
+        struct Sleeps(std::sync::mpsc::Sender<u64>);
+        impl tracing::field::Visit for Sleeps {
+            fn record_debug(&mut self, _: &tracing::field::Field, _: &dyn std::fmt::Debug) {}
+            fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+                if field.name() == "delay" {
+                    self.0.send(value).unwrap();
+                }
+            }
+        }
+        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Sleeps {
+            fn on_event(
+                &self,
+                event: &tracing::Event<'_>,
+                _: tracing_subscriber::layer::Context<'_, S>,
+            ) {
+                if event.metadata().target() == "loopflow::linear_watch" {
+                    event.record(&mut Sleeps(self.0.clone()));
+                }
+            }
+        }
+
+        with_planning_task(|runtime, fixture, repo, task, state| {
+            let clock = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+            conn.execute("DELETE FROM linear_team_checks", []).unwrap();
+            runtime.block_on(async { state.lock().await.requests = 0 });
+            let (sender, sleeps) = std::sync::mpsc::channel();
+            let subscriber = tracing_subscriber::registry().with(Sleeps(sender));
+            let _trace = tracing::subscriber::set_default(subscriber);
+            clock.block_on(async {
+                tokio::time::pause();
+                let mut watch = Box::pin(super::watch_repository(
+                    &fixture.store,
+                    repo.to_str().unwrap(),
+                ));
+                let exercise = async {
+                    let mut previous = 0;
+                    for (index, expected) in [30, 60, 120, 240, 240, 30, 60].into_iter().enumerate()
+                    {
+                        if previous != 0 {
+                            tokio::time::advance(std::time::Duration::from_secs(previous - 1))
+                                .await;
+                            tokio::task::yield_now().await;
+                            assert_eq!(state.lock().await.requests, index);
+                            // SQLite freshness uses wall time; advance its attempt too.
+                            conn.execute("UPDATE linear_team_checks SET attempted_at=0", [])
+                                .unwrap();
+                            if index == 5 {
+                                let mut provider = state.lock().await;
+                                provider.issues[0]["title"] =
+                                    serde_json::json!("Watcher acquired change");
+                                mark_issue_updated(&mut provider.issues[0]);
+                            }
+                            // Tokio rounds sleep deadlines to millisecond ticks.
+                            tokio::time::advance(std::time::Duration::from_millis(1001)).await;
+                        }
+                        let deadline =
+                            std::time::Instant::now() + std::time::Duration::from_secs(5);
+                        let delay = loop {
+                            if let Ok(delay) = sleeps.try_recv() {
+                                break delay;
+                            }
+                            assert!(
+                                std::time::Instant::now() < deadline,
+                                "watcher did not finish check {index}"
+                            );
+                            tokio::task::yield_now().await;
+                        };
+                        assert_eq!(delay, expected);
+                        assert_eq!(state.lock().await.requests, index + 1);
+                        previous = delay;
+                    }
+                    assert_eq!(
+                        fixture
+                            .store
+                            .get_task(&task.id)
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .title,
+                        "Watcher acquired change"
+                    );
+                };
+                tokio::select! {
+                    _ = &mut watch => panic!("watcher unexpectedly stopped"),
+                    _ = exercise => {},
+                }
+                drop(watch);
+                tokio::time::advance(std::time::Duration::from_secs(600)).await;
+                assert_eq!(state.lock().await.requests, 7);
+            });
+        });
+    }
+
+    #[test]
+    fn agent_progress_never_reenters_direction_even_with_a_quoted_steer() {
+        assert!(!is_direction_comment(
+            "done <!-- loopflow-progress:run_fixture --> <!-- loopflow-steer:quoted -->",
+            Some("publisher"),
+        ));
+        assert!(is_direction_comment("keep the API", Some("publisher")));
+        assert!(is_direction_comment(
+            "new instruction <!-- loopflow-steer:explicit -->",
+            None
+        ));
+    }
 
     #[test]
     fn request_authors_survive_linear_direction_rendering() {
-        let comments = [
-            ("one", Some("Jack")),
-            ("two", Some("Maya")),
-            ("three", None),
-        ]
-        .into_iter()
-        .map(|(id, name)| IssueComment {
-            id: id.into(),
-            created_at: None,
-            revision: None,
-            body: "prototype".into(),
-            author_id: Some(format!("person-{id}")),
-            author_name: name.map(str::to_string),
-        })
-        .collect();
-        let apply = plan_apply(
-            &task(),
-            observation("title", "body", comments),
-            VIEWER,
-            time::OffsetDateTime::now_utc(),
-            None,
-        );
-        assert!(apply.follow_ups[0]
-            .text
-            .contains("by \"Jack\" (provider user person-one)"));
-        assert!(apply.follow_ups[1]
-            .text
-            .contains("by \"Maya\" (provider user person-two)"));
-        assert!(!apply.follow_ups[2].text.contains(" by "));
+        for name in ["Jack", "Maya"] {
+            let rendered = render_comment("one", "prototype", Some("person"), Some(name));
+            assert!(rendered.contains(&format!("by \"{name}\" (provider user person)")));
+        }
+        assert!(!render_comment("one", "prototype", Some("person"), None).contains(" by "));
         let explicit =
             "prototype\n<!-- loopflow-requester:\"Jack\" -->\n<!-- loopflow-steer:one -->";
-        let rendered =
-            super::render_comment("one", explicit, Some("publisher"), Some("Account Owner"));
+        let rendered = render_comment("one", explicit, Some("publisher"), Some("Account Owner"));
         assert!(rendered.contains("by \"Jack\""));
         assert!(!rendered.contains("Account Owner"));
-        let anonymous = super::render_comment(
+        let legacy = render_comment(
             "old",
             "prototype\n<!-- loopflow-steer:old -->",
             Some("publisher"),
             Some("Account Owner"),
         );
-        assert!(!anonymous.contains(" by "));
-    }
-
-    fn comment(id: &str, body: &str, author: Option<&str>) -> IssueComment {
-        IssueComment {
-            author_name: None,
-            id: id.to_string(),
-            created_at: None,
-            revision: None,
-            body: body.to_string(),
-            author_id: author.map(str::to_string),
-        }
-    }
-
-    fn observation(
-        title: &str,
-        description: &str,
-        comments: Vec<IssueComment>,
-    ) -> IssueObservation {
-        IssueObservation {
-            revision: "2026-07-15T18:00:00.000Z".to_string(),
-            title: title.to_string(),
-            description: description.to_string(),
-            comments,
-        }
-    }
-
-    fn task() -> Task {
-        let now = time::OffsetDateTime::now_utc();
-        Task {
-            id: TaskId::from_raw("ts_plan"),
-            plan: TaskPlan {
-                id: LinearIssueId::new("issue-1").unwrap(),
-                identifier: "INF-123".to_string(),
-                title: "Old title".to_string(),
-                description: "Old body".to_string(),
-                pm_snapshot_synced_at: 1,
-            },
-            pm_writeback: crate::work::task::PmWritebackState::Current,
-            wave_id: crate::id::WaveId::new(),
-            project_id: crate::work::project::ProjectId::new(),
-            worktree: "/tmp/task".into(),
-            workspace_slug: "ship-it".to_string(),
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::work::task::Observation::NotRequired,
-        }
-    }
-
-    fn cursor(title: &str, description: &str) -> TaskLinearObservation {
-        let now = time::OffsetDateTime::now_utc();
-        TaskLinearObservation {
-            task_id: TaskId::from_raw("task_plan"),
-            last_revision: "2026-07-15T00:00:00.000Z".to_string(),
-            last_title: title.to_string(),
-            last_description: description.to_string(),
-            last_success_at: now,
-            degraded_reason: None,
-            updated_at: now,
-        }
+        assert!(legacy.contains("by \"Account Owner\""));
     }
 
     #[test]
-    fn own_account_comments_are_direction_but_writebacks_are_not() {
-        assert!(is_human_comment(
-            &comment("c", "hi", Some("user-human")),
-            VIEWER
-        ));
-        assert!(is_human_comment(
-            &comment("c", "please fix this", Some(VIEWER)),
-            VIEWER
-        ));
-        assert!(!is_human_comment(
-            &comment("c", "PR: x", Some(VIEWER)),
-            VIEWER
-        ));
-        assert!(!is_human_comment(&comment("c", "bot", None), VIEWER));
-    }
-
-    #[test]
-    fn baseline_emits_no_content_steer_and_keeps_user_comments_as_candidates() {
-        // No cursor yet: a title change must not become a Steer, but user
-        // comments still ride so the store can deliver them.
-        let obs = observation(
-            "New title",
-            "New body",
-            vec![
-                comment("c-1", "please prioritize", Some("user-human")),
-                comment("c-2", "PR: x", Some(VIEWER)),
-            ],
-        );
-        let apply = plan_apply(&task(), obs, VIEWER, time::OffsetDateTime::now_utc(), None);
-        assert!(apply.content_steer.is_none());
-        assert_eq!(apply.follow_ups.len(), 1);
-        assert_eq!(apply.follow_ups[0].comment_id, "c-1");
-    }
-
-    #[test]
-    fn a_content_edit_becomes_one_steer() {
-        let obs = observation("New title", "New body", vec![]);
-        let apply = plan_apply(
-            &task(),
-            obs,
-            VIEWER,
-            time::OffsetDateTime::now_utc(),
-            Some(&cursor("Old title", "Old body")),
-        );
-        let steer = apply.content_steer.expect("Steer for a content edit");
-        assert!(steer.contains("New title"));
-        assert!(steer.contains("New body"));
-    }
-
-    #[test]
-    fn an_unchanged_issue_emits_no_steer() {
-        let obs = observation("Old title", "Old body", vec![]);
-        let apply = plan_apply(
-            &task(),
-            obs,
-            VIEWER,
-            time::OffsetDateTime::now_utc(),
-            Some(&cursor("Old title", "Old body")),
-        );
-        assert!(apply.content_steer.is_none());
+    fn account_identity_does_not_filter_direction() {
+        for author in ["person", "publisher"] {
+            assert!(is_direction_comment("please fix this", Some(author)));
+            assert!(!is_direction_comment("PR: x", Some(author)));
+        }
+        assert!(!is_direction_comment("bot", None));
     }
 }

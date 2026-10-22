@@ -1,134 +1,134 @@
 import Foundation
 import Testing
+import Loopflow
 @testable import LoopflowMac
 
-@Suite("Portfolio Service")
+@MainActor
 struct PortfolioServiceTests {
-    @Test("addRepo keeps most recently opened repo first and de-duplicates by path")
-    func addRepoDeduplicatesAndSorts() throws {
-        let (defaults, key, cleanup) = makeDefaults()
-        defer { cleanup() }
-        let root = try makeTempDirectory(prefix: "portfolio-service")
-        defer { try? FileManager.default.removeItem(at: root) }
-        let repoA = try makeGitRepo("repo-a", in: root)
-        let repoB = try makeGitRepo("repo-b", in: root)
-
-        let service = PortfolioService(defaults: defaults, key: key)
-        service.addRepo(repoA)
-        service.addRepo(repoB)
-        service.addRepo(repoA)
-
-        #expect(service.repos.count == 2)
-        #expect(service.repos.first?.path == repoA.normalizedFilePath)
-        #expect(service.repos.last?.path == repoB.normalizedFilePath)
+    @Test func desktopWritesReadBackThroughCLI() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("portfolio-cli-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let query = try BuiltLf(home: home).query
+        let service = PortfolioService(query: query)
+        await service.refresh()
+        #expect(service.selection?.configured == false)
+        await service.perform(["import", home.appendingPathComponent("missing").path])
+        let imported = try await query.portfolio()
+        #expect(service.selection == imported)
+        #expect(imported.mode == .manual)
+        #expect(imported.repos.count == 1)
+        #expect(imported.repos[0].error != nil)
+        await service.perform(["remove", imported.repos[0].path])
+        #expect(try await query.portfolio().repos.isEmpty)
+        _ = try await query.portfolio(["folder", home.path])
+        await service.refresh()
+        #expect(service.selection?.mode == .folder)
+        #expect(service.selection == (try await query.portfolio()))
     }
 
-    @Test("adding a linked worktree stores its main repository")
-    func addRepoCollapsesLinkedWorktree() throws {
-        let (defaults, key, cleanup) = makeDefaults()
-        defer { cleanup() }
-        let root = try makeTempDirectory(prefix: "portfolio-worktree")
-        defer { try? FileManager.default.removeItem(at: root) }
-        let mainRepo = try makeGitRepo("repo", in: root)
-        let worktree = root.appendingPathComponent("repo.feature", isDirectory: true)
-        try git(["worktree", "add", "-q", worktree.path], at: mainRepo)
-
-        let service = PortfolioService(defaults: defaults, key: key)
-        service.addRepo(worktree)
-
-        #expect(service.repos.map(\.path) == [mainRepo.normalizedFilePath])
-        #expect(service.repos.map(\.displayName) == ["repo"])
-    }
-
-    @Test("adding a non-repository leaves the portfolio unchanged")
-    func addRepoRejectsNonRepository() throws {
-        let (defaults, key, cleanup) = makeDefaults()
-        defer { cleanup() }
-        let root = try makeTempDirectory(prefix: "portfolio-non-repo")
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        let service = PortfolioService(defaults: defaults, key: key)
-
-        #expect(service.addRepo(root) == nil)
+    @Test func mutationWaitsForPendingReading() async {
+        let transport = DelayedPortfolioReading()
+        let service = PortfolioService(query: RegistryQuery { _, _ in await transport.read() })
+        let earlier = Task { await service.refresh() }
+        while !(await transport.isWaiting) { await Task.yield() }
+        let removal = Task { await service.perform(["remove", "/removed/repo"]) }
+        await transport.release()
+        await earlier.value
+        await removal.value
+        #expect(service.error == nil)
         #expect(service.repos.isEmpty)
+        #expect(!service.isPending)
     }
 
-    @Test("loading stored worktrees migrates them to one main repository")
-    func loadReposNormalizesStoredWorktrees() throws {
-        let (defaults, key, cleanup) = makeDefaults()
-        defer { cleanup() }
-        let root = try makeTempDirectory(prefix: "portfolio-stored-worktree")
-        defer { try? FileManager.default.removeItem(at: root) }
-        let mainRepo = try makeGitRepo("repo", in: root)
-        let worktree = root.appendingPathComponent("repo.feature", isDirectory: true)
-        try git(["worktree", "add", "-q", worktree.path], at: mainRepo)
-        let entries = [
-            PortfolioRepo(path: worktree.path, lastOpened: Date()),
-            PortfolioRepo(path: mainRepo.path, lastOpened: .distantPast),
-        ]
-        defaults.set(try JSONEncoder().encode(entries), forKey: key)
-
-        let service = PortfolioService(defaults: defaults, key: key)
-
-        #expect(service.repos.map(\.path) == [mainRepo.normalizedFilePath])
-        let stored = try #require(defaults.data(forKey: key))
-        #expect(try JSONDecoder().decode([PortfolioRepo].self, from: stored) == service.repos)
+    @Test func sharedFixtureDecodes() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/portfolio.json"))
+        let value = try JSONDecoder().decode(Portfolio.self, from: data)
+        #expect(value.configured)
+        #expect(value.mode == .manual)
+        #expect(value.repos.count == 2)
+        #expect(value.repos[1].error == "Repository unavailable")
+        #expect(try JSONDecoder().decode(Portfolio.self, from: JSONEncoder().encode(value)) == value)
     }
 
-    @Test("removeRepo updates stored list")
-    func removeRepo() throws {
-        let (defaults, key, cleanup) = makeDefaults()
-        defer { cleanup() }
-        let root = try makeTempDirectory(prefix: "portfolio-remove")
-        defer { try? FileManager.default.removeItem(at: root) }
-        let repoA = try makeGitRepo("repo-a", in: root)
-        let repoB = try makeGitRepo("repo-b", in: root)
-
-        let service = PortfolioService(defaults: defaults, key: key)
-        service.addRepo(repoA)
-        service.addRepo(repoB)
-
-        service.removeRepo(repoA)
-        #expect(service.repos.count == 1)
-        #expect(service.repos[0].path == repoB.normalizedFilePath)
+    @Test func mutationsPublishSharedReadingAndFailureRetainsMembership() async throws {
+        let state = PortfolioTransport()
+        let service = PortfolioService(query: RegistryQuery { args, _ in try await state.run(args) })
+        await service.refresh()
+        #expect(service.repos.map(\.path) == ["/src/repo"])
+        await service.perform(["manual"])
+        #expect(service.selection?.mode == .manual)
+        #expect(service.repos.isEmpty)
+        await service.perform(["add", "/other/repo"])
+        #expect(service.repos.map(\.path) == ["/other/repo"])
+        await service.perform(["folder", "/missing"])
+        #expect(service.selection?.mode == .folder)
+        #expect(service.selection?.root == "/missing")
+        #expect(service.error == "Folder unavailable")
+        #expect(service.repos.map(\.path) == ["/other/repo"])
+        await state.fail()
+        await service.refresh()
+        #expect(service.repos.map(\.path) == ["/other/repo"])
+        #expect(service.error == "Unavailable")
     }
 
-    private func makeDefaults() -> (UserDefaults, String, () -> Void) {
-        let suiteName = "portfolio-tests-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        let key = "portfolio.repos"
-        return (defaults, key, { defaults.removePersistentDomain(forName: suiteName) })
+    @Test func legacyImportRequiresAnUnconfiguredSharedSelection() async throws {
+        let suite = "portfolio-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let saved = Data("[{\"path\":\"/saved/repo\",\"lastOpened\":0}]".utf8)
+        defaults.set(saved, forKey: "portfolioRepos")
+        let state = PortfolioTransport()
+        let service = PortfolioService(query: RegistryQuery { args, _ in try await state.run(args) }, defaults: defaults)
+        #expect(service.legacyPaths.isEmpty)
+        await service.refresh()
+        #expect(service.legacyPaths == ["/saved/repo"])
+        await service.importLegacy()
+        #expect(service.repos.map(\.path) == ["/saved/repo"])
+        #expect(service.legacyPaths.isEmpty)
+        #expect(defaults.data(forKey: "portfolioRepos") == saved)
     }
+}
 
-    private func makeGitRepo(_ name: String, in root: URL) throws -> URL {
-        let repo = root.appendingPathComponent(name, isDirectory: true)
-        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
-        try git(["init", "-q"], at: repo)
-        try git(
-            [
-                "-c", "user.email=t@t", "-c", "user.name=t",
-                "commit", "-q", "--allow-empty", "-m", "init",
-            ],
-            at: repo
-        )
-        return repo
+private actor PortfolioTransport {
+    private var configured = false
+    private var mode = "folder"
+    private var root = "/src"
+    private var readingError: String?
+    private var paths = ["/src/repo"]
+    private var failed = false
+    func fail() { failed = true }
+    func run(_ args: [String]) throws -> String {
+        if failed { throw RegistryQueryError("Unavailable") }
+        if args.contains("manual") { configured = true; mode = "manual"; paths = [] }
+        if args.count > 3, args[1] == "add" || args[1] == "import" {
+            configured = true; mode = "manual"; paths = [args[2]]
+        }
+        if args.count > 3, args[1] == "folder" {
+            configured = true; mode = "folder"; root = args[2]; paths = []; readingError = "Folder unavailable"
+        }
+        let json: [String: Any] = ["configured": configured, "mode": mode, "root": root,
+                                  "repos": paths.map { ["path": $0, "error": NSNull()] as [String: Any] },
+                                  "error": readingError as Any? ?? NSNull()]
+        return String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
     }
+}
 
-    private func git(_ args: [String], at directory: URL) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "-C", directory.path] + args
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-        try process.run()
-        process.waitUntilExit()
-        try #require(process.terminationStatus == 0, "git \(args.joined(separator: " "))")
+private actor DelayedPortfolioReading {
+    private var continuation: CheckedContinuation<String, Never>?
+    private var reads = 0
+    var isWaiting: Bool { continuation != nil }
+    func read() async -> String {
+        reads += 1
+        if reads > 1 {
+            return #"{"configured":true,"mode":"manual","root":"/src","repos":[],"error":null}"#
+        }
+        return await withCheckedContinuation { continuation = $0 }
     }
-
-    private func makeTempDirectory(prefix: String) throws -> URL {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
+    func release() {
+        continuation?.resume(returning: #"{"configured":true,"mode":"manual","root":"/src","repos":[{"path":"/removed/repo","error":null}],"error":null}"#)
+        continuation = nil
     }
 }

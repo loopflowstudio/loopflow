@@ -1,0 +1,35 @@
+---
+requires: Runnable behavior and the implementation's Done When claims
+produces: self-contained scratch notes with demo evidence, human feedback, and the next useful action
+action_style: conversational
+---
+Demonstrate the changed behavior through the real configured path.
+
+On an interactive surface, guide the User through doing and observing the
+important behavior themselves. Keep source review secondary to the experience.
+Record what the User observed, what they accepted, and what remains wrong or
+unclear. Reconsider the design with them when the experience calls for it; save
+the revised design and concrete implementation direction before ending review.
+A failed demonstration can finish its review with clear feedback for another
+implementation pass. Do not describe that completion as successful behavior.
+
+Write the result in a topic-named Markdown note under `scratch/`, or update the
+relevant existing note. Make it useful to a reader without this conversation:
+name the experience reviewed and its date, observed behavior and human feedback,
+agreed design changes, unresolved questions, and the recommended next action
+with its proof. Link the current design and supporting evidence. Distinguish
+human statements from your interpretation, and agreed changes from proposals.
+Keep the current account coherent; mark superseded conclusions and preserve
+useful evidence. The note should stand on its own in any later review or work
+step, including when this demo runs outside a Graph.
+
+Discuss the feedback, revised artifact paths and remaining work in the ongoing
+conversation. Save their exact paths and a short takeaway with the review evidence.
+The caller chooses further work; this demo closes no Session and restarts no Graph.
+
+On a headless surface, run the same demonstration autonomously. If required
+product judgment or absent-user action prevents the proof, explain the exact
+blocker in ordinary output and stop. The declared interactive demo owns
+presentation. Do not manufacture a question to create a checkpoint.
+
+Never treat closing, detaching, provider exit, or lack of response as approval.

@@ -1,0 +1,62 @@
+--- a/include/ghostty.h
++++ b/include/ghostty.h
+@@ -1150,6 +1150,9 @@
+ GHOSTTY_API void ghostty_config_load_default_files(ghostty_config_t);
+ GHOSTTY_API void ghostty_config_load_recursive_files(ghostty_config_t);
+ GHOSTTY_API void ghostty_config_finalize(ghostty_config_t);
++// Cursor, selection and search colors read into ghostty_config_color_s when
++// configured as RGB. Unset or cell-relative colors return false without writing;
++// they have no fixed RGB value until resolved against a terminal cell.
+ GHOSTTY_API bool ghostty_config_get(ghostty_config_t, void*, const char*, uintptr_t);
+ GHOSTTY_API ghostty_input_trigger_s ghostty_config_trigger(ghostty_config_t,
+                                                               const char*,
+--- a/src/config/c_get.zig
++++ b/src/config/c_get.zig
+@@ -32,6 +32,11 @@
+             ptr.* = if (value) |slice| @ptrCast(slice.ptr) else null;
+         },
+ 
++        Config.TerminalColor => return switch (value) {
++            .color => |color| getValue(ptr_raw, color),
++            .@"cell-foreground", .@"cell-background" => false,
++        },
++
+         bool => {
+             const ptr: *bool = @ptrCast(@alignCast(ptr_raw));
+             ptr.* = value;
+@@ -238,3 +243,35 @@
+     try testing.expect(get(&c, .@"split-preserve-zoom", @ptrCast(&bits)));
+     try testing.expectEqual(@as(c_uint, 1), bits);
+ }
++
++test "c_get: terminal colors" {
++    const testing = std.testing;
++    var config = try Config.default(testing.allocator);
++    defer config.deinit();
++
++    inline for (.{
++        "cursor-color",               "cursor-text",
++        "selection-background",       "selection-foreground",
++        "search-background",          "search-foreground",
++        "search-selected-background", "search-selected-foreground",
++    }) |name| {
++        @field(config, name) = .{ .color = .{ .r = 0x12, .g = 0x34, .b = 0x56 } };
++        var color: Color.C = undefined;
++        try testing.expect(get(&config, @field(Key, name), &color));
++        try testing.expectEqualDeep(Color.C{ .r = 0x12, .g = 0x34, .b = 0x56 }, color);
++    }
++}
++
++test "c_get: unresolved terminal colors leave output unchanged" {
++    const testing = std.testing;
++    var config = try Config.default(testing.allocator);
++    defer config.deinit();
++
++    const sentinel = Color.C{ .r = 0xAB, .g = 0xCD, .b = 0xEF };
++    var color = sentinel;
++    for ([_]?Config.TerminalColor{ null, .@"cell-foreground", .@"cell-background" }) |value| {
++        config.@"cursor-color" = value;
++        try testing.expect(!get(&config, .@"cursor-color", &color));
++        try testing.expectEqualDeep(sentinel, color);
++    }
++}

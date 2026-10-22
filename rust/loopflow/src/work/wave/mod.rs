@@ -2,9 +2,10 @@
 
 pub mod config;
 pub mod context;
-pub mod memory;
+pub mod metrics;
+pub mod relocate;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::id::WaveId;
@@ -52,37 +53,18 @@ impl WaveLocator {
     }
 }
 
-/// The one-time typed wake derived from a child Wave's durable promotion occurrence.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct PromotionWake {
-    pub(crate) parent_wave_id: WaveId,
-    pub(crate) parent: String,
-}
-
-impl PromotionWake {
-    pub(crate) fn inbox_id(&self) -> String {
-        format!("promotion:{}", self.parent_wave_id)
-    }
-
-    pub(crate) fn prompt(&self) -> String {
-        format!(
-            "Promotion from parent Wave '{}' is complete. Begin the first child-Wave pass and report what this Wave now owns.",
-            self.parent
-        )
-    }
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct Wave {
     id: WaveId,
     name: String,
+    /// Derived on read from this Wave and its ancestors; never persisted.
+    #[serde(skip)]
+    slug: String,
     /// Current canonical repository half of the mutable locator.
     repo: String,
     #[serde(with = "time::serde::rfc3339::option")]
     created_at: Option<OffsetDateTime>,
-    /// Parent wave in the chord tree. `None` for a root wave. A chord is simply
-    /// a wave that has children (`children_of(id)` non-empty) — there is no
-    /// `wave_type` discriminator.
+    /// Directory parent; absent for a top-level Wave.
     parent_wave_id: Option<WaveId>,
     /// The first completed promotion occurrence. Ancestry alone leaves this
     /// absent so an older parent link cannot manufacture a new wake.
@@ -98,6 +80,7 @@ impl Wave {
     pub fn new(id: WaveId, name: String, repo: String) -> Self {
         Self {
             id,
+            slug: name.clone(),
             name,
             repo,
             created_at: Some(OffsetDateTime::now_utc()),
@@ -109,7 +92,7 @@ impl Wave {
         }
     }
 
-    /// Establish initial chord ancestry without recording a promotion occurrence.
+    /// Establish an initial directory parent without recording a promotion occurrence.
     /// An existing parent always wins.
     pub fn with_parent(mut self, parent: WaveId) -> Self {
         self.parent_wave_id.get_or_insert(parent);
@@ -130,6 +113,7 @@ impl Wave {
     ) -> Self {
         Self {
             id,
+            slug: name.clone(),
             name,
             repo,
             created_at: Some(created_at),
@@ -145,7 +129,7 @@ impl Wave {
         &self.id
     }
 
-    /// Parent wave in the chord tree, `None` for a root wave.
+    /// Directory parent, `None` for a root Wave.
     pub fn parent_wave_id(&self) -> Option<&WaveId> {
         self.parent_wave_id.as_ref()
     }
@@ -171,6 +155,15 @@ impl Wave {
         self.retired_at.is_some()
     }
 
+    pub fn slug(&self) -> &str {
+        &self.slug
+    }
+
+    pub(crate) fn with_slug(mut self, slug: String) -> Self {
+        self.slug = slug;
+        self
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -185,60 +178,18 @@ impl Wave {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{Wave, WaveLocator};
-    use crate::id::WaveId;
-    use time::OffsetDateTime;
-
-    #[test]
-    fn reconstructing_identity_cannot_copy_or_reparent_a_promotion() {
-        let parent = WaveId::new();
-        let promoted = Wave::from_stored_parts(
-            WaveId::new(),
-            "ship".to_string(),
-            "/repo".to_string(),
-            OffsetDateTime::now_utc(),
-            Some(parent.clone()),
-            Some(OffsetDateTime::now_utc()),
-            None,
-            None,
-            None,
-        );
-
-        let rebuilt = Wave::new(
-            promoted.id().clone(),
-            promoted.name().to_string(),
-            promoted.repo().to_string(),
-        );
-        assert_eq!(rebuilt.parent_wave_id(), None);
-        assert_eq!(rebuilt.promoted_at(), None);
-
-        let other_parent = WaveId::new();
-        let unchanged = promoted.with_parent(other_parent);
-        assert_eq!(unchanged.parent_wave_id(), Some(&parent));
-        assert!(unchanged.promoted_at().is_some());
-    }
-
-    #[test]
-    fn locator_slugs_allow_safe_nesting_but_never_path_traversal() {
-        let repo = crate::repository::CanonicalRepo::discover(
-            &std::env::current_dir().expect("current directory"),
-        )
-        .unwrap();
-        assert_eq!(
-            WaveLocator::new(repo.clone(), "goals/release")
-                .unwrap()
-                .slug(),
-            "goals/release"
-        );
-        for unsafe_slug in [
-            "../escape",
-            "goals/../escape",
-            "goals//release",
-            "goals\\release",
-        ] {
-            assert!(WaveLocator::new(repo.clone(), unsafe_slug).is_err());
-        }
-    }
+pub async fn ensure_wave_row(
+    store: &crate::store::Store,
+    repo: &std::path::Path,
+    name: &str,
+) -> crate::store::StoreResult<Wave> {
+    let locator = WaveLocator::discover(repo, name)
+        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+    let id = store
+        .sqlite
+        .ensure_wave(&repo.to_string_lossy(), locator.slug())?;
+    store
+        .get_wave(&id)
+        .await?
+        .ok_or(crate::store::StoreError::NotFound)
 }

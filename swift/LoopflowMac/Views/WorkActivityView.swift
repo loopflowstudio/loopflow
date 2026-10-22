@@ -2,11 +2,9 @@ import Loopflow
 import SwiftUI
 
 struct WorkActivityView: View {
-    @Bindable var model: PodiumModel
+    @Bindable var model: WorkModel
 
     @Environment(\.palette) private var palette
-    @State private var isSettingTurnIntent = false
-    @State private var turnIntentError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,15 +13,12 @@ struct WorkActivityView: View {
             if let reason = model.workActivity.errorMessage {
                 evidenceBanner(reason)
             }
-            if let turnIntentError {
-                evidenceBanner(turnIntentError)
-            }
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.surface)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("podium-activity")
+        .accessibilityIdentifier("loopflow-activity")
         .task(id: model.selection) {
             await model.refreshWorkActivity()
         }
@@ -40,18 +35,9 @@ struct WorkActivityView: View {
                         .font(Typography.caption(10))
                         .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)
-                        .accessibilityIdentifier("podium-activity-scope")
+                        .accessibilityIdentifier("loopflow-activity-scope")
                 }
                 Spacer(minLength: Spacing.sm)
-                if let wave = selectedWave, model.selection?.kind == .wave {
-                    Button(wave.paused ? "Resume" : "Pause") {
-                        Task { await setPaused(!wave.paused, waveId: wave.id) }
-                    }
-                    .buttonStyle(.borderless)
-                    .font(Typography.caption(9).weight(.semibold))
-                    .disabled(isSettingTurnIntent)
-                    .accessibilityIdentifier("podium-wave-turn-control")
-                }
                 if model.selection != nil {
                     Button {
                         model.select(nil)
@@ -70,7 +56,7 @@ struct WorkActivityView: View {
                     .foregroundStyle(palette.text)
                     .lineLimit(2)
                     .textSelection(.enabled)
-                    .accessibilityIdentifier("podium-selection-summary")
+                    .accessibilityIdentifier("loopflow-selection-summary")
             }
         }
         .padding(.horizontal, Spacing.lg)
@@ -82,7 +68,7 @@ struct WorkActivityView: View {
         if model.workActivity.value == nil, model.workActivity.errorMessage == nil {
             ProgressView("Reading Activity…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityIdentifier("podium-activity-loading")
+                .accessibilityIdentifier("loopflow-activity-loading")
         } else if let items = model.workActivity.value?.items, !items.isEmpty {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -98,14 +84,14 @@ struct WorkActivityView: View {
                     }
                 }
             }
-            .accessibilityIdentifier("podium-activity-list")
+            .accessibilityIdentifier("loopflow-activity-list")
         } else {
             ContentUnavailableView(
                 "No Activity in this window",
                 systemImage: "clock.arrow.circlepath",
                 description: Text("Work creation, Runs, PRs, and Steers will appear here.")
             )
-            .accessibilityIdentifier("podium-activity-empty")
+            .accessibilityIdentifier("loopflow-activity-empty")
         }
     }
 
@@ -124,7 +110,7 @@ struct WorkActivityView: View {
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     Text("\((entry.work.kind == .project ? "CHAPTER" : entry.work.kind.rawValue.uppercased())) · \(entry.subject)")
-                        .font(Typography.caption(8).weight(.bold))
+                        .font(Typography.strong(8))
                         .tracking(0.6)
                         .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)
@@ -143,8 +129,8 @@ struct WorkActivityView: View {
                 if let github = entry.fact.github {
                     Link("Open PR #\(github.number)", destination: github.url)
                         .font(Typography.caption(9).weight(.semibold))
-                        .foregroundStyle(Color.loopflowBurgundy)
-                        .accessibilityIdentifier("podium-open-pr-\(github.number)")
+                        .buttonStyle(WorkLinkStyle())
+                        .accessibilityIdentifier("loopflow-open-pr-\(github.number)")
                 }
             }
         }
@@ -153,13 +139,7 @@ struct WorkActivityView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(entry.subject), \(entry.summary), \(exactTime(entry.recordedAt))")
-        .accessibilityIdentifier("podium-activity-\(entry.id)")
-    }
-
-    private var selectedWave: WaveSnapshot? {
-        guard let selection = model.selection else { return nil }
-        guard let waveId = model.waveId(for: selection) else { return nil }
-        return model.wave(id: waveId)?.wave
+        .accessibilityIdentifier("loopflow-activity-\(entry.id)")
     }
 
     private var scopeTitle: String {
@@ -202,21 +182,21 @@ struct WorkActivityView: View {
 
     private func activityAppearance(_ fact: WorkActivityFact) -> (icon: String, color: Color) {
         switch fact {
-        case .workCreated: ("plus", .statusNeutral)
-        case .runStarted: ("play.fill", .statusInfo)
-        case .runFinished(_, let status):
+        case .workCreated: ("plus", palette.textTertiary)
+        case .inputCaptured, .providerHistoryRecorded: ("play.fill", palette.working)
+        case .inputCompletionRecorded(_, _, let status):
             (
                 "checkmark",
                 ["ok", "completed", "succeeded"].contains(status.lowercased())
-                    ? .statusSuccess
-                    : .statusWarning
+                    ? palette.success
+                    : palette.warning
             )
-        case .prStarted: ("arrow.triangle.branch", .statusNeutral)
-        case .prPublishRequested: ("arrow.up.right", .statusInfo)
-        case .prMergeRequested: ("arrow.triangle.merge", .statusInfo)
-        case .prMerged: ("checkmark.seal.fill", .statusSuccess)
-        case .prAbandoned: ("xmark", .statusWarning)
-        case .steerIssued: ("arrow.turn.down.right", Color.loopflowBurgundy)
+        case .prStarted: ("arrow.triangle.branch", palette.textTertiary)
+        case .prPublishRequested: ("arrow.up.right", palette.working)
+        case .prMergeRequested: ("arrow.triangle.merge", palette.working)
+        case .prMerged: ("checkmark.seal.fill", palette.success)
+        case .prAbandoned: ("xmark", palette.warning)
+        case .steerIssued: ("arrow.turn.down.right", palette.emphasisInk)
         }
     }
 
@@ -233,24 +213,13 @@ struct WorkActivityView: View {
     private func evidenceBanner(_ reason: String) -> some View {
         Label(reason, systemImage: "exclamationmark.triangle.fill")
             .font(Typography.caption(9))
-            .foregroundStyle(Color.statusWarning)
+            .foregroundStyle(palette.warning)
             .lineLimit(2)
             .textSelection(.enabled)
             .padding(.horizontal, Spacing.lg)
             .padding(.vertical, Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.statusWarning.opacity(0.10))
+            .background(palette.warning.opacity(0.10))
     }
 
-    @MainActor
-    private func setPaused(_ paused: Bool, waveId: String) async {
-        isSettingTurnIntent = true
-        turnIntentError = nil
-        defer { isSettingTurnIntent = false }
-        do {
-            try await model.setWavePaused(waveId: waveId, paused: paused)
-        } catch {
-            turnIntentError = error.localizedDescription
-        }
-    }
 }

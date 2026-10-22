@@ -53,10 +53,10 @@ fn map_incident_report_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CiIncide
             repaired_head_sha: row.get(19)?,
         },
         wave: row.get(20)?,
-        task: row.get(21)?,
-        task_status: row.get(22)?,
-        task_started_at: optional_datetime(23, row.get(23)?)?,
-        human_assisted: row.get::<_, i64>(24)? != 0,
+        task: None,
+        task_status: row.get(21)?,
+        task_started_at: optional_datetime(22, row.get(22)?)?,
+        human_assisted: row.get::<_, i64>(23)? != 0,
     })
 }
 
@@ -133,45 +133,15 @@ impl super::SqliteStore {
         Ok(conn.execute(
             "UPDATE ci_incidents
              SET claimed_landing_generation=?3,
-                 responded_at=COALESCE(responded_at, ?4),
+                 responded_at=?4,
                  updated_at=MAX(updated_at, ?4)
-             WHERE identity=?1 AND landing_id=?2
+             WHERE identity=?1 AND landing_id=?2 AND responded_at IS NULL
                AND EXISTS (
                     SELECT 1 FROM pr_landings landing
                     WHERE landing.id=?2 AND landing.generation=?3
-                      AND landing.state IN ('watching', 'repairing')
+                      AND landing.state IN ('watching', 'repairing', 'blocked')
                )",
             params![identity, landing_id.as_str(), generation as i64, at],
-        )? > 0)
-    }
-
-    pub fn mark_ci_incident_repaired(
-        &self,
-        identity: &str,
-        landing_id: &PrLandingId,
-        generation: u64,
-        repaired_head_sha: &str,
-        updated_at: OffsetDateTime,
-    ) -> StoreResult<bool> {
-        let at = timestamp(updated_at);
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute(
-            "UPDATE ci_incidents
-             SET repaired_head_sha=COALESCE(repaired_head_sha, ?4),
-                 updated_at=MAX(updated_at, ?5)
-             WHERE identity=?1 AND landing_id=?2
-               AND EXISTS (
-                    SELECT 1 FROM pr_landings landing
-                    WHERE landing.id=?2 AND landing.generation=?3
-                      AND landing.state IN ('watching', 'repairing')
-               )",
-            params![
-                identity,
-                landing_id.as_str(),
-                generation as i64,
-                repaired_head_sha,
-                at
-            ],
         )? > 0)
     }
 
@@ -240,6 +210,44 @@ impl super::SqliteStore {
         )?)
     }
 
+    /// Fill the provider's completion time on this head's incidents that lack one.
+    pub(crate) fn record_ci_provider_completion(
+        &self,
+        repo: &str,
+        pr_number: u32,
+        failed_head_sha: &str,
+        completed_at: OffsetDateTime,
+    ) -> StoreResult<usize> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute(
+            "UPDATE ci_incidents SET provider_completed_at=?4
+             WHERE repo=?1 AND pr_number=?2 AND failed_head_sha=?3
+               AND provider_completed_at IS NULL",
+            params![
+                repo,
+                i64::from(pr_number),
+                failed_head_sha,
+                timestamp(completed_at)
+            ],
+        )?)
+    }
+
+    /// Processes holding an unfinished repair for this landing, newest first.
+    pub(crate) fn landing_repair_processes(
+        &self,
+        landing_id: &PrLandingId,
+    ) -> StoreResult<Vec<crate::id::LfProcessId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT repair_lf_process_id FROM ci_incidents
+             WHERE landing_id=?1 AND repair_lf_process_id IS NOT NULL AND repair_finished_at IS NULL
+             ORDER BY updated_at DESC",
+        )?;
+        let rows = statement.query_map([landing_id.as_str()], |row| row.get(0))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
     pub(crate) fn ci_incidents_since(
         &self,
         since: OffsetDateTime,
@@ -247,7 +255,8 @@ impl super::SqliteStore {
         repo: Option<&str>,
     ) -> StoreResult<Vec<CiIncidentReportRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
+        let conn = conn.unchecked_transaction()?;
+        let mut statement = conn.prepare(&format!(
             "SELECT
                 ci.identity, ci.landing_id, ci.task_id, ci.pr_id,
                 ci.repo, ci.pr_number, ci.failed_head_sha, ci.failure_set_json,
@@ -255,14 +264,16 @@ impl super::SqliteStore {
                 ci.claimed_landing_generation, ci.responded_at, ci.green_at,
                 ci.merged_at, ci.blocked_at, ci.blocked_reason, ci.created_at,
                 ci.updated_at, ci.repaired_head_sha,
-                w.name, ts.issue_identifier,
-                ts.work_state,
-                ts.created_at,
+                w.slug,
+                CASE WHEN ts.id IS NOT NULL THEN {task_state} END,
+                (SELECT min(o.at) * 1000000000 FROM task_ownership o
+                 WHERE o.task_id=ci.task_id AND o.kind IN ('claim','recorded')),
                 EXISTS (
                     SELECT 1 FROM task_events event
+                    JOIN steers direction ON direction.id=json_extract(event.kind_json, '$.steer_id')
                     WHERE event.task_id=ci.task_id
                       AND json_extract(event.kind_json, '$.kind')='steer'
-                      AND json_extract(event.kind_json, '$.author.kind')='user'
+                      AND json_extract(direction.author, '$.kind') IN ('user','named')
                       AND event.created_at * 1000000000 >= CASE
                           WHEN ci.poll_observed_at IS NULL THEN COALESCE(ci.webhook_received_at, ci.created_at)
                           WHEN ci.webhook_received_at IS NULL THEN ci.poll_observed_at
@@ -273,19 +284,30 @@ impl super::SqliteStore {
              FROM ci_incidents ci
              LEFT JOIN tasks ts ON ts.id=ci.task_id
              LEFT JOIN projects p ON p.id=ts.project_id
-             LEFT JOIN waves w ON w.id=p.wave_id
+             LEFT JOIN wave_addresses w ON w.id=p.wave_id
              WHERE COALESCE(ci.provider_completed_at, ci.poll_observed_at,
                             ci.webhook_received_at, ci.created_at) >= ?1
-               AND (?2 IS NULL OR w.name=?2)
+               AND (?2 IS NULL OR w.slug=?2)
                AND (?3 IS NULL OR ci.repo=?3)
              ORDER BY COALESCE(ci.provider_completed_at, ci.poll_observed_at,
                                ci.webhook_received_at, ci.created_at) DESC",
-        )?;
+            task_state = super::durable::task_state_sql("ts")
+        ))?;
         let rows = statement.query_map(
             params![timestamp(since), wave, repo],
             map_incident_report_row,
         )?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StoreError::from)
+        let mut incidents = rows.collect::<Result<Vec<_>, _>>()?;
+        let mut labels = std::collections::HashMap::new();
+        for row in &mut incidents {
+            row.task = row
+                .incident
+                .task_id
+                .as_ref()
+                .map(|id| super::children::cached_short_task_id(&conn, &mut labels, id))
+                .transpose()?
+                .flatten();
+        }
+        Ok(incidents)
     }
 }

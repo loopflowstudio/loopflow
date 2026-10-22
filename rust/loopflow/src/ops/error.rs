@@ -1,11 +1,15 @@
 use thiserror::Error;
 
-use crate::engine::error::{CoreError, GitError, LoadError};
+use crate::error::{CoreError, GitError, LoadError};
 
 pub type OpsResult<T> = Result<T, OpsError>;
 
 #[derive(Debug, Error)]
 pub enum OpsError {
+    #[error(transparent)]
+    Planning(#[from] crate::linear::LinearBindingError),
+    #[error(transparent)]
+    TaskData(#[from] crate::work::task::TaskDataError),
     #[error("git error: {0}")]
     Git(#[from] GitError),
     #[error("core error: {0}")]
@@ -20,16 +24,25 @@ pub enum OpsError {
     Parse(String),
     #[error("{0}")]
     Message(String),
-    #[error("rebase onto {onto} failed ({detail})")]
-    RebaseConflict {
+    #[error("{0}")]
+    DeliveryHeld(String),
+    #[error("checkout is busy: {0}")]
+    CheckoutBusy(String),
+    #[error("release deferred: {reason}; continuation: {continuation}")]
+    ReleaseDeferred {
+        reason: String,
+        continuation: String,
+    },
+    #[error("sync onto {onto} failed ({detail})")]
+    SyncConflict {
         onto: String,
         detail: String,
-        recovery: Option<Box<crate::ops::rebase::RebaseRecovery>>,
+        recovery: Option<Box<crate::ops::sync::SyncRecovery>>,
     },
     #[error(
-        "refusing to rebase: recorded base {base} is not an ancestor of HEAD, so \
-         its history diverged. Reconcile by hand; the commits since the common \
-         ancestor are:\n{commits}"
+        "refusing to sync: recorded base {base} is not an ancestor of HEAD, so \
+         the saved comparison cannot identify the child edits. Keep this branch; \
+         review its history before changing the stack comparison base"
     )]
-    UnsafeRebaseBase { base: String, commits: String },
+    UnsafeSyncBase { base: String },
 }

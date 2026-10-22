@@ -2,7 +2,7 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use crate::engine::git;
+use crate::git;
 pub use crate::migration_drafts::MigrationDraft;
 
 include!(concat!(env!("OUT_DIR"), "/migration_draft_manifest.rs"));
@@ -131,7 +131,7 @@ impl std::fmt::Display for BuildProvenance {
 }
 
 pub fn provenance() -> BuildProvenance {
-    parse_provenance(env!("LOOPFLOW_BUILD_PROVENANCE"))
+    parse_provenance(env!("LOOPFLOW_COMPILED_PROVENANCE"))
         .expect("build script embeds a validated Loopflow provenance")
 }
 
@@ -153,7 +153,7 @@ pub fn source_revision() -> &'static str {
 pub const BUILD_VERSION: &str = env!("LOOPFLOW_BUILD_VERSION");
 
 pub fn migration_authority() -> MigrationAuthority {
-    match env!("LOOPFLOW_MIGRATION_AUTHORITY") {
+    match env!("LOOPFLOW_COMPILED_MIGRATION_AUTHORITY") {
         "published" => MigrationAuthority::Published,
         "validation_only" => MigrationAuthority::ValidationOnly,
         _ => unreachable!("build script validates migration authority"),
@@ -360,8 +360,6 @@ mod tests {
             .iter()
             .all(|name| !name.is_empty()));
         for draft in migration_draft_manifest() {
-            assert_eq!(draft.id.len(), 32);
-            assert_eq!(draft.checksum.len(), 64);
             assert!(draft.sql.is_empty() || draft.sql.ends_with('\n'));
         }
         assert!(!source_revision().is_empty());

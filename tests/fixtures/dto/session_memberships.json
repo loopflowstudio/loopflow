@@ -1,7 +1,6 @@
 [
   {
     "id": "task_00000000000000000000000000000001:task-design:review_kickoff:0",
-    "kind": "flow",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -16,10 +15,13 @@
     "open_argv": [
       "lf",
       "session",
-      "open",
+      "connect",
       "task_00000000000000000000000000000001:task-design:review_kickoff:0"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
     "actions": [
@@ -27,31 +29,42 @@
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
-        "unavailable_reason": null
+        "unavailable_reason": "This Session is active in another terminal; use Move here to transfer it"
       },
       {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Complete the review and return feedback to the next Flow step",
-        "unavailable_reason": "The session agent has not marked this ready"
+        "kind": "move_here",
+        "label": "Move here",
+        "help": "Transfer control here; unsent text in the previous terminal is not transferred",
+        "unavailable_reason": null
       }
     ],
-    "run_id": "run_00000000000000000000000000000001",
-    "flow_membership": {
+    "graph_membership": {
       "kind": "step",
-      "flow": "task-design",
-      "invocation_id": "00000000-0000-0000-0000-00000000f10w",
+      "graph": "task-design",
       "step": "review-design",
       "occurrence": "current",
-      "node": "1",
+      "node": 1,
       "iterations": [
         []
-      ]
-    }
+      ],
+      "graph_lf_process_id": "00000000-0000-0000-0000-00000000f10w"
+    },
+    "workspace": {
+      "machine_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "availability": "available",
+    "task_primary": false,
+    "program_status": null,
+    "agent_process_id": "44444444-4444-4444-8444-444444444444",
+    "preview": null
   },
   {
     "id": "run_00000000000000000000000000000002",
-    "kind": "interactive",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -66,10 +79,13 @@
     "open_argv": [
       "lf",
       "session",
-      "open",
+      "connect",
       "run_00000000000000000000000000000002"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
     "actions": [
@@ -78,22 +94,14 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
-        "unavailable_reason": null
       }
     ],
-    "run_id": "run_00000000000000000000000000000002",
-    "flow_membership": {
+    "graph_membership": {
       "kind": "step",
-      "flow": "feature",
-      "invocation_id": "00000000-0000-0000-0000-0000000000f2",
+      "graph": "feature",
       "step": "implement",
       "occurrence": "earlier",
-      "node": "4/fix/1",
+      "node": 6,
       "iterations": [
         [
           2,
@@ -102,12 +110,25 @@
         [
           1
         ]
-      ]
-    }
+      ],
+      "graph_lf_process_id": "00000000-0000-0000-0000-0000000000f2"
+    },
+    "workspace": {
+      "machine_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "availability": null,
+    "task_primary": false,
+    "program_status": null,
+    "agent_process_id": "44444444-4444-4444-8444-444444444444",
+    "preview": null
   },
   {
     "id": "run_00000000000000000000000000000003",
-    "kind": "interactive",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -122,10 +143,13 @@
     "open_argv": [
       "lf",
       "session",
-      "open",
+      "connect",
       "run_00000000000000000000000000000003"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
     "actions": [
@@ -138,24 +162,29 @@
       {
         "kind": "move_here",
         "label": "Move here",
-        "help": "Stop the other client and resume here; unsent text there is lost",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
+        "help": "Transfer control here; unsent text in the previous terminal is not transferred",
         "unavailable_reason": null
       }
     ],
-    "run_id": "run_00000000000000000000000000000003",
-    "flow_membership": {
+    "graph_membership": {
       "kind": "independent"
-    }
+    },
+    "workspace": {
+      "machine_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "availability": null,
+    "task_primary": false,
+    "program_status": null,
+    "agent_process_id": "44444444-4444-4444-8444-444444444444",
+    "preview": null
   },
   {
     "id": "run_00000000000000000000000000000004",
-    "kind": "interactive",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -170,10 +199,13 @@
     "open_argv": [
       "lf",
       "session",
-      "open",
+      "connect",
       "run_00000000000000000000000000000004"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
     "actions": [
@@ -182,23 +214,28 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
-        "unavailable_reason": null
       }
     ],
-    "run_id": "run_00000000000000000000000000000004",
-    "flow_membership": {
+    "graph_membership": {
       "kind": "unknown",
-      "reason": "Run run_00000000000000000000000000000004 predates recorded Flow membership"
-    }
+      "reason": "Run run_00000000000000000000000000000004 predates recorded Graph membership"
+    },
+    "workspace": {
+      "machine_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "availability": null,
+    "task_primary": false,
+    "program_status": null,
+    "agent_process_id": "44444444-4444-4444-8444-444444444444",
+    "preview": null
   },
   {
     "id": "run_00000000000000000000000000000006",
-    "kind": "interactive",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -213,10 +250,13 @@
     "open_argv": [
       "lf",
       "session",
-      "open",
+      "connect",
       "run_00000000000000000000000000000006"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
     "actions": [
@@ -225,33 +265,38 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
-        "unavailable_reason": null
       }
     ],
-    "run_id": "run_00000000000000000000000000000006",
-    "flow_membership": {
+    "graph_membership": {
       "kind": "step",
-      "flow": "feature",
-      "invocation_id": "00000000-0000-0000-0000-0000000000f1",
+      "graph": "feature",
       "step": "implement",
       "occurrence": "past",
-      "node": "2",
+      "node": 2,
       "iterations": [
         [
           2,
           1
         ]
-      ]
-    }
+      ],
+      "graph_lf_process_id": "00000000-0000-0000-0000-0000000000f1"
+    },
+    "workspace": {
+      "machine_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "availability": null,
+    "task_primary": false,
+    "program_status": null,
+    "agent_process_id": "44444444-4444-4444-8444-444444444444",
+    "preview": null
   },
   {
     "id": "run_00000000000000000000000000000007",
-    "kind": "interactive",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -266,10 +311,13 @@
     "open_argv": [
       "lf",
       "session",
-      "open",
+      "connect",
       "run_00000000000000000000000000000007"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
     "actions": [
@@ -278,28 +326,33 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
-        "unavailable_reason": null
       }
     ],
-    "run_id": "run_00000000000000000000000000000007",
-    "flow_membership": {
+    "graph_membership": {
       "kind": "step",
-      "flow": "feature",
-      "invocation_id": "00000000-0000-0000-0000-0000000000f0",
+      "graph": "feature",
       "step": "implement",
       "occurrence": "past",
       "node": null,
-      "iterations": null
-    }
+      "iterations": null,
+      "graph_lf_process_id": "00000000-0000-0000-0000-0000000000f0"
+    },
+    "workspace": {
+      "machine_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "availability": null,
+    "task_primary": false,
+    "program_status": null,
+    "agent_process_id": "44444444-4444-4444-8444-444444444444",
+    "preview": null
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
-    "kind": "flow",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -309,17 +362,20 @@
     "detail": "demo",
     "provider": null,
     "cwd": "/src/loopflow.task",
-    "state": "waiting",
+    "state": "unknown",
     "ready_summary": null,
     "open_argv": [
       "lf",
       "ssh",
       "home_remote",
       "session",
-      "open",
+      "connect",
       "task_00000000000000000000000000000001:feature:demo:0"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
     "actions": [
@@ -328,28 +384,34 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Complete the review and return feedback to the next Flow step",
-        "unavailable_reason": "The session agent has not marked this ready"
       }
     ],
-    "run_id": "run_00000000000000000000000000000005",
-    "flow_membership": {
+    "graph_membership": {
       "kind": "step",
-      "flow": "feature",
-      "invocation_id": "00000000-0000-0000-0000-0000000000f2",
+      "graph": "feature",
       "step": "demo",
       "occurrence": "current",
-      "node": "7",
+      "node": 9,
       "iterations": [
         [
           0,
           0
         ]
-      ]
-    }
+      ],
+      "graph_lf_process_id": "00000000-0000-0000-0000-0000000000f2"
+    },
+    "workspace": {
+      "machine_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "availability": "available",
+    "task_primary": false,
+    "program_status": null,
+    "agent_process_id": "44444444-4444-4444-8444-444444444444",
+    "preview": null
   }
 ]

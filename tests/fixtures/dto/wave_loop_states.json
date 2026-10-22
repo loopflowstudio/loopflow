@@ -1,3 +1,0 @@
-{
-  "states": ["idle", "turning", "interrupting", "failed"]
-}

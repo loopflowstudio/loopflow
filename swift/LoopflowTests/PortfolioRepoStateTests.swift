@@ -6,10 +6,28 @@ import Testing
 @MainActor
 @Suite("Portfolio Repo State")
 struct PortfolioRepoStateTests {
+    @Test("Explicit repository choices resolve to their own roots")
+    func explicitRepositoryRoots() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for name in ["first", "second"] {
+            let root = directory.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["init", "--quiet", root.path]
+            process.standardInput = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 0)
+            #expect(PortfolioDiscovery.resolveLaunchRepo(root.path) == root.resolvingSymlinksInPath().normalizedFilePath)
+        }
+    }
+
     @Test("connected waves keep only this repo's rows")
     func connectedWavesScopedToRepo() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-scope")
-        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
+        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, error: nil)
         let state = PortfolioRepoState(repo: repo)
 
         let mine = makeWave(
@@ -30,7 +48,7 @@ struct PortfolioRepoStateTests {
     @Test("waves hold one stable alphabetical order, not a status regrouping")
     func wavesSortStableAlphabetical() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-priority")
-        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
+        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, error: nil)
         let state = PortfolioRepoState(repo: repo)
 
         // Status varies, but the row's lens carries state — so the list stays in
@@ -73,7 +91,7 @@ struct PortfolioRepoStateTests {
         )
         try git(["worktree", "add", "-q", worktree.path], at: origin)
 
-        let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, lastOpened: Date())
+        let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, error: nil)
         let originPath = origin.path.normalizedFilePath
         let json = """
         [{
@@ -94,11 +112,11 @@ struct PortfolioRepoStateTests {
           "retired_at":null,
           "superseded_by_wave_id":null,
           "retirement_reason":null,
-          "home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}
+          "machine":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}
         }]
         """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["ls", "--all", "--current", "--json"])
+            #expect(args == ["wave", "list", "--all", "--current", "--json"])
             return json
         }
         let state = PortfolioRepoState(repo: repo, registryQuery: query)
@@ -110,7 +128,7 @@ struct PortfolioRepoStateTests {
 
     @Test("createWave writes GOAL.md at the origin repo, not the worktree")
     func createWaveWritesAtOrigin() async throws {
-        // Authoring from a worktree rail must land wave/<name>/GOAL.md at the
+        // Authoring from a worktree rail must land .lf/wave/<name>/GOAL.md at the
         // ORIGIN — every reader (endpoint discovery, launcher, probe) resolves
         // the origin, so a worktree-local GOAL.md is a wave nobody finds.
         // Real git, like WaveOriginTests: the origin resolution is the point.
@@ -139,14 +157,14 @@ struct PortfolioRepoStateTests {
         )
         try git(["worktree", "add", "-q", worktree.path], at: origin)
 
-        let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, lastOpened: Date())
+        let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, error: nil)
         let state = PortfolioRepoState(repo: repo)
         try await state.createWave(name: "goals")
 
-        let originGoal = origin.appendingPathComponent("wave/goals/GOAL.md")
-        let worktreeGoal = worktree.appendingPathComponent("wave/goals/GOAL.md")
+        let originGoal = origin.appendingPathComponent(".lf/wave/goals/GOAL.md")
+        let worktreeGoal = worktree.appendingPathComponent(".lf/wave/goals/GOAL.md")
         #expect(FileManager.default.fileExists(atPath: originGoal.path), "GOAL.md lands at the origin")
-        #expect(FileManager.default.fileExists(atPath: origin.appendingPathComponent("wave/goals/MEMORY.md").path))
+        #expect(FileManager.default.fileExists(atPath: origin.appendingPathComponent(".lf/wave/goals/MEMORY.md").path))
         #expect(!FileManager.default.fileExists(atPath: worktreeGoal.path), "nothing written into the worktree")
     }
 

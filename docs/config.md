@@ -77,6 +77,7 @@ config files.
 | Account's own provider home | `--isolate` / `--shared` | `isolate: true` |
 | [`~/.lf` disk budget](troubleshooting.md#disk-space) | — | global-only `disk_budget: 20G` |
 | Review FlowStep terminal | — | global-only `session.terminal: Ghostty` |
+| End agents nobody is viewing | — | `session.end_detached_after: 24h` (or `off`) |
 
 ## Scratch lifecycle
 
@@ -175,6 +176,7 @@ For most settings, repo overrides global. For additive settings (`docs`, `contex
 agent: claude:opus
 session:
   terminal: Ghostty       # presents review FlowStep sessions on this Machine
+  end_detached_after: 24h # stop an unviewed Session's agent; `lf resume` reopens it
 
 # .lf/config.yaml (repo)
 agent: codex        # overrides global

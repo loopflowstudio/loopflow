@@ -363,16 +363,23 @@ or treating missing local evidence as completion.
 
 ## Choose planning synchronization
 
-Planning defaults to your own Git ref on `origin`: nobody else sees it. Working
-with someone? Commit a shared ref, or Linear, to `.lf/config.yaml` so you both
-read one plan. Set a personal default in `~/.lf/config.yaml`. Asana and Notion
-are planned:
+Planning defaults to one shared Git ref on `origin`,
+`refs/loopflow/planning/shared/main`: everyone who clones the repository reads
+and writes the same plan. Want another shared ref, a plan only you see, or
+Linear? Select it in `.lf/config.yaml`, or set a personal default in
+`~/.lf/config.yaml`. Asana and Notion are planned:
 
 ```yaml
 planning:
   provider: git
   remote: origin
-  shared: team
+  shared: team        # refs/loopflow/planning/shared/team
+```
+
+```yaml
+planning:
+  provider: git
+  personal: true      # refs/loopflow/planning/users/<user-key>
 ```
 
 ```yaml
@@ -382,13 +389,16 @@ linear:
   team: <team-id>
 ```
 
-Repository `planning` replaces the personal selection as a whole. Omit `shared`
-for `refs/loopflow/planning/users/<user-key>`; shared names use
-`refs/loopflow/planning/shared/<name>`. Existing `linear.team` selects Linear
-when `planning` is omitted. Every machine uses the selected transport independently.
-Linear unavailability leaves saves buffered locally; it never switches to Git. All Tasks in a Linear
-repository are queued for publication, including Tasks created offline. Retry a
-specific Task with `lf task sync <task>`: it publishes the saved Project/Task
+Repository `planning` replaces the personal selection as a whole. `shared` and
+`personal` are exclusive. Existing `linear.team` selects Linear when `planning`
+is omitted. A plan published by an older build to an unconfigured personal ref
+moves to `shared/main` on the first save after upgrade, with its identifiers,
+comments and ownership; the old ref stays on the remote until you delete it with
+`git push origin :<ref>`. Machines still on an older build keep publishing to
+their personal ref until they upgrade. Every machine uses the selected transport
+independently. Linear unavailability leaves saves buffered locally; it never
+switches to Git. All Tasks in a Linear repository are queued for publication,
+including Tasks created offline. Retry a specific Task with `lf task sync <task>`: it publishes the saved Project/Task
 identity before synchronizing state, fields, and comments. An uncertain creation remains
 pending instead of silently creating a duplicate. To deliberately retry an
 uncertain issue creation, use `lf task sync <task> --retry-creation`. This reuses
@@ -398,7 +408,7 @@ For an uncertain saved state or field update, `lf task sync <task> --retry-updat
 retries that saved intention after reading Linear again. Observed conflicts still
 win; this flag does not retry deletion or allocate another issue.
 `lf repo connect <wave>` saves the repository Team and selects Linear, overriding
-a personal Git preference.
+a Git preference in `~/.lf/config.yaml`.
 
 ```bash
 lf planning status --json
@@ -406,7 +416,7 @@ lf planning key                    # show this machine's personal planning key
 lf planning key --recover <uuid>   # reuse it on a fresh second machine
 ```
 
-The first personal Git connection creates the key. Recover the same key before
+The first `personal: true` connection creates the key. Recover the same key before
 starting personal synchronization on another machine. Shared refs require no key.
 Ref separation is not access control; choose a remote appropriate for the plan.
 Configuration selects the repository's entire plan, including retained history.

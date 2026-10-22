@@ -80,7 +80,7 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
         return Ok(());
     }
     if !destinations.iter().any(|d| d.active) {
-        println!("Planning: user-keyed Git (configured remote; local saves wait when unavailable)");
+        println!("Planning: Git (configured remote; local saves wait when unavailable)");
     }
     for destination in destinations {
         println!(

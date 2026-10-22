@@ -655,6 +655,15 @@ pub fn open_ledger() -> Result<SqliteStore, crate::store::StoreError> {
     SqliteStore::new(&ledger_db_path()?)
 }
 
+/// This Process's retained ledger connection, opening one only when no receipt
+/// has yet; every open revalidates the schema.
+pub(crate) fn process_ledger() -> Result<SqliteStore, crate::store::StoreError> {
+    match current_context().and_then(|context| context.ledger.get().cloned()) {
+        Some(store) => Ok(store),
+        None => open_ledger(),
+    }
+}
+
 #[cfg(not(test))]
 fn ledger_db_path() -> Result<PathBuf, crate::store::StoreError> {
     crate::store::database_path_from_env()

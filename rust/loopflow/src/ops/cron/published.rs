@@ -25,11 +25,8 @@ pub struct PublishedCron {
     pub wave: Option<String>,
     pub command: Vec<String>,
     pub schedule: String,
-    pub person: Option<String>,
-    /// The owner's person key (lowercase Git user.email).
-    pub person_key: Option<String>,
-    pub machine_id: MachineId,
-    pub machine_label: Option<String>,
+    #[serde(flatten)]
+    pub publisher: Publisher,
 }
 
 /// A published cron as last fetched, with when its Machine published it.
@@ -41,9 +38,10 @@ pub struct ObservedCron {
 }
 
 /// Who publishes: this Machine and its person.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Publisher {
     pub person: Option<String>,
+    /// The person's key (lowercase Git user.email).
     pub person_key: Option<String>,
     pub machine_id: MachineId,
     pub machine_label: Option<String>,
@@ -91,10 +89,7 @@ pub fn published_from(
             wave: (!cron.wave.is_empty()).then(|| cron.wave.clone()),
             command: cron.command.clone(),
             schedule: cron.schedule.clone(),
-            person: publisher.person.clone(),
-            person_key: publisher.person_key.clone(),
-            machine_id: publisher.machine_id.clone(),
-            machine_label: publisher.machine_label.clone(),
+            publisher: publisher.clone(),
         })
         .collect())
 }
@@ -234,21 +229,20 @@ pub fn observed(repo: &Path, except: &MachineId) -> OpsResult<Vec<ObservedCron>>
                 .map(|cron| ObservedCron { cron, published_at }),
         );
     }
-    let order = |observed: &ObservedCron| {
+    observed.sort_by_key(|observed| {
         let cron = &observed.cron;
         (
-            cron.person.clone(),
-            cron.machine_id.to_string(),
+            cron.publisher.person.clone(),
+            cron.publisher.machine_id.to_string(),
             cron.name.clone(),
         )
-    };
-    observed.sort_by_key(order);
+    });
     Ok(observed)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{fetch, observed, publish, PublishedCron};
+    use super::{fetch, observed, publish, PublishedCron, Publisher};
     use crate::durable::MachineId;
     use std::path::Path;
     use std::process::Command;
@@ -273,10 +267,12 @@ mod tests {
                 "telemetry-daily".into(),
             ],
             schedule: "0 0 9 * * *".into(),
-            person: Some(person.into()),
-            person_key: Some(format!("{}@example.com", person.to_lowercase())),
-            machine_id: machine.clone(),
-            machine_label: Some(format!("{}-mbp", person.to_lowercase())),
+            publisher: Publisher {
+                person: Some(person.into()),
+                person_key: Some(format!("{}@example.com", person.to_lowercase())),
+                machine_id: machine.clone(),
+                machine_label: Some(format!("{}-mbp", person.to_lowercase())),
+            },
         }
     }
 

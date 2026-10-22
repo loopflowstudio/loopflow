@@ -1663,14 +1663,19 @@ fn print_cron_listing(listing: &crate::ops::cron::CronListing) {
     }
     for observed in &listing.published {
         let cron = &observed.cron;
+        let publisher = &cron.publisher;
         println!(
             "{} · {} · {} · {} (not installed here; published {})",
-            crate::durable::person_text(cron.person.as_deref(), cron.person_key.as_deref()),
+            crate::durable::person_text(
+                publisher.person.as_deref(),
+                publisher.person_key.as_deref()
+            ),
             cron.name,
             cron.schedule,
-            cron.machine_label
+            publisher
+                .machine_label
                 .clone()
-                .unwrap_or_else(|| cron.machine_id.to_string()),
+                .unwrap_or_else(|| publisher.machine_id.to_string()),
             crate::lf::output::format_time(observed.published_at),
         );
     }

@@ -334,11 +334,11 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       # Claims name their person by Git user.email; repository-local test identities win.
       - name: Give tests a fallback Git identity
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
-        with:
-          fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Fingerprint workspace build profiles

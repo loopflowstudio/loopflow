@@ -9,7 +9,10 @@ again with no plan change; the second relaunch found the worktree reset to
 main with that work held in a `lf checkout update` stash, restored it onto
 main `ed568b1f` with one AGENTS.md conflict, and again changed no plan; the fourth kickoff
 found the work intact and main two commits ahead, which lands LOO-550 and a
-PR test-time budget: see "Main moved" below). Jack
+PR test-time budget: see "Main moved" below; the fifth kickoff, after the
+implement step was killed in a six-hour process sweep, found all the work
+committed as `5b725154`, repaired one invalid CI step and added the
+`docs/conducting.md` resolution to "Main moved"). Jack
 Heart filed the seven items on
 2026-10-21 from LOO-550's two-person docs review. They are accepted direction.
 The mechanisms below are kickoff choices; the consequential ones are logged in
@@ -349,9 +352,11 @@ rebase, as "Main moved" lists.
 
 ## Main moved 2026-10-21 (#1637, #1647)
 
-Found at the fourth kickoff. Main is two commits past the base `ed568b1f`;
-twelve of this branch's files overlap, and nothing changes the plan. The rebase
-step owns these resolutions:
+Found at the fourth kickoff; unchanged at the fifth. Main is two commits past
+the base `ed568b1f`; twelve of this branch's files overlap, and nothing changes
+the plan. `git merge-tree origin/main HEAD` conflicts in exactly three files:
+`docs/lf.md`, `docs/conducting.md` and `DesktopHeadlessTests.swift`. The
+rebase step owns these resolutions:
 
 - **LOO-550 landed (#1637).** Its `docs/lf.md` "Work with another person"
   section documents the gaps as current behavior. Rewrite its caveats to this
@@ -369,8 +374,14 @@ step owns these resolutions:
   test after 120 s. `two_people` runs in 19 s here (the earlier 80 s included
   building `lf-world`), so no override entry; add one only from a measured CI
   run.
-- **CI (`ci.yml`).** Main restructured the Swift steps. Re-add this branch's
-  "Give tests a fallback Git identity" step to each test job after the rebase.
+- **`docs/conducting.md`.** LOO-550 wrote "comments imported through Git
+  planning do not" become steers. Keep this branch's sentence (comments steer
+  under either transport) and take main's "shared plan" wording in the
+  `lf wave show` paragraph above it.
+- **CI (`ci.yml`).** Auto-merges; all six "Give tests a fallback Git identity"
+  steps survive. In `swift-test` the step must follow the checkout's
+  `with: fetch-depth: 0`, not split it (fixed at the fifth kickoff; a `run:`
+  step with `with:` is invalid).
 - **Swift (`DesktopHeadlessTests.swift`).** Main deleted `storedWorkflow` and
   `peerPlanningStatus` as intermittent. This branch's `customizedWorkflow`
   replaces `storedWorkflow` with a temp-repository file write, a different
@@ -464,3 +475,4 @@ lists `lf machine public` and `cron publish/unpublish`), and the PR body's
 - 2026-10-21 compress (second pass): the store's private `Holder` is gone; `TaskOwnershipEntry::owner()` yields the `TaskOwner` the reading, the published prose and the log renderer all use, with `resolved_in` adding the best-known Machine label. fmt + clippy clean; lib `task_ownership` 8 passed, `two_people` 1 passed. Gate owns the full suite.
 - 2026-10-21 kickoff (third relaunch): worktree had been reset to main `ed568b1f` with the work in an `lf checkout update` stash; `git stash apply` restored it with one AGENTS.md conflict (resolved to main's `reference_matches_the_compiled_cli` wording), stash dropped. `cargo fmt --check` clean, clippy clean; integration `reference_matches_the_compiled_cli` 1, `documented_commands` 4, `dto` 42, `two_people` 1 passed; lib `task_ownership published cron:: planning_git planning_peers task_comments` 77 passed (one earlier run failed `task_comments_read_and_publish_without_starting_work`, an untouched Linear HTTP fixture, under a 117s loaded batch; three reruns pass). No plan change. Gate owns the full suite.
 - 2026-10-21 kickoff (fourth relaunch): work intact on `ed568b1f`; `lf context` within targets; `cargo fmt --check` clean, `cargo check --all-targets` ok (28s), `two_people` 1 passed (19s). Main ahead by #1637 and #1647; rebase targets recorded above, no plan change. Gate owns the full suite.
+- 2026-10-21 kickoff (fifth relaunch): work committed as `5b725154` on `ed568b1f`, tree clean; main still #1637 + #1647. `cargo fmt --check` clean, `cargo check --all-targets` ok (26s), `two_people` 1 passed (21s). Fixed `ci.yml` `swift-test` (identity step split the checkout from its `with:`); every job's steps parse with no `run`+`with` step. No plan change. Gate owns the full suite.

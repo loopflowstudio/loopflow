@@ -114,6 +114,8 @@ enum Request {
         key: String,
         hint: String,
     },
+    /// Whether some viewer holds input control, asked before opening another.
+    Controlled,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -140,6 +142,9 @@ enum Response {
     NativeEnded,
     InputHint {
         hint: String,
+    },
+    Controlled {
+        held: bool,
     },
 }
 
@@ -507,6 +512,11 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         Request::InputHint { key, hint } if key == control_key => {
                             viewer.input_hint = Some(hint);
                             hint_due = true;
+                        }
+                        Request::Controlled => {
+                            viewer.queue(&Response::Controlled {
+                                held: control.is_some(),
+                            })?;
                         }
                         Request::Attach {
                             control: wants_control,
@@ -914,7 +924,9 @@ pub(crate) fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<(
     let mut buffer = Vec::new();
     let mut stdin_open = true;
     let mut previous_size = (rows, cols);
+    let mut title = crate::terminal_title::ViewerTitle::new(id);
     loop {
+        title.tick();
         anyhow::ensure!(
             acknowledgement_deadline.is_none_or(|deadline| Instant::now() < deadline),
             "Execution owner did not acknowledge attachment; outcome is unknown, no provider was restarted and no input was replayed"
@@ -991,7 +1003,7 @@ pub(crate) fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<(
                     Response::Detached => return Ok(()),
                     Response::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
                     Response::Return { detach } => returning = Some(detach),
-                    Response::NativeEnded => {}
+                    Response::NativeEnded | Response::Controlled { .. } => {}
                     Response::InputHint { hint } => {
                         if let Some(terminal) = &mut terminal {
                             write!(terminal.output.stderr, "\r\n{hint}\r\n")?;
@@ -1051,6 +1063,21 @@ pub(crate) fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<(
                 )?;
             }
         }
+    }
+}
+
+/// Whether a viewer of this execution holds input control. A closed terminal
+/// leaves its execution running with none, ready for the next viewer.
+pub(crate) fn controlled(id: &LfProcessId) -> Result<bool> {
+    let mut socket = UnixStream::connect(endpoint(id)?)?;
+    socket.set_read_timeout(Some(Duration::from_secs(1)))?;
+    socket.set_write_timeout(Some(Duration::from_secs(1)))?;
+    send(&mut socket, &Request::Controlled)?;
+    let mut line = String::new();
+    BufReader::new(socket).read_line(&mut line)?;
+    match serde_json::from_str(&line)? {
+        Response::Controlled { held } => Ok(held),
+        other => bail!("unexpected transport reply {other:?}"),
     }
 }
 

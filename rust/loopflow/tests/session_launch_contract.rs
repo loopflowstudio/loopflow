@@ -137,6 +137,23 @@ elif os.path.basename(sys.argv[0]) == 'codex':
     }
 }
 
+/// Each OpenCode launch's private stderr log, found where it is retained.
+fn opencode_logs(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(opencode_logs(&path));
+        } else if path
+            .file_name()
+            .is_some_and(|name| name == "opencode.stderr.log")
+        {
+            found.push(path);
+        }
+    }
+    found
+}
+
 fn success(output: &Output) {
     assert!(
         output.status.success(),
@@ -229,10 +246,10 @@ fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
         let stderr = String::from_utf8(output.stderr.clone()).unwrap();
         assert!(!stderr.contains("stream error"), "{stderr}");
         assert!(!stderr.contains("background diagnostic"), "{stderr}");
-        let path = stderr
-            .lines()
-            .find_map(|line| line.strip_prefix("OpenCode diagnostics: "))
-            .expect("launch announces retained diagnostics");
+        assert!(!stderr.contains("diagnostics:"), "{stderr}");
+        let logs = opencode_logs(fixture.home.path());
+        assert_eq!(logs.len(), 1, "{logs:?}");
+        let path = &logs[0];
         let log = fs::read(path).unwrap();
         let text = String::from_utf8_lossy(&log);
         for attempt in 0..3 {
@@ -271,12 +288,10 @@ fn opencode_failure_before_session_creation_keeps_diagnostics() {
         stderr.contains("startup failure without a session"),
         "{stderr}"
     );
-    let path = stderr
-        .lines()
-        .find_map(|line| line.strip_prefix("OpenCode diagnostics: "))
-        .unwrap();
+    let logs = opencode_logs(fixture.home.path());
+    assert_eq!(logs.len(), 1, "{logs:?}");
     assert_eq!(
-        fs::read(path).unwrap(),
+        fs::read(&logs[0]).unwrap(),
         b"startup failure without a session\n"
     );
 }

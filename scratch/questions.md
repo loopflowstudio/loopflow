@@ -124,5 +124,27 @@ one pair can sign each other out. Options:
   token valid after rotation.
 - (c) **Keep fresh logins** (status quo): one approval per rented machine.
 
-Default until Jack decides: (c). The rent still works; (a) is the path that
-matches his direction and the July posture for hardware he does not own root on.
+Jack chose (a) and authorized a probe pod (2026-10-22, `probe-token-1`,
+cpu3c×2, $0.00 billed). Findings, token minted by Jack with `claude setup-token`:
+
+- Claude Code on the pod answers with it as `CLAUDE_CODE_OAUTH_TOKEN`, and
+  from a `.credentials.json` holding only `accessToken` (no refresh token); the
+  file is left untouched after the run.
+- It is a subscription token, not an API key: prefix `sk-ant-oat01-`, refused
+  as `x-api-key` (401 invalid x-api-key), accepted as an OAuth bearer on the
+  subscription path (200). Jack: "the pricing is totally different", so the
+  install must refuse anything that is not an `oat` token. Claude says it is
+  valid for a year.
+- `api.anthropic.com/api/oauth/profile` returns 403 `oauth_scope_insufficient`
+  (needs `user:profile`), so connect's identity probe cannot verify it on the
+  pod. The laptop, which holds the account it was minted for, asserts the
+  identity; the pod installs it under that account without probing. Usage
+  polling for that account on the pod is likewise unavailable.
+
+### Q11. How many Claude accounts a rented machine gets
+
+Jack: "probably easier if each one is just one", then "but may have issues if
+we burn an account". Taken: one account per rented machine, the account the
+Task or `lf machine connect` names; a second `lf machine connect <m> claude
+<email>` adds another by hand when one is exhausted. Automatic failover
+across accounts is a later Task.

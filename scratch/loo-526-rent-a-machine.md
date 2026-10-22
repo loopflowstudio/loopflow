@@ -406,8 +406,13 @@ sends nothing, and output flows from the prompt as any command's does
 copy banner still prints twice, once per lf process; cosmetic.
 
 Jack, during the demo: "I don't really want to have to approve my credentials
-every time I rent a machine." Q10 in `questions.md` has the options; GitHub
-already forwards the laptop's token, Claude is the fresh login.
+every time I rent a machine." Q10 in `questions.md` has the options and the
+probe: a `claude setup-token` subscription token works on a pod as an env var
+and as an access-token-only credential file, is refused as an API key, and
+fails the profile scope check. Next pursue pass: `lf account token claude
+<email>` stores one per account (read from a file or stdin, never argv), connect
+installs it with the laptop asserting identity, one account per rented machine
+(Q11).
 
 Remaining:
 

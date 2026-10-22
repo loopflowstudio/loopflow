@@ -755,8 +755,8 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             use loopflow::lf::WaveWorkflowCommand;
             tokio::runtime::Runtime::new()?.block_on(async {
                 match cmd {
-                    WaveWorkflowCommand::List { wave, json } => {
-                        let entries = project::workflow_catalog(repo, wave.as_deref()).await?;
+                    WaveWorkflowCommand::List { json } => {
+                        let entries = loopflow::workflow::workflow_catalog(repo)?;
                         if *json {
                             println!("{}", serde_json::to_string(&entries)?);
                         } else {
@@ -772,10 +772,12 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                             }
                         }
                     }
-                    WaveWorkflowCommand::Source { wave, name } => {
+                    WaveWorkflowCommand::Source { name } => {
                         print!(
                             "{}",
-                            project::workflow_source(repo, wave.as_deref(), name).await?
+                            loopflow::workflow::read_workflow_source(name, repo)?.ok_or_else(
+                                || anyhow::anyhow!(loopflow::workflow::missing_workflow(name))
+                            )?
                         );
                     }
                     WaveWorkflowCommand::Show { wave, json } => {
@@ -793,10 +795,8 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                             );
                         }
                     }
-                    WaveWorkflowCommand::Set { wave, name, file } => {
-                        let saved =
-                            project::set_workflow(repo, wave.as_deref(), name, file.as_deref())
-                                .await?;
+                    WaveWorkflowCommand::Set { wave, name } => {
+                        let saved = project::set_workflow(repo, wave.as_deref(), name).await?;
                         println!("{}: Workflow {name}", saved.wave);
                     }
                 }
@@ -2197,7 +2197,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 ..
             })
     );
-    if execution && loopflow::transport::delegate_current()? {
+    if execution && loopflow::transport::delegate_current(cli.batch)? {
         return Ok(());
     }
     // Display location is not execution placement. Opening reads Work here;

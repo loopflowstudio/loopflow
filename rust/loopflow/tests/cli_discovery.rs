@@ -837,6 +837,7 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
             "credentials",
             "id",
             "list",
+            "public",
             "remove",
             "rename",
             "status",

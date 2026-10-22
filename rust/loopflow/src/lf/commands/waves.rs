@@ -768,7 +768,12 @@ pub fn list_tasks(repo: &Path, wave: Option<&str>, json: bool) -> Result<()> {
             println!("{}", serde_json::to_string(&tasks)?);
         } else {
             for task in tasks {
-                println!("{} · {}", task.task.identifier, task.task.name);
+                println!(
+                    "{} · {} · {}",
+                    task.task.identifier,
+                    owner_text(task.runtime.as_ref()),
+                    task.task.name
+                );
             }
         }
         Ok(())
@@ -1950,8 +1955,12 @@ fn print_status(status: &WaveDetailSnapshot) {
                         "unstarted"
                     });
                 println!(
-                    "  {}  {:<10}  {}  {}",
-                    task.task.identifier, state, task.task.name, task.next_move.reason
+                    "  {}  {:<10}  {:<12}  {}  {}",
+                    task.task.identifier,
+                    state,
+                    owner_text(task.runtime.as_ref()),
+                    task.task.name,
+                    task.next_move.reason
                 );
                 if let Some(due) = &task.task.due_date {
                     println!("    due        {due}");
@@ -2246,7 +2255,8 @@ struct RoadmapRow {
     title: String,
     rank: Option<u32>,
     age_secs: Option<i64>,
-    owner: NextMoveOwner,
+    owner: String,
+    next: NextMoveOwner,
     pr: Option<String>,
     workspace: Option<String>,
     condition: Option<TaskConditionState>,
@@ -2273,7 +2283,8 @@ fn task_roadmap_row(task: &RoadmapTask, now: time::OffsetDateTime) -> RoadmapRow
             .runtime
             .as_ref()
             .and_then(|runtime| age_secs(&runtime.updated_at, now)),
-        owner: task.next_move.owner,
+        owner: owner_text(task.runtime.as_ref()).to_string(),
+        next: task.next_move.owner,
         pr: task.pr.as_ref().map(pr_label),
         workspace: task
             .reference
@@ -2362,6 +2373,13 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             println!("  (no plan rows)");
             continue;
         }
+        // Wide enough for an unnamed owner's email key.
+        let owner_width = rows
+            .iter()
+            .map(|row| row.owner.chars().count())
+            .max()
+            .unwrap_or(0)
+            .clamp(12, 32);
         for section in [
             RoadmapSection::Now,
             RoadmapSection::Waiting,
@@ -2376,7 +2394,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             println!("  {}", section_label(section));
             for row in in_section {
                 println!(
-                    "    {id}  {rank:>4}  {owner:<8}  {age:>5}  {condition:<7}  {workspace:<20}  {pr:<24}  {title}",
+                    "    {id}  {rank:>4}  {owner:<owner_width$}  next:{next:<8}  {age:>5}  {condition:<7}  {workspace:<20}  {pr:<24}  {title}",
                     id = task_identifier_label(
                         &row.id,
                         row.issue_url.as_deref(),
@@ -2387,7 +2405,8 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
                         .rank
                         .map(|r| r.to_string())
                         .unwrap_or_else(|| "-".into()),
-                    owner = owner_label(&row.owner),
+                    owner = truncate(&row.owner, owner_width),
+                    next = owner_label(&row.next),
                     age = row
                         .age_secs
                         .map(format_age)
@@ -2403,6 +2422,14 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
                 println!("      {}", row.reason);
             }
         }
+    }
+}
+
+/// Who owns a Task, for text lists: their name, else their key, or "—".
+fn owner_text(runtime: Option<&TaskRuntimeSnapshot>) -> &str {
+    match runtime.and_then(|runtime| runtime.owner.as_ref()) {
+        Some(owner) => owner.who(),
+        None => "—",
     }
 }
 
@@ -2454,6 +2481,7 @@ mod tests {
     fn owned() -> crate::durable::TaskOwner {
         crate::durable::TaskOwner {
             person: Some("Jack Heart".into()),
+            person_key: Some("jack@loopflow.studio".into()),
             machine: crate::durable::MachineRef {
                 id: None,
                 label: None,

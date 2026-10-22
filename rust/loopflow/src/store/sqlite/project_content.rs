@@ -1,7 +1,7 @@
-//! Project content and stored Wave workflows share one transaction in every repository.
+//! Project content and Wave Workflow selection share one transaction in every repository.
 
 use crate::work::edit::WorkValue as Edit;
-use rusqlite::{params, OptionalExtension, TransactionBehavior};
+use rusqlite::TransactionBehavior;
 
 use crate::durable::ProjectId;
 use crate::id::WaveId;
@@ -47,26 +47,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn wave_workflows(&self, wave: &WaveId) -> StoreResult<Vec<(String, String)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query =
-            conn.prepare("SELECT name,content FROM wave_workflows WHERE wave_id=?1 ORDER BY name")?;
-        let rows = query.query_map([wave], |row| Ok((row.get(0)?, row.get(1)?)))?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StoreError::from)
-    }
-
-    pub fn wave_workflow(&self, wave: &WaveId, name: &str) -> StoreResult<Option<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            "SELECT content FROM wave_workflows WHERE wave_id=?1 AND name=?2",
-            params![wave, name],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(StoreError::from)
-    }
-
     pub fn selected_wave_workflow(&self, wave: &WaveId) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row("SELECT workflow FROM waves WHERE id=?1", [wave], |row| {
@@ -75,37 +55,17 @@ impl SqliteStore {
         .map_err(Into::into)
     }
 
-    pub fn select_wave_workflow(
-        &self,
-        wave: &WaveId,
-        name: &str,
-        definition: &str,
-    ) -> StoreResult<()> {
+    /// Select the Workflow name future Tasks take up; definitions live in the repository.
+    pub fn select_wave_workflow(&self, wave: &WaveId, name: &str) -> StoreResult<()> {
         crate::workflow::validate_workflow_name(name).map_err(StoreError::InvalidData)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let repo: String = tx.query_row(
-            "SELECT repo FROM waves WHERE id=?1",
-            [wave.as_str()],
-            |row| row.get(0),
-        )?;
-        crate::workflow::CapturedGraph::from_source(name, definition, std::path::Path::new(&repo))
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?
-            .project()
-            .map_err(StoreError::InvalidData)?;
         super::planning_write::local(
             &tx,
             &crate::work::edit::WorkEdit::for_target(
                 wave.as_str(),
                 &[Edit::WaveWorkflow(Some(name.into()))],
             ),
-        )?;
-        tx.execute(
-            "INSERT INTO wave_workflows(wave_id,name,content)
-                VALUES(?1,?2,?3)
-                ON CONFLICT(wave_id,name) DO UPDATE SET content=excluded.content
-                WHERE content IS NOT excluded.content",
-            params![wave.as_str(), name, definition],
         )?;
         tx.commit()?;
         Ok(())
@@ -356,17 +316,15 @@ mod tests {
         assert_eq!(read.name, "Original");
         assert_eq!(read.summary, "");
         assert!(store.pending_project_changes(&project).unwrap().is_empty());
-        assert!(store.wave_workflow(wave.id(), "review").unwrap().is_none());
         assert_eq!(store.revisions().unwrap(), before);
     }
 
     #[test]
-    fn stored_workflows_use_the_same_owner_with_and_without_linear_mapping() {
+    fn workflow_selection_uses_the_same_owner_with_and_without_linear_mapping() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&database).unwrap();
-        let definition = "- cmd: help\n";
-        let mut owners = Vec::new();
+        let mut waves = Vec::new();
         for (name, mapping) in [("offline", None), ("connected", Some("linear-project"))] {
             let wave = Wave::new(WaveId::new(), name.into(), "/repo".into());
             store.create_wave(&wave).unwrap();
@@ -381,56 +339,22 @@ mod tests {
                     rusqlite::params![project.as_str(), wave.id(), mapping, name],
                 )
                 .unwrap();
-            store
-                .select_wave_workflow(wave.id(), "review", definition)
-                .unwrap();
+            store.select_wave_workflow(wave.id(), "review").unwrap();
             let before = store.revisions().unwrap();
             let changes = store.pending_project_changes(&project).unwrap();
-            store
-                .select_wave_workflow(wave.id(), "review", definition)
-                .unwrap();
+            store.select_wave_workflow(wave.id(), "review").unwrap();
             store.update_project_content(&project, &[], &[]).unwrap();
             store
                 .edit_project(&project, Some(name), Some(""), None)
                 .unwrap();
             assert_eq!(store.revisions().unwrap(), before);
             assert_eq!(store.pending_project_changes(&project).unwrap(), changes);
-            owners.push((wave.id().clone(), project));
+            waves.push(wave.id().clone());
         }
         drop(store);
         let store = SqliteStore::open_ephemeral(&database).unwrap();
-        for (wave, _project) in owners {
-            assert_eq!(
-                store.wave_workflow(&wave, "review").unwrap().as_deref(),
-                Some(definition)
-            );
-            assert_eq!(
-                store.wave_workflows(&wave).unwrap(),
-                vec![("review".into(), definition.into())]
-            );
-            assert_eq!(
-                store.selected_wave_workflow(&wave).unwrap().as_deref(),
-                Some("review")
-            );
-            for (name, source) in [("invalid:review", definition), ("review", "changed")] {
-                assert!(store.select_wave_workflow(&wave, name, source).is_err());
-            }
-            assert_eq!(
-                store.selected_wave_workflow(&wave).unwrap().as_deref(),
-                Some("review")
-            );
-            assert_eq!(
-                store.wave_workflow(&wave, "review").unwrap().as_deref(),
-                Some(definition)
-            );
-            let changed = "- cmd: help --all\n";
-            store
-                .select_wave_workflow(&wave, "review", changed)
-                .unwrap();
-            assert_eq!(
-                store.wave_workflow(&wave, "review").unwrap().as_deref(),
-                Some(changed)
-            );
+        for wave in waves {
+            assert!(store.select_wave_workflow(&wave, "invalid:review").is_err());
             assert_eq!(
                 store.selected_wave_workflow(&wave).unwrap().as_deref(),
                 Some("review")

@@ -133,13 +133,8 @@ for line in sys.stdin:
     repo.commit("Define agent selection fixtures");
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let workflow = fs::read_to_string(repo.path().join(".lf/graphs/feature.yaml")).unwrap();
     store
-        .select_wave_workflow(
-            registered.task.wave_id.as_ref().unwrap(),
-            "feature",
-            &workflow,
-        )
+        .select_wave_workflow(registered.task.wave_id.as_ref().unwrap(), "feature")
         .unwrap();
     // Direct Task binding used to prefer the saved Task agent over -a.
     for args in [
@@ -897,14 +892,8 @@ impl WorkflowTask {
         let store =
             loopflow::store::sqlite::SqliteStore::new(&self.home.path().join("loopflow.db"))
                 .unwrap();
-        let content =
-            fs::read_to_string(self.repo.path().join(format!(".lf/graphs/{name}.yaml"))).unwrap();
         store
-            .select_wave_workflow(
-                self.registered.task.wave_id.as_ref().unwrap(),
-                name,
-                &content,
-            )
+            .select_wave_workflow(self.registered.task.wave_id.as_ref().unwrap(), name)
             .unwrap();
     }
 
@@ -1069,12 +1058,13 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
         .unwrap()
         .unwrap();
     let select = |name: &str| {
+        fs::write(
+            fixture.repo.path().join(format!(".lf/graphs/{name}.yaml")),
+            "- graph: proof\n- interactive: {name: demo, id: review}\n",
+        )
+        .unwrap();
         sqlite
-            .select_wave_workflow(
-                task.wave_id.as_ref().unwrap(),
-                name,
-                "- graph: proof\n- interactive: {name: demo, id: review}\n",
-            )
+            .select_wave_workflow(task.wave_id.as_ref().unwrap(), name)
             .unwrap();
     };
     select("before-checkout");
@@ -1827,18 +1817,7 @@ while not (home / 'release').exists():
 print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}))
 "#,
     );
-    task.ok(&[
-        "wave",
-        "workflow",
-        "set",
-        "live-workflow",
-        task.registered.task.wave_id.as_ref().unwrap().as_str(),
-        "--file",
-        worktree
-            .join(".lf/graphs/live-workflow.yaml")
-            .to_str()
-            .unwrap(),
-    ]);
+    // The run names the checkout's Workflow file; no Wave selection is needed.
     let log_path = task.home.path().join("live.log");
     let log = fs::File::create(&log_path).unwrap();
     let mut held = HeldGraph {

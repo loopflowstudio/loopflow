@@ -176,7 +176,7 @@ fn spawn_session_command_with_env(
         Ok(())
     } else if agent_session.is_some() {
         Err(anyhow!(
-            "{} could not open this session (status {}). If another client still owns it, close that client or use `lf session connect --takeover` for a Loopflow-owned client.",
+            "{} exited with {}. If another client still owns this session, close it or use `lf session connect --takeover`.",
             command.program,
             outcome.status,
         ))

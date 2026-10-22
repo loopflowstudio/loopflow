@@ -103,6 +103,17 @@ impl WorkContext {
     }
 }
 
+/// Whether context includes clipboard text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ClipboardContext {
+    #[default]
+    Off,
+    /// Configured `paste`: include text when a source has some.
+    IfAvailable,
+    /// Explicit `-c`: refuse to continue without text.
+    Required,
+}
+
 /// Options for gathering context.
 #[derive(Debug, Clone, Default)]
 pub struct GatherContextOpts {
@@ -123,7 +134,7 @@ pub struct GatherContextOpts {
     pub wave: Option<String>,
     pub include_diff: bool,
     pub include_diff_files: bool,
-    pub include_clipboard: bool,
+    pub clipboard: ClipboardContext,
     /// Related repos resolved from the edge graph.
     pub related_repos: Vec<RelatedRepoContext>,
 }
@@ -384,10 +395,13 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 
     // Gather clipboard
     let clipboard_start = Instant::now();
-    let clipboard = if opts.include_clipboard {
-        read_clipboard()
-    } else {
-        None
+    let clipboard = match opts.clipboard {
+        ClipboardContext::Off => None,
+        ClipboardContext::IfAvailable => crate::platform::clipboard::read().ok(),
+        ClipboardContext::Required => Some(
+            crate::platform::clipboard::read()
+                .map_err(|err| CoreError::ExecutionFailed(format!("-c: {err}")))?,
+        ),
     };
     debug!(
         elapsed_ms = clipboard_start.elapsed().as_millis(),
@@ -1311,10 +1325,6 @@ fn parse_shortstat_total_lines(output: &str) -> Option<usize> {
         return Some(0);
     }
     Some(numbers[1..].iter().sum())
-}
-
-fn read_clipboard() -> Option<String> {
-    crate::platform::clipboard::read()
 }
 
 fn build_gitignore(repo_root: &Path) -> ignore::gitignore::Gitignore {

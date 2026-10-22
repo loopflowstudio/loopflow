@@ -1917,7 +1917,7 @@ impl SqliteStore {
                 )));
             }
             if let Some(collision) = &update.retire_collision {
-                let blockers = Self::wave_retirement_blockers_in(&tx, collision, &update.wave_id)?;
+                let blockers = Self::wave_retirement_blockers_in(&tx, collision)?;
                 if !blockers.is_empty() {
                     return Err(StoreError::InvalidData(format!(
                         "cannot retire destination Wave {collision}: {}",
@@ -1983,31 +1983,16 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn wave_retirement_blockers(
-        &self,
-        wave_id: &WaveId,
-        replacement: &WaveId,
-    ) -> StoreResult<Vec<String>> {
+    pub(crate) fn wave_retirement_blockers(&self, wave_id: &WaveId) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Self::wave_retirement_blockers_in(&conn, wave_id, replacement)
+        Self::wave_retirement_blockers_in(&conn, wave_id)
     }
 
     fn wave_retirement_blockers_in(
         conn: &Connection,
         wave_id: &WaveId,
-        replacement: &WaveId,
     ) -> StoreResult<Vec<String>> {
         let mut blockers = Vec::new();
-        // Independent stored Workflow edits survive retirement.
-        let differs: bool = conn.query_row(
-            "SELECT EXISTS(SELECT name,content FROM wave_workflows WHERE wave_id=?1
-                EXCEPT SELECT name,content FROM wave_workflows WHERE wave_id=?2)",
-            params![wave_id, replacement],
-            |row| row.get(0),
-        )?;
-        if differs {
-            blockers.push("stored definitions".to_string());
-        }
         let projects: i64 = conn.query_row(
             "SELECT COUNT(*) FROM projects WHERE wave_id = ?1",
             params![wave_id],

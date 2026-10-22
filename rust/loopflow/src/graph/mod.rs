@@ -450,17 +450,6 @@ impl<'a> DefinitionLoader<'a> {
     }
 }
 
-/// Parse Graph text that lives outside the repository, such as a Wave's stored
-/// graph, resolving its steps against the repository's definitions.
-pub fn parse_graph_source(
-    name: &str,
-    content: &str,
-    repo: &Path,
-) -> Result<GraphDefinition, LoadError> {
-    let catalog = SkillCatalog::discover(Some(repo))?;
-    DefinitionLoader::new(Some(repo), &catalog).parse_source(name.to_string(), content)
-}
-
 pub fn compile_graph(graph: &GraphDefinition, repo: &Path) -> Result<Vec<ConcreteStep>, LoadError> {
     Ok(flatten_resolved(&resolve_graph(graph, repo)?))
 }

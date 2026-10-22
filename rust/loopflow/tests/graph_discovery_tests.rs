@@ -247,43 +247,22 @@ fn flow_and_workflow_catalogs_read_the_same_graphs() {
             "proof",
         )
         .unwrap();
-    let definition = repo.path().join("workflow.yaml");
-    std::fs::write(&definition, "- graph: feature\n").unwrap();
-    let selected = run(&[
-        "wave",
-        "workflow",
-        "set",
-        "feature",
-        "proof",
-        "--file",
-        definition.to_str().unwrap(),
-    ]);
+    // A Workflow is selected by name; its definition is the committed graph.
+    let definition = repo.path().join(".lf/graphs/feature.yaml");
+    let selected = run(&["wave", "workflow", "set", "feature", "proof"]);
     assert!(
         selected.status.success(),
         "{}",
         String::from_utf8_lossy(&selected.stderr)
     );
-    let workflows = run(&["wave", "workflow", "list", "--wave", "proof", "--json"]);
+    let workflows = run(&["wave", "workflow", "list", "--json"]);
     assert!(entry(&workflows)["workflow"].is_object());
+    assert_eq!(entry(&workflows)["source"], ".lf/graphs/feature.yaml");
     std::fs::write(&definition, "invalid: true\n").unwrap();
-    assert!(!run(&[
-        "wave",
-        "workflow",
-        "set",
-        "feature",
-        "proof",
-        "--file",
-        definition.to_str().unwrap()
-    ])
-    .status
-    .success());
-    assert_eq!(
-        entry(&run(&[
-            "wave", "workflow", "list", "--wave", "proof", "--json"
-        ])),
-        entry(&workflows)
-    );
-    assert_eq!(entry(&run(&["graph", "list", "--json"])), entry(&graphs));
+    assert!(!run(&["wave", "workflow", "set", "feature", "proof"])
+        .status
+        .success());
+    assert!(entry(&run(&["wave", "workflow", "list", "--json"]))["unavailable"].is_string());
 }
 
 #[test]

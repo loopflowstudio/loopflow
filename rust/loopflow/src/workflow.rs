@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::LoadError;
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
-use crate::graph::{compile_graph, load_authored_graph, parse_graph_source, ConcreteStep};
+use crate::graph::{compile_graph, load_authored_graph, ConcreteStep};
 use crate::skills::first_prose_line;
 
 pub const START: &str = "start";
@@ -189,16 +189,6 @@ impl CapturedGraph {
         }))
     }
 
-    /// Compile authored text kept outside the repository, such as a Wave's stored graph.
-    pub fn from_source(name: &str, content: &str, repo: &Path) -> Result<Self, LoadError> {
-        let graph = parse_graph_source(name, content, repo)?;
-        let steps = compile_graph(&graph, repo)?;
-        Ok(Self {
-            name: graph.name,
-            steps,
-        })
-    }
-
     /// The graph of a Task that reached `end` without taking one up: nothing
     /// between `start` and `end`.
     pub fn unplanned() -> Self {
@@ -352,6 +342,14 @@ pub fn load_workflow(name: &str, repo: &Path) -> Result<Option<WorkflowDefinitio
         .project()
         .map(|(definition, _)| Some(definition))
         .map_err(|error| LoadError::InvalidGraph(format!("graph {name}: {error}")))
+}
+
+/// Name the committed file a teammate's Workflow selection needs.
+pub fn missing_workflow(name: &str) -> String {
+    format!(
+        "graph {name:?} is unavailable: add .lf/graphs/{name}.yaml \
+         (a teammate's graph arrives when its commit is merged or pulled)"
+    )
 }
 
 /// The authored text of graph `name`: the repository's file, else the builtin.

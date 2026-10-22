@@ -58,6 +58,7 @@ fn cron_command_failure_stays_nonzero_through_direct_and_graph_entry() {
     ] {
         let spec = CronSpec {
             wave: String::new(),
+            published: false,
             graph: name.into(),
             command: command.into_iter().map(str::to_owned).collect(),
             schedule: loopflow::ops::parse_schedule("daily").unwrap(),
@@ -569,6 +570,7 @@ exit 0
         fs::set_permissions(&telemetry_runner, fs::Permissions::from_mode(0o755)).unwrap();
         let telemetry = CronSpec {
             wave: "infrastructure".into(),
+            published: false,
             graph: "telemetry-daily".into(),
             command: vec![
                 "--wave".into(),

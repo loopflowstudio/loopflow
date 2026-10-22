@@ -222,7 +222,11 @@ pub struct TaskOwnershipEntry {
     pub task_id: TaskId,
     pub kind: OwnershipKind,
     pub person: Option<String>,
+    /// The person's stable key; names are display only.
+    pub person_key: Option<String>,
     pub machine_id: Option<MachineId>,
+    /// The Machine's label when written, or as best known on this Machine.
+    pub machine_label: Option<String>,
     pub at: i64,
 }
 
@@ -236,12 +240,38 @@ pub struct MachineRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskOwner {
     pub person: Option<String>,
+    pub person_key: Option<String>,
     pub machine: MachineRef,
+}
+
+/// A person for display: their name, else their key, else "Someone".
+pub fn person_text<'a>(person: Option<&'a str>, person_key: Option<&'a str>) -> &'a str {
+    person.or(person_key).unwrap_or("Someone")
+}
+
+impl TaskOwner {
+    pub fn who(&self) -> &str {
+        person_text(self.person.as_deref(), self.person_key.as_deref())
+    }
+}
+
+impl TaskOwnershipEntry {
+    /// The person and Machine this entry names.
+    pub fn owner(&self) -> TaskOwner {
+        TaskOwner {
+            person: self.person.clone(),
+            person_key: self.person_key.clone(),
+            machine: MachineRef {
+                id: self.machine_id.clone(),
+                label: self.machine_label.clone(),
+            },
+        }
+    }
 }
 
 impl std::fmt::Display for TaskOwner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let person = self.person.as_deref().unwrap_or("Someone");
+        let person = self.who();
         match (&self.machine.label, &self.machine.id) {
             (Some(label), _) => write!(f, "{person} on {label}"),
             (None, Some(id)) => write!(f, "{person} on {id}"),

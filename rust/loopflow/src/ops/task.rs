@@ -584,7 +584,8 @@ pub(crate) fn select_task_run(
     };
     let named = match requested {
         Some(name) if !names_edge(name) => Some(
-            super::project::load_workflow(store, task.wave_id.as_ref(), name, checkout)?
+            crate::workflow::CapturedGraph::load(name, checkout)
+                .map_err(task_error)?
                 .ok_or_else(|| {
                     task_error(format!(
                         "{name:?} is neither an edge leaving {} nor a graph. Outgoing edges: {}",
@@ -619,17 +620,15 @@ pub(crate) fn select_task_run(
                     task.identifier
                 )));
             };
-            let wave = (source == "wave")
-                .then_some(task.wave_id.as_ref())
-                .flatten();
             Some(
-                super::project::load_workflow(
-                    store,
-                    wave,
-                    &name,
-                    &repository_for_task(store, task)?,
-                )?
-                .ok_or_else(|| task_error(format!("{source} graph {name:?} is unavailable")))?,
+                crate::workflow::CapturedGraph::load(&name, &repository_for_task(store, task)?)
+                    .map_err(task_error)?
+                    .ok_or_else(|| {
+                        task_error(format!(
+                            "{source} {}",
+                            crate::workflow::missing_workflow(&name)
+                        ))
+                    })?,
             )
         }
     };
@@ -955,7 +954,8 @@ fn prepare_task(
         }
         let task = if task.worktree.is_none() {
             if let Some(graph) = options.graph.as_deref().filter(|graph| *graph != END) {
-                if super::project::load_workflow(&store, task.wave_id.as_ref(), graph, repo)?
+                if crate::workflow::load_workflow(graph, repo)
+                    .map_err(task_error)?
                     .is_none()
                 {
                     return Err(task_error(format!("graph {graph:?} is not defined")));

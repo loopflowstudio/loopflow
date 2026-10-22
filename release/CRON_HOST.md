@@ -41,38 +41,31 @@ loopflow-release-publisher \
 The logical command is the public contract; its Machine-local implementation owns
 the private provider binding. The bootstrap never reads or prints a secret and
 never forwards a Task lease, provider lease, GitHub token, PM token, or
-invocation context. A missing command or failed check stops before cron sync.
+invocation context. A missing command or failed check stops before any cron is installed.
 
-## Repo-owned schedules
+## Release schedules
 
-Schedules live in `wave/infrastructure/GOAL.md`:
+Crons are personal: the bootstrap installs the two release jobs on this Machine
+with `lf cron add`. They stay private until `lf cron publish <name>` shows one
+to teammates:
 
-```yaml
-crons:
-  - flow: telemetry-daily
-    schedule: "0 0 9 * * *"
-  - flow: release-run
-    schedule: "0 0 10 * * *"
+```bash
+lf cron add telemetry-daily --schedule "0 0 9 * * *" -- --wave infrastructure --batch flow telemetry-daily
+lf cron add release-run --schedule "0 0 10 * * *" -- --wave infrastructure --batch flow release-run
 ```
 
 `release-run` resolves to `.lf/flows/release-run.yaml`, whose single operation
 is `release run patch`. The release command's error reaches the cron receipt;
 an agent's successful report cannot turn a blocked release into success.
 Release notes still use the agent stage inside that command. After updating an
-existing host, run `lf cron sync --wave infrastructure` to replace the old skill
-target with this Flow target, then inspect `lf cron list --wave infrastructure`.
+existing host, run `lf cron sync` to reinstall the jobs with the current lf,
+then inspect `lf cron list --wave infrastructure`.
 
-`lf cron sync --wave infrastructure` validates both targets and both fixed
-daily schedules before it writes a plist. A declared `flow` must resolve to a
-flow; missing or malformed repository content cannot fall back to a same-named
-skill. Repository flows take precedence over reusable skills. Sync captures the
-non-secret host path, Machine id, Machine/store paths, authoritative checkout, installed binary, exact
-schedule, and log path. Scheduled execution repeats the owning-Machine check and
-fails with a receipt instead of running after ownership moves.
-
-`lf cron preflight --wave infrastructure` performs the installed-binary,
-owning-Machine, checkout, catalog, and schedule checks without changing launchd;
-the bootstrap runs it before any credential probe.
+`lf cron add` refuses unless this Machine is your Machine for the Wave's Tasks.
+Each job captures the non-secret host path, Machine id, Machine/store paths,
+authoritative checkout, installed binary, exact schedule, and log path.
+Scheduled execution repeats the owning-Machine check and fails with a receipt
+instead of running after ownership moves.
 
 launchd uses host-local time and coalesces missed calendar firings after wake.
 Receipts record the actual start; declarations alone never count as evidence of

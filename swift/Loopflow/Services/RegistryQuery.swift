@@ -298,17 +298,13 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([GraphCatalogEntry].self, from: stdout)
     }
 
-    public func workflowCatalog(cwd: String?, wave: String? = nil) async throws -> [WorkflowCatalogEntry] {
-        let stdout = try await run(["wave", "workflow", "list", "--json"] + (wave.map { ["--wave", $0] } ?? []), cwd)
+    public func workflowCatalog(cwd: String?) async throws -> [WorkflowCatalogEntry] {
+        let stdout = try await run(["wave", "workflow", "list", "--json"], cwd)
         return try Self.decode([WorkflowCatalogEntry].self, from: stdout)
     }
 
-    public func workflowSource(_ name: String, wave: String, cwd: String?) async throws -> String {
-        try await run(["wave", "workflow", "source", name, wave], cwd)
-    }
-
-    public func saveWorkflow(_ name: String, content: String, wave: String, cwd: String?) async throws {
-        _ = try await runWithInput(["wave", "workflow", "set", name, wave, "--file", "/dev/stdin"], cwd, content)
+    public func workflowSource(_ name: String, cwd: String?) async throws -> String {
+        try await run(["wave", "workflow", "source", name], cwd)
     }
 
     public func customizeGraph(_ name: String, cwd: String?) async throws -> String {

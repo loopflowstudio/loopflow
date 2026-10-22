@@ -765,7 +765,7 @@ Connect a Wave to its Initiative and the repository's Team (Task prefix)
 
 ## lf repo refresh
 
-Refresh shared planning from Linear
+Refresh shared planning now: Linear per Wave, or the repository's Git planning ref (Git ignores the Wave selection; its exchange is per repository)
 
 | Argument | What it does |
 |---|---|
@@ -1201,7 +1201,7 @@ Install a separate login on an added machine using this laptop's browser
 | Argument | What it does |
 |---|---|
 | `<target>` | target |
-| `<provider>` | provider |
+| `<provider>` | github, claude, codex, opencode or linear |
 | `<email>` | email |
 | `--chrome-profile` | chrome profile |
 | `--help / -h` | Print help |
@@ -1230,6 +1230,15 @@ Receive a fresh login as JSON on stdin; preserve existing accounts
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf machine public
+
+Name this Machine for teammates, or `off` to make it private again. A private Machine's ownership entries and published crons carry only its id
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
 | `--help / -h` | Print help |
 
 ## lf machine id
@@ -1353,12 +1362,11 @@ Select and inspect the Wave default Workflow
 
 ## lf wave workflow source
 
-Read the authored graph without creating a repository file
+Print a graph from `.lf/graphs/` or the builtins
 
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
-| `<wave>` | wave |
 | `--help / -h` | Print help |
 
 ## lf wave workflow list
@@ -1367,7 +1375,6 @@ List graphs, including unavailable local files
 
 | Argument | What it does |
 |---|---|
-| `--wave` | Include this Wave's stored graphs |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1383,13 +1390,12 @@ Show the Wave's default Workflow
 
 ## lf wave workflow set
 
-Select the graph future Tasks take up; captured Tasks stay unchanged
+Select the graph future Tasks take up; captured Tasks stay unchanged. Graphs are committed `.lf/graphs/<name>.yaml` files or builtins
 
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
 | `<wave>` | wave |
-| `--file` | Store this graph in the Wave |
 | `--help / -h` | Print help |
 
 ## lf wave edit-plan
@@ -1478,12 +1484,13 @@ Install a named ordinary lf command on this Machine
 |---|---|
 | `<name>` | Stable job name, retained across command changes |
 | `--schedule` | Daily or every-minute cron expression, or a schedule alias Default: daily. |
+| `--publish` | Let teammates see this cron; crons are private by default Default: false. |
 | `<command>` | Arguments passed to lf, after -- |
 | `--help / -h` | Print help |
 
 ## lf wave cron list
 
-List installed loopflow cron jobs
+List jobs installed here, then teammates' published ones
 
 | Argument | What it does |
 |---|---|
@@ -1492,24 +1499,32 @@ List installed loopflow cron jobs
 | `--json` | Emit machine-readable job state Default: false. |
 | `--help / -h` | Print help |
 
-## lf wave cron preflight
+## lf wave cron publish
 
-Validate configured commands and your Wave Machine without installing jobs
+Let teammates see an installed cron (pushed to origin)
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | Only commands with this --wave selector |
-| `--task` | Only commands with this --task selector |
+| `<name>` | name |
+| `--wave / -w` | The cron's Wave, when the name is installed for more than one |
+| `--help / -h` | Print help |
+
+## lf wave cron unpublish
+
+Make an installed cron private again
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--wave / -w` | The cron's Wave, when the name is installed for more than one |
 | `--help / -h` | Print help |
 
 ## lf wave cron sync
 
-Reconcile installed jobs with the repository configuration's cron list
+Reinstall this Machine's jobs with the current lf
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | Only commands with this --wave selector |
-| `--task` | Only commands with this --task selector |
 | `--repo` | Install the finite repository Task check on this Machine Default: false. |
 | `--disable` | Remove the repository schedule; running work retains its authority Default: false. |
 | `--help / -h` | Print help |

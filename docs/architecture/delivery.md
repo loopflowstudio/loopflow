@@ -309,6 +309,14 @@ checks unknown until the caller reobserves; an unreadable page cannot supply a
 partial success. Repeated jobs retain their newest result within each workflow
 and event, while legacy status contexts keep their own identities.
 
+An aggregate required check such as `tests-result` has no check run until every
+job it `needs` finishes. The checkout's `.github/workflows` names each required
+check's producing job and its transitive `needs`; a failed job in that set fails
+the gate at once, matrix runs included (`rust-test (library, 3, 5)`). Optional
+checks outside it keep their meaning. A required check with no producer in the
+checkout is judged when its own run reports. The watcher hands any failed check
+to this one judgment.
+
 A blocked landing stays observable: later checks still settle its merge,
 checks that stop failing clear the block, and a waited landing keeps checking.
 Use `lf history show SESSION --final` to inspect a repair's conclusion.

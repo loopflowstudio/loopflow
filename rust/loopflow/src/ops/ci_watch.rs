@@ -22,7 +22,7 @@ use crate::store::SharedStore;
 
 use super::cron::Launchctl;
 use super::error::{OpsError, OpsResult};
-use super::pr::{GhCheck, MergeGateReading};
+use super::pr::{required_contexts, GhCheck, MergeGateReading};
 
 const INTERVAL: Duration = Duration::from_secs(60);
 const MAX_BACKOFF: Duration = Duration::from_secs(300);
@@ -206,37 +206,17 @@ fn parse<T: serde::de::DeserializeOwned>(path: &str, body: &str) -> OpsResult<T>
         .map_err(|cause| OpsError::Parse(format!("could not parse GitHub {path}: {cause}")))
 }
 
-/// Required check names from a `rules/branches/{branch}` or classic
-/// `protection/required_status_checks` response.
-fn required_contexts(body: &str) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
-        return names;
-    };
-    let mut collect = |checks: &serde_json::Value| {
-        for check in checks.as_array().into_iter().flatten() {
-            if let Some(name) = check.as_str().or_else(|| check["context"].as_str()) {
-                names.insert(name.to_string());
-            }
-        }
-    };
-    for rule in value.as_array().into_iter().flatten() {
-        if rule["type"] == "required_status_checks" {
-            collect(&rule["parameters"]["required_status_checks"]);
-        }
-    }
-    collect(&value["contexts"]);
-    collect(&value["checks"]);
-    names
-}
-
 // Gate reading
 
 /// One head's required-check state as the watcher reads it over REST.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Gate {
     Passing,
-    Pending,
+    /// `leaf_failed`: some check already failed. The landing check judges
+    /// whether a required check is made of it.
+    Pending {
+        leaf_failed: bool,
+    },
     Failing {
         /// The failing checks' names, sorted and distinct.
         names: Vec<String>,
@@ -244,16 +224,27 @@ enum Gate {
         completed_at: Option<OffsetDateTime>,
     },
     /// No required check has reported for this head yet.
-    Unreported,
+    Unreported {
+        leaf_failed: bool,
+    },
 }
 
 impl Gate {
     fn label(&self) -> &'static str {
         match self {
             Self::Passing => "passing",
-            Self::Pending => "pending",
+            Self::Pending { .. } => "pending",
             Self::Failing { .. } => "failing",
-            Self::Unreported => "unreported",
+            Self::Unreported { .. } => "unreported",
+        }
+    }
+
+    /// Whether the landing check should read this head now.
+    fn suspect(&self) -> bool {
+        match self {
+            Self::Failing { .. } => true,
+            Self::Pending { leaf_failed } | Self::Unreported { leaf_failed } => *leaf_failed,
+            Self::Passing => false,
         }
     }
 }
@@ -306,8 +297,9 @@ fn read_gate(
         );
         push(check, &status.context);
     }
+    let leaf_failed = full.iter().any(GhCheck::failed);
     if required_checks.is_empty() {
-        return Gate::Unreported;
+        return Gate::Unreported { leaf_failed };
     }
     let reading = MergeGateReading::from_checks(required_checks, full);
     if reading.failing {
@@ -325,7 +317,7 @@ fn read_gate(
             names: names.into_iter().collect(),
         }
     } else if reading.pending {
-        Gate::Pending
+        Gate::Pending { leaf_failed }
     } else {
         Gate::Passing
     }
@@ -569,7 +561,7 @@ impl Watcher {
     fn gate(&mut self, fetch: Fetch<'_>, pull: &RestPull) -> OpsResult<Gate> {
         let required = self.required(fetch, &pull.base.name)?;
         if required.is_empty() {
-            return Ok(Gate::Unreported);
+            return Ok(Gate::Unreported { leaf_failed: false });
         }
         let mut runs = Vec::new();
         for page in 1..=10 {
@@ -627,7 +619,7 @@ impl Watcher {
                     let detail = match landing {
                         Some(landing) => {
                             // A failure is checked at once; a quiet landing occasionally.
-                            let due = failing
+                            let due = gate.suspect()
                                 || self
                                     .landing_checked
                                     .get(&pull.number)
@@ -1043,13 +1035,13 @@ mod tests {
     #[test]
     fn required_checks_come_from_rulesets_or_classic_protection() {
         let rules = r#"[{"type":"deletion"},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"tests-result","integration_id":15368}]}}]"#;
-        assert_eq!(required_contexts(rules), required());
+        assert_eq!(super::required_contexts(rules), required());
         let classic = r#"{"contexts":["tests-result"],"checks":[{"context":"lint","app_id":1}]}"#;
         assert_eq!(
-            required_contexts(classic),
+            super::required_contexts(classic),
             BTreeSet::from(["lint".to_string(), "tests-result".to_string()])
         );
-        assert!(required_contexts(r#"{"message":"Branch not protected"}"#).is_empty());
+        assert!(super::required_contexts(r#"{"message":"Branch not protected"}"#).is_empty());
     }
 
     #[test]
@@ -1091,18 +1083,18 @@ mod tests {
 
     #[test]
     fn the_gate_follows_only_required_checks() {
-        // A red leaf does not fail a head whose required check has not finished.
-        assert_eq!(
-            read_gate(
-                vec![
-                    run("tests-result", None, None),
-                    run("rust-test", Some("failure"), None)
-                ],
-                vec![],
-                &required()
-            ),
-            Gate::Pending
+        // A red leaf does not fail a head whose required check has not
+        // finished; the landing check judges whether it is part of that check.
+        let gate = read_gate(
+            vec![
+                run("tests-result", None, None),
+                run("rust-test", Some("failure"), None),
+            ],
+            vec![],
+            &required(),
         );
+        assert_eq!(gate, Gate::Pending { leaf_failed: true });
+        assert!(gate.suspect());
         assert_eq!(
             read_gate(
                 vec![run("tests-result", Some("success"), None)],
@@ -1117,7 +1109,7 @@ mod tests {
                 vec![],
                 &required()
             ),
-            Gate::Unreported
+            Gate::Unreported { leaf_failed: true }
         );
         let status = RestStatus {
             context: "tests-result".into(),

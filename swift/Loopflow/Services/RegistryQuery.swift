@@ -62,7 +62,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func pinDashboard(id: String, pinned: Bool, revision: Int64, repoPath: String) async throws -> Dashboard {
-        try Self.decode(Dashboard.self, from: await run(["desktop", pinned ? "pin" : "unpin", id, "--revision", String(revision), "--json"], repoPath))
+        try Self.decode(Dashboard.self, from: await run(["desktop", pinned ? "pin" : "unpin", id, "--revision", String(revision)], repoPath))
     }
 
     public func renameDashboard(id: String, name: String, revision: Int64, repoPath: String) async throws -> Dashboard {
@@ -99,7 +99,7 @@ public struct RegistryQuery: Sendable {
 
     public func savePaneLayout(_ layout: WorkPaneLayout, repoPath: String) async throws -> WorkPaneLayout {
         let input = String(decoding: try JSONEncoder().encode(layout), as: UTF8.self)
-        return try Self.decode(WorkPaneLayout.self, from: await runWithInput(["desktop", "layout", layout.work.selector, "--save", "--json"], repoPath, input))
+        return try Self.decode(WorkPaneLayout.self, from: await runWithInput(["desktop", "layout", layout.work.selector, "--save"], repoPath, input))
     }
 
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {

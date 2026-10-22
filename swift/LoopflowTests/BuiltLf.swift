@@ -24,14 +24,14 @@ struct BuiltLf: Sendable {
         self.cwd = cwd ?? home
     }
 
-    /// `lf` or `lf-world` from `LOOPFLOW_TEST_LF`/`LOOPFLOW_TEST_LF_WORLD` or `target/debug`.
+    /// A built binary such as `lf`, from `LOOPFLOW_TEST_<NAME>` or `target/debug`.
     static func binary(_ name: String) throws -> String {
         let variable = "LOOPFLOW_TEST_" + name.uppercased().replacingOccurrences(of: "-", with: "_")
         let path = ProcessInfo.processInfo.environment[variable]
             ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
                 .deletingLastPathComponent().appendingPathComponent("target/debug/\(name)").path
         try #require(FileManager.default.isExecutableFile(atPath: path),
-                     "Build with cargo build -p loopflow --bin lf --bin lf-world")
+                     "Build with cargo build -p loopflow --bin \(name)")
         return path
     }
 
@@ -85,58 +85,6 @@ struct BuiltLf: Sendable {
             throw RegistryQueryError("\(([executable ?? "lf"] + args).joined(separator: " ")) exited \(status): \(detail)")
         }
         return try String(contentsOf: files[1], encoding: .utf8)
-    }
-}
-
-/// A recipe built by the source-built `lf-world`, once per test process and
-/// shared by every suite that reads it. Reads must not change it.
-struct World: Sendable {
-    /// Runs in the world's repository with the world's environment.
-    let lf: BuiltLf
-    var repo: URL { lf.cwd }
-    var query: RegistryQuery { lf.query }
-
-    static func shared(_ recipe: String) async throws -> World {
-        try await builds.world(recipe)
-    }
-
-    private static let builds = Builds()
-
-    private actor Builds {
-        private var started: [String: Task<World, any Error>] = [:]
-
-        func world(_ recipe: String) async throws -> World {
-            if let build = started[recipe] { return try await build.value }
-            let build = Task { try await World.build(recipe) }
-            started[recipe] = build
-            return try await build.value
-        }
-    }
-
-    private static let prefix = "loopflow-world-"
-
-    private static func build(_ recipe: String) async throws -> World {
-        removeAbandonedWorlds()
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(prefix)\(recipe)-\(getpid())").resolvingSymlinksInPath()
-        try? FileManager.default.removeItem(at: root)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let world = root.appendingPathComponent("world")
-        let printed = try await BuiltLf(home: root).run(["build", recipe, world.path],
-                                                        executable: try BuiltLf.binary("lf-world"))
-        let environment = try JSONDecoder().decode([String: String].self, from: Data(printed.utf8))
-        return World(lf: try BuiltLf(home: root, cwd: world.appendingPathComponent("repo"), overriding: environment))
-    }
-
-    /// Worlds outlive their test process; remove those whose process has exited.
-    private static func removeAbandonedWorlds() {
-        let temporary = FileManager.default.temporaryDirectory
-        for name in (try? FileManager.default.contentsOfDirectory(atPath: temporary.path)) ?? []
-        where name.hasPrefix(prefix) {
-            guard let pid = name.split(separator: "-").last.flatMap({ pid_t($0) }),
-                  kill(pid, 0) != 0, errno == ESRCH else { continue }
-            try? FileManager.default.removeItem(at: temporary.appendingPathComponent(name))
-        }
     }
 }
 #endif

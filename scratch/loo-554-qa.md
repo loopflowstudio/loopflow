@@ -62,7 +62,7 @@ Format: `<harness> <check> | command | result | evidence`
 ## OpenCode forwarding (round two)
 
 - paid model before connect | `lf -b -a opencode:opencode/gpt-5.4-nano : …` on m | FAIL as expected, but lf's text is "execution failed: invalid data: OpenCode native request: error sending request for url (…/prompt)", not OpenCode's reason (follow-up in questions.md) | —
-- connect | `lf machine connect m opencode --chrome-profile 'Profile 7'` | PASS: fresh device login approved in the jack@loopflow.studio profile; "Connected opencodezen on m: Zen accepted a fresh login for the same OpenCode account as this laptop" | r2-opencode-connect.txt
+- connect | `lf machine connect m opencode --chrome-profile 'Profile 7'` | PASS: fresh device login approved in the jack@loopflow.studio profile; "Connected opencodezen on m: Zen accepted a fresh login for the same OpenCode account as this laptop" (the slug on that line is fixed at 00deba37ad: both lines now say "OpenCode Zen"; not re-run on a machine) | r2-opencode-connect.txt
 - paid model after connect | same command | PASS: stdout `PONG`, stderr empty | —
 - second connect | same connect again | PASS: 1.9 s, no browser, nothing transferred | —
 - laptop login | `opencode auth list` before/after | PASS: unchanged | —

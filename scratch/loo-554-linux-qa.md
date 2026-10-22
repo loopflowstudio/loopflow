@@ -9,9 +9,11 @@ directed a fully autonomous run (plan, implement, land), so assumptions in
 newcomer on a rented Linux machine with Jack's real logins forwarded through
 Loopflow, and fix what it finds at its owners in this branch.
 
-Round three (2026-10-22) is landing only: the earlier Flow stopped after
-implement when its steps could not launch (missing managed Claude credential),
-so nothing was published. No new defects are open. PR #1635 merged into main
+Round three (2026-10-22) is landing plus one cosmetic fix from the round-two
+concept review: the earlier Flow stopped after implement when its steps could
+not launch (missing managed Claude credential), so nothing was published. The
+connect lines now name the provider by display name (00deba37ad, below). No
+other defects are open. PR #1635 merged into main
 as 173bb90880, so the launch-output results below now describe this branch on
 main, not a combined tree. Sync merged main at ed568b1ff5 (#1638) as
 e1bfa5c7e1. The one conflict, the AGENTS.md sentence on generating
@@ -128,8 +130,9 @@ from the first release cut after this lands).
 - `lf machine connect m opencode [email]` (`Provider::OpenCodeZen`; the
   existing parser already accepts `opencode`, `zen`, `oc`). The laptop reads
   `opencode auth export opencode --standalone` and takes the active entry.
-  No OpenCode, or a 1.x `opencode` without `auth export` → "forwarding needs
-  OpenCode 2 on this laptop; install it with `npm install -g @opencode/cli`".
+  No OpenCode, or a 1.x `opencode` without `auth export` → "OpenCode 2 is not
+  installed on this laptop; install it with `npm install -g @opencode/cli`"
+  (one `opencode_missing(host)` message serves the laptop and the machine).
   No active entry → "OpenCode has no active login on this laptop; run
   `opencode auth login`".
 - Active entry is an **API key** → validate it with Zen and send it as is.
@@ -446,10 +449,6 @@ Check (2026-10-21, compress): `cargo clippy --all-targets -- -D warnings` clean;
 Check (2026-10-21, publish): cargo fmt --check, gate lib tests (5), golden_prompt, clippy -D warnings → pass; full matrix → CI.
 Check (2026-10-21, kickoff round two): laptop probes of OpenCode 2.0.32 export/import/device login and Zen `/zen/v1/models` → findings above; plan only, no build.
 Check (2026-10-22, implement round two): `cargo test -p loopflow --lib -- machine_credentials` 13 pass; `cargo clippy --all-targets -- -D warnings` clean; machine run → ledger.
-Check (2026-10-22, kickoff round three): `cargo test -p loopflow --lib -- machine_credentials platform::clipboard machine::tests::release_numbers_order_by_component` 16 pass on HEAD 79c04625; `cargo fmt --check` clean; dry-run merge with origin/main (173bb90880 and seven later commits) → 0 conflicts; full matrix → gate/CI.
-Check (2026-10-21, implement round three): no code change since 79c04625 (prose commits only), so the kickoff result stands; `git merge-tree HEAD origin/main` (ed568b1ff5) → one conflict, AGENTS.md reference sentence, resolution above; build and suites → sync/gate.
-Check (2026-10-22, compress round three): OpenCode device login reuses `wait_for_browser_confirmation`; `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- machine_credentials platform::clipboard account::tests::browser_confirmation …` 20 pass; full matrix → gate/CI.
-Check (2026-10-22, realign round three): merged tree e1bfa5c7e1; `cargo fmt --check` clean; `cargo test -p loopflow --test integration reference_matches_the_compiled_cli` pass; `cargo test -p loopflow --lib -- machine_credentials platform::clipboard machine::tests::release_numbers_order_by_component harness::context::tests::pi_extension` 17 pass; full matrix → gate/CI.
-Check (2026-10-22, compress round three b): connect lines verified at 00deba37ad; one `opencode_missing(host)` message, one test `Machine` fixture, one stub `http_server` behind identity and Zen; `cargo fmt`; `cargo test -p loopflow --lib -- machine_credentials` 13 pass; `cargo clippy --all-targets -- -D warnings` clean; full matrix → gate/CI.
-Check (2026-10-22, decision round three): HEAD 9b00ad694b clean; `cargo fmt --check` clean; `cargo test -p loopflow --lib -- machine_credentials platform::clipboard machine::tests::release_numbers_order_by_component harness::context::tests::pi_extension` 17 pass; `git merge-tree HEAD origin/main` (845e8b7c8c, #1647) → 0 conflicts; full matrix → gate/CI.
+Check (2026-10-22, round three through decision): merged tree e1bfa5c7e1; `cargo fmt --check` clean; `cargo test -p loopflow --test integration reference_matches_the_compiled_cli` pass; 17 focused lib tests pass; `git merge-tree HEAD origin/main` (845e8b7c8c, #1647) → 0 conflicts; full matrix → gate/CI.
 Check (2026-10-22, implement round three): connect lines use `display_name()`; `cargo test -p loopflow --lib -- machine_credentials` 13 pass; `cargo clippy --all-targets -- -D warnings` clean; machine re-run of the OpenCode line → demo/gate.
+Check (2026-10-22, realign round three b): HEAD a87e518b67 (merge of main 91b21dc508); `cargo test -p loopflow --lib -- machine_credentials` 13 pass; `cargo clippy --all-targets -- -D warnings` clean; full matrix → gate/CI.

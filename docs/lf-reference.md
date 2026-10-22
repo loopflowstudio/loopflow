@@ -1190,7 +1190,7 @@ Install a separate login on an added machine using this laptop's browser
 | Argument | What it does |
 |---|---|
 | `<target>` | target |
-| `<provider>` | provider |
+| `<provider>` | github, claude, codex, opencode or linear |
 | `<email>` | email |
 | `--chrome-profile` | chrome profile |
 | `--help / -h` | Print help |

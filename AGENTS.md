@@ -440,9 +440,8 @@ Keep canonical owner paths in command references and help, where the tree is
 the point. Preserve established short names; do not expand `wt` to `worktree`.
 `documented_commands` checks example ambiguity against Clap; adding a competing
 command requires updating any shorthand that stops resolving uniquely.
-`docs/lf-reference.md` is generated: `LF_HOME=<disposable> target/debug/lf help --all --json > catalog.json`
-then `uv run python scripts/generate_cli_reference.py catalog.json`. Without a
-custom `LF_HOME` the build re-execs the installed lf and renders its help.
+`docs/lf-reference.md` is generated: with inherited `LF_*` unset, run
+`UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration cli_reference < /dev/null`.
 
 User docs follow the same principles as prompts (see PROMPTS.md):
 

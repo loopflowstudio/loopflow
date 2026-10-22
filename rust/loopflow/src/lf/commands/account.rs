@@ -10,7 +10,6 @@ use std::path::Path;
 use std::path::PathBuf;
 #[cfg(all(target_os = "macos", not(test)))]
 use std::process::Command;
-#[cfg(all(target_os = "macos", not(test)))]
 use std::process::Stdio;
 use std::sync::Arc;
 #[cfg(test)]
@@ -741,6 +740,55 @@ pub(super) async fn fresh_linear_login(
         .extract_token()
         .await
         .ok_or_else(|| anyhow!("Linear login completed without a credential"))
+}
+
+/// Run OpenCode's device login in a private `home`, approved in the verified Chrome
+/// profile; the laptop's own OpenCode login is untouched.
+pub(super) async fn fresh_opencode_login(
+    store: &SharedStore,
+    chrome_profile: Option<&str>,
+    home: &Path,
+) -> Result<()> {
+    use tokio::io::AsyncBufReadExt;
+    let (profiles, _) =
+        browser_profiles(store, Provider::OpenCodeZen, None, chrome_profile).await?;
+    let profile = profiles
+        .first()
+        .ok_or_else(|| anyhow!("no browser profile available"))?;
+    let chrome = verified_chrome_profile(profile)?;
+    let mut child = tokio::process::Command::from(super::machine_credentials::opencode(
+        Some(home),
+        &["auth", "login", "opencode", "--method", "device"],
+    ))
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null())
+    .kill_on_drop(true)
+    .spawn()
+    .context("start OpenCode device login")?;
+    let mut lines =
+        tokio::io::BufReader::new(child.stdout.take().expect("piped OpenCode stdout")).lines();
+    let login = async {
+        while let Some(line) = lines.next_line().await? {
+            if let Some(url) = line
+                .split(|c: char| c.is_whitespace() || c.is_control())
+                .find(|word| word.starts_with("https://") && word.contains("/device?"))
+            {
+                open_chrome_profile(&chrome, url)?;
+                println!("Approve the OpenCode login in Chrome; it completes automatically.");
+            }
+        }
+        let status = child.wait().await?;
+        if !status.success() {
+            bail!("OpenCode device login failed (exit {:?})", status.code());
+        }
+        Ok(())
+    };
+    tokio::select! {
+        result = login => result,
+        _ = tokio::time::sleep(Duration::from_secs(AUTH_CODE_FLOW_TIMEOUT_SECS)) => Err(anyhow!("timed out waiting for OpenCode browser approval")),
+        _ = tokio::signal::ctrl_c() => Err(anyhow!("authorization cancelled")),
+    }
 }
 
 async fn wait_for_browser_confirmation<F>(

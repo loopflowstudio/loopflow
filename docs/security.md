@@ -86,6 +86,7 @@ configured publisher workflow and credentials.
 lf machine add mini
 lf machine connect mini github
 lf machine connect mini codex work@example.com
+lf machine connect mini opencode
 lf machine connect mini linear
 lf --machine mini --account codex=work@ implement
 ```
@@ -97,6 +98,10 @@ headless caller needing browser approval stops with the connect command.
 
 Claude and Codex receive a fresh login minted in a private laptop directory,
 not the laptop's existing refresh credential. Linear receives a fresh OAuth grant.
+An OpenCode Console login gets a fresh device grant in a private laptop directory,
+checked to be the same OpenCode account; an OpenCode API key has no grant and is
+copied, like a GitHub token. OpenCode Zen must accept either before installation;
+it names no owner, so an API key's owner is not verified.
 Each login is checked against the intended provider identity before installation.
 GitHub receives gh's selected token through `gh auth login --with-token
 --insecure-storage`; gh configures its HTTPS Git credential helper. Existing

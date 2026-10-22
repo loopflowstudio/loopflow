@@ -68,7 +68,7 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
 /// assignee. The person is the Linear viewer on this Machine. Without a viewer
 /// the assignee is left alone; ownership is already saved.
 pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task: &TaskId) {
-    if !super::linear_observe::connected(&repository.to_string_lossy()) {
+    if !super::planning_client::is_linear(&repository.to_string_lossy()) {
         return;
     }
     match store.task_claimed_here(task) {

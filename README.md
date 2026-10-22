@@ -375,6 +375,7 @@ each `.md` URL, use the curated
 |------|--------|
 | [Get Started](docs/getting-started.md) | Install, first commands, building features, going remote |
 | [Waves](docs/waves.md) | The planning model, goals, memory, KRs, Linear, crons |
+| [Plan and share Tasks](docs/planning.md) | Share and capture Tasks with or without Linear, Asana or Notion |
 | [The Agent API](docs/agent-api.md) | How agents launch, steer, and prove control of other agents |
 | [Conducting](docs/conducting.md) | Seeing what got done, what you can pick up, and how to step in |
 | [Authoring](docs/authoring.md) | Writing skills, flows, and goals |

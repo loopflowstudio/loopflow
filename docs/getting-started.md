@@ -294,6 +294,8 @@ Auth connects your providers locally:
 lf account connect github    # connect GitHub
 lf account connect claude    # connect Claude
 lf account connect linear    # connect Linear with OAuth; needs LINEAR_CLIENT_ID/SECRET or Doppler
+lf account connect asana     # or plan in Asana; needs ASANA_CLIENT_ID/SECRET or Doppler
+lf account connect notion    # or plan in Notion; needs NOTION_CLIENT_ID/SECRET or Doppler
 lf account    # refresh managed identity and usage
 ```
 

@@ -16,7 +16,7 @@ impl SqliteStore {
             [task.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
-        let connected = crate::ops::linear_observe::connected(&repo);
+        let connected = crate::ops::planning_client::connected(&repo);
         let mut changes = fields(&tx, "task", task.as_str(), connected, false)?;
         if let Some(project) = project {
             changes.extend(fields(&tx, "project", &project, connected, true)?);
@@ -50,7 +50,7 @@ impl SqliteStore {
             [project.as_str()],
             |row| row.get(0),
         )?;
-        let connected = crate::ops::linear_observe::connected(&repo);
+        let connected = crate::ops::planning_client::connected(&repo);
         let mut changes = fields(&tx, "project", project.as_str(), connected, false)?;
         append(&tx, &mut changes,
             "SELECT c.successor_id,'creation',COALESCE(json_extract(c.export_json,'$.input'),c.local_plan_json),c.export_attempted OR c.export_link_attempted,c.export_error,NULL

@@ -142,7 +142,7 @@ GitHub delivery still requires confirmed merge evidence. Chapter rotation commit
 all selected Waves together, carrying started Tasks and preserving backlog. Stable
 local IDs select the rows and retry receipts; provider aliases select existing
 Projects through their stored mapping. Membership, Project fields, selection and
-pending effects commit together. Connected commands report pending Linear sync.
+pending effects commit together. Connected commands report a pending planning sync.
 Inbound observations preserve pending membership against an unchanged baseline;
 conflicting Linear membership wins while the losing local intention remains in history.
 Mapped membership and Project fields use foreground delivery below; local settlement

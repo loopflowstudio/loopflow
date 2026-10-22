@@ -312,10 +312,10 @@ fn append_in(
         [task.as_str()],
         |row| row.get(0),
     )?;
-    let linear = crate::ops::linear_observe::connected(&repo);
-    // Without Linear, the planning journal is the provider and this write is its
+    let remote = crate::ops::planning_client::connected(&repo);
+    // Without a remote provider, the planning journal is the provider and this write is its
     // order: after every entry this Machine has seen, whatever their clocks said.
-    let ordered_at: Option<i64> = if linear {
+    let ordered_at: Option<i64> = if remote {
         None
     } else {
         Some(conn.query_row(
@@ -356,7 +356,7 @@ fn append_in(
             created_at: Some(created_at),
         },
     )?;
-    if linear {
+    if remote {
         match kind {
             OwnershipKind::Claim => {
                 let state: Option<String> = conn.query_row(

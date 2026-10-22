@@ -125,7 +125,11 @@ fn assert_success(output: &Output, command: &str) -> String {
 
 fn seed_repository(repo: &Path) {
     std::fs::create_dir_all(repo.join(".lf")).unwrap();
-    std::fs::write(repo.join(".lf/config.yaml"), "linear:\n  team: team-loo\n").unwrap();
+    std::fs::write(
+        repo.join(".lf/config.yaml"),
+        "planning:\n  provider: linear\n  team: team-loo\n",
+    )
+    .unwrap();
     write_goal(repo, "survival", "initiative-survival");
     write_goal(repo, "survival/infrastructure", "initiative-infrastructure");
     write_goal(repo, "intelligence", "initiative-intelligence");

@@ -452,6 +452,10 @@ forward Claude or Codex logins into Pi. Jack Heart's assumption in
 autonomous-run direction of October 21; the question remains Jack's call for
 a later Task.
 
+### Round five (2026-10-22, headless)
+
+Since round two only c84f113161 and 85efd23e74 touched code, both folds with no behavior change (`opencode_export` now raises the missing-OpenCode error itself). No new concept, name or open choice; nothing to implement.
+
 ## Check results
 
 Check (2026-10-21, compress): `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- platform::clipboard machine::tests` passed; full suites → gate/CI.

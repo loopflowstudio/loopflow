@@ -80,20 +80,6 @@ fn rows_in(
     Ok(records)
 }
 
-fn counts_in(conn: &Connection, origin: &MachineId) -> StoreResult<CopyCounts> {
-    let count = |kind: RecordKind| -> StoreResult<usize> {
-        Ok(conn.query_row(
-            "SELECT count(*) FROM machine_records WHERE origin_machine_id=?1 AND kind=?2",
-            params![origin.as_str(), kind.as_str()],
-            |row| row.get::<_, i64>(0),
-        )? as usize)
-    };
-    Ok(CopyCounts {
-        sessions: count(RecordKind::Session)?,
-        processes: count(RecordKind::Process)?,
-    })
-}
-
 impl SqliteStore {
     /// This Machine's Sessions, Processes, Graph rows and session events
     /// touched since `since`, and the artifact keys of their captures.
@@ -179,7 +165,17 @@ impl SqliteStore {
 
     pub fn copy_counts(&self, origin: &MachineId) -> StoreResult<CopyCounts> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        counts_in(&conn, origin)
+        let count = |kind: RecordKind| -> StoreResult<usize> {
+            Ok(conn.query_row(
+                "SELECT count(*) FROM machine_records WHERE origin_machine_id=?1 AND kind=?2",
+                params![origin.as_str(), kind.as_str()],
+                |row| row.get::<_, i64>(0),
+            )? as usize)
+        };
+        Ok(CopyCounts {
+            sessions: count(RecordKind::Session)?,
+            processes: count(RecordKind::Process)?,
+        })
     }
 
     /// Copied Sessions, newest first, for one Task or one repository's Tasks
@@ -193,9 +189,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT r.origin_machine_id, m.label, r.key,
-                    json_extract(r.row,'$.title'), json_extract(r.row,'$.task_id'),
-                    json_extract(r.row,'$.repo'), json_extract(r.row,'$.created_at'),
-                    json_extract(r.row,'$.completed_at'), r.observed_at
+                    json_extract(r.row,'$.title'), json_extract(r.row,'$.completed_at')
              FROM machine_records r LEFT JOIN machines m ON m.id=r.origin_machine_id
              WHERE r.kind='session'
                AND (?1 IS NULL OR json_extract(r.row,'$.task_id')=?1)
@@ -214,11 +208,7 @@ impl SqliteStore {
                     origin_label: row.get(1)?,
                     id: row.get(2)?,
                     title: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                    task_id: row.get::<_, Option<String>>(4)?.map(TaskId::from_raw),
-                    repo: row.get(5)?,
-                    created_at: row.get(6)?,
-                    completed_at: row.get(7)?,
-                    observed_at: row.get(8)?,
+                    completed_at: row.get(4)?,
                 })
             },
         )?;

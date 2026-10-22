@@ -117,8 +117,9 @@ rentals
   cost_usd TEXT                   -- whole billed hours from /v2/billing/pods, updated each pass
 ```
 
-Copy-up adds `rentals.copied_at` and a `machine_records` table (origin, kind,
-key, row JSON, observed_at) in the same draft.
+Copy-up adds a `machine_records` table (origin, kind, key, row JSON,
+observed_at) in the same draft. Each copy re-exports from the rental's start
+and upserts; when it last ran is `observed_at`, so `rentals` keeps no watermark.
 
 A Machine is rented when a Rental names it, owned otherwise; `pool` and a
 Rental never both apply. One draft migration (`scripts/new_migration.py
@@ -328,7 +329,7 @@ list`; `lf machine end` gives back one rental. Compress dropped the unbuilt
 copy watermark column; copy-up adds its own.
 
 Copy-up implemented 2026-10-21 (second implement pass): `lf history export`,
-`machine_records` import with origin check, captures copied, `copied_at`,
+`machine_records` import with origin check, captures copied,
 copy before every delete (give-back pass and `lf machine end`; a failed copy
 keeps the machine unless `--force`), copied Sessions in `lf session list`,
 `lf task status` and `lf ondemand list`, `lf machine status` "rental ended",
@@ -344,5 +345,9 @@ Remaining:
    `portMappings`/`publicIp` field names, `RUNPOD_POD_ID` injection, the
    pod-scoped key deleting itself, and `lf history export` over SSH from the
    published lf (the pod needs a build with the command).
+
+Compress 2026-10-21 (after copy-up): dropped `rentals.copied_at` (duplicated
+`machine_records.observed_at`; nothing read it as a watermark), the export's
+unread `exported_at`, and unread `CopiedSession` fields.
 
 Last check (implement 2026-10-21): clippy clean; `cargo test --lib` machine_records 4, rental give-back 2, store revisions/rentals 11 passed; check_migrations ok; CLI reference regenerated.

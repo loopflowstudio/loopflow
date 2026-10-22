@@ -13,10 +13,10 @@ use anyhow::{anyhow, bail, Context};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{MachineId, TaskId};
+use crate::durable::MachineId;
 use crate::store::sqlite::SqliteStore;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordKind {
     Process,
@@ -54,7 +54,6 @@ pub enum ExportLine {
     /// file another Machine's records under this one.
     Origin {
         machine_id: MachineId,
-        exported_at: i64,
     },
     Row(Record),
     /// One file of a Session capture, base64.
@@ -82,19 +81,14 @@ impl std::fmt::Display for CopyCounts {
 }
 
 /// A Session as its origin Machine recorded it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CopiedSession {
     pub origin: MachineId,
     /// The origin's label while it is still added here.
     pub origin_label: Option<String>,
     pub id: String,
     pub title: String,
-    pub task_id: Option<TaskId>,
-    pub repo: Option<String>,
-    pub created_at: i64,
     pub completed_at: Option<i64>,
-    /// When it was copied.
-    pub observed_at: i64,
 }
 
 impl CopiedSession {
@@ -115,7 +109,6 @@ pub fn export(
 ) -> anyhow::Result<()> {
     let origin = ExportLine::Origin {
         machine_id: sqlite.local_machine()?.id,
-        exported_at: time::OffsetDateTime::now_utc().unix_timestamp(),
     };
     writeln!(out, "{}", serde_json::to_string(&origin)?)?;
     let (records, artifact_keys) = sqlite.export_records(since)?;
@@ -156,8 +149,8 @@ pub fn import(
         .next()
         .ok_or_else(|| anyhow!("the export was empty"))??;
     match serde_json::from_str::<ExportLine>(&first).context("read the export's origin")? {
-        ExportLine::Origin { machine_id, .. } if &machine_id == expected => {}
-        ExportLine::Origin { machine_id, .. } => {
+        ExportLine::Origin { machine_id } if &machine_id == expected => {}
+        ExportLine::Origin { machine_id } => {
             bail!("the export came from {machine_id}, not {expected}; nothing was copied")
         }
         _ => bail!("the export does not start with its origin; nothing was copied"),

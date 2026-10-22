@@ -245,7 +245,6 @@ fn rented(by_hand: bool) -> Rental {
         created_at: now(),
         ended_at: None,
         cost_usd: None,
-        copied_at: None,
     }
 }
 

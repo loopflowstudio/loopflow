@@ -309,10 +309,7 @@ fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing
         Some(id) => (
             sqlite.machine_by_id(id)?.and_then(|machine| machine.label),
             sqlite.tasks_held_by(id)?,
-            rental
-                .copied_at
-                .map(|_| sqlite.copy_counts(id))
-                .transpose()?,
+            Some(sqlite.copy_counts(id)?).filter(|counts| counts.sessions + counts.processes > 0),
         ),
         None => (None, Vec::new(), None),
     };
@@ -936,6 +933,7 @@ fn delete_pod(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Re
 
 /// Pull the machine's records since its rental began (`lf history export`).
 fn copy_up(sqlite: &SqliteStore, rental: &Rental, machine: &Machine) -> anyhow::Result<CopyCounts> {
+    // An hour early absorbs clock skew between the laptop and the pod.
     let since = (rental.created_at - time::Duration::hours(1))
         .format(&time::format_description::well_known::Rfc3339)?;
     let script = format!(
@@ -958,14 +956,12 @@ fn copy_up(sqlite: &SqliteStore, rental: &Rental, machine: &Machine) -> anyhow::
             String::from_utf8_lossy(&output.stderr).trim(),
         ));
     }
-    let counts = crate::machine_records::import(
+    crate::machine_records::import(
         sqlite,
         &crate::store::lf_home_dir(),
         &machine.id,
         output.stdout.as_slice(),
-    )?;
-    sqlite.set_rental_copied(&rental.id)?;
-    Ok(counts)
+    )
 }
 
 /// After a run forwarded to `machine` returns: if it is a live rental, give

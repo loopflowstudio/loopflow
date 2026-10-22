@@ -71,7 +71,7 @@ fn map_ondemand(row: &rusqlite::Row<'_>) -> StoreResult<OnDemand> {
 }
 
 const RENTAL_COLUMNS: &str = "id,ondemand,provider,provider_name,provider_id,machine_id,by_hand,
-    hardware,usd_per_hour,cap_usd,deadline,state,created_at,ended_at,cost_usd,copied_at";
+    hardware,usd_per_hour,cap_usd,deadline,state,created_at,ended_at,cost_usd";
 
 fn map_rental(row: &rusqlite::Row<'_>) -> StoreResult<Rental> {
     let provider: String = row.get(2)?;
@@ -95,7 +95,6 @@ fn map_rental(row: &rusqlite::Row<'_>) -> StoreResult<Rental> {
         created_at: at(row.get(12)?)?,
         ended_at: row.get::<_, Option<i64>>(13)?.map(at).transpose()?,
         cost_usd: row.get::<_, Option<String>>(14)?.map(usd).transpose()?,
-        copied_at: row.get::<_, Option<i64>>(15)?.map(at).transpose()?,
     })
 }
 
@@ -467,14 +466,6 @@ impl SqliteStore {
             id,
             "UPDATE rentals SET cost_usd=?2 WHERE id=?1",
             params![id.as_str(), cost.to_decimal()],
-        )
-    }
-
-    pub fn set_rental_copied(&self, id: &RentalId) -> StoreResult<Rental> {
-        self.update_rental(
-            id,
-            "UPDATE rentals SET copied_at=?2 WHERE id=?1",
-            params![id.as_str(), now_unix()],
         )
     }
 

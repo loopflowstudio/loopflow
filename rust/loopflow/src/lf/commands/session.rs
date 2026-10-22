@@ -298,39 +298,16 @@ async fn list(
         return Ok(());
     }
     let sessions = crate::ops::human_session::list(store, filter).await?;
-    // Sessions copied from given-back Machines are history, never available here.
-    let copied = if json || filter.available || filter.orphan {
-        Vec::new()
-    } else {
-        let task = match &filter.task {
-            Some(selector) => match store.sqlite.resolve_task_id(selector, None)? {
-                Some(task) => Some(task),
-                None => return print_sessions(&sessions, &[]),
-            },
-            None => None,
-        };
-        let repository = match &filter.repo {
-            Some(repo) => match store.sqlite.repository_id(repo)? {
-                Some(id) => Some(id),
-                None => return print_sessions(&sessions, &[]),
-            },
-            None => None,
-        };
-        store
-            .sqlite
-            .copied_sessions(task.as_ref(), repository.as_ref())?
-    };
     if json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
         return Ok(());
     }
-    print_sessions(&sessions, &copied)
-}
-
-fn print_sessions(
-    sessions: &[crate::ops::human_session::SessionRecord],
-    copied: &[crate::machine_records::CopiedSession],
-) -> anyhow::Result<()> {
+    // Sessions copied from given-back Machines are history, never available here.
+    let copied = if filter.available || filter.orphan {
+        Vec::new()
+    } else {
+        copied_sessions(store, filter)?
+    };
     if sessions.is_empty() && copied.is_empty() {
         println!("No Sessions.");
     } else {
@@ -347,7 +324,7 @@ fn print_sessions(
                 session.work_path.as_deref().unwrap_or("Repository"),
                 session.title
             );
-            for action in &session.actions {
+            for action in session.actions {
                 println!(
                     "  {} — {}",
                     action.label,
@@ -370,6 +347,31 @@ fn print_sessions(
         }
     }
     Ok(())
+}
+
+/// Copied Sessions the filter's Task or repository selects; none when it names
+/// one this Machine does not know.
+fn copied_sessions(
+    store: &Store,
+    filter: &crate::session::SessionFilter,
+) -> anyhow::Result<Vec<crate::machine_records::CopiedSession>> {
+    let task = match &filter.task {
+        Some(selector) => match store.sqlite.resolve_task_id(selector, None)? {
+            Some(task) => Some(task),
+            None => return Ok(Vec::new()),
+        },
+        None => None,
+    };
+    let repository = match &filter.repo {
+        Some(repo) => match store.sqlite.repository_id(repo)? {
+            Some(id) => Some(id),
+            None => return Ok(Vec::new()),
+        },
+        None => None,
+    };
+    Ok(store
+        .sqlite
+        .copied_sessions(task.as_ref(), repository.as_ref())?)
 }
 
 async fn connect(

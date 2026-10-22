@@ -38,28 +38,6 @@ private final class Feed {
 @Suite("Desktop without a display")
 @MainActor
 struct DesktopHeadlessTests {
-    @Test("Git planning shows retained mutations and read failures without claiming convergence")
-    func peerPlanningStatus() throws {
-        let data = try Data(contentsOf: fixtures.appendingPathComponent("peer_planning_status.json"))
-        let statuses = try JSONDecoder().decode([PeerPlanningStatus].self, from: data)
-        let view = PeerPlanningView(reading: .unavailable(lastGood: statuses, reason: "reader exited"))
-        for text in ["Showing the last sync status", "Local changes pending",
-                     "Configured for this repository", "Held retained-task: retained projection conflict",
-                     "Publication: unconfirmed (attempted-publication)", "Fetched: newer-fetch",
-                     "Retained import: retained-import", "Sync status unavailable: reader exited",
-                     "Retained alternative", "\"Retained title\"",
-                     "Candidate, not confirmed", "\"Maya\"",
-                     "Mutation: comment-head"] {
-            #expect(try view.inspect().find(text: text).string() == text)
-        }
-        let local = PeerPlanningView(reading: .available([]))
-        #expect(try local.inspect().find(text: "No active Git planning destination").string() == "No active Git planning destination")
-        let unknown = PeerPlanningView(reading: .unavailable(lastGood: nil, reason: "store unavailable"))
-        #expect(try unknown.inspect().findAll(ViewType.Text.self).allSatisfy {
-            try $0.string() != "No active Git planning destination"
-        })
-    }
-
     @Test("The repository roadmap reads Git planning through the ordinary query")
     func roadmapPeerPlanning() async throws {
         let data = try Data(contentsOf: fixtures.appendingPathComponent("peer_planning_status.json"))

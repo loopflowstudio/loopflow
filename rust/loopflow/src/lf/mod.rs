@@ -1929,7 +1929,7 @@ pub enum CiCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum PlanningCommand {
-    /// Show, explicitly create, or recover the same planning user key on another machine
+    /// Show, create, or recover the planning user key that names a `personal: true` ref
     Key {
         #[arg(long, conflicts_with = "recover")]
         new: bool,

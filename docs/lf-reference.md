@@ -723,7 +723,7 @@ Inspect planning synchronization and personal identity
 
 ## lf repo planning key
 
-Show, explicitly create, or recover the same planning user key on another machine
+Show, create, or recover the planning user key that names a `personal: true` ref
 
 | Argument | What it does |
 |---|---|

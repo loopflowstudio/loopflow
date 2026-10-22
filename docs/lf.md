@@ -125,7 +125,7 @@ It does not connect, select, fetch or publish planning. An ID already locating
 another checkout on the same Machine cannot be rebound to this one.
 An explicit Task from another repository is rejected rather than silently retargeted.
 
-[Select Git planning](#select-git-planning) to exchange planning. Import never
+[Select Git planning](#choose-planning-synchronization) to exchange planning. Import never
 moves local Workflows or transfers a started Task to another Machine.
 
 ```bash
@@ -197,6 +197,8 @@ Flow process for a Task is equally its work.
 
 `lf task run EXP-12 --name fix` selects its first checkout name. Names use the
 same normalization as `lf wt create`; single words and longer names are accepted.
+Branches start with your Git user name (`jack/exp-12-…`), so a teammate's never
+collide with yours; a Linear issue's recorded branch is reused.
 
 Flow output shows each step's position and name followed by the agent's messages.
 Diagnostics go to `logs/lf.log` in the Loopflow home, not the terminal. Use
@@ -361,10 +363,11 @@ or treating missing local evidence as completion.
 
 ## Choose planning synchronization
 
-Planning defaults to `refs/loopflow/planning/shared/main` on `origin`: everyone
-who clones the repository reads and writes the same plan. Select another shared
-ref, a personal ref, Linear, Asana or Notion in `.lf/config.yaml`, or set a
-personal default in `~/.lf/config.yaml`:
+Planning defaults to one shared Git ref on `origin`,
+`refs/loopflow/planning/shared/main`: everyone who clones the repository reads
+and writes the same plan. Want another shared ref, a plan only you see, Linear,
+Asana or Notion? Select it in `.lf/config.yaml`, or set a personal default in
+`~/.lf/config.yaml`:
 
 ```yaml
 planning:
@@ -408,11 +411,6 @@ win; this flag does not retry deletion or allocate another issue.
 `lf repo connect <wave>` saves the repository Team and selects Linear, overriding
 a Git preference in `~/.lf/config.yaml`.
 
-This build implements the enrollment baseline below. LOO-412 replaces it with one
-configured transport per repository; that unmerged configuration path is not
-included here. Manual per-Wave enrollment is superseded direction, and mixed
-Linear/Git exchange is not a target. `lf planning status` and key recovery remain.
-
 ```bash
 lf planning status --json
 lf planning key                    # show this machine's personal planning key
@@ -437,6 +435,57 @@ Only planning travels: Tasks, Project content, comments and planning disposition
 Workflows, Sessions, Processes, checkouts and machine control stay local. A completed
 plan does not move another machine's Workflow or clean its checkout.
 
+## Work with another person
+
+You both read one plan by default: the shared Git ref on `origin`.
+
+```bash
+lf user                                  # your name on claims and comments; set one first
+lf planning status                       # which plan you read: shared ref, personal ref or Linear
+lf task status ETU-20                    # owner and state; fetches a Task you don't have yet
+lf task claim ETU-20                     # take it; the earlier owner's Sessions are told
+lf comment ETU-20 "keep the GPU fallback" # with Linear, also steers the owner's agents
+lf pr request-review --reviewer dustin   # a teammate reviews through the pull request
+lf sync                                  # merge what a teammate landed into your checkout
+```
+
+What travels between you: the plan (Tasks, Projects, KRs, comments, ownership
+notes), committed repository files (`.lf/config.yaml`, each Wave's `GOAL.md` and
+`MEMORY.md`, Skills, Flows, Workflows) and pull requests. What stays on each
+Machine: Sessions and their history, Flow runs and Workflow position, checkouts
+and scratch, usage, accounts and routes, and installed crons. Each of you has
+your own conversation for a Wave or a Task.
+
+- **Names.** Claims compare display names: a Task claimed under your name, or
+  with no name on either side, reads as yours. Give each person a distinct
+  `lf user` name before claiming.
+- **Branches.** A Task's branch starts with your Git user name
+  (`dustin/etu-20-…`), so two people's branches don't collide. A Linear issue's
+  recorded branch is reused by whoever runs it.
+- **Taking over.** The owner pushes commits and scratch, then runs
+  `lf task unclaim`; you `lf task claim` and `lf task run`. Their Workflow
+  position, Flow history and Sessions stay on their Machine;
+  `lf task workflow move ETU-20 demo` puts you where they were. With Git
+  planning a takeover gets your own branch, so a new pull request.
+- **Operating Waves.** `wave-operate` and `repo-operate` act on every owned
+  Task, and a teammate's live Flow is invisible from your Machine: their Task
+  looks idle. Agree who operates each Wave.
+- **Reviewing.** A Workflow's design and demo nodes happen in the owner's
+  conversation. A teammate reviews the pull request: publish a draft at the
+  design node with `lf pr publish`.
+- **Comments.** With Git planning, a teammate's comment syncs but does not
+  steer your agents; with Linear it does.
+- **Crons.** Repository `crons:` run on every Machine that syncs them. One
+  person installs each Wave's jobs.
+- **Process.** A repository Skill or Flow outranks a personal one of the same
+  name, so change the team's in a pull request. To try your own variant, save
+  it under a new name in `~/.lf/skills`.
+- **Wave memory.** Each pull request may fold into `MEMORY.md`. Keep it as short,
+  independent sections so two people's edits merge cleanly.
+- **Linear.** Each person needs a login in the repository's Linear Team.
+  Signing in uses the Linear OAuth app: set `LINEAR_CLIENT_ID` and
+  `LINEAR_CLIENT_SECRET`, or provide them through Doppler.
+
 ## Connect planning and create work
 
 ```bash
@@ -450,7 +499,8 @@ lf wave show --json                   # plans and Tasks across Waves
 lf wave status exports --json       # one Wave's detailed evidence
 ```
 
-Connected planning needs a Linear login and repository Team. Connection names
+Git planning needs no connection: start at `lf task create`. Linear planning
+needs a Linear login and repository Team. Connection names
 missing access and the command to obtain it. Authored Waves remain discoverable
 before connection. Planning setup is separate from direct local execution.
 
@@ -501,6 +551,8 @@ lf connect --fresh                 # fresh conversation for the same scope
 lf context --task EXP-12 --json     # effective context limits, sources and usage
 lf wt timing                        # how long real `lf wt list` runs took here
 ```
+
+Usage covers Sessions recorded on this Machine; a teammate's runs appear on theirs.
 
 `lf history show SESSION` also prints private Codex relay failures with their
 AgentProcess identity. `--events` includes the diagnostic JSON. Retention keeps
@@ -693,7 +745,7 @@ lf cron add daily-review --schedule daily -- --wave product --batch skill wave/o
 ```
 
 Commands use ordinary `lf` arguments, including `--wave` and `--task`.
-Reading or cloning the repository installs nothing. An explicit `crons: []`
+Reading or cloning the repository installs nothing. Each Machine that syncs runs the jobs, so with two people, one installs them. An explicit `crons: []`
 removes the repository's jobs when synced; an absent list leaves them alone.
 Scope-filtered sync only changes matching jobs. Existing job names and Wave
 selectors retain installed identities and receipt history.

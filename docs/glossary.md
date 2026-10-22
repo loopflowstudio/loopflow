@@ -14,8 +14,8 @@ first, then the engineering words it borrows.
 | **Deciding step** | The step that chooses between moving on and going back. |
 | **Task** | One piece of work with a finish line. |
 | **Wave** | A goal Loopflow keeps working on. It has a written objective, a memory, and a schedule. |
-| **Chapter** | The shared name of every Wave's In Progress Linear Project; it has no separate stored object. |
-| **Project** | One Wave's Linear plan: status, Tasks, KRs and targets. |
+| **Chapter** | The shared name of every Wave's In Progress Project; it has no separate stored object. |
+| **Project** | One Wave's plan: status, Tasks, KRs and targets. |
 | **KR** | Key result. A result you can check, stated before the work starts. |
 | **Memory** | A text file, `MEMORY.md`, where a Wave writes down what it learned. |
 | **LfSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |
@@ -26,7 +26,7 @@ first, then the engineering words it borrows.
 | **Machine** | One OS user’s Loopflow authority in one data directory; two users on one host have separate identities. |
 | **Data directory** | Local Loopflow state in `~/.lf` by default; explicit `LF_HOME` selects a disposable experiment. |
 | **Steer** | A message you send to work that is already running, to change its direction. |
-| **Harness**, **provider** | The AI coding tool Loopflow drives: Claude Code, Codex, or OpenCode. |
+| **Harness**, **provider** | The AI coding tool Loopflow drives: Claude Code, Codex, OpenCode, or Pi. |
 | **Scratch** | The `scratch/` folder, for working notes. `lf scratch clear` removes added files; existing files and edits remain. |
 
 Historical capture paths and immutable receipts retain their encoding; see
@@ -52,6 +52,7 @@ execution owner in the accepted model.
 | **Test** | A small program that checks another program does what it should. |
 | **Lint** | An automatic check for mistakes and style, without running the code. |
 | **GitHub** | A website that stores repositories and hosts pull requests. |
-| **Linear** | A planning tool. Loopflow keeps Tasks and Projects there. |
+| **Planning provider** | Where your Tasks and Projects are shared: a Git ref by default, or Linear, Asana or Notion. |
+| **Linear** | A planning tool. Loopflow can keep Tasks and Projects there instead of in Git. |
 | **Token** | The unit AI tools count text in, and charge by. Roughly three quarters of a word. |
 | **YAML**, **Markdown** | Two plain text formats. Flows are written in YAML; skills and docs in Markdown. |

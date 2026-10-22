@@ -1092,8 +1092,24 @@ impl CodexHarness {
             loop {
                 if let Some(child) = &mut child {
                     if let Some(status) = child.try_wait()? {
+                        // Codex says why it stopped; the person needs that line.
+                        let mut stderr = String::new();
+                        if let Some(mut pipe) = child.stderr.take() {
+                            let _ = tokio::time::timeout(
+                                Duration::from_secs(1),
+                                tokio::io::AsyncReadExt::read_to_string(&mut pipe, &mut stderr),
+                            )
+                            .await;
+                        }
+                        let reason = stderr
+                            .lines()
+                            .rev()
+                            .map(str::trim)
+                            .find(|line| !line.is_empty())
+                            .map(|line| format!(": {line}"))
+                            .unwrap_or_default();
                         return Err(anyhow!(
-                            "codex app-server exited before opening its socket: {status}"
+                            "codex app-server exited before opening its socket ({status}){reason}"
                         ));
                     }
                 }

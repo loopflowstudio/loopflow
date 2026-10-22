@@ -1,8 +1,9 @@
 # From install to an open Loopflow
 
 Status: accepted direction; Rust installer activation, PATH, destination,
-native agent/gh install and provider/GitHub status and sign-in implemented
-(see This slice). Swift setup and live Mac acceptance remain outstanding.
+native agent/gh install, provider/GitHub status and sign-in, and the Swift
+first-launch activation implemented (see This slice). The setup view and live
+Mac acceptance remain outstanding.
 Baseline: synced onto main `98dab5ea8e` (v0.14.15).
 Research performed 2026-09-26 (run-local date).
 
@@ -439,15 +440,25 @@ Provider/GitHub setup actions (2026-10-22, second pass). The command is
   `~/.local/bin` after checking the release's SHA-256 list; an existing `gh`
   on PATH is left alone.
 
+Swift first launch (2026-10-22, third pass): `AppActivation` (LoopflowMac
+Services) runs the bundle's helper with output to a temp file (promotion may
+quit the app; a pipe would end the helper), shares one attempt between the
+launch window and Session resume, and retries after failure.
+`WorkspaceLaunchView` shows "Setting up Loopflow…", the helper's refusal and
+Retry before opening a repository; Session resume waits for activation. Tests,
+offline clones and unbundled runs skip it; Rust returns success for a
+validation-only (development) helper so local app builds keep opening. The
+getting-started opening now leads with drag/open, CLI setup actions and the
+coding tool's cost; `lf init` is no longer in the required sequence.
+
 Remaining:
 
-1. Swift first-launch call to activate-app (progress, failure, retry; app is
-   quiesced/reopened by promotion when source == target — unproven live).
-2. Primary-window setup view reading `lf account --json` and running the
+1. Primary-window setup view reading `lf account --json` and running the
    recovery commands in its shell, only after the running-app baseline is
-   recorded.
-3. Docs, then the clean-account Done-when trials (incl. real installer,
-   browser sign-in and `gh` download, none exercised here).
+   recorded (needs a display session; not recordable headless). Its docs then
+   replace the CLI setup block in getting-started.
+2. The clean-account Done-when trials (real signed bundle, first-install
+   quit/reopen through promotion, installer, browser sign-in, `gh` download).
 
 The live baseline and clean-account acceptance are open gaps; Jack directed
 that fixtures not substitute for them. The retained-helper
@@ -469,6 +480,7 @@ open findings are folded into Remaining above.
 | Setup actions (2026-10-22) | `cargo test --lib -- lf::commands::account provider_auth`: 120 passed; integration `auth_tests` 11 passed (missing→installed→connected without a repo; default agent written only on success; malformed config kept); `install::gh` 2 passed; Swift `DTOFixtureTests` 50 passed; clippy/fmt clean; CLI reference regenerated. | Stub CLIs; no real provider, browser, Keychain or GitHub download. |
 | Compress (2026-10-22) | One local `AccountRow` path, `connect` split into sign-in/verify, config write inlined in `update_global_config_at`; clippy clean; account_status/portfolio lib tests and 3 integration auth tests passed. Unrelated `session_record::manifest_round_trips…` fails on missing `graph_process_steps` (untouched by branch). | Same stub limits. |
 | Realign (2026-10-22) | Plan matched code; origin/main unchanged since `98dab5ea8e`; no tests rerun. | Reuses results above. |
+| Swift activation (2026-10-22) | `swift test --filter AppActivationTests` 2 passed (progress → refusal → Retry → open; settled launches skip the helper); `swift build` passed; `install::bundle` 4 passed; documented_commands 4 passed; fmt/clippy clean. | Held closure stands in for the helper; no app bundle, xcodebuild or GUI. |
 
 Proposed Wave memory update after landing (memory is read-only here): items 1,
 3 and 7 of "What stands between a newcomer and a first task" are addressed in

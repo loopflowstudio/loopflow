@@ -15,6 +15,7 @@ use std::process::Command;
 use anyhow::{anyhow, Context, Result};
 
 use super::shell_path;
+use crate::build_info::MigrationAuthority;
 
 const DEFAULT_APPLICATIONS: &str = "/Applications";
 
@@ -164,6 +165,13 @@ fn refuse_downgrade(installed: &str, opened: &str, installed_app: Option<&Path>)
 
 /// `lf install activate-app --bundle <Loopflow.app>`.
 pub fn activate_app(bundle: &Path) -> Result<()> {
+    // Development builds carry a validation-only helper and are installed by
+    // `scripts/install.py local`; opening one leaves the installation alone.
+    let opened = super::CandidateIdentity::current();
+    if opened.authority != MigrationAuthority::Published {
+        println!("Development build: the installation is unchanged.");
+        return Ok(());
+    }
     let bundle = fs::canonicalize(bundle)
         .with_context(|| format!("resolve opened app {}", bundle.display()))?;
     check_placement(&bundle)?;
@@ -179,7 +187,6 @@ pub fn activate_app(bundle: &Path) -> Result<()> {
         ));
     }
     // Published promotion verifies the signature before any target changes.
-    let opened = super::CandidateIdentity::current();
     if let Some(active) = crate::installation::active_install(&crate::installation::root()?)? {
         let cli = active
             .selection
@@ -215,7 +222,7 @@ pub fn activate_app(bundle: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_placement, choose_app_destination, refuse_downgrade};
+    use super::{activate_app, check_placement, choose_app_destination, refuse_downgrade};
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -238,6 +245,12 @@ mod tests {
             choose_app_destination(None, None, false, home),
             PathBuf::from("/Users/kim/Applications/Loopflow.app")
         );
+    }
+
+    #[test]
+    fn development_builds_leave_the_installation_alone() {
+        // Test builds carry a validation-only helper, like any local app build.
+        activate_app(Path::new("/nonexistent/Loopflow.app")).unwrap();
     }
 
     #[test]

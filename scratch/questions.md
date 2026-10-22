@@ -50,3 +50,10 @@
   explicit `export` line.
 
 - Sync onto main (v0.14.15): main bounds retention to the target's fallback plus the one it replaced, and prunes the rest. The branch had accumulated every recorded set. The merge keeps main's bound and the branch's reuse of an already-written active record. The `failed_reopen…` fixture now expects two retained sets, not three.
+
+- 2026-10-22 choices (reversible): a development (validation-only) helper's
+  `activate-app` succeeds without changes rather than refusing, so locally
+  built apps open. A restored workspace window reads the registry without
+  waiting for activation; only the launch window and Session resume wait. A
+  first install has no restored windows; a newer copy dragged over an older
+  one is quit and reopened by promotion anyway.

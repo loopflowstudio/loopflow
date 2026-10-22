@@ -4,13 +4,19 @@ import SwiftUI
 
 /// The unbound launch scene is a loading/error surface, never a second workspace.
 struct WorkspaceLaunchView: View {
+    var activation = AppActivation.shared
     let open: () async throws -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var error: String?
 
     var body: some View {
         VStack {
-            if let error {
+            if case .failed(let failure) = activation.state {
+                Text(failure).textSelection(.enabled)
+                Button("Retry") { Task { await launch() } }
+            } else if activation.state == .activating {
+                ProgressView("Setting up Loopflow…")
+            } else if let error {
                 Text(error).textSelection(.enabled)
                 Button("Retry") { Task { await launch() } }
             } else {
@@ -21,9 +27,10 @@ struct WorkspaceLaunchView: View {
         .task { await launch() }
     }
 
-    private func launch() async {
+    func launch() async {
         error = nil
         do {
+            try await activation.activated()
             try await open()
             dismiss()
         } catch { self.error = error.localizedDescription }

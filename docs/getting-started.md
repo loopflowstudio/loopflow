@@ -2,12 +2,40 @@
 
 ## Install
 
+### Mac
+
+1. [Download Loopflow](https://downloads.loopflow.studio/Loopflow-latest.dmg) and open it.
+2. Drag Loopflow into Applications, then eject the disk image.
+3. Open Loopflow from Applications.
+
+First launch sets up the `lf` command; new zsh terminals find it. No Terminal
+step is needed. If Applications won't accept the drag, use the Applications
+folder in your home folder (Finder: Go → Home, then New Folder named
+`Applications`). Opened straight from the disk image, Loopflow asks you to
+drag it first.
+
+### Connect a coding tool and GitHub
+
+```bash
+lf install agent claude                    # or codex: its official installer
+lf account connect claude --default-agent  # browser sign-in, then the default
+lf install gh                              # GitHub CLI into ~/.local/bin
+lf account connect github
+lf account                                 # what's connected; next command for anything missing
+```
+
+Loopflow is free; the coding tool has its own cost. An existing signed-in
+Claude Code, Codex or OpenCode is used as is.
+
+### Terminal only
+
 ```bash
 curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
-lf init
 ```
 
 Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`.
+On a Mac, the installer adds that directory to new zsh terminals and prints an
+`export PATH=...` line for the current one. `lf init` sets up a repository.
 
 ### Before you install
 

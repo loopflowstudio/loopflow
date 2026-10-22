@@ -12,7 +12,9 @@ use crate::graph::output::GraphOutput;
 use crate::graph::runner::SkillOutcome;
 use crate::graph::transitions::{GraphDecision, GraphVerdict};
 use crate::lf::Cli;
-use crate::ops::task::ship::{ship_begin, ship_next, stand_in_message, ShipStart, ShipStep};
+use crate::ops::task::ship::{
+    blocked_backoff, ship_begin, ship_next, stand_in_message, ShipStart, ShipStep,
+};
 use crate::ops::task::TaskProcessOptions;
 
 pub fn run(
@@ -39,6 +41,8 @@ pub fn run(
     };
     let issue = task.identifier.clone();
     let worktree = task.worktree()?.to_path_buf();
+    // Blocked decisions in a row; each repeat after one waits longer.
+    let mut blocked = 0;
     loop {
         let (edge, note) = match ship_next(&issue)? {
             ShipStep::Edge(edge) => (edge, None),
@@ -75,20 +79,35 @@ pub fn run(
                     (Some(GraphVerdict { decision, summary }), Some(repeat))
                         if decision != GraphDecision::Advance =>
                     {
-                        let blocked = if decision == GraphDecision::Blocked {
-                            ", blocked"
+                        if decision == GraphDecision::Blocked {
+                            blocked += 1;
+                            (repeat, format!("repeat, blocked: {summary}"))
                         } else {
-                            ""
-                        };
-                        (repeat, format!("repeat{blocked}: {summary}"))
+                            blocked = 0;
+                            (repeat, format!("repeat: {summary}"))
+                        }
                     }
                     (Some(GraphVerdict { summary, .. }), _) => {
+                        blocked = 0;
                         (advance, format!("advance: {summary}"))
                     }
-                    (None, _) => (advance, "advance".to_string()),
+                    (None, _) => {
+                        blocked = 0;
+                        (advance, "advance".to_string())
+                    }
                 };
                 let note = format!("{stage} (stand-in) → {choice}");
                 eprintln!("{issue}: {note}");
+                if blocked > 0 {
+                    let wait = blocked_backoff(blocked);
+                    eprintln!(
+                        "{issue}: blocked {blocked} time(s) in a row; repeating {stage} in {} min",
+                        wait.as_secs() / 60
+                    );
+                    if let Some(step) = wait_unless_halted(&issue, wait)? {
+                        return halt(&issue, &step);
+                    }
+                }
                 (edge, Some(note))
             }
             step => return halt(&issue, &step),
@@ -109,6 +128,23 @@ pub fn run(
             crate::ops::task::workflow_arrive(&task)?;
         }
     }
+}
+
+/// Sleep for `wait`, returning early with the step if the Task is paused or
+/// stopped meanwhile.
+fn wait_unless_halted(issue: &str, wait: std::time::Duration) -> Result<Option<ShipStep>> {
+    let until = std::time::Instant::now() + wait;
+    while let Some(left) = until.checked_duration_since(std::time::Instant::now()) {
+        std::thread::sleep(left.min(std::time::Duration::from_secs(10)));
+        let step = ship_next(issue)?;
+        if matches!(
+            step,
+            ShipStep::Paused | ShipStep::Stopped | ShipStep::Finished
+        ) {
+            return Ok(Some(step));
+        }
+    }
+    Ok(None)
 }
 
 /// Say why shipping ends here: paused, stopped or finished.

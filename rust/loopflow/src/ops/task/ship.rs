@@ -417,6 +417,13 @@ fn routes_from(workflow: &Workflow, node: &str) -> Option<(String, Option<String
     ))
 }
 
+/// How long a stand-in waits before repeating its stage after `consecutive`
+/// blocked decisions in a row: the landing's repair backoff, 1 minute up to 30.
+pub fn blocked_backoff(consecutive: u32) -> std::time::Duration {
+    let seconds = crate::ops::pr_landing::repair_backoff(consecutive.saturating_add(1));
+    std::time::Duration::from_secs(u64::try_from(seconds).expect("backoff is positive"))
+}
+
 /// The instruction a headless stand-in receives at a stage. With a loop behind
 /// the stage it answers advance or iterate; blocked repeats with the blocker.
 pub fn stand_in_message(stage: &str, repeats: bool) -> String {
@@ -472,6 +479,12 @@ mod tests {
     use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::sqlite::TaskShipping;
     use crate::workflow::CapturedGraph;
+
+    #[test]
+    fn a_repeatedly_blocked_stand_in_waits_longer_up_to_half_an_hour() {
+        let minutes = |n| super::blocked_backoff(n).as_secs() / 60;
+        assert_eq!([1, 2, 3, 6, 20].map(minutes), [1, 2, 4, 30, 30]);
+    }
 
     #[test]
     fn a_stand_in_runs_each_stage_and_chooses_between_its_routes() {

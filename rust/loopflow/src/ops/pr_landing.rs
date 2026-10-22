@@ -109,7 +109,7 @@ pub(crate) type RepairCi = Arc<dyn Fn(&PrLanding, &CiIncident) -> OpsResult<()> 
 pub(crate) type RearmPr = Arc<dyn Fn(&PrLanding, &str) -> OpsResult<()> + Send + Sync>;
 
 /// Before attempt `n` (n ≥ 2) of the same incident starts: 1, 2, 4… minutes, at most 30.
-fn repair_backoff(attempt: u32) -> i64 {
+pub(crate) fn repair_backoff(attempt: u32) -> i64 {
     (60_i64 << attempt.saturating_sub(2).min(5)).min(30 * 60)
 }
 

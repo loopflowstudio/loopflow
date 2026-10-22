@@ -102,8 +102,8 @@ impl LandingObservation {
 
 /// How one check reads its PR.
 pub(crate) type ObservePr = Arc<dyn Fn(&PrLanding) -> OpsResult<LandingObservation> + Send + Sync>;
-/// How one check starts a ci-fix. A check without one still records the failure
-/// and leaves the repair to `lf ci watch`.
+/// How one check starts a ci-fix. A check without one (`lf pr reconcile`) still
+/// records the failure and leaves the repair to the landing's own process.
 pub(crate) type RepairCi = Arc<dyn Fn(&PrLanding, &CiIncident) -> OpsResult<()> + Send + Sync>;
 /// How one check asks GitHub to merge the requested head again.
 pub(crate) type RearmPr = Arc<dyn Fn(&PrLanding, &str) -> OpsResult<()> + Send + Sync>;
@@ -312,14 +312,10 @@ fn admit_ci_fix(
                 .await
                 .map_err(repair_error)?
                 .ok_or_else(|| repair_error("landing Task is missing"))?;
-            if store
-                .sqlite
-                .task_automation(task_id)
-                .map_err(repair_error)?
-                .enabled
-                == Some(false)
+            if store.sqlite.task_state(task_id).map_err(repair_error)?
+                == crate::durable::TaskState::Paused
             {
-                return Err(repair_error("Task automation is held"));
+                return Err(repair_error("Task is paused; CI repair is held"));
             }
             let local = store.local_machine().await.map_err(repair_error)?;
             let machine = store
@@ -1335,12 +1331,8 @@ async fn rearm_landing(
 ) -> OpsResult<bool> {
     let paused = match &landing.task_id {
         Some(task_id) => {
-            store
-                .sqlite
-                .task_automation(task_id)
-                .map_err(repair_error)?
-                .enabled
-                == Some(false)
+            store.sqlite.task_state(task_id).map_err(repair_error)?
+                == crate::durable::TaskState::Paused
         }
         None => false,
     };
@@ -1614,13 +1606,6 @@ pub(crate) fn reconcile_armed_pr(
         )
         .await
     })
-}
-
-/// One landing check that may start a ci-fix: the entry point `lf ci watch`
-/// shares with a release's own landing. The landing lock, generation claim and
-/// incident reservation keep a second caller from repeating the repair.
-pub(crate) async fn repair_landing(store: SharedStore, landing: PrLanding) -> OpsResult<PrLanding> {
-    reconcile_pr_landing(store, landing, LandingIo::github(Some(ci_fix(None)))).await
 }
 
 /// Whether a repair worker for this landing is running now.

@@ -21,8 +21,8 @@ successful completion of its Graph or Skill.
 For a missing receipt, inspect the executable and log path Doctor prints. Jobs
 installed before the stable entry gate may pin a superseded binary, which a
 later install removes, and fail before recording a receipt. After installing a release with this repair,
-run `lf cron sync` from the repository to reinstall your jobs;
-use `lf cron sync --repo` for repository Task checks. New scheduled invocations
+run `lf cron sync` from the repository to reinstall your jobs; it also removes
+the retired minute repository check. New scheduled invocations
 follow the selected installation across promotions. Existing Sessions
 retain their runtime ownership.
 

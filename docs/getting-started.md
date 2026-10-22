@@ -224,7 +224,6 @@ lf submit    # prepare the exact head; you click merge
 lf arm       # arm exact-head auto-merge and return
 lf land      # request auto-merge, record delivery, and return
 lf pr reconcile # check recorded landings once and settle merges
-lf ci watch     # watch PR checks; start a ci-fix when a landing fails
 ```
 
 Use the same delivery verbs for Task and non-Task branches. They act on the
@@ -239,7 +238,8 @@ lf ship --stop    # back to working; disarms auto-merge it armed
 Workflow stage, running its skill headless, and stays in the foreground until
 the Task completes. On a branch with no Task it first creates one for the branch
 and its checkout. A second `lf ship` while one runs exits 0; `lf task pause`
-holds it, and the minute `lf task reconcile` restarts one that died. Choosing a
+holds it, and the next read of the Task (`lf task status`, Desktop) restarts one
+that died. Choosing a
 route into `end` (`lf task run X deliver`) ships the Task the same way.
 
 ---
@@ -255,9 +255,8 @@ lf ps --json
 Author `.lf/wave/shipper/GOAL.md` with an objective and operating guidance.
 `lf cron add` schedules recurring commands on your Machine; `pm:` connects shared planning. Each
 `wave-operate` invocation keeps your started Tasks moving and leaves the plan alone.
-Tasks own implementation in stable worktrees; `lf land` hands off delivery and
-`lf pr reconcile` settles verified merges; `lf ci watch` repairs failed CI
-while it runs.
+Tasks own implementation in stable worktrees; `lf ship` lands them and repairs
+failed CI until merge; `lf pr reconcile` settles verified merges.
 
 Open the repository in Loopflow on macOS to read Waves, Tasks and conversations.
 `lf session list` finds conversations and Graph reviews; open one with

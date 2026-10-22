@@ -908,43 +908,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         | TaskCommand::Location { .. } => {
             unreachable!("location reads precede repository commands")
         }
-        TaskCommand::Automation { json } => {
-            let status = loopflow::ops::task_automation::status(repo)?;
-            if *json {
-                println!("{}", serde_json::to_string(&status)?);
-            } else {
-                println!(
-                    "{} · every {} seconds",
-                    status.coverage, status.cadence_seconds
-                );
-                for task in status.tasks {
-                    println!(
-                        "{}: {}",
-                        task.issue,
-                        if task.enabled == Some(false) {
-                            "CI repair held"
-                        } else {
-                            "CI repair enabled"
-                        }
-                    );
-                }
-            }
-            Ok(())
-        }
-        TaskCommand::Reconcile { json } => {
-            let result = loopflow::ops::pr_landing::reconcile_repository(repo)?;
-            if *json {
-                println!("{}", serde_json::to_string(&result)?);
-            }
-            if !result.errors.is_empty() {
-                anyhow::bail!("{}", result.errors.join("\n"));
-            }
-            Ok(())
-        }
-        TaskCommand::Automate { issue, state } => Ok(loopflow::ops::task_automation::select(
-            issue,
-            state == "on",
-        )?),
         TaskCommand::Repair { incident, launcher } => {
             Ok(loopflow::ops::pr_landing::run_repair(incident, launcher)?)
         }
@@ -2278,7 +2241,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         }) | Some(Commands::History {
             cmd: None | Some(loopflow::lf::commands::history::HistoryCommand::List { .. }),
             ..
-        })
+        }) | Some(Commands::Monitor { .. })
     ) {
         loopflow::ops::recovery::recover();
     }
@@ -2541,24 +2504,6 @@ fn execute_command(
         Some(Commands::Repo { cmd }) => match cmd {
             loopflow::lf::RepoCommand::Release { .. } => {
                 in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd))
-            }
-            // The watcher admits repairs, which needs a recorded Process.
-            loopflow::lf::RepoCommand::Ci {
-                cmd:
-                    Some(loopflow::lf::CiCommand::Watch {
-                        uninstall: false,
-                        status: false,
-                        ..
-                    }),
-                ..
-            } => {
-                // It runs from the main checkout so its long-lived Process never
-                // counts as live work in a Task's worktree.
-                let root = loopflow::git::worktrees::main_repo_root(
-                    &loopflow::lf::commands::util::find_repo_root()?,
-                )?;
-                let _cwd = CwdGuard::enter(&root)?;
-                with_runtime(&root, args, || loopflow::lf::commands::ops::run_repo(cmd))
             }
             loopflow::lf::RepoCommand::Tokens { .. } | loopflow::lf::RepoCommand::Ci { .. } => {
                 loopflow::lf::commands::ops::run_repo(cmd)

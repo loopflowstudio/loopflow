@@ -90,7 +90,7 @@ lf pr publish                          # ready for review
 lf arm                                 # request auto-merge and return
 lf land                                # hand off delivery and return
 lf pr reconcile                        # check recorded landings once
-lf ci watch                            # repair failed landings while it runs
+lf land --wait-and-fix                 # land, repairing failed CI until merge
 ```
 
 `publish` creates or refreshes the current PR. After settlement, continued work
@@ -112,9 +112,8 @@ merge current main, verify once,
 and push the exact head. Branch commits and merge resolutions retain their identities.
 GitHub applies the repository’s allowed merge method or merge queue policy. `arm` and `land` request
 GitHub auto-merge, record the landing, and return. Success means handoff;
-`lf task reconcile` checks recorded repository landings once;
-`lf pr reconcile` uses its delivery-only path. `lf cron sync --repo` installs the
-finite minute check on this Machine. Neither repairs CI; `lf ci watch` does. `submit` performs the
+`lf pr reconcile` checks recorded repository landings once and repairs nothing;
+the waiting landing (`--wait-and-fix`, `lf ship`) does. `submit` performs the
 same preparation but leaves the exact-head merge to a person. These delivery
 commands inspect Task delivery state when present; they do not require a running
 Task Graph or certify that a particular Graph ran.
@@ -213,52 +212,23 @@ read required checks on H1 once
    |      |      |          |
  pending pass  merged      fail
    |      |      |          |
- return return settle   record the incident; waited landing, the CI
-                        watcher or a release reserves one repair under G
+ return return settle   record the incident; waited landing or a
+                        release reserves one repair under G
 ```
 
-The next repository tick or `lf pr reconcile` repeats this from fresh evidence.
-Those checks record a failure and return. `lf land --wait-and-fix`, `lf ci watch`
-and a release's own landing can start a repair through this same check.
+`lf pr reconcile` repeats this from fresh evidence, records a failure and
+returns. Only a waiting landing (`lf land --wait-and-fix`, the ship process of a
+shipping Task) and a release's own landing start a repair through this check.
+The landing lock, landing generation and incident reservation are the claim, so
+none of them repeats a fix. A returned bare landing is repaired by nothing.
 
-### CI watcher
+### Recovery
 
-```text
-lf ci watch ──60 s, jitter──> REST, If-None-Match (304 costs no quota)
-      |                         pulls?state=open
-      |                         commits/{head}/check-runs, commits/{head}/status
-      |                         rules/branches/{base} (required checks, hourly)
-      v
- required check failed on a PR with a recorded landing?
-      |  yes                                  | no landing, or no Task
-      v                                       v
- the landing check above                   report only
- (lock, generation, confirm, reserve)
-```
-
-`lf ci watch` is one repository-wide program with one job. It reads the gate
-with the same required-check projection as the landing check, then hands a
-failing landing to that check, which confirms the failure against GitHub and
-reserves the incident's current repair attempt. The landing
-lock, landing generation and incident reservation are the claim, so waited
-landing, a watcher and a release cannot repeat a fix. Scheduled checks only
-observe. The watcher fills the
-incident's `provider_completed_at` from the check's `completed_at`, which makes
-detection latency measurable in `lf ci`.
-
-It backs off to five minutes after a degraded pass and waits for the reset when
-fewer than 500 core requests remain. Every recorded landing is also checked
-every five minutes, so a conflicting or stale head can be repaired
-without any check failing.
-
-The command runs three ways: in a terminal, as a launchd service
-(`lf ci watch --install`), and from Loopflow Desktop, which starts it for each
-open repository and stops it on quit. `<git-dir>/lf-ci-watch.lock` admits one
-live watcher per repository; a second copy stands by and takes over when the
-first exits. `<git-dir>/loopflow/ci-watch.json` carries its last poll, the PRs
-it saw and the repairs it started, read by `lf ci watch --status`. Correctness
-never depends on it: waited landing repairs its own PR. A returned bare landing
-waits for another waited landing or a watcher to repair failures.
+There is no schedule. Any lf read of this Machine's Tasks or processes
+(`lf task status`, `lf task list`, `lf ps`, `lf wave status`, Desktop's planning
+reads) first settles AgentProcesses whose lf died and starts the ship process of
+each shipping Task checked out here again when it has exited. A Machine nothing
+reads recovers on its next read.
 
 A check never transfers green checks from one head to another. A failure is
 confirmed by a second observation before repair. One incident (head, failed check set and provider check URLs) owns one repair

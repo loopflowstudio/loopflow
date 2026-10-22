@@ -210,28 +210,6 @@ impl super::SqliteStore {
         )?)
     }
 
-    /// Fill the provider's completion time on this head's incidents that lack one.
-    pub(crate) fn record_ci_provider_completion(
-        &self,
-        repo: &str,
-        pr_number: u32,
-        failed_head_sha: &str,
-        completed_at: OffsetDateTime,
-    ) -> StoreResult<usize> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute(
-            "UPDATE ci_incidents SET provider_completed_at=?4
-             WHERE repo=?1 AND pr_number=?2 AND failed_head_sha=?3
-               AND provider_completed_at IS NULL",
-            params![
-                repo,
-                i64::from(pr_number),
-                failed_head_sha,
-                timestamp(completed_at)
-            ],
-        )?)
-    }
-
     /// Processes holding an unfinished repair for this landing, newest first.
     pub(crate) fn landing_repair_processes(
         &self,

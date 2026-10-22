@@ -141,14 +141,8 @@ Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
 their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
 Source and license notices ship offline with the catalogue.
 
-Choose **Settings → Delivery**, select a repository, and enable minute
-checks, enroll or hold Tasks, and inspect the last check and blockers. Checks
-continue with the app closed on the selected Machine. Disabling stops scheduled
-admission; already-running work and requested GitHub merges continue.
-
-While a repository is open, the app runs `lf ci watch` for it and stops it on
-quit. The watcher starts a ci-fix when a recorded landing fails its required
-checks; `lf ci watch --status` shows its last poll and what it started.
+**Ship it** hands a Task off; it leaves Working tasks and its ship process lands it.
+Open a Dashboard with `state:shipping` to watch it.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool

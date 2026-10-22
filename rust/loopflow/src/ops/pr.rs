@@ -1559,12 +1559,6 @@ impl RequiredProducers {
         Self { jobs, produced }
     }
 
-    /// Whether every required check has a producing job here, so a failure
-    /// can be read before the check itself reports.
-    pub(crate) fn produces_all(&self, required: &BTreeSet<String>) -> bool {
-        required.is_subset(&self.produced)
-    }
-
     /// Whether this check run, by its workflow and job, is one a required check
     /// is made of. Matrix runs (`rust-test (library, 3, 5)`) match their job.
     pub(crate) fn fails_required(&self, workflow: Option<&str>, check: &str) -> bool {
@@ -2741,9 +2735,6 @@ jobs:
         assert!(!producers.fails_required(Some("CI"), "docs"));
         assert!(!producers.fails_required(Some("Other"), "rust-build"));
         assert!(!producers.fails_required(None, "rust-build"));
-        assert!(producers.produces_all(&["tests-result".to_string()].into()));
-        let elsewhere = ["tests-result".to_string(), "external-ci".to_string()].into();
-        assert!(!producers.produces_all(&elsewhere));
     }
 
     #[test]

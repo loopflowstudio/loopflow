@@ -1,10 +1,8 @@
-//! Task CI repair holds and incident-owned repair admission.
+//! Incident-owned CI repair admission.
 
 use rusqlite::{params, OptionalExtension};
 
-use crate::durable::TaskId;
 use crate::id::LfProcessId;
-use crate::ops::task_automation::TaskAutomation;
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
@@ -58,31 +56,6 @@ impl SqliteStore {
                 },
             )
             .optional()?)
-    }
-
-    pub(crate) fn task_automation(&self, task: &TaskId) -> StoreResult<TaskAutomation> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.unchecked_transaction()?;
-        let issue = super::children::short_task_id(&conn, task)?.ok_or(StoreError::NotFound)?;
-        Ok(conn.query_row(
-            "SELECT automation_enabled AND paused=0 FROM tasks WHERE id=?1",
-            [task.as_str()],
-            |row| {
-                Ok(TaskAutomation {
-                    task_id: task.to_string(),
-                    issue,
-                    enabled: row.get(0)?,
-                })
-            },
-        )?)
-    }
-
-    pub(crate) fn set_task_automation(&self, task: &TaskId, enabled: bool) -> StoreResult<()> {
-        self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE tasks SET automation_enabled=?2 WHERE id=?1",
-            params![task.as_str(), enabled],
-        )?;
-        Ok(())
     }
 
     pub(crate) fn repair_reservation(&self, identity: &str) -> StoreResult<RepairReservation> {

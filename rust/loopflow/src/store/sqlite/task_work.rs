@@ -1105,11 +1105,6 @@ mod tests {
             store.task_state(&task).unwrap(),
             crate::durable::TaskState::Paused
         );
-        assert!(!store
-            .task_automation(&task)
-            .unwrap()
-            .enabled
-            .unwrap_or(true));
         assert!(store
             .choose_workflow_edge(&task, &before, 0, &LfProcessId::new(), None)
             .is_err());

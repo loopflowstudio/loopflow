@@ -898,19 +898,6 @@ Show how failed CI is detected, repaired, and landed across this Machine
 | `--json` | Emit the complete incident report as JSON Default: false. |
 | `--help / -h` | Print help |
 
-## lf repo ci watch
-
-Watch this repository's PR checks and start a ci-fix when a recorded landing fails
-
-| Argument | What it does |
-|---|---|
-| `--once` | Check every open PR once and exit Default: false. |
-| `--install` | Keep the watcher running in the background as a launchd service Default: false. |
-| `--uninstall` | Remove the background service Default: false. |
-| `--status` | Show whether a watcher is live, its last poll, and what it started Default: false. |
-| `--json` | Emit the status as JSON Default: false. |
-| `--help / -h` | Print help |
-
 ## lf repo reteam
 
 Reconcile linked Waves to the repository's Linear Team
@@ -1620,8 +1607,6 @@ Reinstall this Machine's jobs with the current lf
 
 | Argument | What it does |
 |---|---|
-| `--repo` | Install the finite repository Task check on this Machine Default: false. |
-| `--disable` | Remove the repository schedule; running work retains its authority Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron history
@@ -1786,34 +1771,6 @@ Move the captured Workflow to start without executing or reloading it
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--help / -h` | Print help |
-
-## lf task automation
-
-Inspect delivery scheduling and Task CI repair settings
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task reconcile
-
-Check authorized deliveries once, then exit
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task automate
-
-Enable or hold CI repair for a Task without interrupting running work
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `<state>` | state |
 | `--help / -h` | Print help |
 
 ## lf task checkout

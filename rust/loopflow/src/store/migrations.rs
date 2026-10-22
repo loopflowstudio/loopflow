@@ -2179,14 +2179,15 @@ mod tests {
                 {"metric_id":"recovery","target":{"kind":"at_least","value":1.0}}
             ])
         );
+        // `ship_it` drops Workflows short of `end`; the next run re-places them.
         assert_eq!(
             conn.query_row(
-                "SELECT node FROM task_workflows WHERE task_id='retained-task'",
+                "SELECT count(*) FROM task_workflows WHERE task_id='retained-task'",
                 [],
-                |r| r.get::<_, String>(0)
+                |r| r.get::<_, i64>(0)
             )
             .unwrap(),
-            "review"
+            0
         );
         assert_eq!(
             conn.query_row(
@@ -3678,9 +3679,10 @@ mod tests {
                 },
             )
             .unwrap();
+        // That release's Workflow shape; `ship_it` later empties it to a graph.
         assert_eq!(
-            serde_json::from_str::<crate::workflow::CapturedGraph>(&placed.0).unwrap(),
-            crate::workflow::CapturedGraph::unplanned()
+            serde_json::from_str::<serde_json::Value>(&placed.0).unwrap(),
+            serde_json::json!({"name":"unplanned","nodes":[],"edges":[{"from":"start","to":"end","flow":null}]})
         );
         assert_eq!((placed.1, placed.2, placed.3, placed.4), (25, None, 25, 1));
         assert_eq!(

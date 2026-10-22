@@ -173,7 +173,6 @@ lf --task INF-123 skill task-session               # ongoing conversation that k
 lf arm                                             # request exact-head auto-merge and return
 lf land                                            # request merge; Task completion stays separate
 lf pr reconcile                                      # check recorded deliveries once and settle merges
-lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
 
 IDs accept any casing: `lf task status loo-506`, `TASK_…`, an uppercased Linear

@@ -196,13 +196,6 @@ impl Cli {
                     cmd: ReleaseCommand::Run { .. }
                         | ReleaseCommand::Bump { .. }
                         | ReleaseCommand::Notes { .. }
-                } | RepoCommand::Ci {
-                    cmd: Some(CiCommand::Watch {
-                        status: false,
-                        uninstall: false,
-                        ..
-                    }),
-                    ..
                 }
             ),
             Some(_) => false,
@@ -1279,22 +1272,6 @@ pub enum TaskCommand {
         #[command(subcommand)]
         cmd: TaskWorkflowCommand,
     },
-    /// Inspect delivery scheduling and Task CI repair settings
-    Automation {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Check authorized deliveries once, then exit
-    Reconcile {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Enable or hold CI repair for a Task without interrupting running work
-    Automate {
-        issue: String,
-        #[arg(value_parser = ["on", "off"])]
-        state: String,
-    },
     /// Run a reserved CI repair in its own process
     #[command(name = "__repair", hide = true)]
     Repair { incident: String, launcher: String },
@@ -1537,19 +1514,15 @@ pub enum TaskCommand {
 impl TaskCommand {
     pub fn selector(&self) -> Option<&str> {
         match self {
-            Self::List { .. }
-            | Self::Create { .. }
-            | Self::Sweep { .. }
-            | Self::Reconcile { .. }
-            | Self::Repair { .. }
-            | Self::Automation { .. } => None,
+            Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } | Self::Repair { .. } => {
+                None
+            }
             Self::Workflow {
                 cmd:
                     TaskWorkflowCommand::Show { issue, .. }
                     | TaskWorkflowCommand::Restart { issue }
                     | TaskWorkflowCommand::Move { issue, .. },
             } => Some(issue),
-            Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
@@ -1579,19 +1552,15 @@ impl TaskCommand {
 
     pub fn selector_mut(&mut self) -> Option<&mut String> {
         match self {
-            Self::List { .. }
-            | Self::Create { .. }
-            | Self::Sweep { .. }
-            | Self::Reconcile { .. }
-            | Self::Repair { .. }
-            | Self::Automation { .. } => None,
+            Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } | Self::Repair { .. } => {
+                None
+            }
             Self::Workflow {
                 cmd:
                     TaskWorkflowCommand::Show { issue, .. }
                     | TaskWorkflowCommand::Restart { issue }
                     | TaskWorkflowCommand::Move { issue, .. },
             } => Some(issue),
-            Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
@@ -1855,14 +1824,7 @@ pub enum CronCommand {
         wave: Option<String>,
     },
     /// Reinstall this Machine's jobs with the current lf
-    Sync {
-        /// Install the finite repository Task check on this Machine
-        #[arg(long)]
-        repo: bool,
-        /// Remove the repository schedule; running work retains its authority
-        #[arg(long, requires = "repo")]
-        disable: bool,
-    },
+    Sync,
     /// Execute one installed cron job and persist its terminal receipt
     #[command(hide = true)]
     Run {
@@ -1914,31 +1876,6 @@ pub enum CronCommand {
         /// Graph or skill name to remove
         #[arg(long = "graph")]
         graph: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum CiCommand {
-    /// Watch this repository's PR checks and start a ci-fix when a recorded landing fails
-    Watch {
-        /// Check every open PR once and exit
-        #[arg(long)]
-        once: bool,
-        /// Keep the watcher running in the background as a launchd service
-        #[arg(long, conflicts_with_all = ["once", "uninstall", "status"])]
-        install: bool,
-        /// Remove the background service
-        #[arg(long, conflicts_with_all = ["once", "status"])]
-        uninstall: bool,
-        /// Show whether a watcher is live, its last poll, and what it started
-        #[arg(long, conflicts_with = "once")]
-        status: bool,
-        /// Emit the status as JSON
-        #[arg(long, requires = "status")]
-        json: bool,
-        /// Stop when this process exits
-        #[arg(long = "parent-pid", hide = true)]
-        parent_pid: Option<u32>,
     },
 }
 
@@ -2033,8 +1970,6 @@ pub enum RepoCommand {
     },
     /// Show how failed CI is detected, repaired, and landed across this Machine
     Ci {
-        #[command(subcommand)]
-        cmd: Option<CiCommand>,
         /// Relative window (7d, 24h, 30m) or RFC3339 start
         #[arg(long, default_value = "7d")]
         since: String,
@@ -2675,7 +2610,6 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Repo { cmd: RepoCommand::Ci {
-                cmd: None,
                 since,
                 wave: Some(wave),
                 repo: Some(repo),

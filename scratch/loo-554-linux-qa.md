@@ -140,7 +140,8 @@ from the first release cut after this lands).
   it), spawn the device login, read the `…/console/device?user_code=…` URL
   from its stdout (ANSI stripped), open it in the verified Chrome profile
   (`browser_profiles(store, Provider::OpenCodeZen, None, chrome_profile)`),
-  wait for exit 0 within the device timeout, export from staging. The fresh
+  wait for exit 0 through `wait_for_browser_confirmation` (the Claude/Codex/Linear
+  timeout and heartbeat), export from staging. The fresh
   entry must carry the same `metadata.accountID` as the laptop's active login
   ("fresh OpenCode login belongs to a different account; discarded"), and Zen
   must accept its access token. Then the staging home is dropped.
@@ -401,3 +402,4 @@ Check (2026-10-21, kickoff round two): laptop probes of OpenCode 2.0.32 export/i
 Check (2026-10-22, implement round two): `cargo test -p loopflow --lib -- machine_credentials` 13 pass; `cargo clippy --all-targets -- -D warnings` clean; machine run → ledger.
 Check (2026-10-22, kickoff round three): `cargo test -p loopflow --lib -- machine_credentials platform::clipboard machine::tests::release_numbers_order_by_component` 16 pass on HEAD 79c04625; `cargo fmt --check` clean; dry-run merge with origin/main (173bb90880 and seven later commits) → 0 conflicts; full matrix → gate/CI.
 Check (2026-10-21, implement round three): no code change since 79c04625 (prose commits only), so the kickoff result stands; `git merge-tree HEAD origin/main` (ed568b1ff5) → one conflict, AGENTS.md reference sentence, resolution above; build and suites → sync/gate.
+Check (2026-10-22, compress round three): OpenCode device login reuses `wait_for_browser_confirmation`; `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- machine_credentials platform::clipboard account::tests::browser_confirmation …` 20 pass; full matrix → gate/CI.

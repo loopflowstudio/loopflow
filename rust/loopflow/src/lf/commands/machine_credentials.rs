@@ -154,7 +154,8 @@ pub(super) async fn connect(
                 .ok_or_else(|| anyhow!("OpenCode's active login has no identity"))?
                 .to_string();
             let oauth = active["value"]["type"] == "oauth";
-            match (email, active["value"]["metadata"]["email"].as_str()) {
+            let account_email = active["value"]["metadata"]["email"].as_str();
+            match (email, account_email) {
                 (Some(_), None) => bail!(
                     "OpenCode's active login is an API key, which names no email; connect without one"
                 ),
@@ -174,9 +175,7 @@ pub(super) async fn connect(
                 // A copied login would share the laptop's refresh grant; mint a fresh one.
                 eprintln!(
                     "Connecting OpenCode {} on {}",
-                    active["value"]["metadata"]["email"]
-                        .as_str()
-                        .unwrap_or(&login),
+                    account_email.unwrap_or(&login),
                     machine.label.as_deref().unwrap_or(&machine.route)
                 );
                 let staging = tempfile::Builder::new()

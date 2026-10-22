@@ -19,6 +19,7 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context, Result};
 use secrecy::{ExposeSecret, SecretString};
 use time::OffsetDateTime;
+use tokio::io::AsyncBufReadExt;
 
 use crate::lf::AccountCommand;
 use crate::profile::{AccessProfile, EmailAddress, LocalChromeProfile, ProfileId};
@@ -31,7 +32,7 @@ use crate::provider_auth::codex::{daemon_has_running_turn, daemon_login, restart
 use crate::provider_auth::{
     capture_claude_profile_credentials, disconnect_provider_account_auth,
     import_ambient_claude_profile_credentials, prepare_provider_account_access_token,
-    start_provider_account_auth, AuthBroker, AuthCompletion, AuthError, AuthFlowResponse, Provider,
+    start_provider_account_auth, AuthBroker, AuthCompletion, AuthFlowResponse, Provider,
     ProviderAuthService,
 };
 use crate::store::{
@@ -749,7 +750,6 @@ pub(super) async fn fresh_opencode_login(
     chrome_profile: Option<&str>,
     home: &Path,
 ) -> Result<()> {
-    use tokio::io::AsyncBufReadExt;
     let (profiles, _) =
         browser_profiles(store, Provider::OpenCodeZen, None, chrome_profile).await?;
     let profile = profiles
@@ -784,21 +784,25 @@ pub(super) async fn fresh_opencode_login(
         }
         Ok(())
     };
+    let completion =
+        wait_for_browser_confirmation(login, None, Provider::OpenCodeZen, "remote machine");
+    tokio::pin!(completion);
     tokio::select! {
-        result = login => result,
-        _ = tokio::time::sleep(Duration::from_secs(AUTH_CODE_FLOW_TIMEOUT_SECS)) => Err(anyhow!("timed out waiting for OpenCode browser approval")),
+        biased;
+        result = &mut completion => result,
         _ = tokio::signal::ctrl_c() => Err(anyhow!("authorization cancelled")),
     }
 }
 
-async fn wait_for_browser_confirmation<F>(
+async fn wait_for_browser_confirmation<F, E>(
     confirmation: F,
     expires_in: Option<u64>,
     provider: Provider,
     login: &str,
 ) -> Result<()>
 where
-    F: Future<Output = std::result::Result<(), AuthError>>,
+    F: Future<Output = std::result::Result<(), E>>,
+    E: Into<anyhow::Error>,
 {
     let timeout = Duration::from_secs(expires_in.unwrap_or(AUTH_CODE_FLOW_TIMEOUT_SECS));
     let started_at = tokio::time::Instant::now();
@@ -814,7 +818,7 @@ where
     loop {
         tokio::select! {
             biased;
-            result = &mut confirmation => return result.map_err(anyhow::Error::from),
+            result = &mut confirmation => return result.map_err(Into::into),
             _ = &mut deadline => {
                 return Err(anyhow!(
                     "timed out waiting for {} account '{}' browser confirmation",

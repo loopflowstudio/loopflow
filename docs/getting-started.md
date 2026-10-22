@@ -283,8 +283,9 @@ read the executing Machine. Prefix the command with `lf --machine <machine-id>` 
 another Machine. Loopflow does not silently aggregate or replicate execution records.
 
 `lf machine connect <machine> <provider> [email]` installs a separate login
-(github, claude, codex, opencode or linear) on an added machine. Account-selected `lf --machine` launches connect a missing login in the
-foreground and then use its resident credential. See
+(github, claude, codex, opencode or linear) on an added machine. Account-selected
+`lf --machine` launches connect a missing login in the foreground and then use its
+resident credential. See
 [Subscription Management](subscriptions.md#use-subscriptions-over-ssh).
 
 Auth connects your providers locally:

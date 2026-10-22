@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.desktop_inputs import affects_desktop
+from scripts.macos_inputs import affects_macos
 
 
 @pytest.mark.parametrize(
@@ -12,8 +12,8 @@ from scripts.desktop_inputs import affects_desktop
         [".lf/wave/infrastructure/MEMORY.md"],
     ],
 )
-def test_documentation_website_and_python_changes_skip_desktop(paths: list[str]) -> None:
-    assert not affects_desktop(paths)
+def test_documentation_website_and_python_changes_skip_macos(paths: list[str]) -> None:
+    assert not affects_macos(paths)
 
 
 @pytest.mark.parametrize(
@@ -30,9 +30,9 @@ def test_documentation_website_and_python_changes_skip_desktop(paths: list[str])
         "Cargo.lock",
     ],
 )
-def test_anything_desktop_can_reach_runs_desktop(path: str) -> None:
-    assert affects_desktop(["docs/config.md", path])
+def test_anything_the_macos_jobs_can_reach_runs_them(path: str) -> None:
+    assert affects_macos(["docs/config.md", path])
 
 
-def test_an_unknown_diff_runs_desktop() -> None:
-    assert affects_desktop([])
+def test_an_unknown_diff_runs_macos() -> None:
+    assert affects_macos([])

@@ -21,7 +21,13 @@ a failing required check by name. Delivery cleanup preserves existing scratch
 content, so repositories retaining it must define their own candidate policy.
 
 A new PR update cancels the previous CI run for that PR. Main and merge-group
-runs remain independent.
+runs remain independent, except that a merge-queue entry's earlier runs are
+cancelled when GitHub rebuilds it (`cancel-superseded`) or when its PR leaves
+the queue (`merge-queue-cleanup.yml`). PRs and queue entries that touch only
+docs, the website, scratch, Wave memory or Python skip the macOS jobs
+(`scripts/macos_inputs.py`); anything the Swift tests can reach, including
+Rust, fixtures and scripts, runs them. A push to main whose exact tree the
+queue already proved builds the macOS tests only to warm their caches.
 
 After changing `Cargo.lock`, including a release version bump, run
 `uv run python scripts/third_party.py refresh` and
@@ -525,6 +531,11 @@ shell output for prompt headers, command boundaries and exit status.
 
 `scripts/prove_wave_surface_states.sh` is an optional demo capture: it launches
 windows and therefore needs a display session. It is not in gate or CI.
+
+`scripts/test_desktop.sh` runs `swift test` under `scripts/swift_test_limit.py`,
+which reads the event stream and ends the whole run, naming the test, when one
+test function outlives 300 s. Swift Testing's `.timeLimit` only records an
+issue; a test blocked on a child process still holds the run.
 
 Failed Swift CI runs retain a `swift-tests-<run>-<attempt>` artifact for seven
 days with the toolchain, output log, and Swift Testing event stream. When console

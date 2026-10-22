@@ -1,10 +1,11 @@
-"""Decide whether a change can affect the Desktop CI jobs.
+"""Decide whether a change can reach the macOS CI jobs.
 
 swift-test builds and drives the source `lf`, decodes CLI JSON fixtures and
-runs scripts, so Rust, fixtures, scripts and CI changes all reach Desktop.
-Only the paths below cannot; any other path, or an unknown diff, runs Desktop.
+runs scripts, and macos-process-test runs Rust, so Rust, fixtures, scripts
+and CI changes all reach them. Only the paths below cannot; any other path,
+or an unknown diff, runs the macOS jobs.
 
-    desktop_inputs.py BASE_SHA    # writes desktop=true|false to $GITHUB_OUTPUT
+    macos_inputs.py BASE_SHA    # writes macos=true|false to $GITHUB_OUTPUT
 """
 
 import os
@@ -25,7 +26,7 @@ def _affects(path: str) -> bool:
     return not path.startswith(_UNAFFECTED)
 
 
-def affects_desktop(paths: list[str]) -> bool:
+def affects_macos(paths: list[str]) -> bool:
     return not paths or any(_affects(path) for path in paths)
 
 
@@ -36,7 +37,7 @@ def _changed(base: str) -> list[str] | None:
             ["git", "diff", "--name-only", base, "HEAD"], capture_output=True, text=True, check=True
         )
     except (OSError, subprocess.CalledProcessError) as error:
-        print(f"Changed paths unavailable ({error}); running Desktop.", file=sys.stderr)
+        print(f"Changed paths unavailable ({error}); running the macOS jobs.", file=sys.stderr)
         return None
     return result.stdout.splitlines()
 
@@ -45,15 +46,15 @@ def main() -> None:
     # Empty on events without a base, such as a manual run.
     base = sys.argv[1]
     paths = _changed(base) if base else None
-    desktop = paths is None or affects_desktop(paths)
+    macos = paths is None or affects_macos(paths)
     summary = (
-        "Desktop inputs changed; running the Desktop jobs."
-        if desktop
-        else f"Only {len(paths)} non-Desktop paths changed; skipping the Desktop jobs."
+        "macOS inputs changed; running the macOS jobs."
+        if macos
+        else f"Only {len(paths)} non-macOS paths changed; skipping the macOS jobs."
     )
     print(summary)
     with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
-        output.write(f"desktop={'true' if desktop else 'false'}\n")
+        output.write(f"macos={'true' if macos else 'false'}\n")
     with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as output:
         output.write(summary + "\n")
 

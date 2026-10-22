@@ -28,3 +28,23 @@
 - **Product cost, not fixed here.** A real `lf task create` pays the same
   per-save Git exchange (~1 s locally against a local bare origin; more over
   the network). Candidate Task for Reliability.
+- **Rebase follows #1645 (2026-10-21, gate).** Main deleted the three world
+  suites, `BuiltWorld` and the `World` cache while this branch was open, with
+  LOO-564 to bring them back. The rebase takes main's deletion rather than
+  restoring the suites here: Jack chose that split in #1645, and LOO-564 can
+  restore them on top of this branch's fast `lf-world` builds. The Rust
+  deferral and its recipe test stay.
+- **Allow-list vs deny-list, held open.** Jack's 18:55 PT comment asks that
+  Rust-only PRs skip the macOS jobs too. The brief says a filter that skips a
+  check that could have failed is worse than none, and `swift-test` decodes
+  CLI JSON and drives the source `lf`, so a Rust change can break it. Kept the
+  deny-list (docs, website, scratch, Wave memory, Python). Skipping Rust-only
+  PRs would need a narrower rule, such as "Rust paths that cannot change CLI
+  JSON or process launch", decided with the DTO fixtures in view.
+- **Push-to-main cancellation not added.** Jack noted an older main push
+  superseded by a newer one. Main pushes now only warm caches after a queue
+  proof, so the cost is one build; cancelling the older run would also drop
+  the proof for a directly pushed commit. Left as is.
+- **Queue cleanup proves itself only in CI.** `cancel-superseded` and
+  `merge-queue-cleanup.yml` use `actions: write` on the built-in token; the
+  first rebuilt queue entry after landing shows whether cancellation lands.

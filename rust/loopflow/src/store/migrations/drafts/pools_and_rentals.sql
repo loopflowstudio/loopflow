@@ -40,6 +40,21 @@ CREATE TABLE rentals (
   state TEXT NOT NULL CHECK(state IN ('requested','unconfirmed','booting','running','ending','ended','lost')),
   created_at INTEGER NOT NULL,
   ended_at INTEGER,
-  cost_usd TEXT
+  cost_usd TEXT,
+  -- When the worker's records were last copied here; give-back copies before it deletes.
+  copied_at INTEGER
 );
 CREATE INDEX idx_rentals_ondemand_live ON rentals(ondemand) WHERE state NOT IN ('ended','lost');
+
+-- Session, Process and Graph rows copied from another Machine, as it wrote
+-- them. They live apart from this Machine's own rows so no reconciler,
+-- attachment or Task judgment here ever acts on a copy; after the origin is
+-- deleted they are the final record. observed_at is when they were copied.
+CREATE TABLE machine_records (
+  origin_machine_id TEXT NOT NULL REFERENCES machines(id),
+  kind TEXT NOT NULL CHECK(kind IN ('process','session','session_event','graph_process','graph_process_step')),
+  key TEXT NOT NULL,
+  row TEXT NOT NULL CHECK(json_valid(row)),
+  observed_at INTEGER NOT NULL,
+  PRIMARY KEY(origin_machine_id, kind, key)
+);

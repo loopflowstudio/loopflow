@@ -92,7 +92,7 @@ impl RunPod {
         })))
     }
 
-    fn with_send(send: Send) -> Self {
+    pub(crate) fn with_send(send: Send) -> Self {
         Self { send }
     }
 

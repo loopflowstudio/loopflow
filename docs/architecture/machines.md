@@ -243,6 +243,16 @@ The laptop gives back by drain (Task rentals), soft deadline (15 minutes
 before the hard one) or `lf machine end`; any of them refuses while the pod
 holds uncommitted or unpushed work. Owned machines are never deleted.
 
+Before it deletes, the laptop pulls `lf history export --since <rental start>`:
+the worker's Process, Session, session-event and Graph rows as JSON lines, origin
+first, plus capture files. They land in `machine_records` keyed by origin and
+row, and captures under `~/.lf/machines/<origin>/runs`, never in this Machine's
+own tables, so no reconciler, attachment or Task judgment acts on a copy. An
+export from any Machine but the one expected is refused; a failed copy deletes
+nothing. `lf session list` and `lf task status` read copies "from <machine>"
+after the pod is gone. The end of a forwarded `lf task run` runs the give-back
+pass for its rented Machine.
+
 ## Process topology
 
 ```text

@@ -11,8 +11,9 @@ use anyhow::{anyhow, Context};
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use crate::durable::Machine;
+use crate::durable::{Machine, MachineId};
 use crate::lf::{OndemandCommand, PoolCommand};
+use crate::machine_records::CopyCounts;
 use crate::rental::runpod::{self, CreatePod, RunPod};
 use crate::rental::{
     self, GiveBack, Holdings, OnDemand, Pool, PoolMachine, Provider, Rental, RentalState,
@@ -132,6 +133,8 @@ struct RentalListing {
     rental: Rental,
     machine: Option<String>,
     tasks: Vec<crate::durable::TaskId>,
+    /// What has been copied from it, once anything has.
+    copied: Option<CopyCounts>,
 }
 
 #[derive(Debug, Serialize)]
@@ -302,17 +305,22 @@ fn require_ondemand(sqlite: &SqliteStore, name: &str) -> anyhow::Result<OnDemand
 }
 
 fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing> {
-    let (machine, tasks) = match &rental.machine_id {
+    let (machine, tasks, copied) = match &rental.machine_id {
         Some(id) => (
             sqlite.machine_by_id(id)?.and_then(|machine| machine.label),
             sqlite.tasks_held_by(id)?,
+            rental
+                .copied_at
+                .map(|_| sqlite.copy_counts(id))
+                .transpose()?,
         ),
-        None => (None, Vec::new()),
+        None => (None, Vec::new(), None),
     };
     Ok(RentalListing {
         rental,
         machine,
         tasks,
+        copied,
     })
 }
 
@@ -351,8 +359,11 @@ fn print_ondemand(listing: &OndemandListing) {
             .collect::<Vec<_>>()
             .join(" ");
         let how = if rental.by_hand { " · by hand" } else { "" };
+        let copied = entry
+            .copied
+            .map_or_else(String::new, |counts| format!(" · {counts} copied"));
         println!(
-            "  {name} · {when} · {} · {}/h · {cost}{how}{}",
+            "  {name} · {when} · {} · {}/h · {cost}{how}{}{copied}",
             rental.hardware,
             rental.usd_per_hour,
             if tasks.is_empty() {
@@ -849,26 +860,134 @@ fn give_back(
             }
         }
         GiveBack::End => {
-            sqlite.set_rental_state(&rental.id, RentalState::Ending)?;
-            let pod_id = rental
-                .provider_id
-                .as_deref()
-                .ok_or_else(|| anyhow!("rental {} has no confirmed pod", rental.id))?;
-            if let Some(pod) = api.delete(pod_id, &rental.provider_name)? {
-                sqlite.set_rental_cost(&rental.id, api.billed(&pod, now())?)?;
-            }
-            let ended = sqlite.set_rental_state(&rental.id, RentalState::Ended)?;
+            let copied = match end_rental(sqlite, api, rental, || copy_up(sqlite, rental, machine))?
+            {
+                Ended::Copied(counts) => Some(counts),
+                Ended::Uncopied(error) if !force => {
+                    let message = format!(
+                        "{label} stays: its Session and Process records could not be copied ({error:#}); \
+                         `lf machine end {label} --force` deletes it without them"
+                    );
+                    return if explicit {
+                        Err(anyhow!(message))
+                    } else {
+                        eprintln!("{message}");
+                        Ok(())
+                    };
+                }
+                Ended::Uncopied(error) => {
+                    eprintln!("Discarded on {label}: Session and Process records ({error:#})");
+                    delete_pod(sqlite, api, rental)?;
+                    None
+                }
+            };
             if force && !holdings.unpushed.is_empty() {
                 eprintln!("Discarded on {label}: {}", holdings.unpushed.join(", "));
             }
+            let ended = sqlite.rental(&rental.id)?;
             println!(
-                "Gave back {label}{}; Session and Process records on it were not copied",
+                "Gave back {label}{}{}",
                 ended
                     .cost_usd
-                    .map_or_else(String::new, |cost| format!(" after {cost}"))
+                    .map_or_else(String::new, |cost| format!(" after {cost}")),
+                copied.map_or_else(String::new, |counts| format!("; {counts} copied here"))
             );
             Ok(())
         }
+    }
+}
+
+#[derive(Debug)]
+enum Ended {
+    Copied(CopyCounts),
+    /// The copy failed, so nothing was deleted.
+    Uncopied(anyhow::Error),
+}
+
+/// Copy the machine's records here, then delete its pod. A failed copy
+/// deletes nothing: the pod may hold the only record of its work.
+fn end_rental(
+    sqlite: &SqliteStore,
+    api: &RunPod,
+    rental: &Rental,
+    copy: impl FnOnce() -> anyhow::Result<CopyCounts>,
+) -> anyhow::Result<Ended> {
+    match copy() {
+        Ok(counts) => {
+            delete_pod(sqlite, api, rental)?;
+            Ok(Ended::Copied(counts))
+        }
+        Err(error) => Ok(Ended::Uncopied(error)),
+    }
+}
+
+fn delete_pod(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Result<()> {
+    sqlite.set_rental_state(&rental.id, RentalState::Ending)?;
+    let pod_id = rental
+        .provider_id
+        .as_deref()
+        .ok_or_else(|| anyhow!("rental {} has no confirmed pod", rental.id))?;
+    if let Some(pod) = api.delete(pod_id, &rental.provider_name)? {
+        sqlite.set_rental_cost(&rental.id, api.billed(&pod, now())?)?;
+    }
+    sqlite.set_rental_state(&rental.id, RentalState::Ended)?;
+    Ok(())
+}
+
+/// Pull the machine's records since its rental began (`lf history export`).
+fn copy_up(sqlite: &SqliteStore, rental: &Rental, machine: &Machine) -> anyhow::Result<CopyCounts> {
+    let since = (rental.created_at - time::Duration::hours(1))
+        .format(&time::format_description::well_known::Rfc3339)?;
+    let script = format!(
+        "{}; lf history export --since {}",
+        super::machine::REMOTE_PATH,
+        super::ssh::sh_quote(&since)
+    );
+    let output = Command::new("ssh")
+        .args(crate::machine_route::bounded_ssh_args(
+            &machine.route,
+            false,
+        )?)
+        .arg(script)
+        .stdin(Stdio::null())
+        .output()
+        .context("could not run ssh")?;
+    if !output.status.success() {
+        return Err(super::machine::transport_failure(
+            &machine.route,
+            String::from_utf8_lossy(&output.stderr).trim(),
+        ));
+    }
+    let counts = crate::machine_records::import(
+        sqlite,
+        &crate::store::lf_home_dir(),
+        &machine.id,
+        output.stdout.as_slice(),
+    )?;
+    sqlite.set_rental_copied(&rental.id)?;
+    Ok(counts)
+}
+
+/// After a run forwarded to `machine` returns: if it is a live rental, give
+/// it back when its work has drained. Problems are reported, never raised;
+/// `lf ondemand list` runs the same pass again.
+pub fn settle(machine: &MachineId) {
+    let result = (|| -> anyhow::Result<()> {
+        let runtime = tokio::runtime::Runtime::new()?;
+        let store = open_store(&runtime)?;
+        let sqlite = &store.sqlite;
+        let Some(rental) = sqlite.rental_for_machine(machine)? else {
+            return Ok(());
+        };
+        if !rental.state.is_live() {
+            return Ok(());
+        }
+        let api = RunPod::from_env()
+            .context("`lf ondemand list` gives it back once RUNPOD_API_KEY is set")?;
+        reconcile(sqlite, &api, &rental)
+    })();
+    if let Err(error) = result {
+        eprintln!("{machine}: {error:#}");
     }
 }
 
@@ -923,7 +1042,115 @@ fn read_holdings(text: &str) -> Holdings {
 
 #[cfg(test)]
 mod tests {
-    use super::read_holdings;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use serde_json::json;
+
+    use super::{end_rental, read_holdings, Ended};
+    use crate::durable::MachineId;
+    use crate::machine_records::CopyCounts;
+    use crate::rental::runpod::RunPod;
+    use crate::rental::{Hardware, OnDemand, Provider, Quote, Rental, RentalState, Template, Usd};
+    use crate::store::sqlite::SqliteStore;
+
+    type Log = Rc<RefCell<Vec<String>>>;
+
+    /// A running rental of `code-1` and a RunPod that knows its pod.
+    fn running(dir: &std::path::Path) -> (SqliteStore, Rental, RunPod, Log) {
+        let store = SqliteStore::open_ephemeral(&dir.join("db")).unwrap();
+        store
+            .add_ondemand(&OnDemand {
+                name: "code".into(),
+                provider: Provider::Runpod,
+                template: Template {
+                    gpu: None,
+                    vcpus: 8,
+                    memory_gb: 16,
+                    disk_gb: None,
+                    image: "runpod/base@sha256:ab".into(),
+                    data_center: None,
+                },
+                max_machines: 1,
+                max_usd_per_hour: Usd::parse("0.40").unwrap(),
+                hours: 4.0,
+                created_at: time::OffsetDateTime::now_utc(),
+            })
+            .unwrap();
+        let quote = Quote {
+            hardware: Hardware::Cpu {
+                flavor: "cpu3c".into(),
+                vcpus: 8,
+            },
+            usd_per_hour: Usd::parse("0.24").unwrap(),
+            available: true,
+        };
+        let rental = store
+            .admit_rental("code", &quote, None, None, false)
+            .unwrap();
+        store
+            .confirm_rental(&rental.id, "pod1", quote.usd_per_hour)
+            .unwrap();
+        let machine = MachineId::new();
+        store
+            .add_machine(&machine, "ssh://lf@203.0.113.7:40022", "code-1")
+            .unwrap();
+        let rental = store.attach_rental(&rental.id, &machine).unwrap();
+        let log: Log = Rc::default();
+        let kept = log.clone();
+        let name = rental.provider_name.clone();
+        let api = RunPod::with_send(Box::new(move |method, url, _| {
+            kept.borrow_mut().push(format!("{method} {url}"));
+            let reply = if url.contains("billing") {
+                json!({"records": []})
+            } else {
+                json!({"id": "pod1", "name": name, "cost": 0.24,
+                       "createdAt": "2026-10-21T20:10:00Z", "status": "RUNNING"})
+            };
+            Ok((200, reply.to_string().into_bytes()))
+        }));
+        (store, rental, api, log)
+    }
+
+    fn deleted(log: &Log) -> bool {
+        log.borrow().iter().any(|call| call.starts_with("DELETE"))
+    }
+
+    #[test]
+    fn give_back_copies_before_it_deletes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, rental, api, log) = running(dir.path());
+        let ended = end_rental(&store, &api, &rental, || {
+            assert!(
+                !deleted(&log),
+                "the pod was deleted before its records were copied"
+            );
+            Ok(CopyCounts {
+                sessions: 3,
+                processes: 14,
+            })
+        })
+        .unwrap();
+        assert!(matches!(ended, Ended::Copied(counts) if counts.processes == 14));
+        assert!(deleted(&log));
+        assert_eq!(store.rental(&rental.id).unwrap().state, RentalState::Ended);
+    }
+
+    #[test]
+    fn a_failed_copy_leaves_the_machine_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, rental, api, log) = running(dir.path());
+        let ended = end_rental(&store, &api, &rental, || {
+            Err(anyhow::anyhow!("ssh timed out"))
+        })
+        .unwrap();
+        assert!(matches!(ended, Ended::Uncopied(_)));
+        assert!(!deleted(&log));
+        assert_eq!(
+            store.rental(&rental.id).unwrap().state,
+            RentalState::Running
+        );
+    }
 
     #[test]
     fn holdings_count_agents_and_name_unpushed_work() {

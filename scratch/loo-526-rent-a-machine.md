@@ -117,7 +117,8 @@ rentals
   cost_usd TEXT                   -- whole billed hours from /v2/billing/pods, updated each pass
 ```
 
-Copy-up adds whatever watermark it needs (e.g. `copied_at`) in the same draft.
+Copy-up adds `rentals.copied_at` and a `machine_records` table (origin, kind,
+key, row JSON, observed_at) in the same draft.
 
 A Machine is rented when a Rental names it, owned otherwise; `pool` and a
 Rental never both apply. One draft migration (`scripts/new_migration.py
@@ -231,21 +232,27 @@ The give-back pass, in order:
 2. **Copy up** (pull; Jack's decision for now): `lf --machine code-1 history
    export --since <rental start>` emits the Machine's Sessions, Processes,
    GraphProcesses, session events and capture payloads for the window as JSON
-   lines plus files; the laptop imports them as read-only rows carrying
-   `origin_machine_id` and `observed_at` (new columns, NULL for rows this
-   Machine wrote itself). Copies never gain authority while the origin exists;
-   after the pod is deleted they are the final record. `lf session list`,
-   `lf history show` and Task status read them like local rows and say "from
-   code-1".
+   lines (origin first) plus capture files; the laptop imports them into
+   `machine_records(origin_machine_id, kind, key, row, observed_at)` and
+   captures into `~/.lf/machines/<origin>/runs`. Decided in implement
+   2026-10-21: copies live apart from `processes`/`agent_sessions`, not as
+   stamped rows in them, because `session_events.seq` is a local integer
+   referenced by `current_capture`, `captured_event` and
+   `attachment_exit_seq`, and every local reconciler (unfinished Processes,
+   attachment, availability, Task work) would need an origin filter. Apart,
+   a copy cannot gain authority. An export from another Machine id (a reused
+   pod address) is refused. `lf session list` and `lf task status` say "from
+   code-1"; `lf history show` does not read copies yet.
 3. `DELETE pods/{id}` with the identity re-check; `state = ended`, `ended_at`,
    final `cost_usd`. The Machine row stays (ownership history reads "Jack on
    code-1"); `lf machine status` shows "rental ended" instead of unreachable.
    `lf machine remove code-1` is allowed afterwards and loses nothing.
 
 **Who runs the pass.** There is no daemon. Built: the whole pass in `lf
-ondemand list`; `lf machine end` gives back its one rental. Planned: the end of
-a forwarded `lf task run` (the laptop already waits for it) and the installed
-periodic Task check (`lf task automation`). A soft deadline 15 minutes
+ondemand list`; `lf machine end` gives back its one rental; the end of a
+forwarded `lf task run` reconciles its Machine's rental (`rental::settle`),
+which also strips `--pool/--rent/--quote` before forwarding. Planned: the
+installed periodic Task check (`lf task automation`). A soft deadline 15 minutes
 before the hard one turns the pass from "when drained" into "now". The guardian
 is the backstop for a laptop that never comes back: what it deletes at the hard
 deadline was copied on an earlier pass or was unreachable for the whole window.
@@ -265,7 +272,7 @@ lf ondemand max <name> N                change the limit; current windows stay
 lf ondemand rent <name> [--hours H] [--max-usd USD]      a machine by hand
 lf ondemand remove <name>               forget it; its rentals' history stays
 lf task run X [--pool P] [--rent R] [--quote]
-lf history export [--since]             the export the copy reads (remaining)
+lf history export --since T             the export the copy reads
 ```
 
 `lf machine use <machine> --task X` keeps today's meaning (hand off). The Wave
@@ -320,20 +327,22 @@ deletes, bill, give back drained or soft-deadlined rentals) runs in `lf ondemand
 list`; `lf machine end` gives back one rental. Compress dropped the unbuilt
 copy watermark column; copy-up adds its own.
 
+Copy-up implemented 2026-10-21 (second implement pass): `lf history export`,
+`machine_records` import with origin check, captures copied, `copied_at`,
+copy before every delete (give-back pass and `lf machine end`; a failed copy
+keeps the machine unless `--force`), copied Sessions in `lf session list`,
+`lf task status` and `lf ondemand list`, `lf machine status` "rental ended",
+pass at the end of a forwarded `lf task run`.
+
 Remaining:
 
-1. **Records copy-up** (step 4): `lf history export`, import with
-   `origin_machine_id`, a copy watermark on `rentals`, and calling it before
-   every delete. Until then give-back
-   deletes without copying and says so ("Session and Process records on it
-   were not copied").
-2. **Pass callers**: end of a forwarded `lf task run`, and `lf task automation`.
-3. `lf machine status` should read "rental ended" instead of unreachable.
-4. **Live probe (~$0.10) and demo** — not run: both spend money. The quote path
+1. **Pass caller** `lf task automation` (periodic check).
+2. `lf history show <id>` and `lf session list --json` do not read copies.
+3. **Live probe (~$0.10) and demo** — not run: both spend money. The quote path
    was verified live (cpu3c×8 at $0.24/h; stock image pinned). Unverified on a
    real pod: boot script (apt, sshd, nodesource, installer as `lf`), RunPod's
-   `portMappings`/`publicIp` field names, `RUNPOD_POD_ID` injection, and the
-   pod-scoped key deleting itself.
+   `portMappings`/`publicIp` field names, `RUNPOD_POD_ID` injection, the
+   pod-scoped key deleting itself, and `lf history export` over SSH from the
+   published lf (the pod needs a build with the command).
 
-Implement check: `pytest python/tests/test_guardian.py` 5 passed; CLI reference regenerated.
-Realign 2026-10-21: plan reconciled to code (no `--machine` flag, pool freedom by ownership only, pass callers); no code changed, no rerun. Last check (compress): clippy clean; `cargo test -p loopflow --lib -- rental` 25 passed.
+Last check (implement 2026-10-21): clippy clean; `cargo test --lib` machine_records 4, rental give-back 2, store revisions/rentals 11 passed; check_migrations ok; CLI reference regenerated.

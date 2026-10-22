@@ -233,8 +233,45 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     if !found {
         forwarded.splice(0..0, ["--task".into(), route.task_id.to_string()]);
     }
-    super::ssh::run(machine.as_str(), false, cli, &forwarded, Some(route))?;
+    let task_run = matches!(
+        cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Run { .. }
+        })
+    );
+    if task_run {
+        // Placement already chose this Machine; the destination runs in place.
+        forwarded = without_placement(forwarded);
+    }
+    let result = super::ssh::run(machine.as_str(), false, cli, &forwarded, Some(route));
+    if task_run {
+        // The laptop waited for the run; a rented machine whose work drained goes back now.
+        super::rental::settle(&machine);
+    }
+    result?;
     Ok(true)
+}
+
+/// `lf task run`'s `--pool`, `--rent` and `--quote`, removed before `--`.
+fn without_placement(args: Vec<String>) -> Vec<String> {
+    let mut kept = Vec::with_capacity(args.len());
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        if arg == "--" {
+            kept.push(arg);
+            kept.extend(args);
+            break;
+        }
+        match arg.as_str() {
+            "--pool" | "--rent" => {
+                args.next();
+            }
+            "--quote" => {}
+            _ if arg.starts_with("--pool=") || arg.starts_with("--rent=") => {}
+            _ => kept.push(arg),
+        }
+    }
+    kept
 }
 
 /// A Wave's or repository's Session lives on your Session Machine for it. The
@@ -470,7 +507,7 @@ fn resolve_task_id(
 
 #[cfg(test)]
 mod tests {
-    use super::{launch_task, repository_path, resolve, resolve_task};
+    use super::{launch_task, repository_path, resolve, resolve_task, without_placement};
     use crate::durable::{RepositoryId, TaskId};
     use crate::lf::Cli;
     use crate::store::sqlite::SqliteStore;
@@ -576,5 +613,27 @@ mod tests {
             let cli = Cli::try_parse_from(["lf", "--task", "LOO-427"].iter().chain(argv)).unwrap();
             assert_eq!(launch_task(&cli), None);
         }
+    }
+
+    #[test]
+    fn a_placed_run_arrives_without_placement_flags() {
+        let args = |list: &[&str]| list.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            without_placement(args(&[
+                "--task",
+                "task_1",
+                "task",
+                "run",
+                "LOO-570",
+                "--pool",
+                "lab",
+                "--rent=code",
+                "--quote",
+                "--",
+                "--rent",
+                "x"
+            ])),
+            args(&["--task", "task_1", "task", "run", "LOO-570", "--", "--rent", "x"])
+        );
     }
 }

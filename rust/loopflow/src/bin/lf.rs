@@ -1079,6 +1079,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     if let Some(ownership) = &status.ownership {
                         println!("{}", loopflow::ops::task_ownership::render(ownership));
                     }
+                    for session in loopflow::ops::task::task_copied_sessions(&task.id)? {
+                        println!(
+                            "Session {} from {}: {}",
+                            session.id,
+                            session.origin_name(),
+                            session.title
+                        );
+                    }
                 } else {
                     println!("No saved Task; retained observations are not Work.");
                 }

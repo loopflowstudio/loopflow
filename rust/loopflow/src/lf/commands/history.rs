@@ -120,6 +120,29 @@ pub enum HistoryCommand {
         /// Captured input identity or an unambiguous displayed prefix
         run: String,
     },
+    /// Write this Machine's Sessions, Processes and captures as JSON lines,
+    /// for the Machine that copies them before giving this one back
+    Export {
+        /// Relative window (7d, 24h, 30m) or RFC3339 start
+        #[arg(long)]
+        since: String,
+    },
+}
+
+fn export(since: &str) -> anyhow::Result<()> {
+    let since = super::util::parse_since(since, time::OffsetDateTime::now_utc())?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    let store = runtime.block_on(open_store(&storage_config_from_env()?))?;
+    let stdout = std::io::stdout();
+    let mut out = std::io::BufWriter::new(stdout.lock());
+    crate::machine_records::export(
+        &store.sqlite,
+        &crate::store::lf_home_dir(),
+        since.unix_timestamp(),
+        &mut out,
+    )?;
+    std::io::Write::flush(&mut out)?;
+    Ok(())
 }
 
 fn parse_cursor(value: &str) -> Result<LfProcessCursor, String> {
@@ -129,6 +152,7 @@ fn parse_cursor(value: &str) -> Result<LfProcessCursor, String> {
 pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
     match command {
         HistoryCommand::Replay { run } => super::replay::run(run),
+        HistoryCommand::Export { since } => export(since),
         HistoryCommand::Usage {
             json, binds: true, ..
         } => super::bind_attribution::run(*json),

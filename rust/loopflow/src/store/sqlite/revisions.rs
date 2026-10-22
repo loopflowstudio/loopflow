@@ -95,6 +95,8 @@ mod tests {
         // Acquisition attempts and watermarks do not change displayed Work.
         "linear_team_checks",
         "machines",
+        // Copies from rented Machines are read by explicit CLI listings only.
+        "machine_records",
         // Rental capacity is read by `lf pool`/`lf ondemand`, not workspace surfaces.
         "ondemands",
         "pools",

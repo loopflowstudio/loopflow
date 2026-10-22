@@ -365,6 +365,9 @@ pub struct Rental {
     #[serde(with = "time::serde::rfc3339::option")]
     pub ended_at: Option<OffsetDateTime>,
     pub cost_usd: Option<Usd>,
+    /// When its Machine's records were last copied here.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub copied_at: Option<OffsetDateTime>,
 }
 
 impl Rental {

@@ -20,6 +20,7 @@ pub mod id;
 pub mod installation;
 pub mod journal;
 pub mod lf;
+pub mod machine_records;
 pub(crate) mod machine_route;
 pub mod naming;
 pub(crate) mod os_process;

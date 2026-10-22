@@ -57,3 +57,15 @@ only now, pools in their own Task.
   repo root there) and counts `lf`/`claude` processes as live work.
 - **SSH user** on pods is `lf`, routed as `ssh://lf@IP:PORT`; the first contact
   accepts the fresh host key (`StrictHostKeyChecking=accept-new`).
+
+## Assumptions taken in the copy-up pass (2026-10-21)
+
+- **Copies live in `machine_records`, not stamped rows in `processes` /
+  `agent_sessions`** as the design first said. Session event `seq` is a local
+  integer other rows reference, and stamped rows would need an origin filter in
+  every local reconciler. Reversible: the draft is unreleased.
+- **`--force` also overrides a failed copy** on `lf machine end`, naming the
+  records it discards; otherwise an unreachable pod could only be ended in the
+  RunPod console or by its guardian.
+- **Copies appear in text output only**: `lf session list --json` and the
+  `TaskStatus` DTO are unchanged, which avoids DTO fixture and Swift changes.

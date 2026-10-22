@@ -164,7 +164,20 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             };
             let mut statuses = Vec::new();
             for machine in machines {
-                let result = probe(&machine.route, false).await;
+                // A given-back pod is gone; probing it would only time out.
+                let ended = store
+                    .sqlite
+                    .rental_for_machine(&machine.id)?
+                    .filter(|rental| !rental.state.is_live());
+                let result = match &ended {
+                    Some(rental) => Err(anyhow!(
+                        "rental ended{}",
+                        rental
+                            .ended_at
+                            .map_or_else(String::new, |at| format!(" {at}"))
+                    )),
+                    None => probe(&machine.route, false).await,
+                };
                 let (remote_version, error) = match result {
                     Ok(probe) => {
                         let error = match probe.id {

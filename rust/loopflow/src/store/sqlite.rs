@@ -29,6 +29,7 @@ mod graph_inventory;
 mod linear_migration_tests;
 
 mod linear_team_checks;
+mod machine_records;
 mod metrics;
 pub(crate) mod planning_changes;
 pub(crate) mod planning_export;

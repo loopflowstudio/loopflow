@@ -1865,6 +1865,9 @@ Place a Task's worktree, then run a Graph there like `lf --task ISSUE graph GRAP
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
 | `--reason` | Direction for this run, published to the Task |
+| `--pool` | Run on a free machine you own in this pool |
+| `--rent` | Rent a machine from this on-demand (after `--pool`, only when none is free) |
+| `--quote` | Print where it would run and the most it could cost; run nothing Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task complete
@@ -2207,6 +2210,15 @@ Launch a new execution from an immutable captured provider request
 | Argument | What it does |
 |---|---|
 | `<run>` | Captured input identity or an unambiguous displayed prefix |
+| `--help / -h` | Print help |
+
+## lf history export
+
+Write this Machine's Sessions, Processes and captures as JSON lines, for the Machine that copies them before giving this one back
+
+| Argument | What it does |
+|---|---|
+| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start |
 | `--help / -h` | Print help |
 
 ## lf graph

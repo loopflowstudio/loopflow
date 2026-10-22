@@ -298,9 +298,40 @@ async fn list(
         return Ok(());
     }
     let sessions = crate::ops::human_session::list(store, filter).await?;
+    // Sessions copied from given-back Machines are history, never available here.
+    let copied = if json || filter.available || filter.orphan {
+        Vec::new()
+    } else {
+        let task = match &filter.task {
+            Some(selector) => match store.sqlite.resolve_task_id(selector, None)? {
+                Some(task) => Some(task),
+                None => return print_sessions(&sessions, &[]),
+            },
+            None => None,
+        };
+        let repository = match &filter.repo {
+            Some(repo) => match store.sqlite.repository_id(repo)? {
+                Some(id) => Some(id),
+                None => return print_sessions(&sessions, &[]),
+            },
+            None => None,
+        };
+        store
+            .sqlite
+            .copied_sessions(task.as_ref(), repository.as_ref())?
+    };
     if json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
-    } else if sessions.is_empty() {
+        return Ok(());
+    }
+    print_sessions(&sessions, &copied)
+}
+
+fn print_sessions(
+    sessions: &[crate::ops::human_session::SessionRecord],
+    copied: &[crate::machine_records::CopiedSession],
+) -> anyhow::Result<()> {
+    if sessions.is_empty() && copied.is_empty() {
         println!("No Sessions.");
     } else {
         for session in sessions {
@@ -316,13 +347,26 @@ async fn list(
                 session.work_path.as_deref().unwrap_or("Repository"),
                 session.title
             );
-            for action in session.actions {
+            for action in &session.actions {
                 println!(
                     "  {} — {}",
                     action.label,
                     action.unavailable_reason.as_deref().unwrap_or(&action.help)
                 );
             }
+        }
+        for session in copied {
+            println!(
+                "{}  {:<7} {}  from {}",
+                session.id,
+                if session.completed_at.is_some() {
+                    "closed"
+                } else {
+                    "unknown"
+                },
+                session.title,
+                session.origin_name()
+            );
         }
     }
     Ok(())

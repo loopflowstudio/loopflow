@@ -61,7 +61,6 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
         pm_snapshot_synced_at: Some(updated_at.unix_timestamp()),
 
         wave_id: wave.id().clone(),
-        abandon_intent: None,
         created_at: updated_at,
         updated_at,
     }
@@ -242,7 +241,6 @@ fn seed_stale_project_work(
         pm_snapshot_synced_at: Some(now.unix_timestamp() - 1),
 
         wave_id: wave.id().clone(),
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
     };
@@ -275,7 +273,6 @@ fn seed_stale_project_work(
         base_commit: "deadbeef".to_string(),
         parent_pr_id: None,
         agent: None,
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
         rank: 0,
@@ -343,7 +340,6 @@ fn seed_stale_project_work(
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
     };

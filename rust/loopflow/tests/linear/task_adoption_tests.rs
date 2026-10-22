@@ -106,7 +106,6 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
             krs: Vec::new(),
             metric_targets: Vec::new(),
             pm_snapshot_synced_at: Some(now.unix_timestamp()),
-            abandon_intent: None,
             created_at: now,
             updated_at: now,
         };

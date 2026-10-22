@@ -2031,7 +2031,6 @@ mod tests {
             base_commit: "deadbeef".into(),
             parent_pr_id: None,
             agent: None,
-            abandon_intent: None,
             created_at: now,
             updated_at: now,
             rank: 0,

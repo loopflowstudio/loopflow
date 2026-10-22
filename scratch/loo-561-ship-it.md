@@ -1,12 +1,12 @@
 # LOO-561 · Ship it — plan
 
-Status (realigned 2026-10-22): design accepted (Jack Heart, 2026-10-21/22). Built: graphs with
-`interactive:` stages, the landing engine fixes, `lf ship` with stand-ins, stored Shipping
-lifecycle with Stop, the mounted Workflow header. Remaining: single landing engine plus lazy
-recovery, the rest of the state-model cleanup, Desktop Shipping on #1580 Dashboards.
-#1580 merged to main at 2026-10-22 16:11Z (70e08c2a00); the branch has not taken it yet.
-Drafts beside this Task's `ship_it.sql`: #1643's `rename_flow_to_graph.sql`, main's
-`detached_owner_viewers.sql`.
+Status (2026-10-22, implement pass): design accepted (Jack Heart, 2026-10-21/22). Built: graphs
+with `interactive:` stages, the landing engine fixes, `lf ship` with stand-ins, Shipping lifecycle
+with Stop, #1580 taken (Shipping is `state:shipping`), one landing engine with lazy recovery,
+completion on merge while shipping, blocked backoff, Ship it on the Task heading. Remaining: the
+rest of the state-model cleanup (item 3). Drafts beside this Task's `ship_it.sql`: #1643's
+`rename_flow_to_graph.sql`, main's `detached_owner_viewers.sql`, `saved_selections.sql`,
+`two_person_gaps.sql`.
 
 ## Direction from Jack Heart (2026-10-21, design review)
 
@@ -92,37 +92,33 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
 - Desktop: `TaskWorkflowHeader` mounted in `WorkSurfaceView` with **Ship it** (`task-ship`,
   replacing route buttons into `end`) and **Stop shipping**; `TaskActionItems` both;
   `RegistryQuery.shipTask` (`-b --task X ship`, detached); interim `SidebarFilter.shipping`;
-  `workingTaskIDs` excludes shipping; rows show `state · reason`.
+  rows show `state · reason`.
+- One engine (2026-10-22): `lf ci watch`, `CIWatchers.swift`, `lf task reconcile/automation/
+  automate`, the repository cron (`lf cron sync` removes released copies) and
+  `tasks.automation_enabled` deleted; Pause holds repair and re-arm; `ops/recovery.rs` runs on
+  `task status/list`, `wave status/list/show`, `history`, `monitor`.
+- `lf ship` completes on merge (`ship_complete_if_merged`), backs off blocked stand-ins
+  (`blocked_backoff`, 1→30 min, rechecking Pause/Stop).
 
 ## Remaining
 
-1. **Take #1580.** Sync main; rebuild the Shipping view as the `state:shipping` query, make the
-   built-in Working query exclude `state:shipping`, delete `SidebarFilter.shipping` and the
-   `workingTaskIDs` special case. `state:` vocabulary is the lifecycle plus `paused`.
-2. **Single landing engine + lazy recovery.** Move carrier restart from `lf task reconcile`
-   (`restart_ships`, called from `bin/lf.rs`) onto lf's read paths for this Machine; settle dead
-   AgentProcesses there too. Then delete `lf ci watch` (`--install`, `--parent-pid`, launchd),
-   `CIWatchers.swift`, the periodic Task check schedule, `lf pr reconcile`'s repair path,
-   `automation_enabled` (column via the draft, `lf task automate`, interrupt side effect,
-   `store/sqlite/automation.rs`, per-Task lines of `lf task automation`). Inventory the periodic
-   check's other duties first. `lf ci` stays read-only.
-3. **State-model cleanup.** Delete `planning_state`/`planning_completed(_at)`, `abandon_intent`
-   (`abandon_requested_at/reason`), duplicate DTO state fields; fold `completion_request/error`
-   into the done transition plus writeback if nothing else reads it. Linear mapping:
+3. **State-model cleanup.** Done: `AbandonIntent` and `abandon_requested_at` (Task and Project)
+   deleted; nothing set them, and the Task save nulled `abandon_reason` on every write. Left:
+   `tasks.planning_state`/`planning_completed(_at)` (Linear's mirrored state; read by
+   `linear/acceptance.rs` writeback and `ops/task.rs`; distinct from the `PlanningState` evidence
+   enum, which stays), duplicate DTO state fields, and folding `completion_request/error` into the
+   done transition plus writeback if nothing else reads it. Linear mapping:
    Backlog/Todo↔unstarted, In Progress↔working, In Review↔shipping, Done↔done,
    Canceled↔abandoned, through the one writer.
-4. **Completion on any merge** while a Graph is paused or running: verify, then fix if needed.
-5. **Stand-in `blocked` backoff**: it repeats at once; give it the landing's 1→30 min backoff.
 
-6. **Ship it placement (Jack Heart, 2026-10-22, prototypes in `scratch/ship-it-placement.html`).**
-   Jack: "i think i like B best, but only in the main pane, not the sidebar" (he corrected
-   "left" to "best") and "with maybe something C like eventually, but still havent quite nailed
-   the workflow presentation or handling". Build variant B in the main pane: hovering the Task
-   heading fades in a green **Ship it** at its right end, after the state; while shipping the
-   same spot holds **Stop shipping**; a toast offers Undo (= Stop shipping). No ship control in
-   sidebar rows. Operator reading, reversible: the sidebar context menu (`TaskActionItems`)
-   drops Ship it too. The Workflow rail (variant C) is later and unsettled: do not grow
-   `TaskWorkflowHeader` here; Ship it no longer lives in it.
+Settled this pass (2026-10-22):
+- Completion on merge is the ship process's job: before each route it reads the PR and completes
+  the Task once merged. A non-shipping Task still follows "merge leaves the Task open until
+  completion"; `lf pr reconcile`, `lf land` and reads settle it as before.
+- Placement (Jack, variant B): Ship it/Stop shipping in `TaskShipControl` on the main-pane
+  heading, hover-revealed; `ShipNoticeToast` Undo = Stop shipping. Not in `TaskWorkflowHeader`,
+  sidebar rows, the sidebar/Dashboard/Sessions menus (`TaskActionItems`). Variant C (Workflow
+  rail) is later and unsettled.
 
 ## Done when
 
@@ -164,8 +160,7 @@ The hosted merge-queue run is left to demo.
 - World Tasks that ran a Graph read `unstarted` on the branch; main's builder says a Graph in a
   checkout starts its Task. Possible regression, unverified.
 
-Check (2026-10-22 implement pass): lib store/waves/ship/workflow/work/durable, task_graph_launch,
-local_planning, work_watch, dto_fixtures, world_recipes, CLI reference, Swift 152 pass, clippy
-clean; pre-existing failures also at 8300f436a6 (`agent_session_identity_is_durable…`,
-`bind_preserves_prior_work…`, three "capture does not belong to a recorded Session",
-`a_landing_edge_that_returns…`, `every_task_launch_runs_in_the_foreground…`) deferred to gate.
+Check (2026-10-22 second implement pass): lib cron/pr_landing/ship/doctor/task_work/migrations/
+canonical_ids/planning, task_graph_launch ship tests (5), integration documented_commands/
+cli_reference/dto_fixtures, Swift DesktopHeadless/DTOFixture/WorkModel/WorkNavigation 137 pass,
+clippy clean. Earlier pre-existing failures (`agent_session_identity_is_durable…` etc.) deferred to gate.

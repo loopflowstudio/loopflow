@@ -1430,7 +1430,6 @@ async fn snapshot_task_detail(
         resume_refusal: resume_refusal.as_deref(),
         ci: active.and_then(|pr| pr.fresh_ci()),
         predecessor_phase,
-        abandon_intent: task.abandon_intent.is_some(),
         launch_refusal: launch_refusal.as_deref(),
     };
     let condition = derive_task_condition(
@@ -3469,7 +3468,6 @@ mod tests {
                 resume_refusal: None,
                 ci: None,
                 predecessor_phase: None,
-                abandon_intent: false,
                 launch_refusal: Some("next launch configuration is invalid"),
             };
             let condition = derive_task_condition(
@@ -3590,7 +3588,6 @@ mod tests {
                     resume_refusal: None,
                     ci: None,
                     predecessor_phase: None,
-                    abandon_intent: false,
                     launch_refusal: Some("worktree is missing"),
                 }),
                 Some(&failed),
@@ -3621,7 +3618,6 @@ mod tests {
             resume_refusal: None,
             ci: None,
             predecessor_phase: None,
-            abandon_intent: false,
             launch_refusal: None,
         };
         let condition = derive_task_condition(

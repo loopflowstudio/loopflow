@@ -57,3 +57,9 @@ ALTER TABLE tasks ADD COLUMN ship_lf_process_id TEXT REFERENCES processes(id);
 -- CI repair has no per-Task setting: Pause holds it, and the ship process is the
 -- only repair starter.
 ALTER TABLE tasks DROP COLUMN automation_enabled;
+
+-- No command records a pending abandonment: abandon ends the Task in one write,
+-- keeping its reason in `tasks.abandon_reason`.
+ALTER TABLE tasks DROP COLUMN abandon_requested_at;
+ALTER TABLE projects DROP COLUMN abandon_requested_at;
+ALTER TABLE projects DROP COLUMN abandon_reason;

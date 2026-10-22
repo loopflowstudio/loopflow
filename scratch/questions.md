@@ -29,3 +29,10 @@ design rewrite, each reversible before implementation:
 - `ship_control` is `run_control` plus "already shipping" and "at the end of its Workflow".
 - `lf ship <graph>` takes the graph up (replacing the captured Workflow, history kept in moves)
   rather than running it whole beside the old one; settled in the second concept review (2026-10-22).
+- Completion on merge (2026-10-22): scoped to shipping Tasks. The ship process completes the Task
+  when its PR merges, whoever merged it; a non-shipping Task with a paused Graph stays open until
+  completion, per "merge leaves the Task open until completion". With the minute check gone,
+  nothing polls GitHub for non-shipping Tasks; `lf pr reconcile`, `lf land` and reads settle them.
+- Ship it placement (2026-10-22): the Dashboard tile menu and Sessions menu share
+  `TaskActionItems` with the sidebar, so they lose Ship it too; only the main-pane heading ships.
+- The blocked-stand-in count is in the ship process's memory; a restarted carrier starts it at 1 min.

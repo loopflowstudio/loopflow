@@ -401,7 +401,6 @@ fn register_task_fixture(
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
     };
@@ -428,7 +427,6 @@ fn register_task_fixture(
         base_commit: base_commit.to_string(),
         parent_pr_id: None,
         agent: None,
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
         rank: 0,

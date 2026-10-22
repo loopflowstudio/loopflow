@@ -3620,7 +3620,6 @@ async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSn
             resume_refusal: resume_refusal.as_deref(),
             ci: active.and_then(|pr| pr.fresh_ci()),
             predecessor_phase,
-            abandon_intent: task.abandon_intent.is_some(),
             launch_refusal: launch_refusal.as_deref(),
         };
         derive_task_actions(&action_evidence)
@@ -5123,7 +5122,6 @@ mod tests {
             pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
             wave_id: wave.id().clone(),
-            abandon_intent: None,
             created_at: now,
             updated_at: now,
         };
@@ -5147,7 +5145,6 @@ mod tests {
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
             agent: None,
-            abandon_intent: None,
             created_at: now,
             updated_at: now,
             rank: 0,

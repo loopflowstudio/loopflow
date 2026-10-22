@@ -11,7 +11,6 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::child::AbandonIntent;
 pub use crate::durable::TaskId;
 use crate::id::prefixed_uuid_id;
 use crate::id::WaveId;
@@ -516,9 +515,6 @@ pub struct Task {
     pub parent_pr_id: Option<TaskPrId>,
     /// Explicit choice for every Graph step; None uses the step/config defaults.
     pub agent: Option<String>,
-    /// Set when abandonment is *requested*, not when it is applied. No launch
-    /// path may start a Run for Task Work carrying this.
-    pub abandon_intent: Option<AbandonIntent>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
     /// Per-command view derived from the active PR's durable observation cache.
@@ -762,7 +758,6 @@ mod tests {
             base_commit: "abc".to_string(),
             parent_pr_id: None,
             agent: None,
-            abandon_intent: None,
             created_at: now,
             updated_at: now,
             rank: 0,

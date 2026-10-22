@@ -299,7 +299,6 @@ async fn seed_project(
         metric_targets: plan.metric_targets.clone(),
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
         status: plan.status,
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
     };
@@ -348,7 +347,6 @@ async fn local_task(
         base_commit: base.into(),
         parent_pr_id: None,
         agent: None,
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
         rank: 0,

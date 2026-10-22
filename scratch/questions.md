@@ -100,3 +100,29 @@ pass usually has no key. Taken: it then does nothing until a rental passes its
 soft deadline, and from there reports an error each minute naming the rental
 (`lf machine end` or the guardian resolves it). Alternative: the Doppler
 reference of Q3, so the schedule can resolve the key itself.
+
+## Raised at the demo (2026-10-22)
+
+### Q10. Credentials on a rented machine without a browser approval per rent
+
+Jack Heart, during the first `--rent` demo: "I don't really want to have to
+approve my credentials every time I rent a machine", and asked whether the
+machine code can forward what the laptop already has.
+
+Today `prepare` connects GitHub and Claude. GitHub already forwards the
+laptop's `gh` token with no approval. Claude makes a fresh OAuth login in
+Chrome (`fresh_machine_login`) because the laptop's `.credentials.json` holds
+an access/refresh pair whose refresh token rotates: two machines refreshing
+one pair can sign each other out. Options:
+
+- (a) **One long-lived token per account.** `claude setup-token` mints a
+  subscription token meant for headless use, approved once in the browser; lf
+  stores it with the account and installs it on every rental. Needs a probe
+  that Claude Code on the pod honours it without a refresh token.
+- (b) **Copy the laptop's credential file.** No approval, but the rotation
+  risk above; a probe could show whether Anthropic keeps the old refresh
+  token valid after rotation.
+- (c) **Keep fresh logins** (status quo): one approval per rented machine.
+
+Default until Jack decides: (c). The rent still works; (a) is the path that
+matches his direction and the July posture for hardware he does not own root on.

@@ -456,7 +456,7 @@ pub(crate) fn rent(
             .template
             .disk_gb
             .unwrap_or_else(|| rental.hardware.disk_gb()),
-        data_center: ondemand.template.data_center.clone(),
+        data_centers: quote.data_centers.clone(),
         env,
         entrypoint,
     };
@@ -1135,6 +1135,7 @@ mod tests {
             },
             usd_per_hour: Usd::parse("0.24").unwrap(),
             available: true,
+            data_centers: Vec::new(),
         };
         let rental = store
             .admit_rental("code", &quote, None, None, false)

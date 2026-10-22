@@ -392,7 +392,22 @@ the Task is there and laptop-side PR and push effects are deliberately inert.
 The first quote then refused: cpu3c at 8 vCPUs was in stock in seven data
 centers but not US-KS-2, where the 2-vCPU probe had run. The refusal now names
 the pinned data center; the demo on-demand was re-added in US-IL-1 and quotes
-cpu3c×8 at $0.24/h.
+cpu3c×8 at $0.24/h. `--data-center` is now a full id or a region prefix (`US`):
+the quote keeps the data centers in stock there and the create sends them as
+RunPod's preferred placement, so a pin names a region, not a guess at a hall.
+Jack's `--rent code` then rented `code-1` (cpu3c×8, $0.24/h, 4h).
+
+The "flash": `lf task run` delegates to an execution owner and attaches to it;
+the attach snapshot began with clear-scrollback, home, clear-screen before
+replaying an owner screen that was still empty, so a quick refusal wiped the
+terminal and left two lines at the top. A snapshot of an untouched screen now
+sends nothing, and output flows from the prompt as any command's does
+(`attaching_before_the_owner_draws_leaves_the_viewer_terminal_alone`). The
+copy banner still prints twice, once per lf process; cosmetic.
+
+Jack, during the demo: "I don't really want to have to approve my credentials
+every time I rent a machine." Q10 in `questions.md` has the options; GitHub
+already forwards the laptop's token, Claude is the fresh login.
 
 Remaining:
 

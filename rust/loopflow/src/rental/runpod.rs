@@ -169,6 +169,7 @@ impl RunPod {
                     ram_gb_per_vcpu: row["ramGbPerVcpu"].as_f64()?,
                     usd_per_vcpu_hour: usd(&row["price"]["securePerVcpu"])?,
                     available: available(row, template.data_center.as_deref()),
+                    data_centers: stocked(row, template.data_center.as_deref()),
                 })
             })
             .collect::<Option<Vec<_>>>()
@@ -206,6 +207,7 @@ impl RunPod {
             },
             usd_per_hour,
             available: available(row, template.data_center.as_deref()),
+            data_centers: stocked(row, template.data_center.as_deref()),
         })
     }
 
@@ -287,8 +289,8 @@ impl RunPod {
                 });
             }
         }
-        if let Some(data_center) = &request.data_center {
-            payload["dataCenterIds"] = json!([data_center]);
+        if !request.data_centers.is_empty() {
+            payload["dataCenterIds"] = json!(request.data_centers);
         }
         let raw = self
             .ask("POST", "pods", &[], Some(payload), false)?
@@ -368,7 +370,8 @@ pub struct CreatePod {
     pub hardware: Hardware,
     pub image: String,
     pub disk_gb: u32,
-    pub data_center: Option<String>,
+    /// Preferred placement, from the quote; empty lets RunPod choose.
+    pub data_centers: Vec<String>,
     pub env: Vec<(String, String)>,
     pub entrypoint: Vec<String>,
 }
@@ -442,15 +445,30 @@ fn read_pod(raw: &Value) -> Result<Pod> {
     fields().ok_or_else(|| Unavailable("a pod record was missing its expected fields".into()))
 }
 
-/// False only when a catalog row positively reports none, there or anywhere.
-fn available(row: &Value, data_center: Option<&str>) -> bool {
-    match data_center {
+/// False only when a catalog row positively reports none: anywhere when
+/// unpinned, or in every data center the pin names.
+fn available(row: &Value, pin: Option<&str>) -> bool {
+    match pin {
         None => row["availability"] != "NONE",
-        Some(place) => row["dataCenters"]
-            .as_array()
-            .and_then(|places| places.iter().find(|p| p["id"] == place))
-            .is_some_and(|p| p["availability"] != "NONE"),
+        Some(_) => !stocked(row, pin).is_empty(),
     }
+}
+
+/// The pinned data centers with stock. A pin is a full id (`US-IL-1`) or a
+/// region prefix (`US`); unpinned, the list is empty and the scheduler chooses.
+fn stocked(row: &Value, pin: Option<&str>) -> Vec<String> {
+    let Some(pin) = pin else {
+        return Vec::new();
+    };
+    row["dataCenters"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|place| place["availability"] != "NONE")
+        .filter_map(|place| place["id"].as_str())
+        .filter(|id| id.starts_with(pin))
+        .map(str::to_string)
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

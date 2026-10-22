@@ -208,6 +208,9 @@ pub struct Quote {
     pub usd_per_hour: Usd,
     /// False only when the catalog positively reports none.
     pub available: bool,
+    /// Where it is in stock within the template's pin, for placement; empty
+    /// when unpinned, and the provider's scheduler chooses.
+    pub data_centers: Vec<String>,
 }
 
 /// One CPU flavor from a provider catalog.
@@ -219,6 +222,7 @@ pub struct CpuFlavor {
     pub ram_gb_per_vcpu: f64,
     pub usd_per_vcpu_hour: Usd,
     pub available: bool,
+    pub data_centers: Vec<String>,
 }
 
 /// CPU pods come in power-of-two vCPU counts with memory a fixed multiple of
@@ -241,6 +245,7 @@ pub fn cpu_quote(flavors: &[CpuFlavor], vcpus: u32, memory_gb: u32) -> Option<Qu
                 },
                 usd_per_hour,
                 available: flavor.available,
+                data_centers: flavor.data_centers.clone(),
             })
         })
         .min_by_key(|quote| (!quote.available, quote.usd_per_hour))

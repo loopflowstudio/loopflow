@@ -2141,6 +2141,7 @@ pub enum OndemandCommand {
         /// Image, pinned by digest when added (default: RunPod's stock Ubuntu)
         #[arg(long)]
         image: Option<String>,
+        /// A data center (US-IL-1) or a region prefix (US); rents where it is in stock
         #[arg(long)]
         data_center: Option<String>,
         /// Hard deadline for each machine it rents

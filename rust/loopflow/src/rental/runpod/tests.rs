@@ -90,7 +90,32 @@ fn a_cpu_template_is_quoted_from_the_catalog_in_its_data_center() {
     let quote = api.quote(&template()).unwrap();
     assert_eq!(quote.hardware.to_string(), "cpu3c×8");
     assert_eq!(quote.usd_per_hour, Usd::parse("0.24").unwrap());
+    assert_eq!(quote.data_centers, ["US-KS-2"]);
     assert!(log.borrow()[0].1.contains("vcpuCount=8"));
+}
+
+#[test]
+fn a_region_pin_takes_the_data_centers_there_with_stock() {
+    let (api, _) = stub(|_, _| {
+        Ok((
+            200,
+            json!({"cpus": [
+                {"id": "cpu3c", "vcpu": {"min": 2, "max": 32}, "ramGbPerVcpu": 2,
+                 "price": {"securePerVcpu": 0.03},
+                 "dataCenters": [{"id": "US-KS-2", "availability": "NONE"},
+                                 {"id": "US-IL-1", "availability": "HIGH"},
+                                 {"id": "EU-RO-1", "availability": "HIGH"}]}
+            ]}),
+        ))
+    });
+    let mut template = template();
+    template.data_center = Some("US".into());
+    let quote = api.quote(&template).unwrap();
+    assert!(quote.available);
+    assert_eq!(quote.data_centers, ["US-IL-1"]);
+    template.data_center = Some("US-KS-2".into());
+    let quote = api.quote(&template).unwrap();
+    assert!(!quote.available && quote.data_centers.is_empty());
 }
 
 #[test]
@@ -105,7 +130,7 @@ fn create_asks_for_exactly_the_quoted_cpu_and_reads_the_ssh_address() {
             },
             image: template().image,
             disk_gb: 40,
-            data_center: None,
+            data_centers: vec!["US-IL-1".into()],
             env: vec![("PUBLIC_KEY".into(), "ssh-ed25519 AAAA".into())],
             entrypoint: vec!["bash".into()],
         })
@@ -115,6 +140,7 @@ fn create_asks_for_exactly_the_quoted_cpu_and_reads_the_ssh_address() {
     assert_eq!(sent["cpu"], json!({"id": "cpu3c", "vcpuCount": 8}));
     assert!(sent.get("gpu").is_none() && sent.get("mounts").is_none());
     assert_eq!(sent["ports"], json!(["22/tcp"]));
+    assert_eq!(sent["dataCenterIds"], json!(["US-IL-1"]));
 }
 
 #[test]
@@ -128,7 +154,7 @@ fn create_refuses_an_unpinned_image_or_the_account_key_without_asking() {
         },
         image: "runpod/base:latest".into(),
         disk_gb: 20,
-        data_center: None,
+        data_centers: Vec::new(),
         env: Vec::new(),
         entrypoint: Vec::new(),
     };
@@ -150,7 +176,7 @@ fn a_create_whose_reply_names_another_pod_is_not_trusted() {
         },
         image: template().image,
         disk_gb: 20,
-        data_center: None,
+        data_centers: Vec::new(),
         env: Vec::new(),
         entrypoint: Vec::new(),
     };

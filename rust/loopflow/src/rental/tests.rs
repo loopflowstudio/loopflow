@@ -27,6 +27,7 @@ fn flavor(id: &str, per_vcpu: &str, ram: f64, available: bool) -> CpuFlavor {
         ram_gb_per_vcpu: ram,
         usd_per_vcpu_hour: usd(per_vcpu),
         available,
+        data_centers: Vec::new(),
     }
 }
 
@@ -57,6 +58,7 @@ fn quote(price: &str, available: bool) -> Quote {
         },
         usd_per_hour: usd(price),
         available,
+        data_centers: Vec::new(),
     }
 }
 

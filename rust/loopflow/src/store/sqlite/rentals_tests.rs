@@ -42,6 +42,7 @@ fn quote() -> Quote {
         },
         usd_per_hour: usd("0.24"),
         available: true,
+        data_centers: Vec::new(),
     }
 }
 

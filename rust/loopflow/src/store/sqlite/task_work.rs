@@ -973,7 +973,11 @@ mod tests {
         }
         let latest = store.latest_task_graphs().unwrap();
         for id in [&task, &sibling, &idle] {
-            assert_eq!(latest.get(id), store.task_graphs(id).unwrap().last(), "{id}");
+            assert_eq!(
+                latest.get(id),
+                store.task_graphs(id).unwrap().last(),
+                "{id}"
+            );
         }
         assert_eq!(
             latest[&task].process.cwd.as_deref(),

@@ -84,10 +84,10 @@ struct WorkCLISubscriptionTests {
         // Planning and sidebar membership arrive as independent stream frames.
         try await eventually {
             guard let plan = model.selectionPlans.value?.first(where: {
-                $0.owner.reference == .wave(id: wave.wave.id)
+                $0.dashboardID == nil && $0.selection.expression == .wave(wave.wave.id)
             }) else { return false }
             return model.task(id: id)?.task.task.state == state
-                && !plan.members.contains { $0.work.id == id }
+                && !plan.contents.contains { $0.work.id == id }
         }
         #expect(model.selection == .task(id: id))
         #expect(selectedPlanMembers(model).isEmpty) // Built-in plans belong to repositories and Waves, not Tasks.

@@ -36,3 +36,9 @@ design rewrite, each reversible before implementation:
 - Ship it placement (2026-10-22): the Dashboard tile menu and Sessions menu share
   `TaskActionItems` with the sidebar, so they lose Ship it too; only the main-pane heading ships.
 - The blocked-stand-in count is in the ship process's memory; a restarted carrier starts it at 1 min.
+- Item 3 (2026-10-22): kept `tasks.planning_completed(_at)`/`planning_state` and
+  `completion_request/error` rather than folding them. The first is the done authority inside the
+  portable `Disposition` WorkValue that released peers read; the second is the retry path for
+  a failed completion. Removing them needs its own shared-wire Task. Reversible.
+- In Review↔shipping is not built: `queue_in` targets Linear state types, and In Review is a
+  named `started` state that needs a per-team lookup by name plus a reconcile rule.

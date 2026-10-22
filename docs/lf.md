@@ -199,8 +199,9 @@ Flow process for a Task is equally its work.
 same normalization as `lf wt create`; single words and longer names are accepted.
 
 Flow output shows each step's position and name followed by the agent's messages.
-Use `lf -v -b task run EXP-12 pursue` for context token accounting and INFO
-diagnostics. Codex Sessions start through the provider protocol and attach the
+Diagnostics go to `logs/lf.log` in the Loopflow home, not the terminal. Use
+`lf -v -b task run EXP-12 pursue` to see them, with context token accounting and
+INFO detail, on stderr. Codex Sessions start through the provider protocol and attach the
 native terminal. Prompts and instructions stay off the command line. Conversation
 capture requires no hook approval; context refresh uses stable launch hooks.
 Review new or changed declarations with Codex’s `/hooks`; headless runs skip
@@ -244,10 +245,9 @@ its protocol after the terminal connects.
 Claude reads its first turn from stdin, then uses the terminal for keyboard input.
 OpenCode first turns still use argv; a first turn exceeding its argument cap is
 refused before spawning the provider.
-OpenCode launches and resumes print an `OpenCode diagnostics:` path before opening
-the terminal. Full stderr is retained in that private `opencode.stderr.log` file
-beside the Session's capture. Read or tail it from another terminal; native
-errors and retries remain visible in OpenCode without raw logs covering input.
+OpenCode's full stderr is retained in a private `opencode.stderr.log` beside the
+Session's capture. Read or tail it from another terminal; native errors and
+retries remain visible in OpenCode without raw logs covering input.
 
 Interactive startup shows the current preparation stage and elapsed seconds.
 The indicator clears before the native terminal opens; redirected output stays clean.
@@ -882,19 +882,20 @@ one folder name need `?repository=<id>`; an unqualified link to them changes
 nothing and lists the qualified links. Emitted links add the qualifier when needed.
 
 `--host auto` opens where you are: a new workspace in this Herdr pane or cmux
-workspace, then Loopflow Desktop when installed (macOS), then a plain terminal:
-this terminal for a person at a prompt, otherwise a new Terminal window on macOS
-or the desktop's terminal launcher on Linux. A host is current only through its
-own caller context (`HERDR_*`, `CMUX_*`, Desktop's `LF_DESKTOP`); nothing scans
+workspace, or a new window right after this one in tmux, then Loopflow Desktop
+when installed (macOS), then a plain terminal: this terminal for a person at a
+prompt, otherwise a new Terminal window on macOS or the desktop's terminal
+launcher on Linux. A host is current only through its own caller context
+(`HERDR_*`, `TMUX`/`TMUX_PANE`, `CMUX_*`, Desktop's `LF_DESKTOP`); nothing scans
 running applications. A clicked link carries no caller, so it opens in Desktop.
-Use `--host desktop` from a cmux or Herdr shell to open in Desktop anyway. An
+Use `--host desktop` from a cmux, tmux or Herdr shell to open in Desktop anyway. An
 explicit `--host` wins. A destination that refuses lets the next one try; an
 unanswered request is reported and never repeated elsewhere.
 
 Terminal destinations run `lf session connect` for the resolved Work, so its
 primary conversation, admission and attachment fences decide what opens. A
-conversation already live in a cmux or Herdr workspace is focused there, draft
-intact, when this caller is in that host. Live in any other client, it is
+conversation already live in a cmux or Herdr workspace or a tmux pane is
+focused there, draft intact, when this caller is in that host. Live in any other client, it is
 reported as `elsewhere` with its `--takeover` command; ordinary opening never
 moves it. Openings of one Work are serialized: a repeat while its new workspace
 is still starting focuses that workspace instead of creating another. `--available` opens

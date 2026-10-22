@@ -489,6 +489,21 @@ impl SqliteStore {
             .transpose()
     }
 
+    /// The Session an execution owner runs, for its viewers.
+    pub(crate) fn transport_session(
+        &self,
+        owner: &crate::id::LfProcessId,
+    ) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT id FROM agent_sessions WHERE transport_lf_process_id=?1",
+                [owner.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     /// Unfinished interactive Sessions whose execution owner never recorded an
     /// exit, with that owner. Leaving or detaching records one; a restart,
     /// crash or kill does not. Liveness is the caller's observation.

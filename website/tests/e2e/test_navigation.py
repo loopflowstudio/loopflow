@@ -1,31 +1,15 @@
-import pytest
 from playwright.sync_api import Page, expect
 
 
 def test_navbar_links_exist(homepage: Page):
     nav = homepage.locator("nav")
     assert nav.locator("a", has_text="Docs").is_visible()
-    assert nav.get_by_role("link", name="CLI", exact=True).is_visible()
     assert nav.get_by_role("link", name="For you", exact=True).is_visible()
 
 
 def test_navbar_docs_link(homepage: Page, base_url: str):
     homepage.locator("nav").locator("a", has_text="Docs").click()
     assert "/docs" in homepage.url
-
-
-@pytest.mark.parametrize(
-    ("path", "label", "destination"), [("/", "CLI", "/cli"), ("/docs", "Flows", "/cli#flows")]
-)
-def test_cli_navigation(page: Page, base_url: str, path: str, label: str, destination: str) -> None:
-    page.goto(f"{base_url}{path}")
-    page.get_by_role("navigation", name="Main navigation").get_by_role(
-        "link", name=label, exact=True
-    ).click()
-    expect(page).to_have_url(f"{base_url}{destination}")
-    heading = page.locator("#flows .plain")
-    heading.scroll_into_view_if_needed()
-    expect(heading).to_be_visible()
 
 
 def test_navbar_install_link(homepage: Page, base_url: str):

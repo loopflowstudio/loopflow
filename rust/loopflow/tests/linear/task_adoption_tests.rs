@@ -16,22 +16,22 @@ use serde_json::json;
 
 #[test]
 #[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
-fn task_adopts_linear_checkout_and_preserves_flow_history() {
+fn task_adopts_linear_checkout_and_preserves_graph_history() {
     for (operation, remote_only) in [("checkout", false), ("checkout", true)] {
         let repo = TestRepo::new();
         repo.create_file(
             ".lf/config.yaml",
-            "agent: claude\nlinear:\n  team: team-1\n",
+            "agent: claude\nplanning:\n  provider: linear\n  team: team-1\n",
         );
         repo.create_file(
             ".lf/wave/product/GOAL.md",
             "---\nlinear:\n  initiative: initiative-1\n---\nKeep working.\n",
         );
-        repo.create_file(".lf/flows/adoption.yaml", "- cmd: sync --plan\n");
+        repo.create_file(".lf/graphs/adoption.yaml", "- cmd: sync --plan\n");
         // The Project names a workflow; its planning is what the launches below test.
         repo.create_file(
             ".lf/workflows/adoption.yaml",
-            "nodes:\n  demo: demo\nedges:\n  - { from: start, to: demo, flow: adoption }\n  - { from: demo, to: end }\n",
+            "nodes:\n  demo: demo\nedges:\n  - { from: start, to: demo, graph: adoption }\n  - { from: demo, to: end }\n",
         );
         repo.stage_all();
         repo.commit("Fixture planning");
@@ -201,7 +201,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
         let run = |cwd: &Path, args: &[&str]| command(cwd, args).output().unwrap();
         let invoke = |op: &str| {
             let args = if op == "start" {
-                vec!["--task", "FIX-1", "flow", "start", "--json"]
+                vec!["--task", "FIX-1", "graph", "start", "--json"]
             } else {
                 vec!["task", op, "FIX-1", "--json"]
             };
@@ -249,19 +249,19 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
         assert_eq!(runtime.block_on(store.list_tasks(None)).unwrap().len(), 1);
 
         if operation == "checkout" {
-            assert!(support::recorded_flows(home.path()).is_empty());
-            support::record_flow(home.path(), &checkout, "adoption", "implement", "failed");
+            assert!(support::recorded_graphs(home.path()).is_empty());
+            support::record_graph(home.path(), &checkout, "adoption", "implement", "failed");
         }
-        let saved = support::recorded_flows(home.path());
+        let saved = support::recorded_graphs(home.path());
         assert_eq!(saved.len(), 1);
-        // Neither a catalog change nor another checkout touches a Flow's Processes.
+        // Neither a catalog change nor another checkout touches a Graph's Processes.
         fs::write(
-            checkout.join(".lf/flows/adoption.yaml"),
+            checkout.join(".lf/graphs/adoption.yaml"),
             "- cmd: sync --plan\n",
         )
         .unwrap();
         invoke("checkout");
-        assert_eq!(support::recorded_flows(home.path()), saved);
+        assert_eq!(support::recorded_graphs(home.path()), saved);
         assert_eq!(
             runtime
                 .block_on(store.active_task_pr(&task.id))
@@ -278,7 +278,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             fs::read_to_string(repo.path().join("main-notes")).unwrap(),
             "preserve the invoking checkout too\n"
         );
-        // Ignore only the intentionally edited Flow definition in this comparison.
+        // Ignore only the intentionally edited Graph definition in this comparison.
         let status = Command::new("git")
             .args(["status", "--porcelain=v1", "--", "authored.txt"])
             .current_dir(&checkout)
@@ -299,18 +299,18 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             // admission. A connection edit must not strand this adopted Task.
             fs::write(
                 checkout.join(".lf/config.yaml"),
-                "agent: claude\nlinear:\n  team: another-team\n",
+                "agent: claude\nplanning:\n  provider: linear\n  team: another-team\n",
             )
             .unwrap();
-            let output = run(repo.path(), &["-b", "--task", "FIX-1", "flow", "adoption"]);
+            let output = run(repo.path(), &["-b", "--task", "FIX-1", "graph", "adoption"]);
             assert!(
                 output.status.success(),
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            let current = support::recorded_flows(home.path());
+            let current = support::recorded_graphs(home.path());
             assert_eq!(current.len(), saved.len() + 1);
-            assert!(saved.iter().all(|flow| current.contains(flow)));
+            assert!(saved.iter().all(|graph| current.contains(graph)));
             let saved = current;
             let scope = repo.path().canonicalize().unwrap().display().to_string();
             let original: crate::test_linear_input::IssueFixture =
@@ -362,11 +362,11 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                 let output = run(repo.path(), &["-b", "task", "run", "FIX-1"]);
                 assert!(
                     !output.status.success(),
-                    "{condition} allowed a Task Flow launch"
+                    "{condition} allowed a Task Graph launch"
                 );
                 let error = String::from_utf8_lossy(&output.stderr);
                 assert!(error.contains(expected), "{condition}: {error}");
-                assert_eq!(support::recorded_flows(home.path()), saved);
+                assert_eq!(support::recorded_graphs(home.path()), saved);
                 assert_eq!(
                     runtime.block_on(store.get_task(&task.id)).unwrap(),
                     task_before

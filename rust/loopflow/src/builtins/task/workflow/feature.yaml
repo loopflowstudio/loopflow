@@ -1,11 +1,11 @@
 # Design, build and land. Design review and the demo happen in the Task
-# conversation; each edge is the Flow that carries the Task to the next node.
+# conversation; each edge is the Graph that carries the Task to the next node.
 nodes:
   design: { skill: review-design, description: you review the plan }
   demo: { skill: demo, description: you try the change }
 edges:
-  - { from: start, to: design, flow: task-design }
-  - { from: design, to: design, flow: task-design }
-  - { from: design, to: demo, flow: pursue }
-  - { from: demo, to: demo, flow: pursue }
-  - { from: demo, to: end, flow: ship }
+  - { from: start, to: design, graph: task-design }
+  - { from: design, to: design, graph: task-design }
+  - { from: design, to: demo, graph: pursue }
+  - { from: demo, to: demo, graph: pursue }
+  - { from: demo, to: end, graph: ship }

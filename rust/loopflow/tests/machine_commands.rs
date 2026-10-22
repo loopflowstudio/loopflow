@@ -1079,7 +1079,7 @@ fn remote_preview_uses_the_same_work_for_explicit_and_inferred_task_selection() 
         "remote-preview",
         &repo.head_sha(),
     );
-    support::record_flow(
+    support::record_graph(
         &remote_store,
         repo.path(),
         "prior",
@@ -1115,12 +1115,12 @@ fn remote_preview_uses_the_same_work_for_explicit_and_inferred_task_selection() 
 }
 
 #[test]
-fn flow_context_preview_reads_selected_machine_graph_without_executing_steps() {
+fn graph_context_preview_reads_selected_machine_graph_without_executing_steps() {
     let fixture = preview_machines();
     let remote = fixture.root.path().join("remote");
     let repo = remote.join("projects/preview");
     fs::create_dir_all(repo.join(".lf/skills")).unwrap();
-    fs::create_dir_all(repo.join(".lf/flows")).unwrap();
+    fs::create_dir_all(repo.join(".lf/graphs")).unwrap();
     assert!(Command::new("git")
         .args(["init", "-q"])
         .arg(&repo)
@@ -1146,17 +1146,17 @@ fn flow_context_preview_reads_selected_machine_graph_without_executing_steps() {
         fs::write(repo.join(format!(".lf/skills/{skill}.md")), body).unwrap();
     }
     fs::write(
-        repo.join(".lf/flows/repair.yaml"),
+        repo.join(".lf/graphs/repair.yaml"),
         "- work\n- loop: work\n  step: decide\n",
     )
     .unwrap();
-    fs::write(repo.join(".lf/flows/probe.yaml"), "- xor:\n    router: route\n    paths:\n      repair:\n        description: Repair the work\n        flow: repair\n      skip:\n        description: Skip repairs\n- cmd: config set repo_root /must-not-write\n- work\n").unwrap();
+    fs::write(repo.join(".lf/graphs/probe.yaml"), "- xor:\n    router: route\n    paths:\n      repair:\n        description: Repair the work\n        graph: repair\n      skip:\n        description: Skip repairs\n- cmd: config set repo_root /must-not-write\n- work\n").unwrap();
     fs::write(
-        repo.join(".lf/flows/command-first.yaml"),
+        repo.join(".lf/graphs/command-first.yaml"),
         "- cmd: config set repo_root /must-not-write\n- work\n",
     )
     .unwrap();
-    fs::write(repo.join(".lf/flows/invalid.yaml"), "- absent-skill\n").unwrap();
+    fs::write(repo.join(".lf/graphs/invalid.yaml"), "- absent-skill\n").unwrap();
     let local_db = fixture.root.path().join("local/loopflow.db");
     let remote_db = remote.join("store/loopflow.db");
     let before = [checkpoint_bytes(&local_db), checkpoint_bytes(&remote_db)];
@@ -1165,7 +1165,7 @@ fn flow_context_preview_reads_selected_machine_graph_without_executing_steps() {
         "mini",
         "--repo",
         "preview",
-        "flow",
+        "graph",
         "probe",
         "literal 'input'; $(false)",
         "--context",
@@ -1178,11 +1178,11 @@ fn flow_context_preview_reads_selected_machine_graph_without_executing_steps() {
         input["checkout"],
         repo.canonicalize().unwrap().to_str().unwrap()
     );
-    let graph = &input["graph"];
-    assert_eq!(graph["steps"][0]["kind"], "xor");
-    assert_eq!(graph["steps"][0]["paths"][0]["name"], "repair");
-    assert_eq!(graph["steps"][0]["paths"][1]["name"], "skip");
-    let nested = &graph["steps"][0]["paths"][0]["steps"];
+    let compiled = &input["compiled"];
+    assert_eq!(compiled["steps"][0]["kind"], "xor");
+    assert_eq!(compiled["steps"][0]["paths"][0]["name"], "repair");
+    assert_eq!(compiled["steps"][0]["paths"][1]["name"], "skip");
+    let nested = &compiled["steps"][0]["paths"][0]["steps"];
     assert_eq!(nested[1]["returns_to"], nested[0]["key"]);
     let inputs = input["inputs"].as_array().unwrap();
     assert_eq!(inputs.len(), 5);
@@ -1214,7 +1214,7 @@ fn flow_context_preview_reads_selected_machine_graph_without_executing_steps() {
         "mini",
         "--repo",
         "preview",
-        "flow",
+        "graph",
         "command-first",
         "--context",
         "--json",
@@ -1226,7 +1226,7 @@ fn flow_context_preview_reads_selected_machine_graph_without_executing_steps() {
         "mini",
         "--repo",
         "preview",
-        "flow",
+        "graph",
         "invalid",
         "--context",
     ]);
@@ -1777,6 +1777,8 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
         .bind_repository(path.to_str().unwrap(), &repository)
         .unwrap();
     let owner = store.local_machine().unwrap().id;
+    fs::write(path.join(".gitignore"), "target/\n").unwrap();
+    fs::create_dir(path.join("target")).unwrap();
     let shell = fixture.root.path().join("remote/.local/bin/fixture-shell");
     executable(&shell, "#!/bin/sh\nprintf 'shell at %s\\n' \"$PWD\"\ncat\n");
     let launcher = fixture.root.path().join("remote/.local/bin/lf");
@@ -1863,14 +1865,16 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
     assert_eq!(first.task_id, registered.task.id);
     assert_eq!(first.machine_id, owner);
     assert_eq!(first.checkout, path.to_str().unwrap());
-    assert!(first.changed);
-    // An atomic replacement must invalidate even when dirty status stays dirty.
+    assert_eq!(first.paths, [""]);
+    // Ignored build output never invalidates; an atomic replacement must, even
+    // when dirty status stays dirty.
+    fs::write(path.join("target/out"), "build\n").unwrap();
     repo.create_file("replacement", "new peer contents\n");
     fs::rename(path.join("replacement"), path.join("note.txt")).unwrap();
-    let mut changed = false;
+    let mut changed = Vec::new();
     for _ in 0..5 {
-        if read().changed {
-            changed = true;
+        changed.extend(read().paths);
+        if changed.iter().any(|path| path == "note.txt") {
             break;
         }
     }
@@ -1878,6 +1882,7 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
     drop(child.stdin.take());
     let output = child.wait_with_output().unwrap();
     assert_success(&output);
-    assert!(changed);
+    assert!(changed.iter().any(|path| path == "note.txt"));
+    assert!(!changed.iter().any(|path| path.starts_with("target")));
     assert!(!fixture.root.path().join("forbidden-effect").exists());
 }

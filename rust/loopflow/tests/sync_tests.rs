@@ -1110,8 +1110,8 @@ fn squash_parent_conflict_retains_real_target_and_can_abort_or_continue() {
     }
 }
 
-/// Run an operation step the way a Flow process does: as its own `lf` command.
-fn run_flow_command(repo: &std::path::Path, command: &loopflow::flow::Command) {
+/// Run an operation step the way a Graph process does: as its own `lf` command.
+fn run_graph_command(repo: &std::path::Path, command: &loopflow::graph::Command) {
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(&command.argv()[1..])
         .current_dir(repo)
@@ -1125,7 +1125,7 @@ fn run_flow_command(repo: &std::path::Path, command: &loopflow::flow::Command) {
 }
 
 #[test]
-fn saved_flow_command_migrates_and_merges_through_the_cli_path() {
+fn saved_graph_command_migrates_and_merges_through_the_cli_path() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
@@ -1140,9 +1140,9 @@ fn saved_flow_command_migrates_and_merges_through_the_cli_path() {
     repo.push();
     let target = repo.head_sha();
     repo.checkout("feature");
-    let command: loopflow::flow::Command =
+    let command: loopflow::graph::Command =
         serde_json::from_str(r#"{"command":"rebase","args":["origin/main"]}"#).unwrap();
-    run_flow_command(repo.path(), &command);
+    run_graph_command(repo.path(), &command);
     assert_eq!(
         git(repo.path(), &["show", "-s", "--format=%P", "HEAD"]),
         format!("{original} {target}")
@@ -1158,7 +1158,7 @@ fn saved_flow_command_migrates_and_merges_through_the_cli_path() {
 }
 
 #[test]
-fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
+fn saved_graph_sync_follows_task_parent_and_skips_an_already_contained_head() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let child_dir = tempfile::tempdir().unwrap();
@@ -1227,7 +1227,7 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
     repo.push();
     let main_head = repo.head_sha();
     let command = serde_json::from_str(r#"{"command":"sync","args":[]}"#).unwrap();
-    let sync = || run_flow_command(&child_path, &command);
+    let sync = || run_graph_command(&child_path, &command);
     assert_eq!(
         plan_sync(&child_path, Some("origin/parent"), Some(fork.clone()))
             .unwrap()

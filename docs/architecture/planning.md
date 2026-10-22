@@ -125,7 +125,7 @@ the full Task UUID; default checkout names use up to four title words and an ID
 suffix. Retained provider branch names take precedence.
 Placement records the checkout before filesystem creation, without creating a PR or rewriting
 planning fields. Accepted state and completion are retained on the Task, so terminal
-planning prevents first placement even without provider inventory. Task and Flow entry
+planning prevents first placement even without provider inventory. Task and Graph entry
 use the same SQLite admission reader as placement, without a provider resolver.
 It reads one snapshot of saved planning, Workflow state and retained invalidation,
 removal and membership evidence. Missing provider inventory alone does not prevent
@@ -142,7 +142,7 @@ GitHub delivery still requires confirmed merge evidence. Chapter rotation commit
 all selected Waves together, carrying started Tasks and preserving backlog. Stable
 local IDs select the rows and retry receipts; provider aliases select existing
 Projects through their stored mapping. Membership, Project fields, selection and
-pending effects commit together. Connected commands report pending Linear sync.
+pending effects commit together. Connected commands report a pending planning sync.
 Inbound observations preserve pending membership against an unchanged baseline;
 conflicting Linear membership wins while the losing local intention remains in history.
 Mapped membership and Project fields use foreground delivery below; local settlement
@@ -166,7 +166,8 @@ local delivery receipts and mutation identity. Execution columns are absent from
 this writer. Local creation attaches machine-specific metadata afterward in the
 same transaction. Import never creates execution placement or provider attempts.
 
-Repository configuration selects Linear, personal Git (the default) or shared Git.
+Repository configuration selects Linear, shared Git (`shared/main` by default) or
+personal Git.
 Repository `planning` overrides the personal setting as one value. Linear-connected
 machines acquire and deliver independently through their existing local receipts.
 An outage buffers changes locally; Git cannot take over. Git transports code in
@@ -217,7 +218,7 @@ not applied or published evidence; rejected projections retain their failure rea
 Journal read failures fail the status read; Desktop keeps its last reading with the
 error, rather than inventing an empty plan. Foreground CLI, headless Session and Desktop connections own Git exchange
 for their lifetimes; Linear checks run at the boundaries described below. A short save attempts exchange before returning. No resident,
-whole-store callback, scheduler or implicit turn/Flow replay is involved.
+whole-store callback, scheduler or implicit turn/Graph replay is involved.
 
 `--machine` sends portable pushed-code requirements and a Task selector, then the
 target resolves its own configured planning. Linear mappings resolve independently
@@ -233,7 +234,7 @@ CLI and Desktop project creation, field/order edits, state and comments through
 pending in connected repositories; attempted effects retain uncertainty and errors.
 Observed conflicts show both values after adopting Linear. Disconnected repositories
 show no pending Linear delivery; retained losing values remain inspectable.
-Planning acquisition runs at useful boundaries: before Flow steps, after agent
+Planning acquisition runs at useful boundaries: before Graph steps, after agent
 turns, before Linear mutations, and when CLI commands show planning. One team
 query obtains issues and comments changed since its successful watermark; large
 deltas paginate without advancing that watermark early. SQLite shares a ten-second
@@ -476,39 +477,39 @@ Historical provider transitions and archival acknowledgements remain evidence;
 local rotation does not recreate the removed provider-first chapter operation
 or infer that its uncertain effects settled.
 
-## Capture a Flow once
+## Capture a Graph once
 
 ```yaml
-# .lf/flows/build.yaml
+# .lf/graphs/build.yaml
 - step: implement
 - step: compress
 - step: gate
 ```
 
 ```bash
-lf flow build
-lf flow show FLOW_PROCESS --processes --json
+lf graph build
+lf graph show GRAPH_PROCESS --processes --json
 ```
 
-A Flow is one lf process and the step processes it starts; its ID is the Flow
+A Graph is one lf process and the step processes it starts; its ID is the Graph
 process's. Starting one compiles its definition, including every router and
-alternative, into a graph the Flow process holds in memory. One cursor and its return
-counters identify loop passes. Subflows and passes are display lenses over the
+alternative, into a graph the Graph process holds in memory. One cursor and its return
+counters identify loop passes. Subgraphs and passes are display lenses over the
 step processes, with no separate record or process.
 
-Every Flow naming a Task, or run in its checkout, is equally that Task's
+Every Graph naming a Task, or run in its checkout, is equally that Task's
 work; none is selected or privileged. Taskless and Task execution share the
-Flow runner. Each `task run` starts a fresh Flow as a child `lf flow`, and a fresh
-one again when that Flow process fails. Flows hold autonomous
+Graph runner. Each `task run` starts a fresh Graph as a child `lf graph`, and a fresh
+one again when that Graph process fails. Graphs hold autonomous
 steps only: launching one with a `human: true` step is rejected. Finishing
-retains history and chooses no successor; Flow completion alone does not
+retains history and chooses no successor; Graph completion alone does not
 complete Task Work.
 
 ## Move a Task through its workflow
 
 A [workflow](../authoring.md#workflows) is the outer shape of a Task: nodes
 where a person takes part in the Task conversation, and edges that each run
-one Flow. On its first `lf task run`, a Task selects the explicitly named Workflow,
+one Graph. On its first `lf task run`, a Task selects the explicitly named Workflow,
 its Wave default, then repository `workflow:`. A captured Workflow stays fixed. `task_workflows` holds one
 row per Task: the graph as it was then, never edited, and the Task's
 position. A later edit to the YAML applies to Tasks that take it up
@@ -526,8 +527,8 @@ has one read and four writes, and every write appends to
 | arrive | the Process that carried the edge, on success, puts the Task at `to` if it is still on that edge |
 | set | put the Task at a named node |
 
-`lf task run ISSUE [NAME]` chooses, then runs the edge's Flow in the same
-process, which arrives when the Flow succeeds. A Flow that stops leaves the
+`lf task run ISSUE [NAME]` chooses, then runs the edge's Graph in the same
+process, which arrives when the Graph succeeds. A Graph that stops leaves the
 Task on its edge. `lf task workflow move ISSUE NODE` sets. An edge is not chosen
 while another runs. A move's author is its Process's calling conversation, else
 a person; an arrival is the edge's own.
@@ -584,55 +585,55 @@ new attempt errors and confirmations. Composed CLI/Desktop reconnect remains unp
 
 Each executed skill or operation runs in its own child lf Process as the plain
 command: `lf -b skill <name> [message]`, or the operation's own command. The
-step is told nothing about its Flow. The Flow process owns navigation and the Flow's
-record, FlowProcess: the Flow's name and graph as compiled at launch, then one
+step is told nothing about its Graph. The Graph process owns navigation and the Graph's
+record, GraphProcess: the Graph's name and graph as compiled at launch, then one
 appended row per step with its Process, graph node key and per-edge iterations.
 Nothing reads it back to resume. A step's result is how its process exited; a
 deciding or routing step also answers through the final answer of the Session
-turn its Process captured. After an operation the Flow process stops the Flow when a
+turn its Process captured. After an operation the Graph process stops the Graph when a
 landing of its checkout is still being watched: neither failed.
 
 A deciding step's message asks for a JSON `decision`: `advance` or `iterate`
 with a nonempty `summary`, or `blocked` with a nonempty `reason`; the unused
 field is null. A router's message asks for a JSON object containing `path`, one
 of the branch's path names. The contract travels in the message, not as a
-provider schema, and the Flow process accepts the value inside prose or a code fence.
+provider schema, and the Graph process accepts the value inside prose or a code fence.
 Session history retains the native output and completion separately. An invalid
 answer is corrected by `lf -b connect ID --message TEXT` in the same
-conversation, at most twice, then the Flow fails; provider failure remains
+conversation, at most twice, then the Graph fails; provider failure remains
 distinct.
 
-Blocked records the reason and stops at the current Flow position. Existing logs
+Blocked records the reason and stops at the current Graph position. Existing logs
 and outcomes provide the evidence. The Wave operator resolves
 impediments or discusses missing judgment in its ongoing chat. Nothing retries
-or resumes a stopped Flow.
+or resumes a stopped Graph.
 
 ## Inspect before further work
 
 ```bash
 lf task status INF-124
-lf flow show FLOW_PROCESS --processes --json
+lf graph show GRAPH_PROCESS --processes --json
 lf task interrupt INF-124
 lf task run INF-124 --reason "take the smaller approach"
 ```
 
-A killed Flow process leaves its Processes and FlowProcess rows as history; the last step
-row shows where it stood. Nothing restarts or resumes it. A Flow is `current` while its
-Flow process has no recorded exit, `completed` when it succeeded and `stopped`
+A killed Graph process leaves its Processes and GraphProcess rows as history; the last step
+row shows where it stood. Nothing restarts or resumes it. A Graph is `current` while its
+Graph process has no recorded exit, `completed` when it succeeded and `stopped`
 when it exited before the last step. Crash recovery
 belongs to the caller, normally the Task conversation: inspect the Session,
 process and effect receipts, then launch fresh work. Observation does not replay
 work or consume a surviving child's result.
 
-`task run` places the Task, then runs a fresh ordinary Flow in its checkout:
-the same command, checks and records as `lf --task ISSUE flow FLOW` or a run
-from the worktree. It blocks until the Flow ends; a caller that will not wait
+`task run` places the Task, then runs a fresh ordinary Graph in its checkout:
+the same command, checks and records as `lf --task ISSUE graph GRAPH` or a run
+from the worktree. It blocks until the Graph ends; a caller that will not wait
 backgrounds it. `--reason` publishes direction to the Task first. To change
 direction, interrupt, inspect, then run.
 
 Task status and roadmap `execution` observe the Task's most recently launched
-Flow: `none`, `latest` or `finished`. Its only control is `start`, available
-whenever the Task can run, even when an earlier Flow exists.
+Graph: `none`, `latest` or `finished`. Its only control is `start`, available
+whenever the Task can run, even when an earlier Graph exists.
 
 Automatic provider retries within one Process retain earlier failure and usage and
 select only an authorized successor. An uncertain mechanical effect requires
@@ -649,7 +650,7 @@ lf connect SESSION --prepare --json
 
 Discuss design and review feedback in the ongoing Task conversation. Historical
 review feedback remains Session evidence. No Ready/Complete operation closes the
-conversation or releases a Flow. The caller inspects outcomes and effects
+conversation or releases a Graph. The caller inspects outcomes and effects
 before selecting further work; pane closure and provider exit grant no authority.
 
 Saved handoffs retain the Machine and stable installed entry; private-Home
@@ -660,13 +661,13 @@ terminal surface on LfSession identity.
 ## Work, steering and execution
 
 Task status is `Ready`, `Done` or `Abandoned`. Current activity, command outcome,
-conversation state and Flow progress remain separate. A ready Task can have no
+conversation state and Graph progress remain separate. A ready Task can have no
 live process; an absent terminal result cannot prove liveness. Binding to a done
 Task assigns work history without reopening it.
 
 ```bash
 lf comment INF-124 "keep the public name"
-lf --wave product wave-operate "review the current priorities"
+lf --wave product wave-operate "recover the stopped release Task"
 ```
 
 SQLite owns every Task comment. A save records the comment and its stable delivery
@@ -682,32 +683,32 @@ saved steers. Comments and adopted definition revisions save immutable
 steers. Each Session selects steers from checkout/explicit Task associations, Wave
 ancestors and repository. Provider callbacks deliver bounded batches at startup,
 continuation and tool boundaries; the Task brief reloads independently of consumed
-steers. Idle steering starts no Flow. Local emission
+steers. Idle steering starts no Graph. Local emission
 remains unconfirmed and does not prove the model followed a correction. Wave
 planning uses ordinary finite LfSessions.
 
 Work reservation claims an unowned Task in its ownership log; an inspection Process does not. Constructors
 validate Task/Wave ancestry, and chapter transfers preserve historical event
 attribution. Task delivery separately owns Git/PR mutations. Conversation identity
-and Flow membership never substitute for that authority.
+and Graph membership never substitute for that authority.
 
 [Delivery](delivery.md) follows Task Work through Git and GitHub.
 [Execution](execution.md) owns process and conversation admission.
 
 ## Author and discover executable targets
 
-`Target` is the shared executable value: Skill, Command, Flow, or Xor.
-A `Flow` contains `Step { target, id, human, repeat }`; Xor paths contain the same Steps.
-Loading resolves bare names and `flow:` names flow-first, including nested Flow
+`Target` is the shared executable value: Skill, Command, Graph, or Xor.
+A `Graph` contains `Step { target, id, human, repeat }`; Xor paths contain the same Steps.
+Loading resolves bare names and `graph:` names graph-first, including nested Graph
 bodies, and rejects recursive references. `step:` selects a Skill explicitly,
 retaining its name and options until compilation; Xor router names also load then.
-Loading a Flow alone does not capture all instruction bodies.
-There is no separate FlowRef node. Review IDs and repeat edges belong to the
+Loading a Graph alone does not capture all instruction bodies.
+There is no separate GraphRef node. Review IDs and repeat edges belong to the
 Step itself, not to a reusable Target.
 
 Compilation produces `ConcreteStep` plans containing every Skill body and Xor
 router/path. The `sources` breadcrumb retains definition provenance for display.
-These captured plans serve both Task and ordinary execution; a running Flow
+These captured plans serve both Task and ordinary execution; a running Graph
 never resolves names from current source.
 
 Review Sessions launch the captured Skill explicitly, escaping command names.

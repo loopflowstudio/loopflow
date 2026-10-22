@@ -44,7 +44,7 @@ pub enum SessionEventKind {
     Completed,
     /// Final provider output for an exact native turn; completion is separate.
     Output,
-    /// Evidence without an exact native turn; cannot settle a Flow.
+    /// Evidence without an exact native turn; cannot settle a Graph.
     Observed,
 }
 
@@ -78,7 +78,7 @@ pub struct LfSession {
     pub id: LfSessionId,
     /// Immutable captured input; absent until the first explicit input reservation.
     pub artifact_key: Option<String>,
-    /// Causal input reference; grants neither attachment nor Flow authority.
+    /// Causal input reference; grants neither attachment nor Graph authority.
     pub caller_artifact_key: Option<String>,
     pub input_published: bool,
     pub cwd: std::path::PathBuf,
@@ -89,8 +89,8 @@ pub struct LfSession {
     pub iterations: Option<Vec<Vec<u32>>>,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
-    /// The Flow whose step captured the current input; derived, never stored.
-    pub flow_lf_process_id: Option<String>,
+    /// The Graph whose step captured the current input; derived, never stored.
+    pub graph_lf_process_id: Option<String>,
     pub work_source: Option<WorkSource>,
     /// Time of a prospective bind; absent for admission or unknown historical timing.
     pub bound_at: Option<i64>,
@@ -161,7 +161,7 @@ pub enum TitleSource {
 
 /// What a conversation is the one ongoing conversation of. A repository's or
 /// Wave's row carries the scope's identity; a Task names its own, which stays
-/// one of the Task's conversations. Primary grants no Flow or process authority.
+/// one of the Task's conversations. Primary grants no Graph or process authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PrimaryScope {
@@ -249,46 +249,46 @@ pub(crate) struct SessionSummary {
     pub interactive: bool,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
-    pub flow_lf_process_id: Option<String>,
+    pub graph_lf_process_id: Option<String>,
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub node: Option<u32>,
     pub iterations: Option<Vec<Vec<u32>>>,
-    pub flow: Option<FlowProcessSummary>,
-    /// Whether this Session's step is the last its Flow launched.
-    pub flow_step_latest: bool,
+    pub graph: Option<GraphProcessSummary>,
+    /// Whether this Session's step is the last its Graph launched.
+    pub graph_step_latest: bool,
     pub independent: bool,
     pub wave_name: Option<String>,
     pub task_identifier: Option<String>,
 }
 
-/// A Flow as its Flow process records it; Current says nothing about a live process.
+/// A Graph as its Graph process records it; Current says nothing about a live process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowProcessSummary {
-    /// The Flow process.
+pub struct GraphProcessSummary {
+    /// The Graph process.
     pub id: String,
     pub name: String,
-    pub state: FlowProcessSummaryState,
+    pub state: GraphProcessSummaryState,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
-    /// When its latest step started, or its Flow process exited.
+    /// When its latest step started, or its Graph process exited.
     pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum FlowProcessSummaryState {
-    /// The Flow process has no recorded exit.
+pub enum GraphProcessSummaryState {
+    /// The Graph process has no recorded exit.
     Current,
     Completed,
-    /// The Flow process exited before the Flow's last step.
+    /// The Graph process exited before the Graph's last step.
     Stopped,
 }
 
-impl FlowProcessSummaryState {
-    /// What a Flow process's recorded outcome and exit time say of its Flow.
+impl GraphProcessSummaryState {
+    /// What a Graph process's recorded outcome and exit time say of its Graph.
     pub(crate) fn of_process(outcome: Option<&str>, completed_at: Option<i64>) -> Self {
         match (outcome, completed_at) {
             (Some("succeeded"), _) => Self::Completed,
@@ -324,7 +324,7 @@ pub(crate) fn conversation(
     skill: &str,
     title: String,
 ) -> anyhow::Result<LfSession> {
-    let skill = crate::flow::load_skill(skill, cwd)?.name;
+    let skill = crate::graph::load_skill(skill, cwd)?.name;
     let agent = crate::ops::task::resolve_task_agent(cwd, agent, None);
     let (provider, model) = crate::config::parse_agent(&agent);
     Ok(LfSession {
@@ -341,7 +341,7 @@ pub(crate) fn conversation(
         iterations: None,
         task_id: None,
         wave_id: None,
-        flow_lf_process_id: None,
+        graph_lf_process_id: None,
         work_source: None,
         bound_at: None,
         interactive: true,

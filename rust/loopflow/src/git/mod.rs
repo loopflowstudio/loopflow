@@ -3,9 +3,9 @@ pub(crate) mod scratch;
 pub mod worktree_name;
 pub mod worktrees;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{Seek, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -1028,7 +1028,44 @@ pub(crate) fn worktree_add_inheriting(
             ),
         });
     }
+    if let Err(error) = _mark_lf_created(path, inherit) {
+        tracing::warn!(path = %path.display(), %error, "failed to mark worktree as lf-created");
+    }
     Ok(())
+}
+
+/// Admin-dir file recording that lf created a worktree. Git removes it with
+/// the worktree; the working tree never sees it.
+const LF_CREATED_MARKER: &str = "loopflow-created";
+
+fn _mark_lf_created(path: &Path, inherit: &impl Fn(&mut Command)) -> Result<(), GitError> {
+    let marker = git_stdout_inheriting(
+        path,
+        &["rev-parse", "--git-path", LF_CREATED_MARKER],
+        inherit,
+    )?;
+    fs::write(path.join(marker.trim()), "")?;
+    Ok(())
+}
+
+/// The real-path root of the worktree containing `cwd`, when lf created it.
+/// Git resolves symlinks in `--show-toplevel`, matching Claude's config keys.
+pub(crate) fn lf_created_worktree(cwd: &Path) -> Option<PathBuf> {
+    let output = git_stdout(
+        cwd,
+        &[
+            "rev-parse",
+            "--show-toplevel",
+            "--git-path",
+            LF_CREATED_MARKER,
+        ],
+    )
+    .ok()?;
+    let mut lines = output.lines();
+    let root = lines.next()?;
+    cwd.join(lines.next()?)
+        .is_file()
+        .then(|| PathBuf::from(root))
 }
 
 /// Read a file's contents at a given revision.
@@ -1256,6 +1293,43 @@ pub fn intervention_state(worktree: &Path) -> Result<Option<&'static str>, GitEr
         return Ok(Some("bisect"));
     }
     Ok(None)
+}
+
+/// The checkout-relative `paths` git ignores, judged by `git check-ignore` at `root`.
+/// Tracked paths are never ignored.
+pub(crate) fn ignored_paths<'a>(
+    root: &Path,
+    paths: impl IntoIterator<Item = &'a str>,
+) -> std::io::Result<HashSet<String>> {
+    // File-backed input avoids a pipe deadlock for batches larger than a pipe buffer.
+    let mut input = tempfile::tempfile()?;
+    let mut empty = true;
+    for path in paths {
+        input.write_all(path.as_bytes())?;
+        input.write_all(b"\0")?;
+        empty = false;
+    }
+    if empty {
+        return Ok(HashSet::new());
+    }
+    input.rewind()?;
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(["check-ignore", "--stdin", "-z"])
+        .stdin(input)
+        .output()?;
+    if !output.status.success() && output.status.code() != Some(1) {
+        return Err(std::io::Error::other(format!(
+            "cannot read ignored paths: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect())
 }
 
 pub fn absolute_git_dir(worktree: &Path) -> Result<PathBuf, GitError> {
@@ -1760,6 +1834,12 @@ mod tests {
         // Verify branch was created
         let branch = current_branch(&wt_path).expect("get branch");
         assert_eq!(branch, Some("new-feature".to_string()));
+
+        assert_eq!(
+            lf_created_worktree(&wt_path),
+            Some(wt_path.canonicalize().unwrap())
+        );
+        assert!(!wt_path.join(LF_CREATED_MARKER).exists());
 
         // Clean up
         worktree_remove(repo.path(), &wt_path).expect("remove worktree");

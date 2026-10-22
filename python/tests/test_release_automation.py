@@ -196,16 +196,16 @@ def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
     assert jobs == [
         {
             "name": "telemetry-daily",
-            "command": ["--wave", "infrastructure", "--batch", "flow", "telemetry-daily"],
+            "command": ["--wave", "infrastructure", "--batch", "graph", "telemetry-daily"],
             "schedule": "0 0 9 * * *",
         },
         {
             "name": "release-run",
-            "command": ["--wave", "infrastructure", "--batch", "flow", "release-run"],
+            "command": ["--wave", "infrastructure", "--batch", "graph", "release-run"],
             "schedule": "0 0 10 * * *",
         },
     ]
-    assert yaml.safe_load((ROOT / ".lf/flows/release-run.yaml").read_text()) == [
+    assert yaml.safe_load((ROOT / ".lf/graphs/release-run.yaml").read_text()) == [
         {"cmd": "repo release run patch"}
     ]
 
@@ -226,8 +226,8 @@ def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
     assert '"${minimal_env[@]}" lf cron sync --wave "$wave"' in bootstrap
     assert 'lf cron list --wave "$wave" --json' in bootstrap
     assert "lf cron trigger" in bootstrap
-    assert "--flow telemetry-daily --wait --timeout 15m" in bootstrap
-    assert "--flow release-run --wait --timeout 3h" in bootstrap
+    assert "--graph telemetry-daily --wait --timeout 15m" in bootstrap
+    assert "--graph release-run --wait --timeout 3h" in bootstrap
     assert 'lf cron history --wave "$wave" --days 35' in bootstrap
     assert "env -i" in bootstrap
     assert "DOPPLER_TOKEN" not in bootstrap

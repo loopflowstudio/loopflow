@@ -22,7 +22,7 @@ fn lf_with(
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     for (name, _) in std::env::vars_os() {
         let name = name.to_string_lossy();
-        if ["LF_", "CMUX_", "HERDR_"]
+        if ["LF_", "CMUX_", "HERDR_", "TMUX"]
             .iter()
             .any(|prefix| name.starts_with(prefix))
         {
@@ -232,7 +232,7 @@ fn cmux_opens_the_task_conversation_through_session_connect() {
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     // The Task waits at its design review: the workspace name says so.
-    let graph = serde_json::json!({"name": "feature", "nodes": [{"name": "design", "skill": "review-design", "description": null}], "edges": [{"from": "design", "to": "end", "flow": null}]});
+    let graph = serde_json::json!({"name": "feature", "nodes": [{"name": "design", "skill": "review-design", "description": null}], "edges": [{"from": "design", "to": "end", "graph": null}]});
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
         .execute(
@@ -310,6 +310,38 @@ fn herdr_types_connect_into_a_newly_created_pane() {
 }
 
 #[test]
+fn tmux_opens_a_named_window_after_the_callers() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let log = host(bin.path(), "tmux", "%7", 0);
+    let url = format!("loopflow://{}/task/INF-123", folder(repo.path()));
+    let report = json(&lf_with(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &[("TMUX", "/tmp/tmux-1000/default,1,0"), ("TMUX_PANE", "%3")],
+        &["open", &url, "--json"],
+    ));
+    assert_eq!(report["receipts"][0]["host"], "tmux");
+    assert_eq!(report["receipts"][0]["status"], "opening");
+    assert_eq!(report["receipts"][0]["destination"], "%7");
+    let call = std::fs::read_to_string(log).unwrap();
+    assert!(
+        call.starts_with(
+            "new-window -a -t %3 -P -F #{pane_id} -n INF-123 · Prove Task PR transitions -c "
+        ),
+        "{call}"
+    );
+    assert!(
+        call.trim_end().ends_with(" session connect --task INF-123"),
+        "{call}"
+    );
+}
+
+#[test]
 fn refused_host_reports_cause_and_the_usable_command() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
@@ -369,6 +401,8 @@ fn automatic_route_opens_where_the_caller_is() {
         ("HERDR_PANE_ID", "w1:p1"),
     ];
     assert_eq!(route(&herdr)["hosts"], order(&["herdr"]));
+    let tmux = [("TMUX", "/tmp/tmux-1000/default,1,0"), ("TMUX_PANE", "%0")];
+    assert_eq!(route(&tmux)["hosts"], order(&["tmux"]));
     assert_eq!(route(&[])["hosts"], order(&[]));
     if cfg!(target_os = "macos") {
         let cmux = [
@@ -442,7 +476,7 @@ fn live_conversation(
                 iterations: None,
                 task_id: None,
                 wave_id: None,
-                flow_lf_process_id: None,
+                graph_lf_process_id: None,
                 work_source: None,
                 bound_at: None,
                 interactive: true,
@@ -774,7 +808,7 @@ fn links_tell_the_current_conversation_from_another_on_the_same_task() {
         &provider.0,
         started,
         repo.path(),
-        "Flow step",
+        "Graph step",
         1,
         0,
     );
@@ -820,7 +854,7 @@ fn links_tell_the_current_conversation_from_another_on_the_same_task() {
     assert_eq!(
         relation(&step),
         "other_conversation",
-        "sharing a Task does not make a Flow step the Task's conversation"
+        "sharing a Task does not make a Graph step the Task's conversation"
     );
 
     let own = caller(&primary);

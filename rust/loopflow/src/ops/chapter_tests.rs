@@ -398,7 +398,7 @@ async fn local_task(
 async fn local_started_task(
     context: &LinearTestContext,
     repo: &std::path::Path,
-) -> (Task, TaskPr, Vec<crate::ops::flow_process::FlowProcess>) {
+) -> (Task, TaskPr, Vec<crate::ops::graph_process::GraphProcess>) {
     let (task, _) = local_task(
         context,
         repo,
@@ -408,20 +408,20 @@ async fn local_started_task(
         "0000000000000000000000000000000000000000",
     )
     .await;
-    // Allocating the checkout claimed the Task; a Flow in it is its work.
+    // Allocating the checkout claimed the Task; a Graph in it is its work.
     assert!(context.store.task_owned(&task.id).await.unwrap());
-    context.store.sqlite.test_flow(
+    context.store.sqlite.test_graph(
         "captured",
         &repo.to_string_lossy(),
         &[("commit -m work", Some("succeeded"))],
         None,
     );
-    let flows = context.store.sqlite.task_flows(&task.id).unwrap();
-    assert_eq!(flows.len(), 1);
+    let graphs = context.store.sqlite.task_graphs(&task.id).unwrap();
+    assert_eq!(graphs.len(), 1);
     let pr = context.store.task_prs(&task.id).await.unwrap().remove(0);
     // Compare persisted values: SQLite stores timestamps at second precision.
     let task = context.store.get_task(&task.id).await.unwrap().unwrap();
-    (task, pr, flows)
+    (task, pr, graphs)
 }
 
 fn clean_checkout(checkout: &std::path::Path) -> String {
@@ -487,7 +487,11 @@ fn fixture_repo(root: &std::path::Path) -> std::path::PathBuf {
             .unwrap()
             .success());
     }
-    std::fs::write(repo.join(".lf/config.yaml"), "linear:\n  team: team-1\n").unwrap();
+    std::fs::write(
+        repo.join(".lf/config.yaml"),
+        "planning:\n  provider: linear\n  team: team-1\n",
+    )
+    .unwrap();
     for wave in ["a", "b"] {
         std::fs::create_dir_all(repo.join(format!(".lf/wave/{wave}"))).unwrap();
         std::fs::write(
@@ -535,14 +539,14 @@ async fn explicit_sync_adopts_project_status_without_changing_historical_content
             .unwrap()
             .success());
     }
-    let original = "Keep this prose.\n\n## Flows\nrecommended: custom\n\n## KRs\n- [ ] Keep this KR\n\n## Notes\nRetain this closing note.\n";
+    let original = "Keep this prose.\n\n## Graphs\nrecommended: custom\n\n## KRs\n- [ ] Keep this KR\n\n## Notes\nRetain this closing note.\n";
     let mut state = provider_fixture();
     let old = state
         .projects
         .get_mut("00000000-0000-4000-8000-000000000001")
         .unwrap();
     old["name"] = json!("previous");
-    old["description"] = json!("Authored summary unrelated to the Flow or KRs.");
+    old["description"] = json!("Authored summary unrelated to the Graph or KRs.");
     old["content"] = json!(original);
     old["status"]["type"] = json!("planned");
     let mut expected = old.clone();
@@ -550,7 +554,7 @@ async fn explicit_sync_adopts_project_status_without_changing_historical_content
     let provider = Arc::new(Mutex::new(state));
     let (url, server) = serve_fixture(provider.clone()).await;
     let home = context(&directory.path().join("sync"), &repo, &url).await;
-    let (task, pr, flow) = local_started_task(&home, &repo).await;
+    let (task, pr, graph) = local_started_task(&home, &repo).await;
     rusqlite::Connection::open(&home.path)
         .unwrap()
         .execute(
@@ -592,7 +596,7 @@ async fn explicit_sync_adopts_project_status_without_changing_historical_content
     let retained = store.get_task(&task.id).await.unwrap().unwrap();
     assert_eq!(retained.project_id, task.project_id);
     assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-    assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
+    assert_eq!(store.sqlite.task_graphs(&task.id).unwrap(), graph);
     server.abort();
 }
 
@@ -618,7 +622,7 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
     }
     let (url, server) = serve_fixture(provider.clone()).await;
     let home = context(&directory.path().join("archive"), &repo, &url).await;
-    let (task, pr, flow) = local_started_task(&home, &repo).await;
+    let (task, pr, graph) = local_started_task(&home, &repo).await;
     LINEAR_TEST_CONTEXT
         .scope(home, async {
             let (ctx, initiative) = resolve_context(&repo, "a").await.unwrap();
@@ -649,7 +653,7 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
             assert_eq!(retained.linear_id, task.linear_id);
             assert_eq!(retained.title, "a-started");
             assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-            assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
+            assert_eq!(store.sqlite.task_graphs(&task.id).unwrap(), graph);
         })
         .await;
     assert_eq!(provider.lock().await.mutations, 0);
@@ -699,7 +703,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
     let provider = Arc::new(Mutex::new(provider_fixture()));
     let (url, server) = serve_fixture(provider.clone()).await;
     let original =
-        "Keep this prose.\n\n## Flows\nrecommended: custom\n\n## KRs\n- [ ] Keep this KR\n";
+        "Keep this prose.\n\n## Graphs\nrecommended: custom\n\n## KRs\n- [ ] Keep this KR\n";
     for status in ["backlog", "planned"] {
         for second_home in [false, true] {
             {
@@ -711,7 +715,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                     .unwrap();
                 old["status"]["type"] = json!(status);
                 old["content"] = json!(original);
-                for (id, name, archived, flow) in [
+                for (id, name, archived, graph) in [
                     (
                         "00000000-0000-4000-8000-000000000003",
                         "next",
@@ -725,7 +729,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                     project["id"] = json!(id);
                     project["name"] = json!(format!("A — {name}"));
                     project["status"]["type"] = json!(if archived { "started" } else { "planned" });
-                    project["content"] = json!(original.replace("custom", flow));
+                    project["content"] = json!(original.replace("custom", graph));
                     project["archivedAt"] = if archived {
                         json!("2026-09-01T00:00:00Z")
                     } else {
@@ -803,7 +807,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                     let store = super::planning_store().await.unwrap();
                     let task = store.get_task_by_issue("a-started").await.unwrap().unwrap();
                     let prs = store.task_prs(&task.id).await.unwrap();
-                    let flow = store.sqlite.task_flows(&task.id).unwrap();
+                    let graph = store.sqlite.task_graphs(&task.id).unwrap();
                     let (ctx, initiative) = resolve_context(&repo, "a").await.unwrap();
                     super::adopt_legacy_projects(&repo, &store, "a", &ctx, &initiative, true)
                         .await
@@ -820,7 +824,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                     assert_eq!(provider.lock().await.mutations, mutations);
                     assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
                     assert_eq!(store.task_prs(&task.id).await.unwrap(), prs);
-                    assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
+                    assert_eq!(store.sqlite.task_graphs(&task.id).unwrap(), graph);
                     {
                         let state = provider.lock().await;
                         assert_eq!(state.projects.len(), 4);
@@ -867,7 +871,7 @@ async fn legacy_adoption_leaves_foreign_team_projects_and_receipts_untouched() {
             .get_mut("00000000-0000-4000-8000-000000000001")
             .unwrap();
         old["status"]["type"] = json!("backlog");
-        old["content"] = json!("## Flows\nrecommended: custom");
+        old["content"] = json!("## Graphs\nrecommended: custom");
         for id in ["00000000-0000-4000-8000-000000000003", "a-archived"] {
             let mut foreign = state.projects["00000000-0000-4000-8000-000000000001"].clone();
             foreign["id"] = json!(id);
@@ -945,7 +949,7 @@ async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
         state
             .projects
             .get_mut("00000000-0000-4000-8000-000000000001")
-            .unwrap()["content"] = json!("## Flows\nrecommended: custom");
+            .unwrap()["content"] = json!("## Graphs\nrecommended: custom");
     }
     let (url, server) = serve_fixture(provider.clone()).await;
     let home = context(&directory.path().join("unrecorded"), &repo, &url).await;
@@ -972,7 +976,7 @@ async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
                 future["id"] = json!("a-future");
                 future["name"] = json!("A — future");
                 future["status"]["type"] = json!("planned");
-                future["content"] = json!("flow: future-custom");
+                future["content"] = json!("graph: future-custom");
                 state.projects.insert("a-future".into(), future);
             }
             assert!(

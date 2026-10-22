@@ -183,6 +183,9 @@ fn create(
     ] {
         fs::create_dir_all(manifest.directory.join(name))?;
     }
+    // Migrating the snapshot spills SQLite statement journals and temp tables
+    // into TMPDIR; inside the sandbox only the clone's own tmp is writable.
+    std::env::set_var("TMPDIR", manifest.directory.join("tmp"));
     fs::copy(std::env::current_exe()?, manifest.directory.join("bin/lf"))?;
     crate::store::copy::snapshot(
         &manifest.source.join("loopflow.db"),

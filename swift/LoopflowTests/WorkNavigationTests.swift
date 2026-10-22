@@ -239,7 +239,7 @@ struct WorkNavigationTests {
     }
 
     @Test("Checkout association groups independent Sessions despite different attribution")
-    func checkoutOwnsGroupingWithoutGrantingFlowMembership() throws {
+    func checkoutOwnsGroupingWithoutGrantingGraphMembership() throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
         let original = try session("independent", work: .task(id: "another-task"))
         var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
@@ -250,7 +250,7 @@ struct WorkNavigationTests {
         let task = try #require(projection.waves.flatMap(\.tasks).first { !$0.sessions.isEmpty })
         #expect(task.task.runtime?.workId == associated.workspace?.taskId)
         #expect(associated.work == .task(id: "another-task"))
-        #expect(associated.flowMembership == .independent)
+        #expect(associated.graphMembership == .independent)
         #expect(projection.unmatchedSessions.isEmpty)
         #expect(projection.subject(for: associated.id) == task.id.work)
     }
@@ -666,7 +666,7 @@ struct WorkNavigationTests {
         let model = try model()
         await model.refresh()
         let found = try #require(model.task(id: "issue-review"))
-        let empty = try JSONDecoder().decode(TaskOverview.self, from: Data(#"{"sessions":[],"flow_processes":[],"processes":[],"workflow":null}"#.utf8))
+        let empty = try JSONDecoder().decode(TaskOverview.self, from: Data(#"{"sessions":[],"graph_processes":[],"processes":[],"workflow":null}"#.utf8))
         let loading = TaskWorkflowHeader(model: model, task: found.task, work: .loading)
         #expect(try loading.inspect().find(text: "Reading workflow…").string() == "Reading workflow…")
         #expect(throws: (any Error).self) { try loading.inspect().find(text: "No workflow selected") }
@@ -911,7 +911,7 @@ struct WorkNavigationTests {
          "workspace":{"machine_id":"local","worktree":"/src/loopflow","task_id":\(taskJSON),"unavailable":null},
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
          "wave_id":\(waveJSON),"work_path":null,"actions":\(sessionActionFixtureJSON(state: state.rawValue)),
-         "ready_summary":null,"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
+         "ready_summary":null,"title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
         """.utf8))
     }
 }

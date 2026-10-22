@@ -3,51 +3,51 @@ pub mod name;
 use std::path::Path;
 
 use crate::error::LoadError;
-use crate::flow::Command;
-use crate::flow::DefinitionLoader;
-use crate::flow::FlowDefinition;
-use crate::flow::Skill;
-use crate::flow::Step;
-use crate::flow::XorDef;
+use crate::graph::Command;
+use crate::graph::DefinitionLoader;
+use crate::graph::GraphDefinition;
+use crate::graph::Skill;
+use crate::graph::Step;
+use crate::graph::XorDef;
 use serde::{Deserialize, Serialize};
 
 /// Kind restriction for named-definition lookup; commands are selected by the CLI tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefinitionKind {
     Skill,
-    Flow,
+    Graph,
 }
 
 impl DefinitionKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Skill => "skill",
-            Self::Flow => "flow",
+            Self::Graph => "graph",
         }
     }
 }
 
-/// An executable value shared by CLI selection and authored Flow composition.
+/// An executable value shared by CLI selection and authored Graph composition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Target {
     Command(Command),
     Skill(Skill),
-    Flow(FlowDefinition),
+    Graph(GraphDefinition),
     Xor(XorDef),
 }
 
 impl Target {
-    /// Adapt a selected executable only when the caller needs Flow execution.
-    pub fn into_flow(self) -> FlowDefinition {
+    /// Adapt a selected executable only when the caller needs Graph execution.
+    pub fn into_graph(self) -> GraphDefinition {
         let name = match &self {
-            Self::Flow(flow) => flow.name.clone(),
+            Self::Graph(graph) => graph.name.clone(),
             Self::Command(command) => command.display_name(),
             Self::Skill(skill) => skill.name.clone(),
             Self::Xor(_) => "xor".to_string(),
         };
         match self {
-            Self::Flow(flow) => flow,
-            target => FlowDefinition {
+            Self::Graph(graph) => graph,
+            target => GraphDefinition {
                 name,
                 items: vec![Step::new(target)],
             },
@@ -82,16 +82,16 @@ mod tests {
             "Current instructions",
         )
         .unwrap();
-        let mut captured = crate::flow::Skill::named("review");
+        let mut captured = crate::graph::Skill::named("review");
         captured.content = Some("Retired captured instructions".into());
         std::env::set_var(
             "LF_HUMAN_SESSION",
             serde_json::json!({
-                "kind": "flow",
+                "kind": "graph",
                 "token": {
                     "task_id": crate::work::task::TaskId::new(),
                     "invocation_id": "legacy",
-                    "flow": "legacy",
+                    "graph": "legacy",
                     "node_id": "review",
                     "skill": captured,
                     "iteration": 0
@@ -171,12 +171,12 @@ mod tests {
             assert!(
                 matches!(
                     resolve_definition(tmp.path(), name, None).unwrap(),
-                    Target::Flow(_)
+                    Target::Graph(_)
                 ),
                 "{name}"
             );
         }
-        // A workflow is traversed by `lf task run`, never run as a Flow.
+        // A workflow is traversed by `lf task run`, never run as a Graph.
         for name in ["feature", "code"] {
             let error = resolve_definition(tmp.path(), name, None).unwrap_err();
             assert!(matches!(error, crate::error::LoadError::Workflow(_)));

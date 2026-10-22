@@ -1390,20 +1390,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-hero h1 { max-width: 980px; margin-bottom: 26px; }
 .home-hero .actions { font-size: 13px; }
 .home-hero .actions a:not(.button) { text-decoration: underline; text-underline-offset: 4px; }
-/* The engineers' page: a narrow column of plain lists. */
 .home-page .home-hero:has(.rotating) { padding-bottom: 0; }
-.home-page .reading.closing { padding: 56px 0 80px; }
-.home-page .reading.closing .eyebrow { color: var(--burgundy); margin-bottom: 14px; }
-.home-page .reading.closing .install-links { margin-top: 18px; }
-.home-page .reading { max-width: 900px; padding-top: 36px; }
-.home-page .reading h2 { font-size: clamp(30px, 3.2vw, 42px); margin: 30px 0 12px; }
-.home-page .plain { list-style: none; margin: 26px 0 0; padding: 22px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font: 13.5px/1.7 var(--font-mono); color: #333; }
-.home-page .plain li { list-style: none; margin: 0 0 9px; padding-left: 2ch; text-indent: -2ch; }
-.home-page .plain li:last-child { margin-bottom: 0; }
-.home-page .plain li::before { content: "- "; color: var(--text-secondary); }
-.home-page .plain b { color: var(--text); font-weight: 500; }
-.home-page .plain code { display: inline; text-indent: 0; color: var(--text); }
-.home-page .plain b::after { content: ":"; }
 .home-page .more { font: 12px/1.6 var(--font-mono); color: var(--text-secondary); display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 14px 0 0; }
 .home-page .more a { text-decoration: underline; text-underline-offset: 4px; }
 .home-hero h1 + .install-row { margin-top: 34px; }
@@ -1498,7 +1485,6 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
     .home-hero { padding: 44px 0 36px; }
         .home-page .install-row .term { font-size: 12px; padding: 14px; }
     .home-page .copy { min-width: 72px; padding: 0 12px; }
-    .home-page .plain { font-size: 12.5px; }
         .home-page .strip { grid-template-columns: 1fr 1fr; }
     .home-page .work-row, .home-page .efforts .work-row { grid-template-columns: 1fr; gap: 14px; }
     .studio-hero { padding: 44px 0 34px; }
@@ -1620,6 +1606,71 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .appmock .t6 .id{font:12px var(--font-mono);color:var(--text-secondary)}
 .appmock .t6 .done b{font-weight:400;color:var(--text-secondary)}
 @media (max-width:900px){.appmock .wf{align-items:stretch}.appmock .wf .cap{padding-top:0}.appmock .wf .edge i{width:2px;margin:8px auto}.appmock .t6 li{grid-template-columns:22px minmax(0,1fr)}.appmock .t6 .pos{grid-column:2;justify-self:start}.appmock .t6 .id{display:none}}
+.appmock .t6 .who{display:block;font:12px var(--font-mono);color:var(--text-secondary);margin-top:2px}
+.home-page .system .term{margin:22px 0 0;font-size:12px;overflow-x:auto;max-width:100%}
+.home-page .system article{min-width:0}
+/* Hero pictures: the agents dashboard and the team view, side by side. */
+.appmock.duo{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:start}
+.appmock.duo .shot{margin:0;min-width:0}
+.appmock.duo .win{display:block}
+.appmock.duo header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;padding:18px 20px 14px;border-bottom:1px solid #e2dcd2;background:#f7f3ed}
+.appmock.duo h3{font:400 24px/1.1 var(--font-serif);color:var(--burgundy);margin:0}
+.appmock .dash header p{margin:0;font:12px var(--font-mono);color:var(--text-secondary)}
+.appmock .dash header b{font-weight:600;color:var(--text);margin-left:10px}
+.appmock .dash header b.w{color:var(--wine)}
+.appmock .dash header b.ok{color:#1f6b36}
+.appmock .runs{list-style:none;margin:0;padding:14px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.appmock .runs>li{list-style:none;margin:0;background:#fff;border:1px solid var(--border);border-radius:8px;padding:11px 12px 10px;min-width:0}
+.appmock .runs>li.need{border-color:#e7b7c7;box-shadow:inset 3px 0 0 var(--wine)}
+.appmock .runs>li.done{background:none}
+.appmock .runs .t{margin:0 0 6px;font-size:13px;font-weight:600;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.appmock .runs .done .t{font-weight:400;color:var(--text-secondary)}
+.appmock .runs .m{margin:0;display:flex;justify-content:space-between;gap:8px;font:11px var(--font-mono);color:var(--text-secondary)}
+.appmock .runs .st{color:var(--wine);white-space:nowrap}
+.appmock .runs .st.run{color:#5a524a}
+.appmock .runs .st.run::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#3b8a55;margin-right:6px;vertical-align:1px;animation:lf-pulse 1.6s ease-in-out infinite}
+.appmock .runs .st.ok{color:#1f6b36}
+.appmock .steps{list-style:none;display:flex;gap:4px;margin:9px 0 0;padding:0}
+.appmock .steps li{list-style:none;margin:0;flex:1;height:4px;border-radius:2px;background:#ece8e0}
+.appmock .steps .d{background:#b9b1a6}
+.appmock .steps .r{background:#3b8a55}
+.appmock .steps .y{background:var(--wine)}
+@keyframes lf-pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.appmock .runs .st.run::before{animation:none}}
+.appmock .people{list-style:none;display:flex;gap:14px;margin:0;padding:0}
+.appmock .people li{list-style:none;margin:0;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)}
+.appmock .team i{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;font:600 9px var(--font-mono);font-style:normal;color:#fff;background:var(--burgundy);flex:none}
+.appmock .team i.a{background:#2f6f8f}
+.appmock .team i.b{background:#7a5c1e}
+.appmock .team i.c{background:#4b7a3a}
+.appmock .team i.u{background:#fff;color:var(--text-secondary);box-shadow:inset 0 0 0 1px #b9b1a6}
+.appmock .waves{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px}
+.appmock .waves section{padding:0;margin:0;min-width:0}
+.appmock .waves h4{font:400 19px var(--font-serif);color:var(--text);margin:0 0 2px}
+.appmock .waves section>p{margin:0 0 10px;font-size:11.5px;line-height:1.4;color:var(--text-secondary)}
+.appmock .waves ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.appmock .waves li{list-style:none;margin:0;background:#fff;border:1px solid var(--border);border-radius:8px;padding:9px 10px;display:grid;gap:7px}
+.appmock .waves li b{font-size:12.5px;font-weight:600;line-height:1.3}
+.appmock .waves li span{display:flex;align-items:center;gap:6px;font:11px var(--font-mono);color:var(--text-secondary)}
+.appmock .waves li.open{background:none;border-style:dashed}
+.appmock .waves li.done b{font-weight:400;color:var(--text-secondary)}
+@media (max-width:1000px){.appmock.duo{grid-template-columns:1fr}}
+@media (max-width:560px){.appmock .runs{grid-template-columns:1fr}.appmock .waves{grid-template-columns:1fr}}
+.appmock.duo .win>header{margin:0;min-height:0;height:auto}
+.appmock.duo header>*{margin-top:0;margin-bottom:0}
+.appmock .runs .ag{white-space:nowrap}
+.appmock .runs .st{overflow:hidden;text-overflow:ellipsis}
+.appmock .dash header b:first-child{margin-left:0}
+.appmock.duo .win{position:relative}
+.appmock.duo .win::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(-45deg,#722f3709 0 12px,transparent 12px 24px)}
+.appmock .sketch{position:absolute;z-index:1;bottom:16px;right:16px;margin:0;padding:5px 11px;border:1.5px dashed var(--wine);border-radius:6px;background:#fdfbf7e6;font:600 11px/1.4 var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--wine);transform:rotate(-2deg)}
+.appmock .sketch{top:50%;left:50%;bottom:auto;right:auto;transform:translate(-50%,-50%) rotate(-4deg);padding:10px 20px;font-size:15px;border-width:2px;background:#fdfbf7f0;box-shadow:0 8px 24px -10px #722f3760;white-space:nowrap}
+.home-page .split h3{font:400 26px/1.15 var(--font-serif);color:var(--burgundy);margin:0 0 10px}
+.home-page .split article{min-width:0}
+.home-page .split .term{margin:16px 0 0;font-size:12px;overflow-x:auto;max-width:100%}
+.home-page .split .lede{font-size:17px;line-height:1.6;max-width:760px;margin:18px 0 0}
+
+.home-page .split .hand{margin:32px 0 36px;padding-top:24px;border-top:1px solid var(--border);font-size:17px;line-height:1.6;max-width:900px;color:#3a3532}
 
 /* Portable-only additions. The shared docs system lives in website/static/style.css. */
 
@@ -1669,7 +1720,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 <a href="https://loopflow.studio/" class="nav-logo"><img src="https://loopflow.studio/static/logo.svg" alt="Loopflow"></a><a href="https://loopflow.studio/" class="nav-title">Loopflow</a>    </div>
     <ul class="nav-links">
       <li>
-<a href="https://loopflow.studio/cli#flows">Flows</a>      </li>
+<a href="https://loopflow.studio/docs/authoring#graphs">Graphs</a>      </li>
       <li>
 <a href="https://loopflow.studio/docs">Docs</a>      </li>
       <li>
@@ -1716,8 +1767,8 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
           <h1>Architecture</h1>
           <p class="docs-deck">A developer's path through the whole system</p>
         </header>
-<p>Loopflow records commands, preserves agent conversations, and drives Flows.
-Process records an lf command and its outcome; LfSession records a conversation; a Flow is one lf process
+<p>Loopflow records commands, preserves agent conversations, and drives Graphs.
+Process records an lf command and its outcome; LfSession records a conversation; a Graph is one lf process
 and the step processes it starts.</p>
 <p>This guide specifies the accepted model. The reference owns
 <a href="https://loopflow.studio/architecture/reference#cutover-status">cutover status</a>, the remaining work
@@ -1803,7 +1854,7 @@ progression; attributed conversations consume the same execution and delivery
 operations available to helpers without becoming standing Work identities.</p>
 <pre tabindex="0"><code class="language-text">one Skill run
     |
-    +-- Flow: compose Skills, mechanical operations, and review boundaries
+    +-- Graph: compose Skills, mechanical operations, and review boundaries
     |
     +-- Work: preserve purpose and input across independent processes
     |
@@ -1831,7 +1882,7 @@ operations available to helpers without becoming standing Work identities.</p>
 </tr>
 <tr>
 <td>Planning</td>
-<td>Flow composition, Wave/Task Work, Steer, questions, review FlowSteps</td>
+<td>Graph composition, Wave/Task Work, Steer, questions, review GraphSteps</td>
 <td><a href="https://loopflow.studio/architecture/planning">Planning</a></td>
 </tr>
 <tr>
@@ -1864,13 +1915,13 @@ project
 task
 
 ops/chapter.rs                deterministic chapter rotation
-ops/task.rs                   Task launch: a fresh Flow in the Task checkout
-lf/commands/flow.rs           Flow process: one process per Flow
+ops/task.rs                   Task launch: a fresh Graph in the Task checkout
+lf/commands/graph.rs           Graph process: one process per Graph
 
-execution kernel: flow/ + agent/ + prompt/ + harness/ + command and conversation history
+execution kernel: graph/ + agent/ + prompt/ + harness/ + command and conversation history
 composition surfaces: lf/ + bin/
 </code></pre>
-<p><code>work</code> never imports the Flow runner. The execution kernel works without either
+<p><code>work</code> never imports the Graph runner. The execution kernel works without either
 layer and never loads Work. CLI callers resolve Work identity and Wave memory,
 then pass ordinary launch inputs into the kernel.</p>
 <p>Release delivery also separates proof from authority:</p>
@@ -1892,7 +1943,7 @@ after that point publish the same bytes under the same tag.</p>
 data flow, and ends with the contracts that neighboring areas may rely on.</p>
 <h2 id="the-whole-system">The whole system<a class="anchor-link" href="#the-whole-system" title="Link to this section">#</a></h2>
 <pre tabindex="0"><code class="language-text">                                      shared truth
-                              Linear     GitHub     providers
+                              planning   GitHub     providers
                                  ^          ^           ^
                                  |          |           |
 user / agent --&gt; lf CLI --------+----------+-----------+
@@ -1901,7 +1952,7 @@ user / agent --&gt; lf CLI --------+----------+-----------+
           |                    |
           v                    v
   authored definitions    tracked Work
-  Skills / Flows /       Wave -&gt; Linear Project -&gt; Task
+  Skills / Graphs /       Wave -&gt; Project -&gt; Task
   goals / memory                  |
           |                       +---------&gt; Task delivery
           |                       |                ^
@@ -1923,20 +1974,20 @@ another machine is another Machine; cross it explicitly with `lf --machine`
 </code></pre>
 <p>There is no central Loopflow server. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
-definitions and memory. Linear and GitHub keep shared planning and delivery
-truth. Readers join those sources; they do not replace them with a universal
+definitions and memory. The planning provider (a Git ref or Linear) and GitHub
+keep shared planning and delivery truth. Readers join those sources; they do not replace them with a universal
 ledger.</p>
 <h2 id="core-models">Core models<a class="anchor-link" href="#core-models" title="Link to this section">#</a></h2>
 <pre tabindex="0"><code class="language-text">Repository
   `-- Wave                    enduring objective, memory and cadence
-        `-- Linear Project    status + shared chapter name + Flow + KRs
-              `-- Task        identity, worktree, PR and every Flow process for it
+        `-- Project           status + shared chapter name + Graph + KRs
+              `-- Task        identity, worktree, PR and every Graph process for it
 
 Process                          one actual lf process; immutable causal parent
 LfSession                  one conversation; nullable attached LfProcess
   `-- history                 provider starts, outcomes, retries and usage
-Flow                          one lf process; cursor in its memory, graph in FlowProcess
-  `-- step processes              plain commands; the Flow process records each one's node
+Graph                          one lf process; cursor in its memory, graph in GraphProcess
+  `-- step processes              plain commands; the Graph process records each one's node
 </code></pre>
 <table tabindex="0">
 <thead>
@@ -1953,7 +2004,7 @@ Flow                          one lf process; cursor in its memory, graph in Flo
 <td>Repository, builtin or installed Markdown</td>
 </tr>
 <tr>
-<td>Flow</td>
+<td>Graph</td>
 <td>Reusable graph of agent, mechanical and routing steps</td>
 <td>Repository or builtin YAML</td>
 </tr>
@@ -1968,29 +2019,29 @@ Flow                          one lf process; cursor in its memory, graph in Flo
 <td><code>agent_sessions</code>, subordinate history and provider-native conversation</td>
 </tr>
 <tr>
-<td>Running Flow</td>
-<td>One Flow process and the steps it starts, including taskless execution</td>
-<td>The Flow process and its child step processes in <code>processes</code></td>
+<td>Running Graph</td>
+<td>One Graph process and the steps it starts, including taskless execution</td>
+<td>The Graph process and its child step processes in <code>processes</code></td>
 </tr>
 <tr>
 <td>Wave</td>
 <td>Enduring objective, memory, cadence, budget and metric instruments</td>
-<td>Wave files, local Wave identity and Linear Initiative membership</td>
+<td>Wave files, local Wave identity and, with Linear, Initiative membership</td>
 </tr>
 <tr>
 <td>Chapter</td>
 <td>Shared name of each Wave's In Progress Project</td>
-<td>Linear Project statuses; no Chapter row or packet</td>
+<td>Project statuses; no Chapter row or packet</td>
 </tr>
 <tr>
 <td>Project</td>
 <td>A Wave's plan, KRs and targets</td>
-<td>Linear Project and its synchronized <code>projects</code> row</td>
+<td><code>projects</code> row, shared through the planning provider</td>
 </tr>
 <tr>
 <td>Task</td>
 <td>A concrete change, investigation or document</td>
-<td><code>tasks</code>, Linear Issue, Git and GitHub</td>
+<td><code>tasks</code>, the planning provider, Git and GitHub</td>
 </tr>
 <tr>
 <td>Steer</td>
@@ -2011,7 +2062,7 @@ Flow                          one lf process; cursor in its memory, graph in Flo
 </table>
 <p>An LfSession keeps its ID, name, feedback and native conversation when its
 command process changes. Its <code>interactive</code> field is independent of purpose,
-Flow membership and completion. Default conversation views show interactive
+Graph membership and completion. Default conversation views show interactive
 Sessions; explicit filters expose headless and completed history. Large captured
 payloads remain files, but readers select and page rows before opening them.</p>
 <p>Connect uses the live AgentProcess when possible. Passive display acquires no claim.
@@ -2025,28 +2076,28 @@ Process; an agent-issued child also records <code>via_agent</code> and LfSession
 The provider's AgentProcess resolves to its attached LfProcess at child admission.
 A delayed command from a replaced provider retains historical provenance; old
 Process parents are never rewritten. Causal ancestry grants no control authority.</p>
-<p>Every Flow naming a Task, or run in its checkout, is equally its work;
+<p>Every Graph naming a Task, or run in its checkout, is equally its work;
 none is privileged. <code>task run</code> always runs a fresh one.
-Taskless and Task-owned Flows use the same Flow runner. The Flow process holds the compiled graph
+Taskless and Task-owned Graphs use the same Graph runner. The Graph process holds the compiled graph
 and cursor in memory; template composition compiles into the graph, and loop
 passes are positions in it. Each step is a real child Process whose argv carries
-the Flow name, launch sequence and position. A step's result is how its process
+the Graph name, launch sequence and position. A step's result is how its process
 exited; a deciding or routing step also answers through the Session turn its
 Process captured. Mechanical work creates no agent conversation. A Session reaches
-its Flow through the step Process that captured its input. A killed Flow process leaves
+its Graph through the step Process that captured its input. A killed Graph process leaves
 its Processes as history; nothing resumes it, and its caller launches fresh work.</p>
 <p>Task requires repository identity and may belong to a Project; its Wave is derived
 from that Project. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
 target and writes; Desktop confirms it. Bind cannot clear or move an assignment
-or change Flow membership. Done and landed Tasks remain valid targets. Earlier
+or change Graph membership. Done and landed Tasks remain valid targets. Earlier
 usage retains its recorded owner; binding affects subsequent work, and uncertain
 mid-turn allocation remains unknown.</p>
 <p>Reserving actual Task work (<code>lf task run</code> or <code>lf task checkout</code> allocating a
 checkout) claims an unowned Task in its append-only ownership log. Recording an
 inspection command's Process does not claim a Task. Chapter retirement
-also checks authored work, PRs and Flows; missing history alone cannot
-prove untouched backlog. Rotation converges from fresh Linear facts using the
+also checks authored work, PRs and Graphs; missing history alone cannot
+prove untouched backlog. Rotation converges from fresh provider facts using the
 explicit target name and stable Project identities. A partially rotated repository
 must be retryable; unrelated competing plans remain unresolved.</p>
 <p>The <a href="https://loopflow.studio/architecture/reference#core-models-and-apis">reference</a> owns the field and
@@ -2072,20 +2123,20 @@ lf task status INF-123 --json
 without starting execution. Publication creates its optional, sole PR. Each <code>--task</code> command
 starts an independent LfSession in that worktree; several may overlap and write distinct
 scratch paths. Any caller may then use the ordinary Work and delivery commands.
-Those commands act on delivery facts, not on Flow-driving authority. <code>submit</code> and <code>land</code> therefore work the same whether the Task was pursued by a
-Task Flow, piecemeal helper LfSessions, or another system.</p>
-<h3 id="task-flows">Task Flows<a class="anchor-link" href="#task-flows" title="Link to this section">#</a></h3>
-<pre tabindex="0"><code class="language-bash">lf --wave product wave-operate        # one finite planning pass
+Those commands act on delivery facts, not on Graph-driving authority. <code>submit</code> and <code>land</code> therefore work the same whether the Task was pursued by a
+Task Graph, piecemeal helper LfSessions, or another system.</p>
+<h3 id="task-graphs">Task Graphs<a class="anchor-link" href="#task-graphs" title="Link to this section">#</a></h3>
+<pre tabindex="0"><code class="language-bash">lf --wave product wave-operate        # one finite pass over your started Tasks
 lf task run INF-123
 lf --wave &lt;wave&gt; wave-operate &quot;ship invoices first&quot;
 lf wave status product
 </code></pre>
-<p><code>task run</code> places the Task, then runs a fresh Flow in its checkout exactly as
-<code>lf --task ISSUE flow FLOW</code> does, returning when the Flow ends; it never
+<p><code>task run</code> places the Task, then runs a fresh Graph in its checkout exactly as
+<code>lf --task ISSUE graph GRAPH</code> does, returning when the Graph ends; it never
 continues an earlier one. Repository rotation converges every Wave on the
 requested Project name, preserving active Task identity and execution. Direct
-questions and helpers use attributed LfSessions without gaining Flow
-authority. Flows hold autonomous steps only; review happens in the Task
+questions and helpers use attributed LfSessions without gaining Graph
+authority. Graphs hold autonomous steps only; review happens in the Task
 conversation.</p>
 <h3 id="another-machine">Another machine<a class="anchor-link" href="#another-machine" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf --machine build-home session list --json
@@ -2110,7 +2161,7 @@ the behavior.</p>
 <td><a href="https://loopflow.studio/architecture/execution">Execution</a></td>
 </tr>
 <tr>
-<td>Flow semantics, Work state, Steer, questions, review FlowSteps, chapter rotation and Task advancement</td>
+<td>Graph semantics, Work state, Steer, questions, review GraphSteps, chapter rotation and Task advancement</td>
 <td><a href="https://loopflow.studio/architecture/planning">Planning</a></td>
 </tr>
 <tr>

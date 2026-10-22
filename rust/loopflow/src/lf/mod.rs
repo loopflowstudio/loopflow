@@ -1,7 +1,7 @@
 /// Explicit Work declaration inherited by descendants; checkout inference never writes it.
 pub const WORK_DECLARATION_ENV: &str = "LF_AS";
 
-/// The caller's prompt and provider flags for the Task Flow it launches.
+/// The caller's prompt and provider flags for the Task Graph it launches.
 #[doc(hidden)]
 use std::path::PathBuf;
 
@@ -53,11 +53,11 @@ pub struct Cli {
     #[arg(short = 'c', long = "clipboard")]
     pub clipboard: bool,
 
-    /// Override agents named in Tasks, Flows and skills, including child commands (claude, codex, opencode, pi; harness[:model])
+    /// Override agents named in Tasks, Graphs and skills, including child commands (claude, codex, opencode, pi; harness[:model])
     #[arg(short = 'a', long = "agent", global = true)]
     pub agent: Option<String>,
 
-    /// Captured skill and arguments supplied by the invoking Flow process.
+    /// Captured skill and arguments supplied by the invoking Graph process.
     #[arg(long, hide = true)]
     pub skill_input: Option<std::path::PathBuf>,
     /// Native final-answer schema supplied by a deciding step.
@@ -165,7 +165,7 @@ impl Cli {
             | Some(Commands::External(_) | Commands::Inline { .. })
             | Some(Commands::Discord { .. }) => true,
             Some(Commands::Skill { cmd }) => matches!(cmd, SkillCommand::External(_)),
-            Some(Commands::Flow { cmd }) => matches!(cmd, FlowCommand::External(_)),
+            Some(Commands::Graph { cmd }) => matches!(cmd, GraphCommand::External(_)),
             Some(Commands::History {
                 cmd: Some(commands::history::HistoryCommand::Replay { .. }),
                 ..
@@ -261,7 +261,7 @@ impl Cli {
     #[doc(hidden)]
     pub fn step_args(&self) -> Vec<String> {
         let mut args = Vec::new();
-        // A person takes part at Workflow nodes, so a Flow's steps run headless
+        // A person takes part at Workflow nodes, so a Graph's steps run headless
         // even from a terminal unless the caller asks for `-i`.
         for (flag, enabled) in [
             ("--batch", !self.interactive),
@@ -556,13 +556,13 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Discover commands, skills, and flows
+    /// Discover commands, skills, and graphs
     List {
         path: Vec<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Explain a command, skill, or flow without launching it
+    /// Explain a command, skill, or graph without launching it
     Help {
         path: Vec<String>,
         #[arg(long)]
@@ -579,17 +579,17 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: Option<commands::history::HistoryCommand>,
     },
-    /// Run or inspect authored flows
-    Flow {
+    /// Run or inspect authored graphs
+    Graph {
         #[command(subcommand)]
-        cmd: FlowCommand,
+        cmd: GraphCommand,
     },
     /// Run a skill explicitly
     Skill {
         #[command(subcommand)]
         cmd: SkillCommand,
     },
-    /// External: skill/flow name (when no subcommand matches)
+    /// External: skill/graph name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -661,8 +661,8 @@ pub enum DesktopCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Show the recorded Task's Flow processes beside an exact pane
-    FlowLog {
+    /// Show the recorded Task's Graph processes beside an exact pane
+    GraphLog {
         #[arg(long)]
         pane: Option<String>,
         #[arg(long)]
@@ -786,15 +786,15 @@ pub enum TaskWorkflowCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum FlowCommand {
-    /// List authored flows, or Flows that ran
+pub enum GraphCommand {
+    /// List authored graphs, or Graphs that ran
     List {
         #[arg(long)]
         json: bool,
         #[command(flatten)]
-        inventory: commands::flow_inventory::FlowProcessInventoryArgs,
+        inventory: commands::graph_inventory::GraphProcessInventoryArgs,
     },
-    /// Inspect an authored flow, or one that ran
+    /// Inspect an authored graph, or one that ran
     Show {
         name: String,
         #[arg(long)]
@@ -802,7 +802,7 @@ pub enum FlowCommand {
         #[arg(long)]
         processes: bool,
     },
-    /// Print the repository file that defines a Flow, creating
+    /// Print the repository file that defines a Graph, creating
     /// it from the builtin when the repository has none
     Customize { name: String },
     #[command(external_subcommand)]
@@ -1166,7 +1166,7 @@ pub enum TaskCommand {
     Pause { issue: String },
     /// Clear a Task pause without starting execution
     Resume { issue: String },
-    /// Synchronize a Task; observed planning conflicts adopt Linear
+    /// Synchronize a Task with its tracker; the change sent last wins
     Sync {
         issue: String,
         /// Retry an uncertain issue creation with its saved ID; may recreate a deleted issue
@@ -1200,7 +1200,7 @@ pub enum TaskCommand {
     /// Run a reserved CI repair in its own process
     #[command(name = "__repair", hide = true)]
     Repair { incident: String, launcher: String },
-    /// Ensure tracked Task Work and its worktree without launching a Flow
+    /// Ensure tracked Task Work and its worktree without launching a Graph
     Checkout {
         issue: Option<String>,
         #[arg(long)]
@@ -1219,12 +1219,12 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Place a Task's worktree, then run a Flow there like `lf --task ISSUE flow FLOW`
+    /// Place a Task's worktree, then run a Graph there like `lf --task ISSUE graph GRAPH`
     Run {
         issue: Option<String>,
-        /// The edge's Flow, or a workflow to take up; the Task's only edge or its
+        /// The edge's Graph, or a workflow to take up; the Task's only edge or its
         /// Wave or repository default when omitted
-        flow: Option<String>,
+        graph: Option<String>,
         #[arg(long)]
         name: Option<String>,
         /// Fork this Task's worktree from another Task's active PR
@@ -1768,9 +1768,9 @@ pub enum CronCommand {
         /// Wave whose installed declaration is executed
         #[arg(short = 'w', long = "wave")]
         wave: String,
-        /// Flow or skill name to run
-        #[arg(long = "flow")]
-        flow: String,
+        /// Graph or skill name to run
+        #[arg(long = "graph")]
+        graph: String,
         /// Mark a launchd-owned invocation
         #[arg(long, hide = true)]
         scheduled: bool,
@@ -1780,9 +1780,9 @@ pub enum CronCommand {
         /// Wave whose receipts are shown
         #[arg(short = 'w', long = "wave")]
         wave: String,
-        /// Only receipts for this flow or skill
-        #[arg(long = "flow")]
-        flow: Option<String>,
+        /// Only receipts for this graph or skill
+        #[arg(long = "graph")]
+        graph: Option<String>,
         /// Receipt window in days
         #[arg(long, default_value_t = 35)]
         days: u32,
@@ -1795,9 +1795,9 @@ pub enum CronCommand {
         /// Wave whose installed job is fired
         #[arg(short = 'w', long = "wave")]
         wave: String,
-        /// Flow or skill name to run
-        #[arg(long = "flow")]
-        flow: String,
+        /// Graph or skill name to run
+        #[arg(long = "graph")]
+        graph: String,
         /// Wait for and return the scheduled receipt
         #[arg(long)]
         wait: bool,
@@ -1807,12 +1807,12 @@ pub enum CronCommand {
     },
     /// Uninstall a scheduled lf invocation
     Remove {
-        /// Wave name passed to `lf <flow> --wave <wave>`
+        /// Wave name passed to `lf <graph> --wave <wave>`
         #[arg(short = 'w', long = "wave")]
         wave: String,
-        /// Flow or skill name to remove
-        #[arg(long = "flow")]
-        flow: String,
+        /// Graph or skill name to remove
+        #[arg(long = "graph")]
+        graph: String,
     },
 }
 
@@ -1843,7 +1843,7 @@ pub enum CiCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum PlanningCommand {
-    /// Show, explicitly create, or recover the same planning user key on another machine
+    /// Show, create, or recover the planning user key that names a `personal: true` ref
     Key {
         #[arg(long, conflicts_with = "recover")]
         new: bool,
@@ -1971,7 +1971,7 @@ pub enum SelfCommand {
         #[command(subcommand)]
         cmd: Option<InstallCommand>,
     },
-    /// Export skills and Flows into native vendor Skills directories.
+    /// Export skills and Graphs into native vendor Skills directories.
     #[command(name = "sync-skills", hide = true)]
     SyncSkills {
         /// Confirm writes under ~/ without prompting
@@ -2862,10 +2862,10 @@ mod tests {
         assert!(Cli::try_parse_from(["lf", "task", "create", "--name", "placed"]).is_err());
         assert!(Cli::try_parse_from(["lf", "task", "create", "--run"]).is_err());
         assert!(
-            Cli::try_parse_from(["lf", "flow", "start", "proof"]).is_ok_and(|cli| !matches!(
+            Cli::try_parse_from(["lf", "graph", "start", "proof"]).is_ok_and(|cli| !matches!(
                 cli.command,
-                Some(Commands::Flow {
-                    cmd: FlowCommand::List { .. } | FlowCommand::Show { .. }
+                Some(Commands::Graph {
+                    cmd: GraphCommand::List { .. } | GraphCommand::Show { .. }
                 })
             ))
         );
@@ -2874,8 +2874,8 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Task {
-                cmd: TaskCommand::Run { issue, flow: Some(flow), .. }
-            }) if issue.as_deref() == Some("INF-123") && flow == "proof"
+                cmd: TaskCommand::Run { issue, graph: Some(graph), .. }
+            }) if issue.as_deref() == Some("INF-123") && graph == "proof"
         ));
     }
 
@@ -3034,7 +3034,7 @@ mod tests {
     }
 
     #[test]
-    fn navigation_belongs_to_flow_decisions() {
+    fn navigation_belongs_to_graph_decisions() {
         for args in [
             vec!["lf", "task", "run", "LOO-1", "--session", "review"],
             vec!["lf", "session", "advance", "review", "approved"],

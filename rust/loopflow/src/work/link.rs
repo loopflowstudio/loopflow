@@ -247,7 +247,7 @@ mod tests {
             "loopflow://loopflow/task/A?diff=1",
             "loopflow://loopflow/wave/product?diff=true",
             "loopflow://loopflow?session=s",
-            "loopflow://loop flow",
+            "loopflow://loop graph",
         ] {
             assert!(WorkUrl::parse(text).is_err(), "{text} parsed");
         }

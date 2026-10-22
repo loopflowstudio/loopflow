@@ -565,6 +565,58 @@ fn claude_terminal_delivers_large_first_turn_without_prompt_arguments() {
 }
 
 #[test]
+fn claude_opens_lf_created_worktree_already_trusted() {
+    let repo = TestRepo::new();
+    let worktree = repo.path().with_file_name(format!(
+        "{}.agent-trust",
+        repo.path().file_name().unwrap().to_string_lossy()
+    ));
+    loopflow::git::worktree_add(
+        repo.path(),
+        &worktree,
+        "agent-trust",
+        loopflow::git::WorktreeBranch::New {
+            start_point: "HEAD",
+        },
+    )
+    .unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let provider = bin.join("claude");
+    fs::write(
+        &provider,
+        "#!/bin/sh\ncp \"$CLAUDE_CONFIG_DIR/.claude.json\" \"$HOME/seen.json\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path().join("machine"))
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        .current_dir(&worktree)
+        .args(["-i", "-a", "claude", ":", "hello"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let seen: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.path().join("seen.json")).unwrap()).unwrap();
+    let key = worktree.canonicalize().unwrap().display().to_string();
+    assert_eq!(
+        seen,
+        serde_json::json!({"projects": {key: {"hasTrustDialogAccepted": true}}})
+    );
+}
+
+#[test]
 fn existing_task_checkout_preloads_work_without_enrolling_other_checkouts() {
     let repo = TestRepo::new();
     repo.create_branch("launcher");
@@ -698,7 +750,7 @@ exit 23
 }
 
 #[test]
-fn flow_context_preview_preserves_absent_store_and_captured_first_skill() {
+fn graph_context_preview_preserves_absent_store_and_captured_first_skill() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     repo.create_file(
@@ -708,7 +760,7 @@ fn flow_context_preview_preserves_absent_store_and_captured_first_skill() {
     repo.create_file(".lf/skills/probe.md", "First input marker.");
     repo.create_file(".lf/skills/decide.md", "Do not assemble future input.");
     repo.create_file(
-        ".lf/flows/inspect.yaml",
+        ".lf/graphs/inspect.yaml",
         "- probe\n- loop: probe\n  step: decide\n",
     );
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -718,7 +770,7 @@ fn flow_context_preview_preserves_absent_store_and_captured_first_skill() {
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("PATH", "/usr/bin:/bin")
         .current_dir(repo.path())
-        .args(["flow", "inspect", "literal input", "--context", "--json"])
+        .args(["graph", "inspect", "literal input", "--context", "--json"])
         .output()
         .unwrap();
     assert!(
@@ -727,7 +779,7 @@ fn flow_context_preview_preserves_absent_store_and_captured_first_skill() {
         String::from_utf8_lossy(&output.stderr)
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["graph"]["steps"][1]["returns_to"], 0);
+    assert_eq!(report["compiled"]["steps"][1]["returns_to"], 0);
     assert_eq!(report["inputs"][0]["node"], 0);
     let prompt = report["inputs"][0]["input"]["task_prompt"]
         .as_str()
@@ -741,7 +793,7 @@ fn flow_context_preview_preserves_absent_store_and_captured_first_skill() {
 }
 
 #[test]
-fn flow_context_preview_retains_native_arguments_and_operating_guidance() {
+fn graph_context_preview_retains_native_arguments_and_operating_guidance() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     repo.create_file(
@@ -752,7 +804,7 @@ fn flow_context_preview_retains_native_arguments_and_operating_guidance() {
         ".claude/skills/audit/SKILL.md",
         "---\nname: audit\ndescription: Native audit\n---\nAudit these exact arguments.",
     );
-    repo.create_file(".lf/flows/inspect.yaml", "- audit\n");
+    repo.create_file(".lf/graphs/inspect.yaml", "- audit\n");
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()
         .env("HOME", home.path())
@@ -763,7 +815,7 @@ fn flow_context_preview_retains_native_arguments_and_operating_guidance() {
         .args([
             "-a",
             "claude",
-            "flow",
+            "graph",
             "inspect",
             "  literal input  ",
             "--context",
@@ -796,7 +848,7 @@ fn operator_context_preview_uses_resolved_skills_without_preparing_checkouts() {
         ".lf/config.yaml",
         "diff: false\ndiff_files: false\npaste: false\n",
     );
-    repo.create_file(".lf/flows/inspect.yaml", "- repo/operate\n");
+    repo.create_file(".lf/graphs/inspect.yaml", "- repo/operate\n");
     let preview = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_lf"))
             .env_clear()
@@ -814,7 +866,7 @@ fn operator_context_preview_uses_resolved_skills_without_preparing_checkouts() {
         vec!["operate"],
         vec!["repo/operate"],
         vec!["skill", "repo-operate"],
-        vec!["flow", "inspect"],
+        vec!["graph", "inspect"],
     ] {
         let output = preview(&args);
         assert!(!output.status.success(), "{args:?}");
@@ -831,7 +883,7 @@ fn operator_context_preview_uses_resolved_skills_without_preparing_checkouts() {
         ".lf/skills/repo/operate.md",
         "Local skill, current checkout.",
     );
-    for args in [vec!["repo/operate"], vec!["flow", "inspect"]] {
+    for args in [vec!["repo/operate"], vec!["graph", "inspect"]] {
         let output = preview(&args);
         assert!(
             output.status.success(),

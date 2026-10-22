@@ -1,4 +1,4 @@
-//! Linear delivery evidence for saved Work.
+//! Planning provider delivery evidence for saved Work.
 
 use serde::{Deserialize, Serialize};
 
@@ -55,9 +55,9 @@ impl PlanningSyncStatus {
             .iter()
             .map(|change| {
                 let label = match change.state {
-                    PlanningSyncState::Pending => "Saved locally; pending Linear sync",
-                    PlanningSyncState::Uncertain => "Awaiting Linear confirmation",
-                    PlanningSyncState::AdoptedLinear => "Adopted Linear change",
+                    PlanningSyncState::Pending => "Saved locally; pending planning sync",
+                    PlanningSyncState::Uncertain => "Awaiting planning provider confirmation",
+                    PlanningSyncState::AdoptedLinear => "Adopted planning provider change",
                 };
                 let mut line = format!("{label} · {}", change.field);
                 if change.state == PlanningSyncState::AdoptedLinear {
@@ -66,7 +66,7 @@ impl PlanningSyncStatus {
                         .as_ref()
                         .unwrap_or(&serde_json::Value::Null);
                     line.push_str(&format!(
-                        " · saved: {} · Linear: {value}",
+                        " · saved: {} · provider: {value}",
                         change.local_value
                     ));
                 }

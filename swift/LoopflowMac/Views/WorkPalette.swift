@@ -11,7 +11,7 @@ struct WorkPaletteRow: Identifiable, Equatable {
 
 extension WorkModel {
     var paletteIsStale: Bool {
-        roadmap.errorMessage != nil || sessions.errorMessage != nil || flowCatalog.errorMessage != nil || workflowCatalog.errorMessage != nil
+        roadmap.errorMessage != nil || sessions.errorMessage != nil || graphCatalog.errorMessage != nil || workflowCatalog.errorMessage != nil
             || visibleRoadmaps.contains { $0.tasks.unavailableReason != nil || !$0.unavailableTasks.isEmpty }
     }
 
@@ -45,17 +45,17 @@ extension WorkModel {
                 rows.append(recent)
             }
         }
-        for flow in flowCatalog.value ?? [] {
-            rows.append(.init(id: .flow(flow.name), title: flow.name,
-                              detail: "Flow definition", key: flow.name))
+        for graph in graphCatalog.value ?? [] {
+            rows.append(.init(id: .graph(graph.name), title: graph.name,
+                              detail: "Graph definition", key: graph.name))
         }
         for workflow in workflowCatalog.value ?? [] {
             rows.append(.init(id: .workflow(workflow.name), title: workflow.name,
                               detail: "Workflow", key: workflow.name))
         }
         if let selection, selection.kind == .task, let found = task(id: selection.id) {
-            rows.append(.init(id: .flowLog(selection.id), title: "Flow processes of \(found.task.task.identifier)",
-                              detail: "Action · Open the log", key: "Flow processes"))
+            rows.append(.init(id: .graphLog(selection.id), title: "Graph processes of \(found.task.task.identifier)",
+                              detail: "Action · Open the log", key: "Graph processes"))
         }
         if let id = navigation.selectedSessionId, let session = sessions.value?.first(where: { $0.id == id }) {
             if session.titleSource != .unavailable {
@@ -179,7 +179,7 @@ struct WorkPalette: View {
         .onChange(of: search) { _, _ in highlighted = rows.first?.id }
         .onExitCommand { model.navigation.palette = nil }
         .task {
-            await model.loadFlowCatalog()
+            await model.loadGraphCatalog()
             await model.loadWorkflowCatalog()
             if !model.paletteIsStale && !model.roadmap.isLoading && !model.sessions.isLoading {
                 let available = Set(model.paletteRows.map(\.id))
@@ -318,18 +318,18 @@ struct WorkPaletteShortcut: NSViewRepresentable {
     }
 }
 
-struct FlowCatalogInspector: View {
+struct GraphCatalogInspector: View {
     @Environment(\.palette) private var palette
-    let entry: FlowCatalogEntry?
+    let entry: GraphCatalogEntry?
     @Bindable var navigation: WorkNavigation
     let model: WorkModel
     @State private var sourceError: String?
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(entry?.name ?? "Flow unavailable").font(Typography.sectionTitle(26))
+            Text(entry?.name ?? "Graph unavailable").font(Typography.sectionTitle(26))
             if let entry {
-                Text(entry.source ?? "builtin Flow").font(Typography.code(11))
+                Text(entry.source ?? "builtin Graph").font(Typography.code(11))
                 Button(entry.source == nil ? "Customize" : "Edit") {
                     Task {
                         do {
@@ -340,14 +340,14 @@ struct FlowCatalogInspector: View {
                     }
                 }
             }
-            if let error = sourceError ?? model.flowCatalog.errorMessage {
+            if let error = sourceError ?? model.graphCatalog.errorMessage {
                 Text(error).foregroundStyle(palette.warning)
             }
-            Button("Refresh") { Task { await model.loadFlowCatalog(force: true) } }
-            if let graph = entry?.graph, let composition = entry?.composition {
-                FlowCompositionView(graph: graph, composition: composition, navigation: navigation)
+            Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }
+            if let compiled = entry?.compiled, let composition = entry?.composition {
+                GraphCompositionView(compiled: compiled, composition: composition, navigation: navigation)
 
-            } else { Text(entry?.unavailable ?? "Refresh the Flow catalog and try again.") }
+            } else { Text(entry?.unavailable ?? "Refresh the Graph catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }.padding(24).frame(width: 780)
     }
@@ -374,7 +374,7 @@ struct WorkflowCatalogInspector: View {
             }
             Button("Refresh") { Task { await model.loadWorkflowCatalog(force: true) } }
             if let workflow = entry?.workflow {
-                WorkflowGraph(nodes: workflow.nodes, edges: workflow.edges)
+                WorkflowDiagram(nodes: workflow.nodes, edges: workflow.edges)
             } else { Text(entry?.unavailable ?? "Refresh the Workflow catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }.padding(24).frame(width: 780)

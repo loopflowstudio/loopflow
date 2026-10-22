@@ -2,22 +2,23 @@
 # Using lf
 
 `lf` launches coding agents, keeps their Sessions, and runs saved Skills and
-Flows. Use as much of it as the request needs. A Flow is an authored sequence
+Graphs. Use as much of it as the request needs. A Graph is an authored sequence
 of steps; it runs with or without a Task.
 
 Work in the supplied checkout. Read its agent guide and existing work, preserve
 other contributions, and carry out the request here. Do not launch another
 agent or create a worktree merely to do the work already assigned to this one.
-Follow a supplied Flow's steps and boundaries; finishing it selects no next work.
+Follow a supplied Graph's steps and boundaries; finishing it selects no next work,
+but steps a stopped Graph never reached remain yours.
 
 Use the requested tools and repository conventions. Read
-`lf help <command-or-skill>` for instructions on Sessions, Skills, Flows,
+`lf help <command-or-skill>` for instructions on Sessions, Skills, Graphs,
 worktrees and PRs.
 
 When continuing an existing Task or when the request calls for Tasks, Waves,
 or Projects, read `lf help skill work` unless that guidance was preloaded. It is also
 available as `lf skill work`. Work association supplies context; the request
-or selected Skill/Flow determines what to do. Stay within that chosen scope.
+or selected Skill/Graph determines what to do. Stay within that chosen scope.
 
 Name the Session for the work in two or three specific words. Read `session_id`
 from `LF_AGENT_CALLER` and use `lf session rename <id> "<name>" --suggest` when
@@ -80,7 +81,7 @@ Produce a working change, resolve reversible ambiguity, and verify it. Preserve 
 Run `lf context` to read memory and scratch size targets, their configuration
 sources, and current usage. Read complete sources before curating them.
 Bring over-budget scratch under both token and byte limits as part of this step.
-Curate `.lf/wave/` only when the selected Loopflow Flow calls for it; otherwise
+Curate `.lf/wave/` only when the selected Loopflow Graph calls for it; otherwise
 record proposed memory changes in scratch.
 Merge duplicates, summarize long evidence, remove obsolete notes inherited from a
 stacked parent, and keep historical detail in git rather than ambient context.
@@ -137,7 +138,7 @@ plan in the conversation; do not require a document template or a prior skill.
      once. Do not run them early because they appear in Done when.
    - If a check cannot run headless here, use a headless equivalent or leave it
      to gate/CI. Human judgment belongs to demo/review. Neither is a reason to
-     stop implementation or block the Flow. An actual build or test failure
+     stop implementation or block the Graph. An actual build or test failure
      still needs a fix.
    - Update remaining work in place. Keep one command/result line with any
      deferred owner; no pass ledger or repeated caveats.
@@ -158,7 +159,7 @@ when the reviewed design explicitly calls for it and names its deletion point.
 ## Task context
 
 When a Task is supplied, use its directive, accepted design and included Steers.
-Stay in its supplied worktree and preserve the active writer, selected Flow,
+Stay in its supplied worktree and preserve the active writer, selected Graph,
 and review boundaries. Do not select backlog work, create a second Task or
 launch a competing implementation. A failed planning read is a named gap;
 continue independent work from the supplied evidence without repairing auth.
@@ -176,7 +177,7 @@ If `<lf:wave>` is present, check `.lf/wave/<wave>/GOAL.md` and `MEMORY.md` in do
 
 - Follow the wave's intent and principles during implementation
 - Respect decisions and constraints recorded in `MEMORY.md`
-- Edit GOAL.md and MEMORY.md only when the selected Loopflow Flow calls for
+- Edit GOAL.md and MEMORY.md only when the selected Loopflow Graph calls for
   maintaining them. Association alone leaves `.lf/wave/` read-only.
 - Note drift from wave constraints in `scratch/questions.md`
 

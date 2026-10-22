@@ -37,6 +37,7 @@ pub enum OpenHost {
     Desktop,
     Cmux,
     Herdr,
+    Tmux,
     Rex,
     Terminal,
 }
@@ -48,6 +49,7 @@ impl OpenHost {
             Self::Desktop => "Loopflow Desktop",
             Self::Cmux => "cmux",
             Self::Herdr => "Herdr",
+            Self::Tmux => "tmux",
             Self::Rex => "Rex",
             Self::Terminal => "a terminal",
         }
@@ -264,7 +266,7 @@ impl Resolved {
     }
 
     /// Compare the calling conversation with this Work's selected destination.
-    /// Same Work is not enough: a Flow step and the primary can share a Task.
+    /// Same Work is not enough: a Graph step and the primary can share a Task.
     fn relation(&self) -> (ConversationRelation, Option<String>) {
         let Some(caller) = crate::journal::agent_caller() else {
             return (
@@ -776,15 +778,24 @@ fn route(requested: OpenHost) -> OpenRoute {
     }
     let mut hosts = Vec::new();
     let mut reasons = Vec::new();
-    // Open where the caller is. A Herdr pane inside a cmux or Desktop terminal
-    // is the innermost, current host.
-    if in_herdr() {
-        hosts.push(OpenHost::Herdr);
-        reasons.push("this Herdr pane");
-    }
-    if in_cmux() {
-        hosts.push(OpenHost::Cmux);
-        reasons.push("this cmux workspace");
+    if let Some((host, _)) = viewed_placement() {
+        hosts.push(host);
+        reasons.push("where this conversation is viewed");
+    } else {
+        // Open where the caller is. A Herdr pane or tmux session inside a cmux
+        // or Desktop terminal is the innermost, current host.
+        if in_herdr() {
+            hosts.push(OpenHost::Herdr);
+            reasons.push("this Herdr pane");
+        }
+        if in_tmux() {
+            hosts.push(OpenHost::Tmux);
+            reasons.push("this tmux session");
+        }
+        if in_cmux() {
+            hosts.push(OpenHost::Cmux);
+            reasons.push("this cmux workspace");
+        }
     }
     if cfg!(target_os = "macos") {
         hosts.push(OpenHost::Desktop);
@@ -812,6 +823,8 @@ const HERDR_ENV: &str = "HERDR_ENV";
 const HERDR_SOCKET: &str = "HERDR_SOCKET_PATH";
 const HERDR_WORKSPACE: &str = "HERDR_WORKSPACE_ID";
 const HERDR_PANE: &str = "HERDR_PANE_ID";
+const TMUX: &str = "TMUX";
+const TMUX_PANE: &str = "TMUX_PANE";
 /// Set by Loopflow Desktop on every child, including its terminals' agents.
 const DESKTOP: &str = "LF_DESKTOP";
 
@@ -824,6 +837,8 @@ pub(crate) const HOST_CONTEXT: &[&str] = &[
     HERDR_SOCKET,
     HERDR_WORKSPACE,
     HERDR_PANE,
+    TMUX,
+    TMUX_PANE,
     DESKTOP,
 ];
 
@@ -839,12 +854,18 @@ fn in_herdr() -> bool {
     std::env::var(HERDR_ENV).as_deref() == Ok("1") && set(HERDR_SOCKET) && set(HERDR_PANE)
 }
 
+fn in_tmux() -> bool {
+    set(TMUX) && set(TMUX_PANE)
+}
+
 /// The host workspace this direct process runs in, recorded as its attached
-/// terminal placement (`herdr:<workspace>` or `cmux:<workspace>`) so a later
-/// opening can focus that conversation instead of starting another client.
+/// terminal placement (`herdr:<workspace>`, `tmux:<pane>` or `cmux:<workspace>`)
+/// so a later opening can focus that conversation instead of starting another client.
 pub(crate) fn host_placement() -> Option<String> {
     let (host, name) = if in_herdr() {
         (OpenHost::Herdr, HERDR_WORKSPACE)
+    } else if in_tmux() {
+        (OpenHost::Tmux, TMUX_PANE)
     } else if in_cmux() {
         (OpenHost::Cmux, CMUX_WORKSPACE)
     } else {
@@ -854,11 +875,29 @@ pub(crate) fn host_placement() -> Option<String> {
     placement(host, &workspace)
 }
 
-/// `cmux:<workspace>` / `herdr:<workspace>`; other hosts record no placement.
+/// Where an agent caller's own conversation is viewed now. Its environment
+/// names the terminal it launched in, which may since be closed or left.
+fn viewed_placement() -> Option<(OpenHost, String)> {
+    let caller = crate::journal::agent_caller()?;
+    let store = crate::store::read_existing_registry().ok().flatten()?;
+    let placement = store
+        .sqlite
+        .session_summary(
+            caller.session_id.as_str(),
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )
+        .ok()
+        .flatten()?
+        .terminal_id?;
+    placement_host(&placement).map(|(host, id)| (host, id.to_owned()))
+}
+
+/// `cmux:<workspace>` / `herdr:<workspace>` / `tmux:<pane>`; other hosts record no placement.
 fn placement(host: OpenHost, destination: &str) -> Option<String> {
     match host {
         OpenHost::Cmux => Some(format!("cmux:{destination}")),
         OpenHost::Herdr => Some(format!("herdr:{destination}")),
+        OpenHost::Tmux => Some(format!("tmux:{destination}")),
         _ => None,
     }
 }
@@ -868,6 +907,7 @@ fn placement_host(placement: &str) -> Option<(OpenHost, &str)> {
     let host = match prefix {
         "cmux" => OpenHost::Cmux,
         "herdr" => OpenHost::Herdr,
+        "tmux" => OpenHost::Tmux,
         _ => return None,
     };
     Some((host, id))
@@ -1046,6 +1086,7 @@ fn open_one(
             OpenHost::Desktop => open_desktop(target, focus, desktop),
             OpenHost::Cmux => open_cmux(target, focus, lf),
             OpenHost::Herdr => open_herdr(target, focus, lf),
+            OpenHost::Tmux => open_tmux(target, focus, lf),
             OpenHost::Terminal => open_terminal(target, focus, in_place, lf),
             OpenHost::Rex => Err(RouteError::Definite(
                 "Rex opening is not supported yet; use --host terminal".into(),
@@ -1153,6 +1194,7 @@ struct Live {
 
 /// A live provider attached to another client keeps its conversation; ordinary
 /// opening never takes it over. Desktop shows and moves its own retained panes.
+/// One whose terminal closed has no viewer in control, so it opens here.
 fn elsewhere(target: &Resolved) -> Option<Live> {
     let id = target.conversation()?;
     let store = crate::store::read_existing_registry().ok().flatten()?;
@@ -1161,7 +1203,16 @@ fn elsewhere(target: &Resolved) -> Option<Live> {
         .session_summary(id, time::OffsetDateTime::now_utc().unix_timestamp())
         .ok()
         .flatten()?;
-    (summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live).then(|| Live {
+    if summary.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Live {
+        return None;
+    }
+    let unviewed = store
+        .sqlite
+        .session_transport(id)
+        .ok()
+        .flatten()
+        .is_some_and(|owner| crate::transport::controlled(&owner).is_ok_and(|held| !held));
+    (!unviewed).then(|| Live {
         reason: format!(
             "this conversation is already open in another client; move it here with `lf session connect {id} --takeover` (unsent text there is not transferred)"
         ),
@@ -1258,6 +1309,50 @@ fn open_herdr(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteE
     Ok(Opened::opening(workspace))
 }
 
+/// A new window right after the caller's, named for the Work. Its pane is the
+/// destination: pane IDs are unique for the server's life, unlike indexes.
+fn open_tmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
+    let shell = target.connect_shell(lf)?;
+    let window = |after: Option<&str>| {
+        let mut command = Command::new("tmux");
+        command.arg("new-window");
+        if let Some(pane) = after {
+            command.args(["-a", "-t", pane]);
+        }
+        if !focus {
+            command.arg("-d");
+        }
+        command
+            .args([
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "-n",
+                &target.destination_name(),
+                "-c",
+            ])
+            .arg(target.cwd())
+            .arg(&shell);
+        run_host(command, "tmux")
+    };
+    // A pane recorded at launch may be gone; the server's current session remains.
+    let caller = match viewed_placement() {
+        Some((OpenHost::Tmux, pane)) => Some(pane),
+        _ => std::env::var(TMUX_PANE)
+            .ok()
+            .filter(|pane| !pane.is_empty()),
+    };
+    let output = match caller.as_deref().map(|pane| window(Some(pane))) {
+        Some(Err(RouteError::Definite(_))) | None => window(None)?,
+        Some(result) => result?,
+    };
+    let pane = output.trim();
+    if pane.is_empty() {
+        return Err(RouteError::Unknown("tmux reply named no pane".into()));
+    }
+    Ok(Opened::opening(Some(pane.to_owned())))
+}
+
 fn open_terminal(
     target: &Resolved,
     focus: bool,
@@ -1352,12 +1447,28 @@ fn focus_destination(host: OpenHost, destination: &str) -> Result<(), RouteError
             command.args(["workspace", "focus", destination]);
             command
         }
+        OpenHost::Tmux => {
+            // Selecting proves the pane still exists; a client in another
+            // session follows it when one is attached.
+            let mut command = Command::new("tmux");
+            command.args(["select-window", "-t", destination, ";"]);
+            command.args(["select-pane", "-t", destination]);
+            let selected = run_host(command, OpenHost::Tmux.label()).map(drop);
+            if selected.is_ok() {
+                let mut switch = Command::new("tmux");
+                switch.args(["switch-client", "-t", destination]);
+                let _ = run_host(switch, OpenHost::Tmux.label());
+            }
+            return selected.inspect_err(|error| {
+                tracing::debug!(reason = error.reason(), "cannot focus the destination");
+            });
+        }
         _ => return Ok(()),
     };
     run_host(command, host.label())
         .map(drop)
         .inspect_err(|error| {
-            tracing::warn!(reason = error.reason(), "cannot focus the destination");
+            tracing::debug!(reason = error.reason(), "cannot focus the destination");
         })
 }
 
@@ -1406,7 +1517,7 @@ fn drain(pipe: Option<impl std::io::Read>) -> String {
 pub struct OpenArgs {
     /// Work address, such as loopflow://loopflow/task/LOO-507
     pub url: Option<String>,
-    /// Presentation destination; auto opens in this Herdr/cmux host, then Desktop, then a terminal
+    /// Presentation destination; auto opens in this Herdr/tmux/cmux host, then Desktop, then a terminal
     #[arg(long, value_enum, default_value = "auto")]
     pub host: OpenHost,
     /// Open every conversation available for you to work with

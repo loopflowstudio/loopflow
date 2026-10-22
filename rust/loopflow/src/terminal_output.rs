@@ -55,18 +55,13 @@ impl TerminalOutput {
                 File::from(BorrowedFd::borrow_raw(2).try_clone_to_owned()?),
             )
         };
-        let mut output = Self {
+        let output = Self {
             stdout,
             stderr,
             log,
             path,
             initial_size,
         };
-        writeln!(
-            output.stderr,
-            "Loopflow diagnostics: {}",
-            output.path.display()
-        )?;
         // Drop restores both descriptors even if the second handoff fails.
         redirect(&output.log, 1)?;
         redirect(&output.log, 2)?;

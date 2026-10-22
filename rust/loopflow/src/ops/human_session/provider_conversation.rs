@@ -252,7 +252,7 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<LfSess
             iterations: None,
             task_id: None,
             wave_id: None,
-            flow_lf_process_id: None,
+            graph_lf_process_id: None,
             work_source: None,
             bound_at: None,
             interactive: true,
@@ -292,7 +292,7 @@ pub(crate) async fn select(
         publish_prepared_input(
             &store.sqlite,
             session,
-            crate::session_record::SessionFlowMembership::Independent,
+            crate::session_record::SessionGraphMembership::Independent,
         )?
     };
     let dir = local_capture_dir(session.input_key()?)

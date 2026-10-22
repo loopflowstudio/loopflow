@@ -565,6 +565,64 @@ struct TaskFilesTests {
         try await eventually { readings.withLock { $0 } > before }
     }
 
+    /// Every `lf` read writes a journal trace and agents build into ignored
+    /// directories; neither may schedule the next read.
+    @Test func ignoredWritesFromReadsNeverScheduleAnotherRead() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let checkout = URL(fileURLWithPath: directory.resolvingSymlinksInPath().path)
+        try git(["init", "-q"], at: checkout)
+        try Data(".lf/journal/\n".utf8).write(to: checkout.appendingPathComponent(".git/info/exclude"))
+        try Data("target/\n".utf8).write(to: checkout.appendingPathComponent(".gitignore"))
+        let tracked = checkout.appendingPathComponent("tracked.txt")
+        try Data("one\n".utf8).write(to: tracked)
+        try git(["add", "."], at: checkout)
+        try git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], at: checkout)
+        let traces = checkout.appendingPathComponent(".lf/journal/traces")
+        let target = checkout.appendingPathComponent("target")
+        try FileManager.default.createDirectory(at: traces, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try await Task.sleep(for: .milliseconds(300))
+        let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let readings = OSAllocatedUnfairLock(initialState: 0)
+        let store = TaskFilesStore(issue: "TEST-1", cwd: checkout.path, query: RegistryQuery { args, _ in
+            if args.contains("--files") {
+                readings.withLock { $0 += 1 }
+                let trace = traces.appendingPathComponent(UUID().uuidString)
+                try FileManager.default.createDirectory(at: trace, withIntermediateDirectories: true)
+                try Data("{}\n".utf8).write(to: trace.appendingPathComponent("events.jsonl"))
+                try Data("o".utf8).write(to: target.appendingPathComponent(UUID().uuidString))
+            }
+            let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
+            let value = root[args[1] == "files" ? "directory" : args.contains("--files") ? "changes" : "diff"]!
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        })
+        store.observeFiles()
+        await store.refreshChanges()
+        try await Task.sleep(for: .seconds(2))
+        #expect(readings.withLock { $0 } == 1)
+        // A real change re-reads; FSEvents may split it into two batches, but the
+        // reads it causes never cause more.
+        try Data("two\n".utf8).write(to: tracked)
+        try await eventually { readings.withLock { $0 } > 1 }
+        try await Task.sleep(for: .seconds(1))
+        let settled = readings.withLock { $0 }
+        try await Task.sleep(for: .seconds(1))
+        #expect(readings.withLock { $0 } == settled)
+    }
+
+    private func git(_ args: [String], at directory: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git", "-C", directory.path] + args
+        try process.run()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0)
+    }
+
     @Test func saveKeepsTypingAndUndoWhileAdvancingOnlyTheSubmittedBaseline() async throws {
         let original = try fixture().file
         let document = TaskFileDocument(path: original.path)
@@ -796,7 +854,7 @@ private actor RemoteFilesFixture {
     private func emit() {
         guard let request else { return }
         stream.continuation.yield(TaskFilesFrame(request: request, taskID: "remote-task", machineID: "peer",
-            checkout: "/peer/checkout", changed: true))
+            checkout: "/peer/checkout", paths: ["note.txt"]))
     }
     func read(_ args: [String], cwd: String?) throws -> String {
         guard cwd == nil, args.starts(with: ["--machine", "peer", "--repository", "plan"]) else {

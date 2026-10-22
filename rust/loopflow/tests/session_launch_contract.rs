@@ -137,6 +137,23 @@ elif os.path.basename(sys.argv[0]) == 'codex':
     }
 }
 
+/// Each OpenCode launch's private stderr log, found where it is retained.
+fn opencode_logs(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(opencode_logs(&path));
+        } else if path
+            .file_name()
+            .is_some_and(|name| name == "opencode.stderr.log")
+        {
+            found.push(path);
+        }
+    }
+    found
+}
+
 fn success(output: &Output) {
     assert!(
         output.status.success(),
@@ -195,41 +212,6 @@ fn bypass(value: &Value, provider: &str, enabled: bool) {
 }
 
 #[test]
-fn loopflow_warnings_preserve_native_drafts_across_providers() {
-    let editor = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/support/native_diagnostics.py"
-    );
-    for provider in ["claude", "codex", "opencode"] {
-        let fixture = Fixture::new(provider);
-        let path = fixture.home.path().join("bin").join(provider);
-        let source = fs::read_to_string(&path).unwrap();
-        let run_editor = format!(
-            "import runpy; runpy.run_path({})['_editor']()",
-            serde_json::to_string(editor).unwrap()
-        );
-        // The protocol stand-in completes its normal startup first. Only its
-        // native client then owns a real PTY editor, never the private server.
-        let source = if provider == "opencode" {
-            source.replace(
-                "    _record_launch()",
-                &format!("    _record_launch()\n    {run_editor}"),
-            )
-        } else {
-            format!("{source}\n{run_editor}\n")
-        };
-        fs::write(path, source).unwrap();
-        let output = Command::new("/usr/bin/python3")
-            .args([editor, env!("CARGO_BIN_EXE_lf"), provider])
-            .arg(fixture.home.path())
-            .arg(fixture.repo.path())
-            .output()
-            .unwrap();
-        success(&output);
-    }
-}
-
-#[test]
 fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
     let fixture = Fixture::new("opencode");
     fs::write(
@@ -264,10 +246,10 @@ fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
         let stderr = String::from_utf8(output.stderr.clone()).unwrap();
         assert!(!stderr.contains("stream error"), "{stderr}");
         assert!(!stderr.contains("background diagnostic"), "{stderr}");
-        let path = stderr
-            .lines()
-            .find_map(|line| line.strip_prefix("OpenCode diagnostics: "))
-            .expect("launch announces retained diagnostics");
+        assert!(!stderr.contains("diagnostics:"), "{stderr}");
+        let logs = opencode_logs(fixture.home.path());
+        assert_eq!(logs.len(), 1, "{logs:?}");
+        let path = &logs[0];
         let log = fs::read(path).unwrap();
         let text = String::from_utf8_lossy(&log);
         for attempt in 0..3 {
@@ -306,12 +288,10 @@ fn opencode_failure_before_session_creation_keeps_diagnostics() {
         stderr.contains("startup failure without a session"),
         "{stderr}"
     );
-    let path = stderr
-        .lines()
-        .find_map(|line| line.strip_prefix("OpenCode diagnostics: "))
-        .unwrap();
+    let logs = opencode_logs(fixture.home.path());
+    assert_eq!(logs.len(), 1, "{logs:?}");
     assert_eq!(
-        fs::read(path).unwrap(),
+        fs::read(&logs[0]).unwrap(),
         b"startup failure without a session\n"
     );
 }
@@ -456,7 +436,7 @@ fn repo_false_overrides_global_true_and_cli_can_enable_bypass() {
 }
 
 #[test]
-fn headless_continuation_and_flow_keep_current_options_without_repeating_the_skill() {
+fn headless_continuation_and_graph_keep_current_options_without_repeating_the_skill() {
     let fixture = Fixture::new("claude:sonnet");
     fixture
         .repo
@@ -494,8 +474,8 @@ fn headless_continuation_and_flow_keep_current_options_without_repeating_the_ski
     assert!(resumed["input"].to_string().contains("second turn"));
     fixture
         .repo
-        .create_file(".lf/flows/launch-probe.yaml", "- probe\n");
-    let flowed = fixture.run(&["--yolo", "--chrome", "on", "flow", "launch-probe"]);
+        .create_file(".lf/graphs/launch-probe.yaml", "- probe\n");
+    let flowed = fixture.run(&["--yolo", "--chrome", "on", "graph", "launch-probe"]);
     bypass(&flowed, "claude", true);
     assert!(args(&flowed).contains(&"--chrome"));
 }

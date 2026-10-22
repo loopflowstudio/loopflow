@@ -112,13 +112,13 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
     prior_usage = json.loads(_command(prior, env, repo, "usage", "--json"))
     definitions = repo / ".lf"
     (definitions / "skills").mkdir(parents=True)
-    (definitions / "flows").mkdir()
+    (definitions / "graphs").mkdir()
     (definitions / "skills/review-proof.md").write_text("Review retained history.")
-    (definitions / "flows/review-first.yaml").write_text(
+    (definitions / "graphs/review-first.yaml").write_text(
         "- step:\n    id: review\n    name: review-proof\n    human: true\n"
     )
     waiting = subprocess.run(
-        [str(prior), "--model", "opencode", "flow", "review-first", "-b", "--no-loopflow"],
+        [str(prior), "--model", "opencode", "graph", "review-first", "-b", "--no-loopflow"],
         env={**env, "LF_BIN": str(prior)},
         cwd=repo,
         capture_output=True,
@@ -127,14 +127,14 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
     )
     assert "waiting for human input" in waiting.stderr, waiting.stderr
     with sqlite3.connect(database) as db:
-        review, flow, review_capture = db.execute(
-            "SELECT s.id,s.flow_session_id,e.receipt_key FROM agent_sessions s "
-            "JOIN session_events e ON e.seq=s.current_capture WHERE s.kind='flow_review'"
+        review, graph, review_capture = db.execute(
+            "SELECT s.id,s.graph_session_id,e.receipt_key FROM agent_sessions s "
+            "JOIN session_events e ON e.seq=s.current_capture WHERE s.kind='graph_review'"
         ).fetchone()
     review_env = {
         **env,
         "LF_RUN_ID": review_capture,
-        "LF_HUMAN_SESSION": json.dumps({"kind": "standalone_flow", "id": review}),
+        "LF_HUMAN_SESSION": json.dumps({"kind": "standalone_graph", "id": review}),
     }
     _command(prior, review_env, repo, "session", "ready", "Keep this released feedback")
     with sqlite3.connect(database) as db:
@@ -217,10 +217,10 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
                 opened.kill()
                 opened.wait()
     provider.write_text(provider_source.replace("__WAIT__", "False"))
-    _command(candidate, env, repo, "flow", "resume", flow)
+    _command(candidate, env, repo, "graph", "resume", graph)
     with sqlite3.connect(database) as db:
         assert (
-            db.execute("SELECT state FROM flow_sessions WHERE id=?", (flow,)).fetchone()[0]
+            db.execute("SELECT state FROM graph_sessions WHERE id=?", (graph,)).fetchone()[0]
             == "completed"
         )
         feedback, completed = db.execute(

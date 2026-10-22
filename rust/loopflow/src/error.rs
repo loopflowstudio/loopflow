@@ -4,15 +4,15 @@ use serde::Serialize;
 
 #[derive(Debug, Error)]
 pub enum LoadError {
-    #[error("skill or flow not found: {0}. Run `lf list skill` or `lf list flow` to discover definitions")]
+    #[error("skill or graph not found: {0}. Run `lf list skill` or `lf list graph` to discover definitions")]
     TargetNotFound(String),
-    #[error("flow not found: {0}. For a skill, use `lf skill {0}`")]
-    FlowNotFound(String),
+    #[error("graph not found: {0}. For a skill, use `lf skill {0}`")]
+    GraphNotFound(String),
     #[error("skill not found: {0}")]
     SkillNotFound(String),
-    #[error("invalid flow: {0}")]
-    InvalidFlow(String),
-    #[error("{0} is a workflow, not a Flow. Traverse it with `lf task run <issue> {0}`")]
+    #[error("invalid graph: {0}")]
+    InvalidGraph(String),
+    #[error("{0} is a workflow, not a Graph. Traverse it with `lf task run <issue> {0}`")]
     Workflow(String),
     #[error("invalid skill: {0}")]
     InvalidSkill(String),
@@ -22,12 +22,12 @@ pub enum LoadError {
 
 #[derive(Debug, Error)]
 pub enum CoreError {
-    #[error("flow not found: {0}")]
-    FlowNotFound(String),
+    #[error("graph not found: {0}")]
+    GraphNotFound(String),
     #[error("skill not found: {0}")]
     SkillNotFound(String),
-    #[error("invalid flow: {0}")]
-    InvalidFlow(String),
+    #[error("invalid graph: {0}")]
+    InvalidGraph(String),
     #[error("execution failed: {0}")]
     ExecutionFailed(String),
     #[error("io error: {0}")]
@@ -46,9 +46,9 @@ pub enum GitError {
 impl From<LoadError> for CoreError {
     fn from(err: LoadError) -> Self {
         match err {
-            LoadError::FlowNotFound(name) => CoreError::FlowNotFound(name),
+            LoadError::GraphNotFound(name) => CoreError::GraphNotFound(name),
             LoadError::SkillNotFound(name) => CoreError::SkillNotFound(name),
-            LoadError::InvalidFlow(msg) => CoreError::InvalidFlow(msg),
+            LoadError::InvalidGraph(msg) => CoreError::InvalidGraph(msg),
             other => CoreError::ExecutionFailed(other.to_string()),
         }
     }

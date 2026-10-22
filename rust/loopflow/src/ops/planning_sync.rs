@@ -6,6 +6,7 @@ use crate::work::wave::Wave;
 use std::fs::OpenOptions;
 use std::future::Future;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -62,7 +63,9 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
             .unwrap_or_default();
         match config.planning_transport() {
             crate::config::PlanningConfig::Git { .. } => publish_repository(store, repo).await,
-            crate::config::PlanningConfig::Linear {} => {
+            crate::config::PlanningConfig::Linear { .. }
+            | crate::config::PlanningConfig::Asana { .. }
+            | crate::config::PlanningConfig::Notion { .. } => {
                 // Export attempts have individual deadlines. A shared deadline
                 // lets older pending work starve the Task that was just saved.
                 super::planning_export::sync_repository_exports(store, repo).await?;
@@ -85,33 +88,20 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
 /// Resolve the repository configuration before touching a planning remote.
 /// A Linear outage cannot select Git: routing is configuration, not availability.
 pub(crate) async fn configured_destination(store: &Store, repo: &str) -> OpsResult<Option<String>> {
-    use crate::config::{load_config, PlanningConfig};
+    use crate::config::{load_config, GitPlan, PlanningConfig};
     let config = load_config(Some(Path::new(repo)))
         .map_err(message)?
         .unwrap_or_default();
-    let PlanningConfig::Git { remote, shared } = config.planning_transport() else {
+    let PlanningConfig::Git { remote, plan } = config.planning_transport() else {
         return Ok(None);
     };
-    let reference = match shared {
-        Some(name) => format!("refs/loopflow/planning/shared/{name}"),
-        None => {
-            let key = match store.planning_user_key().await.map_err(message)? {
-                Some(key) => key,
-                None => {
-                    let key = uuid::Uuid::new_v4().to_string();
-                    let result = store.provision_planning_user_key(&key).await;
-                    match store.planning_user_key().await.map_err(message)? {
-                        Some(saved) => saved,
-                        None => {
-                            result.map_err(message)?;
-                            key
-                        }
-                    }
-                }
-            };
-            format!("refs/loopflow/planning/users/{key}")
-        }
+    let key = match plan {
+        GitPlan::Shared(_) => None,
+        GitPlan::Personal => Some(provisioned_user_key(store).await?),
     };
+    let reference = plan
+        .reference(key.as_deref())
+        .expect("a personal plan has a provisioned user key");
     let destination =
         crate::planning_git::PlanningDestination::resolve(Path::new(repo), &remote, &reference)
             .map_err(message)?;
@@ -122,26 +112,37 @@ pub(crate) async fn configured_destination(store: &Store, repo: &str) -> OpsResu
     Ok(Some(id))
 }
 
+/// The first personal connection creates the key; a concurrent creator's key wins.
+async fn provisioned_user_key(store: &Store) -> OpsResult<String> {
+    if let Some(key) = store.planning_user_key().await.map_err(message)? {
+        return Ok(key);
+    }
+    let key = uuid::Uuid::new_v4().to_string();
+    let result = store.provision_planning_user_key(&key).await;
+    match store.planning_user_key().await.map_err(message)? {
+        Some(saved) => Ok(saved),
+        None => result.map(|()| key).map_err(message),
+    }
+}
+
 /// Passive status uses configuration, never a persisted copy of its selection.
 /// Retained routes remain readable in a Work folder without a Git checkout.
 pub(crate) async fn peer_status(
     store: &Store,
     repo: &str,
 ) -> OpsResult<Vec<crate::store::PeerPlanningStatus>> {
-    let config = crate::config::load_config(Some(Path::new(repo)))
+    use crate::config::{load_config, GitPlan, PlanningConfig};
+    let config = load_config(Some(Path::new(repo)))
         .map_err(message)?
         .unwrap_or_default();
-    let crate::config::PlanningConfig::Git { remote, shared } = config.planning_transport() else {
+    let PlanningConfig::Git { remote, plan } = config.planning_transport() else {
         return Ok(Vec::new());
     };
-    let reference = match shared {
-        Some(name) => Some(format!("refs/loopflow/planning/shared/{name}")),
-        None => store
-            .planning_user_key()
-            .await
-            .map_err(message)?
-            .map(|key| format!("refs/loopflow/planning/users/{key}")),
+    let key = match plan {
+        GitPlan::Shared(_) => None,
+        GitPlan::Personal => store.planning_user_key().await.map_err(message)?,
     };
+    let reference = plan.reference(key.as_deref());
     let active = if crate::repo::discover_repo_root(Path::new(repo))
         .map_err(message)?
         .is_some()
@@ -166,7 +167,19 @@ pub(crate) async fn peer_status(
         .map_err(message)
 }
 
+/// A World build is this process's only writer to a remote nobody else reads,
+/// so its saves stay local and [`crate::world::World::finish`] publishes once.
+/// A Git exchange per save made a 150-Task world cost minutes.
+static EXCHANGE_DEFERRED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn defer_exchange(deferred: bool) {
+    EXCHANGE_DEFERRED.store(deferred, Ordering::SeqCst);
+}
+
 async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsResult<()> {
+    if EXCHANGE_DEFERRED.load(Ordering::SeqCst) {
+        return Ok(());
+    }
     let Some(destination) = configured_destination(store, repo).await? else {
         return Ok(());
     };
@@ -317,7 +330,7 @@ pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
     let repo = crate::repository::CanonicalRepo::discover(directory)
         .map_err(message)?
         .to_string();
-    if !super::linear_observe::connected(&repo) {
+    if !super::planning_client::connected(&repo) {
         return Ok(());
     }
     tokio::runtime::Builder::new_current_thread()
@@ -362,8 +375,8 @@ impl PlanningSync {
         watching: bool,
         open: impl Future<Output = OpsResult<SharedStore>> + Send + 'static,
     ) -> OpsResult<Self> {
-        let linear = super::linear_observe::connected(&repo);
-        if linear && !watching {
+        let remote = super::planning_client::connected(&repo);
+        if remote && !watching {
             return Ok(Self {
                 stop: None,
                 thread: None,
@@ -401,13 +414,13 @@ impl PlanningSync {
                     }
                     tokio::select! {
                         _ = stopped => {},
-                        _ = super::linear_observe::watch_repository(&store, &repo), if linear => {},
+                        _ = super::linear_observe::watch_repository(&store, &repo), if remote => {},
                         _ = repeat_sync("Git planning acquisition", Duration::from_secs(5), || {
                             acquire_repository(&store, &repo)
-                        }), if !linear => {},
+                        }), if !remote => {},
                         _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
                             publish_repository(&store, &repo)
-                        }), if !linear => {},
+                        }), if !remote => {},
                     }
                 };
                 #[cfg(test)]

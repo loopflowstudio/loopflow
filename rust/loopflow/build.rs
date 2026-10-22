@@ -25,7 +25,7 @@ mod migration_catalog;
 #[path = "src/store/migration_schema.rs"]
 mod migration_schema;
 
-/// Category directories whose skill/flow names are registered flat (no prefix).
+/// Category directories whose skill/graph names are registered flat (no prefix).
 /// Everything else is a namespaced category: public names carry a `<cat>-` prefix.
 /// Core categories share one flat namespace and must not collide with each other.
 /// Within a filename, `_` encodes a namespace separator (`wave_clarify.md`
@@ -55,7 +55,7 @@ fn main() {
     emit_schema_references(&manifest_dir, &out_dir);
     let builtins_dir = manifest_dir.join("src/builtins");
 
-    for (kind, extension) in [("skill", "md"), ("flow", "yaml")] {
+    for (kind, extension) in [("skill", "md"), ("graph", "yaml")] {
         generate_builtins(&builtins_dir, &out_dir, kind, extension);
     }
 

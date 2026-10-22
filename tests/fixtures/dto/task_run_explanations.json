@@ -48,7 +48,7 @@
       "take_up": true,
       "from": "start",
       "to": "design",
-      "flow": "task-design"
+      "graph": "task-design"
     },
     "impediments": [],
     "unavailable": [
@@ -104,7 +104,7 @@
       "take_up": false,
       "from": "design",
       "to": "end",
-      "flow": null
+      "graph": null
     },
     "impediments": [],
     "unavailable": [
@@ -155,8 +155,8 @@
       "planning_observed_at": null
     },
     "action": {
-      "kind": "flow",
-      "flow": "proof"
+      "kind": "graph",
+      "graph": "proof"
     },
     "impediments": [
       "Task cancellation is pending"

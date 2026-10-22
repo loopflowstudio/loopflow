@@ -1,17 +1,17 @@
-//! Observed Task membership grants no attachment, process or Flow authority.
+//! Observed Task membership grants no attachment, process or Graph authority.
 
 use serde::{Deserialize, Serialize};
 
-use crate::durable::FlowProcessInventoryEntry;
+use crate::durable::GraphProcessInventoryEntry;
 use crate::process::LfProcess;
 
 /// All retained work in a checkout, plus explicitly attributed work elsewhere.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskWork {
     pub sessions: Vec<TaskSession>,
-    pub flow_processes: Vec<FlowProcessInventoryEntry>,
+    pub graph_processes: Vec<GraphProcessInventoryEntry>,
     pub processes: Vec<LfProcess>,
-    /// The Task's Workflow; `None` when it runs only ad hoc Flows.
+    /// The Task's Workflow; `None` when it runs only ad hoc Graphs.
     pub workflow: Option<crate::ops::workflow::Workflow>,
 }
 
@@ -19,7 +19,7 @@ pub struct TaskWork {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskOverview {
     pub sessions: Vec<TaskSession>,
-    pub flow_processes: Vec<FlowProcessInventoryEntry>,
+    pub graph_processes: Vec<GraphProcessInventoryEntry>,
     pub workflow: Option<crate::ops::workflow::Workflow>,
 }
 
@@ -29,8 +29,8 @@ pub struct TaskSession {
     pub id: crate::id::LfSessionId,
     pub title: String,
     pub interactive: bool,
-    /// The Flow whose step opened its current input.
+    /// The Graph whose step opened its current input.
     #[serde(deserialize_with = "crate::id::deserialize_uuid_option")]
-    pub flow_lf_process_id: Option<String>,
+    pub graph_lf_process_id: Option<String>,
     pub completed_at: Option<i64>,
 }

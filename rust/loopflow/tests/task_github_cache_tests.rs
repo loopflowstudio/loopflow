@@ -219,7 +219,7 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
         .execution
         .expect("execution");
     assert!(
-        cached.work.flow_processes.is_empty(),
+        cached.work.graph_processes.is_empty(),
         "an interrupt launches nothing"
     );
     assert!(matches!(cached.observation, Observation::NotRequired));

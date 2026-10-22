@@ -272,15 +272,15 @@ lf --only-account claude=personal@ --only-account codex=work@ implement
 resolved independently for Claude and Codex. The two flags cannot be combined.
 A provider omitted from `--only-account` is unavailable to that process tree.
 
-Choose both providers once for a Flow or Task:
+Choose both providers once for a Graph or Task:
 
 ```bash
-lf --only-account claude=personal@ --only-account codex=work@ flow code
+lf --only-account claude=personal@ --only-account codex=work@ graph code
 lf --account claude=personal@ --account codex=work@ task run LOO-123
 ```
 
-A Flow carries these choices to its steps. `--account` keeps fallback routing;
-`--only-account` restricts the entire Flow. Run a fresh Flow to choose again.
+A Graph carries these choices to its steps. `--account` keeps fallback routing;
+`--only-account` restricts the entire Graph. Run a fresh Graph to choose again.
 Steps have no account overrides. Native Session affinity remains authoritative within that selection.
 Local choices use the Machine's catalog directly and survive the initiating CLI's
 exit, including logins installed on a remote machine.
@@ -334,7 +334,7 @@ These launch-time switches do not restart Codex's shared daemon. If plain
 
 `--isolate` runs the invocation and its children in the selected account's own
 home, unmoved by any switch. `isolate: true` in `.lf/config.yaml` makes that the
-default, and `--shared` overrides it for one invocation. A Flow's steps keep
+default, and `--shared` overrides it for one invocation. A Graph's steps keep
 the mode it was launched with.
 
 Codex's own conversation ID works wherever a Session ID does:
@@ -372,7 +372,7 @@ list does not mean zero credits; the provider's count is authoritative.
 Only `redeem-reset` spends a credit. It requires a named managed Codex login,
 validates identity, reports usage before and after, and supports `--json`.
 `--credit-id <id>` selects a particular returned credit; otherwise Codex chooses.
-Status, routing and Flow launches never redeem resets.
+Status, routing and Graph launches never redeem resets.
 
 Each attempt prints an idempotency key before sending the request. Reuse it
 if the reply is lost. `reset` confirms a spend; `alreadyRedeemed` confirms that
@@ -460,7 +460,7 @@ consumers must migrate; the removed interfaces have no compatibility aliases.
   credential binding.
 - Account selection lives in `provider_account::selection`; the SSH credential
   broker and lent-account API are removed. Launch local commands with `--account`
-  or `--only-account`; a Flow carries those choices to its steps.
+  or `--only-account`; a Graph carries those choices to its steps.
 - Route candidates belong to the executing machine. Their JSON and text omit
   the former local/forwarded `source` field.
 

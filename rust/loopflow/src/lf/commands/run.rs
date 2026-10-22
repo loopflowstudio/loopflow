@@ -100,7 +100,7 @@ pub(crate) fn preview_prompt(
 /// `lf -b connect ID --message TEXT`: one more headless turn of a conversation,
 /// using `message` and the provider's own history without re-executing its skill.
 pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
-    if crate::transport::delegate_current()? {
+    if crate::transport::delegate_current(true)? {
         return Ok(());
     }
     crate::data_clone::require_writable_session(id)?;

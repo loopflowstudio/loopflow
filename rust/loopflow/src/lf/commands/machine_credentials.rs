@@ -1335,6 +1335,8 @@ esac
         let _environment = Environment::isolate(root.path());
         let (endpoint, server) = identity_server(json!({"login":"person"})).await;
         std::env::set_var("LF_TEST_MACHINE_GITHUB_URL", endpoint);
+        // CI images ship gh in /usr/bin; only the fixture bin stays reachable.
+        std::env::set_var("PATH", root.path().join("bin"));
         let store = store(root.path()).await;
         let error = install(
             &store,

@@ -163,13 +163,14 @@ pub(crate) fn current() -> Option<&'static LfProcessId> {
 
 /// Delegate before capture admission or provider effects. A missing startup
 /// acknowledgement is uncertainty, never permission to launch again.
-pub fn delegate_current() -> Result<bool> {
+pub fn delegate_current(batch: bool) -> Result<bool> {
     if current().is_some() {
         return Ok(false);
     }
     // Library tests do not execute the CLI entry point.
     #[cfg(test)]
     {
+        let _ = batch;
         Ok(false)
     }
     #[cfg(not(test))]
@@ -179,14 +180,10 @@ pub fn delegate_current() -> Result<bool> {
         crate::journal::current_lf_process_id()
             .context("Execution requires an admitted invocation; check the process ledger and caller provenance")?;
         argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
-        // Output decides: `lf -b … > file` typed at a terminal must write
-        // only the answer, never a relayed screen.
-        let owner = start(
-            &argv,
-            io::stdout().is_terminal(),
-            &std::env::current_dir()?,
-            &|_| {},
-        )?;
+        // `lf -b … > file` typed at a terminal writes only the answer, never a
+        // relayed screen; an interactive run keeps the terminal it reads from.
+        let terminal = io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
+        let owner = start(&argv, terminal, &std::env::current_dir()?, &|_| {})?;
         attach(&owner, false, true)?;
         Ok(true)
     }

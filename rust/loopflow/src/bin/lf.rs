@@ -2189,7 +2189,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 ..
             })
     );
-    if execution && loopflow::transport::delegate_current()? {
+    if execution && loopflow::transport::delegate_current(cli.batch)? {
         return Ok(());
     }
     // Display location is not execution placement. Opening reads Work here;

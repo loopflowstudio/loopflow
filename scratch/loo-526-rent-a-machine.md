@@ -210,8 +210,10 @@ host and published port for 22 (the proxy endpoint is PTY-only and never counts)
 lf@IP:PORT --label code-1` (probe + identity), clone the repository's origin and
 `lf repo identity --bind <repo_id>` over `lf --machine code-1`, then `lf machine
 connect code-1 github` (the laptop's `gh` token, no approval) and every
-Claude account holding a long-lived token (below; `-b` reports which connects
-are still needed instead of waiting). The Rental is
+Claude account holding a long-lived token (below). Under `-b`, `--rent`
+first checks that `gh` is connected and some Claude account holds a token,
+and refuses before renting otherwise; accounts without one are skipped with a
+note. The Rental is
 `running` once `machine_id` is set. Then the handoff and the forwarded run,
 exactly as to any Machine. Nothing in Task execution learns about rentals.
 
@@ -357,7 +359,10 @@ Jack's, from the brief, in today's vocabulary: `lf ondemand add code --provider
 runpod --vcpus 8 --memory-gb 16 --max 1 --max-usd-per-hour 0.40`, run a Task
 with `--rent code`, watch the machine appear, the Task read "Jack on code-1",
 the PR push, and the machine get deleted with its Session history retained on
-the laptop. Etude rented cpu3c×8 at $0.24/h on the 21st.
+the laptop. Etude rented cpu3c×8 at $0.24/h on the 21st. Then the same
+unattended: `lf -b task run X --rent code -a claude` rents, connects and runs
+with no Chrome window, and refuses before renting when no Claude token is
+stored.
 
 ## Delete — do not maintain
 
@@ -377,6 +382,28 @@ The model still maps one-to-one. Found one lifecycle gap: a rental could end
 open Task, so the next `lf task run` forwarded to a deleted pod. Settled: an
 ordinary `Handoff` back to the Machine running the pass, keeping the person's
 claim and the code-1 history (built; see Status). Q7–Q9 stand as recorded.
+
+## Concept review (2026-10-22, after long-lived tokens, headless)
+
+Jack's credential decision (Q10a, the steer "no approval every time I rent")
+removes the premise of Q7's default. `--rent` refused under `-b` because a
+fresh pod needed a Chrome approval per login. Now GitHub forwards the
+laptop's `gh` token and Claude installs stored tokens, so no step of
+`prepare` needs a person once tokens exist. Built 2026-10-22:
+
+- Drop `require_foreground` from GitHub's branch of `machine connect`
+  (`machine_credentials.rs`): it guards an approval that does not exist.
+- Replace the blanket `-b` refusal in `--rent` with a check before renting:
+  `gh` is connected and at least one Claude account holds a long-lived
+  token; otherwise refuse naming `lf account token claude <email>`, so a
+  background run still never pays for a machine it cannot use. `prepare`
+  passes the run's `batch` through, so an account without a token is skipped
+  with its note rather than minted.
+- An autonomous `lf -b task run X --rent code -a claude` is a demo case.
+
+Q8 sharpens and stays open (below in `questions.md`): a rented pod now holds
+year-long subscription tokens, and give-back deletes the pod without revoking
+them.
 
 ## Status and remaining work
 
@@ -463,8 +490,7 @@ Remaining:
    year's validity); then `--rent` should open Chrome zero times (GitHub
    forwards the laptop's `gh` token). It proves the real setup-token capture,
    several accounts on one pod, clone, hand-off, push, copy-up and delete.
-   `--rent` under `-b` still refuses on GitHub's `require_foreground` (Q7).
-   The scheduled reconcile only gives back when its environment carries
-   `RUNPOD_API_KEY` (Q9).
+   It also runs `lf -b task run X --rent code -a claude` once. The scheduled
+   reconcile only gives back when its environment carries `RUNPOD_API_KEY` (Q9).
 
-Last check (realign 2026-10-22): `cargo test -p loopflow --lib -- claude_long_lived long_lived_token claude_refuses_api_keys setup_token_captures only_subscription_tokens` 5 passed.
+Last check (implement 2026-10-22): `cargo test -p loopflow --lib -- background_rental_needs github_installs claude_long_lived` 3 passed; `cargo clippy --all-targets -- -D warnings` clean.

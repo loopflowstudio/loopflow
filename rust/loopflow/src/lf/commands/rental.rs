@@ -640,17 +640,17 @@ pub fn place(
         return Ok(true);
     }
     if batch {
-        return Err(anyhow!(
-            "renting for a Task connects a fresh machine from a foreground terminal; \
-             run it without -b, or `lf ondemand rent {name}` and `lf machine connect` first"
-        ));
+        runtime.block_on(async {
+            let accounts = crate::provider_account::open_account_store().await?;
+            super::machine_credentials::require_unattended_logins(&accounts).await
+        })?;
     }
     let (_, machine) = rent(&runtime, sqlite, &api, name, None, None, false)?;
     let label = machine
         .label
         .clone()
         .unwrap_or_else(|| machine.id.to_string());
-    prepare(&runtime, &label, repo, sqlite)?;
+    prepare(&runtime, &label, repo, sqlite, batch)?;
     hand_off(&runtime, repo, issue, &label)?;
     Ok(false)
 }
@@ -686,6 +686,7 @@ fn prepare(
     label: &str,
     repo: &std::path::Path,
     sqlite: &SqliteStore,
+    batch: bool,
 ) -> anyhow::Result<()> {
     use crate::provider_auth::Provider as Login;
     let machine = runtime.block_on(super::ssh::resolve_target(label, false))?;
@@ -694,10 +695,10 @@ fn prepare(
         Login::GitHub,
         None,
         None,
-        false,
+        batch,
     ))?;
     runtime.block_on(super::machine_credentials::connect_claude_accounts(
-        &machine, false,
+        &machine, batch,
     ))?;
     let key = crate::repository::CanonicalRepo::discover(repo)?.to_string();
     let id = sqlite

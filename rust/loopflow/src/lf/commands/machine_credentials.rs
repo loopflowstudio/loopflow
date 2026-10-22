@@ -134,7 +134,6 @@ pub(super) async fn connect(
             if remote_has(machine, provider, &login)? {
                 return Ok(());
             }
-            require_foreground(batch)?;
             Credential::Github {
                 login,
                 token: token.expose_secret().clone(),
@@ -236,7 +235,8 @@ pub(super) async fn connect(
 
 /// Every Claude account with a long-lived token, so account selection on the
 /// machine falls through an exhausted account as on any other. With none
-/// stored, a foreground run mints one for each connected account.
+/// stored, a foreground run mints one for each connected account; a background
+/// run skips each with a note.
 pub(super) async fn connect_claude_accounts(machine: &Machine, batch: bool) -> Result<()> {
     let store = open_account_store().await?;
     let accounts = store
@@ -253,7 +253,7 @@ pub(super) async fn connect_claude_accounts(machine: &Machine, batch: bool) -> R
             unminted.push(account);
         }
     }
-    let chosen = if minted.is_empty() {
+    let chosen = if minted.is_empty() && foreground(batch) {
         unminted.retain(|account| account.credential_state == CredentialState::Connected);
         unminted
     } else {
@@ -266,7 +266,7 @@ pub(super) async fn connect_claude_accounts(machine: &Machine, batch: bool) -> R
         minted
     };
     if chosen.is_empty() {
-        bail!("no Claude account on this laptop; `lf account connect claude <email>` first");
+        bail!("no Claude account to install; `lf account connect claude <email>`, then `lf account token claude <email>`");
     }
     for account in chosen {
         connect(
@@ -279,6 +279,32 @@ pub(super) async fn connect_claude_accounts(machine: &Machine, batch: bool) -> R
         .await?;
     }
     Ok(())
+}
+
+/// A background rental pays only when no login needs a person: `gh` holds a
+/// token here and a Claude account holds a long-lived one.
+pub(super) async fn require_unattended_logins(store: &SharedStore) -> Result<()> {
+    let gh = Command::new("gh")
+        .args(["auth", "token", "--hostname", "github.com"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    if !gh.is_ok_and(|status| status.success()) {
+        bail!("GitHub is not connected on this laptop; `gh auth login` first");
+    }
+    for account in store
+        .list_provider_accounts(Some(Provider::Claude.as_str()))
+        .await?
+    {
+        if store
+            .long_lived_token(Provider::Claude.as_str(), &account.account_id)
+            .await?
+            .is_some()
+        {
+            return Ok(());
+        }
+    }
+    bail!("no Claude account holds a long-lived token, and a background run cannot approve one; `lf account token claude <email>` mints it in a foreground terminal")
 }
 
 fn connecting(machine: &Machine, provider: Provider, login: &str) {
@@ -1611,6 +1637,37 @@ esac
         assert!(!raw
             .windows(b"stored-token".len())
             .any(|window| window == b"stored-token"));
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn background_rental_needs_gh_and_a_long_lived_claude_token() {
+        let _lock = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _environment = Environment::isolate(root.path());
+        std::env::set_var("PATH", root.path().join("bin"));
+        let store = store(root.path()).await;
+        let error = super::require_unattended_logins(&store)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("GitHub is not connected"));
+        executable(&root.path().join("bin/gh"), "#!/bin/sh\necho gh-token\n");
+        let account = super::managed_account(&store, Provider::Claude, "person@example.com")
+            .await
+            .unwrap();
+        store.upsert_provider_account(&account).await.unwrap();
+        let error = super::require_unattended_logins(&store)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("`lf account token claude <email>`"));
+        let token = secrecy::SecretString::new("sk-ant-oat01-stored-token".into());
+        store
+            .set_long_lived_token("claude", &account.account_id, &token, 7)
+            .await
+            .unwrap();
+        super::require_unattended_logins(&store).await.unwrap();
     }
 
     #[tokio::test]

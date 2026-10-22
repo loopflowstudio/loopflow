@@ -165,5 +165,18 @@ the callback page, so the paste stays.
   it honours BROWSER, reads the pasted code on piped stdin and prints the
   `sk-ant-oat…` token on one line. If the TUI needs a TTY, `--file -` with a
   hand-minted token is the fallback.
-- **`--rent` under `-b` still refuses** (Q7 unchanged); with tokens stored the
-  only remaining blocker is `require_foreground` on GitHub's forwarding.
+
+## Raised in concept review after long-lived tokens (2026-10-22)
+
+- **Q7 settled by Q10a**: with no approval left in `prepare`, `--rent` under
+  `-b` rents when `gh` is connected and a Claude account holds a long-lived
+  token, and refuses before renting otherwise. GitHub's `require_foreground`
+  is gone. Built 2026-10-22. Assumed: in the foreground the check is skipped,
+  since a missing token is minted there; under `-b` with no token anywhere,
+  every account is skipped rather than minted.
+- **Q8 sharpened, still open for Jack**: each rented pod now receives every
+  stored year-long `sk-ant-oat` token and the laptop's `gh` token, and
+  give-back deletes the pod without revoking either. Options: (a) accept
+  RunPod's disk deletion as the boundary (current behavior), or (b) remove the
+  credential files over SSH before `DELETE` (cheap, does not revoke). Not blocking the
+  demo: Jack chose installing tokens on rentals with this exposure known.

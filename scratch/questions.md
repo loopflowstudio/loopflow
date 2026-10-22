@@ -25,7 +25,7 @@
   `install.sh`, fixes are verified with this branch's build on the machine.
 - **Claude trust prompt per agent worktree (decided; moved to LOO-565).**
   Jack said yes to pre-accepting trust for lf-created worktrees. LOO-565 owns
-  it; leave it out of this branch.
+  it and landed on main as df052b7240 (#1648); this branch takes it by merge.
 - **Codex forwarding proven (2026-10-22).** Round two connected Codex on a
   rented machine and a headless `lf -a codex` turn answered there; see the ledger.
 - **Newcomer messages: fix both here (Jack Heart, October 21).** `install.sh`

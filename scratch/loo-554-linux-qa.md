@@ -15,8 +15,12 @@ not launch (missing managed Claude credential), so nothing was published.
 Round four (2026-10-22) restarts the Flow on the same committed tree after
 the round-three steps past implement failed the same way; jack@loopflow.studio
 verifies again and its implement step found the managed Claude login active
-(verified). Nothing new to implement: no PR exists yet, main (91b21dc508)
-has not moved, and the remaining work is the Landing section below. The
+(verified). Round four's compress folded the missing-OpenCode error into
+`opencode_export` (85efd23e74). Round five (2026-10-22) resumes after both
+Claude accounts hit their five-hour limit during realign: nothing new to
+implement, no PR exists yet, and the remaining work is the Landing section
+below. Main moved four commits (to ce21904f77, including #1648, LOO-565's
+Claude folder-trust change) and merges cleanly. The
 connect lines now name the provider by display name (00deba37ad, below). No
 other defects are open. PR #1635 merged into main
 as 173bb90880, so the launch-output results below now describe this branch on
@@ -460,3 +464,4 @@ Check (2026-10-22, realign round three b): HEAD a87e518b67 (merge of main 91b21d
 Check (2026-10-22, kickoff round four): HEAD 83d6c8e453 (plan-only commit over a87e518b67); `git merge-tree HEAD origin/main` → 0 conflicts, 0 commits behind; no build, the round-three-b checks still apply.
 Check (2026-10-22, implement round four): HEAD c71dfd5127 differs from 83d6c8e453 only in this plan; `git merge-tree HEAD origin/main` → 0 conflicts, 0 behind; `lf context` scratch 10736/12000 tokens; no code change, the round-three-b checks still apply.
 Check (2026-10-22, compress round four): `opencode_export` now owns the missing-OpenCode error (no `Option` layer, `opencode_missing` deleted); `cargo test -p loopflow --lib -- machine_credentials platform::clipboard` 15 pass; `cargo clippy --all-targets -- -D warnings` clean; `lf context` scratch under budget.
+Check (2026-10-22, kickoff round five): HEAD 85efd23e74; `git merge-tree --write-tree HEAD origin/main` (ce21904f77, 4 ahead) → clean; `lf context` scratch 10909/12000 tokens; plan-only, compress-round-four checks still apply.

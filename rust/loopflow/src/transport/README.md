@@ -26,6 +26,14 @@ Leaving through the provider or detaching records an exit, so those never qualif
 Each resumes through ordinary `lf resume` in a new owner with no viewer; its
 interrupted turn is flagged, not replayed.
 
+A Session nobody views ends after `session.end_detached_after` (default `24h`,
+`off` disables it), counted from when its last viewer left. Owners from builds
+that never recorded that time end 48 hours after they started. A viewer, a turn
+in progress, or a Graph step keeps its owner running; headless Runs are never
+ended. Every owner judges all owners on the Machine every few minutes and ends
+one by signaling it, which stops its agent and records its exit. `lf resume`
+reopens the conversation from provider history; `lf resume --all` skips it.
+
 `lf resume` reconnects to a retained native terminal. A structured Run may require
 an explicit transition to the provider's native UI. That transition preserves the
 Session and saved conversation, but does not preserve its old in-flight turn or

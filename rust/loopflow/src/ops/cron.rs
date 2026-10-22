@@ -857,27 +857,13 @@ pub fn wait_for_cron_receipt(
 }
 
 pub fn parse_wait_duration(value: &str) -> OpsResult<Duration> {
-    let value = value.trim();
-    let (number, multiplier) = if let Some(number) = value.strip_suffix('s') {
-        (number, 1)
-    } else if let Some(number) = value.strip_suffix('m') {
-        (number, 60)
-    } else if let Some(number) = value.strip_suffix('h') {
-        (number, 60 * 60)
-    } else {
-        (value, 1)
-    };
-    let amount: u64 = number.parse().map_err(|_| {
-        OpsError::Parse(format!(
-            "invalid duration {value:?}; use seconds, 10s, 5m, or 1h"
-        ))
-    })?;
-    let seconds = amount
-        .checked_mul(multiplier)
-        .ok_or_else(|| OpsError::Parse(format!("duration {value:?} is larger than 24h")))?;
+    let seconds = crate::config::parse_duration(value)
+        .map_err(|error| OpsError::Parse(error.to_string()))?
+        .as_secs();
     if seconds == 0 || seconds > 24 * 60 * 60 {
         return Err(OpsError::Parse(format!(
-            "duration {value:?} must be between 1s and 24h"
+            "duration {:?} must be between 1s and 24h",
+            value.trim()
         )));
     }
     Ok(Duration::from_secs(seconds))

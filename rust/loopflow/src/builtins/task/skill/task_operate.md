@@ -18,7 +18,9 @@ and reread status), **available** (the review, demo, choice or merge click the
 person can take up, with its conversation link or PR), **dependency or capacity**,
 **paused** (an explicit hold or instruction), or **unknown** (the missing read
 or liveness evidence; never a reason to start a second Graph process). “Ready” or
-“needs reconciliation” is not a disposition.
+“needs reconciliation” is not a disposition. A PR that conflicts with or
+trails its base is not available to a person: run `lf sync`, resolve the
+conflicts, verify and push, then reread status.
 
 ## Workflow
 

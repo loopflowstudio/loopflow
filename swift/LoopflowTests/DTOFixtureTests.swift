@@ -17,7 +17,7 @@ struct DTOFixtureTests {
     @Test func taskFilesFramesKeepInvalidationSeparateFromHeartbeat() throws {
         let data = try loadFixtureData("task_files_frames.json")
         let frames = try JSONDecoder().decode([TaskFilesFrame].self, from: data)
-        #expect(frames.map(\.changed) == [true, false])
+        #expect(frames.map(\.paths) == [["note.txt", ".git/index", ""], []])
         #expect(frames[0].request == frames[1].request)
         #expect(frames[0].checkout == "/repo/task")
         #expect(try JSONDecoder().decode([TaskFilesFrame].self, from: JSONEncoder().encode(frames)) == frames)

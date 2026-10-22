@@ -502,7 +502,7 @@ source. A Markdown-only edit can fail that check.
 App build and headless tests for models, protocols, and production views.
 
 ```bash
-cargo build -p loopflow --bin lf --bin lf-world # Real CLI transport and world proofs
+cargo build -p loopflow --bin lf # Real CLI transport proofs
 scripts/test_desktop.sh -Xswiftc -gnone # Headless Swift tests
 swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by coverage
 swift test --package-path swift --filter SomeTestClass  # Filtered
@@ -532,20 +532,10 @@ output stops after compilation, inspect `events.jsonl` for the last started test
 without a matching end event. SwiftPM buffers console output, so silence alone
 does not establish that test execution never began.
 
-The Swift transport suite launches `target/debug/lf` against a temporary Machine,
-and `WorldReadTests` decodes every Desktop read against an `lf-world` build of
-`portfolio`. Build both before running it; an existing developer build can hide
-a missing prerequisite in a clean checkout. CI and `scripts/test.py --swift`
-include this build.
-
-```bash
-cargo build -p loopflow --bin lf --bin lf-world
-scripts/test_desktop.sh --filter WorldReadTests -Xswiftc -gnone
-```
-
-`BuiltLf` owns finding and running those binaries in a private Machine, and
-`World.shared` builds each recipe once per test process. A new public
-`RegistryQuery` method needs a `WorldRead` row or a stated exclusion.
+The Swift transport suite launches `target/debug/lf` against a temporary Machine.
+Build it before running the suite; an existing developer build can hide a missing
+prerequisite in a clean checkout. CI and `scripts/test.py --swift` include this
+build. `BuiltLf` owns finding and running it in a private Machine.
 
 Transport tests register `Process.terminationHandler` before launch and await
 its notification. Do not use `waitUntilExit()` after an async suspension: the

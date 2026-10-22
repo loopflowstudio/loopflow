@@ -440,8 +440,8 @@ Keep canonical owner paths in command references and help, where the tree is
 the point. Preserve established short names; do not expand `wt` to `worktree`.
 `documented_commands` checks example ambiguity against Clap; adding a competing
 command requires updating any shorthand that stops resolving uniquely.
-`docs/lf-reference.md` is generated:
-`UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration cli_reference`.
+`docs/lf-reference.md` is generated from the compiled Clap tree:
+`UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration reference_matches_the_compiled_cli`.
 
 User docs follow the same principles as prompts (see PROMPTS.md):
 

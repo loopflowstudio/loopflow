@@ -148,7 +148,7 @@ fn default_lf_home_dir() -> PathBuf {
     machine_home_dir().join(".lf")
 }
 
-pub(crate) fn lf_home_dir() -> PathBuf {
+pub fn lf_home_dir() -> PathBuf {
     std::env::var_os("LF_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)

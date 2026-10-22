@@ -565,7 +565,7 @@ mod tests {
         attached_lf.wait().unwrap();
         std::thread::sleep(Duration::from_secs(3));
         let alive = group_alive(agent);
-        assert!(terminate_process_group(agent));
+        terminate_process_group(agent).unwrap();
         assert!(alive, "agent died although a second lf process held it");
         // An agent with no lifeline predates them; there is nothing to hold.
         assert!(!hold_agent_process_lifeline(&dir.path().join("absent")).unwrap());

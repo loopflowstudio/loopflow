@@ -37,7 +37,7 @@ missing service and continue independent work; do not repair auth unasked.
 
 Before starting more execution, inspect the Task's live work, previous results
 and effects. Leave a live Graph running. A stopped Graph is history: repair the
-cause and start only the authorized remaining work, without replaying effects.
+cause and run the steps it did not reach, without replaying effects.
 
 `lf task run` takes up the Task's selected Workflow when applicable and runs an
 edge. `lf task workflow move` changes its position without executing anything.

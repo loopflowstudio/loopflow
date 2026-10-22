@@ -3,9 +3,9 @@ pub(crate) mod scratch;
 pub mod worktree_name;
 pub mod worktrees;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{Seek, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -1256,6 +1256,43 @@ pub fn intervention_state(worktree: &Path) -> Result<Option<&'static str>, GitEr
         return Ok(Some("bisect"));
     }
     Ok(None)
+}
+
+/// The checkout-relative `paths` git ignores, judged by `git check-ignore` at `root`.
+/// Tracked paths are never ignored.
+pub(crate) fn ignored_paths<'a>(
+    root: &Path,
+    paths: impl IntoIterator<Item = &'a str>,
+) -> std::io::Result<HashSet<String>> {
+    // File-backed input avoids a pipe deadlock for batches larger than a pipe buffer.
+    let mut input = tempfile::tempfile()?;
+    let mut empty = true;
+    for path in paths {
+        input.write_all(path.as_bytes())?;
+        input.write_all(b"\0")?;
+        empty = false;
+    }
+    if empty {
+        return Ok(HashSet::new());
+    }
+    input.rewind()?;
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(["check-ignore", "--stdin", "-z"])
+        .stdin(input)
+        .output()?;
+    if !output.status.success() && output.status.code() != Some(1) {
+        return Err(std::io::Error::other(format!(
+            "cannot read ignored paths: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect())
 }
 
 pub fn absolute_git_dir(worktree: &Path) -> Result<PathBuf, GitError> {

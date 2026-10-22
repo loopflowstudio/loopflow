@@ -162,48 +162,63 @@ pub(crate) fn kill_process_group(pid: u32) {
     crate::platform::kill_process(pid);
 }
 
+/// SIGTERM gets a short grace; SIGKILL waits for the kernel to finish tearing
+/// the group down, which takes seconds for large address spaces under load.
 const TERMINATE_GRACE: Duration = Duration::from_secs(2);
+const KILL_GRACE: Duration = Duration::from_secs(10);
 
-/// SIGTERM a process group, wait, then SIGKILL the stragglers. Returns true
-/// when no live member remains. Zombies await their own parent's wait; they
-/// cannot keep an AgentProcess alive. The caller proves this is an owned group.
+/// SIGTERM a process group, wait, then SIGKILL the stragglers. Succeeds when
+/// every member has exited: zombies await their own parent's wait and cannot
+/// keep an AgentProcess alive. The caller proves this is an owned group.
 #[cfg(unix)]
-pub(crate) fn terminate_process_group(pgid: u32) -> bool {
-    if pgid <= 1 || current_process_group_id() == Some(pgid) {
-        return false;
-    }
-    let Ok(group) = i32::try_from(pgid) else {
-        return false;
-    };
-    for signal in [libc::SIGTERM, libc::SIGKILL] {
+pub(crate) fn terminate_process_group(pgid: u32) -> Result<()> {
+    let group = i32::try_from(pgid)
+        .ok()
+        .filter(|_| pgid > 1 && current_process_group_id() != Some(pgid))
+        .ok_or_else(|| anyhow!("process group {pgid} is not an owned group"))?;
+    let mut survivors = Vec::new();
+    for (signal, grace) in [
+        (libc::SIGTERM, TERMINATE_GRACE),
+        (libc::SIGKILL, KILL_GRACE),
+    ] {
         // SAFETY: a negative pid signals only the named process group.
         if unsafe { libc::kill(-group, signal) } != 0 {
-            return std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                return Ok(());
+            }
+            return Err(anyhow!("cannot signal process group {pgid}: {error}"));
         }
-        let deadline = Instant::now() + TERMINATE_GRACE;
-        while Instant::now() < deadline {
+        let deadline = Instant::now() + grace;
+        // Observe before checking the deadline so the last look follows it.
+        loop {
             // SAFETY: WNOHANG collects the leader only if it is this
             // process's exited child; otherwise it fails without effect.
             unsafe {
                 libc::waitpid(group, std::ptr::null_mut(), libc::WNOHANG);
             }
-            match crate::journal::OsProcess::group_is_alive(pgid) {
-                Ok(false) => return true,
-                Ok(true) => {}
-                Err(error) => {
-                    tracing::warn!(pgid, %error, "cannot observe process group after signal");
-                    return false;
-                }
+            survivors = crate::journal::OsProcess::group(pgid)
+                .map_err(|error| anyhow!("cannot observe process group {pgid}: {error}"))?;
+            if survivors.is_empty() {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                break;
             }
             std::thread::sleep(Duration::from_millis(25));
         }
     }
-    false
+    Err(anyhow!(
+        "process group {pgid} survives SIGKILL: {}",
+        crate::journal::OsProcess::describe(&survivors)
+    ))
 }
 
 #[cfg(not(unix))]
-pub(crate) fn terminate_process_group(_pgid: u32) -> bool {
-    false
+pub(crate) fn terminate_process_group(pgid: u32) -> Result<()> {
+    Err(anyhow!(
+        "process group {pgid} cannot be signaled on this platform"
+    ))
 }
 
 #[cfg(test)]
@@ -447,7 +462,7 @@ mod tests {
         let group = leader.id();
         leader.wait().unwrap();
 
-        assert!(terminate_process_group(group));
+        terminate_process_group(group).unwrap();
 
         std::thread::sleep(Duration::from_millis(1500));
         assert!(!flag.exists(), "grandchild outlived its group");

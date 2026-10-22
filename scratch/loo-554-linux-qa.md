@@ -13,9 +13,14 @@ Round three (2026-10-22) is landing only: the earlier Flow stopped after
 implement when its steps could not launch (missing managed Claude credential),
 so nothing was published. No new defects are open. PR #1635 merged into main
 as 173bb90880, so the launch-output results below now describe this branch on
-main, not a combined tree. Main's eight newer commits touch `os_process.rs`
-(`terminate_process_group`) and `transport.rs` in regions this branch did not
-edit; a dry-run merge shows no conflicts, and gate builds the merged tree.
+main, not a combined tree. Main's eight newer commits (through ed568b1ff5,
+#1638) touch `os_process.rs`, `transport.rs`, `lf/mod.rs` and
+`docs/lf-reference.md` in regions this branch did not edit; those merge
+cleanly. One conflict: both sides rewrote the AGENTS.md sentence on
+generating `docs/lf-reference.md`, and main's wording (the
+`reference_matches_the_compiled_cli` test) wins. After the merge, if that
+integration test fails, regenerate the reference with its `UPDATE_CLI_REFERENCE=1`
+form rather than editing the doc by hand. Gate builds the merged tree.
 
 ## Problem
 
@@ -395,3 +400,4 @@ Check (2026-10-21, publish): cargo fmt --check, gate lib tests (5), golden_promp
 Check (2026-10-21, kickoff round two): laptop probes of OpenCode 2.0.32 export/import/device login and Zen `/zen/v1/models` → findings above; plan only, no build.
 Check (2026-10-22, implement round two): `cargo test -p loopflow --lib -- machine_credentials` 13 pass; `cargo clippy --all-targets -- -D warnings` clean; machine run → ledger.
 Check (2026-10-22, kickoff round three): `cargo test -p loopflow --lib -- machine_credentials platform::clipboard machine::tests::release_numbers_order_by_component` 16 pass on HEAD 79c04625; `cargo fmt --check` clean; dry-run merge with origin/main (173bb90880 and seven later commits) → 0 conflicts; full matrix → gate/CI.
+Check (2026-10-21, implement round three): no code change since 79c04625 (prose commits only), so the kickoff result stands; `git merge-tree HEAD origin/main` (ed568b1ff5) → one conflict, AGENTS.md reference sentence, resolution above; build and suites → sync/gate.

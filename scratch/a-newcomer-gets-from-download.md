@@ -37,8 +37,8 @@ its ownership still need to be resolved. No planning records were changed.
 After considering requiring GitHub, Jack confirmed: "make sure theyre signed in
 asap" in response to initial setup versus first publication. GitHub sign-in
 belongs in initial setup, before **Open project…**; do not postpone it until
-delivery. Reuse existing `lf auth github` and account for its `gh` executable
-dependency on a clean Mac. Verify and reuse an existing sign-in. Authentication
+delivery. Reuse `lf account connect github` and supply its `gh` executable
+on a clean Mac (`lf install gh`). Verify and reuse an existing sign-in. Authentication
 does not authorize creating repositories or publishing code automatically.
 
 Jack chose "drag to app -> open" as the primary acquisition path. Jack
@@ -193,8 +193,8 @@ Once a tool is installed, the primary action is **Sign in**. Once the coding
 tool is connected, establish GitHub sign-in through the existing auth owner.
 If `gh` is absent, offer its installation as part of setup; if signed out,
 offer **Connect GitHub**. Verify existing sign-in and skip completed steps.
-Failed or canceled connection leaves an actionable retry. The mechanism for
-acquiring `gh` is still to be specified; do not assume Homebrew is present.
+Failed or canceled connection leaves an actionable retry. `gh` comes from
+`lf install gh` (GitHub's release archive); Homebrew is never assumed.
 Once both accounts are connected, the primary action is **Open project…**,
 with a brief explanation that a project
 is a folder of files and currently must use Git. The chooser reuses
@@ -236,7 +236,7 @@ installed-tool ordering when no explicit setup choice or configuration exists.
 |---|---|---|
 | Does the shell wall exist? | The real installer, with isolated HOME and stubbed transport/promotion, exited 0 and put a fixture in `.local/bin`. No startup files were written; a new `zsh -lic` reported `lf: not found`. A separate minimal PATH probe failed in both login and interactive zsh; explicit PATH succeeded. | Fix persistence and distinguish the current shell from future shells. This is shell simulation, not clean-account proof. |
 | Does the app depend on terminal PATH to find lf? | `LocalWaveAgentLauncher.controlLfPath` resolves the bundled helper; `GUIProcessEnvironment` already adds `.local/bin` and common package-manager directories. | Reuse these paths. Do not replace bundled-helper authority with PATH fallback. |
-| Does nothing support sign-in? | `lf auth` already invokes Claude/Codex native login, opens the browser and waits for completion. | Expose the existing path. No second OAuth client or credential store. |
+| Does nothing support sign-in? | `lf account connect` (then `lf auth`) already invokes Claude/Codex native login, opens the browser and waits for completion. | Expose the existing path. No second OAuth client or credential store. |
 | Is npm required? | Both official provider docs now offer native macOS installers; see sources below. | Install without Node, npm or Homebrew as prerequisites. |
 | What happens with no tools? | `default_agent()` falls back to Codex; `missing_agent_message` then gives a Codex/npm-only instruction. Availability checks are cached. | Distinguish implicit absence from an explicit provider request; re-probe after install. |
 | Is the claimed empty screen current? | Code: primary launch is `PodiumView` → `WorkspaceNavigator` when no repo is selected. Its menu can contain no repository and no actions. “Author a Wave” belongs to `WorkSurfaceView`; `WavesView` is a different scene. | Change the actual primary boundary. Live confirmation remains required before UI implementation. |
@@ -362,13 +362,15 @@ of this branch or a clean account. No clean Mac account was created.
 
 ## Internal slices
 
-1. **Activate a dragged app.** Record the running baseline before UI edits.
+1. **Activate a dragged app.** (Rust side implemented; Swift entry and
+   live proof outstanding.) Record the running baseline before UI edits.
    Trace and implement the copied-bundle entry into the existing promotion
    owner, including first-install app restart and durable helper registration.
    Isolate installer fixtures before profile writes; share PATH persistence
    across both install entries and retain the actual app destination on update.
    Prove the clean-account drag/open path and fresh-shell command discovery.
-2. **Connect a coding tool and GitHub.** Add the small native installer operation and typed
+2. **Connect a coding tool and GitHub.** (Rust side implemented; live
+   proof outstanding.) Add the small native installer operation and typed
    native-status projection in existing owners, reuse login, persist explicit
    default selection, and fix implicit no-tool diagnostics. Prove missing →
    installed → connected and failure/retry without a repo. Supply `gh` when
@@ -413,9 +415,9 @@ Implemented in the existing installer owner:
   definition; missing-tool errors and doctor fallbacks name these installers
   and offer both tools.
 
-Provider/GitHub setup actions (2026-10-22, second pass). `lf auth` is now
-`lf account`; the design's `lf auth status <provider> --json` is
-`lf account [provider] --json`:
+Provider/GitHub setup actions (2026-10-22, second pass). The command is
+`lf account` on the base (renamed upstream); the design's
+`lf auth status <provider> --json` is `lf account [provider] --json`:
 
 - Local rows for codex, claude and github carry a fresh native reading:
   `executable` (`installed|missing`, PATH as a launch sees it; null for
@@ -466,6 +468,7 @@ open findings are folded into Remaining above.
 | After main sync + recovery fix `257ed79113` (2026-10-22) | `cargo test -p loopflow --lib -- lf::commands::install machine_install app_activation_tests`: 37 passed, 2 ignored. | Same fixture limits. |
 | Setup actions (2026-10-22) | `cargo test --lib -- lf::commands::account provider_auth`: 120 passed; integration `auth_tests` 11 passed (missing→installed→connected without a repo; default agent written only on success; malformed config kept); `install::gh` 2 passed; Swift `DTOFixtureTests` 50 passed; clippy/fmt clean; CLI reference regenerated. | Stub CLIs; no real provider, browser, Keychain or GitHub download. |
 | Compress (2026-10-22) | One local `AccountRow` path, `connect` split into sign-in/verify, config write inlined in `update_global_config_at`; clippy clean; account_status/portfolio lib tests and 3 integration auth tests passed. Unrelated `session_record::manifest_round_trips…` fails on missing `graph_process_steps` (untouched by branch). | Same stub limits. |
+| Realign (2026-10-22) | Plan matched code; origin/main unchanged since `98dab5ea8e`; no tests rerun. | Reuses results above. |
 
 Proposed Wave memory update after landing (memory is read-only here): items 1,
 3 and 7 of "What stands between a newcomer and a first task" are addressed in

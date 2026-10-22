@@ -570,25 +570,6 @@ impl Drop for EnvGuard {
     }
 }
 
-fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
-    let value = value.trim();
-    let (number, multiplier) = if let Some(number) = value.strip_suffix('s') {
-        (number, 1)
-    } else if let Some(number) = value.strip_suffix('m') {
-        (number, 60)
-    } else if let Some(number) = value.strip_suffix('h') {
-        (number, 60 * 60)
-    } else {
-        (value, 1)
-    };
-    let amount: u64 = number
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid duration {value:?}; use seconds, 10s, 5m, or 1h"))?;
-    Ok(std::time::Duration::from_secs(
-        amount.saturating_mul(multiplier),
-    ))
-}
-
 /// One PR's line in `lf task status`. A degraded Linear linkage is named here
 /// because this reading is where an operator already looks for writeback health —
 /// the Task's `PM writeback` line sits directly above. Silence means linked.
@@ -1361,7 +1342,10 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             } else {
                 loopflow::ops::task::TaskWaitUntil::Terminal
             };
-            let timeout = timeout.as_deref().map(parse_duration).transpose()?;
+            let timeout = timeout
+                .as_deref()
+                .map(loopflow::config::parse_duration)
+                .transpose()?;
             let task = loopflow::ops::task::task_wait(issue, until, timeout)?;
             print_task(&task, *json)
         }

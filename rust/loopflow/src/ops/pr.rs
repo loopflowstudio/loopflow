@@ -1463,6 +1463,8 @@ fn required_contexts_for(repo: &Path, base: &str) -> BTreeSet<String> {
 pub(crate) struct RequiredProducers {
     /// (workflow name, job name) pairs.
     jobs: HashSet<(String, String)>,
+    /// The required checks some job here produces.
+    produced: BTreeSet<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1517,6 +1519,7 @@ impl RequiredProducers {
 
     fn parse(files: &[(String, String)], required: &BTreeSet<String>) -> Self {
         let mut jobs = HashSet::new();
+        let mut produced = BTreeSet::new();
         for (path, source) in files {
             let Ok(workflow) = serde_yaml_ng::from_str::<WorkflowFile>(source) else {
                 continue;
@@ -1534,6 +1537,7 @@ impl RequiredProducers {
                 if !required.contains(&display(key)) {
                     continue;
                 }
+                produced.insert(display(key));
                 let mut pending = vec![key.clone()];
                 let mut seen = HashSet::new();
                 while let Some(key) = pending.pop() {
@@ -1552,7 +1556,13 @@ impl RequiredProducers {
                 }
             }
         }
-        Self { jobs }
+        Self { jobs, produced }
+    }
+
+    /// Whether every required check has a producing job here, so a failure
+    /// can be read before the check itself reports.
+    pub(crate) fn produces_all(&self, required: &BTreeSet<String>) -> bool {
+        required.is_subset(&self.produced)
     }
 
     /// Whether this check run, by its workflow and job, is one a required check
@@ -2316,9 +2326,9 @@ mod tests {
     use super::{
         classify_pr_read_failure, disable_auto_merge, is_missing_pr, merge_gate_state,
         merge_needs_integration, normalize_task_pr_copy, observe_merge_request,
-        parse_generated_pr_copy, parse_pr_merge, pr_number_from_url, project_checks, GhCheck,
-        GhRestHead, GhRestPr, MergeGateReading, MergeRequest, PrCopy, RequiredChecks,
-        RequiredProducers, TaskPrCopyLifecycle,
+        parse_generated_pr_copy, parse_pr_merge, pr_number_from_url, project_checks,
+        required_contexts, GhCheck, GhRestHead, GhRestPr, MergeGateReading, MergeRequest, PrCopy,
+        RequiredChecks, RequiredProducers, TaskPrCopyLifecycle,
     };
     use crate::ops::task::TaskPrContext;
     use serde_json::{json, Value};
@@ -2703,6 +2713,21 @@ jobs:
     }
 
     #[test]
+    fn required_checks_come_from_rulesets_or_classic_protection() {
+        let rules = r#"[{"type":"deletion"},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"tests-result","integration_id":15368}]}}]"#;
+        assert_eq!(
+            required_contexts(rules),
+            ["tests-result".to_string()].into()
+        );
+        let classic = r#"{"contexts":["tests-result"],"checks":[{"context":"lint","app_id":1}]}"#;
+        assert_eq!(
+            required_contexts(classic),
+            ["lint".to_string(), "tests-result".to_string()].into()
+        );
+        assert!(required_contexts(r#"{"message":"Branch not protected"}"#).is_empty());
+    }
+
+    #[test]
     fn required_producers_follow_needs_and_match_matrix_runs() {
         let producers = producers();
         for job in [
@@ -2716,6 +2741,9 @@ jobs:
         assert!(!producers.fails_required(Some("CI"), "docs"));
         assert!(!producers.fails_required(Some("Other"), "rust-build"));
         assert!(!producers.fails_required(None, "rust-build"));
+        assert!(producers.produces_all(&["tests-result".to_string()].into()));
+        let elsewhere = ["tests-result".to_string(), "external-ci".to_string()].into();
+        assert!(!producers.produces_all(&elsewhere));
     }
 
     #[test]

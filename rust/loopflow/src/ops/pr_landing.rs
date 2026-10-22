@@ -22,7 +22,7 @@ use crate::session_record::{
 };
 use crate::store::sqlite::automation::RepairAttempt;
 use crate::store::{open_store, storage_config_from_env, SharedStore};
-use crate::work::task::{CiCheck, CiIncident};
+use crate::work::task::{CiCheck, CiIncident, TaskEventKind};
 
 use super::error::{OpsError, OpsResult};
 use super::land::LandOptions;
@@ -1068,10 +1068,7 @@ async fn reconcile_claimed(
     ownership: &Arc<File>,
 ) -> OpsResult<()> {
     let LandingIo { observe, act } = io;
-    let (repair, rearm) = match act {
-        Some((repair, rearm)) => (Some(repair), Some(rearm)),
-        None => (None, None),
-    };
+    let (repair, rearm) = act.unzip();
     refresh_joined_request(store, landing).await?;
     let mut observed = if let Some(merge_commit) = &landing.merge_commit {
         LandingObservation::Merged {
@@ -1180,23 +1177,23 @@ async fn reconcile_claimed(
             let Some(rearm) = rearm else {
                 return Ok(());
             };
-            if task_held(store, landing)? {
-                return block_landing(store, landing, PAUSED.into()).await;
+            if !rearm_landing(store, landing, ownership, rearm, &head_sha, "re-arm").await? {
+                return Ok(());
             }
-            let rearmed = run_landing_operation(ownership, "re-arm", {
-                let landing = landing.clone();
-                let head_sha = head_sha.clone();
-                move || rearm(&landing, &head_sha)
-            })
-            .await;
-            if let Err(error) = rearmed {
-                return block_landing(store, landing, format!("re-arm failed: {error}")).await;
-            }
-            eprintln!(
-                "PR #{}: GitHub dropped its merge request ({}); re-armed {head_sha}",
+            let summary = format!(
+                "PR #{}: {} at {}; re-armed {head_sha}",
                 landing.pr_number,
-                reason.as_deref().unwrap_or("no event")
+                describe_drop(reason.as_deref()),
+                now.format(&time::format_description::well_known::Rfc3339)
+                    .unwrap_or_else(|_| now.unix_timestamp().to_string())
             );
+            eprintln!("{summary}");
+            if let Some(task_id) = &landing.task_id {
+                store
+                    .append_task_event(task_id, &TaskEventKind::Progress { summary })
+                    .await
+                    .map_err(|error| OpsError::Message(error.to_string()))?;
+            }
             persist_landing_state(
                 store,
                 landing,
@@ -1250,18 +1247,8 @@ async fn reconcile_claimed(
             if let Some(rearm) = rearm.filter(|_| {
                 attempt_number(&incident.identity) == 1 && incident.failure_set == ["merge-queue"]
             }) {
-                if task_held(store, landing)? {
-                    return block_landing(store, landing, PAUSED.into()).await;
-                }
-                let requeued = run_landing_operation(ownership, "re-queue", {
-                    let landing = landing.clone();
-                    let head_sha = head_sha.clone();
-                    move || rearm(&landing, &head_sha)
-                })
-                .await;
-                if let Err(error) = requeued {
-                    return block_landing(store, landing, format!("re-queue failed: {error}"))
-                        .await;
+                if !rearm_landing(store, landing, ownership, rearm, &head_sha, "re-queue").await? {
+                    return Ok(());
                 }
                 store
                     .record_ci_response(&incident.identity, &landing.id, landing.generation, now)
@@ -1335,19 +1322,55 @@ async fn reconcile_claimed(
     }
 }
 
-const PAUSED: &str = "Task is paused; landing continues after `lf task resume`";
-
-/// Pause is the one hold on a landing's own actions.
-fn task_held(store: &SharedStore, landing: &PrLanding) -> OpsResult<bool> {
-    let Some(task_id) = &landing.task_id else {
-        return Ok(false);
+/// Ask GitHub to merge `head_sha` again, returning whether it was asked. Pause
+/// is the one hold on this; a held or failed request blocks the landing until
+/// the next check.
+async fn rearm_landing(
+    store: &SharedStore,
+    landing: &mut PrLanding,
+    ownership: &Arc<File>,
+    rearm: RearmPr,
+    head_sha: &str,
+    label: &'static str,
+) -> OpsResult<bool> {
+    let paused = match &landing.task_id {
+        Some(task_id) => {
+            store
+                .sqlite
+                .task_automation(task_id)
+                .map_err(repair_error)?
+                .enabled
+                == Some(false)
+        }
+        None => false,
     };
-    Ok(store
-        .sqlite
-        .task_automation(task_id)
-        .map_err(repair_error)?
-        .enabled
-        == Some(false))
+    if paused {
+        let reason = "Task is paused; landing continues after `lf task resume`";
+        return block_landing(store, landing, reason.into())
+            .await
+            .map(|()| false);
+    }
+    let requested = run_landing_operation(ownership, label, {
+        let landing = landing.clone();
+        let head_sha = head_sha.to_string();
+        move || rearm(&landing, &head_sha)
+    })
+    .await;
+    if let Err(error) = requested {
+        return block_landing(store, landing, format!("{label} failed: {error}"))
+            .await
+            .map(|()| false);
+    }
+    Ok(true)
+}
+
+/// Why GitHub stopped merging the PR, as the Task history reads it.
+fn describe_drop(reason: Option<&str>) -> String {
+    match reason {
+        Some("manually_disabled") => "auto-merge was turned off on GitHub".into(),
+        Some(reason) => format!("GitHub removed it from the merge queue ({reason})"),
+        None => "GitHub dropped its merge request".into(),
+    }
 }
 
 /// An armed head whose checks no longer fail has outlived its recorded block.
@@ -1752,14 +1775,17 @@ mod tests {
 
     use super::{
         classify_github_observation, next_attempt, reconcile_pr_landing, wait_for_landing,
-        wait_with_io, LandingIo, LandingObservation, NextAttempt, ObservePr, RepairCi,
+        wait_with_io, LandingIo, LandingObservation, NextAttempt, ObservePr, RearmPr, RepairCi,
     };
+    use crate::durable::TaskId;
     use crate::ops::error::{OpsError, OpsResult};
     use crate::ops::pr::{MergeRequest, PrInfo};
     use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::{SharedStore, StorageConfig};
-    use crate::work::task::CiCheck;
-    use std::path::PathBuf;
+    use crate::work::task::{
+        CiCheck, LinearWritebackState, Observation, Task, TaskEventKind, TaskPr, TaskPrId,
+    };
+    use std::path::{Path, PathBuf};
 
     fn github_landing_fixture() -> (PrLanding, PrInfo) {
         let landing = PrLanding::new(
@@ -1938,6 +1964,11 @@ mod tests {
     }
 
     async fn fixture() -> (tempfile::TempDir, SharedStore, PrLanding) {
+        fixture_for(false).await
+    }
+
+    /// A landing that belongs to a Task, so its history and Pause apply.
+    async fn fixture_for(with_task: bool) -> (tempfile::TempDir, SharedStore, PrLanding) {
         let directory = tempfile::tempdir().unwrap();
         let worktree = directory.path().join("checkout");
         std::fs::create_dir(&worktree).unwrap();
@@ -1954,13 +1985,17 @@ mod tests {
             .await
             .unwrap(),
         );
+        let task_id = match with_task {
+            true => Some(seed_task(&store, &worktree).await),
+            false => None,
+        };
         let landing = PrLanding::new(
             NewPrLanding {
                 repo: "loopflowstudio/loopflow".into(),
                 pr_number: 248,
                 worktree,
                 branch: "feature".into(),
-                task_id: None,
+                task_id,
                 requested_head_sha: "head".into(),
             },
             OffsetDateTime::now_utc(),
@@ -1968,6 +2003,74 @@ mod tests {
         .unwrap();
         let landing = store.start_or_join_pr_landing(&landing).await.unwrap();
         (directory, store, landing)
+    }
+
+    async fn seed_task(store: &SharedStore, worktree: &Path) -> TaskId {
+        let now = OffsetDateTime::now_utc();
+        let task = Task {
+            repository_id: store
+                .sqlite
+                .ensure_repository(&worktree.display().to_string())
+                .unwrap(),
+            id: TaskId::new(),
+            revision: 0,
+            linear_id: None,
+            identifier: "LAND-1".into(),
+            title: "Land it".into(),
+            description: String::new(),
+            pm_snapshot_synced_at: None,
+            pm_writeback: LinearWritebackState::Current,
+            wave_id: None,
+            project_id: None,
+            worktree: Some(worktree.to_path_buf()),
+            workspace_slug: "land-it".into(),
+            branch: "feature".into(),
+            base_commit: "deadbeef".into(),
+            parent_pr_id: None,
+            agent: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            rank: 0,
+            assignee: None,
+            due_date: None,
+            state: None,
+            completed: false,
+            completed_at: None,
+            observation: Observation::NotRequired,
+        };
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_id: task.id.clone(),
+            sequence: 1,
+            slug: task.workspace_slug.clone(),
+            branch: task.branch.clone(),
+            base_commit: task.base_commit.clone(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.seed_task(&task, &pr).await.unwrap().id
+    }
+
+    fn rearm_counter() -> (Arc<Mutex<Vec<String>>>, RearmPr) {
+        let rearmed = Arc::new(Mutex::new(Vec::new()));
+        let rearm: RearmPr = {
+            let rearmed = Arc::clone(&rearmed);
+            Arc::new(move |_: &PrLanding, head: &str| {
+                rearmed.lock().unwrap().push(head.to_string());
+                Ok(())
+            })
+        };
+        (rearmed, rearm)
     }
 
     fn failure(head: &str) -> LandingObservation {
@@ -2029,21 +2132,73 @@ mod tests {
             head_sha: "head".into(),
             reason: Some("checks_timed_out".into()),
         }]);
-        let rearmed = Arc::new(Mutex::new(Vec::new()));
+        let (rearmed, rearm) = rearm_counter();
         let io = LandingIo {
             observe: script.observe(),
-            act: Some((script.repair(), {
-                let rearmed = Arc::clone(&rearmed);
-                Arc::new(move |_: &PrLanding, head: &str| {
-                    rearmed.lock().unwrap().push(head.to_string());
-                    Ok(())
-                })
-            })),
+            act: Some((script.repair(), rearm)),
         };
         let watching = reconcile_pr_landing(store, landing, io).await.unwrap();
         assert_eq!(watching.state, PrLandingState::Watching);
         assert_eq!(*rearmed.lock().unwrap(), ["head"]);
         assert_eq!(*script.repairs.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_rearm_is_recorded_in_task_history() {
+        let (_directory, store, landing) = fixture_for(true).await;
+        let task_id = landing.task_id.clone().unwrap();
+        let script = script(vec![LandingObservation::Dequeued {
+            head_sha: "head".into(),
+            reason: Some("manually_disabled".into()),
+        }]);
+        let (rearmed, rearm) = rearm_counter();
+        let io = LandingIo {
+            observe: script.observe(),
+            act: Some((script.repair(), rearm)),
+        };
+        reconcile_pr_landing(store.clone(), landing, io)
+            .await
+            .unwrap();
+        assert_eq!(*rearmed.lock().unwrap(), ["head"]);
+        let summaries: Vec<_> = store
+            .task_events_after(&task_id, 0)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter_map(|event| match event.kind {
+                TaskEventKind::Progress { summary } => Some(summary),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(summaries.len(), 1, "{summaries:?}");
+        assert!(
+            summaries[0].starts_with("PR #248: auto-merge was turned off on GitHub at ")
+                && summaries[0].ends_with("; re-armed head"),
+            "{}",
+            summaries[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_paused_task_holds_its_rearm() {
+        let (_directory, store, landing) = fixture_for(true).await;
+        let task_id = landing.task_id.clone().unwrap();
+        store.sqlite.set_task_paused(&task_id, true).unwrap();
+        let script = script(vec![LandingObservation::Dequeued {
+            head_sha: "head".into(),
+            reason: Some("checks_timed_out".into()),
+        }]);
+        let (rearmed, rearm) = rearm_counter();
+        let io = LandingIo {
+            observe: script.observe(),
+            act: Some((script.repair(), rearm)),
+        };
+        let held = reconcile_pr_landing(store, landing, io).await;
+        assert!(
+            matches!(&held, Err(OpsError::DeliveryHeld(reason)) if reason.contains("lf task resume")),
+            "{held:?}"
+        );
+        assert!(rearmed.lock().unwrap().is_empty());
     }
 
     #[test]

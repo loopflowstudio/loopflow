@@ -22,7 +22,7 @@ use crate::store::SharedStore;
 
 use super::cron::Launchctl;
 use super::error::{OpsError, OpsResult};
-use super::pr::{required_contexts, GhCheck, MergeGateReading};
+use super::pr::{required_contexts, GhCheck, MergeGateReading, RequiredProducers};
 
 const INTERVAL: Duration = Duration::from_secs(60);
 const MAX_BACKOFF: Duration = Duration::from_secs(300);
@@ -323,6 +323,8 @@ fn read_gate(
     }
 }
 
+const PRODUCER_UNKNOWN: &str = "required check producer unknown";
+
 /// Why a failing PR is left alone. A recorded landing is the request to
 /// deliver a PR, so only a landing is repaired.
 fn unrepaired(has_task: bool) -> &'static str {
@@ -480,6 +482,8 @@ pub fn status(repo: &Path) -> OpsResult<CiWatchStatus> {
 struct Watcher {
     /// GitHub `owner/name`, as REST paths spell it.
     nwo: String,
+    /// The main checkout, whose `.github/workflows` name required-check producers.
+    root: PathBuf,
     /// The repository id landings are recorded under.
     repo_id: String,
     cache: RestCache,
@@ -490,7 +494,7 @@ struct Watcher {
 }
 
 impl Watcher {
-    fn new(nwo: String, repo_id: String) -> Self {
+    fn new(nwo: String, repo_id: String, root: PathBuf) -> Self {
         Self {
             state: CiWatchState {
                 pid: std::process::id(),
@@ -504,6 +508,7 @@ impl Watcher {
                 repairs: Vec::new(),
             },
             nwo,
+            root,
             repo_id,
             cache: RestCache::default(),
             required: HashMap::new(),
@@ -556,6 +561,15 @@ impl Watcher {
         self.required
             .insert(base.to_string(), (Instant::now(), names.clone()));
         Ok(names)
+    }
+
+    /// Whether this checkout's workflows produce every check `base` requires.
+    /// Without a producer, a failure waits for the required check to report.
+    fn producers_known(&self, base: &str) -> bool {
+        let Some((_, required)) = self.required.get(base) else {
+            return true;
+        };
+        RequiredProducers::read(&self.root, required).produces_all(required)
     }
 
     fn gate(&mut self, fetch: Fetch<'_>, pull: &RestPull) -> OpsResult<Gate> {
@@ -638,6 +652,12 @@ impl Watcher {
                         }
                         None if failing => Some(unrepaired(task.is_some()).to_string()),
                         None => None,
+                    };
+                    let detail = match gate {
+                        Gate::Unreported { .. } if !self.producers_known(&pull.base.name) => {
+                            detail.or_else(|| Some(PRODUCER_UNKNOWN.to_string()))
+                        }
+                        _ => detail,
                     };
                     (gate.label().to_string(), detail)
                 }
@@ -801,7 +821,11 @@ pub fn watch(repo: &Path, options: WatchOptions) -> OpsResult<()> {
         let (owner, name) = crate::git::worktrees::github_repo_nwo(&root)
             .ok_or_else(|| error("the origin remote is not a GitHub repository"))?;
         let repo_id = crate::repository::RepoId::discover(&root).map_err(error)?;
-        let mut watcher = Watcher::new(format!("{owner}/{name}"), repo_id.as_str().to_string());
+        let mut watcher = Watcher::new(
+            format!("{owner}/{name}"),
+            repo_id.as_str().to_string(),
+            root.clone(),
+        );
         let store = super::pr_landing::landing_store().await?;
         println!("watching CI for {}", watcher.nwo);
         let fetch = |path: &str, etag: Option<&str>| gh_rest(&root, path, etag);
@@ -1033,18 +1057,6 @@ mod tests {
     }
 
     #[test]
-    fn required_checks_come_from_rulesets_or_classic_protection() {
-        let rules = r#"[{"type":"deletion"},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"tests-result","integration_id":15368}]}}]"#;
-        assert_eq!(super::required_contexts(rules), required());
-        let classic = r#"{"contexts":["tests-result"],"checks":[{"context":"lint","app_id":1}]}"#;
-        assert_eq!(
-            super::required_contexts(classic),
-            BTreeSet::from(["lint".to_string(), "tests-result".to_string()])
-        );
-        assert!(super::required_contexts(r#"{"message":"Branch not protected"}"#).is_empty());
-    }
-
-    #[test]
     fn a_failed_gate_names_its_leaf_and_when_the_provider_finished() {
         let gate = read_gate(
             vec![
@@ -1251,7 +1263,7 @@ mod tests {
             .unwrap(),
         );
         let repo = "loopflowstudio/loopflow".to_string();
-        let mut watcher = Watcher::new(repo.clone(), repo);
+        let mut watcher = Watcher::new(repo.clone(), repo, directory.path().into());
         assert!(watcher.pass(&store, &github).await.unwrap());
         assert_eq!(
             watcher.state.prs,
@@ -1264,5 +1276,45 @@ mod tests {
             }]
         );
         assert!(watcher.state.repairs.is_empty());
+    }
+
+    /// GitHub before `tests-result` exists: only a needed job is running.
+    fn unreported_github(path: &str, etag: Option<&str>) -> OpsResult<RestResponse> {
+        if !path.contains("/check-runs") {
+            return github(path, etag);
+        }
+        Ok(ok(
+            r#"{"total_count":1,"check_runs":[{"name":"rust-build","status":"in_progress","conclusion":null,"details_url":null,"started_at":"2026-10-01T10:00:00Z","completed_at":null,"check_suite":{"id":1}}]}"#,
+            "\"v1\"",
+        ))
+    }
+
+    #[tokio::test]
+    async fn an_unreported_gate_says_when_no_job_produces_its_required_check() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                directory.path().join("registry.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let repo = "loopflowstudio/loopflow".to_string();
+        let detail = |watcher: &Watcher| watcher.state.prs[0].detail.clone();
+        let mut watcher = Watcher::new(repo.clone(), repo.clone(), directory.path().into());
+        assert!(watcher.pass(&store, &unreported_github).await.unwrap());
+        assert_eq!(watcher.state.prs[0].state, "unreported");
+        assert_eq!(detail(&watcher).as_deref(), Some(PRODUCER_UNKNOWN));
+
+        let workflows = directory.path().join(".github/workflows");
+        std::fs::create_dir_all(&workflows).unwrap();
+        std::fs::write(
+            workflows.join("ci.yml"),
+            "name: CI\njobs:\n  rust-build: {}\n  tests-result:\n    needs: [rust-build]\n",
+        )
+        .unwrap();
+        let mut watcher = Watcher::new(repo.clone(), repo, directory.path().into());
+        assert!(watcher.pass(&store, &unreported_github).await.unwrap());
+        assert_eq!(detail(&watcher), None);
     }
 }

@@ -2559,7 +2559,7 @@ esac
         );
         let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         let status = &status["execution"];
-        assert_eq!(status["status"], "not_ready", "{status}");
+        assert_eq!(status["status"], "unstarted", "{status}");
         assert_eq!(
             fs::read_to_string(worktree.join("feature.txt")).unwrap(),
             "retain until completion\n"

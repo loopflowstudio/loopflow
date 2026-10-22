@@ -113,6 +113,11 @@ struct TaskWorkflowHeader: View {
             Text("\(shipping.label) · \(shipping.reason)")
                 .foregroundStyle(palette.textSecondary)
                 .accessibilityIdentifier("task-shipping")
+            Button("Stop shipping") { Task { await model.stopShipping(task) } }
+                .buttonStyle(WorkOutlineButtonStyle())
+                .disabled(acting || readingUnavailable != nil)
+                .help("lf --task \(task.task.identifier) ship --stop: return it to working and disarm auto-merge")
+                .accessibilityIdentifier("task-ship-stop")
         } else if !(task.task.isTerminal || task.runtime?.status.isTerminal == true) {
             let refusal = readingUnavailable ?? task.shipControl.unavailable
             Button("Ship it") { Task { await model.shipTask(task) } }
@@ -271,6 +276,8 @@ struct TaskActionItems: View {
             if task.shipping == nil {
                 Button("Ship it") { Task { await model.shipTask(task) } }
                     .disabled(unavailable || task.shipControl.unavailable != nil)
+            } else {
+                Button("Stop shipping") { Task { await model.stopShipping(task) } }.disabled(unavailable)
             }
             Button("Complete Task") { Task { await model.completeTask(task) } }.disabled(unavailable)
             Button(task.runtime?.status == .paused ? "Resume Task" : "Pause Task") {

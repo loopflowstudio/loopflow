@@ -212,7 +212,7 @@
                     "label": "mini"
                   }
                 },
-                "status": "not_ready",
+                "status": "unstarted",
                 "updated_at": "2026-10-11T22:28:08Z",
                 "work_id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
               },
@@ -340,7 +340,7 @@
                 "label": "mini"
               }
             },
-            "status": "not_ready",
+            "status": "unstarted",
             "updated_at": "2026-10-11T22:28:08Z",
             "work_id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
           },

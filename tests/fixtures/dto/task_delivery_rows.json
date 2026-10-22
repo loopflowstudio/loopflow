@@ -39,7 +39,7 @@
     },
     "runtime": {
       "work_id": "ts_commits",
-      "status": "active",
+      "status": "working",
       "completion_pending": "Completion pending: follow-through needs resolution. Retry: lf task complete W2-SOURCE",
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
@@ -1439,7 +1439,7 @@
     },
     "runtime": {
       "work_id": "ts_commits",
-      "status": "active",
+      "status": "working",
       "completion_pending": null,
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",

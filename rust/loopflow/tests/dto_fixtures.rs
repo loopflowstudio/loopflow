@@ -136,7 +136,7 @@ fn wave_detail_preserves_graph_and_machine() {
 #[test]
 fn status_preserves_stranded_tasks_alongside_project_history() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
-    assert_eq!(snapshot.unavailable_tasks[0].status, TaskState::Ready);
+    assert_eq!(snapshot.unavailable_tasks[0].status, TaskState::Unstarted);
     let Evidence::Ok { items, .. } = snapshot.tasks else {
         panic!("available tasks")
     };

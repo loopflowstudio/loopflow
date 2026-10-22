@@ -1,10 +1,10 @@
 # LOO-561 · Ship it — design (draft, for review)
 
-Status: design accepted in review (2026-10-21, Jack Heart); slices 1–4 built, gate next.
-#1643 (Flow → Graph) landed 2026-10-22 and is merged in (53968945e9): `lf graph`,
-`.lf/graphs/`, `builtins/*/graph/`, `- graph: x`. Its draft `rename_flow_to_graph.sql` sits
-beside `ship_moves.sql` (and main's `detached_owner_viewers.sql`); both of the first two recreate
-`task_workflow_graph_is_fixed` identically.
+Status: design accepted in review (2026-10-21, Jack Heart); slices 1–4 built; 2026-10-22
+implement pass built the stored Shipping state, Stop shipping and the mounted Workflow header
+(see "Implement pass 2026-10-22" below). #1643 (Flow → Graph) is merged in (53968945e9);
+its draft `rename_flow_to_graph.sql` sits beside this Task's `ship_it.sql` (renamed from
+`ship_moves.sql`) and main's `detached_owner_viewers.sql`.
 
 ## Direction from Jack Heart (2026-10-21, design review)
 
@@ -60,27 +60,11 @@ Decisions (2026-10-21). Jack confirmed 1 and 2. The operator took 3–6 under th
 - **Completion on any merge.** #1619 and #1614 merged while their Flows were paused or running. The
   Task completes when its PR merges, whoever merged it.
 
-## Concept review (2026-10-22) — supersedes "approval is a `Shipped` move"
+## Concept review (2026-10-22) — ship intent is live state
 
-Jack Heart: "I am concerned that we are not modeling the state correctly so that we can track
-(or undo) which tasks have been marked for 'ship it'" … "yeah no it should be live state, not
-somethign in the history log".
-
-Accepted (Jack): ship intent is live state on the Task, not derived from Workflow history.
-
-- `Task.ship_intent: Option<{by, at, graph, note}>` on the Task row (one SQLite owner), the same
-  shape as the existing `abandon_intent`. The DTO carries it; no default.
-- `lf ship [GRAPH]` sets it; an explicit stop (`lf ship --stop` and a Desktop "Stop shipping")
-  clears it and stops the ship process; complete and abandon clear it. Each set/clear is also
-  logged in Task history for audit only.
-- Shipping view = `ship_intent` set, plus derived progress (stage, landing, process liveness).
-  `restart_ships` = `ship_intent` set and ship process dead. Pause holds the process and keeps
-  the intent.
-- Delete: the `Shipped` move kind, `shipped_moves` (history scan "since the last `Set`"), and
-  `Set`-as-implicit-undo.
-
-Unresolved (asked of Jack, not yet answered): when a ship is stopped after it armed auto-merge,
-does stopping also disarm the merge, or only halt future steps?
+Jack Heart: "yeah no it should be live state, not somethign in the history log". Accepted:
+shipping is live Task state, set by `lf ship`, cleared by Stop/complete/abandon, each logged in
+history for audit. The `ship_intent` field drafted here was superseded by the lifecycle below.
 
 ## Task state model (2026-10-22) — supersedes `ship_intent` above
 
@@ -205,6 +189,33 @@ Accepted (Jack: "that works for me", 2026-10-22) — shape A, one landing method
   plus paused).
 - #1580 was open, armed and BLOCKED on checks at 2026-10-22 ~07:40 PT. Take it through the
   ordinary sync once it merges; if it has not merged when this work reaches gate, stack on it.
+
+## Implement pass 2026-10-22
+
+Built:
+- `TaskState` is the lifecycle: `unstarted | working | shipping | done | abandoned`, plus
+  `paused` (Rust, Swift, fixtures; `not_ready`/`ready` → `unstarted`, `active` → `working`).
+- Shipping is stored: `tasks.shipped_at` (shared WorkValue `task_shipped_at`, synced like
+  `paused`) and machine-local `tasks.ship_lf_process_id` (the carrier). Set by `lf ship` and by
+  choosing any route into `end` (`choose_edge_in`); handoff/stop each append a Task `Progress`
+  event. Done/abandoned outrank it in `task_state_sql`; reopen clears it.
+- `lf ship --stop` (Desktop "Stop shipping" in the header and context menu): clears shipping,
+  SIGTERMs a live carrier, disarms a Loopflow-armed merge request
+  (`clear_task_pr_merge_before_head_mutation`). The ship loop exits on `ShipStep::Stopped`.
+- Deleted: `WorkflowMoveKind::Shipped`, the `shipped` move CHECK value, the history scan, the
+  restart-count note.
+- `TaskWorkflowHeader` is mounted in the Task detail (`WorkSurfaceView`).
+- Gate blocker: `flow_finished` task events read as `GraphFinished` via serde alias (bytes kept).
+
+Remaining (not started this pass):
+- Single landing engine + lazy recovery: delete `lf ci watch` (+ launchd, `CIWatchers.swift`),
+  the periodic Task check, `lf pr reconcile`'s repair path and `automation_enabled`; restart a
+  dead carrier on lf's own reads. Restart today is still `lf task reconcile` (`restart_ships`).
+- Rest of the state-model cleanup: `planning_state`/`planning_completed`, `abandon_intent`,
+  `completion_request` folding; Linear mapping (shipping ↔ In Review).
+- Desktop Shipping view on #1580 Dashboards (Jack, 2026-10-22: default Working query excludes
+  `state:shipping`; Shipping is a `state:shipping` query, not a `SidebarFilter` case). #1580 is
+  open; take it by sync when it lands, then delete `SidebarFilter.shipping`.
 
 ## Demo findings (2026-10-22, branch build on lf-world `portfolio`)
 
@@ -694,4 +705,4 @@ Expected: all pass.
   button replaces the `deliver` route.
 - The hosted merge-queue run is left to demo.
 
-Check results (latest, 2026-10-22): `cargo test -p loopflow --test integration -- documented_commands reference_matches_the_compiled_cli` 5/5 passed, clippy clean; earlier slice passes passed their focused suites. Deferred to gate: Swift `DTOFixture`/`TaskShip`, `release_lock_tests::surviving_*` integration failures and 5 `cargo test --lib lf::` failures (replay ×2, run two_task_research, util preferred_name/provider_sigterm), all uninvestigated. `task_ship` tests run under `--lib`.
+Check results (2026-10-22, implement pass): `cargo test --lib` store::sqlite/waves/ship/workflow/work/durable, task_graph_launch_tests, local_planning, work_watch pass except pre-existing failures (also failing at 8300f436a6): `session_record::agent_session_identity_is_durable_before_the_provider_starts`, `bind_preserves_prior_work_and_usage…`, three other `durable_store_tests`/`local_planning_tests` "capture does not belong to a recorded Session", `a_landing_edge_that_returns_to_its_node_can_be_taken_again`, `every_task_launch_runs_in_the_foreground_under_the_same_checks` — deferred to gate. Integration `dto_fixtures`, `world_recipes`, CLI reference pass; Swift DTOFixture/WorkNavigation/TaskHistoryFilter/RegistryQuery/DesktopHeadless/WorkModel 152 pass; clippy clean.

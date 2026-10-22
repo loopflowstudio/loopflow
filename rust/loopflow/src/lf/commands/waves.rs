@@ -1022,7 +1022,7 @@ fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     };
     // Linear completing a Task that never left `start` withdraws it from what
     // is offered; an active one keeps its place and shows the conflict.
-    let withdrawn = matches!(runtime.status, TaskState::NotReady | TaskState::Ready)
+    let withdrawn = matches!(runtime.status, TaskState::Unstarted)
         && crate::linear::terminal_reason(task.task.state.as_deref(), task.task.completed)
             .is_some();
     if runtime.status.is_terminal() || runtime.status == TaskState::Paused || withdrawn {
@@ -1410,7 +1410,7 @@ async fn snapshot_task_detail(
                 task.state.as_deref(),
                 task.completed,
             )
-            .filter(|_| matches!(runtime.status, TaskState::NotReady | TaskState::Ready)),
+            .filter(|_| matches!(runtime.status, TaskState::Unstarted)),
             worktree_blocker: worktree_blocker
                 .as_ref()
                 .map(|blocker| blocker.reason.as_str()),
@@ -3276,7 +3276,7 @@ mod tests {
         let missing = LocalProgressEvidenceState::Missing;
         // A removed checkout alone does not reopen settled work.
         assert!(!unresolved(TaskState::Done, none, missing, true));
-        assert!(unresolved(TaskState::Active, none, missing, true));
+        assert!(unresolved(TaskState::Working, none, missing, true));
         // Blocked describes a stopped failed Graph, not a live Process. Later
         // Task completion must not make that retained history current forever.
         assert!(!unresolved(
@@ -3286,7 +3286,7 @@ mod tests {
             false
         ));
         assert!(unresolved(
-            TaskState::Active,
+            TaskState::Working,
             review.as_ref(),
             missing,
             false
@@ -3322,7 +3322,7 @@ mod tests {
     fn task_condition_distinguishes_clear_work_from_external_waits() {
         let runtime = TaskRuntimeSnapshot {
             work_id: "task-1".to_string(),
-            status: TaskState::Active,
+            status: TaskState::Working,
             reason: "ready".to_string(),
             updated_at: "2026-07-21T00:00:00Z".to_string(),
             provider: "codex".to_string(),

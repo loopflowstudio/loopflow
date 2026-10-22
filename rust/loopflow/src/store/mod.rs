@@ -1820,7 +1820,7 @@ mod tests {
                 if completed {
                     crate::durable::TaskState::Done
                 } else {
-                    crate::durable::TaskState::NotReady
+                    crate::durable::TaskState::Unstarted
                 }
             );
             assert!(store.sqlite.workflow(&task.id).unwrap().is_none());

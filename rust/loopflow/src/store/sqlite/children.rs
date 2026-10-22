@@ -372,6 +372,24 @@ impl SqliteStore {
                 [id.as_str()],
             )?;
             super::task_state_delivery::queue_in(&tx, id, "unstarted")?;
+            // Reopening returns to working: a handoff ended with the Task.
+            if tx.query_row(
+                "SELECT shipped_at IS NOT NULL FROM tasks WHERE id=?1",
+                [id.as_str()],
+                |row| row.get::<_, bool>(0),
+            )? {
+                super::planning_write::local(
+                    &tx,
+                    &crate::work::edit::WorkEdit::for_target(
+                        id.as_str(),
+                        &[crate::work::edit::WorkValue::TaskShippedAt(None)],
+                    ),
+                )?;
+                tx.execute(
+                    "UPDATE tasks SET ship_lf_process_id=NULL WHERE id=?1",
+                    [id.as_str()],
+                )?;
+            }
             insert_task_event_in(
                 &tx,
                 id,
@@ -1117,7 +1135,7 @@ pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResu
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     if crate::linear::terminal_reason(state.as_deref(), completed).is_some()
-        && super::durable::task_state_in(conn, &task.id)? != crate::durable::TaskState::Active
+        && !super::durable::task_state_in(conn, &task.id)?.is_started()
     {
         return Err(StoreError::InvalidAuthority(
             "terminal planning state cannot start work; its execution history is preserved".into(),

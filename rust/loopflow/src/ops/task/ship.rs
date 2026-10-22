@@ -1,9 +1,9 @@
-//! `lf ship`: someone approves a Task once, and its remaining graph runs to
-//! `end` with no one at hand. The approval is a `Shipped` move; whether a Task
-//! is shipping, and by which process, is read from its moves and that
-//! process's liveness, never stored. At each stage a headless stand-in runs
-//! the stage's skill and decides the route. Pause holds it; reconcile restarts
-//! a ship process that died.
+//! `lf ship`: someone hands a Task off once, and its remaining graph runs to
+//! `end` with no one at hand. Shipping is the Task's lifecycle state between
+//! working and done; this Machine's ship process carries it there. At each
+//! stage a headless stand-in runs the stage's skill and decides the route.
+//! Pause holds it, Stop returns it to working, and a ship process that died is
+//! started again.
 
 use serde::{Deserialize, Serialize};
 
@@ -11,15 +11,13 @@ use crate::durable::TaskState;
 use crate::id::LfProcessId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::error::OpsResult;
-use crate::ops::workflow::{Workflow, WorkflowMove, WorkflowMoveKind, WorkflowPosition};
+use crate::ops::workflow::{Workflow, WorkflowPosition};
 use crate::pr_landing::{PrLanding, PrLandingState};
+use crate::store::sqlite::TaskShipping;
 use crate::work::task::Task;
 use crate::workflow::{END, START};
 
 use super::{block_on_task, task_error, task_store, TaskRunSelection};
-
-/// The note a reconcile restart leaves on its `Shipped` move.
-const RESTART_NOTE: &str = "ship process exited; restarted";
 
 /// What `lf ship` found before running anything.
 #[derive(Debug)]
@@ -55,24 +53,17 @@ pub enum ShipStep {
     /// Take this edge, or run it again when it stopped.
     Edge(String),
     Paused,
+    /// Someone stopped shipping; the Task is working again.
+    Stopped,
     /// The Task reached `end`, completed, or was abandoned.
     Finished,
 }
 
-/// The process shipping the Task: the one behind its latest `Shipped` move,
-/// unless a person has since set its position or it has reached `end`.
-pub(crate) fn shipping_process(workflow: &Workflow) -> Option<&LfProcessId> {
-    if matches!(&workflow.position, WorkflowPosition::Node { node } if node == END) {
-        return None;
-    }
-    shipped_moves(workflow).last()?.lf_process_id.as_ref()
-}
-
-/// What a shipped Task is doing, derived from its moves, its ship process,
-/// its state and its landing; never stored. Nothing here waits on a person.
+/// What a shipping Task is doing, derived from its ship process, its state
+/// and its landing. Nothing here waits on a person.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShippingSnapshot {
-    /// When the current shipping began: its first `Shipped` move.
+    /// When the Task was handed off.
     pub shipped_at: i64,
     pub state: ShippingState,
     /// One line saying what is happening.
@@ -90,41 +81,32 @@ pub enum ShippingState {
     Paused,
 }
 
-/// The `Shipped` moves of the current shipping, oldest first: those since a
-/// person last set the Task's position.
-fn shipped_moves(workflow: &Workflow) -> Vec<&WorkflowMove> {
-    let mut moves: Vec<_> = workflow
-        .history
-        .iter()
-        .rev()
-        .take_while(|entry| entry.kind != WorkflowMoveKind::Set)
-        .filter(|entry| entry.kind == WorkflowMoveKind::Shipped)
-        .collect();
-    moves.reverse();
-    moves
+/// Whether the process carrying a shipping Task has exited. Unknown evidence
+/// is never read as a dead process; no carrier at all is.
+fn carrier_evidence(
+    sqlite: &crate::store::sqlite::SqliteStore,
+    shipping: &TaskShipping,
+) -> ProcessIdentityEvidence {
+    match &shipping.process {
+        Some(process) => crate::journal::process_evidence(sqlite, process),
+        None => ProcessIdentityEvidence::Dead,
+    }
 }
 
-/// The Task's shipping, when it is shipping. `alive` is the ship process's
-/// liveness; unknown evidence is never read as a dead process.
+/// The Task's shipping, when it is shipping. `alive` is the ship process's liveness.
 pub(crate) fn shipping_snapshot(
-    workflow: &Workflow,
+    workflow: Option<&Workflow>,
+    shipping: &TaskShipping,
     status: TaskState,
     alive: ProcessIdentityEvidence,
     landing: Option<&PrLanding>,
 ) -> Option<ShippingSnapshot> {
-    shipping_process(workflow)?;
-    if matches!(status, TaskState::Done | TaskState::Abandoned) {
+    if !matches!(status, TaskState::Shipping | TaskState::Paused) {
         return None;
     }
-    let moves = shipped_moves(workflow);
-    let shipped_at = moves.first()?.at;
-    let restarts = moves
-        .iter()
-        .filter(|entry| entry.note.as_deref() == Some(RESTART_NOTE))
-        .count();
     let shipping = |state, reason: String| {
         Some(ShippingSnapshot {
-            shipped_at,
+            shipped_at: shipping.shipped_at,
             state,
             reason,
         })
@@ -136,14 +118,9 @@ pub(crate) fn shipping_snapshot(
         );
     }
     if alive == ProcessIdentityEvidence::Dead {
-        let times = if restarts > 0 {
-            format!(" (restarted ×{restarts})")
-        } else {
-            String::new()
-        };
         return shipping(
             ShippingState::Restarting,
-            format!("Ship process exited; restarts at the next check{times}"),
+            "Ship process exited; it restarts on the next read of this Machine's Tasks".into(),
         );
     }
     if let Some(landing) = landing {
@@ -159,39 +136,44 @@ pub(crate) fn shipping_snapshot(
             _ => shipping(ShippingState::Landing, format!("CI running on #{number}")),
         };
     }
-    let definition = &workflow.definition;
-    let reason = match &workflow.position {
-        WorkflowPosition::Edge { edge, .. } => {
-            let edge = &definition.edges[*edge as usize];
-            format!("{} → {}", edge.name, edge.to)
-        }
-        WorkflowPosition::Node { node } if definition.node(node).is_some() => {
-            format!("{node} (stand-in)")
-        }
-        WorkflowPosition::Node { node } => format!("from {node}"),
+    let reason = match workflow {
+        None => "taking up its graph".to_string(),
+        Some(workflow) => match &workflow.position {
+            WorkflowPosition::Edge { edge, .. } => {
+                let edge = &workflow.definition.edges[*edge as usize];
+                format!("{} → {}", edge.name, edge.to)
+            }
+            WorkflowPosition::Node { node } if workflow.definition.node(node).is_some() => {
+                format!("{node} (stand-in)")
+            }
+            WorkflowPosition::Node { node } => format!("from {node}"),
+        },
     };
     shipping(ShippingState::Building, reason)
 }
 
-/// Read a Task's shipping from the store: its moves, its ship process and its landing.
+/// Read a Task's shipping from the store: its handoff, its ship process and its landing.
 pub(crate) fn read_shipping(
     sqlite: &crate::store::sqlite::SqliteStore,
     task: &crate::work::task::TaskId,
     workflow: Option<&Workflow>,
     status: TaskState,
 ) -> crate::store::StoreResult<Option<ShippingSnapshot>> {
-    let Some(workflow) = workflow else {
+    let Some(shipping) = sqlite.task_shipping(task)? else {
         return Ok(None);
     };
-    let Some(process) = shipping_process(workflow) else {
-        return Ok(None);
-    };
-    let alive = crate::journal::process_evidence(sqlite, process);
+    let alive = carrier_evidence(sqlite, &shipping);
     let landing = sqlite.pending_task_landing(task)?;
-    Ok(shipping_snapshot(workflow, status, alive, landing.as_ref()))
+    Ok(shipping_snapshot(
+        workflow,
+        &shipping,
+        status,
+        alive,
+        landing.as_ref(),
+    ))
 }
 
-/// Approve the Task and claim it for this process, unless a live process
+/// Hand the Task off and claim it for this process, unless a live process
 /// already ships it. A Task with no graph takes up its default first; naming
 /// `graph` takes that one up in place of the remaining steps.
 pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsResult<ShipStart> {
@@ -219,6 +201,22 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
             .sqlite
             .require_task_launch(&task.id)
             .map_err(task_error)?;
+        if let Some(carrier) = store
+            .sqlite
+            .task_shipping(&task.id)
+            .map_err(task_error)?
+            .and_then(|shipping| shipping.process)
+        {
+            if carrier != process
+                && crate::journal::process_evidence(&store.sqlite, &carrier)
+                    != ProcessIdentityEvidence::Dead
+            {
+                return Ok(ShipStart::AlreadyShipping {
+                    issue,
+                    process: carrier,
+                });
+            }
+        }
         let current = store.sqlite.workflow(&task.id).map_err(task_error)?;
         let workflow = match (current, graph) {
             (Some(workflow), None) => workflow,
@@ -242,32 +240,76 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
                 }
             }
         };
-        let shipped_note = match (graph, note) {
-            (Some(graph), Some(note)) => Some(format!("shipped with {graph}: {note}")),
-            (Some(graph), None) => Some(format!("shipped with {graph}")),
-            (None, note) => note.map(str::to_owned),
-        };
-        let note = shipped_note.as_deref();
         if matches!(&workflow.position, WorkflowPosition::Node { node } if node == END) {
             return Ok(ShipStart::AtEnd { issue });
         }
-        if let Some(shipping) = shipping_process(&workflow) {
-            if shipping != &process
-                && crate::journal::process_evidence(&store.sqlite, shipping)
-                    != ProcessIdentityEvidence::Dead
-            {
-                return Ok(ShipStart::AlreadyShipping {
-                    issue,
-                    process: shipping.clone(),
-                });
-            }
+        let by = crate::config::participant_name()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "someone".into());
+        let mut handoff = format!("{by} shipped it");
+        if let Some(graph) = graph {
+            handoff.push_str(&format!(" with {graph}"));
+        }
+        if let Some(note) = note {
+            handoff.push_str(&format!(": {note}"));
         }
         store
             .sqlite
-            .ship_workflow(&task.id, &process, note)
+            .ship_task(&task.id, &process, &handoff)
             .map_err(task_error)?;
         Ok(ShipStart::Begun(Box::new(task)))
     })
+}
+
+/// Return a shipping Task to working: stop its ship process and take back any
+/// merge request Loopflow armed on GitHub. Returns false when it was not shipping.
+pub fn ship_stop(issue: &str, note: Option<&str>) -> OpsResult<bool> {
+    let (task, stopped) = block_on_task(async {
+        let store = task_store().await?;
+        let task = store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        let by = crate::config::participant_name()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "someone".into());
+        let note = match note {
+            Some(note) => format!("{by}: {note}"),
+            None => by,
+        };
+        let stopped = store
+            .sqlite
+            .stop_shipping(&task.id, &note)
+            .map_err(task_error)?;
+        if let Some(process) = stopped
+            .as_ref()
+            .and_then(|shipping| shipping.process.as_ref())
+        {
+            if crate::journal::process_evidence(&store.sqlite, process)
+                == ProcessIdentityEvidence::Live
+            {
+                if let Some(pid) = store
+                    .sqlite
+                    .process(process)
+                    .ok()
+                    .flatten()
+                    .and_then(|record| record.pid)
+                {
+                    crate::platform::kill_process(pid);
+                }
+            }
+        }
+        Ok((task, stopped.is_some()))
+    })?;
+    if stopped {
+        if let Ok(worktree) = task.worktree() {
+            super::clear_task_pr_merge_before_head_mutation(worktree, true, &|_| {})?;
+        }
+    }
+    Ok(stopped)
 }
 
 /// Create a Task for the checkout's branch so it can ship: it takes the branch,
@@ -311,7 +353,8 @@ pub fn ship_next(issue: &str) -> OpsResult<ShipStep> {
         match store.sqlite.task_state(&task.id).map_err(task_error)? {
             TaskState::Paused => return Ok(ShipStep::Paused),
             TaskState::Done | TaskState::Abandoned => return Ok(ShipStep::Finished),
-            _ => {}
+            TaskState::Shipping => {}
+            TaskState::Unstarted | TaskState::Working => return Ok(ShipStep::Stopped),
         }
         let workflow = store
             .sqlite
@@ -392,28 +435,20 @@ pub fn stand_in_message(stage: &str, repeats: bool) -> String {
     message
 }
 
-/// Start `lf --task ISSUE ship` again for each of the repository's shipped
+/// Start `lf --task ISSUE ship` again for each of the repository's shipping
 /// Tasks whose ship process has exited. Paused and finished Tasks wait.
 pub fn restart_ships(repo: &std::path::Path) -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;
         let repo_id = crate::repository::RepoId::discover(repo).map_err(task_error)?;
         for task in crate::ops::task_automation::repository_tasks(&store, &repo_id).await? {
-            if !matches!(
-                store.sqlite.task_state(&task.id).map_err(task_error)?,
-                TaskState::Ready | TaskState::Active
-            ) {
+            if store.sqlite.task_state(&task.id).map_err(task_error)? != TaskState::Shipping {
                 continue;
             }
-            let Some(workflow) = store.sqlite.workflow(&task.id).map_err(task_error)? else {
+            let Some(shipping) = store.sqlite.task_shipping(&task.id).map_err(task_error)? else {
                 continue;
             };
-            let Some(process) = shipping_process(&workflow) else {
-                continue;
-            };
-            if crate::journal::process_evidence(&store.sqlite, process)
-                != ProcessIdentityEvidence::Dead
-            {
+            if carrier_evidence(&store.sqlite, &shipping) != ProcessIdentityEvidence::Dead {
                 continue;
             }
             let Ok(worktree) = task.worktree() else {
@@ -428,8 +463,6 @@ pub fn restart_ships(repo: &std::path::Path) -> OpsResult<()> {
                 "--task".into(),
                 task.identifier.clone(),
                 "ship".into(),
-                "--reason".into(),
-                RESTART_NOTE.into(),
             ];
             crate::os_process::start_lf_session(worktree, &argv, &[], &|_| {})
                 .map_err(task_error)?;
@@ -440,32 +473,14 @@ pub fn restart_ships(repo: &std::path::Path) -> OpsResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        next_step, shipping_process, shipping_snapshot, ShipStep, ShippingState, RESTART_NOTE,
-    };
+    use super::{next_step, shipping_snapshot, ShipStep, ShippingState};
     use crate::durable::TaskState;
     use crate::id::LfProcessId;
     use crate::journal::ProcessIdentityEvidence;
-    use crate::ops::workflow::{
-        Workflow, WorkflowActor, WorkflowMove, WorkflowMoveKind, WorkflowPosition,
-    };
+    use crate::ops::workflow::{Workflow, WorkflowPosition};
     use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
+    use crate::store::sqlite::TaskShipping;
     use crate::workflow::CapturedGraph;
-
-    fn moved(kind: WorkflowMoveKind, process: &LfProcessId) -> WorkflowMove {
-        WorkflowMove {
-            workflow: "feature".into(),
-            kind,
-            from: "design".into(),
-            to: "design".into(),
-            edge: None,
-            lf_process_id: Some(process.clone()),
-            actor: WorkflowActor::Person,
-            session_id: None,
-            note: None,
-            at: 0,
-        }
-    }
 
     #[test]
     fn a_stand_in_runs_each_stage_and_chooses_between_its_routes() {
@@ -522,72 +537,40 @@ mod tests {
     }
 
     #[test]
-    fn shipping_lasts_until_a_person_sets_the_task_or_it_reaches_the_end() {
-        let repo = tempfile::tempdir().unwrap();
-        let graph = CapturedGraph::load("feature", repo.path())
-            .unwrap()
-            .unwrap();
-        let (definition, routes) = graph.project().unwrap();
-        let on = |node: &str, history| {
-            Workflow::new(
-                definition.clone(),
-                routes.clone(),
-                WorkflowPosition::Node { node: node.into() },
-                history,
-            )
-        };
-        let restart = LfProcessId::new();
-        let shipped = vec![
-            moved(WorkflowMoveKind::Shipped, &LfProcessId::new()),
-            moved(WorkflowMoveKind::Shipped, &restart),
-            moved(WorkflowMoveKind::Arrived, &LfProcessId::new()),
-        ];
-        assert_eq!(
-            shipping_process(&on("demo", shipped.clone())),
-            Some(&restart)
-        );
-        assert!(shipping_process(&on("end", shipped.clone())).is_none());
-        let mut set = shipped;
-        set.push(moved(WorkflowMoveKind::Set, &LfProcessId::new()));
-        assert!(shipping_process(&on("demo", set)).is_none());
-        assert!(shipping_process(&on("demo", Vec::new())).is_none());
-    }
-
-    #[test]
     fn shipping_reads_what_happens_now_and_never_waits_on_a_person() {
         let repo = tempfile::tempdir().unwrap();
         let graph = CapturedGraph::load("feature", repo.path())
             .unwrap()
             .unwrap();
         let (definition, routes) = graph.project().unwrap();
-        let mut restarted = moved(WorkflowMoveKind::Shipped, &LfProcessId::new());
-        restarted.note = Some(RESTART_NOTE.into());
-        restarted.at = 9;
-        let mut first = moved(WorkflowMoveKind::Shipped, &LfProcessId::new());
-        first.at = 5;
-        let shipped = Workflow::new(
-            definition.clone(),
-            routes.clone(),
+        let workflow = Workflow::new(
+            definition,
+            routes,
             WorkflowPosition::Node {
                 node: "demo".into(),
             },
-            vec![first, restarted],
+            Vec::new(),
         );
-        let read = |status, alive, landing: Option<&PrLanding>| {
-            shipping_snapshot(&shipped, status, alive, landing).unwrap()
+        let handoff = TaskShipping {
+            shipped_at: 5,
+            process: Some(LfProcessId::new()),
         };
-        let building = read(TaskState::Active, ProcessIdentityEvidence::Live, None);
+        let read = |status, alive, landing: Option<&PrLanding>| {
+            shipping_snapshot(Some(&workflow), &handoff, status, alive, landing).unwrap()
+        };
+        let building = read(TaskState::Shipping, ProcessIdentityEvidence::Live, None);
         assert_eq!(building.shipped_at, 5);
         assert_eq!(building.state, ShippingState::Building);
         assert_eq!(building.reason, "demo (stand-in)");
         // Unknown liveness is not a dead process.
         assert_eq!(
-            read(TaskState::Active, ProcessIdentityEvidence::Unknown, None).state,
+            read(TaskState::Shipping, ProcessIdentityEvidence::Unknown, None).state,
             ShippingState::Building
         );
-        let restarting = read(TaskState::Active, ProcessIdentityEvidence::Dead, None);
-        assert_eq!(restarting.state, ShippingState::Restarting);
-        assert!(restarting.reason.contains("×1"), "{}", restarting.reason);
+        assert_eq!(
+            read(TaskState::Shipping, ProcessIdentityEvidence::Dead, None).state,
+            ShippingState::Restarting
+        );
         assert_eq!(
             read(TaskState::Paused, ProcessIdentityEvidence::Dead, None).state,
             ShippingState::Paused
@@ -606,7 +589,7 @@ mod tests {
         )
         .unwrap();
         let landing_now = read(
-            TaskState::Active,
+            TaskState::Shipping,
             ProcessIdentityEvidence::Live,
             Some(&landing),
         );
@@ -615,32 +598,18 @@ mod tests {
         landing.state = PrLandingState::Blocked;
         landing.blocked_reason = Some("rust-lint".into());
         let repairing = read(
-            TaskState::Active,
+            TaskState::Shipping,
             ProcessIdentityEvidence::Live,
             Some(&landing),
         );
         assert_eq!(repairing.state, ShippingState::Repairing);
         assert_eq!(repairing.reason, "Repairing #1650 · rust-lint");
 
-        // Done, or never shipped, is not shipping.
+        // Done is not shipping.
         assert!(shipping_snapshot(
-            &shipped,
+            Some(&workflow),
+            &handoff,
             TaskState::Done,
-            ProcessIdentityEvidence::Live,
-            None
-        )
-        .is_none());
-        let unshipped = Workflow::new(
-            definition,
-            routes,
-            WorkflowPosition::Node {
-                node: "demo".into(),
-            },
-            Vec::new(),
-        );
-        assert!(shipping_snapshot(
-            &unshipped,
-            TaskState::Active,
             ProcessIdentityEvidence::Live,
             None
         )

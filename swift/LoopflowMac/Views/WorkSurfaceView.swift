@@ -309,6 +309,8 @@ struct WorkSurfaceView: View {
                             .foregroundStyle(palette.textSecondary)
                     }
                     PlanningSyncView(sync: task.task.sync)
+                    TaskWorkflowHeader(model: model, task: task, work: model.taskWork[task.id])
+                        .id(task.id)
                 }
                 if let unavailable = found.wave?.unavailableTasks.first(where: { $0.taskId == task.id }) {
                     evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)

@@ -194,7 +194,7 @@
         },
         "runtime": {
           "work_id": "ts_22222222222222222222222222222222",
-          "status": "ready",
+          "status": "unstarted",
           "completion_pending": null,
           "reason": "ready",
           "updated_at": "2026-07-13T19:00:00Z",
@@ -715,7 +715,7 @@
       "work_id": "task_40fbeeaadfbca5367aa7391432ae84ff",
       "task_id": "linear-task-w2-127",
       "task_identifier": "W2-127",
-      "status": "ready",
+      "status": "unstarted",
       "owner": "wave",
       "reason": "Task's owning Project is absent from the current PM snapshot",
       "recovery": "lf task status task_40fbeeaadfbca5367aa7391432ae84ff --json"

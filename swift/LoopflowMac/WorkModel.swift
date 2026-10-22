@@ -1585,7 +1585,7 @@ final class WorkModel {
     var workingTaskIDs: [String] {
         navigation.workingTaskIDs.filter {
             guard let task = task(id: $0)?.task else { return true }
-            return task.runtime?.status != .paused && task.shipping == nil
+            return task.runtime?.status != .paused && task.runtime?.status != .shipping
         }
     }
 
@@ -1921,6 +1921,13 @@ final class WorkModel {
     func shipTask(_ task: RoadmapTask) async {
         await performTaskAction(task.id) {
             try await query.shipTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+        }
+    }
+
+    /// Stop shipping the Task; it returns to Working.
+    func stopShipping(_ task: RoadmapTask) async {
+        await performTaskAction(task.id) {
+            try await query.stopShipping(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 

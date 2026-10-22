@@ -285,7 +285,7 @@ struct RegistryQueryTests {
         },
         "runtime": {
           "work_id": "issue-1",
-          "status": "ready",
+          "status": "unstarted",
           "reason": "ready",
           "updated_at": "2026-07-06T00:00:00Z",
           "provider": "codex",

@@ -1483,19 +1483,19 @@ fn a_held_command_stops_the_task_run_without_repeating_the_graph() {
 #[test]
 fn completion_is_independent_of_workflow_readiness() {
     let task = WorkflowTask::new();
-    assert_eq!(task.state(), "not_ready");
+    assert_eq!(task.state(), "unstarted");
     // A node, then a stopped edge: both between start and end.
     task.ok(&["-b", "task", "run", "INF-123", "gated"]);
     assert_eq!(task.workflow()["position"], at("review"));
-    assert_eq!(task.state(), "active");
+    assert_eq!(task.state(), "working");
     assert!(!task
         .run(&["-b", "task", "run", "INF-123", "gate"])
         .status
         .success());
     assert_eq!(task.workflow()["position"]["kind"], "edge");
-    assert_eq!(task.state(), "active");
+    assert_eq!(task.state(), "working");
     task.ok(&["task", "workflow", "move", "INF-123", "start"]);
-    assert_eq!(task.state(), "ready");
+    assert_eq!(task.state(), "unstarted");
     // Moving away from end does not reopen a completed Task.
     task.finish_after_provider_observation(&[
         "task",
@@ -1544,7 +1544,8 @@ fn end_is_retained_while_the_tasks_pr_blocks_completion() {
         let error = refusal(task.run(reach));
         assert!(error.to_lowercase().contains("pull request"), "{error}");
         assert_eq!(task.workflow()["position"], at("end"));
-        assert_eq!(task.state(), "active");
+        // The route into `end` handed it off; it stays shipping until it completes.
+        assert_eq!(task.state(), "shipping");
     }
 }
 
@@ -1593,7 +1594,7 @@ fn local_reopening_preserves_delivery_and_workflow_and_supersedes_pending_comple
     task.complete_in_linear();
     assert_eq!(task.state(), "done");
     task.ok(&["task", "reopen", "INF-123"]);
-    assert_eq!(task.state(), "active");
+    assert_eq!(task.state(), "working");
     assert_eq!(task.workflow(), workflow);
     task.ok(&["task", "reopen", "INF-123"]);
     assert_eq!(task.workflow(), workflow);
@@ -1630,11 +1631,11 @@ fn linear_completion_and_reopening_preserve_workflow_and_supersede_old_end() {
         .unwrap();
     rt.block_on(store.seed_issue(&scope, "linear", stale, None, None))
         .unwrap();
-    assert_eq!(task.state(), "active");
+    assert_eq!(task.state(), "working");
     assert_eq!(task.workflow(), ended);
     assert!(task.status()["completion_pending"].is_null());
     task.ok(&["task", "workflow", "move", "INF-123", "end"]);
-    assert_eq!(task.state(), "active");
+    assert_eq!(task.state(), "working");
 }
 
 #[test]
@@ -1896,7 +1897,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
     assert_eq!(task.state(), "done");
     assert_eq!(task.workflow(), before);
     task.ok(&["task", "reopen", "INF-123"]);
-    assert_eq!(task.state(), "active");
+    assert_eq!(task.state(), "working");
     assert_eq!(task.workflow(), before);
     assert!(held.child.try_wait().unwrap().is_none());
     assert!(task.repo.path().exists());
@@ -1988,6 +1989,28 @@ fn stand_ins(task: &WorkflowTask) -> Vec<String> {
         .collect()
 }
 
+/// The Task history lines that record a handoff to shipping.
+fn handoffs(task: &WorkflowTask) -> Vec<String> {
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(
+            task.registered
+                .store
+                .task_events_after(&task.registered.task.id, 0),
+        )
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event.kind {
+            loopflow::work::task::TaskEventKind::Progress { summary }
+                if summary.starts_with("Shipping: ") =>
+            {
+                Some(summary)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 fn wait_for(what: &str, mut ready: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(90);
     while !ready() {
@@ -2012,15 +2035,14 @@ fn task_ship_runs_every_remaining_step_standing_in_at_each_node() {
         moves(&workflow),
         [
             ("took_up".into(), None),
-            ("shipped".into(), None),
             ("chose".into(), Some(0)),
             ("arrived".into(), Some(0)),
             ("chose".into(), Some(1)),
         ]
     );
-    let shipped = &workflow["history"][1];
-    assert_eq!(shipped["note"], "good to go");
-    assert_eq!(shipped["actor"], "person");
+    let handoff = handoffs(&task);
+    assert_eq!(handoff.len(), 1);
+    assert!(handoff[0].ends_with(": good to go"), "{}", handoff[0]);
     // The review node ran headless with its skill, standing in for a person.
     let turns = stand_ins(&task);
     assert_eq!(turns.len(), 1);
@@ -2063,13 +2085,35 @@ fn task_ship_holds_while_paused_and_defers_to_a_live_ship() {
     );
     fs::remove_file(task.home.path().join("hold")).unwrap();
     assert!(first.wait().unwrap().success());
-    let workflow = task.workflow();
-    assert_eq!(workflow["position"], at("end"));
-    let shipped = moves(&workflow)
-        .into_iter()
-        .filter(|(kind, _)| kind == "shipped")
-        .count();
-    assert_eq!(shipped, 1);
+    assert_eq!(task.workflow()["position"], at("end"));
+    assert_eq!(handoffs(&task).len(), 1);
+}
+
+#[test]
+fn task_ship_stop_returns_the_task_to_working_and_ends_its_ship() {
+    let task = shipping_task();
+    fs::write(task.home.path().join("hold"), "").unwrap();
+    let mut first = command(
+        task.repo.path(),
+        task.home.path(),
+        &["-b", "--task", "INF-123", "ship"],
+    )
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    wait_for("the stand-in", || !stand_ins(&task).is_empty());
+    assert_eq!(task.state(), "shipping");
+    let stopped = task.run(&["--task", "INF-123", "ship", "--stop"]);
+    let stopped = String::from_utf8_lossy(&stopped.stdout);
+    assert!(stopped.contains("INF-123 stopped shipping"), "{stopped}");
+    assert!(!first.wait().unwrap().success());
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    assert_eq!(task.state(), "working");
+    let again = task.run(&["--task", "INF-123", "ship", "--stop"]);
+    let again = String::from_utf8_lossy(&again.stdout);
+    assert!(again.contains("INF-123 is not shipping"), "{again}");
 }
 
 #[test]
@@ -2095,19 +2139,6 @@ fn task_ship_restarts_from_reconcile_after_its_process_dies() {
     wait_for("the restarted ship to reach end", || {
         task.workflow()["position"] == at("end")
     });
-    let workflow = task.workflow();
-    let restarted = workflow["history"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|entry| entry["kind"] == "shipped")
-        .map(|entry| entry["note"].clone())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        restarted,
-        [
-            serde_json::Value::Null,
-            "ship process exited; restarted".into()
-        ]
-    );
+    // The restart carries the same handoff; it is not shipped a second time.
+    assert_eq!(handoffs(&task).len(), 1);
 }

@@ -101,7 +101,7 @@
             },
             "runtime": {
               "work_id": "ts_now00000000000000000000000000000",
-              "status": "ready",
+              "status": "shipping",
               "completion_pending": null,
               "reason": "ready",
               "updated_at": "2026-07-14T23:44:00Z",
@@ -490,7 +490,7 @@
             },
             "runtime": {
               "work_id": "ts_review00000000000000000000000000",
-              "status": "ready",
+              "status": "unstarted",
               "completion_pending": null,
               "reason": "ready",
               "updated_at": "2026-07-14T22:00:00Z",
@@ -1046,7 +1046,7 @@
           "work_id": "task_40fbeeaadfbca5367aa7391432ae84ff",
           "task_id": "linear-task-w2-127",
           "task_identifier": "W2-127",
-          "status": "ready",
+          "status": "unstarted",
           "owner": "wave",
           "reason": "Task's owning Project is absent from the current PM snapshot",
           "recovery": "lf task status task_40fbeeaadfbca5367aa7391432ae84ff --json"
@@ -1181,7 +1181,7 @@
         },
         "runtime": {
           "work_id": "ts_now00000000000000000000000000000",
-          "status": "ready",
+          "status": "shipping",
           "completion_pending": null,
           "reason": "ready",
           "updated_at": "2026-07-14T23:44:00Z",
@@ -1570,7 +1570,7 @@
         },
         "runtime": {
           "work_id": "ts_review00000000000000000000000000",
-          "status": "ready",
+          "status": "unstarted",
           "completion_pending": null,
           "reason": "ready",
           "updated_at": "2026-07-14T22:00:00Z",

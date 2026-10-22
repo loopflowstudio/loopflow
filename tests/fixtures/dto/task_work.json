@@ -158,18 +158,6 @@
       },
       {
         "workflow": "feature",
-        "kind": "shipped",
-        "from": "review-design",
-        "to": "review-design",
-        "edge": null,
-        "lf_process_id": "22222222-2222-4222-8222-222222222222",
-        "actor": "person",
-        "session_id": null,
-        "note": "good to go",
-        "at": 1700000600
-      },
-      {
-        "workflow": "feature",
         "kind": "chose",
         "from": "review-design",
         "to": "demo",

@@ -935,8 +935,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             // The schedule runs this check every minute; an AgentProcess whose attached lf
             // was killed is reaped here before delivery is observed.
             let agents = loopflow::harness::agent_process::reap_agent_processes(false);
-            // A shipped Task whose ship process died is started again, ahead of
-            // delivery observation; its `shipped` move records the restart.
+            // A shipping Task whose ship process died is started again, ahead of
+            // delivery observation.
             let restarts = loopflow::ops::task::ship::restart_ships(repo);
             let mut result = loopflow::ops::pr_landing::reconcile_repository(repo)?;
             if let Err(error) = restarts {
@@ -2236,7 +2236,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             loopflow::ops::context::ContextFact::Unavailable { reason } => anyhow::bail!(reason),
             // Shipping a branch with no Task first gives it one.
             loopflow::ops::context::ContextFact::Unbound
-                if matches!(&cli.command, Some(Commands::Ship { .. })) =>
+                if matches!(&cli.command, Some(Commands::Ship { stop: false, .. })) =>
             {
                 let task = loopflow::ops::task::ship::ship_branch_task(
                     &loopflow::repo::working_directory()?,
@@ -2349,9 +2349,22 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         )?;
         return Ok(loopflow::ops::task::workflow_arrive(&task)?);
     }
-    if let Some(Commands::Ship { graph, reason }) = &cli.command {
+    if let Some(Commands::Ship {
+        graph,
+        reason,
+        stop,
+    }) = &cli.command
+    {
         journal::admit_process(&std::env::current_dir()?, args);
         let issue = cli.task.clone().context("No Task selected")?;
+        if *stop {
+            if loopflow::ops::task::ship::ship_stop(&issue, reason.as_deref())? {
+                println!("{issue} stopped shipping; it is working again");
+            } else {
+                println!("{issue} is not shipping");
+            }
+            return Ok(());
+        }
         let directory = loopflow::repo::working_directory()?;
         let repo = selected_task_repository(&cli, &directory, Some(&issue))?;
         return loopflow::lf::commands::ship::run(

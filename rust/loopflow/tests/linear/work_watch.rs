@@ -1173,7 +1173,7 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     };
     for (operation, state) in [
         ("complete", loopflow::durable::TaskState::Done),
-        ("reopen", loopflow::durable::TaskState::NotReady),
+        ("reopen", loopflow::durable::TaskState::Unstarted),
     ] {
         let output = lf(home.path(), &["task", operation, "FIX-1"])
             .current_dir(home.wave.repo())
@@ -1189,7 +1189,7 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     drop(watch);
     let mut reopened = home.watch();
     reopened.request(scope);
-    await_state(&reopened, loopflow::durable::TaskState::NotReady);
+    await_state(&reopened, loopflow::durable::TaskState::Unstarted);
     let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
     assert!(task.worktree.is_none());
     assert!(home.store.task_prs(&task.id).unwrap().is_empty());

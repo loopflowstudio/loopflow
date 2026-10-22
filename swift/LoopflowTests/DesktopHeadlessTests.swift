@@ -357,7 +357,8 @@ struct DesktopHeadlessTests {
             start: { args, _ in await started.add(args) },
             run: { args, _ in
                 if args.prefix(2) == ["wave", "show"] { return String(decoding: planning, as: UTF8.self) }
-                if args.prefix(3) == ["task", "workflow", "move"] || args.prefix(2) == ["task", "complete"] { await started.add(args) }
+                if args.prefix(3) == ["task", "workflow", "move"] || args.prefix(2) == ["task", "complete"]
+                    || args.last == "--stop" { await started.add(args) }
                 return "{}"
             }))
         func view(position: [String: Any]? = nil, outgoing: [Int] = []) throws -> TaskWorkflowHeader {
@@ -419,6 +420,17 @@ struct DesktopHeadlessTests {
         // Completion has its own operation and does not move the Workflow.
         await model.completeTask(task)
         #expect(await started.calls.last == ["task", "complete", task.task.identifier])
+
+        // A shipping Task offers Stop shipping in place of Ship it.
+        let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
+        let shipped = TaskWorkflowHeader(model: model, task: shipping, work: .available(
+            try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))))
+        #expect(throws: (any Error).self) {
+            try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
+        }
+        try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop").button().tap()
+        for _ in 0..<200 where await started.calls.last?.last != "--stop" { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(await started.calls.last == ["--task", shipping.task.identifier, "ship", "--stop"])
     }
 
     @Test("Task lifecycle controls remain available without a Workflow", arguments: ["unstarted", "completed", "canceled"])

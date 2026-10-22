@@ -431,13 +431,13 @@ fn map_machine_row(row: &rusqlite::Row<'_>) -> StoreResult<Machine> {
     })
 }
 
-/// Completion and abandonment are durable; unfinished readiness follows the Workflow.
+/// Completion, abandonment, pause and shipping are durable; whether an open
+/// Task has started follows its Workflow.
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
-        "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' WHEN {t}.planning_completed=1 THEN 'done' WHEN {t}.paused=1 THEN 'paused' ELSE COALESCE((
-            SELECT CASE WHEN wf.edge IS NOT NULL THEN 'active' WHEN wf.node='start' THEN 'ready'
-                ELSE 'active' END
-            FROM task_workflows wf WHERE wf.task_id={t}.id),'not_ready') END"
+        "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' WHEN {t}.planning_completed=1 THEN 'done' WHEN {t}.paused=1 THEN 'paused' WHEN {t}.shipped_at IS NOT NULL THEN 'shipping' ELSE COALESCE((
+            SELECT CASE WHEN wf.edge IS NULL AND wf.node='start' THEN 'unstarted' ELSE 'working' END
+            FROM task_workflows wf WHERE wf.task_id={t}.id),'unstarted') END"
     )
 }
 

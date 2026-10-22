@@ -307,7 +307,90 @@ fn choose_edge_in(
         by,
         note,
     )?;
+    // No person takes part on a route into `end`: taking one hands the Task off.
+    if let (true, Some(by)) = (chosen.to == END, by) {
+        ship_in(
+            tx,
+            task,
+            by,
+            &format!("{} runs to the end with no stage left", chosen.name),
+        )?;
+    }
     Ok(true)
+}
+
+/// A Task handed off to finish on its own: since when, and this Machine's
+/// process carrying it there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskShipping {
+    pub shipped_at: i64,
+    pub process: Option<LfProcessId>,
+}
+
+fn shipping_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<TaskShipping>> {
+    use rusqlite::OptionalExtension;
+    let row: Option<(i64, Option<String>)> = conn
+        .query_row(
+            "SELECT shipped_at,ship_lf_process_id FROM tasks WHERE id=?1 AND shipped_at IS NOT NULL",
+            [task.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    row.map(|(shipped_at, process)| {
+        Ok(TaskShipping {
+            shipped_at,
+            process: process
+                .map(|id| {
+                    LfProcessId::parse(&id)
+                        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
+                })
+                .transpose()?,
+        })
+    })
+    .transpose()
+}
+
+fn ship_in(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+    by: &LfProcessId,
+    note: &str,
+) -> StoreResult<TaskShipping> {
+    let state = super::durable::task_state_in(tx, task)?;
+    if state.is_terminal() {
+        return Err(crate::store::StoreError::InvalidAuthority(format!(
+            "Task is {state}; it cannot ship"
+        )));
+    }
+    let shipped_at = match shipping_in(tx, task)? {
+        Some(shipping) => shipping.shipped_at,
+        None => {
+            let now = crate::store::rows::now_unix();
+            super::planning_write::local(
+                tx,
+                &crate::work::edit::WorkEdit::for_target(
+                    task.as_str(),
+                    &[crate::work::edit::WorkValue::TaskShippedAt(Some(now))],
+                ),
+            )?;
+            super::children::insert_task_event_in(
+                tx,
+                task,
+                &crate::work::task::TaskEventKind::Progress {
+                    summary: format!("Shipping: {note}"),
+                },
+            )?;
+            now
+        }
+    };
+    tx.execute(
+        "UPDATE tasks SET ship_lf_process_id=?2 WHERE id=?1",
+        rusqlite::params![task.as_str(), by.as_str()],
+    )?;
+    Ok(TaskShipping {
+        shipped_at,
+        process: Some(by.clone()),
+    })
 }
 
 fn arrive_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, by: &LfProcessId) -> StoreResult<()> {
@@ -740,34 +823,59 @@ impl SqliteStore {
         Ok(set)
     }
 
-    /// Record that `by` ships the Task from where it stands. Returns false when
-    /// the Task has no Workflow.
-    pub(crate) fn ship_workflow(
+    /// Hand the Task off to finish on its own, carried by `by`. Shipping that
+    /// already began keeps its start; only the carrier changes.
+    pub(crate) fn ship_task(
         &self,
         task: &TaskId,
         by: &LfProcessId,
-        note: Option<&str>,
-    ) -> StoreResult<bool> {
+        note: &str,
+    ) -> StoreResult<TaskShipping> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let Some(WorkflowRow {
-            graph, node, edge, ..
-        }) = workflow_row(&tx, task)?
-        else {
-            return Ok(false);
+        let shipping = ship_in(&tx, task, by, note)?;
+        tx.commit()?;
+        Ok(shipping)
+    }
+
+    /// Return a shipping Task to working. Returns the process that carried
+    /// it, when it was shipping.
+    pub(crate) fn stop_shipping(
+        &self,
+        task: &TaskId,
+        note: &str,
+    ) -> StoreResult<Option<TaskShipping>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let Some(shipping) = shipping_in(&tx, task)? else {
+            return Ok(None);
         };
-        append_workflow_move(
+        super::planning_write::local(
+            &tx,
+            &crate::work::edit::WorkEdit::for_target(
+                task.as_str(),
+                &[crate::work::edit::WorkValue::TaskShippedAt(None)],
+            ),
+        )?;
+        tx.execute(
+            "UPDATE tasks SET ship_lf_process_id=NULL WHERE id=?1",
+            [task.as_str()],
+        )?;
+        super::children::insert_task_event_in(
             &tx,
             task,
-            &graph.name,
-            WorkflowMoveKind::Shipped,
-            (&node, &node),
-            edge.map(|(edge, _)| edge),
-            Some(by),
-            note,
+            &crate::work::task::TaskEventKind::Progress {
+                summary: format!("Stopped shipping: {note}"),
+            },
         )?;
         tx.commit()?;
-        Ok(true)
+        Ok(Some(shipping))
+    }
+
+    /// When the Task was handed off and the process carrying it, if it is shipping.
+    pub(crate) fn task_shipping(&self, task: &TaskId) -> StoreResult<Option<TaskShipping>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        shipping_in(&conn, task)
     }
 
     /// The node `by`'s edge enters, while the Task is still on that edge.
@@ -810,7 +918,7 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
 
     #[test]
-    fn paused_task_retains_workflow_and_resumes_without_execution() {
+    fn pause_holds_the_lifecycle_and_a_route_into_end_ships() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
@@ -904,13 +1012,34 @@ mod tests {
         store.set_task_paused(&task, false).unwrap();
         assert_eq!(
             store.task_state(&task).unwrap(),
-            crate::durable::TaskState::Ready
+            crate::durable::TaskState::Unstarted
         );
         assert_eq!(store.workflow(&task).unwrap().unwrap(), before);
         assert_eq!(
             store.task(&task).unwrap().unwrap().worktree,
             Some(std::path::PathBuf::from("/repo/task"))
         );
+
+        // No stage remains on the route into `end`: taking it hands the Task off.
+        assert!(store
+            .choose_workflow_edge(&task, &before, 0, &by, None)
+            .unwrap());
+        let state = || store.task_state(&task).unwrap();
+        assert_eq!(state(), crate::durable::TaskState::Shipping);
+        let shipping = store.task_shipping(&task).unwrap().unwrap();
+        assert_eq!(shipping.process, Some(by.clone()));
+        // Pause holds shipping without ending it.
+        store.set_task_paused(&task, true).unwrap();
+        assert_eq!(state(), crate::durable::TaskState::Paused);
+        store.set_task_paused(&task, false).unwrap();
+        assert_eq!(state(), crate::durable::TaskState::Shipping);
+        // Shipping again keeps when it began.
+        let again = store.ship_task(&task, &by, "again").unwrap();
+        assert_eq!(again.shipped_at, shipping.shipped_at);
+        // Stop returns it to working, where it stands.
+        assert_eq!(store.stop_shipping(&task, "stop").unwrap(), Some(shipping));
+        assert_eq!(state(), crate::durable::TaskState::Working);
+        assert_eq!(store.stop_shipping(&task, "stop").unwrap(), None);
     }
 
     #[test]

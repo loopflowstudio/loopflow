@@ -338,6 +338,12 @@ public struct RegistryQuery: Sendable {
         }
     }
 
+    /// Return a shipping Task to working: its ship process stops and any
+    /// auto-merge Loopflow armed is disabled.
+    public func stopShipping(issue: String, cwd: String?) async throws {
+        _ = try await run(["--task", issue, "ship", "--stop"], cwd)
+    }
+
     /// Reopen every conversation on this Machine that a restart or crash cut off,
     /// each in its own owner with no viewer; panes attach when they show it.
     public func resumeInterrupted() async throws {

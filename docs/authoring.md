@@ -287,7 +287,10 @@ builtin `research`, ends with a route into `end` that runs nothing.
 
 `lf ship` runs the remaining steps in the foreground, with a headless agent
 standing in for you at each stage: it runs the stage's skill, decides advance or
-repeat, and records why in the Task history.
+repeat, and records why in the Task history. A Task is `unstarted`, `working`,
+`shipping`, then `done` (or `abandoned`); `paused` holds working or shipping.
+Shipping begins with `lf ship` or with any route into `end`, and
+`lf ship --stop` returns it to working.
 
 On its first `lf task run`, a Task selects the Workflow you name, then its Wave
 default, then repository `workflow:`. It keeps the graph as it was then.

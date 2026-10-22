@@ -49,7 +49,7 @@ public struct Workflow: Codable, Sendable, Equatable {
     public struct Move: Codable, Sendable, Equatable {
         public enum Kind: String, Codable, Sendable {
             case tookUp = "took_up"
-            case chose, arrived, set, shipped
+            case chose, arrived, set
         }
 
         public enum Actor: String, Codable, Sendable { case person, conversation, edge }

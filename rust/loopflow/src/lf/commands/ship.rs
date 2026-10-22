@@ -1,8 +1,8 @@
 //! `lf ship`: run a shipped Task's remaining graph in the foreground until it
 //! reaches `end`. At each stage a headless stand-in runs the stage's skill for
 //! the person who would be there and decides the route; each edge runs as
-//! `lf task run` would run it. The caller backgrounds this process; reconcile
-//! restarts it if it dies.
+//! `lf task run` would run it. The caller backgrounds this process; it is
+//! started again if it dies while the Task is shipping.
 
 use std::path::Path;
 
@@ -42,6 +42,10 @@ pub fn run(
     loop {
         let (edge, note) = match ship_next(&issue)? {
             ShipStep::Paused => return paused(&issue),
+            ShipStep::Stopped => {
+                println!("{issue} stopped shipping");
+                return Ok(());
+            }
             ShipStep::Finished => {
                 println!("{issue} reached its end");
                 return Ok(());
@@ -67,8 +71,13 @@ pub fn run(
                     &message,
                     output.as_ref(),
                 )?;
-                if ship_next(&issue)? == ShipStep::Paused {
-                    return paused(&issue);
+                match ship_next(&issue)? {
+                    ShipStep::Paused => return paused(&issue),
+                    ShipStep::Stopped => {
+                        println!("{issue} stopped shipping");
+                        return Ok(());
+                    }
+                    _ => {}
                 }
                 let verdict = match outcome {
                     Some(SkillOutcome::Decided(verdict)) => Some(verdict),

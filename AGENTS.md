@@ -12,6 +12,7 @@ This is the governing document of the loopflow codebase. Contributors and agents
 - A Task's work is every Session, Graph and Process in its checkout, plus explicit binds; no Graph is selected over another
 - Workflow = the graph a Task took up, with its stored position; its `interactive:` steps are stages (a person, in its conversation) and routes between them run slices of it; `lf task run` chooses a route, `lf task workflow move` sets a stage
 - Task completion, Workflow position and Process liveness are independent; reaching `end` requests completion, and a failed request retries without replaying the route
+- Task lifecycle = `unstarted → working → shipping → done`, or `abandoned`; `paused` holds working or shipping. `lf ship` or any route into `end` ships; `lf ship --stop` returns it to working
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Unreviewed backlog stays in its Project until explicit disposition; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan

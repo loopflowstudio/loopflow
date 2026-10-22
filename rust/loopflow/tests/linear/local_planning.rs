@@ -910,7 +910,11 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let home = tempfile::tempdir().unwrap();
     repo.create_file(".lf/graphs/proof.yaml", "- cmd: graph show proof\n");
     let definition = home.path().join("proof.yaml");
-    std::fs::write(&definition, "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: proof}\n  - {from: review, to: end, graph: proof}\n").unwrap();
+    std::fs::write(
+        &definition,
+        "- cmd: graph show proof\n- interactive: demo\n- cmd: graph show proof\n",
+    )
+    .unwrap();
     repo.stage_all();
     repo.commit("Fixture workflow");
     assert!(Command::new("git")
@@ -990,7 +994,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         .starts_with(&format!("jack/{}-", &id.trim_start_matches("task_")[..6])));
     lf(repo.path(), home.path(), &["-b", "task", "run", id]);
     let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
-    assert_eq!(status["execution"]["status"], "active");
+    assert_eq!(status["execution"]["status"], "working");
     assert_eq!(status["execution"]["task_id"], id);
     assert!(status["planning_error"].is_null());
     assert!(status["execution"]["work"]["workflow"].is_object());
@@ -1001,7 +1005,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let error = String::from_utf8_lossy(&landing.stderr);
     assert!(error.contains("remote"), "{error}");
     let retained = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
-    assert_eq!(retained["execution"]["status"], "active");
+    assert_eq!(retained["execution"]["status"], "working");
     assert!(retained["execution"]["pr"].is_null());
     let backlog = lf(
         repo.path(),
@@ -2189,7 +2193,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 .unwrap();
         }
         db.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
-        db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',0,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![active.id.as_str(),serde_json::json!({"name":"review","nodes":[],"edges":[{"from":"review","to":"end","graph":"implement"}]}).to_string()]).unwrap();
+        db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',1,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![active.id.as_str(),serde_json::json!({"name":"review","steps":[{"Skill":{"skill":{"name":"review"},"id":null,"interactive":true,"returns":null,"sources":[]}},{"Skill":{"skill":{"name":"implement"},"id":null,"interactive":false,"returns":null,"sources":[]}}]}).to_string()]).unwrap();
         let retained_execution = || {
             [
                 ("task_workflows", "task_id", active.id.as_str()),
@@ -3313,7 +3317,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         home.path(),
         &["wave", "workflow", "source", "code", wave.slug()],
     );
-    assert!(source.as_str().unwrap().contains("nodes:"));
+    assert!(source.as_str().unwrap().contains("interactive: demo"));
     connection
         .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
         .unwrap();
@@ -3573,7 +3577,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     )
     .unwrap();
     db.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
-    db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',0,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![id.as_str(),json!({"name":"review","nodes":[],"edges":[{"from":"review","to":"end","graph":"implement"}]}).to_string()]).unwrap();
+    db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',1,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![id.as_str(),json!({"name":"review","steps":[{"Skill":{"skill":{"name":"review"},"id":null,"interactive":true,"returns":null,"sources":[]}},{"Skill":{"skill":{"name":"implement"},"id":null,"interactive":false,"returns":null,"sources":[]}}]}).to_string()]).unwrap();
     let saved = store.task(&id).unwrap().unwrap();
     let read = || {
         lf(

@@ -147,7 +147,8 @@ fn lifecycle_world_reports_each_state() {
     assert_eq!(task("Abandoned attempt")["runtime"]["status"], "abandoned");
     let canceled = task("Canceled upstream");
     assert_eq!(canceled["task"]["state"], "canceled");
-    assert_eq!(canceled["runtime"]["status"], "not_ready");
+    // Its stage-less `pursue` run took the route into `end`, which ships it.
+    assert_eq!(canceled["runtime"]["status"], "shipping");
     // Started local work survives an upstream cancel until someone disposes of it.
     assert_eq!(canceled["condition"]["unresolved_execution"], true);
     let lost = task("Lost checkout");

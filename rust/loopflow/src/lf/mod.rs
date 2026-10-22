@@ -399,12 +399,17 @@ pub enum Commands {
     ///
     /// Runs in the foreground until the Task reaches its end; background it
     /// yourself (`nohup lf ship &`). A second `lf ship` while one runs exits 0.
+    /// `--stop` returns a shipping Task to working and takes back its merge request.
     Ship {
-        /// Run this Graph whole in place of the Task's remaining steps
+        /// Take up this graph in place of the Task's remaining steps
+        #[arg(conflicts_with = "stop")]
         graph: Option<String>,
-        /// Why, kept on the Task's `shipped` move
+        /// Why, kept in the Task's history
         #[arg(long)]
         reason: Option<String>,
+        /// Stop shipping: end the ship process and disarm auto-merge it armed
+        #[arg(long)]
+        stop: bool,
     },
     /// Merge upstream into the current branch (default: main or stack parent)
     Sync(SyncArgs),

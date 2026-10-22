@@ -456,7 +456,7 @@
     },
     "runtime": {
       "work_id": "ts_stale",
-      "status": "active",
+      "status": "working",
       "completion_pending": "Linear calls Task LOO-1 complete while it is active on its workflow; `lf task move LOO-1 end --force` completes it here",
       "reason": "ready",
       "updated_at": "2026-07-14T18:00:00Z",
@@ -848,7 +848,7 @@
     },
     "runtime": {
       "work_id": "ts_unavailable",
-      "status": "not_ready",
+      "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
       "updated_at": "2026-07-14T23:00:00Z",
@@ -943,7 +943,7 @@
     },
     "runtime": {
       "work_id": "task-user",
-      "status": "ready",
+      "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
       "updated_at": "2026-07-14T23:59:00Z",
@@ -1336,7 +1336,7 @@
     },
     "runtime": {
       "work_id": "ts_dirty",
-      "status": "ready",
+      "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
       "updated_at": "2026-07-14T23:50:00Z",
@@ -1431,7 +1431,7 @@
     },
     "runtime": {
       "work_id": "ts_commits",
-      "status": "ready",
+      "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",

@@ -379,8 +379,8 @@ struct DTOFixtureTests {
         #expect(research?.edges.last?.name == "end")
         #expect(workflow.position == .edge(index: 2, lfProcessId: work.graphProcesses[0].id, running: true))
         #expect(workflow.outgoing.isEmpty)
-        #expect(workflow.history.map(\.kind) == [.set, .tookUp, .chose, .arrived, .shipped, .chose])
-        #expect(workflow.history.map(\.actor) == [.person, .person, .person, .edge, .person, .conversation])
+        #expect(workflow.history.map(\.kind) == [.set, .tookUp, .chose, .arrived, .chose])
+        #expect(workflow.history.map(\.actor) == [.person, .person, .person, .edge, .conversation])
         // A move no registered process made names no Process.
         #expect(workflow.history[0].lfProcessId == nil)
         #expect(workflow.history.last?.sessionId == work.sessions[0].id)
@@ -608,7 +608,7 @@ struct DTOFixtureTests {
 
         #expect(detail.currentProject?.sync.changes[1].field == "task_order")
         #expect(detail.unavailableTasks[0].taskIdentifier == "W2-127")
-        #expect(detail.unavailableTasks[0].status == .ready)
+        #expect(detail.unavailableTasks[0].status == .unstarted)
         #expect(detail.unavailableTasks[0].owner == .wave)
         #expect(detail.tasks.items.map(\.task.identifier) == ["INF-123", "INF-124"])
         #expect(detail.tasks.items[0].task.state == "unstarted")
@@ -626,7 +626,7 @@ struct DTOFixtureTests {
         #expect(detail.tasks.items[0].reference.issueUrl?.host == "linear.app")
         // Ready is durable Work status. Historical failure evidence stays
         // visible without replacing that present-tense state.
-        #expect(detail.tasks.items[0].runtime?.status == .ready)
+        #expect(detail.tasks.items[0].runtime?.status == .unstarted)
         #expect(detail.tasks.items[0].runtime?.reason == "ready")
         #expect(detail.tasks.items[1].runtime == nil)
         #expect(detail.tasks.items[1].reference.issueUrl == nil)
@@ -661,7 +661,7 @@ struct DTOFixtureTests {
         #expect(product.metricPortfolio.metrics[0].identity.metricId == "task-loop-trust")
 
         #expect(product.unavailableTasks[0].taskIdentifier == "W2-127")
-        #expect(product.unavailableTasks[0].status == .ready)
+        #expect(product.unavailableTasks[0].status == .unstarted)
         #expect(product.unavailableTasks[0].recovery.contains("lf task status task_40fbeea"))
         let tasks = product.tasks.items
         #expect(tasks.map(\.section) == [.now, .waiting, .notStarted, .later])

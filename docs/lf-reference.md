@@ -1654,7 +1654,7 @@ Move Workflow position without running anything; `end` requests completion
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `<node>` | `start`, `end` or one of the graph's stages |
+| `<stage>` | `start`, `end` or one of the graph's stages |
 | `--reason` | Why, kept in the Task's workflow history |
 | `--help / -h` | Print help |
 

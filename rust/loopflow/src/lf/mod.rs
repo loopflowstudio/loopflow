@@ -780,8 +780,7 @@ pub enum TaskWorkflowCommand {
     Move {
         issue: String,
         /// `start`, `end` or one of the graph's stages
-        #[arg(value_name = "STAGE")]
-        node: String,
+        stage: String,
         /// Why, kept in the Task's workflow history
         #[arg(long)]
         reason: Option<String>,
@@ -2939,8 +2938,8 @@ mod tests {
         ])
         .unwrap();
         assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Workflow { cmd: TaskWorkflowCommand::Move { issue, node, reason } } })
-                if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")));
+            Some(Commands::Task { cmd: TaskCommand::Workflow { cmd: TaskWorkflowCommand::Move { issue, stage, reason } } })
+                if issue == "LOO-42" && stage == "end" && reason.as_deref() == Some("Delivered")));
         let cli =
             Cli::try_parse_from(["lf", "task", "complete", "LOO-42", "--reason", "Delivered"])
                 .unwrap();

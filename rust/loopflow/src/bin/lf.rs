@@ -967,12 +967,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Workflow { cmd } => match cmd {
             loopflow::lf::TaskWorkflowCommand::Move {
                 issue,
-                node,
+                stage,
                 reason,
             } => {
                 println!(
                     "{}",
-                    loopflow::ops::task::workflow_set(issue, node, reason.as_deref())?
+                    loopflow::ops::task::workflow_set(issue, stage, reason.as_deref())?
                 );
                 Ok(())
             }
@@ -2039,11 +2039,11 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                     cmd:
                         loopflow::lf::TaskWorkflowCommand::Move {
                             issue,
-                            node,
+                            stage,
                             reason,
                         },
                 },
-        }) => Some((issue.as_str(), node.as_str(), reason.as_deref())),
+        }) => Some((issue.as_str(), stage.as_str(), reason.as_deref())),
         Some(Commands::Task {
             cmd:
                 TaskCommand::Workflow {

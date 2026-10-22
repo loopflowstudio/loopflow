@@ -42,7 +42,8 @@ def _changed(base: str) -> list[str] | None:
 
 
 def main() -> None:
-    base = sys.argv[1] if len(sys.argv) > 1 else ""
+    # Empty on events without a base, such as a manual run.
+    base = sys.argv[1]
     paths = _changed(base) if base else None
     desktop = paths is None or affects_desktop(paths)
     summary = (

@@ -17,7 +17,7 @@ use crate::store::sqlite::TaskShipping;
 use crate::work::task::Task;
 use crate::workflow::{END, START};
 
-use super::{block_on_task, task_error, task_store, TaskRunSelection};
+use super::{block_on_task, task_error, task_store, SharedStore, TaskRunSelection};
 
 /// What `lf ship` found before running anything.
 #[derive(Debug)]
@@ -79,6 +79,22 @@ pub enum ShippingState {
     Repairing,
     Restarting,
     Paused,
+}
+
+async fn task_by_issue(store: &SharedStore, issue: &str) -> OpsResult<Task> {
+    store
+        .get_task_by_issue(issue)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))
+}
+
+/// The configured participant's name, or `fallback` when none is set.
+fn participant_or(fallback: &str) -> String {
+    crate::config::participant_name()
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| fallback.into())
 }
 
 /// Whether the process carrying a shipping Task has exited. Unknown evidence
@@ -181,11 +197,7 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
         .ok_or_else(|| task_error("lf ship requires a registered Process"))?;
     block_on_task(async {
         let store = task_store().await?;
-        let task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        let task = task_by_issue(&store, issue).await?;
         let issue = task.identifier.clone();
         match store.sqlite.task_state(&task.id).map_err(task_error)? {
             TaskState::Paused => return Ok(ShipStart::Paused { issue }),
@@ -243,10 +255,7 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
         if matches!(&workflow.position, WorkflowPosition::Node { node } if node == END) {
             return Ok(ShipStart::AtEnd { issue });
         }
-        let by = crate::config::participant_name()
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "someone".into());
+        let by = participant_or("someone");
         let mut handoff = format!("{by} shipped it");
         if let Some(graph) = graph {
             handoff.push_str(&format!(" with {graph}"));
@@ -267,15 +276,8 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
 pub fn ship_stop(issue: &str, note: Option<&str>) -> OpsResult<bool> {
     let (task, stopped) = block_on_task(async {
         let store = task_store().await?;
-        let task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-        let by = crate::config::participant_name()
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "someone".into());
+        let task = task_by_issue(&store, issue).await?;
+        let by = participant_or("someone");
         let note = match note {
             Some(note) => format!("{by}: {note}"),
             None => by,
@@ -345,11 +347,7 @@ pub fn ship_branch_task(repo: &std::path::Path, wave: Option<&str>) -> OpsResult
 pub fn ship_next(issue: &str) -> OpsResult<ShipStep> {
     block_on_task(async {
         let store = task_store().await?;
-        let task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        let task = task_by_issue(&store, issue).await?;
         match store.sqlite.task_state(&task.id).map_err(task_error)? {
             TaskState::Paused => return Ok(ShipStep::Paused),
             TaskState::Done | TaskState::Abandoned => return Ok(ShipStep::Finished),
@@ -422,10 +420,7 @@ fn routes_from(workflow: &Workflow, node: &str) -> Option<(String, Option<String
 /// The instruction a headless stand-in receives at a stage. With a loop behind
 /// the stage it answers advance or iterate; blocked repeats with the blocker.
 pub fn stand_in_message(stage: &str, repeats: bool) -> String {
-    let person = crate::config::participant_name()
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "the person who shipped this Task".into());
+    let person = participant_or("the person who shipped this Task");
     let mut message = format!(
         "No one is available. You are standing in for {person} at {stage}. Decide as they would, record why in your final message, and continue."
     );

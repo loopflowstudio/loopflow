@@ -350,6 +350,28 @@ fn shipping_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option
     .transpose()
 }
 
+/// End the Task's handoff, returning what it was, when it was shipping.
+pub(super) fn unship_in(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+) -> StoreResult<Option<TaskShipping>> {
+    let shipping = shipping_in(conn, task)?;
+    if shipping.is_some() {
+        super::planning_write::local(
+            conn,
+            &crate::work::edit::WorkEdit::for_target(
+                task.as_str(),
+                &[crate::work::edit::WorkValue::TaskShippedAt(None)],
+            ),
+        )?;
+        conn.execute(
+            "UPDATE tasks SET ship_lf_process_id=NULL WHERE id=?1",
+            [task.as_str()],
+        )?;
+    }
+    Ok(shipping)
+}
+
 fn ship_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
@@ -847,20 +869,9 @@ impl SqliteStore {
     ) -> StoreResult<Option<TaskShipping>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let Some(shipping) = shipping_in(&tx, task)? else {
+        let Some(shipping) = unship_in(&tx, task)? else {
             return Ok(None);
         };
-        super::planning_write::local(
-            &tx,
-            &crate::work::edit::WorkEdit::for_target(
-                task.as_str(),
-                &[crate::work::edit::WorkValue::TaskShippedAt(None)],
-            ),
-        )?;
-        tx.execute(
-            "UPDATE tasks SET ship_lf_process_id=NULL WHERE id=?1",
-            [task.as_str()],
-        )?;
         super::children::insert_task_event_in(
             &tx,
             task,

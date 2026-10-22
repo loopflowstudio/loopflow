@@ -20,12 +20,9 @@ design rewrite, each reversible before implementation:
   queue-only breakage going unrepaired.
 - `lf ship` walks the projected routes rather than a separate `run_from` entry: each route's
   slice already runs to the next stage, so the two are the same walk.
-- Shipping liveness reads the latest `Shipped` move's process; the idempotence check and the
-  move append are not one transaction, so two `lf ship` started in the same instant could both
-  proceed. Reconcile's restart and the second-ship check cover the common cases.
-- `ShippingSnapshot` carries no `shipped_by` (settled 2026-10-22: the move's actor is the record). Moves have no requester-name column, and the
-  draft migration stays as is. The `Shipped` move keeps actor and Session; add the name with
-  the column if the Shipping row needs it.
+- Shipping liveness reads `tasks.ship_lf_process_id`; the idempotence check and the carrier write
+  are not one transaction, so two `lf ship` started in the same instant could both proceed.
+- No `shipped_by` column (settled 2026-10-22): the handoff `Progress` event names who shipped it.
 - A taskless `lf ship` titles the new Task from the branch's last path segment (no PR title
   read: `branch_pr` returns none) and adopts the checkout that has the branch, even the main
   checkout. The default branch is refused.

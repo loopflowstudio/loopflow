@@ -41,15 +41,6 @@ pub fn run(
     let worktree = task.worktree()?.to_path_buf();
     loop {
         let (edge, note) = match ship_next(&issue)? {
-            ShipStep::Paused => return paused(&issue),
-            ShipStep::Stopped => {
-                println!("{issue} stopped shipping");
-                return Ok(());
-            }
-            ShipStep::Finished => {
-                println!("{issue} reached its end");
-                return Ok(());
-            }
             ShipStep::Edge(edge) => (edge, None),
             ShipStep::StandIn {
                 stage,
@@ -71,13 +62,10 @@ pub fn run(
                     &message,
                     output.as_ref(),
                 )?;
-                match ship_next(&issue)? {
-                    ShipStep::Paused => return paused(&issue),
-                    ShipStep::Stopped => {
-                        println!("{issue} stopped shipping");
-                        return Ok(());
-                    }
-                    _ => {}
+                // Someone may have paused or stopped it while the stand-in ran.
+                let step = ship_next(&issue)?;
+                if matches!(step, ShipStep::Paused | ShipStep::Stopped) {
+                    return halt(&issue, &step);
                 }
                 let verdict = match outcome {
                     Some(SkillOutcome::Decided(verdict)) => Some(verdict),
@@ -103,6 +91,7 @@ pub fn run(
                 eprintln!("{issue}: {note}");
                 (edge, Some(note))
             }
+            step => return halt(&issue, &step),
         };
         let (task, runs) = crate::ops::task::task_place(
             repo,
@@ -122,7 +111,14 @@ pub fn run(
     }
 }
 
-fn paused(issue: &str) -> Result<()> {
-    println!("{issue} is paused; `lf task resume {issue}` and `lf ship` continue shipping");
+/// Say why shipping ends here: paused, stopped or finished.
+fn halt(issue: &str, step: &ShipStep) -> Result<()> {
+    match step {
+        ShipStep::Paused => {
+            println!("{issue} is paused; `lf task resume {issue}` and `lf ship` continue shipping")
+        }
+        ShipStep::Stopped => println!("{issue} stopped shipping"),
+        _ => println!("{issue} reached its end"),
+    }
     Ok(())
 }

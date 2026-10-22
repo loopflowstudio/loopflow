@@ -11,10 +11,11 @@ use crate::durable::TaskState;
 use crate::id::LfProcessId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::error::OpsResult;
+use crate::ops::pr::PrReadFreshness;
 use crate::ops::workflow::{Workflow, WorkflowPosition};
 use crate::pr_landing::{PrLanding, PrLandingState};
 use crate::store::sqlite::TaskShipping;
-use crate::work::task::Task;
+use crate::work::task::{PrPhase, Task};
 use crate::workflow::{END, START};
 
 use super::{block_on_task, task_error, task_store, SharedStore, TaskRunSelection};
@@ -341,6 +342,31 @@ pub fn ship_branch_task(repo: &std::path::Path, wave: Option<&str>) -> OpsResult
         },
         None,
     )
+}
+
+/// Complete a shipping Task whose PR has merged, whoever merged it, so no
+/// further step runs on delivered work. Returns whether the Task is now done.
+pub fn ship_complete_if_merged(issue: &str) -> OpsResult<bool> {
+    block_on_task(async {
+        let store = task_store().await?;
+        let mut task = task_by_issue(&store, issue).await?;
+        let Some(pr) =
+            super::reconcile_task_pr_observation(&store, &mut task, PrReadFreshness::Fresh).await?
+        else {
+            return Ok(false);
+        };
+        if pr.phase() != PrPhase::Merged {
+            return Ok(false);
+        }
+        if let Some(request) = store
+            .sqlite
+            .request_task_completion(&task.id, Some("its PR merged while shipping"))
+            .map_err(task_error)?
+        {
+            super::settle_completion(&store, &mut task, request).await?;
+        }
+        Ok(store.sqlite.task_state(&task.id).map_err(task_error)? == TaskState::Done)
+    })
 }
 
 /// Read where the shipped Task stands and what runs next.

@@ -13,7 +13,8 @@ use crate::graph::runner::SkillOutcome;
 use crate::graph::transitions::{GraphDecision, GraphVerdict};
 use crate::lf::Cli;
 use crate::ops::task::ship::{
-    blocked_backoff, ship_begin, ship_next, stand_in_message, ShipStart, ShipStep,
+    blocked_backoff, ship_begin, ship_complete_if_merged, ship_next, stand_in_message, ShipStart,
+    ShipStep,
 };
 use crate::ops::task::TaskProcessOptions;
 
@@ -44,6 +45,9 @@ pub fn run(
     // Blocked decisions in a row; each repeat after one waits longer.
     let mut blocked = 0;
     loop {
+        if merged(&issue) {
+            return Ok(());
+        }
         let (edge, note) = match ship_next(&issue)? {
             ShipStep::Edge(edge) => (edge, None),
             ShipStep::StandIn {
@@ -112,6 +116,10 @@ pub fn run(
             }
             step => return halt(&issue, &step),
         };
+        // Checked again here: a stand-in can run for a long time.
+        if merged(&issue) {
+            return Ok(());
+        }
         let (task, runs) = crate::ops::task::task_place(
             repo,
             &issue,
@@ -126,6 +134,23 @@ pub fn run(
         if let Some(edge) = runs {
             super::graph::run_task_edge_for(cli, task.id.as_str(), &edge, &worktree)?;
             crate::ops::task::workflow_arrive(&task)?;
+        }
+    }
+}
+
+/// A PR merged by anyone finishes the Task; nothing more runs on it. An
+/// unreadable PR leaves shipping to continue.
+fn merged(issue: &str) -> bool {
+    match ship_complete_if_merged(issue) {
+        Ok(done) => {
+            if done {
+                println!("{issue}: its PR merged; completed");
+            }
+            done
+        }
+        Err(error) => {
+            eprintln!("{issue}: could not read its PR: {error}");
+            false
         }
     }
 }

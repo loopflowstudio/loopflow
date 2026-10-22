@@ -2096,7 +2096,44 @@ fn task_ship_stop_returns_the_task_to_working_and_ends_its_ship() {
 }
 
 #[test]
-fn task_ship_restarts_from_reconcile_after_its_process_dies() {
+fn task_ship_completes_when_its_pr_merges_mid_ship() {
+    let task = shipping_task();
+    fs::write(task.home.path().join("hold"), "").unwrap();
+    let first = command(
+        task.repo.path(),
+        task.home.path(),
+        &["-b", "--task", "INF-123", "ship"],
+    )
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    wait_for("the stand-in", || !stand_ins(&task).is_empty());
+    // Someone merges the PR by hand while the stand-in is still working.
+    task.publish(true);
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    let output = first.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("INF-123: its PR merged; completed"),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(task.state(), "done");
+    // Nothing ran after the merge was seen: the review route was never chosen.
+    assert_eq!(
+        moves(&task.workflow()),
+        [
+            ("took_up".into(), None),
+            ("chose".into(), Some(0)),
+            ("arrived".into(), Some(0)),
+        ]
+    );
+}
+
+#[test]
+fn task_ship_restarts_on_the_next_read_after_its_process_dies() {
     let task = shipping_task();
     fs::write(task.home.path().join("hold"), "").unwrap();
     let mut first = command(
@@ -2113,8 +2150,8 @@ fn task_ship_restarts_from_reconcile_after_its_process_dies() {
     first.kill().unwrap();
     first.wait().unwrap();
     fs::remove_file(task.home.path().join("hold")).unwrap();
-    // The schedule's minute check finds the dead ship and starts it again.
-    let _ = task.run(&["task", "reconcile"]);
+    // Any read of this Machine's Tasks finds the dead ship and starts it again.
+    task.ok(&["task", "list"]);
     wait_for("the restarted ship to reach end", || {
         task.workflow()["position"] == at("end")
     });

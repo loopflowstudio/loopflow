@@ -18,6 +18,7 @@ use crate::provider_account::{
     ensure_account_home, match_account, new_account, open_account_store, AccountMatch,
 };
 use crate::provider_auth::Provider;
+use crate::store::rows::now_unix;
 use crate::store::{
     CredentialState, CredentialType, LongLivedToken, ProviderAccount, ProviderToken, SharedStore,
 };
@@ -85,7 +86,7 @@ pub(super) async fn connect(
                 .long_lived_token(provider.as_str(), &account.account_id)
                 .await?;
             let token = match stored {
-                Some(stored) if stored.is_current(now()) => stored,
+                Some(stored) if stored.is_current(now_unix()) => stored,
                 stale => {
                     if !foreground(batch) {
                         bail!("Claude account {login} {}; `lf account token claude {login}` mints one in a foreground terminal", token_absence(stale.as_ref()));
@@ -291,7 +292,7 @@ async fn claude_accounts_by_token(
             .long_lived_token(Provider::Claude.as_str(), &account.account_id)
             .await?;
         match token {
-            Some(token) if token.is_current(now()) => minted.push(account),
+            Some(token) if token.is_current(now_unix()) => minted.push(account),
             stale => unminted.push((account, stale)),
         }
     }
@@ -303,10 +304,6 @@ fn token_absence(stale: Option<&LongLivedToken>) -> String {
         Some(token) => format!("long-lived token expired {}", token.expires_on()),
         None => "no long-lived token".into(),
     }
-}
-
-fn now() -> i64 {
-    time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
 /// gh resolves its own selected token. It is never exported to a child.

@@ -392,6 +392,53 @@ Since resolved by Jack Heart: OpenCode forwarding joined this Task (round
 two); Claude's trust prompt went to LOO-565. Pi using forwarded logins stays
 an open product call in `questions.md`.
 
+### Round two (2026-10-22, headless)
+
+Reviewed the implemented OpenCode forwarding, the remote `Error:` reason, the
+`gh` NotFound message and the `install.sh` preview against the accepted design.
+
+Concepts that hold: lf is a courier for OpenCode's own credential record
+(`Credential::OpenCode { login, entry }` carries one `auth export` entry
+unchanged, imported by OpenCode's own `auth import`), so lf owns no second
+credential shape; the OpenCode account id is the identity (`login`), with the
+email only in the "Connecting" line, since an API key names no email; "Zen
+accepted it" is the one honesty check on both sides and the success line says
+what was and was not verified; a different working login on the machine is
+left alone (accepted forbidden outcome); the remote lf's authored `Error:`
+line is the only remote text that crosses, which keeps the no-credential-bytes
+rule without a precheck.
+
+Settled by the accepted design, next implement direction:
+
+- **One provider name across the connect lines.** The machine run printed
+  "Connecting OpenCode jack@… on m" and then "Connected opencodezen on m: …"
+  (`r2-opencode-connect.txt`): the second line renders the provider slug, which
+  nobody typed and which the design's demo does not show. Both shared lines
+  (`Connecting {provider} {login} on …` and `Connected {provider} on …`) use
+  `Provider::display_name()` for every provider, and the hand-written
+  "Connecting OpenCode …" string in the OpenCode arm goes away. Result:
+  "Connecting Codex work@… on mini", "Connected OpenCode Zen on mini: Zen
+  accepted a fresh login …". No stored string changes; `as_str()` stays the
+  stored slug.
+
+Design-doc drift for realign, no behavior change: `login` is the OpenCode
+account id (or the entry id for a key), not the email or label; `remote_has`
+inspects by that id; `Credential::OpenCode` has no separate `id` field (it is
+inside `entry`).
+
+Not changed, with the reason: `opencode_export` treats any failing `opencode
+auth export` as "needs OpenCode 2" (a 1.x binary and a broken 2.x export read
+the same); distinguishing them would be a version precheck, which the design
+rules out. `lf --machine m account` does not list the forwarded OpenCode login
+because lf's local OpenCode reads are 1.x; that is the follow-up Task in
+`questions.md`, and the round-one demo line claims only Claude and Codex.
+
+Open product question, recorded (not a block for this Task): whether lf should
+forward Claude or Codex logins into Pi. Jack Heart's assumption in
+`questions.md` (Pi owns its credentials) stands for LOO-554 under the
+autonomous-run direction of October 21; the question remains Jack's call for
+a later Task.
+
 ## Check results
 
 Check (2026-10-21, compress): `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- platform::clipboard machine::tests` passed; full suites → gate/CI.

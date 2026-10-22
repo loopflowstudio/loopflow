@@ -122,7 +122,9 @@ fn a_rental_moves_from_confirmed_to_running_to_ended() {
 
     assert!(store.remove_ondemand("code").is_err());
     store.set_rental_cost(&rental.id, usd("0.25")).unwrap();
-    let (ended, returned) = store.set_rental_ended(&rental.id).unwrap();
+    let (ended, returned) = store
+        .set_rental_state(&rental.id, RentalState::Ended)
+        .unwrap();
     assert!(returned.is_empty());
     assert!(ended.ended_at.is_some());
     store.remove_ondemand("code").unwrap();
@@ -209,7 +211,9 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
     store.handoff_task(&task, &code_1).unwrap();
     let person = store.task_ownership(&task).unwrap().owner.unwrap().person;
 
-    let (_, returned) = store.set_rental_ended(&rental.id).unwrap();
+    let (_, returned) = store
+        .set_rental_state(&rental.id, RentalState::Ended)
+        .unwrap();
 
     assert_eq!(returned, std::slice::from_ref(&task));
     let ownership = store.task_ownership(&task).unwrap();

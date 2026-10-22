@@ -348,10 +348,9 @@ machine end`, the end of a forwarded `lf task run` (`rental::settle`) and the
 scheduled `lf task reconcile` (`rental::check`; `lf task automation` only
 inspects); `lf ondemand list` refreshes provider state and ends nothing; `lf
 history show <id>` opens a copied Session from `machine_records` and its
-copied captures. Built 2026-10-22: every path to `ended` goes through
-`SqliteStore::set_rental_ended`, which hands the Machine's open Tasks back to
-this Machine in the same write (`set_rental_state` refuses `Ended`), and the
-pass prints "LOO-570 back on <host>".
+copied captures. Built 2026-10-22: `SqliteStore::set_rental_state` hands the
+Machine's open Tasks back to this Machine in the same write whenever the rental
+stops being live, so every path to `ended` returns them, and the pass prints "LOO-570 back on <host>".
 
 Deviations from the first draft of this design, recorded in
 `scratch/questions.md`: copies live in `machine_records` rather than stamped

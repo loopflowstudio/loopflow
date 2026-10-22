@@ -443,33 +443,25 @@ impl SqliteStore {
         )
     }
 
-    pub fn set_rental_state(&self, id: &RentalId, state: RentalState) -> StoreResult<Rental> {
-        if state == RentalState::Ended {
-            return Err(invalid(
-                "an ending rental hands back its Tasks: set_rental_ended",
-            ));
-        }
-        let ended = (!state.is_live()).then(now_unix);
-        self.update_rental(
-            id,
-            "UPDATE rentals SET state=?2,ended_at=COALESCE(ended_at,?3) WHERE id=?1",
-            params![id.as_str(), state.as_str(), ended],
-        )
-    }
-
-    /// The pod is gone. Tasks its Machine still owns come back to this Machine
-    /// in the same write, so none forwards to a deleted pod; returns them.
-    pub fn set_rental_ended(&self, id: &RentalId) -> StoreResult<(Rental, Vec<TaskId>)> {
+    /// Once the rental is no longer live, Tasks its Machine still owns come back
+    /// to this Machine in the same write, so none forwards to a gone pod;
+    /// returns them.
+    pub fn set_rental_state(
+        &self,
+        id: &RentalId,
+        state: RentalState,
+    ) -> StoreResult<(Rental, Vec<TaskId>)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let ended = (!state.is_live()).then(now_unix);
         tx.execute(
-            "UPDATE rentals SET state='ended',ended_at=COALESCE(ended_at,?2) WHERE id=?1",
-            params![id.as_str(), now_unix()],
+            "UPDATE rentals SET state=?2,ended_at=COALESCE(ended_at,?3) WHERE id=?1",
+            params![id.as_str(), state.as_str(), ended],
         )?;
         let rental = rental_in(&tx, id)?;
-        let returned = match &rental.machine_id {
-            Some(machine) => super::task_ownership::hand_back_in(&tx, machine)?,
-            None => Vec::new(),
+        let returned = match (&rental.machine_id, state.is_live()) {
+            (Some(machine), false) => super::task_ownership::hand_back_in(&tx, machine)?,
+            _ => Vec::new(),
         };
         tx.commit()?;
         Ok((rental, returned))

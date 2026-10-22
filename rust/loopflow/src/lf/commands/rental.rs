@@ -939,7 +939,7 @@ fn delete_pod(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Re
 /// Every path to `ended` comes here: the Tasks the Machine still owns come
 /// back to this one, so the next `lf task run` runs here, not on a gone pod.
 fn mark_ended(sqlite: &SqliteStore, rental: &Rental) -> anyhow::Result<()> {
-    let (_, returned) = sqlite.set_rental_ended(&rental.id)?;
+    let (_, returned) = sqlite.set_rental_state(&rental.id, RentalState::Ended)?;
     let here = crate::store::sqlite::task_ownership::local_label();
     for task in returned {
         let name = sqlite

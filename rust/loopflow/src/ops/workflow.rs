@@ -52,6 +52,9 @@ pub enum WorkflowMoveKind {
     Arrived,
     /// The Task was put at `to` without running anything.
     Set,
+    /// Someone shipped the Task from `from`: `lf ship` runs every remaining step,
+    /// standing in at each node, until the Task reaches `end`.
+    Shipped,
 }
 
 impl WorkflowMoveKind {
@@ -61,13 +64,20 @@ impl WorkflowMoveKind {
             Self::Chose => "chose",
             Self::Arrived => "arrived",
             Self::Set => "set",
+            Self::Shipped => "shipped",
         }
     }
 
     pub(crate) fn parse(kind: &str) -> Option<Self> {
-        [Self::TookUp, Self::Chose, Self::Arrived, Self::Set]
-            .into_iter()
-            .find(|candidate| candidate.as_str() == kind)
+        [
+            Self::TookUp,
+            Self::Chose,
+            Self::Arrived,
+            Self::Set,
+            Self::Shipped,
+        ]
+        .into_iter()
+        .find(|candidate| candidate.as_str() == kind)
     }
 }
 

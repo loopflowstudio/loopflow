@@ -112,8 +112,14 @@ const TASK_RUN_ATTEMPTS: u32 = 3;
 /// and start it again while a Flow process fails. Each Flow attempt records its
 /// own FlowProcess beneath this process; a single skill remains a skill launch. A Flow held for a person or a watcher, an interrupted
 /// one, and a launch refused before any Flow started are returned as they
-/// ended.
-pub fn run_for_task(cli: &Cli, issue: &str, flow: &str, checkout: &Path) -> Result<()> {
+/// ended. `message` is the step's first turn, such as a stand-in's instruction.
+pub fn run_for_task(
+    cli: &Cli,
+    issue: &str,
+    flow: &str,
+    checkout: &Path,
+    message: Option<&str>,
+) -> Result<()> {
     let owner = match resolve_definition(checkout, flow, None)? {
         Target::Flow(_) => "flow",
         Target::Skill(_) => "skill",
@@ -121,7 +127,8 @@ pub fn run_for_task(cli: &Cli, issue: &str, flow: &str, checkout: &Path) -> Resu
             unreachable!("named definitions are skills or Flows")
         }
     };
-    let args = task_run_args(cli, issue, owner, flow);
+    let mut args = task_run_args(cli, issue, owner, flow);
+    args.extend(message.map(str::to_owned));
     let lf = crate::os_process::resolve_lf_binary()?;
     let store = block_on(open_flow_store())?;
     let store = &store.sqlite;

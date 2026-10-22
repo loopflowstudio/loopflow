@@ -22,6 +22,7 @@ mod lifecycle_tests;
 pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
 pub use lifecycle::{task_abandon, task_delete, task_repository, task_sweep};
 mod file_save;
+pub mod ship;
 pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
 

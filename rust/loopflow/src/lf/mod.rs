@@ -395,6 +395,17 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WtCommand,
     },
+    /// Ship the Task: run every remaining step to merge and completion, standing in at each node
+    ///
+    /// Runs in the foreground until the Task reaches its end; background it
+    /// yourself (`nohup lf ship &`). A second `lf ship` while one runs exits 0.
+    Ship {
+        /// Run this Flow whole in place of the Task's remaining steps
+        flow: Option<String>,
+        /// Why, kept on the Task's `shipped` move
+        #[arg(long)]
+        reason: Option<String>,
+    },
     /// Merge upstream into the current branch (default: main or stack parent)
     Sync(SyncArgs),
     /// Manage working notes

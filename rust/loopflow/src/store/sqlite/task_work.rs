@@ -647,6 +647,33 @@ impl SqliteStore {
         Ok(set)
     }
 
+    /// Record that `by` ships the Task from where it stands. Returns false when
+    /// the Task has no Workflow.
+    pub(crate) fn ship_workflow(
+        &self,
+        task: &TaskId,
+        by: &LfProcessId,
+        note: Option<&str>,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let Some((definition, node, edge)) = workflow_row(&tx, task)? else {
+            return Ok(false);
+        };
+        append_workflow_move(
+            &tx,
+            task,
+            &definition.name,
+            WorkflowMoveKind::Shipped,
+            (&node, &node),
+            edge.map(|(edge, _)| edge),
+            Some(by),
+            note,
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
     /// The node `by`'s edge enters, while the Task is still on that edge.
     pub(crate) fn workflow_edge_target(
         &self,

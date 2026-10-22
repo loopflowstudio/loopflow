@@ -94,40 +94,7 @@ for line in sys.stdin:
         &repo.head_sha(),
     );
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    // A headless Task requires an account record even when the provider is a
-    // stand-in. Its synthetic credential never leaves the network sandbox.
-    let account_home = home.path().join("accounts/claude/fixture");
-    fs::create_dir_all(&account_home).unwrap();
-    let credential =
-        r#"{"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000}}"#;
-    fs::write(account_home.join(".credentials.json"), credential).unwrap();
-    runtime
-        .block_on(registered.store.upsert_provider_account(&ProviderAccount {
-            provider: "claude".into(),
-            account_id: ProviderAccountId::parse("fixture").unwrap(),
-            home: Some(account_home),
-            login_email: Some(
-                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
-            ),
-            observed_email: Some("fixture@example.com".into()),
-            observed_subject: Some("fixture".into()),
-            observed_credential_digest: Some(format!(
-                "{:x}",
-                Sha256::digest(credential.as_bytes())
-            )),
-            observed_plan: None,
-            credential_state: CredentialState::Connected,
-            routing_state: RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        }))
-        .unwrap();
+    connect_fixture_claude(home.path(), &registered.store);
     runtime
         .block_on(
             registered
@@ -820,6 +787,44 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
     }
 }
 
+/// A headless Task requires an account record even when the provider is a
+/// stand-in. Its synthetic credential never leaves the network sandbox.
+fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
+    let account_home = home.join("accounts/claude/fixture");
+    fs::create_dir_all(&account_home).unwrap();
+    let credential =
+        r#"{"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000}}"#;
+    fs::write(account_home.join(".credentials.json"), credential).unwrap();
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(store.upsert_provider_account(&ProviderAccount {
+            provider: "claude".into(),
+            account_id: ProviderAccountId::parse("fixture").unwrap(),
+            home: Some(account_home),
+            login_email: Some(
+                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
+            ),
+            observed_email: Some("fixture@example.com".into()),
+            observed_subject: Some("fixture".into()),
+            observed_credential_digest: Some(format!(
+                "{:x}",
+                Sha256::digest(credential.as_bytes())
+            )),
+            observed_plan: None,
+            credential_state: CredentialState::Connected,
+            routing_state: RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: 1,
+            updated_at: 1,
+        }))
+        .unwrap();
+}
+
 /// A registered Task whose repository defines the Flows and workflows below.
 struct WorkflowTask {
     repo: TestRepo,
@@ -830,13 +835,20 @@ struct WorkflowTask {
 
 impl WorkflowTask {
     fn new() -> Self {
+        Self::with_tools(&[])
+    }
+
+    /// The fixture with these executables on PATH as well.
+    fn with_tools(tools: &[(&str, &str)]) -> Self {
         let repo = TestRepo::new();
         support::bind_task_planning(&repo);
         let home = tempfile::tempdir().unwrap();
-        let env = support::EnvGuard::new(&[
+        let mut entries = vec![
             ("open", "#!/bin/sh\nexit 0\n"),
             ("gh", "#!/bin/sh\nexit 1\n"),
-        ]);
+        ];
+        entries.extend_from_slice(tools);
+        let env = support::EnvGuard::new(&entries);
         for (path, content) in [
             (".lf/flows/proof.yaml", "- cmd: task sync --plan\n"),
             (".lf/flows/land-proof.yaml", "- cmd: task sync --plan\n"),
@@ -1937,4 +1949,172 @@ fn successful_final_flow_keeps_arrival_when_completion_fails_and_never_replays()
     task.ok(&["task", "complete", "INF-123"]);
     assert_eq!(task.workflow(), arrived);
     assert_eq!(support::recorded_flows(task.home.path()), flows);
+}
+
+/// A Claude stand-in that records each first turn and, while `hold` exists in
+/// LF_HOME, waits before answering.
+const STAND_IN_CLAUDE: &str = r#"#!/usr/bin/python3
+import json, os, sys, time
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+home = os.environ['LF_HOME']
+message = json.loads(sys.stdin.readline())
+with open(os.path.join(home, 'stand-ins.jsonl'), 'a') as turns:
+    turns.write(json.dumps(message['message']['content'][0]['text']) + '\n')
+while os.path.exists(os.path.join(home, 'hold')):
+    time.sleep(0.1)
+message['session_id'] = 'stand-in'
+print(json.dumps(message), flush=True)
+print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'stand-in'}), flush=True)
+print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'The proof passes; advance.'}]}}), flush=True)
+print(json.dumps({'type': 'result', 'uuid': 'stand-in-result', 'session_id': 'stand-in', 'subtype': 'success', 'is_error': False, 'result': 'The proof passes; advance.'}), flush=True)
+for line in sys.stdin:
+    pass
+"#;
+
+fn shipping_task() -> WorkflowTask {
+    let task = WorkflowTask::with_tools(&[("claude", STAND_IN_CLAUDE)]);
+    connect_fixture_claude(task.home.path(), &task.registered.store);
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(
+            task.registered
+                .store
+                .set_task_agent(&task.registered.task.id, "claude"),
+        )
+        .unwrap();
+    task
+}
+
+fn stand_ins(task: &WorkflowTask) -> Vec<String> {
+    fs::read_to_string(task.home.path().join("stand-ins.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+fn wait_for(what: &str, mut ready: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(90);
+    while !ready() {
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+#[test]
+fn task_ship_runs_every_remaining_step_standing_in_at_each_node() {
+    let task = shipping_task();
+    let output = task.run(&["-b", "--task", "INF-123", "ship", "--reason", "good to go"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("INF-123 reached its end"));
+    let workflow = task.workflow();
+    assert_eq!(workflow["position"], at("end"));
+    assert_eq!(
+        moves(&workflow),
+        [
+            ("took_up".into(), None),
+            ("shipped".into(), None),
+            ("chose".into(), Some(0)),
+            ("arrived".into(), Some(0)),
+            ("chose".into(), Some(1)),
+        ]
+    );
+    let shipped = &workflow["history"][1];
+    assert_eq!(shipped["note"], "good to go");
+    assert_eq!(shipped["actor"], "person");
+    // The review node ran headless with its skill, standing in for a person.
+    let turns = stand_ins(&task);
+    assert_eq!(turns.len(), 1);
+    assert!(turns[0].contains("You are standing in for"), "{}", turns[0]);
+    assert!(turns[0].contains("at review"), "{}", turns[0]);
+    // Reaching the end completed the Task; nothing remains to ship.
+    assert_eq!(task.state(), "done");
+    let error = refusal(task.run(&["-b", "--task", "INF-123", "ship"]));
+    assert!(error.contains("INF-123 is complete"), "{error}");
+}
+
+#[test]
+fn task_ship_holds_while_paused_and_defers_to_a_live_ship() {
+    let task = shipping_task();
+    task.ok(&["task", "pause", "INF-123"]);
+    let paused = task.run(&["-b", "--task", "INF-123", "ship"]);
+    assert!(paused.status.success());
+    assert!(String::from_utf8_lossy(&paused.stdout).contains("INF-123 is paused"));
+    assert!(task.workflow().is_null());
+    task.ok(&["task", "resume", "INF-123"]);
+
+    // The first ship holds at its stand-in; a second one finds it live.
+    fs::write(task.home.path().join("hold"), "").unwrap();
+    let mut first = command(
+        task.repo.path(),
+        task.home.path(),
+        &["-b", "--task", "INF-123", "ship"],
+    )
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    wait_for("the stand-in", || !stand_ins(&task).is_empty());
+    let second = task.run(&["-b", "--task", "INF-123", "ship"]);
+    assert!(second.status.success());
+    assert!(
+        String::from_utf8_lossy(&second.stdout).contains("INF-123 is already shipping"),
+        "{}",
+        String::from_utf8_lossy(&second.stdout)
+    );
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    assert!(first.wait().unwrap().success());
+    let workflow = task.workflow();
+    assert_eq!(workflow["position"], at("end"));
+    let shipped = moves(&workflow)
+        .into_iter()
+        .filter(|(kind, _)| kind == "shipped")
+        .count();
+    assert_eq!(shipped, 1);
+}
+
+#[test]
+fn task_ship_restarts_from_reconcile_after_its_process_dies() {
+    let task = shipping_task();
+    fs::write(task.home.path().join("hold"), "").unwrap();
+    let mut first = command(
+        task.repo.path(),
+        task.home.path(),
+        &["-b", "--task", "INF-123", "ship"],
+    )
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    wait_for("the stand-in", || !stand_ins(&task).is_empty());
+    first.kill().unwrap();
+    first.wait().unwrap();
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    // The schedule's minute check finds the dead ship and starts it again.
+    let _ = task.run(&["task", "reconcile"]);
+    wait_for("the restarted ship to reach end", || {
+        task.workflow()["position"] == at("end")
+    });
+    let workflow = task.workflow();
+    let restarted = workflow["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["kind"] == "shipped")
+        .map(|entry| entry["note"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        restarted,
+        [
+            serde_json::Value::Null,
+            "ship process exited; restarted".into()
+        ]
+    );
 }

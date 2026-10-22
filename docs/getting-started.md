@@ -178,7 +178,7 @@ Chain skills manually, or use a named flow (a flow is a sequence of steps; each 
 lf incident                            # unbreak → 5whys → launch-plan
 lf code                                # pursue: implement until it holds, publish the PR
 lf feature                             # kickoff → pursue; ends at a published PR
-lf ship                                # gate → land and complete the Task
+lf flow ship                           # gate → land and complete the Task
 ```
 
 Use bare names for both skills and Flows: `lf debug`, `lf code`, `lf incident`.
@@ -227,6 +227,15 @@ lf ci watch     # watch PR checks; start a ci-fix when a landing fails
 
 Use the same delivery verbs for Task and non-Task branches. They act on the
 branch and Task PR record when present; they do not require a running Task Flow.
+
+```bash
+nohup lf ship &   # run the Task's remaining steps to merge and completion
+```
+
+`lf ship` stands in for you at each Workflow node, running its skill headless,
+and stays in the foreground until the Task completes. A second `lf ship` while
+one runs exits 0; `lf task pause` holds it, and the minute `lf task reconcile`
+restarts one that died.
 
 ---
 

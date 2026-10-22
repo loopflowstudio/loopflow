@@ -954,7 +954,13 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             // The schedule runs this check every minute; an AgentProcess whose attached lf
             // was killed is reaped here before delivery is observed.
             let agents = loopflow::harness::agent_process::reap_agent_processes(false);
+            // A shipped Task whose ship process died is started again, ahead of
+            // delivery observation; its `shipped` move records the restart.
+            let restarts = loopflow::ops::task::ship::restart_ships(repo);
             let mut result = loopflow::ops::pr_landing::reconcile_repository(repo)?;
+            if let Err(error) = restarts {
+                result.errors.push(format!("Ship restart: {error}"));
+            }
             match agents {
                 Ok(agents) => result.errors.extend(agents.errors),
                 Err(error) => result
@@ -1610,6 +1616,7 @@ fn run() -> anyhow::Result<()> {
             cli.command,
             Some(
                 Commands::Task { .. }
+                    | Commands::Ship { .. }
                     | Commands::Wave { .. }
                     | Commands::Session { .. }
                     | Commands::Repo { .. }
@@ -2204,7 +2211,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         &cli.command,
         Some(Commands::Task {
             cmd: TaskCommand::Run { issue: None, .. } | TaskCommand::Checkout { issue: None, .. }
-        })
+        }) | Some(Commands::Ship { .. })
     ) && cli.task.is_none()
     {
         let resolution =
@@ -2312,8 +2319,22 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             task.id.as_str(),
             &flow,
             task.worktree()?,
+            None,
         )?;
         return Ok(loopflow::ops::task::workflow_arrive(&task)?);
+    }
+    if let Some(Commands::Ship { flow, reason }) = &cli.command {
+        journal::admit_process(&std::env::current_dir()?, args);
+        let issue = cli.task.clone().context("No Task selected")?;
+        let directory = loopflow::repo::working_directory()?;
+        let repo = selected_task_repository(&cli, &directory, Some(&issue))?;
+        return loopflow::lf::commands::ship::run(
+            &cli,
+            &repo,
+            &issue,
+            flow.as_deref(),
+            reason.as_deref(),
+        );
     }
     if let Some(Commands::Session { cmd }) = &cli.command {
         journal::admit_process(&std::env::current_dir()?, args);
@@ -2436,6 +2457,7 @@ fn execute_command(
             loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment)
         }
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
+        Some(Commands::Ship { .. }) => unreachable!("ship dispatch precedes Work binding"),
         Some(Commands::Account {
             cmd,
             provider,

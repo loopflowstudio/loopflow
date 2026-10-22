@@ -313,6 +313,16 @@ Delete a worktree and its local and remote branch; retain PR and Task outcomes
 | `--force / -f` | force Default: false. |
 | `--help / -h` | Print help |
 
+## lf ship
+
+Ship the Task: run every remaining step to merge and completion, standing in at each node
+
+| Argument | What it does |
+|---|---|
+| `<flow>` | Run this Flow whole in place of the Task's remaining steps |
+| `--reason` | Why, kept on the Task's `shipped` move |
+| `--help / -h` | Print help (see more with '--help') |
+
 ## lf sync
 
 Merge upstream into the current branch (default: main or stack parent)

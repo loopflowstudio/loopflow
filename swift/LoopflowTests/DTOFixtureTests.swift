@@ -380,8 +380,8 @@ struct DTOFixtureTests {
         #expect(research?.edges.last?.launchName == "end")
         #expect(workflow.position == .edge(index: 2, lfProcessId: work.flowProcesses[0].id, running: true))
         #expect(workflow.outgoing.isEmpty)
-        #expect(workflow.history.map(\.kind) == [.set, .tookUp, .chose, .arrived, .chose])
-        #expect(workflow.history.map(\.actor) == [.person, .person, .person, .edge, .conversation])
+        #expect(workflow.history.map(\.kind) == [.set, .tookUp, .chose, .arrived, .shipped, .chose])
+        #expect(workflow.history.map(\.actor) == [.person, .person, .person, .edge, .person, .conversation])
         // A move no registered process made names no Process.
         #expect(workflow.history[0].lfProcessId == nil)
         #expect(workflow.history.last?.sessionId == work.sessions[0].id)

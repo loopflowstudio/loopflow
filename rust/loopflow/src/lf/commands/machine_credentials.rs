@@ -76,10 +76,7 @@ pub(super) async fn connect(
                 return Ok(());
             }
             require_foreground(batch)?;
-            eprintln!(
-                "Connecting {provider} {login} on {}",
-                machine.label.as_deref().unwrap_or(&machine.route)
-            );
+            connecting(machine, provider, login);
             let (staging, identity) =
                 super::account::fresh_machine_login(&store, provider, &account, chrome_profile)
                     .await?;
@@ -173,11 +170,7 @@ pub(super) async fn connect(
             require_foreground(batch)?;
             let entry = if oauth {
                 // A copied login would share the laptop's refresh grant; mint a fresh one.
-                eprintln!(
-                    "Connecting OpenCode {} on {}",
-                    account_email.unwrap_or(&login),
-                    machine.label.as_deref().unwrap_or(&machine.route)
-                );
+                connecting(machine, provider, account_email.unwrap_or(&login));
                 let staging = tempfile::Builder::new()
                     .prefix("lf-machine-login-")
                     .tempdir()?;
@@ -210,10 +203,23 @@ pub(super) async fn connect(
         Some(&bytes),
     )?;
     eprintln!(
-        "Connected {provider} on {}{verified}",
-        machine.label.as_deref().unwrap_or(&machine.route)
+        "Connected {} on {}{verified}",
+        provider.display_name(),
+        machine_name(machine)
     );
     Ok(())
+}
+
+fn connecting(machine: &Machine, provider: Provider, login: &str) {
+    eprintln!(
+        "Connecting {} {login} on {}",
+        provider.display_name(),
+        machine_name(machine)
+    );
+}
+
+fn machine_name(machine: &Machine) -> &str {
+    machine.label.as_deref().unwrap_or(&machine.route)
 }
 
 fn require_foreground(batch: bool) -> Result<()> {
@@ -304,7 +310,7 @@ fn remote_command(machine: &Machine, args: &[&str], input: Option<&[u8]>) -> Res
             .unwrap_or_else(|| crate::os_process::exit_reason(&stderr));
         bail!(
             "machine credential command failed on {}{}",
-            machine.label.as_deref().unwrap_or(&machine.route),
+            machine_name(machine),
             if reason.is_empty() {
                 format!(" ({})", output.status)
             } else {

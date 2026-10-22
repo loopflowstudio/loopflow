@@ -59,7 +59,8 @@ lf machine connect m github
 # Error: … GitHub CLI (gh) is not installed on m; install it (https://cli.github.com) and run this again
 lf machine connect m codex jack@loopflow.studio      # approve in Chrome
 lf machine connect m opencode                        # approve OpenCode's device page in Chrome
-# Connected OpenCode jack@… on m: Zen accepted the login; same OpenCode account as this laptop
+# Connecting OpenCode Zen jack@… on m
+# Connected OpenCode Zen on m: Zen accepted a fresh login for the same OpenCode account as this laptop
 lf --machine m -b -a codex : "Reply with PONG"                          # PONG
 lf --machine m -b -a opencode:opencode/gpt-5.4-nano : "Reply with PONG" # PONG on a paid Zen model
 ```
@@ -145,11 +146,16 @@ from the first release cut after this lands).
   must accept its access token. Then the staging home is dropped.
 - `email`, when given, must equal the entry's `metadata.email`; an API key has
   none, so an email with a key fails naming that.
-- Transfer: `Credential::OpenCode { login, id, entry }` where `entry` is the
+- Transfer: `Credential::OpenCode { login, entry }` where `entry` is the
   exported JSON object, through the existing `receive` path. `login` is the
-  metadata email or the entry label.
-- `remote_has` → `inspect opencodezen <id>`: true when `m`'s export holds an
-  entry with that `id` and Zen accepts it.
+  OpenCode account id, or the entry id for an API key; the email appears only
+  in the "Connecting" line. There is no separate `id` field: it is inside
+  `entry`.
+- `remote_has` → `inspect opencodezen <login>`: true when `m`'s export holds an
+  entry with that id and Zen accepts it.
+- Both shared connect lines name the provider through `Provider::display_name()`
+  ("Connecting OpenCode Zen jack@… on m", "Connected Codex on mini"); `as_str()`
+  stays the stored slug.
 - `install` on `m` (under `credential_lock("opencode")`): Zen must accept the
   received entry. Another active `opencode` entry that Zen accepts → "a
   different OpenCode login is already active on this machine; left unchanged".
@@ -408,23 +414,18 @@ left alone (accepted forbidden outcome); the remote lf's authored `Error:`
 line is the only remote text that crosses, which keeps the no-credential-bytes
 rule without a precheck.
 
-Settled by the accepted design, next implement direction:
+Settled by the accepted design and implemented (2026-10-22):
 
 - **One provider name across the connect lines.** The machine run printed
   "Connecting OpenCode jack@… on m" and then "Connected opencodezen on m: …"
-  (`r2-opencode-connect.txt`): the second line renders the provider slug, which
-  nobody typed and which the design's demo does not show. Both shared lines
-  (`Connecting {provider} {login} on …` and `Connected {provider} on …`) use
-  `Provider::display_name()` for every provider, and the hand-written
-  "Connecting OpenCode …" string in the OpenCode arm goes away. Result:
-  "Connecting Codex work@… on mini", "Connected OpenCode Zen on mini: Zen
-  accepted a fresh login …". No stored string changes; `as_str()` stays the
-  stored slug.
-
-Design-doc drift for realign, no behavior change: `login` is the OpenCode
-account id (or the entry id for a key), not the email or label; `remote_has`
-inspects by that id; `Credential::OpenCode` has no separate `id` field (it is
-inside `entry`).
+  (`r2-opencode-connect.txt`): the second line rendered the provider slug,
+  which nobody typed and which the design's demo does not show. Both shared
+  lines now go through one `connecting` helper and the final line, each using
+  `Provider::display_name()`; the hand-written "Connecting OpenCode …" string
+  is gone. Result: "Connecting Codex work@… on mini", "Connected OpenCode Zen
+  on mini: Zen accepted a fresh login …". No stored string changed; `as_str()`
+  stays the stored slug. The design section above now states the `login`
+  identity and the absent `id` field as built.
 
 Not changed, with the reason: `opencode_export` treats any failing `opencode
 auth export` as "needs OpenCode 2" (a 1.x binary and a broken 2.x export read
@@ -450,3 +451,4 @@ Check (2026-10-21, implement round three): no code change since 79c04625 (prose 
 Check (2026-10-22, compress round three): OpenCode device login reuses `wait_for_browser_confirmation`; `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- machine_credentials platform::clipboard account::tests::browser_confirmation …` 20 pass; full matrix → gate/CI.
 Check (2026-10-22, realign round three): merged tree e1bfa5c7e1; `cargo fmt --check` clean; `cargo test -p loopflow --test integration reference_matches_the_compiled_cli` pass; `cargo test -p loopflow --lib -- machine_credentials platform::clipboard machine::tests::release_numbers_order_by_component harness::context::tests::pi_extension` 17 pass; full matrix → gate/CI.
 Check (2026-10-22, decision round three): HEAD 9b00ad694b clean; `cargo fmt --check` clean; `cargo test -p loopflow --lib -- machine_credentials platform::clipboard machine::tests::release_numbers_order_by_component harness::context::tests::pi_extension` 17 pass; `git merge-tree HEAD origin/main` (845e8b7c8c, #1647) → 0 conflicts; full matrix → gate/CI.
+Check (2026-10-22, implement round three): connect lines use `display_name()`; `cargo test -p loopflow --lib -- machine_credentials` 13 pass; `cargo clippy --all-targets -- -D warnings` clean; machine re-run of the OpenCode line → demo/gate.

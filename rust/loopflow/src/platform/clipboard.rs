@@ -7,7 +7,7 @@
 use std::process::Command;
 
 /// One command that prints clipboard text on stdout.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 struct Source {
     program: String,
     args: Vec<String>,

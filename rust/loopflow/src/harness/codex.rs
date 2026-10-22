@@ -1107,15 +1107,9 @@ impl CodexHarness {
                             )
                             .await;
                         }
-                        let reason = stderr
-                            .lines()
-                            .rev()
-                            .map(str::trim)
-                            .find(|line| !line.is_empty())
-                            .map(|line| format!(": {line}"))
-                            .unwrap_or_default();
                         return Err(anyhow!(
-                            "codex app-server exited before opening its socket ({status}){reason}"
+                            "codex app-server exited before opening its socket ({status}){}",
+                            crate::os_process::exit_reason(&stderr)
                         ));
                     }
                 }

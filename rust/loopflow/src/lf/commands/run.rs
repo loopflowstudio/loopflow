@@ -792,14 +792,7 @@ fn run_headless_prompt(
             capture.artifact_dir().display()
         ))
     } else {
-        let reason = result
-            .stderr
-            .lines()
-            .rev()
-            .map(str::trim)
-            .find(|line| !line.is_empty())
-            .map(|line| format!(": {line}"))
-            .unwrap_or_default();
+        let reason = crate::os_process::exit_reason(&result.stderr);
         Err(anyhow!(
             "agent exited with code {}{reason}. Check {} for details.",
             result.exit_code,

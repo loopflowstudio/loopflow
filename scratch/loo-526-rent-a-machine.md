@@ -3,8 +3,8 @@
 Status: design, 2026-10-21, revised after Jack Heart's review in the Task
 conversation. Jack's brief (Task description) is the problem statement; this
 doc chooses mechanisms. Decided in conversation: records are pulled by the
-laptop, not pushed (Q1); routing lives on `lf task run --machine | --pool |
---rent` (Q2); vocabulary follows Etude's 2026-10-21 split (#23, #19) of
+laptop, not pushed (Q1); routing lives on `lf task run --pool | --rent` (Q2;
+`--machine` already exists as the root forwarding flag); vocabulary follows Etude's 2026-10-21 split (#23, #19) of
 **pool** (machines you own) from **on-demand** (a template and a budget).
 Remaining choices are in `scratch/questions.md`.
 
@@ -152,12 +152,14 @@ verifies this on a CPU pod.
 ## Routing and admission
 
 ```text
-lf task run X [--machine M] [--pool P] [--rent R] [--quote]
+lf task run X [--pool P] [--rent R] [--quote]
 ```
 
-- `--machine M`: hand off to M (existing handoff) and run there.
-- `--pool P`: a free machine in P (owns no unfinished Task, no live Process,
-  not expired, pool not off), else refuse naming the busy machines. Loopflow has
+- A named Machine needs no new flag: `lf machine use M --task X` hands off, and
+  the root `lf --machine M` forwards a command.
+- `--pool P`: a free machine in P (owns no unfinished Task, not expired, pool
+  not off), else refuse naming the busy machines. Live Processes are not
+  probed over SSH; ownership alone decides. Loopflow has
   no queue; waiting is the person's choice.
 - `--rent R`: admission, then rent, then hand off and run.
 - `--pool P --rent R`: a free owned machine first, else rent. Etude's rule.
@@ -228,7 +230,7 @@ The give-back pass, in order:
    override and names what it discards.
 2. **Copy up** (pull; Jack's decision for now): `lf --machine code-1 history
    export --since <rental start>` emits the Machine's Sessions, Processes,
-   FlowProcesses, session events and capture payloads for the window as JSON
+   GraphProcesses, session events and capture payloads for the window as JSON
    lines plus files; the laptop imports them as read-only rows carrying
    `origin_machine_id` and `observed_at` (new columns, NULL for rows this
    Machine wrote itself). Copies never gain authority while the origin exists;
@@ -240,10 +242,10 @@ The give-back pass, in order:
    code-1"); `lf machine status` shows "rental ended" instead of unreachable.
    `lf machine remove code-1` is allowed afterwards and loses nothing.
 
-**Who runs the pass.** There is no daemon. It runs at the end of a forwarded
-`lf task run` (the laptop already waits for it), in every `lf ondemand` and
-`lf machine end` command, and in the installed periodic Task check (`lf task
-automation`), which gains this as one more read. A soft deadline 15 minutes
+**Who runs the pass.** There is no daemon. Built: the whole pass in `lf
+ondemand list`; `lf machine end` gives back its one rental. Planned: the end of
+a forwarded `lf task run` (the laptop already waits for it) and the installed
+periodic Task check (`lf task automation`). A soft deadline 15 minutes
 before the hard one turns the pass from "when drained" into "now". The guardian
 is the backstop for a laptop that never comes back: what it deletes at the hard
 deadline was copied on an earlier pass or was unreachable for the whole window.
@@ -262,8 +264,8 @@ lf ondemand availability <name>         what it would rent now, at what price; r
 lf ondemand max <name> N                change the limit; current windows stay
 lf ondemand rent <name> [--hours H] [--max-usd USD]      a machine by hand
 lf ondemand remove <name>               forget it; its rentals' history stays
-lf task run X [--machine M] [--pool P] [--rent R] [--quote]
-lf history export [--since]             the export the copy reads (also useful alone)
+lf task run X [--pool P] [--rent R] [--quote]
+lf history export [--since]             the export the copy reads (remaining)
 ```
 
 `lf machine use <machine> --task X` keeps today's meaning (hand off). The Wave
@@ -315,7 +317,8 @@ add --pool/--cost-usd/--expires-at`, `lf machine end [--force]`; `lf task run
 GitHub and Claude → clone + `repo identity --bind` → handoff → ordinary forward).
 The reconciliation pass (adopt/lose unconfirmed creates, notice guardian
 deletes, bill, give back drained or soft-deadlined rentals) runs in `lf ondemand
-list` and `lf machine end`.
+list`; `lf machine end` gives back one rental. Compress dropped the unbuilt
+copy watermark column; copy-up adds its own.
 
 Remaining:
 
@@ -332,7 +335,5 @@ Remaining:
    `portMappings`/`publicIp` field names, `RUNPOD_POD_ID` injection, and the
    pod-scoped key deleting itself.
 
-Check: `cargo test -p loopflow --lib -- rental` 25 passed; `pytest
-python/tests/test_guardian.py` 5 passed; clippy clean; CLI reference regenerated.
-
-Compress 2026-10-21: `cargo clippy -p loopflow --all-targets -D warnings` clean; `cargo test -p loopflow --lib -- rental` 25 passed.
+Implement check: `pytest python/tests/test_guardian.py` 5 passed; CLI reference regenerated.
+Realign 2026-10-21: plan reconciled to code (no `--machine` flag, pool freedom by ownership only, pass callers); no code changed, no rerun. Last check (compress): clippy clean; `cargo test -p loopflow --lib -- rental` 25 passed.

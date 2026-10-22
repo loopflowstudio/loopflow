@@ -2,37 +2,18 @@
 
 ## Recovery (2026-10-21)
 
-Jack requested recovery in the native Codex conversation. Recorded Claude
-launches failed while writing a Keychain credential; the old Flow, step and
-provider PIDs are absent. No replacement implementation Flow was launched.
-Recovery continues directly from the existing commits, leaving account
-configuration unchanged. The Claude credential failure itself is unresolved.
+Jack requested recovery after Claude launches failed writing a Keychain
+credential; work continued from the existing commits with account configuration
+unchanged. Synced main through `ce21904f` (#1607): kept person keys and
+public-name privacy, main's insertion ordering for unstamped ownership entries
+and its provider-neutral connection test (the branch writer now uses that API).
+The two-person docs and README/index introductions describe Git comment steers,
+branch reuse and personal crons. PR copy is in `scratch/pr-title.txt` and
+`scratch/pr-body.md`; keep its validation limits and former cron install lines.
 
-Synced main through `ce21904f`: retained person keys and public-name privacy,
-main's insertion ordering for unstamped ownership entries, and its provider-neutral
-connection test. Corrected the branch writer to use that same connection API.
-Kept the deleted intermittent peer-planning view test deleted. Updated the
-two-person docs and matching README/index introductions to reflect Git comment
-steers, branch reuse and personal crons. Gate owns remaining verification and
-delivery; no merge or Task completion is claimed here.
-
-Recovery checks: architecture, Python release automation (10), website (72),
-README/index consistency, migration validation, Rust formatting and Clippy
-passed. Full materialized Rust tests were stopped before execution by the gate's
-macOS security-pressure monitor (syspolicyd sustained >200% CPU); CI owns that
-unproven check. Headless Desktop built and ran 613 tests with one early sidebar
-assertion: planning status and selection membership arrive in separate frames.
-The existing wait now observes both; `scripts/test_desktop.sh --jobs 4
--Xswiftc -gnone --filter WorkCLISubscriptionTests` passed all 3 tests, including
-both completion and abandonment. Swift boundary checks passed. No whole-suite
-rerun is warranted solely for this test synchronization change.
-
-A separate autonomous Flow `5d9d6d99-96eb-4d39-997d-c17b77864bfc` was observed
-live during recovery, with Claude PID 78253 and a running kickoff step. Its
-launch reason reports retrying with lf 0.14.14 after the Keychain failure.
-This conversation leaves that Flow running and launches no competing delivery.
-Prepared PR copy is in `scratch/pr-title.txt` and `scratch/pr-body.md`;
-retain the validation limits and former cron install commands when publishing.
+Main has since landed #1643 (`c0617ec0`, Flow → Graph rename across 348 files).
+This branch is not yet rebased onto it; the rebase step owns that, after checking
+no other agent is driving this worktree.
 
 Status: implemented, merged with main through #1607 (`ce21904f`), committed;
 next gate. Seven kickoff passes on 2026-10-21 changed no plan; their narrative
@@ -461,3 +442,5 @@ lists `lf machine public` and `cron publish/unpublish`), and the PR body's
 - 2026-10-21 compress (second pass): the store's private `Holder` is gone; `TaskOwnershipEntry::owner()` yields the `TaskOwner` the reading, the published prose and the log renderer all use, with `resolved_in` adding the best-known Machine label. fmt + clippy clean; lib `task_ownership` 8 passed, `two_people` 1 passed. Gate owns the full suite.
 - 2026-10-21 kickoffs (six relaunch passes, latest after the six-hour sweep, work committed as `5b725154`): each pass `cargo fmt --check` clean, `cargo check --all-targets` ok (~27s), `two_people` 1 passed (19–30s); the third also ran integration `reference_matches_the_compiled_cli` 1, `documented_commands` 4, `dto` 42 and lib `task_ownership published cron:: planning_git planning_peers task_comments` 77 passed (one `task_comments_read_and_publish_without_starting_work` failure under a 117s loaded batch, an untouched Linear HTTP fixture, passed on three reruns). The fifth fixed `ci.yml` `swift-test` (a `run:` step had split the checkout from its `with:`). No plan change. Gate owns the full suite.
 - 2026-10-21 seventh kickoff (after the #1607 merge): main's new `unstamped_entries_in_one_second_keep_their_written_order` applied released migrations only and missed the draft's `person_key`; it now opens the store fixture. fmt + clippy clean; `two_people` 1, lib `task_ownership` 9, `published` 17, `cron::` 47, `planning_peers` 2, `task_comments` 4, integration `reference_matches_the_compiled_cli` 1, `documented_commands` 4, `dto` 42 passed. Gate owns the full suite.
+- 2026-10-21 recovery: architecture, `pytest test_release_automation.py` 10, website 72, README/index consistency, migration validation, fmt + clippy passed; headless Desktop 613 tests ran with one sidebar frame race, now waited on (`test_desktop.sh --filter WorkCLISubscriptionTests` 3 passed). Full Rust suite was stopped by the gate's macOS security-pressure monitor before running; CI owns it.
+- 2026-10-21 implement re-pass: no code change since `9cc03ed6`; scratch trimmed of ambient facts, no rerun.

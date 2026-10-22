@@ -426,7 +426,7 @@ pub(super) fn report_version(target: &str, remote: &str) {
         return;
     }
     let update = if release_number(remote) > release_number(local) {
-        "Update this one with `lf self install`".to_string()
+        "Update this one with `lf install`".to_string()
     } else {
         format!("Update the remote with `{}`", update_command(target))
     };

@@ -58,7 +58,7 @@ def Navbar():
                 cls="nav-brand-group",
             ),
             Ul(
-                Li(A("Flows", href="/cli#flows")),
+                Li(A("Flows", href="/docs/authoring#flows")),
                 Li(A("Docs", href="/docs")),
                 Li(
                     A(
@@ -123,7 +123,6 @@ def CopyButton(text: str):
 SITE_CONTENT = yaml.safe_load((Path(__file__).parent / "content.yaml").read_text())
 STUDIO_CONTENT = SITE_CONTENT["studio"]
 HOME_CONTENT = SITE_CONTENT["homepage"]
-CLI_CONTENT = SITE_CONTENT["cli"]
 INSTALL_CONTENT = HOME_CONTENT["install"]
 # The homepage is drawn, not listed: its mock, cards and copy are one template.
 HOME_HTML = (
@@ -351,7 +350,7 @@ def generate_llms_full_txt() -> str:
 
 
 def generate_sitemap_xml() -> str:
-    pages = ["", "/cli", "/studio", "/etude", "/fantasia", "/about", "/download", "/docs"] + [
+    pages = ["", "/studio", "/etude", "/fantasia", "/about", "/download", "/docs"] + [
         f"/docs/{slug}" for _, slug in DOCS_NAV if slug != "index" and doc_path(slug)
     ]
     entries = []
@@ -754,38 +753,6 @@ SITEMAP_XML_CONTENT = generate_sitemap_xml()
 # Pages
 
 
-def _inline_code(text: str) -> list:
-    """Set backticked spans in monospace without treating copy as HTML."""
-    return [Code(part) if index % 2 else part for index, part in enumerate(text.split("`"))]
-
-
-def _terminal(content: str, label: str) -> FT:
-    lines = []
-    for line in content.rstrip().splitlines():
-        if line.startswith("#"):
-            lines.extend((Span(line, cls="c"), "\n"))
-            continue
-        if line.startswith("$ "):
-            lines.append(Span("$", cls="p"))
-            line = line[1:]
-        command, marker, comment = line.partition("  #")
-        lines.extend(B(part) if part == "lf" else part for part in re.split(r"\b(lf)\b", command))
-        if marker:
-            lines.append(Span(marker + comment, cls="c"))
-        lines.append("\n")
-    lines.pop()
-    return Pre(*lines, cls="term", tabindex="0", aria_label=label)
-
-
-def _install_row() -> FT:
-    command = INSTALL_CONTENT["install_command"]
-    return Div(
-        Pre(Span("$", cls="p"), " ", command, cls="term", tabindex="0", aria_label="Install Loopflow"),
-        Button("Copy", type="button", cls="copy", data_copy=command, aria_live="polite"),
-        cls="install-row",
-    )
-
-
 def _topbar(current: str) -> FT:
     """The one bar on the homepage and studio pages: brand, links, a company menu, install."""
 
@@ -912,60 +879,6 @@ def build_homepage() -> tuple:
     return _product_page("Loopflow — " + HOME_CONTENT["title"], "/", NotStr(HOME_HTML))
 
 
-def _plain_list(items: list) -> FT:
-    return Ul(*[Li(B(item["name"]), " ", *_inline_code(item["text"])) for item in items], cls="plain")
-
-
-def _rotating_heading(heading: dict) -> FT:
-    """A headline whose one word cycles; read aloud once, with every word."""
-    verbs = heading["verbs"]
-    spoken = f"{heading['before']} {', '.join(verbs[:-1])} and {verbs[-1]} {heading['after']}"
-    return H1(
-        Span(
-            heading["before"],
-            " ",
-            Span(*[Span(verb) for verb in verbs], cls="rotating"),
-            " ",
-            heading["after"],
-            aria_hidden="true",
-        ),
-        aria_label=spoken,
-    )
-
-
-def build_cli_page() -> tuple:
-    hero, agents, where = CLI_CONTENT["hero"], CLI_CONTENT["agents"], CLI_CONTENT["where"]
-    return _product_page(
-        "Loopflow — " + hero["title"],
-        "/cli",
-        Section(_rotating_heading(hero["heading"]), cls="home-hero"),
-        Section(
-            _terminal(agents["commands"], "lf commands"),
-            _plain_list(agents["items"]),
-            P(*[A(link["label"], href=link["href"]) for link in agents["links"]], cls="more"),
-            id="flows",
-            cls="reading",
-        ),
-        Section(
-            H2(where["heading"]),
-            _plain_list(where["items"]),
-            id="where",
-            cls="reading",
-        ),
-        Section(
-            P(INSTALL_CONTENT["label"], cls="eyebrow"),
-            _install_row(),
-            P(hero["cost"], cls="cost"),
-            P(
-                *[A(link["label"], href=link["href"]) for link in INSTALL_CONTENT["links"]],
-                cls="capture-label install-links",
-            ),
-            id="start",
-            cls="reading closing",
-        ),
-    )
-
-
 @rt("/")
 def get():
     return build_homepage()
@@ -977,11 +890,6 @@ def get():
         "https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh",
         status_code=302,
     )
-
-
-@rt("/cli")
-def get():
-    return build_cli_page()
 
 
 @rt("/products")
@@ -1022,6 +930,11 @@ def get():
 
 
 @rt("/team")
+def get():
+    return RedirectResponse("/", status_code=302)
+
+
+@rt("/cli")
 def get():
     return RedirectResponse("/", status_code=302)
 

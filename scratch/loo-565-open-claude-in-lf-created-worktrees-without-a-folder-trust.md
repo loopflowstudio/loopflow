@@ -188,6 +188,13 @@ Out:
 - Kickoff: real-Claude pty probes of the four trust cases → findings above.
 - Implement/compress: `env -u LF_HOME cargo test -p loopflow --lib -- claude_trust git_worktree_add < /dev/null` → 7 pass; `--test integration -- claude_opens_lf_created_worktree_already_trusted` → pass; clippy `--all-targets -D warnings` clean. Gate owns affected suites.
 - Concept review (2026-10-21): accepted model holds (lf-created provenance = git admin marker; trust decided at launch for the child's config). One consequence found: README/docs/lf.md trust prose contradicts shipped behaviour → implement item 4. No open product choice.
+- Concept review, second pass (2026-10-21, HEAD 99e0c7d): nothing to change, no
+  open choice. Every lf worktree creation reaches `worktree_add_inheriting`
+  (placement Create/Track, agent worktrees, `lf wt create`); Desktop opens
+  Sessions through `lf session connect <id>`, so it passes the native launch
+  trust site; the only other admin-dir artifact lf writes is the transient
+  worktree lease lock, not provenance. Pre-existing unmarked worktrees stay an
+  assumption in questions.md, reversible later.
 - Realign (post-merge tree, HEAD 7c1054e): `env -u LF_* cargo test -p loopflow --lib -- claude_trust git_worktree_add < /dev/null` → 7 pass; no repair needed. Second realign (HEAD ca86724, docs item 4 committed, main 845e8b7 merged): prose and CI-policy changes only, pass still applies, no rerun.
 - Compress (2026-10-21, second pass): dropped the redundant `canonicalize` in `git::lf_created_worktree` (git's `--show-toplevel` already returns the realpath); same 7 unit tests pass, clippy clean. Nothing else left to reduce.
 - Land owns CI: PR checks show SKIPPED while scratch is committed; the full matrix runs once `lf pr land` clears scratch. Demo/review owns the real-Claude pty probes.

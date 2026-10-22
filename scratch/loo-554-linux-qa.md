@@ -11,7 +11,11 @@ Loopflow, and fix what it finds at its owners in this branch.
 
 Round three (2026-10-22) is landing plus one cosmetic fix from the round-two
 concept review: the earlier Flow stopped after implement when its steps could
-not launch (missing managed Claude credential), so nothing was published. The
+not launch (missing managed Claude credential), so nothing was published.
+Round four (2026-10-22) restarts the Flow on the same committed tree after
+the round-three steps past implement failed the same way; jack@loopflow.studio
+verifies again. Nothing new to implement: no PR exists yet, main (91b21dc508)
+has not moved, and the remaining work is the Landing section below. The
 connect lines now name the provider by display name (00deba37ad, below). No
 other defects are open. PR #1635 merged into main
 as 173bb90880, so the launch-output results below now describe this branch on
@@ -452,3 +456,4 @@ Check (2026-10-22, implement round two): `cargo test -p loopflow --lib -- machin
 Check (2026-10-22, round three through decision): merged tree e1bfa5c7e1; `cargo fmt --check` clean; `cargo test -p loopflow --test integration reference_matches_the_compiled_cli` pass; 17 focused lib tests pass; `git merge-tree HEAD origin/main` (845e8b7c8c, #1647) → 0 conflicts; full matrix → gate/CI.
 Check (2026-10-22, implement round three): connect lines use `display_name()`; `cargo test -p loopflow --lib -- machine_credentials` 13 pass; `cargo clippy --all-targets -- -D warnings` clean; machine re-run of the OpenCode line → demo/gate.
 Check (2026-10-22, realign round three b): HEAD a87e518b67 (merge of main 91b21dc508); `cargo test -p loopflow --lib -- machine_credentials` 13 pass; `cargo clippy --all-targets -- -D warnings` clean; full matrix → gate/CI.
+Check (2026-10-22, kickoff round four): HEAD 83d6c8e453 (plan-only commit over a87e518b67); `git merge-tree HEAD origin/main` → 0 conflicts, 0 commits behind; no build, the round-three-b checks still apply.

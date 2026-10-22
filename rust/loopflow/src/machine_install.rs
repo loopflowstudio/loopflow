@@ -249,12 +249,18 @@ pub struct ActiveInstall {
     pub selection: InstallSelection,
     pub published_fallback: ArtifactSet,
     pub retained_published_sets: Vec<ArtifactSet>,
+    /// Where this installation was activated, so updates replace the copy the
+    /// person installed. Absent in records written before it was tracked.
+    pub activation: Option<ActivationTargets>,
 }
 
 impl ActiveInstall {
     pub fn validate(&self) -> Result<()> {
         require_schema(self.schema_version)?;
         self.selection.validate()?;
+        if let Some(activation) = &self.activation {
+            activation.validate()?;
+        }
         if self.published_fallback.source != InstallSource::Published {
             return Err(anyhow!("published fallback artifact set is not published"));
         }
@@ -926,6 +932,7 @@ fn startup_active_during_switch(receipt: &SwitchReceipt) -> Result<ActiveInstall
         selection,
         published_fallback: fallback.clone(),
         retained_published_sets: vec![fallback],
+        activation: Some(receipt.activation.clone()),
     })
 }
 
@@ -1443,6 +1450,7 @@ mod tests {
             selection: target,
             retained_published_sets: vec![published_fallback.clone()],
             published_fallback,
+            activation: None,
         }
     }
 
@@ -2113,5 +2121,17 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("is not retained by the active install"));
+    }
+
+    #[test]
+    fn active_record_without_activation_targets_still_reads() {
+        let directory = tempfile::tempdir().unwrap();
+        let published = selection(directory.path(), "published", InstallSource::Published);
+        let mut record =
+            serde_json::to_value(active(published.clone(), published.artifact_set)).unwrap();
+        record.as_object_mut().unwrap().remove("activation");
+        let active: ActiveInstall = serde_json::from_value(record).unwrap();
+        assert_eq!(active.activation, None);
+        active.validate().unwrap();
     }
 }

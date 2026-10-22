@@ -161,10 +161,16 @@ main() {
   chmod +x "$src" "$daemon_src"
   app_source=""
   if [ "$(uname -s)" = "Darwin" ] && [ "$cli_only" != "1" ]; then
-    applications_dir="${LF_APPLICATIONS_DIR:-/Applications}"
-    if [ ! -d "$applications_dir" ] || [ ! -w "$applications_dir" ]; then
-      echo "Application target is not writable: $applications_dir (pass --cli-only to skip the app)" >&2
-      exit 1
+    # Without LF_APPLICATIONS_DIR, lf replaces the app copy this machine
+    # recorded, or chooses /Applications (~/Applications when unwritable).
+    set --
+    if [ -n "${LF_APPLICATIONS_DIR:-}" ]; then
+      if [ ! -d "$LF_APPLICATIONS_DIR" ] || [ ! -w "$LF_APPLICATIONS_DIR" ]; then
+        echo "Application target is not writable: $LF_APPLICATIONS_DIR (pass --cli-only to skip the app)" >&2
+        exit 1
+      fi
+      set -- --app-target "$LF_APPLICATIONS_DIR/Loopflow.app" \
+        --legacy-app-target "$LF_APPLICATIONS_DIR/Concerto.app"
     fi
     dmg_name="Loopflow.dmg"
     dmg="$tmpdir/$dmg_name"
@@ -182,15 +188,13 @@ main() {
       echo "Loopflow.dmg does not contain Loopflow.app" >&2
       exit 1
     fi
-    codesign --verify --deep --strict "$app_source"
-    spctl --assess --type execute "$app_source"
+    # lf verifies the app signature before changing any target.
     "$src" install promote \
       --cli-target "$dst" \
       --daemon-source "$daemon_src" \
       --daemon-target "$daemon_dst" \
       --app-source "$app_source" \
-      --app-target "$applications_dir/Loopflow.app" \
-      --legacy-app-target "$applications_dir/Concerto.app" \
+      "$@" \
       --sync-skills
   else
     "$src" install promote \
@@ -202,9 +206,18 @@ main() {
 
   echo "Installed to $install_dir/lf and $install_dir/lfd"
 
+  if [ "$(uname -s)" = "Darwin" ]; then
+    # New terminals: lf owns one marked block in the zsh startup file.
+    "$dst" install shell-path --dir "$install_dir" ||
+      echo "warning: PATH was not configured for new terminals; lf is still installed" >&2
+  fi
+  # This terminal: an installer cannot change its parent shell.
   case ":$PATH:" in
     *":$install_dir:"*) ;;
-    *) echo "Add to PATH: export PATH=\"$install_dir:\$PATH\"" ;;
+    *)
+      quoted_dir=$(printf "%s" "$install_dir" | sed "s/'/'\\\\''/g")
+      echo "For this terminal, run: export PATH='$quoted_dir':\"\$PATH\""
+      ;;
   esac
 }
 

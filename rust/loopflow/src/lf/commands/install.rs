@@ -36,8 +36,12 @@ use uuid::Uuid;
 use crate::build_info::{self, MigrationAuthority};
 use crate::store::migrations;
 
+mod bundle;
 mod published;
+mod shell_path;
+pub use bundle::{activate_app, app_destination};
 pub use published::{latest, schedule};
+pub use shell_path::configure as configure_shell_path;
 
 /// Bounds re-exec depth in the local-promotion delegation chain.
 ///
@@ -2154,6 +2158,12 @@ fn bootstrap_published_install(
         selection,
         published_fallback: fallback.clone(),
         retained_published_sets: vec![fallback],
+        activation: Some(crate::machine_install::ActivationTargets {
+            cli: artifacts.cli_target.to_path_buf(),
+            daemon: artifacts.daemon_target.to_path_buf(),
+            app: artifacts.app_target.map(Path::to_path_buf),
+            legacy_app: None,
+        }),
     };
     crate::machine_install::write_active(root, &active)?;
     Ok(active)
@@ -3138,6 +3148,7 @@ fn active_install_from_switch(
         selection: receipt.target.clone(),
         published_fallback,
         retained_published_sets: retained,
+        activation: Some(receipt.activation.clone()),
     })
 }
 
@@ -3356,6 +3367,9 @@ fn promote_published_from_machine_install(
         println!("  (preview only: no target changed)");
         return Ok(());
     }
+    if let Some(app_source) = artifacts.app_source {
+        bundle::verify_signed_app(app_source)?;
+    }
 
     if prior.is_none() && store_path.exists() {
         prior = Some(bootstrap_published_install(&root, &artifacts)?);
@@ -3524,6 +3538,24 @@ pub fn promote(
         ));
     }
     guard_promote_hop()?;
+    // A published app update without an explicit destination replaces the
+    // copy this machine recorded, never a second one in /Applications.
+    let resolved_app_target;
+    let resolved_legacy_target;
+    let mut artifacts = artifacts;
+    if artifacts.app_source.is_some() && artifacts.app_target.is_none() {
+        resolved_app_target = app_destination()?;
+        let parent = resolved_app_target
+            .parent()
+            .expect("an app destination has a parent directory");
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create application directory {}", parent.display()))?;
+        resolved_legacy_target = parent.join("Concerto.app");
+        artifacts.app_target = Some(&resolved_app_target);
+        artifacts.legacy_app_target = artifacts
+            .legacy_app_target
+            .or(Some(&resolved_legacy_target));
+    }
     let root = crate::machine_install::root()?;
     let state = crate::machine_install::read_state(&root)?;
     if let crate::machine_install::MachineInstallState::Switching(receipt) = &state {

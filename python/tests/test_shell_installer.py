@@ -89,10 +89,6 @@ def _write_stubs(stub_dir: Path) -> None:
         "fi\n"
         "exit 0\n"
     )
-    codesign = stub_dir / "codesign"
-    codesign.write_text("#!/bin/sh\nexit 0\n")
-    spctl = stub_dir / "spctl"
-    spctl.write_text("#!/bin/sh\nexit 0\n")
     uname = stub_dir / "uname"
     uname.write_text(
         "#!/bin/sh\n"
@@ -104,11 +100,23 @@ def _write_stubs(stub_dir: Path) -> None:
         '  *) /usr/bin/uname "$@" ;;\n'
         "esac\n"
     )
-    for f in (curl, tar, hdiutil, codesign, spctl, uname):
+    for f in (curl, tar, hdiutil, uname):
         f.chmod(0o755)
 
 
+def _isolated(tmp_path: Path) -> dict[str, str]:
+    """Keep every startup-file write inside the test's own home."""
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    return {"HOME": str(home), "ZDOTDIR": str(home)}
+
+
+def _promotions(tmp_path: Path) -> list[list[str]]:
+    return [line.split() for line in (tmp_path / "promote.log").read_text().splitlines()]
+
+
 def _run(script: Path, args: list[str], env_extra: dict[str, str]) -> subprocess.CompletedProcess:
+    assert "HOME" in env_extra and "ZDOTDIR" in env_extra, "installer tests must isolate HOME"
     env = {**os.environ, **env_extra}
     return subprocess.run(
         ["sh", str(script), *args],
@@ -128,6 +136,7 @@ def env(tmp_path: Path) -> dict[str, str]:
     stub_dir = tmp_path / "stub"
     _write_stubs(stub_dir)
     return {
+        **_isolated(tmp_path),
         "PATH": f"{stub_dir}:{os.environ['PATH']}",
         "LF_INSTALL_DIR": str(tmp_path / "dest"),
         "LFTEST_LOG": str(tmp_path / "curl.log"),
@@ -224,7 +233,7 @@ def test_downloaded_candidate_owns_activation(
 ) -> None:
     result = _run(installer, [], env)
     assert result.returncode == 0, result.stderr
-    args = (tmp_path / "promote.log").read_text().split()
+    args = _promotions(tmp_path)[0]
     assert args[:4] == [
         "install",
         "promote",
@@ -238,6 +247,29 @@ def test_downloaded_candidate_owns_activation(
         str(tmp_path / "dest/lfd"),
         "--sync-skills",
     ]
+
+
+def test_macos_install_configures_new_terminals_and_explains_this_one(
+    installer: Path, env: dict[str, str], tmp_path: Path
+) -> None:
+    env["LF_INSTALL_DIR"] = str(tmp_path / "Kim's bin")
+    result = _run(installer, [], {**env, "LFTEST_UNAME_SYSTEM": "Darwin"})
+    assert result.returncode == 0, result.stderr
+    shell_path = (tmp_path / "promote.log").read_text().splitlines()[1]
+    assert shell_path == f"install shell-path --dir {tmp_path}/Kim's bin"
+    assert "export PATH='" + f"{tmp_path}/Kim" + "'\\''s bin':\"$PATH\"" in result.stdout
+    assert not (tmp_path / "home/.zshrc").exists()
+
+
+def test_linux_install_leaves_shell_startup_files_alone(
+    installer: Path, env: dict[str, str], tmp_path: Path
+) -> None:
+    result = _run(
+        installer, [], {**env, "LFTEST_UNAME_SYSTEM": "Linux", "LFTEST_UNAME_ARCH": "x86_64"}
+    )
+    assert result.returncode == 0, result.stderr
+    assert len(_promotions(tmp_path)) == 1
+    assert "For this terminal, run: export PATH=" in result.stdout
 
 
 def test_latest_release_is_pinned_before_the_archive_download(
@@ -260,26 +292,32 @@ def test_digest_mismatch_aborts_before_promotion(
     assert not (tmp_path / "promote.log").exists()
 
 
+@pytest.mark.parametrize("explicit_applications", [True, False])
 def test_macos_release_promotes_the_verified_app_with_the_control_plane(
-    installer: Path, env: dict[str, str], tmp_path: Path
+    installer: Path, env: dict[str, str], tmp_path: Path, explicit_applications: bool
 ) -> None:
     applications = tmp_path / "Applications"
     applications.mkdir()
     app_env = {
         **env,
         "LF_INSTALL_CLI_ONLY": "0",
-        "LF_APPLICATIONS_DIR": str(applications),
         "LFTEST_UNAME_SYSTEM": "Darwin",
         "LFTEST_UNAME_ARCH": "arm64",
     }
+    if explicit_applications:
+        app_env["LF_APPLICATIONS_DIR"] = str(applications)
 
     result = _run(installer, [], app_env)
 
     assert result.returncode == 0, result.stderr
-    args = (tmp_path / "promote.log").read_text().split()
+    args = _promotions(tmp_path)[0]
     assert "--app-source" in args
-    assert args[args.index("--app-target") + 1] == str(applications / "Loopflow.app")
-    assert args[args.index("--legacy-app-target") + 1] == str(applications / "Concerto.app")
+    if explicit_applications:
+        assert args[args.index("--app-target") + 1] == str(applications / "Loopflow.app")
+        assert args[args.index("--legacy-app-target") + 1] == str(applications / "Concerto.app")
+    else:
+        # lf resolves the recorded destination; the script must not pick one.
+        assert "--app-target" not in args and "--legacy-app-target" not in args
 
 
 def test_missing_version_value_fails_clearly(installer: Path, env: dict[str, str]) -> None:
@@ -301,6 +339,7 @@ def test_download_failure_aborts_without_cryptic_error(installer: Path, tmp_path
     stub_dir = tmp_path / "stub"
     _write_stubs(stub_dir)
     env_extra = {
+        **_isolated(tmp_path),
         "PATH": f"{stub_dir}:{os.environ['PATH']}",
         "LF_INSTALL_DIR": str(tmp_path / "dest"),
         "LFTEST_LOG": str(tmp_path / "curl.log"),

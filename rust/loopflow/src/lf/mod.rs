@@ -1119,6 +1119,20 @@ pub enum InstallCommand {
         #[arg(value_enum, default_value = "weekly")]
         frequency: InstallFrequency,
     },
+    /// Activate a Loopflow.app the person copied, from its bundled helper.
+    #[command(hide = true)]
+    ActivateApp {
+        /// The opened Loopflow.app bundle.
+        #[arg(long)]
+        bundle: PathBuf,
+    },
+    /// Put the install directory on PATH for new zsh terminals.
+    #[command(hide = true)]
+    ShellPath {
+        /// Directory holding lf (default: the install directory).
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
     /// Continue one interrupted machine install switch from its pinned candidate.
     #[command(hide = true)]
     RecoverSwitch {

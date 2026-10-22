@@ -55,6 +55,19 @@ and reopening succeed. Once selection is committed, the app and its helpers use
 the selected installation and store even while reopening is pending. Retrying
 observes an already running app before requesting another open.
 
+```bash
+Loopflow.app/Contents/MacOS/lf install activate-app --bundle /Applications/Loopflow.app
+lf install shell-path          # one marked PATH block in ${ZDOTDIR:-$HOME}/.zshrc
+```
+
+A copied app activates from its own bundled helper, in place. It refuses a
+disk image or translocated copy and an older copy than the installed release;
+published promotion verifies the app signature before any target changes.
+The active record keeps the activation targets, so updates without
+`LF_APPLICATIONS_DIR` replace that copy (default `/Applications`, or
+`~/Applications` when unwritable). Both install routes write the same zsh block;
+other shells get the `export PATH=...` line.
+
 Use `release/` to keep the rationale and notes for each shipped version close
 to the code.
 

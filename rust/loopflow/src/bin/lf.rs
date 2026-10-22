@@ -1239,6 +1239,12 @@ fn main() -> anyhow::Result<()> {
             Some(InstallCommand::Schedule { frequency }) => {
                 loopflow::lf::commands::install::schedule(*frequency)
             }
+            Some(InstallCommand::ActivateApp { bundle }) => {
+                loopflow::lf::commands::install::activate_app(bundle)
+            }
+            Some(InstallCommand::ShellPath { dir }) => {
+                loopflow::lf::commands::install::configure_shell_path(dir.as_deref())
+            }
             Some(InstallCommand::RecoverSwitch { switch }) => {
                 loopflow::lf::commands::install::recover_switch(switch)
             }

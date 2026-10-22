@@ -1,7 +1,12 @@
 # LOO-565: Open Claude in lf-created worktrees without a folder-trust prompt
 
-Status: implemented 2026-10-21; demo/review (real Claude pty on macOS and fresh Linux) remains. Product decision accepted by Jack Heart
-on October 21: lf pre-accepts Claude's folder trust for worktrees lf itself creates.
+Status: implemented and published as PR #1648 (head 3d2c7a0f1b) on 2026-10-21. The
+first gate never ran: lf could not select a managed Claude account (the
+jack@loopflow.studio credential was missing). Jack Heart reconnected it on
+October 21 and asked for gate and land of the published PR. Design unchanged;
+demo/review (real Claude pty on macOS and fresh Linux) still remains. Product
+decision accepted by Jack Heart on October 21: lf pre-accepts Claude's folder
+trust for worktrees lf itself creates.
 
 ## Problem
 
@@ -176,3 +181,4 @@ Out:
 - Compress: dropped the duplicate git unmarked-worktree test and a redundant `create_dir_all`; `cargo test -p loopflow --lib -- claude_trust git_worktree_add` → 7 pass.
 - Realign: plan matches the diff and origin/main (54da279a8b) adds nothing; no rerun. Demo/review owns the real-Claude pty probes.
 - Concept review: one provenance record (the admin-dir marker; no prior lf-worktree notion to merge) and one trust writer at both interactive Claude launch sites; names match Jack's accepted "lf-created worktree" wording. No change, no open choice.
+- Kickoff (after gate stop): no design change. Account selection, not the change, stopped the Flow; `lf account claude --cached` now shows jack@loopflow.studio connected. Branch merges clean with origin/main (5 commits behind; the overlapping files `harness/agent_process.rs`, `harness/claude.rs` touch no trust code). PR checks show SKIPPED because scratch is still committed; the full CI matrix runs once `lf pr land` clears scratch, so land owns the CI result.

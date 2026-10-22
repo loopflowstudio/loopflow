@@ -205,6 +205,7 @@ fn render_footprint(footprint: &Footprint) -> String {
             }
         ));
     }
+    out.push_str(&format!("Process receipts  {}\n", home.process_receipts));
     let checkouts: u64 = footprint.worktrees.iter().map(|w| w.checkout_bytes).sum();
     let builds: u64 = footprint.worktrees.iter().map(|w| w.build_bytes).sum();
     out.push_str(&format!(

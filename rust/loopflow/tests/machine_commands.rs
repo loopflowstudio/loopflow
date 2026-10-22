@@ -1777,6 +1777,8 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
         .bind_repository(path.to_str().unwrap(), &repository)
         .unwrap();
     let owner = store.local_machine().unwrap().id;
+    fs::write(path.join(".gitignore"), "target/\n").unwrap();
+    fs::create_dir(path.join("target")).unwrap();
     let shell = fixture.root.path().join("remote/.local/bin/fixture-shell");
     executable(&shell, "#!/bin/sh\nprintf 'shell at %s\\n' \"$PWD\"\ncat\n");
     let launcher = fixture.root.path().join("remote/.local/bin/lf");
@@ -1863,14 +1865,16 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
     assert_eq!(first.task_id, registered.task.id);
     assert_eq!(first.machine_id, owner);
     assert_eq!(first.checkout, path.to_str().unwrap());
-    assert!(first.changed);
-    // An atomic replacement must invalidate even when dirty status stays dirty.
+    assert_eq!(first.paths, [""]);
+    // Ignored build output never invalidates; an atomic replacement must, even
+    // when dirty status stays dirty.
+    fs::write(path.join("target/out"), "build\n").unwrap();
     repo.create_file("replacement", "new peer contents\n");
     fs::rename(path.join("replacement"), path.join("note.txt")).unwrap();
-    let mut changed = false;
+    let mut changed = Vec::new();
     for _ in 0..5 {
-        if read().changed {
-            changed = true;
+        changed.extend(read().paths);
+        if changed.iter().any(|path| path == "note.txt") {
             break;
         }
     }
@@ -1878,6 +1882,7 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
     drop(child.stdin.take());
     let output = child.wait_with_output().unwrap();
     assert_success(&output);
-    assert!(changed);
+    assert!(changed.iter().any(|path| path == "note.txt"));
+    assert!(!changed.iter().any(|path| path.starts_with("target")));
     assert!(!fixture.root.path().join("forbidden-effect").exists());
 }

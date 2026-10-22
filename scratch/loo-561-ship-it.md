@@ -193,6 +193,19 @@ Accepted (Jack: "that works for me", 2026-10-22) — shape A, one landing method
   model, single landing engine, lazy recovery, the visible Workflow header (Ship it / Stop), and
   the gate blocker (branch `lf` must open stores holding `flow_finished` events).
 
+### Desktop views build on #1580 (Jack Heart, 2026-10-22)
+
+> it should be possible to look at shipping tasks (we should probably rebase onto 1580) but
+> default should filter them out
+
+- #1580 (LOO-497, Dashboards) makes *Working tasks* the repository's built-in Work query in plan
+  order and adds a query language with `state:`. Build on it: the default Working query excludes
+  `state:shipping`; Shipping is a query too (`state:shipping`), not a separate `SidebarFilter`
+  case. The `state:` vocabulary is the new lifecycle (unstarted/working/shipping/done/abandoned,
+  plus paused).
+- #1580 was open, armed and BLOCKED on checks at 2026-10-22 ~07:40 PT. Take it through the
+  ordinary sync once it merges; if it has not merged when this work reaches gate, stack on it.
+
 ## Demo findings (2026-10-22, branch build on lf-world `portfolio`)
 
 - Jack accepted the naming: `deliver` is the final `gate → land --wait-and-fix` graph; `lf ship`

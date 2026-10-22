@@ -619,9 +619,12 @@ pub enum TaskEventKind {
         lf_process_ids: Vec<crate::id::LfProcessId>,
         reason: String,
     },
+    // Append-only events recorded before the Flow → Graph rename keep their bytes.
+    #[serde(alias = "flow_finished")]
     GraphFinished {
         #[serde(deserialize_with = "crate::id::deserialize_uuid")]
         invocation_id: String,
+        #[serde(alias = "flow")]
         graph: String,
         summary: String,
     },
@@ -724,9 +727,18 @@ pub struct LinearObservationOutcome {
 mod tests {
     use super::{
         GithubPr, LinearWritebackOperation, LinearWritebackState, PrPhase, PrPublication, Task,
-        TaskId, TaskPr, TaskPrId,
+        TaskEventKind, TaskId, TaskPr, TaskPrId,
     };
     use crate::linear::LinearIssueId;
+
+    #[test]
+    fn events_recorded_before_the_graph_rename_still_read() {
+        let kind: TaskEventKind = serde_json::from_str(
+            r#"{"kind":"flow_finished","invocation_id":"7d4455b3-f215-4762-965c-85ff2b0876a5","flow":"ship","summary":"merged"}"#,
+        )
+        .unwrap();
+        assert!(matches!(kind, TaskEventKind::GraphFinished { graph, .. } if graph == "ship"));
+    }
 
     fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();

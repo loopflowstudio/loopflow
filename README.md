@@ -141,13 +141,13 @@ Author a Wave in the repo and open its conversation:
 <!-- .lf/wave/designer/GOAL.md -->
 ## Objective
 
-Keep the design system coherent. Each wake: read the chapter plan and
-Tasks, pursue the highest-leverage open KR, start a concrete
-Task only after it is filed, and fold what changed into memory.
+Keep the design system coherent. Each wake: read the chapter's Tasks,
+keep your started ones moving, leave teammates' Tasks to them, and fold
+what changed into memory.
 ```
 
 ```bash
-lf --wave designer wave-operate        # one finite pass: keep started Tasks moving
+lf --wave designer wave-operate        # one finite pass: keep your started Tasks moving
 lf --wave designer wave-operate "ship the button audit first"
 lf connect --wave designer             # your ongoing conversation for the Wave, applying that pass on every return
 ```

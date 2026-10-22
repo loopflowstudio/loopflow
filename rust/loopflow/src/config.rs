@@ -26,7 +26,7 @@ struct UserConfig {
 }
 
 /// Resolve a display name from personal Loopflow configuration or Git's user.name.
-pub fn load_user_name() -> Result<Option<String>, LoadError> {
+fn load_user_name() -> Result<Option<String>, LoadError> {
     if let Some(config) = load_yaml_file(&global_config_path())? {
         if let Some(user) = config.get("user").filter(|value| !value.is_null()) {
             let user: UserConfig = serde_yaml_ng::from_value(user.clone()).map_err(|error| {

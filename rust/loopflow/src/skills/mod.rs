@@ -976,6 +976,29 @@ mod tests {
     }
 
     #[test]
+    fn operator_skills_stay_on_existing_work() {
+        for name in ["repo-operate", "wave-operate"] {
+            let skill = builtins::get_builtin_skill(name).unwrap();
+            for planning in [
+                "lf task create",
+                "update-plan",
+                "new-chapter",
+                "lf task claim",
+                "KR",
+            ] {
+                assert!(!skill.contains(planning), "{name} names {planning:?}");
+            }
+            assert!(skill.contains("lf config user"), "{name} omits ownership");
+        }
+        for name in ["s1", "s2", "s3", "s4", "s5"] {
+            let skill = builtins::get_builtin_skill(name).unwrap();
+            for planning in ["lf task create", "update-plan", "new-chapter"] {
+                assert!(!skill.contains(planning), "{name} names {planning:?}");
+            }
+        }
+    }
+
+    #[test]
     fn sync_skills_never_writes_under_a_repo() {
         let home = TempDir::new().unwrap();
         let skills = home.path().join(".lf/skills");

@@ -603,9 +603,11 @@ inspection and replay; they do not select these Session actions.
 | Task | `lf task-operate EXP-12` | `lf connect --task EXP-12` |
 
 Each conversation is its scope's operator and carries the matching operate
-procedure. It leaves running Flows alone, reads a stopped or failed Flow before
-running its remaining work fresh, and names what waits on you, including a Task
-at a workflow node. Unstarted backlog stays unstarted. A conversation acts
+procedure. On Tasks you own, it leaves running Flows alone, reads a stopped or
+failed Flow before running its remaining work fresh, and names what waits on
+you, including a Task at a workflow node. Another person's Task is listed with
+its owner and left alone. Unstarted backlog stays unstarted, and operators
+neither edit KRs or plans nor file Tasks. A conversation acts
 only during a turn: between turns, running Flows and any installed background
 checks continue on their own.
 New commands, hooks and Flow children select the current CLI through the stable

@@ -667,7 +667,7 @@ Task assigns work history without reopening it.
 
 ```bash
 lf comment INF-124 "keep the public name"
-lf --wave product wave-operate "review the current priorities"
+lf --wave product wave-operate "recover the stopped release Task"
 ```
 
 SQLite owns every Task comment. A save records the comment and its stable delivery

@@ -8,7 +8,8 @@ of steps; it runs with or without a Task.
 Work in the supplied checkout. Read its agent guide and existing work, preserve
 other contributions, and carry out the request here. Do not launch another
 agent or create a worktree merely to do the work already assigned to this one.
-Follow a supplied Flow's steps and boundaries; finishing it selects no next work.
+Follow a supplied Flow's steps and boundaries; finishing it selects no next work,
+but steps a stopped Flow never reached remain yours.
 
 Use the requested tools and repository conventions. Read
 `lf help <command-or-skill>` for instructions on Sessions, Skills, Flows,
@@ -71,7 +72,7 @@ missing service and continue independent work; do not repair auth unasked.
 
 Before starting more execution, inspect the Task's live work, previous results
 and effects. Leave a live Flow running. A stopped Flow is history: repair the
-cause and start only the authorized remaining work, without replaying effects.
+cause and run the steps it did not reach, without replaying effects.
 
 `lf task run` takes up the Task's selected Workflow when applicable and runs an
 edge. `lf task workflow move` changes its position without executing anything.

@@ -49,8 +49,13 @@ impl OsProcess {
         macos::sample()
     }
 
+    /// Zombies and processes the kernel is tearing down can never run user code.
+    pub(crate) fn has_exited(&self) -> bool {
+        self.kernel_state.starts_with(['Z', 'X'])
+    }
+
     pub(crate) fn evidence(&self, started_at: i64) -> ProcessIdentityEvidence {
-        if self.kernel_state.starts_with('Z') || self.started_at.abs_diff(started_at) > 3 {
+        if self.has_exited() || self.started_at.abs_diff(started_at) > 3 {
             ProcessIdentityEvidence::Dead
         } else {
             ProcessIdentityEvidence::Live
@@ -61,12 +66,29 @@ impl OsProcess {
         self.pid == pid && self.evidence(started_at) == ProcessIdentityEvidence::Live
     }
 
-    pub(crate) fn group_is_alive(pgid: u32) -> io::Result<bool> {
-        Ok(
-            Self::sample(time::OffsetDateTime::now_utc().unix_timestamp())?
-                .iter()
-                .any(|process| process.pgid == pgid && !process.kernel_state.starts_with('Z')),
-        )
+    /// Members of a process group that have not exited.
+    pub(crate) fn group(pgid: u32) -> io::Result<Vec<Self>> {
+        #[cfg(target_os = "macos")]
+        let members = macos::group(pgid)?;
+        #[cfg(not(target_os = "macos"))]
+        let members = Self::sample(time::OffsetDateTime::now_utc().unix_timestamp())?;
+        Ok(members
+            .into_iter()
+            .filter(|process| process.pgid == pgid && !process.has_exited())
+            .collect())
+    }
+
+    /// Name processes for an error without their arguments: `pid 12 (sleep, S)`.
+    pub(crate) fn describe(processes: &[Self]) -> String {
+        processes
+            .iter()
+            .map(|process| {
+                let program = process.command.split_whitespace().next().unwrap_or("");
+                let name = program.rsplit('/').next().unwrap_or(program);
+                format!("pid {} ({name}, {})", process.pid, process.kernel_state)
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -224,6 +246,38 @@ mod tests {
     }
 
     #[test]
+    fn group_lists_live_members_until_they_are_killed() {
+        let leader = Child(
+            std::process::Command::new("/bin/sleep")
+                .env_clear()
+                .arg("60")
+                .process_group(0)
+                .spawn()
+                .unwrap(),
+        );
+        let pgid = leader.0.id();
+        let helper = Child(
+            std::process::Command::new("/bin/sleep")
+                .env_clear()
+                .arg("60")
+                .process_group(pgid as i32)
+                .spawn()
+                .unwrap(),
+        );
+        let mut members = OsProcess::group(pgid)
+            .unwrap()
+            .into_iter()
+            .map(|process| process.pid)
+            .collect::<Vec<_>>();
+        members.sort();
+        assert_eq!(members, [pgid, helper.0.id()]);
+        assert!(OsProcess::describe(&OsProcess::group(pgid).unwrap()).contains("(sleep, "));
+        drop(helper);
+        drop(leader);
+        assert!(OsProcess::group(pgid).unwrap().is_empty());
+    }
+
+    #[test]
     fn zombie_is_dead_before_its_parent_reaps_it() {
         let mut owned = Child(
             std::process::Command::new("/bin/sh")
@@ -249,7 +303,7 @@ mod tests {
         let observed = OsProcess::read(child.id()).unwrap().unwrap();
         assert!(observed.kernel_state.starts_with('Z'));
         assert_eq!(observed.pgid, child.id());
-        assert!(!OsProcess::group_is_alive(observed.pgid).unwrap());
+        assert!(OsProcess::group(observed.pgid).unwrap().is_empty());
         assert_eq!(
             crate::journal::process_identity_evidence(child.id(), observed.started_at),
             ProcessIdentityEvidence::Dead

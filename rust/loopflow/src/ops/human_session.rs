@@ -714,6 +714,17 @@ pub(crate) async fn open(
                 if crate::transport::current() != Some(&owner)
                     && owner_running(&store.sqlite, &owner)?
                 {
+                    // This viewer takes control, so the conversation is now
+                    // shown where it runs, not where it was launched.
+                    if let Some(attachment) = store.sqlite.session_attachment(&session.id)? {
+                        store.sqlite.record_session_terminal(
+                            &session.id,
+                            &attachment,
+                            crate::session_record::current_terminal_id()
+                                .or_else(crate::lf::commands::open::host_placement)
+                                .as_deref(),
+                        )?;
+                    }
                     crate::transport::attach(&owner, false, true)?;
                     return surface(store, session).await;
                 }
@@ -1568,7 +1579,7 @@ mod tests {
                 let origin = store.sqlite.session_turn_origin(&session.id, &first)?;
                 store.sqlite.record_session_turn_origin(&"saved-thread".into(), "pending", &origin)?;
                 let result = super::open(&store, &session.id, super::OpenMode::Try, true).await;
-                let alive = crate::journal::OsProcess::group_is_alive(provider.id().unwrap())?;
+                let alive = !crate::journal::OsProcess::group(provider.id().unwrap())?.is_empty();
                 if alive {
                     provider.kill().await?;
                 }

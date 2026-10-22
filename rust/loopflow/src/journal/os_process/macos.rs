@@ -13,8 +13,22 @@ struct ProcessInfo {
     ppid: u32,
     pgid: u32,
     status: u32,
+    flags: u32,
     started_at: i64,
     name: [u8; 17],
+}
+
+impl ProcessInfo {
+    fn into_process(self, command: String) -> OsProcess {
+        OsProcess {
+            pid: self.pid,
+            ppid: self.ppid,
+            pgid: self.pgid,
+            started_at: self.started_at,
+            kernel_state: kernel_state(self.status, self.flags).into(),
+            command,
+        }
+    }
 }
 
 pub(super) fn read(pid: u32) -> io::Result<Option<OsProcess>> {
@@ -38,19 +52,61 @@ pub(super) fn read(pid: u32) -> io::Result<Option<OsProcess>> {
     }
     // SAFETY: the shim returned a complete initialized structure.
     let info = unsafe { info.assume_init() };
-    let command = arguments(pid)?.unwrap_or_else(|| {
-        String::from_utf8_lossy(&info.name)
-            .trim_end_matches('\0')
-            .to_string()
-    });
-    Ok(Some(OsProcess {
-        pid: info.pid,
-        ppid: info.ppid,
-        pgid: info.pgid,
-        started_at: info.started_at,
-        kernel_state: if info.status == 5 { "Z" } else { "S" }.into(),
-        command,
-    }))
+    let command = arguments(pid)?.unwrap_or_else(|| name(&info.name));
+    Ok(Some(info.into_process(command)))
+}
+
+/// Members of one process group in a single kernel query, named by `p_comm`.
+/// Arguments are never read: they can carry prompt text into error messages.
+pub(super) fn group(pgid: u32) -> io::Result<Vec<OsProcess>> {
+    unsafe extern "C" {
+        fn loopflow_read_group(pgid: u32, output: *mut ProcessInfo, capacity: i32) -> i32;
+    }
+    let mut capacity = 16;
+    loop {
+        let mut members = Vec::<ProcessInfo>::with_capacity(capacity);
+        // SAFETY: the shim writes at most `capacity` repr(C) structures into
+        // the reserved buffer and retains no pointer.
+        let count = unsafe { loopflow_read_group(pgid, members.as_mut_ptr(), capacity as i32) };
+        let count = usize::try_from(count).map_err(|_| io::Error::last_os_error())?;
+        if count > capacity {
+            capacity = count + 16;
+            continue;
+        }
+        // SAFETY: the shim initialized the first `count` structures.
+        unsafe { members.set_len(count) };
+        return Ok(members
+            .into_iter()
+            .map(|info| {
+                let command = name(&info.name);
+                info.into_process(command)
+            })
+            .collect());
+    }
+}
+
+/// `p_comm` ends at its first NUL; the bytes after it are stale.
+fn name(bytes: &[u8]) -> String {
+    let end = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
+}
+
+// SZOMB awaits its parent's wait. P_WEXIT is set once the kernel starts
+// tearing a process down; ps calls that state "dead" (X). Neither runs user code.
+const SZOMB: u32 = 5;
+const P_WEXIT: u32 = 0x2000;
+
+fn kernel_state(status: u32, flags: u32) -> &'static str {
+    if status == SZOMB {
+        "Z"
+    } else if flags & P_WEXIT != 0 {
+        "X"
+    } else {
+        "S"
+    }
 }
 
 pub(super) fn sample() -> io::Result<Vec<OsProcess>> {
@@ -137,7 +193,15 @@ fn decode_arguments(buffer: &[u8]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::decode_arguments;
+    use super::{decode_arguments, kernel_state};
+
+    #[test]
+    fn exiting_and_zombie_states_are_distinct_from_running() {
+        // SRUN = 2, SSLEEP = 3, SZOMB = 5; P_WEXIT = 0x2000.
+        assert_eq!(kernel_state(5, 0x2000), "Z");
+        assert_eq!(kernel_state(2, 0x2000), "X");
+        assert_eq!(kernel_state(3, 0), "S");
+    }
 
     #[test]
     fn arguments_exclude_environment() {

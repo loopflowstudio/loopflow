@@ -17,7 +17,7 @@ and tests now say Graph (`graph:` edges, `.lf/graphs/`, `CronSpec.graph`). Main'
 branch's `two_person_gaps` draft drops the table (drafts apply alphabetically),
 so its Wave-YAML assertion was removed from the rename upgrade test.
 
-Status: implemented, merged with main through #1607 (`ce21904f`), committed;
+Status: implemented, merged with main through #1643 (`c0617ec0`), committed;
 next gate. Seven kickoff passes on 2026-10-21 changed no plan; their narrative
 lives in this file's git history. Jack Heart filed the seven
 items on 2026-10-21 from LOO-550's two-person docs review. They are accepted direction.
@@ -64,7 +64,7 @@ lf wave show                              # owner column: Maya / Lee / —
 lf task status lf-3f2a                    # Oct 21 14:02  claim  Lee on lee-mbp
                                           # (a private Machine shows its id: "Lee on home_…")
 lf machine public maya-mbp
-lf cron add nightly --publish -- --wave infra flow telemetry-daily
+lf cron add nightly --publish -- --wave infra graph telemetry-daily
                                           lf cron list   # Maya · nightly · daily 09:00 · maya-mbp (not installed here)
 ```
 
@@ -159,8 +159,8 @@ PR body lists the exact `lf cron add` lines for whoever wants them
 (questions.md):
 
 ```bash
-lf cron add telemetry-daily --schedule "0 0 8 * * * *" -- --wave intelligence --batch flow telemetry-daily
-lf cron add wave/operate --schedule "0 0 8 * * * *" -- --wave product --batch flow wave/operate
+lf cron add telemetry-daily --schedule "0 0 8 * * * *" -- --wave intelligence --batch graph telemetry-daily
+lf cron add wave/operate --schedule "0 0 8 * * * *" -- --wave product --batch graph wave/operate
 ```
 
 Installed crons are private after upgrade; `lf cron publish <name>` shows one
@@ -437,7 +437,7 @@ lists `lf machine public` and `cron publish/unpublish`), and the PR body's
 
 ## Check results
 
-- 2026-10-21 realign: plan, steers and code agree; no rerun.
+- 2026-10-21 realign (after the #1643 Graph merge): demo and PR-body cron lines say `graph`; fmt clean, lib `published` 17, `two_people` 1 passed. Gate owns the full suite.
 - 2026-10-21 compress (refresh split into `plans_through_git` + `refresh`, `published_from` as filter/map, cron-host docs say release jobs stay private, init skill's stale cron line): lib `published` 17 passed, `two_people` 1 passed, fmt + clippy clean. Every Delete-list item is done.
 - 2026-10-21 implement re-pass: no code change needed; lib `task_ownership` 8 passed (incl. both private-Machine publication tests), fmt clean. Realign (after `lf machine public` republish): `two_people` 1 passed (80s), lib `published` 17 passed, fmt + clippy clean; earlier same day lib `task_ownership` 8, `cron::` 47, `world_recipes` 3, `test_desktop.sh --filter DesktopHeadless` 14, `pytest test_release_automation.py` 10 passed, clippy clean. Gate owns the full suite.
 - 2026-10-21 implement (owner key fallback): build ok; lib `task_ownership` 8, `two_people` 1, integration `dto` 42, swift `TaskRowMetadataTests|Fixture` 77 passed; fmt + clippy clean. Gate owns the full suite.

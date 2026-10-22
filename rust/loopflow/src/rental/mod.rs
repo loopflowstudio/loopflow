@@ -400,8 +400,13 @@ pub enum Refusal {
         live: u32,
         max: u32,
     },
-    #[error("no {hardware} available for {ondemand} now")]
-    Unavailable { ondemand: String, hardware: String },
+    #[error("no {hardware} available for {ondemand} now{place}")]
+    Unavailable {
+        ondemand: String,
+        hardware: String,
+        /// `" in <data center>"` when the template pins one, else empty.
+        place: String,
+    },
     #[error("{ondemand}: {hardware} costs {seen}/h, above its {max}/h limit")]
     OverPrice {
         ondemand: String,
@@ -431,6 +436,12 @@ pub fn admit(
         return Err(Refusal::Unavailable {
             ondemand: ondemand.name.clone(),
             hardware: quote.hardware.to_string(),
+            place: ondemand
+                .template
+                .data_center
+                .as_deref()
+                .map(|place| format!(" in {place}"))
+                .unwrap_or_default(),
         });
     }
     if quote.usd_per_hour > ondemand.max_usd_per_hour {

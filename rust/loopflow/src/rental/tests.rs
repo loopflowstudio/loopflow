@@ -127,6 +127,14 @@ fn admission_refuses_at_the_limit_out_of_stock_and_over_price() {
         ),
         Err(Refusal::Unavailable { .. })
     ));
+    let mut pinned = code(1, "0.40");
+    pinned.template.data_center = Some("US-KS-2".into());
+    assert_eq!(
+        admit(&pinned, 0, &quote("0.24", false), None, None, now())
+            .unwrap_err()
+            .to_string(),
+        "no cpu3c×8 available for code now in US-KS-2"
+    );
     let refused = admit(&code(1, "0.20"), 0, &quote("0.24", true), None, None, now()).unwrap_err();
     assert_eq!(
         refused.to_string(),

@@ -389,6 +389,10 @@ passing, the build still re-executed the installed lf after making its copy
 resolve to the same binary. The demo runs `target/release/lf` directly; it
 works on `~/.lf/copies/<drafts>/loopflow.db`, a snapshot of the real store, so
 the Task is there and laptop-side PR and push effects are deliberately inert.
+The first quote then refused: cpu3c at 8 vCPUs was in stock in seven data
+centers but not US-KS-2, where the 2-vCPU probe had run. The refusal now names
+the pinned data center; the demo on-demand was re-added in US-IL-1 and quotes
+cpu3c×8 at $0.24/h.
 
 Remaining:
 

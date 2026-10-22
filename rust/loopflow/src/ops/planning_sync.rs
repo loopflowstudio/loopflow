@@ -6,6 +6,7 @@ use crate::work::wave::Wave;
 use std::fs::OpenOptions;
 use std::future::Future;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -164,7 +165,19 @@ pub(crate) async fn peer_status(
         .map_err(message)
 }
 
+/// A World build is this process's only writer to a remote nobody else reads,
+/// so its saves stay local and [`crate::world::World::finish`] publishes once.
+/// A Git exchange per save made a 150-Task world cost minutes.
+static EXCHANGE_DEFERRED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn defer_exchange(deferred: bool) {
+    EXCHANGE_DEFERRED.store(deferred, Ordering::SeqCst);
+}
+
 async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsResult<()> {
+    if EXCHANGE_DEFERRED.load(Ordering::SeqCst) {
+        return Ok(());
+    }
     let Some(destination) = configured_destination(store, repo).await? else {
         return Ok(());
     };

@@ -257,6 +257,7 @@ impl World {
         crate::portfolio::change(&crate::portfolio::PortfolioCommand::Add {
             paths: vec![repo.clone()],
         })?;
+        crate::ops::planning_sync::defer_exchange(true);
         Ok(Self {
             dir,
             env,
@@ -884,8 +885,15 @@ impl World {
         Ok(())
     }
 
-    /// Write `env.json` and return the environment.
+    /// Publish the planning saved while building, write `env.json` and return
+    /// the environment.
     pub fn finish(self) -> Result<WorldEnv> {
+        crate::ops::planning_sync::defer_exchange(false);
+        self.runtime.block_on(async {
+            let store = crate::ops::planning_sync::planning_store().await?;
+            crate::ops::planning_sync::publish_repository(&store, &self.repo.to_string_lossy())
+                .await
+        })?;
         std::fs::write(
             self.dir.join("env.json"),
             serde_json::to_string_pretty(&self.env)? + "\n",

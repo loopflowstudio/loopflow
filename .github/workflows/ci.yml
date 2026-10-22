@@ -371,8 +371,10 @@ jobs:
             --event-stream-version 0 \
             2>&1 | tee "$RUNNER_TEMP/swift-tests/output.log"
         # Bound native test execution, including subprocess cleanup, rather
-        # than holding the PR for GitHub's six-hour default on a hang.
-        timeout-minutes: 20
+        # than holding the PR for GitHub's six-hour default on a hang. Each
+        # lf-world test builds its own world (minutes on these runners), which
+        # took this step from ~5 to 13-14 minutes; LOO-562 owns making that fast.
+        timeout-minutes: 35
       - name: Preserve Swift failure evidence
         if: failure()
         uses: actions/upload-artifact@v7

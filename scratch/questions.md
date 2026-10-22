@@ -7,8 +7,9 @@
   docs' `| sh` / `| bash`); not exercised against the live scripts.
   `activate-app` writes the zsh block whenever activation succeeds, even if the
   user's own config already adds the directory (the block is conditional).
-  Every launch re-runs activate-app's signature check; the "already
-  installed" path then returns without restarting. Measure its cost live.
+  Every launch re-runs activate-app's signature check and PATH write;
+  concept review (2026-10-22) settled that a matching settled install returns
+  first (design Remaining 0). Measure the remaining first-launch cost live.
 - When the opened bundle is also the target, published promotion quiesces the
   running app (the caller) and reopens it. The coordinator survives because it
   re-execs retained bytes; GUI-parent exit, stdout-pipe closure and reopen are

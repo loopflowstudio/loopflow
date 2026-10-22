@@ -454,6 +454,20 @@ coding tool's cost; `lf init` is no longer in the required sequence.
 
 Remaining:
 
+0. **Reuse a settled installation (concept review 2026-10-22, next
+   implement).** Today every launch runs `activate-app` through full
+   promotion — preflight, `codesign --deep --strict`, `spctl --assess`,
+   bootstrap — before `active_install_matches_candidate` says "already
+   installed", then rewrites the zsh block. The accepted design reuses a
+   settled matching installation and never replaces user shell configuration,
+   so: when there is no pending receipt and the active record's app is this
+   bundle and its CLI digest equals the bundled helper's, `activate-app`
+   returns before signature checks, promotion and `shell_path::persist`. A
+   pending receipt still enters promotion for recovery. PATH is written only
+   when activation installs or changes something; someone who removed the
+   block keeps it removed, and `lf install shell-path` restores it. Test: a
+   matching settled install skips verification and leaves `.zshrc` untouched;
+   a pending receipt still recovers.
 1. Primary-window setup view reading `lf account --json` and running the
    recovery commands in its shell, only after the running-app baseline is
    recorded (needs a display session; not recordable headless). Its docs then

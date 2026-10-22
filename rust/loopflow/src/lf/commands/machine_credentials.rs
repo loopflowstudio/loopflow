@@ -53,10 +53,9 @@ enum Credential {
     },
 }
 
-const LAPTOP_NEEDS_OPENCODE: &str =
-    "forwarding needs OpenCode 2 on this laptop; install it with `npm install -g @opencode/cli`";
-const MACHINE_NEEDS_OPENCODE: &str =
-    "OpenCode 2 is not installed on this machine; install it with `npm install -g @opencode/cli`";
+fn opencode_missing(host: &str) -> anyhow::Error {
+    anyhow!("OpenCode 2 is not installed on this {host}; install it with `npm install -g @opencode/cli`")
+}
 
 pub(super) async fn connect(
     machine: &Machine,
@@ -143,7 +142,7 @@ pub(super) async fn connect(
             }
         }
         Provider::OpenCodeZen => {
-            let entries = opencode_export(None)?.ok_or_else(|| anyhow!(LAPTOP_NEEDS_OPENCODE))?;
+            let entries = opencode_export(None)?.ok_or_else(|| opencode_missing("laptop"))?;
             let active = opencode_active(&entries).ok_or_else(|| {
                 anyhow!("OpenCode has no active login on this laptop; run `opencode auth login`")
             })?;
@@ -413,7 +412,7 @@ async fn installed(store: &SharedStore, provider: Provider, login: &str) -> Resu
             None => Ok(false),
         },
         Provider::OpenCodeZen => {
-            let entries = opencode_export(None)?.ok_or_else(|| anyhow!(MACHINE_NEEDS_OPENCODE))?;
+            let entries = opencode_export(None)?.ok_or_else(|| opencode_missing("machine"))?;
             let Some(active) = opencode_active(&entries) else {
                 return Ok(false);
             };
@@ -537,7 +536,7 @@ async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
                 .as_str()
                 .ok_or_else(|| anyhow!("OpenCode credential has no id"))?;
             // A same-id entry here is one Zen no longer accepts; the received one replaces it.
-            let entries = opencode_export(None)?.ok_or_else(|| anyhow!(MACHINE_NEEDS_OPENCODE))?;
+            let entries = opencode_export(None)?.ok_or_else(|| opencode_missing("machine"))?;
             if entries.iter().any(|existing| existing["id"] == id) {
                 opencode_run(&["auth", "logout", "opencode", id])?;
             }
@@ -933,6 +932,15 @@ mod tests {
                 .unwrap(),
         )
     }
+    fn mini() -> crate::durable::Machine {
+        crate::durable::Machine {
+            id: crate::durable::MachineId::new(),
+            route: "mini".into(),
+            label: Some("mini".into()),
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
+            observed_at: time::OffsetDateTime::UNIX_EPOCH,
+        }
+    }
     fn executable(path: &Path, text: &str) {
         fs::write(path, text).unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
@@ -1050,13 +1058,7 @@ echo '{"id":2,"result":{"account":{"email":"person@example.com","planType":"plus
             .await
             .unwrap();
         store.upsert_provider_account(&account).await.unwrap();
-        let machine = crate::durable::Machine {
-            id: crate::durable::MachineId::new(),
-            route: "mini".into(),
-            label: Some("mini".into()),
-            created_at: time::OffsetDateTime::UNIX_EPOCH,
-            observed_at: time::OffsetDateTime::UNIX_EPOCH,
-        };
+        let machine = mini();
         executable(&root.path().join("bin/ssh"), "#!/bin/sh\necho true\n");
         let selected = crate::provider_account::selection::AccountSelection::from_flags(
             &["codex=person@".into()],
@@ -1083,13 +1085,7 @@ echo '{"id":2,"result":{"account":{"email":"person@example.com","planType":"plus
         let _lock = crate::journal::test_env_lock();
         let root = tempfile::tempdir().unwrap();
         let _environment = Environment::isolate(root.path());
-        let machine = crate::durable::Machine {
-            id: crate::durable::MachineId::new(),
-            route: "mini".into(),
-            label: Some("mini".into()),
-            created_at: time::OffsetDateTime::UNIX_EPOCH,
-            observed_at: time::OffsetDateTime::UNIX_EPOCH,
-        };
+        let machine = mini();
         let selection = crate::provider_account::selection::AccountSelection::default();
         let cli = crate::lf::Cli::try_parse_from(["lf", "-a", "pi"]).unwrap();
         let prepared = super::prepare_launch(&machine, &selection, &cli)
@@ -1139,23 +1135,45 @@ echo '{"id":2,"result":{"account":{"email":"person@example.com","planType":"plus
         .is_err());
     }
 
-    async fn identity_server(body: serde_json::Value) -> (String, tokio::task::JoinHandle<()>) {
+    /// One-request-at-a-time HTTP stand-in; `respond` maps the raw request to (status, body).
+    async fn http_server(
+        respond: impl Fn(&str) -> (&'static str, String) + Send + 'static,
+    ) -> (String, tokio::task::JoinHandle<()>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         let task = tokio::spawn(async move {
-            loop {
-                let Ok((mut stream, _)) = listener.accept().await else {
-                    break;
-                };
+            while let Ok((mut stream, _)) = listener.accept().await {
                 let mut input = [0; 8192];
-                let _ = stream.read(&mut input).await.unwrap();
-                let body = body.to_string();
-                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let read = stream.read(&mut input).await.unwrap();
+                let (status, body) = respond(&String::from_utf8_lossy(&input[..read]));
+                let response = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
                 stream.write_all(response.as_bytes()).await.unwrap();
             }
         });
         (endpoint, task)
+    }
+    async fn identity_server(body: serde_json::Value) -> (String, tokio::task::JoinHandle<()>) {
+        http_server(move |_| ("200 OK", body.to_string())).await
+    }
+    /// Zen accepts every bearer except one containing "expired".
+    async fn zen_server() -> tokio::task::JoinHandle<()> {
+        let (endpoint, task) = http_server(|request| {
+            if request.contains("expired") {
+                (
+                    "401 Unauthorized",
+                    r#"{"error":{"message":"This API key has expired"}}"#.into(),
+                )
+            } else {
+                ("200 OK", r#"{"data":[]}"#.into())
+            }
+        })
+        .await;
+        std::env::set_var(
+            "LF_TEST_MACHINE_ZEN_URL",
+            format!("{endpoint}/zen/v1/models"),
+        );
+        task
     }
 
     #[tokio::test]
@@ -1245,33 +1263,6 @@ esac
             "value": {"type": "oauth", "access": token, "refresh": "fixture-refresh",
                 "metadata": {"accountID": account, "email": "person@example.com"}}})
     }
-    /// Zen accepts every bearer except one containing "expired".
-    async fn zen_server() -> tokio::task::JoinHandle<()> {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        std::env::set_var(
-            "LF_TEST_MACHINE_ZEN_URL",
-            format!("http://{}/zen/v1/models", listener.local_addr().unwrap()),
-        );
-        tokio::spawn(async move {
-            while let Ok((mut stream, _)) = listener.accept().await {
-                let mut input = [0; 8192];
-                let read = stream.read(&mut input).await.unwrap();
-                let (status, body) = if String::from_utf8_lossy(&input[..read]).contains("expired")
-                {
-                    (
-                        "401 Unauthorized",
-                        r#"{"error":{"message":"This API key has expired"}}"#,
-                    )
-                } else {
-                    ("200 OK", r#"{"data":[]}"#)
-                };
-                let response = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
-                stream.write_all(response.as_bytes()).await.unwrap();
-            }
-        })
-    }
-
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
     async fn received_opencode_login_becomes_active_and_a_retry_transfers_nothing() {
@@ -1375,13 +1366,7 @@ esac
             &root.path().join("bin/ssh"),
             "#!/bin/sh\ncat >/dev/null\necho 'child output secret-bytes' >&2\necho 'Error: GitHub CLI (gh) is not installed on this machine' >&2\nexit 1\n",
         );
-        let machine = crate::durable::Machine {
-            id: crate::durable::MachineId::new(),
-            route: "mini".into(),
-            label: Some("mini".into()),
-            created_at: time::OffsetDateTime::UNIX_EPOCH,
-            observed_at: time::OffsetDateTime::UNIX_EPOCH,
-        };
+        let machine = mini();
         let error = super::remote_command(&machine, &["machine"], Some(b"secret-bytes"))
             .unwrap_err()
             .to_string();

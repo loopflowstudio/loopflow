@@ -371,8 +371,10 @@ jobs:
             --event-stream-version 0 \
             2>&1 | tee "$RUNNER_TEMP/swift-tests/output.log"
         # Bound native test execution, including subprocess cleanup, rather
-        # than holding the PR for GitHub's six-hour default on a hang.
-        timeout-minutes: 20
+        # than holding the PR for GitHub's six-hour default on a hang. A green
+        # run takes ~13 minutes, ~8 of them building the density world; slow
+        # macos-15 runners take 2.5x that.
+        timeout-minutes: 35
       - name: Preserve Swift failure evidence
         if: failure()
         uses: actions/upload-artifact@v7

@@ -85,33 +85,20 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
 /// Resolve the repository configuration before touching a planning remote.
 /// A Linear outage cannot select Git: routing is configuration, not availability.
 pub(crate) async fn configured_destination(store: &Store, repo: &str) -> OpsResult<Option<String>> {
-    use crate::config::{load_config, PlanningConfig};
+    use crate::config::{load_config, GitPlan, PlanningConfig};
     let config = load_config(Some(Path::new(repo)))
         .map_err(message)?
         .unwrap_or_default();
-    let PlanningConfig::Git { remote, shared } = config.planning_transport() else {
+    let PlanningConfig::Git { remote, plan } = config.planning_transport() else {
         return Ok(None);
     };
-    let reference = match shared {
-        Some(name) => format!("refs/loopflow/planning/shared/{name}"),
-        None => {
-            let key = match store.planning_user_key().await.map_err(message)? {
-                Some(key) => key,
-                None => {
-                    let key = uuid::Uuid::new_v4().to_string();
-                    let result = store.provision_planning_user_key(&key).await;
-                    match store.planning_user_key().await.map_err(message)? {
-                        Some(saved) => saved,
-                        None => {
-                            result.map_err(message)?;
-                            key
-                        }
-                    }
-                }
-            };
-            format!("refs/loopflow/planning/users/{key}")
-        }
+    let key = match plan {
+        GitPlan::Shared(_) => None,
+        GitPlan::Personal => Some(provisioned_user_key(store).await?),
     };
+    let reference = plan
+        .reference(key.as_deref())
+        .expect("a personal plan has a provisioned user key");
     let destination =
         crate::planning_git::PlanningDestination::resolve(Path::new(repo), &remote, &reference)
             .map_err(message)?;
@@ -122,26 +109,37 @@ pub(crate) async fn configured_destination(store: &Store, repo: &str) -> OpsResu
     Ok(Some(id))
 }
 
+/// The first personal connection creates the key; a concurrent creator's key wins.
+async fn provisioned_user_key(store: &Store) -> OpsResult<String> {
+    if let Some(key) = store.planning_user_key().await.map_err(message)? {
+        return Ok(key);
+    }
+    let key = uuid::Uuid::new_v4().to_string();
+    let result = store.provision_planning_user_key(&key).await;
+    match store.planning_user_key().await.map_err(message)? {
+        Some(saved) => Ok(saved),
+        None => result.map(|()| key).map_err(message),
+    }
+}
+
 /// Passive status uses configuration, never a persisted copy of its selection.
 /// Retained routes remain readable in a Work folder without a Git checkout.
 pub(crate) async fn peer_status(
     store: &Store,
     repo: &str,
 ) -> OpsResult<Vec<crate::store::PeerPlanningStatus>> {
-    let config = crate::config::load_config(Some(Path::new(repo)))
+    use crate::config::{load_config, GitPlan, PlanningConfig};
+    let config = load_config(Some(Path::new(repo)))
         .map_err(message)?
         .unwrap_or_default();
-    let crate::config::PlanningConfig::Git { remote, shared } = config.planning_transport() else {
+    let PlanningConfig::Git { remote, plan } = config.planning_transport() else {
         return Ok(Vec::new());
     };
-    let reference = match shared {
-        Some(name) => Some(format!("refs/loopflow/planning/shared/{name}")),
-        None => store
-            .planning_user_key()
-            .await
-            .map_err(message)?
-            .map(|key| format!("refs/loopflow/planning/users/{key}")),
+    let key = match plan {
+        GitPlan::Shared(_) => None,
+        GitPlan::Personal => store.planning_user_key().await.map_err(message)?,
     };
+    let reference = plan.reference(key.as_deref());
     let active = if crate::repo::discover_repo_root(Path::new(repo))
         .map_err(message)?
         .is_some()

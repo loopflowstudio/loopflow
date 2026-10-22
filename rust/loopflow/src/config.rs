@@ -212,16 +212,94 @@ pub struct LinearConfig {
 /// One synchronization destination for the repository's local planning.
 /// Repository configuration overrides the personal default as one value.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(try_from = "RawPlanningConfig", into = "RawPlanningConfig")]
 pub enum PlanningConfig {
+    Git { remote: String, plan: GitPlan },
+    Linear {},
+}
+
+/// Which ref on the planning remote carries this repository's plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitPlan {
+    /// `refs/loopflow/planning/shared/<name>`, read and written by everyone.
+    Shared(String),
+    /// `refs/loopflow/planning/users/<planning user key>`, one person's plan.
+    Personal,
+}
+
+impl Default for GitPlan {
+    fn default() -> Self {
+        Self::Shared("main".into())
+    }
+}
+
+impl GitPlan {
+    /// A personal plan has no reference until its user key exists.
+    pub fn reference(&self, user_key: Option<&str>) -> Option<String> {
+        match self {
+            Self::Shared(name) => Some(format!("refs/loopflow/planning/shared/{name}")),
+            Self::Personal => user_key.map(|key| format!("refs/loopflow/planning/users/{key}")),
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
+enum RawPlanningConfig {
     Git {
         #[serde(default = "default_planning_remote")]
         remote: String,
-        /// Omit for this user's stable personal ref.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         shared: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        personal: bool,
     },
     Linear {},
+}
+
+impl TryFrom<RawPlanningConfig> for PlanningConfig {
+    type Error = String;
+
+    fn try_from(raw: RawPlanningConfig) -> Result<Self, Self::Error> {
+        let RawPlanningConfig::Git {
+            remote,
+            shared,
+            personal,
+        } = raw
+        else {
+            return Ok(Self::Linear {});
+        };
+        let plan = match (shared, personal) {
+            (Some(name), true) => {
+                return Err(format!(
+                    "planning sets both `shared: {name}` and `personal: true`; keep one"
+                ))
+            }
+            (Some(name), false) => GitPlan::Shared(name),
+            (None, true) => GitPlan::Personal,
+            (None, false) => GitPlan::default(),
+        };
+        Ok(Self::Git { remote, plan })
+    }
+}
+
+impl From<PlanningConfig> for RawPlanningConfig {
+    fn from(config: PlanningConfig) -> Self {
+        match config {
+            PlanningConfig::Git { remote, plan } => {
+                let (shared, personal) = match plan {
+                    GitPlan::Shared(name) => (Some(name), false),
+                    GitPlan::Personal => (None, true),
+                };
+                Self::Git {
+                    remote,
+                    shared,
+                    personal,
+                }
+            }
+            PlanningConfig::Linear {} => Self::Linear {},
+        }
+    }
 }
 
 fn default_planning_remote() -> String {
@@ -232,7 +310,7 @@ impl Default for PlanningConfig {
     fn default() -> Self {
         Self::Git {
             remote: default_planning_remote(),
-            shared: None,
+            plan: GitPlan::default(),
         }
     }
 }
@@ -1066,7 +1144,7 @@ supported_harnesses:
 
 #[cfg(test)]
 mod planning_config_tests {
-    use super::{merge_config_values, Config, PlanningConfig};
+    use super::{merge_config_values, Config, GitPlan, PlanningConfig};
 
     #[test]
     fn repository_transport_replaces_personal_provider_fields() {
@@ -1087,16 +1165,30 @@ mod planning_config_tests {
             selected.planning_transport(),
             PlanningConfig::Git {
                 remote: "origin".into(),
-                shared: Some("employees".into())
+                plan: GitPlan::Shared("employees".into())
             }
         );
         assert_eq!(
             Config::default().planning_transport(),
             PlanningConfig::Git {
                 remote: "origin".into(),
-                shared: None
+                plan: GitPlan::Shared("main".into())
             }
         );
+        let personal: Config =
+            serde_yaml_ng::from_str("planning:\n  provider: git\n  personal: true\n").unwrap();
+        assert_eq!(
+            personal.planning_transport(),
+            PlanningConfig::Git {
+                remote: "origin".into(),
+                plan: GitPlan::Personal
+            }
+        );
+        let both = serde_yaml_ng::from_str::<Config>(
+            "planning:\n  provider: git\n  shared: team\n  personal: true\n",
+        )
+        .unwrap_err();
+        assert!(both.to_string().contains("personal: true"), "{both}");
         assert!(serde_yaml_ng::from_str::<Config>(
             "planning:\n  provider: linear\n  shared: employees\n"
         )

@@ -1,9 +1,8 @@
 # From install to an open Loopflow
 
-Status: reviewed direction recorded; installer process lifecycle implemented.
-Product direction is confirmed below; implementation details and missing proof
-are identified separately and are not claims of acceptance.
-Full setup implementation and live Mac acceptance remain outstanding.
+Status: accepted direction; Rust installer activation, PATH, destination and
+native agent install implemented (see This slice). Swift setup, auth/GitHub
+actions and live Mac acceptance remain outstanding.
 Baseline: `102522bc25adc146d4b8cc3f343677ed8170f636`.
 Research performed 2026-09-26 (run-local date).
 
@@ -147,7 +146,7 @@ headless installation. Linux and `--cli-only` never promise an installed app.
 
 After successful activation, the installation owner adds one clearly marked,
 idempotent PATH block to the default Mac zsh's interactive startup file
-(`${ZDOTDIR:-$HOME}/.zshrc`). The block conditionally prepends the actual install
+(`.zshrc` in ZDOTDIR, else HOME). The block conditionally prepends the actual install
 directory. Preserve unrelated content, including a missing final newline;
 quote paths with spaces or shell metacharacters as literals. Reinstallation
 replaces the owned block rather than appending duplicates. Do not infer
@@ -279,7 +278,7 @@ installed-tool ordering when no explicit setup choice or configuration exists.
 | Is the claimed empty screen current? | Code: primary launch is `PodiumView` → `WorkspaceNavigator` when no repo is selected. Its menu can contain no repository and no actions. “Author a Wave” belongs to `WorkSurfaceView`; `WavesView` is a different scene. | Change the actual primary boundary. Live confirmation remains required before UI implementation. |
 | Does the download button run this installer? | No. `website/content.yaml` points at `Loopflow-latest.dmg`; the full verified installer is a separate path. The DMG bundles lf/lfd, but this research did not prove drag-install activation. | Jack chose to retain DMG acquisition; implement and prove activation from first app launch. |
 | Can a standard account use the current app installer? | The shell installer exits if `/Applications` is unwritable. An explicit target already exists. | Select a user-writable target without sudo and keep later updates at that target. |
-| Can setup work with no repo? | Current conversation launch requires repo scope. Native terminal surfaces and provider-auth commands need no project concept. | Give setup a shell surface, not a fabricated conversation/Task. |
+| Can setup work with no repo? | Conversation launch requires repo scope (source read). Native terminal surfaces and provider-auth commands need no project concept. | Give setup a shell surface, not a fabricated conversation/Task. |
 | Can readiness reuse auth text verbatim? | No JSON mode exists; service status can prefer a stored token, and Codex's broker uses file token extraction. | Add a typed native-status observation in the existing owner. Do not treat cached token presence as live execution proof. |
 | Can existing tests establish the finish? | `uv run pytest python/tests/test_shell_installer.py -q`: 16 passed in 6.13s. Tests stub network, archives and promotion and inherited host PATH/HOME. Existing UI modes explicitly distinguish fixtures from live reads. | Add the missing shell boundary proof; retain a real account trial separately. |
 
@@ -419,73 +418,57 @@ of this branch or a clean account. No clean Mac account was created.
 
 ## This slice
 
-Copied-app activation remains the current slice. This implementation pass
-repairs the completion boundary identified by the installer and concept reviews.
-Local and published promotion commit selection in the existing active receipt
-before reopening; Home recovery and app reopen must succeed before that receipt
-is archived and removed. Recovery of a committed receipt does not quiesce or
-replace the app again. Reopening first observes the verified app executable, so
-retry after an already successful open does not request another window. Failed
-unadvanced rollback retains the receipt until the prior Home and app return.
+Status (2026-10-22): copied-app activation's Rust side and the first provider
+setup action are implemented; Swift first-launch integration, the remaining
+setup actions and all live acceptance are outstanding.
 
-No receipt field, schema, startup-routing rule, or installation authority was
-added. The existing `Settled` phase records committed selection; the active
-receipt's presence still means completion work remains. Recovery preserves the
-recorded retained releases, including when active selection and archival are
-already durable but removal of the pending receipt was interrupted. This closes
-the source-ordering gap in the earlier reviews; it does not establish live
-acceptance of the installer entry, keeper, Launch Services, or copied app.
+Implemented in the existing installer owner:
 
-Focused fixtures exercise first installation, published and development updates,
-startup authorization before and after selection commit, failed open, retry with
-an already running fixture app, interruption after archival, helper-only
-completion, and unadvanced update rollback. Native `/bin/sleep` copies stand in
-for app processes; the GUI-open boundary explicitly fails under unit tests.
-Tests use temporary machine roots, not HOME overrides or this account's install
-state. They do not execute real promotion/recovery commands or prove the retained
-helper survives its GUI parent's exit. First-install rollback still refuses
-ordinary helper startup until cancellation completes; the copied-app activation
-entry must exercise its install-command recovery bypass in the eventual live
-proof rather than treating an unadvanced candidate as an active installation.
+- `lf install activate-app --bundle <app>` runs from the opened bundle's own
+  helper (digest-checked, also after promotion re-execs retained bytes). It
+  refuses disk-image/read-only-volume and AppTranslocation copies with the drag
+  instruction, and a copy older than the active release. It then runs ordinary
+  published promotion with the bundle as source and target, then writes PATH.
+- Published promotion with an app source verifies `codesign --deep --strict`
+  and `spctl --assess` before any target changes; `release/install.sh` no
+  longer verifies signatures itself.
+- `ActiveInstall.activation` records the activation targets (absent in records
+  written by released lf; those read as `None`). `app_destination()`:
+  `LF_APPLICATIONS_DIR` > recorded app > `/Applications` if writable >
+  `~/Applications`. Promotion resolves it when `--app-target` is omitted;
+  `install.sh`, `scripts/install.py local` and `lf install`'s current-release
+  check all use it.
+- `lf install shell-path` and activation share one marked block in
+  `.zshrc` in ZDOTDIR, else HOME (symlink-followed, idempotent, single-quoted
+  path, failure names the exact `export` repair). `install.sh` calls it on
+  macOS and prints a quoted `export` for the current terminal. Installer
+  pytest fixtures always set HOME and ZDOTDIR.
+- `lf install agent <codex|claude>` downloads the official installer to a
+  file, runs it from home and succeeds only when the executable answers
+  `--version` (uncached). `GUIDED_AGENTS` in `engine/agent.rs` is the single
+  definition; missing-tool errors and doctor fallbacks name these installers
+  and offer both tools.
 
-Still required: signed repo-independent bundle activation, Swift first-launch
-integration, shared durable PATH setup with isolated HOME/ZDOTDIR fixtures,
-recorded destination retention, and real helper/registration/reopen proofs. The
-running-app baseline remains required before UI edits. This headless run has no
-rendering environment or fresh account; no UI or newcomer walkthrough is changed.
-The complete design, provider/GitHub setup, clean-account acceptance, and public
-channel verification above remain the target.
+Remaining, in order: Swift first-launch call to activate-app (progress,
+failure, retry; app is quiesced/reopened by promotion when source == target —
+unproven live); `lf auth status --json` native-status DTO with Rust/Swift
+fixture and Codex `login status`; `lf auth connect --default-agent`; `gh`
+acquisition and GitHub sign-in; primary-window setup view after the running-app
+baseline; docs; then the clean-account Done-when trials. The retained-helper
+GUI-exit survival and real promotion/recovery entry remain unproven
+(prior reviews, commit `d5c043c13a`).
 
 ## Slice ledger
 
-Concept review on 2026-09-26: [concept-review.md](concept-review.md) now reflects
-the repaired completion model and shared selection constructor. No additional
-product concept or production defect was identified. It reuses the completion
-review's proof and preserves all live-boundary and full-design acceptance gaps.
-
-Completion review on 2026-09-26: [installer-completion-review.md](installer-completion-review.md)
-supersedes the earlier receipt-ordering finding after reviewing the full branch
-through `c64bfbc62`. Seven lifecycle tests passed in 1.65 seconds after compilation;
-ownership searches found no competing completion authority. Real command-entry
-recovery, retained-helper survival, signed copied-app activation and clean-account
-acceptance remain unproven. No production code changed or publication occurred.
+Earlier lifecycle, completion and compression reviews (2026-09-26) are in git
+at `d5c043c13a` (`scratch/installer-*-review.md`, `compress-review.md`); their
+open findings are folded into Remaining above.
 
 | Evidence | Result | Limit |
 |---|---|---|
-| Completion model compression, 2026-09-26 | Local promotion, published promotion and recovery now share `active_install_from_switch`; removed both promotion-specific retention constructors. `cargo test -p loopflow --lib app_activation_tests`: 7 passed, 1.24 seconds after compilation, including exact retained-history assertions. Formatting, clippy and diff checks passed. | Same isolated process fixtures; no receipt, startup, UI or external contract changes. Live helper survival, copied-app activation and clean-account proof remain outstanding. See `compress-review.md`. |
-| Initial branch inspection | Clean at supplied base; scratch contained only `.gitkeep`; repo guide and growth memory read. | No previous design to reconcile. |
-| Minimal environment zsh probe | Login and interactive shells omitted `.local/bin`; explicit PATH resolved the fixture. | Developer OS, temporary HOME, stand-in executable. |
-| Existing shell installer tests | 16 passed, 6.13 seconds. | Simulated release transport/promotion; no new-shell test. |
-| Real installer script with isolated fixture transport | Exit 0; installed fixture; no profile files; new login shell could not find lf. | CLI-only simulation; app and machine activation stubbed. |
-| Primary-window and auth source review | Corrected the assumed UI location and found reusable auth plus native-status gaps. | No rendered/live app observation. |
-| Simulated design review | Added DMG-vs-installer distinction, safe test HOME isolation, same-window opening, and provider default persistence. | These are proposed changes, not implementation evidence. |
-| Installer process lifecycle, 2026-09-26 | `cargo test -p loopflow --lib app_activation_tests`: 4 passed. Selected native fixture processes stop, another copy survives, helper-only shutdown requests no window, restart intent is persisted, and restart targets must match retained bytes. | Native `/bin/sleep` copies in temporary bundles; no real app, promotion, account, or browser sign-in. Initial fixture setup failed on a missing parent directory; fixed before the passing run. |
-| Bundle staging, 2026-09-26 | `cargo test -p loopflow --lib artifact_tests`: 4 passed, including same-source/destination staging without changing the original bundle. | File fixtures only; not signed-release acceptance or interruption of a real promotion. |
-| Implementation review, 2026-09-26 | Removed the app-ID-wide quit operation. A bundled published promotion helper re-execs retained bytes before shutdown so it is not one of the processes being stopped. No new receipt or installation authority. | Full helper re-exec, GUI-exit survival, registration, actual reopen, and repeated first launch still need configured-path proof. |
-| Static checks, 2026-09-26 | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed. | No affected-suite gate, Swift/UI tests, or public-channel trial in this implementation pass. |
-| Completion boundary, 2026-09-26 | `cargo test -p loopflow --lib app_activation_tests`: 7 passed, 1.25 seconds after compilation. First install, published/development updates, failed open, prior/target CLI and bundled-helper store authorization, existing-process retry, interruption after archival, helper-only completion, and unadvanced-update rollback pass. | Temporary machine roots and native sleep processes; open is a test-only failing side effect. No real installer-entry recovery, keeper restart, GUI window, or clean-account trial. |
-| Completion implementation review, 2026-09-26 | Kept the existing receipt schema and routing. Moved local reopen after selection commit; delayed archive/removal through Home recovery and reopen; preserved pending rollback. Found and fixed retained-release loss during reconstruction and reused the exact recorded active selection after partial archival. | P1's source-ordering defect is repaired. P2's retained-helper exec/GUI-parent-exit proof remains missing, along with configured-path verification of completion. |
-| Completion verification, 2026-09-26 | `cargo test -p loopflow --lib machine_install::tests`: 23 passed, 0.29 seconds after compilation. `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed. | Focused implementation proof and static checks only; no affected-suite gate, UI changes/tests, machine promotion, account sign-in, or publication. |
+| Shell/no-PATH probes (kickoff) | Fresh zsh lacked `.local/bin`; installer wrote no startup file. | Temporary HOME, developer OS. |
+| Lifecycle + completion fixtures (2026-09-26) | `app_activation_tests` 7 passed; `machine_install::tests` 23 passed; fmt/clippy passed. | Native sleep stand-ins; no real promotion, keeper or GUI. |
+| Installer/agent slice (2026-10-22) | `cargo test -p loopflow --lib` for install::{shell_path,bundle,published,agent}, machine_install, app_activation_tests, engine::agent: all passed (38 + 64 + 16 in focused runs). Fresh `zsh -ic` resolves a path with spaces/quotes/`$`/backquotes. Built `lf install shell-path` with `env -i` HOME/ZDOTDIR twice: one block, `command -v lf` resolves. `activate-app` on a non-bundle and on a mismatched helper refuses before any state read. `test_shell_installer.py` 19 passed. clippy/fmt/ruff clean. | No real signed bundle, promotion, provider installer download, or clean account. Affected-suite gate not run. |
 
 ## Measure
 

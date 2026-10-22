@@ -2,7 +2,7 @@
 
 Reviewed LOO-312, Jack's accepted [design](a-newcomer-gets-from-download.md),
 growth memory, the full production diff from `102522bc2` through `c64bfbc62`,
-and the [completion review](installer-completion-review.md). Preserved that
+and the completion review (git `d5c043c13a`). Preserved that
 review's pending notes in checkpoint `1650f2d97` before editing. This document
 supersedes the earlier concept review's outstanding receipt-ordering finding.
 

@@ -1,6 +1,7 @@
 //! Session names projected into their attached terminal. Only the pre-spawn
 //! write uses OSC: writing alongside a native provider can split escape frames.
-//! cmux has a separate control channel for its workspace/tab names and renames.
+//! cmux and tmux have separate control channels for their workspace, tab and
+//! window names, so those follow renames.
 
 use std::collections::BTreeMap;
 use std::io::{IsTerminal, Write};
@@ -68,6 +69,50 @@ pub(crate) fn standing(
     Ok((!parts.is_empty()).then(|| parts.join(" · ")))
 }
 
+/// A host whose own names for this terminal Loopflow keeps current.
+#[derive(Debug)]
+enum HostNames {
+    Cmux { workspace: String, surface: String },
+    Tmux { pane: String },
+}
+
+impl HostNames {
+    fn current() -> Option<Self> {
+        let var = |name| std::env::var(name).ok().filter(|value| !value.is_empty());
+        if let (Some(workspace), Some(surface)) = (var("CMUX_WORKSPACE_ID"), var("CMUX_SURFACE_ID"))
+        {
+            return Some(Self::Cmux { workspace, surface });
+        }
+        var("TMUX")
+            .and(var("TMUX_PANE"))
+            .map(|pane| Self::Tmux { pane })
+    }
+
+    fn rename(&self, name: &str) -> std::io::Result<()> {
+        match self {
+            Self::Cmux { workspace, surface } => {
+                host_command(
+                    "cmux",
+                    &["rename-workspace", "--workspace", workspace, "--", name],
+                )?;
+                host_command(
+                    "cmux",
+                    &[
+                        "rename-tab",
+                        "--workspace",
+                        workspace,
+                        "--surface",
+                        surface,
+                        "--",
+                        name,
+                    ],
+                )
+            }
+            Self::Tmux { pane } => host_command("tmux", &["rename-window", "-t", pane, "--", name]),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct TerminalTitle {
     store: SqliteStore,
@@ -75,7 +120,7 @@ pub(crate) struct TerminalTitle {
     attachment: Option<SessionAttachment>,
     name: String,
     provider_name: String,
-    cmux: Option<(String, String)>,
+    host: Option<HostNames>,
     checked: Instant,
 }
 
@@ -90,7 +135,13 @@ impl TerminalTitle {
         }
         let input = environment.get(crate::session_record::CAPTURE_KEY_ENV)?;
         let mut title = match Self::load(input) {
-            Ok(Some(title)) => title,
+            Ok(Some(mut title)) => {
+                // Under a retained execution, each viewer names its own host window.
+                if crate::transport::current().is_some() {
+                    title.host = None;
+                }
+                title
+            }
             Ok(None) => return None,
             Err(error) => {
                 tracing::warn!(%error, "cannot read terminal Session name");
@@ -113,8 +164,28 @@ impl TerminalTitle {
             tracing::warn!(%error, "cannot set terminal Session name");
         }
         title.publish();
-        // Only cmux can observe renames while the provider owns terminal output.
-        title.cmux.is_some().then_some(title)
+        // Only a host control channel can carry renames while the provider owns terminal output.
+        title.host.is_some().then_some(title)
+    }
+
+    fn viewing(owner: &crate::id::LfProcessId) -> Option<Self> {
+        let load = || -> anyhow::Result<Option<Self>> {
+            let store =
+                SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
+            let Some(id) = store.transport_session(owner)? else {
+                return Ok(None);
+            };
+            let Some(session) = store.session(&id)? else {
+                return Ok(None);
+            };
+            Self::from_session(store, session).map(Some)
+        };
+        let mut title = load()
+            .inspect_err(|error| tracing::debug!(%error, "cannot read viewed Session name"))
+            .ok()
+            .flatten()?;
+        title.publish();
+        title.host.is_some().then_some(title)
     }
 
     fn load(input: &str) -> anyhow::Result<Option<Self>> {
@@ -123,23 +194,24 @@ impl TerminalTitle {
         let Some(session) = store.session_for_artifact(input)? else {
             return Ok(None);
         };
+        Self::from_session(store, session).map(Some)
+    }
+
+    fn from_session(store: SqliteStore, session: LfSession) -> anyhow::Result<Self> {
         let name = session_title(&store, &session)?;
-        Ok(Some(Self {
+        Ok(Self {
             attachment: store.session_attachment(&session.id)?,
             provider_name: name.provider,
             name: name.terminal,
             store,
             session: session.id.to_string(),
-            cmux: std::env::var("CMUX_WORKSPACE_ID")
-                .ok()
-                .zip(std::env::var("CMUX_SURFACE_ID").ok())
-                .filter(|(workspace, surface)| !workspace.is_empty() && !surface.is_empty()),
+            host: HostNames::current(),
             checked: Instant::now(),
-        }))
+        })
     }
 
     pub(crate) fn refresh(&mut self) {
-        if self.cmux.is_none() || self.checked.elapsed() < Duration::from_millis(500) {
+        if self.host.is_none() || self.checked.elapsed() < Duration::from_millis(500) {
             return;
         }
         self.checked = Instant::now();
@@ -150,10 +222,10 @@ impl TerminalTitle {
             }
             Ok(Some(_)) => {}
             // A handed-off attachment must stop changing the old terminal's names.
-            Ok(None) => self.cmux = None,
+            Ok(None) => self.host = None,
             Err(error) => {
                 tracing::warn!(%error, "cannot refresh terminal Session name");
-                self.cmux = None;
+                self.host = None;
             }
         }
     }
@@ -169,31 +241,63 @@ impl TerminalTitle {
     }
 
     fn publish(&mut self) {
-        let Some((workspace, surface)) = &self.cmux else {
+        let Some(host) = &self.host else {
             return;
         };
-        let result = rename_cmux(&[
-            "rename-workspace",
-            "--workspace",
-            workspace,
-            "--",
-            &self.name,
-        ])
-        .and_then(|()| {
-            rename_cmux(&[
-                "rename-tab",
-                "--workspace",
-                workspace,
-                "--surface",
-                surface,
-                "--",
-                &self.name,
-            ])
-        });
-        if let Err(error) = result {
-            tracing::warn!(%error, "cmux title update failed; Session continues");
-            self.cmux = None;
+        if let Err(error) = host.rename(&self.name) {
+            tracing::warn!(%error, "terminal host title update failed; Session continues");
+            self.host = None;
         }
+    }
+}
+
+impl Drop for TerminalTitle {
+    /// A tmux window names its running program again once the Session leaves it.
+    fn drop(&mut self) {
+        if let Some(HostNames::Tmux { pane }) = &self.host {
+            let _ = host_command(
+                "tmux",
+                &["set-option", "-wu", "-t", pane, "automatic-rename"],
+            );
+        }
+    }
+}
+
+/// A viewer's host window, named for the Session it views. The execution may
+/// link its Session after the viewer attaches, so the viewer keeps looking.
+#[derive(Debug)]
+pub(crate) struct ViewerTitle {
+    owner: crate::id::LfProcessId,
+    title: Option<TerminalTitle>,
+    /// Until when to look; executions without a Session never get one.
+    looking: Option<Instant>,
+    checked: Option<Instant>,
+}
+
+impl ViewerTitle {
+    pub(crate) fn new(owner: &crate::id::LfProcessId) -> Self {
+        Self {
+            owner: owner.clone(),
+            title: None,
+            looking: HostNames::current().map(|_| Instant::now() + Duration::from_secs(10)),
+            checked: None,
+        }
+    }
+
+    pub(crate) fn tick(&mut self) {
+        if let Some(title) = &mut self.title {
+            title.refresh();
+            return;
+        }
+        if self.looking.is_none_or(|until| Instant::now() > until)
+            || self
+                .checked
+                .is_some_and(|checked| checked.elapsed() < Duration::from_millis(500))
+        {
+            return;
+        }
+        self.checked = Some(Instant::now());
+        self.title = TerminalTitle::viewing(&self.owner);
     }
 }
 
@@ -223,8 +327,8 @@ fn session_title(store: &SqliteStore, session: &LfSession) -> StoreResult<Sessio
     })
 }
 
-fn rename_cmux(args: &[&str]) -> std::io::Result<()> {
-    let mut child = Command::new("cmux")
+fn host_command(program: &str, args: &[&str]) -> std::io::Result<()> {
+    let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -234,12 +338,12 @@ fn rename_cmux(args: &[&str]) -> std::io::Result<()> {
     if timed_out {
         Err(std::io::Error::new(
             std::io::ErrorKind::TimedOut,
-            "cmux title update timed out",
+            format!("{program} title update timed out"),
         ))
     } else if status.success() {
         Ok(())
     } else {
-        Err(std::io::Error::other(format!("cmux exited {status}")))
+        Err(std::io::Error::other(format!("{program} exited {status}")))
     }
 }
 
@@ -271,7 +375,7 @@ mod tests {
             attachment: Some(attachment.clone()),
             name: session.title.clone(),
             provider_name: session.title,
-            cmux: None,
+            host: None,
             checked: std::time::Instant::now(),
         };
         title

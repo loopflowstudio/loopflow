@@ -1420,19 +1420,49 @@ fn main() -> std::process::ExitCode {
     std::process::ExitCode::from(code)
 }
 
+/// Diagnostics go to `logs/lf.log` in the selected home; the terminal shows
+/// what commands print and the errors they return. `-v` or `RUST_LOG` shows
+/// diagnostics on stderr instead.
 fn init_tracing(verbose: bool) {
-    let default_filter = if verbose {
-        "lf=info,loopflow=info"
-    } else {
-        "warn"
-    };
+    let filter = EnvFilter::try_from_default_env().ok();
+    if verbose || filter.is_some() {
+        tracing_subscriber::fmt()
+            .with_env_filter(filter.unwrap_or_else(|| EnvFilter::new("lf=info,loopflow=info")))
+            .with_writer(std::io::stderr)
+            .without_time()
+            .init();
+        return;
+    }
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter)),
-        )
-        .with_writer(std::io::stderr)
-        .without_time()
+        .with_env_filter(EnvFilter::new("warn"))
+        .with_ansi(false)
+        .with_writer(|| DiagnosticLog)
         .init();
+}
+
+/// Opened per event, so a command that logs nothing creates no home.
+struct DiagnosticLog;
+
+impl std::io::Write for DiagnosticLog {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let directory = loopflow::store::lf_home_dir().join("logs");
+        let log = std::fs::create_dir_all(&directory).and_then(|()| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(directory.join("lf.log"))
+        });
+        match log {
+            Ok(mut log) => log.write_all(bytes),
+            // An unwritable home still runs; its diagnostics stay visible.
+            Err(_) => std::io::stderr().write_all(bytes),
+        }?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {

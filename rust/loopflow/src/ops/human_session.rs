@@ -714,6 +714,17 @@ pub(crate) async fn open(
                 if crate::transport::current() != Some(&owner)
                     && owner_running(&store.sqlite, &owner)?
                 {
+                    // This viewer takes control, so the conversation is now
+                    // shown where it runs, not where it was launched.
+                    if let Some(attachment) = store.sqlite.session_attachment(&session.id)? {
+                        store.sqlite.record_session_terminal(
+                            &session.id,
+                            &attachment,
+                            crate::session_record::current_terminal_id()
+                                .or_else(crate::lf::commands::open::host_placement)
+                                .as_deref(),
+                        )?;
+                    }
                     crate::transport::attach(&owner, false, true)?;
                     return surface(store, session).await;
                 }

@@ -1352,7 +1352,6 @@ esac
     }
 
     #[test]
-    #[allow(clippy::await_holding_lock)]
     fn remote_failure_names_the_remote_lf_error_only() {
         let _lock = crate::journal::test_env_lock();
         let root = tempfile::tempdir().unwrap();

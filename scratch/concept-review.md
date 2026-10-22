@@ -31,9 +31,8 @@ current `PodiumModel`, not the older repo scene). No account store,
 setup-complete flag, synthetic Session, alternate repository list or Swift
 provider preference. Installing a tool never changes the default agent; a
 saved token alone never means a usable account. Cancelled sign-in rechecks and
-offers Sign in again; a timeout stays unknown with Retry. Docs to update once
-behavior works: `docs/getting-started.md`, Mac download text in
-`website/content.yaml`.
+offers Sign in again; a timeout stays unknown with Retry. Once the view works,
+its actions replace the CLI setup block in `docs/getting-started.md`.
 
 Smallest missing lifecycle proof: in a disposable Mac account, run the retained
 helper and real recovery entry, terminating the GUI parent and interrupting

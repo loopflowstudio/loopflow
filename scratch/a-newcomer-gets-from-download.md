@@ -363,8 +363,8 @@ of this branch or a clean account. No clean Mac account was created.
 
 ## Internal slices
 
-1. **Activate a dragged app.** (Rust side implemented; Swift entry and
-   live proof outstanding.) Record the running baseline before UI edits.
+1. **Activate a dragged app.** (Rust and Swift first-launch entry
+   implemented; app-bundle build and live proof outstanding.) Record the running baseline before UI edits.
    Trace and implement the copied-bundle entry into the existing promotion
    owner, including first-install app restart and durable helper registration.
    Isolate installer fixtures before profile writes; share PATH persistence
@@ -385,9 +385,10 @@ of this branch or a clean account. No clean Mac account was created.
 
 ## This slice
 
-Status (2026-10-22): copied-app activation's Rust side and the first provider
-setup action are implemented; Swift first-launch integration, the remaining
-setup actions and all live acceptance are outstanding.
+Status (2026-10-22): copied-app activation (Rust and Swift first launch),
+provider/GitHub status and sign-in, and the getting-started docs are
+implemented; the primary-window setup view and all live acceptance are
+outstanding.
 
 Implemented in the existing installer owner:
 
@@ -457,7 +458,9 @@ Remaining:
    recovery commands in its shell, only after the running-app baseline is
    recorded (needs a display session; not recordable headless). Its docs then
    replace the CLI setup block in getting-started.
-2. The clean-account Done-when trials (real signed bundle, first-install
+2. App-bundle build (`xcodebuild`) of the activation entry at gate; only
+   `swift build`/`swift test` ran.
+3. The clean-account Done-when trials (real signed bundle, first-install
    quit/reopen through promotion, installer, browser sign-in, `gh` download).
 
 The live baseline and clean-account acceptance are open gaps; Jack directed
@@ -482,6 +485,7 @@ open findings are folded into Remaining above.
 | Realign (2026-10-22) | Plan matched code; origin/main unchanged since `98dab5ea8e`; no tests rerun. | Reuses results above. |
 | Swift activation (2026-10-22) | `swift test --filter AppActivationTests` 2 passed (progress → refusal → Retry → open; settled launches skip the helper); `swift build` passed; `install::bundle` 4 passed; documented_commands 4 passed; fmt/clippy clean. | Held closure stands in for the helper; no app bundle, xcodebuild or GUI. |
 | Compress (Swift activation) | Release README activation paragraph untangled; folding `.failed` into the view's own error broke `AppActivationTests` (unhosted `@State` is invisible), so the state stays. `AppActivationTests` 2 passed. | Same limits. |
+| Realign (after Swift activation) | Plan, docs and code agree; origin/main unchanged since `98dab5ea8e`; `website/content.yaml` already links the DMG and getting-started, so no change. No tests rerun. | Reuses results above. |
 
 Proposed Wave memory update after landing (memory is read-only here): items 1,
 3 and 7 of "What stands between a newcomer and a first task" are addressed in

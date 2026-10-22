@@ -13,8 +13,47 @@ pub fn run(cmd: &PlanningCommand) -> Result<()> {
     runtime.block_on(run_async(&repo, cmd))
 }
 
-async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
-    let store = crate::store::open_registry_for_authority()
+/// Whether the repository containing `checkout` plans through a Git ref.
+pub fn plans_through_git(checkout: &Path) -> Result<bool> {
+    let repo = crate::git::worktrees::main_repo_root(checkout)?;
+    let config = crate::config::load_config(Some(&repo))?.unwrap_or_default();
+    Ok(matches!(
+        config.planning_transport(),
+        crate::config::PlanningConfig::Git { .. }
+    ))
+}
+
+/// `lf refresh` under Git planning: exchange the repository's planning ref now.
+/// The exchange is per repository, so a Wave selection has no effect.
+pub fn refresh(checkout: &Path) -> Result<()> {
+    let repo = crate::git::worktrees::main_repo_root(checkout)?;
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = open_store().await?;
+        let repo_key = repo.to_string_lossy();
+        // Publication acquires first, so one exchange brings teammates' changes
+        // in and sends this Machine's pending ones out.
+        crate::ops::planning_sync::publish_repository(&store, &repo_key).await?;
+        let destinations = crate::ops::planning_sync::peer_status(&store, &repo_key).await?;
+        let Some(active) = destinations.into_iter().find(|d| d.active) else {
+            return Err(anyhow!(
+                "no Git planning destination is configured; see `lf planning status`"
+            ));
+        };
+        if let Some(error) = active.acquisition_error {
+            return Err(anyhow!("planning refresh failed: {error}"));
+        }
+        println!(
+            "{}  imported {}  {} records",
+            active.reference,
+            active.imported_revision.as_deref().unwrap_or("none"),
+            active.selected_records
+        );
+        Ok(())
+    })
+}
+
+async fn open_store() -> Result<Store> {
+    crate::store::open_registry_for_authority()
         .await
         .map_err(|error| match error {
             RegistryUnavailable::MissingFile { path } => anyhow!(
@@ -28,7 +67,11 @@ async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
                 "Machine registry at {} is incompatible: {error}; run `lf doctor`",
                 path.display()
             ),
-        })?;
+        })
+}
+
+async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
+    let store = open_store().await?;
     let repo_key = repo.to_string_lossy();
     match cmd {
         PlanningCommand::Key { new, recover } => {

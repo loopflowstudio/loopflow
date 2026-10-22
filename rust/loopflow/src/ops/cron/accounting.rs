@@ -1471,6 +1471,7 @@ mod tests {
     fn spec(root: &Path) -> CronSpec {
         CronSpec {
             wave: "infrastructure".into(),
+            published: false,
             graph: "release-run".into(),
             command: vec![
                 "--wave".into(),

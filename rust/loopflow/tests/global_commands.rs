@@ -473,7 +473,7 @@ fn context_explanation_works_outside_git_and_preserves_unavailable_registry() {
 fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
     let home = tempfile::tempdir().unwrap();
     for operation in [
-        "list",
+        "state",
         "hide",
         "restore",
         "focus",
@@ -500,7 +500,7 @@ fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
             ],
         )
         .args(match operation {
-            "list" => vec!["--json"],
+            "state" => vec!["--json"],
             "text" => vec!["--pane", "absent", "literal"],
             "key" => vec!["--pane", "absent", "enter"],
             "read" => vec!["--pane", "absent", "--region", "screen"],

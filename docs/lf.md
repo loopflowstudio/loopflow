@@ -136,9 +136,27 @@ lf task status TASK --json       # ownership: {owner, superseded_by, log}
 ```
 
 A Task is owned by a person on a Machine, or unowned. `task checkout` and `task run`
-claim an unowned Task when they allocate its checkout. Handoff needs only the
-target's identity, not a connection. Completion, abandonment and reopening leave
-ownership alone; a Done Task shows its last owner.
+claim an unowned Task when they allocate its checkout. A claim names you by your
+Git `user.email` (lowercased), so set one before claiming. Names are display only:
+a claim is yours when it carries your email, so two people without names never
+mistake each other's claims, even on a Machine you both use. Use the same
+`user.email` on all your Machines. A claim written before emails were recorded is
+yours when it holds one of your Machines (this one or one added with `lf machine add`). Handoff needs only the target's identity, not a connection.
+Completion, abandonment and reopening leave ownership alone; a Done Task shows its
+last owner. `lf task status` prints the log as `Oct 21 14:02  claim  Lee on lee-mbp`,
+and `lf wave show`, `lf task list` and `lf wave status` name each Task's owner.
+
+```bash
+lf machine public lee-mbp        # teammates see this name on your claims and crons
+lf machine public off            # private again: they see only the Machine id
+```
+
+Machines are private by default. Your own Machines read by their local labels;
+a teammate sees a private Machine's id, or the public name it had when the entry
+was written.
+
+Under Git planning the first checkout records the Task's branch in the plan, so a
+teammate who claims and runs it checks out the same branch and finds the same PR.
 
 ```bash
 lf machine use mini infrastructure            # this Wave's new Tasks and its Session
@@ -225,7 +243,7 @@ its start. See [workflows](authoring.md#workflows).
 lf wave show product --json              # current and retained chapter planning
 lf wave workflow list                 # Workflow definitions and validity
 lf wave workflow set code WAVE     # selection for future Tasks
-lf wave workflow source feature WAVE # read the definition
+lf wave workflow source feature      # read the definition
 lf task workflow show EXP-12             # captured graph, position and history
 lf task workflow restart EXP-12          # move to start; retain graph and history
 lf graph list                            # autonomous Graph definitions
@@ -320,9 +338,7 @@ recorded repository; outside a repository, ticket aliases must be globally uniqu
 lf task edit <id> --rank 0 --assignee <person-id>
 lf task edit <id> --unassign
 lf wave edit-plan WAVE --name "Parser" --summary "Retain quoted input"
-lf wave workflow set review WAVE --file /tmp/review.yaml
-lf wave workflow list --wave WAVE --json
-lf wave workflow source review WAVE
+lf wave workflow set review WAVE      # .lf/workflows/review.yaml or a builtin
 lf wave edit-plan WAVE --description "Preserve quoted text across machines."
 lf wave update-plan --wave parser --plan /tmp/plan.json
 ```
@@ -416,6 +432,15 @@ win; this flag does not retry deletion or allocate another issue.
 a Git preference in `~/.lf/config.yaml`.
 
 ```bash
+lf refresh                          # Git planning: exchange with teammates now
+```
+
+Under Git planning, `lf refresh` fetches and imports the repository's planning
+ref, then publishes this Machine's pending changes. It exits non-zero with the
+recorded error when the exchange fails. The
+exchange is per repository, so a Wave name or `--all` changes nothing.
+
+```bash
 lf planning status --json
 lf planning key                    # show this machine's personal planning key
 lf planning key --recover <uuid>   # reuse it on a fresh second machine
@@ -460,27 +485,24 @@ Machine: Sessions and their history, Graph runs and Workflow position, checkouts
 and scratch, usage, accounts and routes, and installed crons. Each of you has
 your own conversation for a Wave or a Task.
 
-- **Names.** Claims compare display names: a Task claimed under your name, or
-  with no name on either side, reads as yours. Give each person a distinct
-  `lf user` name before claiming.
-- **Branches.** A Task's branch starts with your Git user name
-  (`dustin/etu-20-…`), so two people's branches don't collide. A Linear issue's
-  recorded branch is reused by whoever runs it.
+- **Names.** Claims compare your Git `user.email`, lowercased. `lf user` sets
+  your display name; changing it does not change whose claims are yours.
+- **Branches.** The first checkout records the Task's branch. Whoever takes
+  over reuses it and its pull request, under Git planning as under Linear.
 - **Taking over.** The owner pushes commits and scratch, then runs
   `lf task unclaim`; you `lf task claim` and `lf task run`. Their Workflow
   position, Graph history and Sessions stay on their Machine;
-  `lf task workflow move ETU-20 demo` puts you where they were. With Git
-  planning a takeover gets your own branch, so a new pull request.
-- **Operating Waves.** `wave-operate` and `repo-operate` act on every owned
-  Task, and a teammate's live Graph is invisible from your Machine: their Task
-  looks idle. Agree who operates each Wave.
+  `lf task workflow move ETU-20 demo` puts you where they were.
+- **Operating Waves.** `wave-operate` and `repo-operate` advance your existing
+  Tasks and leave teammates' Tasks and the plan alone.
 - **Reviewing.** A Workflow's design and demo nodes happen in the owner's
   conversation. A teammate reviews the pull request: publish a draft at the
   design node with `lf pr publish`.
-- **Comments.** With Git planning, a teammate's comment syncs but does not
-  steer your agents; with Linear it does.
-- **Crons.** Repository `crons:` run on every Machine that syncs them. One
-  person installs each Wave's jobs.
+- **Comments.** A teammate's comment reaches your agents at their next
+  supported boundary, under Git planning as under remote planning providers.
+- **Crons.** Install your own with `lf cron add`. They run only on that
+  Machine. Publish individual jobs with `lf cron publish` so teammates can
+  see them; fetching a published cron never installs it.
 - **Process.** A repository Skill or Graph outranks a personal one of the same
   name, so change the team's in a pull request. To try your own variant, save
   it under a new name in `~/.lf/skills`.
@@ -736,27 +758,24 @@ preserving the child's identity, PR, Session and design.
 
 ## Schedule ordinary commands
 
-```yaml
-# .lf/config.yaml
-crons:
-  - name: daily-review
-    command: [--wave, product, --batch, skill, wave/operate]
-    schedule: 0 0 9 * * *
-```
-
 ```bash
-lf cron preflight                  # validate configuration and Wave Machines
-lf cron sync                       # explicitly install the configured list
-lf cron list --wave product         # filter by the command's Work selector
-lf cron list --task EXP-12
 lf cron add daily-review --schedule daily -- --wave product --batch skill wave/operate
+lf cron publish daily-review       # let teammates see it; crons are private by default
+lf cron list                       # yours, then teammates' published crons
+lf cron list --wave product        # filter by the command's Work selector
+lf cron unpublish daily-review
+lf cron remove --wave product --flow daily-review
+lf cron sync                       # reinstall yours with the current lf
 ```
 
-Commands use ordinary `lf` arguments, including `--wave` and `--task`.
-Reading or cloning the repository installs nothing. Each Machine that syncs runs the jobs, so with two people, one installs them. An explicit `crons: []`
-removes the repository's jobs when synced; an absent list leaves them alone.
-Scope-filtered sync only changes matching jobs. Existing job names and Wave
-selectors retain installed identities and receipt history.
+Crons are yours: they run only on the Machine that installed them and are never
+committed. Commands use ordinary `lf` arguments, including `--wave` and
+`--task`. Only published crons reach Git: each Machine pushes its published
+crons, with your Git `user.email`, its Machine id and public name, if any, to
+`refs/loopflow/crons/<machine-id>` on `origin`. `lf cron list` shows a
+teammate's published crons as theirs, not installed here. When the fetch fails,
+it shows the last observed state and when it was published. Existing job names
+and Wave selectors retain installed identities and receipt history.
 
 ## Check authorized deliveries in the background
 
@@ -997,7 +1016,10 @@ lf task run LOO-427 --explain --json
 lf --explain                                # resolve the current checkout
 lf session connect SESSION_ID --explain
 lf history show PROCESS_LFID --explain
-lf desktop list --json                       # read an already-running Mac app
+lf desktop state --json                       # read an already-running Mac app
+lf desktop view 'query:attention'             # open a Dashboard in its repository window
+lf desktop view 'state:available' --plan       # derive Work without opening Desktop
+lf desktop query attention 'state:available'  # create a Dashboard; edits need --revision
 ```
 
 Explanation reads local records without allocating a checkout, creating a plan,
@@ -1009,6 +1031,23 @@ permission to start. Process checkout resolution describes current Work at that
 location, not historical usage attribution. Ordinary `lf context` still reads
 prompt budgets.
 
+`desktop view EXPRESSION` opens the shared query results as a Dashboard in the Mac
+app, including unsaved queries. Save the Dashboard to name, pin and arrange it.
+Only Dashboard query results compose Tasks side by side; ordinary navigation
+selects one destination. `state --json` includes the
+selected `view` plan, retained occurrences, hidden members and duplicate winners.
+Repository and Wave navigation still opens their ordinary conversations.
+
+`desktop view --plan`, `query`, `pin`/`unpin`, `rename`, `arrange`, `slots`,
+`order` and `layout` work without macOS and print JSON. Plans contain
+shared selection/arrangement intent and current Work evidence, including explicit
+missing primary Sessions or locations. They acquire no client and do not describe
+native mounted panes. Query edits use the saved revision; `query:ID` reopens the
+Dashboard. Revisit restores the earlier expression’s arrangement. Dashboards
+have independent identities and arrangements; repository/Wave defaults remain
+built in. `layout` reads or saves the referenced Work’s portable pane/draft intent
+without mounting panes. See [query syntax and plan fields](../rust/loopflow/src/work/README.md).
+
 Desktop receives the Work address and resolves it through `lf open --link
 --json`; it never repeats repository selection. A Task address opens the Task's
 primary conversation through its ordinary primary-Session owner. `--session`
@@ -1017,7 +1056,7 @@ Changes browser without replacing file selection or drafts. Session and Changes
 requests require the Task's execution location.
 
 JSON returns `opening`, not `usable`: macOS accepting a link proves no native
-endpoint. `desktop list --json` includes each window's latest Task `opening`
+endpoint. `desktop state --json` includes each window's latest Task `opening`
 reading and lookup failures. Page mounting and requested Session/Changes readiness
 settle that request; connection/comparison failures remain visible. These receipts
 are not configured/native acceptance, and `opening` must not authorize pane input.
@@ -1027,7 +1066,8 @@ operations run on that owner after a fresh location read. Missing owners never c
 a local checkout or transfer execution.
 
 Desktop inspection reports registered repository/window identities, selection,
-reading availability and retained Work pane trees with focus, zoom
+reading availability, the outer `layout` split tree with axes and ratios,
+and retained Work pane trees with focus, zoom
 and hidden panes. Each workspace reports its repository/Wave/Task key, title, open
 state and selection; Machine/checkout locations belong to its pane contents. `task` forwards Rust's recommendation and `run_control`;
 `session` forwards its actions, including unavailable reasons and takeover warnings.
@@ -1041,16 +1081,17 @@ content incarnation; inspection never creates a surface or cleans up an exited
 child. Neither token authorizes terminal input.
 It requires macOS and a running app with automation access; failure leaves
 `lf task status <task>` available in the terminal.
-The outer checkout-slot `layouts` field is removed; `workspaces` retains pane trees.
-Opening Work selects its named tab without starting a conversation or preparing a
-checkout. Closing a tab hides its workspace; reopening restores panes, drafts and
-zoom. Closing the last tab starts nothing. This retention lasts for the window,
-not across app quit. Mutation receipts identify `work` and `pane`, not readiness.
+The window `layout` places open Work; `workspaces` also includes retained Work
+outside that tree. Hiding a Dashboard occurrence preserves its split position and inner panes;
+restoring it keeps edits made to its visible neighbors. Work navigation starts no
+Session or checkout. Pane layouts, selected tool tabs and file drafts save through
+lfdb; restored shell tabs remain unattached. Mutation receipts identify `work` and
+`pane`, not readiness.
 
 Select Work and use pane IDs from the retained layout:
 
 ```sh
-lf desktop list --json
+lf desktop state --json
 lf --task LOO-427 desktop text -- 'add to the draft'
 lf --task LOO-427 desktop key enter
 lf --repo loopflow --task LOO-427 desktop hide --pane "$pane"
@@ -1062,7 +1103,9 @@ PTY selects that terminal within the chosen Work. Explicit `--pane` wins.
 Otherwise one eligible pane is selected; ambiguity lists choices and changes
 nothing. Redirected stdin, agent tool subprocesses without that PTY, and markers
 inherited across SSH do not establish caller identity: use `--pane` when needed.
-Selection never follows current focus. Text/key/read require an existing terminal surface. Restore without a pane
+Terminal targeting never follows current focus. Use `--pane shell:ID` or the raw shell ID
+to address a retained shell, including a background tab. State lists ordered `tabs`
+and `selected_tab` on each Shell pane. Text/key/read require an existing terminal surface. Restore without a pane
 selects a unique hidden pane. Wave and Task scope select their Work workspace;
 a repository without Task scope considers its retained workspaces. Unavailable Work
 or no matching pane produces an error without opening a window or preparing Work.
@@ -1079,10 +1122,16 @@ lf --task LOO-427 desktop zoom --pane "$pane"
 lf --task LOO-427 desktop zoom --pane "$pane" --off
 ```
 
-Shell adds a tab to the Task’s single Shell tool on its recorded execution Machine and checkout; a missing remote location refuses before changing layout.
+Each Task has one Shell pane. Creating a shell adds and selects a tab with its own
+identity and recorded Task location. Repository and Wave shell requests change nothing.
+Files reuse one Task pane and one document per path; reopening a file selects its tab
+and preserves its draft.
 
 ```sh
-pane=$(lf --task LOO-427 desktop shell --pane "$anchor" --json | jq -r .pane)
+receipt=$(lf --task LOO-427 desktop shell --json)
+pane=$(printf '%s' "$receipt" | jq -r .pane)
+shell=$(printf '%s' "$receipt" | jq -r .tab)
+lf --task LOO-427 desktop focus --pane "shell:$shell"
 lf --task LOO-427 desktop zoom --pane "$pane"
 lf help desktop shell --json          # installed arguments and JSON result schema
 lf help desktop --all --json          # all Desktop command contracts
@@ -1091,17 +1140,18 @@ lf help desktop --all --json          # all Desktop command contracts
 Structured help derives syntax from Clap and Desktop output schemas from their
 wire types. It describes the installed CLI without opening the app. A null
 `result_schema` means that command has no schema advertised yet. Running-app
-support remains in `desktop list`; current Work eligibility stays in its legal
+support remains in `desktop state`; current Work eligibility stays in its legal
 actions. A successful shell receipt may precede its surface: inspect readiness
 before input, and do not repeat creation after a lost reply.
 
 Move and resize use two distinct panes in the same Machine/checkout. Vertical
 places a pane to the right; horizontal below. Resize gives the selected side its
 share (0.1–0.9). Move, resize, zoom, hide and restore retain drafts and
-selection. Focus selects the addressed pane without changing Work or foregrounding
-a window. Closing a view does not end a Session. Mutations print the affected
-pane ID; `--json` adds its repository, window, Machine, checkout and observation
-time. Companions return the created or reused pane.
+selection. Focus selects the addressed pane, preserving a visible Dashboard or
+opening the pane's workspace when needed, without foregrounding a window.
+Closing a view does not end a Session. Mutations print the affected
+pane ID; `--json` adds its repository, window, Work and observation time.
+Shell receipts identify the tool pane and newly selected tab separately.
 A receipt confirms the operation, not terminal readiness or usable rendering. Inspect after a lost reply; shell creation is not safe to replay.
 
 ```sh

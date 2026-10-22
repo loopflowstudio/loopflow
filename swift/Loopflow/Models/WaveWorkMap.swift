@@ -162,11 +162,18 @@ public struct MachineRef: Decodable, Sendable, Hashable {
 /// The person and Machine that own a Task.
 public struct TaskOwner: Decodable, Sendable, Hashable {
     public let person: String?
+    /// The owner's lowercase Git email; shown when they have no name.
+    public let personKey: String?
     public let machine: MachineRef
+
+    enum CodingKeys: String, CodingKey {
+        case person, machine
+        case personKey = "person_key"
+    }
 
     /// "Jack Heart on mini"; "Machine unknown" when the Machine was never recorded.
     public var summary: String {
-        let person = person ?? "Someone"
+        let person = person ?? personKey ?? "Someone"
         if let label = machine.label, !label.isEmpty { return "\(person) on \(label)" }
         if let id = machine.id { return "\(person) on \(id)" }
         return "\(person) · Machine unknown"
@@ -441,5 +448,11 @@ public enum WorkEvidence<Item: Decodable & Sendable & Hashable>: Decodable, Send
     public var unavailableReason: String? {
         if case let .unavailable(reason) = self { return reason }
         return nil
+    }
+
+    /// The items that pass `isIncluded`; unavailable evidence stays unavailable.
+    public func filter(_ isIncluded: (Item) -> Bool) -> WorkEvidence<Item> {
+        guard case let .available(items, truncated) = self else { return self }
+        return .available(items: items.filter(isIncluded), truncated: truncated)
     }
 }

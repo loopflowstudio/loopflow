@@ -766,7 +766,7 @@ Connect a Wave to its Initiative and the repository's Team (Task prefix)
 
 ## lf repo refresh
 
-Refresh shared planning from Linear
+Refresh shared planning now: Linear per Wave, or the repository's Git planning ref (Git ignores the Wave selection; its exchange is per repository)
 
 | Argument | What it does |
 |---|---|
@@ -1043,10 +1043,105 @@ Open Work's conversation in Desktop, this cmux/Herdr host or a terminal
 
 ## lf desktop
 
-Inspect and control Loopflow Desktop panes (macOS only)
+Select Work and control Loopflow Desktop panes
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf desktop view
+
+Show a Work selection, or derive a passive plan for external hosts
+
+| Argument | What it does |
+|---|---|
+| `<expression>` | wave/task/query/kind/state expression; omitted uses the repository default |
+| `--plan` | Print the derived plan as JSON without opening Desktop or starting a provider Default: false. |
+| `--json` | Print the opening receipt as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop query
+
+Create or edit a Dashboard query with revision checking; prints the Dashboard as JSON
+
+| Argument | What it does |
+|---|---|
+| `<container>` | Dashboard name or query:ID |
+| `<expression>` | Selection expression, as for `lf desktop view` |
+| `--revision` | Last observed revision; omit only when creating a new Dashboard |
+| `--help / -h` | Print help |
+
+## lf desktop pin
+
+Pin a Dashboard in repository discovery; prints the Dashboard as JSON
+
+| Argument | What it does |
+|---|---|
+| `<query>` | Dashboard name or query:ID |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop unpin
+
+Unpin a Dashboard without changing its membership or arrangement; prints the Dashboard as JSON
+
+| Argument | What it does |
+|---|---|
+| `<query>` | Dashboard name or query:ID |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop rename
+
+Rename a Dashboard or Task through its shared owner; prints the owner's record as JSON
+
+| Argument | What it does |
+|---|---|
+| `<target>` | query:ID or task:<durable-id> |
+| `<name>` | The new name, written to the shared owner so labels and crumbs follow |
+| `--revision` | The target's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop arrange
+
+Replace a Dashboard's occurrence order and hidden members from JSON on stdin; prints the Dashboard as JSON
+
+| Argument | What it does |
+|---|---|
+| `<query>` | Dashboard name or query:ID |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop slots
+
+Replace a Dashboard's slot layout from JSON on stdin; `null` restores the default
+
+| Argument | What it does |
+|---|---|
+| `<query>` | Dashboard name or query:ID |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop order
+
+Move a member into another's place: the repository's Task order, or a Dashboard's with --query; prints the result as JSON
+
+| Argument | What it does |
+|---|---|
+| `<member>` | Member to move: task:<durable-id>, or wave:<durable-id> on a Dashboard |
+| `--to` | Member whose place it takes |
+| `--query` | Dashboard whose order to edit instead of the repository's Task order |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop layout
+
+Read portable pane intent as JSON, or save a complete revision-checked record from stdin
+
+| Argument | What it does |
+|---|---|
+| `<work>` | repository, wave:<durable-id> or task:<durable-id> |
+| `--save` | Replace the record from JSON on stdin instead of reading it Default: false. |
 | `--help / -h` | Print help |
 
 ## lf desktop text
@@ -1105,7 +1200,7 @@ Restore an exact hidden pane without selecting Work or acquiring a client
 
 ## lf desktop focus
 
-Focus an exact pane in its retained workspace (does not select Work)
+Focus an exact pane, opening its retained workspace when needed
 
 | Argument | What it does |
 |---|---|
@@ -1115,7 +1210,7 @@ Focus an exact pane in its retained workspace (does not select Work)
 
 ## lf desktop shell
 
-Add a shell tab on the Task’s recorded Machine
+Add and select a shell tab at the Task’s recorded location
 
 | Argument | What it does |
 |---|---|
@@ -1178,7 +1273,7 @@ Zoom an exact retained pane without changing selection; --off unzooms it
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf desktop list
+## lf desktop state
 
 Read actual windows and panes without launching, focusing, or acquiring clients
 
@@ -1202,7 +1297,7 @@ Install a separate login on an added machine using this laptop's browser
 | Argument | What it does |
 |---|---|
 | `<target>` | target |
-| `<provider>` | provider |
+| `<provider>` | github, claude, codex, opencode or linear |
 | `<email>` | email |
 | `--chrome-profile` | chrome profile |
 | `--help / -h` | Print help |
@@ -1231,6 +1326,15 @@ Receive a fresh login as JSON on stdin; preserve existing accounts
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf machine public
+
+Name this Machine for teammates, or `off` to make it private again. A private Machine's ownership entries and published crons carry only its id
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
 | `--help / -h` | Print help |
 
 ## lf machine id
@@ -1497,12 +1601,11 @@ Select and inspect the Wave default Workflow
 
 ## lf wave workflow source
 
-Read the authored definition without creating a repository file
+Print a definition from `.lf/workflows/` or the builtins
 
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
-| `<wave>` | wave |
 | `--help / -h` | Print help |
 
 ## lf wave workflow list
@@ -1511,7 +1614,6 @@ List Workflow definitions, including unavailable local files
 
 | Argument | What it does |
 |---|---|
-| `--wave` | Include this Wave's stored Workflow definitions |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1527,13 +1629,12 @@ Show the Wave's default Workflow
 
 ## lf wave workflow set
 
-Select the Workflow future Tasks take up; captured Tasks stay unchanged
+Select the Workflow future Tasks take up; captured Tasks stay unchanged. Definitions are committed `.lf/workflows/<name>.yaml` files or builtins
 
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
 | `<wave>` | wave |
-| `--file` | Store this definition in the Wave |
 | `--help / -h` | Print help |
 
 ## lf wave edit-plan
@@ -1622,12 +1723,13 @@ Install a named ordinary lf command on this Machine
 |---|---|
 | `<name>` | Stable job name, retained across command changes |
 | `--schedule` | Daily or every-minute cron expression, or a schedule alias Default: daily. |
+| `--publish` | Let teammates see this cron; crons are private by default Default: false. |
 | `<command>` | Arguments passed to lf, after -- |
 | `--help / -h` | Print help |
 
 ## lf wave cron list
 
-List installed loopflow cron jobs
+List jobs installed here, then teammates' published ones
 
 | Argument | What it does |
 |---|---|
@@ -1636,24 +1738,32 @@ List installed loopflow cron jobs
 | `--json` | Emit machine-readable job state Default: false. |
 | `--help / -h` | Print help |
 
-## lf wave cron preflight
+## lf wave cron publish
 
-Validate configured commands and your Wave Machine without installing jobs
+Let teammates see an installed cron (pushed to origin)
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | Only commands with this --wave selector |
-| `--task` | Only commands with this --task selector |
+| `<name>` | name |
+| `--wave / -w` | The cron's Wave, when the name is installed for more than one |
+| `--help / -h` | Print help |
+
+## lf wave cron unpublish
+
+Make an installed cron private again
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--wave / -w` | The cron's Wave, when the name is installed for more than one |
 | `--help / -h` | Print help |
 
 ## lf wave cron sync
 
-Reconcile installed jobs with the repository configuration's cron list
+Reinstall this Machine's jobs with the current lf
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | Only commands with this --wave selector |
-| `--task` | Only commands with this --task selector |
 | `--repo` | Install the finite repository Task check on this Machine Default: false. |
 | `--disable` | Remove the repository schedule; running work retains its authority Default: false. |
 | `--help / -h` | Print help |

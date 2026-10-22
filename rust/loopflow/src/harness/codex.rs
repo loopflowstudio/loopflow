@@ -1008,7 +1008,13 @@ impl CodexHarness {
             }
         }
         let directory = if connection.is_none() {
-            Some(tempfile::tempdir()?)
+            // Codex refuses a socket parent other users could write to. A
+            // umask of 002 (Ubuntu's default) would otherwise make it 0775.
+            Some(
+                tempfile::Builder::new()
+                    .permissions(std::os::unix::fs::PermissionsExt::from_mode(0o700))
+                    .tempdir()?,
+            )
         } else {
             None
         };
@@ -1092,8 +1098,18 @@ impl CodexHarness {
             loop {
                 if let Some(child) = &mut child {
                     if let Some(status) = child.try_wait()? {
+                        // Codex says why it stopped; the person needs that line.
+                        let mut stderr = String::new();
+                        if let Some(mut pipe) = child.stderr.take() {
+                            let _ = tokio::time::timeout(
+                                Duration::from_secs(1),
+                                tokio::io::AsyncReadExt::read_to_string(&mut pipe, &mut stderr),
+                            )
+                            .await;
+                        }
                         return Err(anyhow!(
-                            "codex app-server exited before opening its socket: {status}"
+                            "codex app-server exited before opening its socket ({status}){}",
+                            crate::os_process::exit_reason(&stderr)
                         ));
                     }
                 }

@@ -9,7 +9,7 @@ lf debug -c
 Build software with other people and their coding agents. Each task has one
 owner, its own working copy and one pull request, so several people's agents can
 work in one project without colliding. The plan is shared through Linear or a shared
-Git ref; a comment on a Linear task reaches its agents before their next step;
+Git ref; a comment on a task reaches its agents before their next step;
 and each task's workflow stops for a person where judgment counts. Skills, Graphs
 and workflows are files in the project, reviewed like code. Conversations stay on
 your computer; only the plan travels.
@@ -216,7 +216,7 @@ after an agent turn, when showing planning, and before a Linear write. Team chec
 share ten-second freshness. Only Desktop and `--watch` keep a slow clock, backing
 off while nothing changes; idle agents do not poll. Teams without live Tasks make
 no acquisition requests. A rate limit pauses requests across repositories in the
-same Home until reset, retaining pending writes. Acquired Task comments become steers for each associated
+same Home until reset, retaining pending writes. Acquired Task comments, through Linear or Git planning, become steers for each associated
 Session, with independent delivery at its next supported provider boundary.
 With Git planning, `lf comment` steers this Machine's Sessions; comments imported
 from another Machine join the plan without becoming steers.

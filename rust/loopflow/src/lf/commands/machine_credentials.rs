@@ -48,6 +48,12 @@ enum Credential {
         oauth_client_id: String,
         expires_at: Option<i64>,
     },
+    /// One `opencode auth export` entry; `login` is its OpenCode account, or the
+    /// entry itself for an API key.
+    OpenCode {
+        login: String,
+        entry: serde_json::Value,
+    },
 }
 
 pub(super) async fn connect(
@@ -58,6 +64,7 @@ pub(super) async fn connect(
     batch: bool,
 ) -> Result<()> {
     let store = open_account_store().await?;
+    let mut verified = "";
     let credential = match provider {
         Provider::Claude => {
             let email = email.ok_or_else(|| anyhow!("{provider} requires a login email"))?;
@@ -100,10 +107,7 @@ pub(super) async fn connect(
                 return Ok(());
             }
             require_foreground(batch)?;
-            eprintln!(
-                "Connecting {provider} {login} on {}",
-                machine.label.as_deref().unwrap_or(&machine.route)
-            );
+            connecting(machine, provider, login);
             let (staging, identity) =
                 super::account::fresh_machine_login(&store, provider, &account, chrome_profile)
                     .await?;
@@ -162,7 +166,59 @@ pub(super) async fn connect(
                 expires_at: fresh.expires_at,
             }
         }
-        _ => bail!("machine login supports github, claude, codex and linear"),
+        Provider::OpenCodeZen => {
+            let entries = opencode_export(None, "laptop")?;
+            let active = opencode_active(&entries).ok_or_else(|| {
+                anyhow!("OpenCode has no active login on this laptop; run `opencode auth login`")
+            })?;
+            let login = opencode_identity(active)
+                .ok_or_else(|| anyhow!("OpenCode's active login has no identity"))?
+                .to_string();
+            let oauth = active["value"]["type"] == "oauth";
+            let account_email = active["value"]["metadata"]["email"].as_str();
+            match (email, account_email) {
+                (Some(_), None) => bail!(
+                    "OpenCode's active login is an API key, which names no email; connect without one"
+                ),
+                (Some(expected), Some(actual)) if !expected.eq_ignore_ascii_case(actual) => {
+                    bail!("OpenCode login does not match the requested account")
+                }
+                _ => {}
+            }
+            if !oauth {
+                zen_check(opencode_token(active)).await?;
+            }
+            if remote_has(machine, provider, &login)? {
+                return Ok(());
+            }
+            require_foreground(batch)?;
+            let entry = if oauth {
+                // A copied login would share the laptop's refresh grant; mint a fresh one.
+                connecting(machine, provider, account_email.unwrap_or(&login));
+                let staging = tempfile::Builder::new()
+                    .prefix("lf-machine-login-")
+                    .tempdir()?;
+                super::account::fresh_opencode_login(&store, chrome_profile, staging.path())
+                    .await?;
+                let fresh = opencode_active(&opencode_export(Some(staging.path()), "laptop")?)
+                    .cloned()
+                    .ok_or_else(|| {
+                        anyhow!("OpenCode device login completed without a credential")
+                    })?;
+                if opencode_identity(&fresh) != Some(login.as_str()) {
+                    bail!("fresh OpenCode login belongs to a different account; discarded");
+                }
+                zen_check(opencode_token(&fresh)).await?;
+                verified =
+                    ": Zen accepted a fresh login for the same OpenCode account as this laptop";
+                fresh
+            } else {
+                verified = ": Zen accepted the API key; its owner was not checked";
+                active.clone()
+            };
+            Credential::OpenCode { login, entry }
+        }
+        _ => bail!("machine login supports github, claude, codex, opencode and linear"),
     };
     let bytes = serde_json::to_vec(&credential)?;
     remote_command(
@@ -171,8 +227,9 @@ pub(super) async fn connect(
         Some(&bytes),
     )?;
     eprintln!(
-        "Connected {provider} on {}",
-        machine.label.as_deref().unwrap_or(&machine.route)
+        "Connected {} on {}{verified}",
+        provider.display_name(),
+        machine_name(machine)
     );
     Ok(())
 }
@@ -222,6 +279,18 @@ pub(super) async fn connect_claude_accounts(machine: &Machine, batch: bool) -> R
         .await?;
     }
     Ok(())
+}
+
+fn connecting(machine: &Machine, provider: Provider, login: &str) {
+    eprintln!(
+        "Connecting {} {login} on {}",
+        provider.display_name(),
+        machine_name(machine)
+    );
+}
+
+fn machine_name(machine: &Machine) -> &str {
+    machine.label.as_deref().unwrap_or(&machine.route)
 }
 
 fn foreground(batch: bool) -> bool {
@@ -336,11 +405,22 @@ fn remote_command(machine: &Machine, args: &[&str], input: Option<&[u8]>) -> Res
     }
     let output = child.wait_with_output()?;
     if !output.status.success() {
-        // Never include a credential-consuming process's output in an error.
+        // Only the remote lf's own error line crosses: it never quotes credential
+        // bytes, and its children's output is discarded there.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let reason = stderr
+            .lines()
+            .find_map(|line| line.strip_prefix("Error: "))
+            .map(|line| format!(": {}", line.trim()))
+            .unwrap_or_else(|| crate::os_process::exit_reason(&stderr));
         bail!(
-            "machine credential command failed on {} (exit {:?}); inspect its account status",
-            machine.route,
-            output.status.code()
+            "machine credential command failed on {}{}",
+            machine_name(machine),
+            if reason.is_empty() {
+                format!(" ({})", output.status)
+            } else {
+                reason
+            }
         );
     }
     Ok(output.stdout)
@@ -442,6 +522,22 @@ async fn installed(store: &SharedStore, provider: Provider, login: &str) -> Resu
             }
             None => Ok(false),
         },
+        Provider::OpenCodeZen => {
+            let entries = opencode_export(None, "machine")?;
+            let Some(active) = opencode_active(&entries) else {
+                return Ok(false);
+            };
+            let accepted = zen_check(opencode_token(active)).await.is_ok();
+            if opencode_identity(active) == Some(login) {
+                return Ok(accepted);
+            }
+            if accepted {
+                bail!(
+                    "a different OpenCode login is already active on this machine; left unchanged"
+                );
+            }
+            Ok(false)
+        }
         _ => bail!("unsupported machine login provider"),
     }
 }
@@ -483,7 +579,11 @@ async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
                 .stdin(Stdio::piped())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
-                .spawn()?;
+                .spawn()
+                .map_err(|error| match error.kind() {
+                    std::io::ErrorKind::NotFound => anyhow!("GitHub CLI (gh) is not installed on this machine; install it (https://cli.github.com) and run `lf machine connect` again"),
+                    _ => error.into(),
+                })?;
             child
                 .stdin
                 .take()
@@ -535,7 +635,142 @@ async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
                 .await?;
             Ok(())
         }
+        Credential::OpenCode { login, entry } => {
+            let _lock = credential_lock("opencode")?;
+            if installed(store, Provider::OpenCodeZen, &login).await? {
+                return Ok(());
+            }
+            if opencode_identity(&entry) != Some(login.as_str()) {
+                bail!("OpenCode credential identity mismatch");
+            }
+            zen_check(opencode_token(&entry)).await?;
+            let id = entry["id"]
+                .as_str()
+                .ok_or_else(|| anyhow!("OpenCode credential has no id"))?;
+            // A same-id entry here is one Zen no longer accepts; the received one replaces it.
+            let entries = opencode_export(None, "machine")?;
+            if entries.iter().any(|existing| existing["id"] == id) {
+                opencode_run(&["auth", "logout", "opencode", id])?;
+            }
+            let mut child = opencode(None, &["auth", "import"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()?;
+            child
+                .stdin
+                .take()
+                .expect("piped opencode stdin")
+                .write_all(&serde_json::to_vec(&[&entry])?)?;
+            if !child.wait()?.success() {
+                bail!("OpenCode did not import the login");
+            }
+            opencode_run(&["auth", "switch", "opencode", id])?;
+            if !installed(store, Provider::OpenCodeZen, &login).await? {
+                bail!("OpenCode did not keep the imported login active");
+            }
+            Ok(())
+        }
     }
+}
+
+/// OpenCode 2 on a private server; `home` isolates a staging login from this user's.
+pub(super) fn opencode(home: Option<&Path>, args: &[&str]) -> Command {
+    let mut command = Command::new("opencode");
+    command.args(args).arg("--standalone");
+    if let Some(home) = home {
+        command.env("HOME", home);
+        for (key, directory) in [
+            ("XDG_DATA_HOME", ".local/share"),
+            ("XDG_CONFIG_HOME", ".config"),
+            ("XDG_STATE_HOME", ".local/state"),
+            ("XDG_CACHE_HOME", ".cache"),
+        ] {
+            command.env(key, home.join(directory));
+        }
+    }
+    command
+}
+
+fn opencode_run(args: &[&str]) -> Result<()> {
+    let status = opencode(None, args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if !status.success() {
+        bail!(
+            "`opencode {}` failed (exit {:?})",
+            args[..2].join(" "),
+            status.code()
+        );
+    }
+    Ok(())
+}
+
+/// Stored OpenCode Zen credentials on this `host`; an OpenCode without `auth export` is 1.x.
+fn opencode_export(home: Option<&Path>, host: &str) -> Result<Vec<serde_json::Value>> {
+    let missing = || {
+        anyhow!("OpenCode 2 is not installed on this {host}; install it with `npm install -g @opencode/cli`")
+    };
+    // `auth export opencode` waits for input when that integration has no entry.
+    let output = match opencode(home, &["auth", "export"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        Ok(_) => return Err(missing()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err(missing()),
+        Err(error) => return Err(error.into()),
+    };
+    let entries: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout)
+        .map_err(|_| anyhow!("OpenCode returned an unreadable credential export"))?;
+    Ok(entries
+        .into_iter()
+        .filter(|entry| entry["integrationID"] == "opencode")
+        .collect())
+}
+
+fn opencode_active(entries: &[serde_json::Value]) -> Option<&serde_json::Value> {
+    entries.iter().find(|entry| entry["active"] == true)
+}
+
+/// The OpenCode account behind a login; an API key names none, so it is its own identity.
+fn opencode_identity(entry: &serde_json::Value) -> Option<&str> {
+    entry["value"]["metadata"]["accountID"]
+        .as_str()
+        .or_else(|| entry["id"].as_str())
+}
+
+fn opencode_token(entry: &serde_json::Value) -> &str {
+    entry["value"]["access"]
+        .as_str()
+        .or_else(|| entry["value"]["key"].as_str())
+        .unwrap_or_default()
+}
+
+/// Zen accepting the bearer is the check; it names no owner.
+async fn zen_check(token: &str) -> Result<()> {
+    #[cfg(test)]
+    let endpoint = std::env::var("LF_TEST_MACHINE_ZEN_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:1/zen/v1/models".into());
+    #[cfg(not(test))]
+    let endpoint = "https://opencode.ai/zen/v1/models";
+    let response = reqwest::Client::new()
+        .get(endpoint)
+        .bearer_auth(token)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|_| anyhow!("OpenCode Zen request failed"))?;
+    if response.status().is_success() {
+        return Ok(());
+    }
+    let status = response.status();
+    let body: serde_json::Value = response.json().await.unwrap_or_default();
+    let reason = body["error"]["message"].as_str().unwrap_or(status.as_str());
+    bail!("OpenCode Zen refused the login: {reason}")
 }
 
 fn credential_lock(provider: &str) -> Result<fs::File> {
@@ -749,12 +984,16 @@ pub(super) async fn prepare_launch(
                 }
         )
     );
-    if requested.is_empty() && launching {
+    // Pi owns its models and credentials, so its harness names no lf account.
+    let launch_provider = if requested.is_empty() && launching {
         let repo = super::util::find_repo_root().ok();
         let config = crate::config::load_config_or_default(repo.as_deref());
         let agent = cli.agent.as_deref().unwrap_or_else(|| config.agent());
-        let (harness, _) = crate::config::parse_agent(agent);
-        let provider = harness.parse::<Provider>()?;
+        crate::config::parse_agent(agent).0.parse::<Provider>().ok()
+    } else {
+        None
+    };
+    if let Some(provider) = launch_provider {
         let repo_id = crate::provider_account::current_repo_id()?;
         if let Some(accounts) = crate::provider_account::inspect_provider_route(
             Some(&store),
@@ -849,6 +1088,15 @@ mod tests {
                 .await
                 .unwrap(),
         )
+    }
+    fn mini() -> crate::durable::Machine {
+        crate::durable::Machine {
+            id: crate::durable::MachineId::new(),
+            route: "mini".into(),
+            label: Some("mini".into()),
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
+            observed_at: time::OffsetDateTime::UNIX_EPOCH,
+        }
     }
     fn executable(path: &Path, text: &str) {
         fs::write(path, text).unwrap();
@@ -967,13 +1215,7 @@ echo '{"id":2,"result":{"account":{"email":"person@example.com","planType":"plus
             .await
             .unwrap();
         store.upsert_provider_account(&account).await.unwrap();
-        let machine = crate::durable::Machine {
-            id: crate::durable::MachineId::new(),
-            route: "mini".into(),
-            label: Some("mini".into()),
-            created_at: time::OffsetDateTime::UNIX_EPOCH,
-            observed_at: time::OffsetDateTime::UNIX_EPOCH,
-        };
+        let machine = mini();
         executable(&root.path().join("bin/ssh"), "#!/bin/sh\necho true\n");
         let selected = crate::provider_account::selection::AccountSelection::from_flags(
             &["codex=person@".into()],
@@ -992,6 +1234,21 @@ echo '{"id":2,"result":{"account":{"email":"person@example.com","planType":"plus
             .unwrap_err();
         assert!(error.to_string().contains("foreground terminal"));
         assert_eq!(store.list_provider_accounts(None).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn remote_pi_launch_prepares_no_account() {
+        let _lock = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _environment = Environment::isolate(root.path());
+        let machine = mini();
+        let selection = crate::provider_account::selection::AccountSelection::default();
+        let cli = crate::lf::Cli::try_parse_from(["lf", "-a", "pi"]).unwrap();
+        let prepared = super::prepare_launch(&machine, &selection, &cli)
+            .await
+            .unwrap();
+        assert!(prepared.is_default());
     }
 
     #[tokio::test]
@@ -1035,23 +1292,45 @@ echo '{"id":2,"result":{"account":{"email":"person@example.com","planType":"plus
         .is_err());
     }
 
-    async fn identity_server(body: serde_json::Value) -> (String, tokio::task::JoinHandle<()>) {
+    /// One-request-at-a-time HTTP stand-in; `respond` maps the raw request to (status, body).
+    async fn http_server(
+        respond: impl Fn(&str) -> (&'static str, String) + Send + 'static,
+    ) -> (String, tokio::task::JoinHandle<()>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         let task = tokio::spawn(async move {
-            loop {
-                let Ok((mut stream, _)) = listener.accept().await else {
-                    break;
-                };
+            while let Ok((mut stream, _)) = listener.accept().await {
                 let mut input = [0; 8192];
-                let _ = stream.read(&mut input).await.unwrap();
-                let body = body.to_string();
-                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let read = stream.read(&mut input).await.unwrap();
+                let (status, body) = respond(&String::from_utf8_lossy(&input[..read]));
+                let response = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
                 stream.write_all(response.as_bytes()).await.unwrap();
             }
         });
         (endpoint, task)
+    }
+    async fn identity_server(body: serde_json::Value) -> (String, tokio::task::JoinHandle<()>) {
+        http_server(move |_| ("200 OK", body.to_string())).await
+    }
+    /// Zen accepts every bearer except one containing "expired".
+    async fn zen_server() -> tokio::task::JoinHandle<()> {
+        let (endpoint, task) = http_server(|request| {
+            if request.contains("expired") {
+                (
+                    "401 Unauthorized",
+                    r#"{"error":{"message":"This API key has expired"}}"#.into(),
+                )
+            } else {
+                ("200 OK", r#"{"data":[]}"#.into())
+            }
+        })
+        .await;
+        std::env::set_var(
+            "LF_TEST_MACHINE_ZEN_URL",
+            format!("{endpoint}/zen/v1/models"),
+        );
+        task
     }
 
     #[tokio::test]
@@ -1104,6 +1383,153 @@ chmod 600 "$GH_CONFIG_DIR/hosts.yml"
             .await
             .unwrap());
         server.abort();
+    }
+
+    /// OpenCode 2 stand-in: one file per credential, plus the active id.
+    fn opencode(root: &Path) {
+        executable(
+            &root.join("bin/opencode"),
+            r#"#!/bin/sh
+store="$HOME/opencode"; mkdir -p "$store"
+case "$2" in
+  export)
+    printf '['; sep=''
+    for file in "$store"/*.json; do
+      [ -e "$file" ] || continue
+      id=$(basename "$file" .json)
+      if [ "$id" = "$(cat "$store/active" 2>/dev/null)" ]; then
+        printf '%s' "$sep"; sed 's/"active":false/"active":true/' "$file"
+      else
+        printf '%s' "$sep"; cat "$file"
+      fi
+      sep=,
+    done
+    printf ']' ;;
+  import)
+    entry=$(cat | sed 's/^\[//; s/\]$//')
+    id=$(printf '%s' "$entry" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+    printf '%s' "$entry" > "$store/$id.json" ;;
+  switch) printf '%s' "$4" > "$store/active" ;;
+  logout) rm "$store/$4.json" ;;
+esac
+"#,
+        );
+    }
+    fn opencode_login(id: &str, account: &str, token: &str) -> serde_json::Value {
+        json!({"id": id, "integrationID": "opencode", "label": "Default", "active": false,
+            "value": {"type": "oauth", "access": token, "refresh": "fixture-refresh",
+                "metadata": {"accountID": account, "email": "person@example.com"}}})
+    }
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn received_opencode_login_becomes_active_and_a_retry_transfers_nothing() {
+        let _lock = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _environment = Environment::isolate(root.path());
+        opencode(root.path());
+        let server = zen_server().await;
+        let store = store(root.path()).await;
+        let login = |token: &str| Credential::OpenCode {
+            login: "acct-1".into(),
+            entry: opencode_login("cred_fresh", "acct-1", token),
+        };
+        install(&store, login("fresh-access")).await.unwrap();
+        install(&store, login("ignored-retry")).await.unwrap();
+        let stored = fs::read_to_string(root.path().join("opencode/cred_fresh.json")).unwrap();
+        assert!(stored.contains("fresh-access"));
+        assert!(installed(&store, Provider::OpenCodeZen, "acct-1")
+            .await
+            .unwrap());
+        server.abort();
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn working_opencode_login_stays_and_a_refused_one_is_not_imported() {
+        let _lock = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _environment = Environment::isolate(root.path());
+        opencode(root.path());
+        let server = zen_server().await;
+        let store = store(root.path()).await;
+        let refused = install(
+            &store,
+            Credential::OpenCode {
+                login: "acct-1".into(),
+                entry: opencode_login("cred_old", "acct-1", "expired-access"),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(refused.to_string().contains("This API key has expired"));
+        assert!(!root.path().join("opencode/cred_old.json").exists());
+        install(
+            &store,
+            Credential::OpenCode {
+                login: "acct-other".into(),
+                entry: opencode_login("cred_other", "acct-other", "other-access"),
+            },
+        )
+        .await
+        .unwrap();
+        let error = install(
+            &store,
+            Credential::OpenCode {
+                login: "acct-1".into(),
+                entry: opencode_login("cred_fresh", "acct-1", "fresh-access"),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("different OpenCode login"));
+        assert_eq!(
+            fs::read_to_string(root.path().join("opencode/active")).unwrap(),
+            "cred_other"
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn missing_gh_is_named_with_how_to_install_it() {
+        let _lock = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _environment = Environment::isolate(root.path());
+        let (endpoint, server) = identity_server(json!({"login":"person"})).await;
+        std::env::set_var("LF_TEST_MACHINE_GITHUB_URL", endpoint);
+        // CI images ship gh in /usr/bin; only the fixture bin stays reachable.
+        std::env::set_var("PATH", root.path().join("bin"));
+        let store = store(root.path()).await;
+        let error = install(
+            &store,
+            Credential::Github {
+                login: "person".into(),
+                token: "fixture-github-token".into(),
+            },
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("GitHub CLI (gh) is not installed on this machine"));
+        assert!(error.contains("https://cli.github.com"));
+        server.abort();
+    }
+
+    #[test]
+    fn remote_failure_names_the_remote_lf_error_only() {
+        let _lock = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _environment = Environment::isolate(root.path());
+        executable(
+            &root.path().join("bin/ssh"),
+            "#!/bin/sh\ncat >/dev/null\necho 'child output secret-bytes' >&2\necho 'Error: GitHub CLI (gh) is not installed on this machine' >&2\nexit 1\n",
+        );
+        let machine = mini();
+        let error = super::remote_command(&machine, &["machine"], Some(b"secret-bytes"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.ends_with(": GitHub CLI (gh) is not installed on this machine"));
+        assert!(!error.contains("secret-bytes"));
     }
 
     fn claude(credential: &str) -> Credential {

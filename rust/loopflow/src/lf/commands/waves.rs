@@ -379,6 +379,7 @@ pub enum RoadmapSection {
 /// evidence, bucketed by planning section.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoadmapSnapshot {
+    /// Every Task once; each names its Wave.
     pub tasks: Evidence<RoadmapTask>,
     /// RFC3339 time this read was taken.
     pub generated_at: String,
@@ -392,8 +393,25 @@ pub struct WaveRoadmap {
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
     pub metric_portfolio: MetricPortfolioDto,
-    pub tasks: Evidence<RoadmapTask>,
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
+}
+
+impl RoadmapSnapshot {
+    /// The Tasks of one Wave, in plan order.
+    pub fn wave_tasks<'a>(&'a self, wave: &WaveRoadmap) -> Evidence<&'a RoadmapTask> {
+        match &self.tasks {
+            Evidence::Ok { items, truncated } => Evidence::Ok {
+                items: items
+                    .iter()
+                    .filter(|task| task.task.wave_id.as_deref() == Some(wave.wave.id.as_str()))
+                    .collect(),
+                truncated: *truncated,
+            },
+            Evidence::Unavailable { reason } => Evidence::Unavailable {
+                reason: reason.clone(),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -547,9 +565,9 @@ pub(crate) async fn wave_snapshots(
         .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
     let waves = scope_waves_to_repo(waves, all)?;
     let mut snapshots = Vec::with_capacity(waves.len());
-    let mut repositories = HashMap::new();
+    let mut checkouts = Checkouts::default();
     for wave in waves {
-        let checkout = wave_repository(&wave, &mut repositories)?;
+        let checkout = wave_repository(&wave, &mut checkouts)?;
         let snapshot = snapshot_wave(store, &wave, &checkout).await?;
         if !current || current_wave(&snapshot) {
             snapshots.push(snapshot);
@@ -614,9 +632,9 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
         .list_waves(Some(wave.repo()))
         .await
         .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
-    let mut repositories = HashMap::new();
-    validate_linear_ownership(store, &repository_waves, &mut repositories).await?;
-    let checkout = wave_repository(wave, &mut repositories)?;
+    let mut checkouts = Checkouts::default();
+    validate_linear_ownership(store, &repository_waves, &mut checkouts).await?;
+    let checkout = wave_repository(wave, &mut checkouts)?;
     let snapshot = snapshot_wave(store, wave, &checkout).await?;
     let shared = SharedTaskReads::read(store).await?;
     let task_snapshots = wave_tasks(store, wave, true, None, &shared).await?;
@@ -763,11 +781,23 @@ pub fn list_tasks(repo: &Path, wave: Option<&str>, json: bool) -> Result<()> {
             println!("{}", serde_json::to_string(&tasks)?);
         } else {
             for task in tasks {
-                println!("{} · {}", task.task.identifier, task.task.name);
+                println!(
+                    "{} · {} · {}",
+                    task.task.identifier,
+                    owner_text(task.runtime.as_ref()),
+                    task.task.name
+                );
             }
         }
         Ok(())
     })
+}
+
+/// The current Waves a roadmap already read, ordered as `wave_snapshots` orders them.
+pub(crate) fn current_waves(roadmap: &RoadmapSnapshot) -> Vec<WaveSnapshot> {
+    let mut waves: Vec<_> = roadmap.waves.iter().map(|wave| wave.wave.clone()).collect();
+    waves.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
+    waves
 }
 
 /// `lf wave show --all`: every current Wave in every repository.
@@ -796,8 +826,8 @@ async fn roadmap_snapshot(
     } else {
         waves.clone()
     };
-    let mut repositories = HashMap::new();
-    validate_linear_ownership(store, &ownership_waves, &mut repositories).await?;
+    let mut checkouts = Checkouts::default();
+    validate_linear_ownership(store, &ownership_waves, &mut checkouts).await?;
     let shared = SharedTaskReads::read(store).await?;
     let mut tasks = store.list_tasks(None).await?;
     if let Some(repo) = repo_scope {
@@ -842,27 +872,15 @@ async fn roadmap_snapshot(
             .iter()
             .find(|current| current.id() == wave.id())
             .unwrap_or(wave);
-        let checkout = wave_repository(wave, &mut repositories)?;
+        let checkout = wave_repository(wave, &mut checkouts)?;
         let snapshot = snapshot_wave(store, wave, &checkout).await?;
         if !include_history && !current_wave(&snapshot) {
             continue;
         }
-        let wave_tasks = match &tasks {
-            Evidence::Ok { items, truncated } => Evidence::Ok {
-                items: items
-                    .iter()
-                    .filter(|task: &&RoadmapTask| {
-                        task.task.wave_id.as_deref() == Some(wave.id().as_str())
-                    })
-                    .cloned()
-                    .collect(),
-                truncated: *truncated,
-            },
-            Evidence::Unavailable { reason } => Evidence::Unavailable {
-                reason: reason.clone(),
-            },
-        };
-        if task.is_some() && matches!(&wave_tasks, Evidence::Ok { items, .. } if items.is_empty()) {
+        if task.is_some()
+            && matches!(&tasks, Evidence::Ok { items, .. }
+                if !items.iter().any(|task| task.task.wave_id.as_deref() == Some(wave.id().as_str())))
+        {
             continue;
         }
         roadmaps.push(WaveRoadmap {
@@ -870,7 +888,6 @@ async fn roadmap_snapshot(
             project_readiness: store.sqlite.project_readiness(wave.id())?,
             wave: snapshot,
             projects: project_planning(store, wave).await,
-            tasks: wave_tasks,
             unavailable_tasks: Vec::new(),
             metric_portfolio: crate::ops::metrics::wave_metric_portfolio(
                 store,
@@ -895,6 +912,7 @@ struct SharedTaskReads {
     checkouts: Vec<crate::store::sqlite::TaskCheckout>,
     machines: Vec<crate::durable::Machine>,
     local_machine: crate::durable::MachineId,
+    latest_graphs: HashMap<crate::durable::TaskId, crate::ops::graph_process::GraphProcess>,
 }
 
 impl SharedTaskReads {
@@ -906,6 +924,7 @@ impl SharedTaskReads {
             checkouts,
             machines: store.machines().await?,
             local_machine,
+            latest_graphs: store.sqlite.latest_task_graphs()?,
         })
     }
 }
@@ -1056,26 +1075,46 @@ fn now() -> time::OffsetDateTime {
 
 // Resolve each recorded repository once per read. Sharing across validation and
 // display avoids one Git process per Wave without retaining facts across reads.
-fn wave_repository(wave: &Wave, repositories: &mut HashMap<String, PathBuf>) -> Result<PathBuf> {
-    if let Some(checkout) = repositories.get(wave.repo()) {
+/// Checkouts resolved during one reading: each repository address once, and
+/// the current directory's checkout once, however many Waves share them.
+#[derive(Debug, Default)]
+struct Checkouts {
+    current: Option<Option<(PathBuf, crate::repository::CanonicalRepo)>>,
+    repositories: HashMap<String, PathBuf>,
+}
+
+fn wave_repository(wave: &Wave, checkouts: &mut Checkouts) -> Result<PathBuf> {
+    if let Some(checkout) = checkouts.repositories.get(wave.repo()) {
         return Ok(checkout.clone());
     }
-    let checkout = wave_checkout(wave)?;
-    repositories.insert(wave.repo().to_string(), checkout.clone());
+    let checkout = wave_checkout(wave, checkouts)?;
+    checkouts
+        .repositories
+        .insert(wave.repo().to_string(), checkout.clone());
     Ok(checkout)
 }
 
 // A registry address identifies the repository, not the checkout's document bytes.
-fn wave_checkout(wave: &Wave) -> Result<PathBuf> {
-    if let Some(checkout) = crate::repo::discover_repo_root(&std::env::current_dir()?)? {
-        if crate::repository::CanonicalRepo::discover(&checkout)?.contains(Path::new(wave.repo())) {
-            return Ok(checkout);
+fn wave_checkout(wave: &Wave, checkouts: &mut Checkouts) -> Result<PathBuf> {
+    let Ok(main) = crate::git::worktrees::main_repo_root(Path::new(wave.repo())) else {
+        return Ok(PathBuf::from(wave.repo()));
+    };
+    if checkouts.current.is_none() {
+        let current = match crate::repo::discover_repo_root(&std::env::current_dir()?)? {
+            Some(checkout) => {
+                let repo = crate::repository::CanonicalRepo::discover(&checkout)?;
+                Some((checkout, repo))
+            }
+            None => None,
+        };
+        checkouts.current = Some(current);
+    }
+    if let Some(Some((checkout, repo))) = &checkouts.current {
+        if main.canonicalize().is_ok_and(|main| main == repo.as_path()) {
+            return Ok(checkout.clone());
         }
     }
-    Ok(
-        crate::git::worktrees::main_repo_root(Path::new(wave.repo()))
-            .unwrap_or_else(|_| PathBuf::from(wave.repo())),
-    )
+    Ok(main)
 }
 
 /// Read planning and your Machine for the Wave without allocating execution.
@@ -1149,11 +1188,11 @@ fn snapshot_task_runtime(
 async fn validate_linear_ownership(
     store: &SharedStore,
     waves: &[Wave],
-    repositories: &mut HashMap<String, PathBuf>,
+    checkouts: &mut Checkouts,
 ) -> Result<()> {
     let mut ownership = HashMap::<PathBuf, Vec<_>>::new();
     for wave in waves {
-        let repo = wave_repository(wave, repositories)?;
+        let repo = wave_repository(wave, checkouts)?;
         let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
         ownership
             .entry(repo)
@@ -1280,8 +1319,11 @@ async fn snapshot_task_detail(
     let pr = store.active_task_pr(&task.id).await?;
     let active = pr.as_ref().filter(|pr| pr.is_active());
     let observed_at = now();
-    let (execution, graph_record) =
-        crate::ops::task_execution::task_execution_and_graph(store, &task.id).await?;
+    let (execution, graph_record) = crate::ops::task_execution::execution_of_latest_graph(
+        store,
+        shared.latest_graphs.get(&task.id).cloned(),
+    )
+    .await?;
     let status = store.task_state(&task.id).await?;
     let pending = crate::ops::task::completion_pending(store, task)?;
     let owner = store.sqlite.task_ownership(&task.id)?.owner;
@@ -1920,8 +1962,12 @@ fn print_status(status: &WaveDetailSnapshot) {
                         "unstarted"
                     });
                 println!(
-                    "  {}  {:<10}  {}  {}",
-                    task.task.identifier, state, task.task.name, task.next_move.reason
+                    "  {}  {:<10}  {:<12}  {}  {}",
+                    task.task.identifier,
+                    state,
+                    owner_text(task.runtime.as_ref()),
+                    task.task.name,
+                    task.next_move.reason
                 );
                 if let Some(due) = &task.task.due_date {
                     println!("    due        {due}");
@@ -2216,7 +2262,8 @@ struct RoadmapRow {
     title: String,
     rank: Option<u32>,
     age_secs: Option<i64>,
-    owner: NextMoveOwner,
+    owner: String,
+    next: NextMoveOwner,
     pr: Option<String>,
     workspace: Option<String>,
     condition: Option<TaskConditionState>,
@@ -2243,7 +2290,8 @@ fn task_roadmap_row(task: &RoadmapTask, now: time::OffsetDateTime) -> RoadmapRow
             .runtime
             .as_ref()
             .and_then(|runtime| age_secs(&runtime.updated_at, now)),
-        owner: task.next_move.owner,
+        owner: owner_text(task.runtime.as_ref()).to_string(),
+        next: task.next_move.owner,
         pr: task.pr.as_ref().map(pr_label),
         workspace: task
             .reference
@@ -2317,7 +2365,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
         print_projects(&wave.projects);
         print_metric_portfolio(&wave.metric_portfolio);
         print_unavailable_tasks(&wave.unavailable_tasks);
-        let tasks = match &wave.tasks {
+        let tasks = match roadmap.wave_tasks(wave) {
             Evidence::Unavailable { reason } => {
                 println!("  tasks unavailable: {reason}");
                 continue;
@@ -2325,13 +2373,20 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             Evidence::Ok { items, .. } => items,
         };
         let rows: Vec<RoadmapRow> = tasks
-            .iter()
+            .into_iter()
             .map(|task| task_roadmap_row(task, now))
             .collect();
         if rows.is_empty() {
             println!("  (no plan rows)");
             continue;
         }
+        // Wide enough for an unnamed owner's email key.
+        let owner_width = rows
+            .iter()
+            .map(|row| row.owner.chars().count())
+            .max()
+            .unwrap_or(0)
+            .clamp(12, 32);
         for section in [
             RoadmapSection::Now,
             RoadmapSection::Waiting,
@@ -2346,7 +2401,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             println!("  {}", section_label(section));
             for row in in_section {
                 println!(
-                    "    {id}  {rank:>4}  {owner:<8}  {age:>5}  {condition:<7}  {workspace:<20}  {pr:<24}  {title}",
+                    "    {id}  {rank:>4}  {owner:<owner_width$}  next:{next:<8}  {age:>5}  {condition:<7}  {workspace:<20}  {pr:<24}  {title}",
                     id = task_identifier_label(
                         &row.id,
                         row.issue_url.as_deref(),
@@ -2357,7 +2412,8 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
                         .rank
                         .map(|r| r.to_string())
                         .unwrap_or_else(|| "-".into()),
-                    owner = owner_label(&row.owner),
+                    owner = truncate(&row.owner, owner_width),
+                    next = owner_label(&row.next),
                     age = row
                         .age_secs
                         .map(format_age)
@@ -2373,6 +2429,14 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
                 println!("      {}", row.reason);
             }
         }
+    }
+}
+
+/// Who owns a Task, for text lists: their name, else their key, or "—".
+fn owner_text(runtime: Option<&TaskRuntimeSnapshot>) -> &str {
+    match runtime.and_then(|runtime| runtime.owner.as_ref()) {
+        Some(owner) => owner.who(),
+        None => "—",
     }
 }
 
@@ -2424,6 +2488,7 @@ mod tests {
     fn owned() -> crate::durable::TaskOwner {
         crate::durable::TaskOwner {
             person: Some("Jack Heart".into()),
+            person_key: Some("jack@loopflow.studio".into()),
             machine: crate::durable::MachineRef {
                 id: None,
                 label: None,

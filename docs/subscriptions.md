@@ -388,6 +388,7 @@ owns these outcomes and retry semantics.
 lf machine connect mini github
 lf machine connect mini codex work@example.com
 lf machine connect mini claude personal@example.com --chrome-profile Personal
+lf machine connect mini opencode
 lf machine connect mini linear
 lf --machine mini --account codex=work@ implement
 ```
@@ -397,6 +398,10 @@ token in the target's gh configuration. Codex and Linear mint a fresh login
 on the laptop; approve it in the laptop's browser. Codex stages the login
 in a private temporary directory. The laptop's existing login is not replaced.
 The target retains its own refresh credential and existing accounts.
+OpenCode forwards its active login (OpenCode 2 on both sides): a Console login
+gets a fresh device grant approved in the laptop's browser, an API key is
+copied. OpenCode Zen must accept it; a different working OpenCode login on the
+target is left unchanged.
 
 Claude installs the account's long-lived subscription token, so every machine
 after the first needs no browser approval:

@@ -38,6 +38,24 @@ private final class Feed {
 @Suite("Desktop without a display")
 @MainActor
 struct DesktopHeadlessTests {
+    @Test("Owned inventory rows name their owner and Machine")
+    func ownedRowsNameTheirOwner() async throws {
+        let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            if args.prefix(2) == ["wave", "show"] { return roadmap }
+            if args.first == "session" { return #"{"entries":[],"next":null}"# }
+            if args.first == "planning" { return #"{"destinations":[]}"# }
+            throw RegistryQueryError("Unexpected command: \(args)")
+        }, repoPath: "/src/loopflow")
+        await model.refresh()
+        let wave = try #require(model.roadmap.value?.waves.first { roadmap in
+            if case .available(let tasks, _) = roadmap.tasks { return tasks.contains { $0.runtime?.owner != nil } }
+            return false
+        })
+        let view = WaveTaskInventory(model: model, waveID: wave.wave.id)
+        #expect(try view.inspect().find(text: "Jack Heart on mini").string() == "Jack Heart on mini")
+    }
+
     @Test("The repository roadmap reads Git planning through the ordinary query")
     func roadmapPeerPlanning() async throws {
         let data = try Data(contentsOf: fixtures.appendingPathComponent("peer_planning_status.json"))
@@ -73,57 +91,31 @@ struct DesktopHeadlessTests {
         }
     }
 
-    @Test("Workflows render and save through the store without creating a repository file")
-    func storedWorkflow() async throws {
-        var roadmap = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
-            fixtures.appendingPathComponent("roadmap_snapshot.json"))) as? [String: Any])
-        var waves = try #require(roadmap["waves"] as? [[String: Any]])
-        var waveObject = try #require(waves[0]["wave"] as? [String: Any])
-        waveObject["name"] = "inbox"
-        waves[0]["wave"] = waveObject
-        roadmap["waves"] = waves
-        let snapshot = String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
-        let wave = try JSONDecoder().decode(WaveSnapshot.self, from: JSONSerialization.data(withJSONObject: waveObject))
+    @Test("Customizing a builtin Workflow copies it into the repository's .lf/workflows")
+    func customizedWorkflow() async throws {
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repo) }
         var entries = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             fixtures.appendingPathComponent("workflow_catalog.json"))) as? [[String: Any]])
         entries[0]["name"] = "code"
-        entries[0]["source"] = "stored"
+        entries[0]["source"] = NSNull()
         let catalog = String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
-        actor Source {
-            var content = "nodes: {}\nedges: []\n"
-            func save(_ content: String) throws {
-                if content == "invalid" { throw RegistryQueryError("Invalid workflow") }
-                self.content = content
-            }
-        }
-        let source = Source()
-        let model = WorkModel(query: RegistryQuery(runWithInput: { args, _, content in
-            guard args.prefix(3) == ["wave", "workflow", "set"], args.contains("code") else {
-                throw RegistryQueryError("Unexpected write: \(args)")
-            }
-            try await source.save(content)
-            return ""
-        }, run: { args, _ in
-            if args.prefix(2) == ["wave", "show"] { return snapshot }
+        let source = "nodes: {review: demo}\nedges: []\n"
+        let model = WorkModel(query: RegistryQuery { args, _ in
             if args.prefix(3) == ["wave", "workflow", "list"] { return catalog }
-            if args.prefix(3) == ["wave", "workflow", "source"] { return await source.content }
+            if args == ["wave", "workflow", "source", "code"] { return source }
             throw RegistryQueryError("Unexpected command: \(args)")
-        }))
-        await model.refresh()
-        model.select(.wave(id: wave.id))
+        }, repoPath: repo.path)
         await model.loadWorkflowCatalog()
-        let view = WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == "code" }, model: model)
-        #expect(try view.inspect().find(text: "Stored in this Wave").string() == "Stored in this Wave")
+        let entry = try #require(model.workflowCatalog.value?.first { $0.name == "code" })
+        let view = WorkflowCatalogInspector(entry: entry, model: model)
+        #expect(try view.inspect().find(text: "builtin Workflow").string() == "builtin Workflow")
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
-        _ = try view.inspect().find(button: "Edit")
-        let updated = "nodes: {review: demo}\nedges: []\n"
-        try await model.saveWorkflow("code", content: updated, wave: wave)
-        #expect(try await model.workflowSource("code", wave: wave) == updated)
-        do {
-            try await model.saveWorkflow("code", content: "invalid", wave: wave)
-            Issue.record("Invalid content must not replace the stored workflow")
-        } catch { #expect(error.localizedDescription == "Invalid workflow") }
-        #expect(try await model.workflowSource("code", wave: wave) == updated)
+        _ = try view.inspect().find(button: "Customize")
+        let url = try await model.workflowDefinitionFile(entry)
+        #expect(url.path.hasSuffix(".lf/workflows/code.yaml"))
+        #expect(try String(contentsOf: url, encoding: .utf8) == source)
     }
 
     @Test("An unplaced Task and its CLI comment thread render without a display")
@@ -422,8 +414,7 @@ struct DesktopHeadlessTests {
         let original = try #require(wave.tasks.items.first)
         let root = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))) as? [String: Any])
-        let waves = try #require(root["waves"] as? [[String: Any]])
-        let tasks = try #require(waves.first?["tasks"] as? [String: Any])
+        let tasks = try #require(root["tasks"] as? [String: Any])
         var row = try #require((tasks["items"] as? [[String: Any]])?.first)
         var planning = try #require(row["task"] as? [String: Any])
         planning["state"] = state
@@ -561,8 +552,7 @@ struct DesktopHeadlessTests {
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-empty")
 
         var saved = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var waves = try #require(saved["waves"] as? [[String: Any]])
-        var tasks = try #require(waves[0]["tasks"] as? [String: Any])
+        var tasks = try #require(saved["tasks"] as? [String: Any])
         var items = try #require(tasks["items"] as? [[String: Any]])
         var planning = try #require(items[0]["task"] as? [String: Any])
         planning["sync"] = ["connected": true, "changes": [[
@@ -571,15 +561,13 @@ struct DesktopHeadlessTests {
         ]]]
         items[0]["task"] = planning
         tasks["items"] = items
-        waves[0]["tasks"] = tasks
-        saved["waves"] = waves
         saved["tasks"] = tasks
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: saved))
         let wave = try #require(roadmap.waves.first).wave
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.toWave()]),
                            workActivity: .loading, repos: [])
-        model.applySelectionPlans([ViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [
-            ViewMember(work: .init(repository: "repo", kind: .wave, id: wave.id), title: wave.displayName)
+        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [
+            fixtureViewContent(work: .init(repository: "repo", kind: .wave, id: wave.id), title: wave.displayName)
         ])], reason: "")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         try navigator.inspect()

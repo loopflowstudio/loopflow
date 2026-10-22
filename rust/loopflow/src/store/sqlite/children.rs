@@ -129,6 +129,31 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
     task_on(conn, &input.id)?.ok_or(StoreError::NotFound)
 }
 
+/// Git planning carries the Task's branch, so whoever runs it next checks out
+/// the same branch and finds the same PR. Remote providers supply their branch
+/// through planning acquisition. An already-recorded branch writes nothing.
+fn record_task_branch_in(tx: &Connection, task: &TaskId, branch: &str) -> StoreResult<()> {
+    let (repo, recorded): (String, Option<String>) = tx.query_row(
+        "SELECT w.repo,t.planning_branch_name FROM tasks t
+         JOIN repository_plans w ON w.id=t.repository_id WHERE t.id=?1",
+        [task.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if recorded.as_deref() == Some(branch) || crate::ops::planning_client::connected(&repo) {
+        return Ok(());
+    }
+    super::planning_write::local(
+        tx,
+        &crate::work::edit::WorkEdit::for_target(
+            task.as_str(),
+            &[crate::work::edit::WorkValue::TaskBranch(Some(
+                branch.into(),
+            ))],
+        ),
+    )?;
+    Ok(())
+}
+
 impl SqliteStore {
     /// Apply the placement transaction's admission rule before preparing Git work.
     pub fn validate_task_planning(&self, task: &Task) -> StoreResult<()> {
@@ -167,6 +192,7 @@ impl SqliteStore {
         // Allocating a checkout is the actual work reservation: it claims an
         // unowned Task, and refuses one owned on another Machine.
         super::task_ownership::claim_in(&tx, task_id)?;
+        record_task_branch_in(&tx, task_id, &pr.branch)?;
         let local = super::durable::map_local_machine(&tx)?.id;
         task.worktree = Some(worktree.to_path_buf());
         task.workspace_slug = workspace_slug.to_string();
@@ -217,13 +243,7 @@ impl SqliteStore {
     pub(crate) fn task_checkout(&self, task: &TaskId) -> StoreResult<Option<TaskCheckout>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
-        conn.query_row(
-            &format!("{TASK_CHECKOUT_COLUMNS} AND id=?1"),
-            [task.as_str()],
-            |row| map_task_checkout(&conn, row),
-        )
-        .optional()
-        .map_err(Into::into)
+        task_checkout_in(&conn, task)
     }
 
     pub(crate) fn task_checkouts(&self) -> StoreResult<Vec<TaskCheckout>> {
@@ -475,17 +495,7 @@ impl SqliteStore {
     pub fn list_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
-        let filter = match wave_id {
-            Some(_) => "p.wave_id=?1 AND ",
-            None => "",
-        };
-        let query =
-            format!("{TASK_COLUMNS} WHERE {filter}{TASK_VISIBLE} ORDER BY t.updated_at DESC");
-        let mut statement = conn.prepare(&query)?;
-        let rows =
-            statement.query_map(params_from_iter(wave_id), |row| map_task_row(&conn, row))?;
-        rows.collect::<rusqlite::Result<_>>()
-            .map_err(StoreError::from)
+        tasks_in(&conn, wave_id)
     }
 
     pub fn sync_task_placement(
@@ -1283,6 +1293,19 @@ fn validate_task_project(conn: &Connection, task: &Task) -> StoreResult<()> {
     Ok(())
 }
 
+pub(super) fn task_checkout_in(
+    conn: &Connection,
+    task: &TaskId,
+) -> StoreResult<Option<TaskCheckout>> {
+    conn.query_row(
+        &format!("{TASK_CHECKOUT_COLUMNS} AND id=?1"),
+        [task.as_str()],
+        |row| map_task_checkout(conn, row),
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
 const TASK_CHECKOUT_COLUMNS: &str = "SELECT id, worktree, checkout_machine_id
     FROM tasks WHERE worktree IS NOT NULL";
 
@@ -1303,7 +1326,7 @@ fn map_task_checkout(conn: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Re
     })
 }
 
-const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL
+pub(super) const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL
     AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id)";
 /// Present locally known Linear identity, otherwise the shortest unique local hex prefix.
 pub(super) fn short_task_id(conn: &Connection, id: &TaskId) -> StoreResult<Option<String>> {
@@ -2125,6 +2148,18 @@ pub(super) fn request_completion_in(
         params![task.as_str(), request],
     )?;
     Ok(Some(request))
+}
+
+pub(super) fn tasks_in(conn: &Connection, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
+    let filter = match wave_id {
+        Some(_) => "p.wave_id=?1 AND ",
+        None => "",
+    };
+    let query = format!("{TASK_COLUMNS} WHERE {filter}{TASK_VISIBLE} ORDER BY t.updated_at DESC");
+    let mut statement = conn.prepare(&query)?;
+    let rows = statement.query_map(params_from_iter(wave_id), |row| map_task_row(conn, row))?;
+    rows.collect::<rusqlite::Result<_>>()
+        .map_err(StoreError::from)
 }
 
 #[cfg(test)]

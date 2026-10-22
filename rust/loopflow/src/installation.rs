@@ -763,8 +763,12 @@ fn reexec(path: &Path) -> Command {
     command
 }
 
-/// Use the installed CLI for the main Machine; private Homes keep their caller.
+/// Use the installed CLI for the main Machine; private Homes keep their caller,
+/// and so does a draft build, which works on its own copy of the store.
 pub fn dispatch_default_cli() -> Result<()> {
+    if crate::store::copy::selected().is_some() {
+        return Ok(());
+    }
     if crate::store::custom_home_selected() {
         let home = crate::store::canonicalize_with_missing_tail(&crate::store::lf_home_dir())?;
         std::env::set_var("LF_HOME", home);

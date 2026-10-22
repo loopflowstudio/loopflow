@@ -146,6 +146,16 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
         scroll.documentView = editor
     }
 
+    func restore(_ draft: WorkFileDraft, task: String) {
+        guard !dirty else { return }
+        snapshot = TaskFileSnapshot(recoveries: [], issueIdentifier: task, taskId: task, path: draft.path,
+            content: draft.baseContent, state: .text, revision: draft.baseRevision,
+            readOnlyReason: "Recovered draft; checking the current file", sizeBytes: UInt64(draft.baseContent.utf8.count))
+        applyIncoming(draft.text)
+        editor.isEditable = false
+        readOnlyReason = "Recovered draft; checking the current file"
+    }
+
     private func loadSnapshot(_ next: TaskFileSnapshot) {
         guard !dirty, !editor.hasMarkedText() else {
             external = next.revision != snapshot?.revision || next.state != snapshot?.state ? next : nil
@@ -333,6 +343,30 @@ final class TaskFilesStore {
         // Documents (including unsaved drafts and Undo) remain Task-owned.
     }
 
+    func restoreTabs(_ retained: [WorkFileTab], selected: String?) {
+        tabs = retained
+        selection = retained.first { $0.id == selected }?.path
+    }
+
+    func restoreDrafts(_ drafts: [WorkFileDraft], location: WorkViewPlan.Location) {
+        for draft in drafts where draft.location == location {
+            document(draft.path).restore(draft, task: issue)
+        }
+    }
+
+    func paneIntent(location: WorkViewPlan.Location) -> WorkPaneIntent {
+        .files(location: location, tabs: tabs,
+               selected: tabs.first { $0.path == selection }?.id)
+    }
+
+    func drafts(location: WorkViewPlan.Location) -> [WorkFileDraft] {
+        documents.values.compactMap { document in
+            guard document.dirty, let base = document.snapshot?.content,
+                  let revision = document.snapshot?.revision else { return nil }
+            return WorkFileDraft(location: location, path: document.path,
+                                 baseRevision: revision, baseContent: base, text: document.text)
+        }.sorted { $0.path < $1.path }
+    }
     var mode = Mode.file
     private(set) var changes: TaskChangesSnapshot?
     private(set) var isRefreshingChanges = false

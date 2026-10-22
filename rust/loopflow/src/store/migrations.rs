@@ -60,7 +60,9 @@ pub(crate) fn apply_released_planning_fixture(conn: &rusqlite::Connection) {
 }
 
 #[cfg(test)]
-pub(crate) use tests::{apply_before_current_draft, current_draft_sql, upgrade_from_draft};
+pub(crate) use tests::{
+    apply_before_current_draft, apply_build_drafts, current_draft_sql, upgrade_from_draft,
+};
 
 /// The exact branch-local history that reached one production ledger before
 /// main established `0.11.008_interactive_handoffs`. These ids were never
@@ -433,6 +435,12 @@ fn _migration_transaction(
 }
 
 pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResult<()> {
+    // Dashboard intent is introduced by the current draft; older prefixes omit it.
+    let has_dashboards: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='dashboards')",
+        [],
+        |row| row.get(0),
+    )?;
     // Released stores still carry this field until delivery receipts take ownership.
     let mut failures = if conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='pm_writeback_json')",
@@ -448,6 +456,37 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
     } else {
         Vec::new()
     };
+    if has_dashboards {
+        failures.extend(validate_json_column::<crate::work::selection::Selection>(
+            conn,
+            "dashboard_arrangements",
+            "dashboard_id",
+            "selection_json",
+        )?);
+        failures.extend(validate_json_column::<crate::work::selection::Arrangement>(
+            conn,
+            "dashboard_arrangements",
+            "dashboard_id",
+            "arrangement_json",
+        )?);
+        failures.extend(validate_json_column::<
+            crate::work::selection::WorkPaneLayout,
+        >(
+            conn, "work_pane_layouts", "work_id", "layout_json"
+        )?);
+        failures.extend(validate_json_column::<crate::work::selection::SlotLayout>(
+            conn,
+            "dashboards",
+            "id",
+            "slots_json",
+        )?);
+        failures.extend(validate_json_column::<Vec<String>>(
+            conn,
+            "task_orders",
+            "repository_id",
+            "task_ids_json",
+        )?);
+    }
     if conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('projects') WHERE name='krs')",
         [],
@@ -806,9 +845,6 @@ fn apply_set(
         migration_preflight(conn, migration, guards)?;
         conn.execute_batch(migration.sql)?;
         seed_peer_planning(conn, migration.sql)?;
-        if migration.sql.contains("CREATE TABLE wave_workflows (") {
-            super::sqlite::wave_definitions::import_registered_workflows(conn)?;
-        }
         backfill_known_checksums(conn, set)?;
         insert_applied_migration(conn, migration, &parent_history)?;
     }
@@ -3350,13 +3386,23 @@ mod tests {
                 )?;
                 apply_set(conn, MIGRATIONS, guards)?;
             }
-            for draft in crate::build_info::migration_draft_manifest() {
-                conn.execute_batch(draft.sql)?;
-                super::seed_peer_planning(conn, draft.sql)?;
-            }
+            _apply_build_drafts_in(conn)?;
             super::validate_foreign_keys(conn)
         })
         .unwrap();
+    }
+
+    /// Bring a released fixture to this build's experiment schema.
+    pub(crate) fn apply_build_drafts(conn: &rusqlite::Connection) {
+        super::_migration_transaction(conn, |conn, _| _apply_build_drafts_in(conn)).unwrap();
+    }
+
+    fn _apply_build_drafts_in(conn: &rusqlite::Connection) -> crate::store::StoreResult<()> {
+        for draft in crate::build_info::migration_draft_manifest() {
+            conn.execute_batch(draft.sql)?;
+            super::seed_peer_planning(conn, draft.sql)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn current_draft_sql(name: &str) -> String {

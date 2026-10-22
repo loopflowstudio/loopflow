@@ -313,6 +313,17 @@ fn executable_file(path: &Path) -> bool {
     metadata.is_file()
 }
 
+/// A failed process's own last word, formatted to follow its exit status.
+pub(crate) fn exit_reason(stderr: &str) -> String {
+    stderr
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| format!(": {line}"))
+        .unwrap_or_default()
+}
+
 pub(crate) fn shell_escape(value: &str) -> String {
     let escaped = value.replace('\'', "'\\''");
     format!("'{escaped}'")
@@ -456,6 +467,7 @@ mod tests {
 
     #[test]
     fn private_home_keeps_explicit_binary_selection() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());

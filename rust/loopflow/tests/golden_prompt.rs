@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use loopflow::prompt::format_prompt;
 use loopflow::prompt::gather_context;
+use loopflow::prompt::ClipboardContext;
 use loopflow::prompt::GatherContextOpts;
 use loopflow::prompt::Surface;
 use serde::Deserialize;
@@ -95,7 +96,11 @@ fn golden_prompts_match() {
             files: Vec::new(),
             include_diff: case.diff,
             include_diff_files: case.diff_files,
-            include_clipboard: case.clipboard,
+            clipboard: if case.clipboard {
+                ClipboardContext::IfAvailable
+            } else {
+                ClipboardContext::Off
+            },
             wave: case.wave.clone(),
             related_repos: Vec::new(),
         };

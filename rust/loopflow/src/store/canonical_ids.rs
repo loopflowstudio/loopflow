@@ -110,6 +110,7 @@ pub(super) fn preflight(conn: &Connection, guards: &mut Vec<File>) -> StoreResul
                 completed,
                 row.get(3)?,
                 row.get(4)?,
+                None,
                 process_identity_evidence,
             )
         } else {

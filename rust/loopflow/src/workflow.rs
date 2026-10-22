@@ -196,7 +196,15 @@ pub fn load_workflow(name: &str, repo: &Path) -> Result<Option<WorkflowDefinitio
         .map_err(|error| LoadError::InvalidGraph(format!("workflow {name}: {error}")))
 }
 
-pub(crate) fn read_workflow_source(name: &str, repo: &Path) -> Result<Option<String>, LoadError> {
+/// Name the committed file a teammate's Workflow selection needs.
+pub fn missing_workflow(name: &str) -> String {
+    format!(
+        "Workflow {name:?} is unavailable: add .lf/workflows/{name}.yaml \
+         (a teammate's definition arrives when its commit is merged or pulled)"
+    )
+}
+
+pub fn read_workflow_source(name: &str, repo: &Path) -> Result<Option<String>, LoadError> {
     for extension in ["yaml", "yml"] {
         let path = repo
             .join(".lf/workflows")

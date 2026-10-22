@@ -115,14 +115,19 @@ final class SessionsWorkspace {
     var conversationError: String?
     private var didPrepareTaskPanes = false
 
-    /// Populate this retained Work even if navigation changes while lf prepares it.
-    func openPrimaryConversation(wave: String? = nil, store: SessionsStore, registry: SessionsWorkspaceRegistry) async {
+    /// Run one conversation opening against this workspace's progress and error.
+    func openConversation(_ open: () async throws -> Void) async {
         guard !openingConversation else { return }
         let request = UUID()
         conversationRequest = request
         conversationError = nil
         defer { if conversationRequest == request { conversationRequest = nil } }
-        do {
+        do { try await open() } catch { conversationError = error.localizedDescription }
+    }
+
+    /// Populate this retained Work even if navigation changes while lf prepares it.
+    func openPrimaryConversation(wave: String? = nil, store: SessionsStore, registry: SessionsWorkspaceRegistry) async {
+        await openConversation {
             let record = try await store.query.ensurePrimarySession(wave: wave, cwd: store.repoPath)
             store.reconcile([record])
             store.adoptPreparation(record)
@@ -130,7 +135,7 @@ final class SessionsWorkspace {
             presentation.content = .terminals
             presentation.selectedSessionId = record.id
             await store.select(record.id)
-        } catch { conversationError = error.localizedDescription }
+        }
     }
 
     func toggleFocus(_ paneId: String) {
@@ -245,12 +250,26 @@ final class SessionsWorkspace {
     }
     let multiplexer = MultiplexerStore()
     let hover = PaneHover()
+    private(set) var isRestoringIntent = false
+    private var unavailableDrafts: [WorkFileDraft] = []
+    var persistenceError: String?
+    private var persistenceQuery: RegistryQuery?
+    private var persistenceRepo: String?
+    @ObservationIgnored private var paneRevision: Int64 = 0
+    private var persistenceLoaded = false
+    private var persistenceWriting = false
+    @ObservationIgnored private var persistenceTask: Task<Void, Never>?
     private var taskFiles: (store: TaskFilesStore, execution: TaskLocationObservation?)?
 
     func files(issue: String, cwd: String, query: RegistryQuery = RegistryQueryLocal.shared, execution: TaskLocationObservation? = nil) -> TaskFilesStore {
         if let files = taskFiles { return files.store }
         let files = TaskFilesStore(issue: issue, cwd: cwd, query: query)
         taskFiles = (files, execution)
+        if let machine = execution?.machineID ?? location?.machineId ?? localMachineId {
+            let place = WorkViewPlan.Location(machineID: machine, cwd: cwd)
+            files.restoreDrafts(unavailableDrafts, location: place)
+            unavailableDrafts.removeAll { $0.location == place }
+        }
         return files
     }
     /// Resolve Files from its content, not the selected checkout or a previous link.
@@ -360,8 +379,22 @@ final class SessionsWorkspaceRegistry {
         catch { machineError = error.localizedDescription }
     }
 
-    private(set) var layout: WorkLayout?
-    var openWork: [WorkWorkspaceKey] { layout?.keys ?? [] }
+    func clearPresentation() {
+        surfaces.clearFocus()
+        openWork = []
+        selectedWork = nil
+    }
+
+    func present(open: [WorkWorkspaceKey]) {
+        openWork = open
+        if selectedWork.map({ openWork.contains($0) }) != true {
+            selectedWork = openWork.first
+            surfaces.clearFocus()
+        }
+    }
+
+    /// Work shown in the window, in slot fill order: readback, not an arrangement owner.
+    private(set) var openWork: [WorkWorkspaceKey] = []
 
     private(set) var selectedWork: WorkWorkspaceKey?
 
@@ -370,30 +403,17 @@ final class SessionsWorkspaceRegistry {
     func retained(_ key: WorkWorkspaceKey) -> SessionsWorkspace? { workspaces[key] }
 
     @discardableResult
-    func open(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?, besideFocused: Bool = false) -> SessionsWorkspace {
+    func open(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?) -> SessionsWorkspace {
         let workspace = workspace(for: key, title: title, location: location)
-        if selectedWork != key { surfaces.clearFocus() }
-        if !openWork.contains(key) {
-            if let layout, let focused = selectedWork, layout.keys.contains(focused), focused.repository == key.repository {
-                self.layout = layout.replacing(focused, with: besideFocused
-                    ? .split(.vertical, .workspace(focused), .workspace(key), 0.5) : .workspace(key))
-            } else { layout = .workspace(key) }
-        }
-        selectedWork = key
+        openWork = [key]
+        focus(key)
         return workspace
     }
 
-    func hide(_ key: WorkWorkspaceKey) {
-        guard let index = openWork.firstIndex(of: key) else { return }
-        layout = layout?.removing(key)
-        if selectedWork == key {
-            surfaces.clearFocus()
-            selectedWork = openWork.isEmpty ? nil : openWork[max(0, index - 1)]
-        }
-    }
-
-    func resize(between first: WorkWorkspaceKey, and second: WorkWorkspaceKey, ratio: Double) {
-        layout = layout?.resizing(between: first, and: second, ratio: ratio)
+    func focus(_ key: WorkWorkspaceKey) {
+        guard openWork.contains(key) else { return }
+        if selectedWork != key { surfaces.clearFocus() }
+        selectedWork = key
     }
 
     func inspect() -> [DesktopWorkspaceInspection] {
@@ -401,8 +421,8 @@ final class SessionsWorkspaceRegistry {
             let panes = workspace.multiplexer
             return DesktopWorkspaceInspection(work: workspace.key, title: workspace.title,
                 isOpen: openWork.contains(workspace.key), selected: selectedWork == workspace.key,
-                layout: DesktopLayoutInspection(panes.layout) { pane in
-                    pane.terminal.flatMap { surfaces.surfaceIncarnation(for: $0) }
+                layout: DesktopLayoutInspection(panes.layout) { content in
+                    content.terminal.flatMap { surfaces.surfaceIncarnation(for: $0) }
                 }, focusedPane: panes.focusedPaneId,
                 zoomedPane: panes.zoomedPaneId, hiddenPanes: panes.collapsedPaneIds.sorted())
         }
@@ -426,23 +446,24 @@ final class SessionsWorkspaceRegistry {
     }
 
     func readText(_ request: DesktopTextRequest) throws -> DesktopTextReading {
-        let (workspace, pane) = try retainedPane(for: request.target)
+        let (workspace, pane, terminal) = try retainedPane(for: request.target)
         let store = workspace.multiplexer
         let result: DesktopTextResult
-        if let terminal = pane.terminal {
+        if let terminal {
             result = try surfaces.readText(request, terminal: terminal)
         } else {
             result = .unavailable(reason: .notTerminal)
         }
         return DesktopTextReading(request: request, observedAt: Int64(Date().timeIntervalSince1970),
-            hidden: !openWork.contains(workspace.key) || !store.isVisible(pane),
+            hidden: !openWork.contains(workspace.key) || !store.isVisible(pane)
+                || (request.target.tab != nil && pane.content.selectedShell?.id != request.target.tab),
             result: result)
     }
 
     @discardableResult
-    func controlPane(_ request: DesktopPaneCommand, model: WorkModel) throws -> String {
+    func controlPane(_ request: DesktopPaneCommand, model: WorkModel) throws -> (pane: String, tab: String?) {
         let target = request.target
-        let (workspace, pane) = try retainedPane(for: target)
+        let (workspace, pane, terminal) = try retainedPane(for: target)
         let store = workspace.multiplexer
         // Validate both ends before changing anything. Moving a view is not
         // reassociating its Work or transferring a client to another checkout.
@@ -455,41 +476,51 @@ final class SessionsWorkspaceRegistry {
             _ = try retainedPane(for: other)
         }
         var result: PaneState? = pane
+        var resultTab = target.tab
         switch request.action {
         case .text(let surface, let text):
-            guard let terminal = pane.terminal else {
+            guard let terminal else {
                 throw RegistryQueryError("The addressed pane is not a terminal; no input was sent.")
             }
             try surfaces.insertText(text, terminal: terminal, surface: surface)
         case .key(let surface, let key):
-            guard let terminal = pane.terminal else {
+            guard let terminal else {
                 throw RegistryQueryError("The addressed pane is not a terminal; no input was sent.")
             }
             try surfaces.sendKey(key, terminal: terminal, surface: surface)
         case .shell:
             result = try workspace.newShell()
+            resultTab = result?.content.selectedShell?.id
         case .files(let task), .graphLog(let task):
+            let shell = target.tab.flatMap { store.shell($0) }
+            let location = target.tab == nil ? pane.content.location : shell?.location
+            let execution = target.tab == nil ? pane.executionLocation : shell?.execution
             guard let projection = model.task(id: task), workspace.key.kind == .task,
                   (workspace.key.id == projection.task.id || workspace.key.id == projection.task.runtime?.workId),
-                  let identity = pane.content.location ?? workspace.location,
+                  let identity = location ?? workspace.location,
                   (model.navigation.preparedTaskWorktrees[projection.task.id]
                     ?? projection.task.reference.workspace?.identity ?? identity) == identity else {
                 throw RegistryQueryError("The Task is not associated with this checkout. Inspect its recorded workspace; no pane was changed.")
             }
             let content: PaneContent = if case .files = request.action {
-                .files(taskId: projection.task.id, location: identity, execution: pane.executionLocation)
+                .files(taskId: projection.task.id, location: identity, execution: execution)
             } else {
-                .graphLog(taskId: projection.task.id, location: identity, execution: pane.executionLocation)
+                .graphLog(taskId: projection.task.id, location: identity, execution: execution)
             }
             if case .files = request.action { workspace.selectFilesPage() }
             result = store.show(content, beside: target.pane, focus: false)
+            resultTab = nil
         case .hide: workspace.setCollapsed(paneId: target.pane, collapsed: true)
         case .restore: workspace.setCollapsed(paneId: target.pane, collapsed: false)
         case .focus:
-            open(workspace.key, title: workspace.title, location: workspace.location)
-            model.select(workspace.key.reference)
-            store.setFocusedPane(target.pane)
-            if let terminal = pane.terminal { surfaces.focus(terminal) }
+            if model.navigation.showsSelection, openWork.contains(workspace.key) {
+                focus(workspace.key)
+            } else {
+                model.select(workspace.key.reference)
+            }
+            if let tab = target.tab { store.selectShell(tab) }
+            else { store.setFocusedPane(target.pane) }
+            if let focused = terminal ?? pane.terminal { surfaces.focus(focused) }
         case .move(let destination, let axis):
             try peer(destination)
             store.move(target.pane, beside: destination.pane, axis: axis)
@@ -502,17 +533,28 @@ final class SessionsWorkspaceRegistry {
         case .zoom(let enabled): store.setZoom(target.pane, enabled: enabled)
         }
         guard let result else { throw RegistryQueryError("The addressed pane disappeared; inspect Desktop before retrying.") }
-        return result.id
+        return (result.id, resultTab ?? result.content.selectedShell?.id)
     }
 
-    private func retainedPane(for target: DesktopPaneTarget) throws -> (SessionsWorkspace, PaneState) {
+    private func retainedPane(for target: DesktopPaneTarget) throws -> (SessionsWorkspace, PaneState, TerminalIdentity?) {
         guard target.repository == target.work.repository,
               let workspace = workspaces[target.work],
-              let pane = workspace.multiplexer.layout.pane(for: target.pane),
-              pane.incarnation == target.incarnation else {
+              let pane = workspace.multiplexer.layout.pane(for: target.pane) else {
             throw RegistryQueryError("The pane content was removed or replaced. Inspect Desktop again; no pane was changed.")
         }
-        return (workspace, pane)
+        if let id = target.tab {
+            guard case .shell(let tabs, _) = pane.content,
+                  let tab = tabs.first(where: { $0.id == id && $0.incarnation == target.incarnation }) else {
+                throw RegistryQueryError("The shell tab was removed or replaced; no input was sent.")
+            }
+            return (workspace, pane, tab.terminal)
+        }
+        guard pane.incarnation == target.incarnation else {
+            throw RegistryQueryError("The pane content was replaced; inspect Desktop again.")
+        }
+        // A Shell tool target grants arrangement authority, not input to whichever
+        // tab happens to be selected. Terminal requests must capture a tab.
+        return (workspace, pane, pane.content.selectedShell == nil ? pane.terminal : nil)
     }
 
     func key(containingShell id: String, machineId: String) -> WorkWorkspaceKey? {
@@ -567,7 +609,7 @@ final class SessionsWorkspaceRegistry {
         guard previous != key, workspaces[key] == nil, let workspace = workspaces.removeValue(forKey: previous) else { return }
         workspace.key = key
         workspaces[key] = workspace
-        layout = layout?.replacing(previous, with: .workspace(key))
+        openWork = openWork.map { $0 == previous ? key : $0 }
         if selectedWork == previous { selectedWork = key }
     }
 
@@ -1003,7 +1045,12 @@ struct SessionsContentView: View {
 
     private var navigation: WorkNavigation { model.navigation }
     private var terminalsVisible: Bool {
-        workspaces.selectedWork != nil && (currentKey.kind != .task || fileTask?.task.runtime?.owner != nil || workspace.presentation.content == .terminals)
+        !navigation.showsSelection && workspaces.selectedWork != nil && fileTask?.task.awaitsStart != true
+            && (currentKey.kind != .task || fileTask?.task.runtime?.owner != nil || workspace.presentation.content == .terminals)
+    }
+    /// Shell, Files and new terminals wait until an unstarted Task starts.
+    private var taskTools: Bool {
+        currentKey.kind == .task && !navigation.showsSelection && fileTask?.task.awaitsStart != true
     }
     private var fileTask: TaskProjection? {
         // A departing repository view must not mount the next repository's
@@ -1022,8 +1069,10 @@ struct SessionsContentView: View {
                         .frame(width: min(navigation.sidebarWidth, max(240, geometry.size.width - 360)))
                     SidebarDivider(navigation: navigation, availableWidth: geometry.size.width)
                 }
-                if let layout = workspaces.layout {
-                    WorkLayoutView(layout: layout, resize: { workspaces.resize(between: $0, and: $1, ratio: $2) }) { key in
+                if navigation.showsSelection {
+                    DashboardView(model: model, workspaces: workspaces, sessions: store)
+                } else if let key = workspaces.selectedWork {
+                    VStack(spacing: 0) {
                         workspacePanel(key).id(key)
                     }
                     .padding([.horizontal, .bottom], PaneGeometry.windowInset)
@@ -1045,9 +1094,9 @@ struct SessionsContentView: View {
             zoom: { _handle(.zoom) }, focusPane: { _handle(.focus($0)) },
             back: { model.goBack() }, forward: { model.goForward() },
             adjacent: { model.cycleWorkingTask($0) }, slot: { model.selectWorkingTask(slot: $0) },
-            shell: currentKey.kind == .task ? { _handle(.toggleShell) } : nil,
-            files: currentKey.kind == .task ? { _handle(.toggleFiles) } : nil,
-            newTerminal: currentKey.kind == .task ? { _handle(.newTerminal) } : nil,
+            shell: taskTools ? { _handle(.toggleShell) } : nil,
+            files: taskTools ? { _handle(.toggleFiles) } : nil,
+            newTerminal: taskTools ? { _handle(.newTerminal) } : nil,
             close: { _handle(.close) }, reopen: multiplexer.canUndoClose ? { _handle(.undoClose) } : nil))
         .background {
             Button("Task actions") { actionTaskID = fileTask?.task.id }
@@ -1154,30 +1203,14 @@ struct SessionsContentView: View {
         let entry = workspaces.workspace(for: key, title: title(for: key),
             location: key.kind == .task ? location : rootIdentity)
         let active = currentKey == key
-        let crumb = active ? model.breadcrumb : model.visibleWork.breadcrumb(
-            selection: key.reference, sessionId: entry.presentation.selectedSessionId)
         let terminals = key.kind != .task || task?.task.runtime?.owner != nil || entry.presentation.content == .terminals
-        let context = workspaces.openWork.count > 1
         return VStack(spacing: 0) {
-            if context {
-                HStack(spacing: 8) {
-                    HStack(spacing: 6) {
-                        if let wave = crumb?.wave {
-                            Text(wave.roadmap.wave.displayName).font(Typography.body(10))
-                                .foregroundStyle(palette.emphasisInk)
-                        }
-                        Text(entry.title).font(Typography.strong(12)).lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                    if workspaces.openWork.count > 1 {
-                        Button { model.hideWorkspace(key) } label: { Image(systemName: "xmark") }
-                            .buttonStyle(WorkPlainButtonStyle()).help("Hide workspace; keep its panes and drafts")
-                            .accessibilityIdentifier("work-hide-\(key.id)")
-                    }
-                }
-                .padding(.horizontal, 10).padding(.vertical, 4).contentShape(Rectangle()).onTapGesture { model.select(key.reference) }
-                .background(palette.surfaceMuted)
-                .accessibilityIdentifier("work-context-\(key.id)")
+            if entry.isRestoringIntent { ProgressView("Restoring workspace") }
+            if let error = entry.persistenceError {
+                HStack {
+                    Text("Layout not saved: " + error).foregroundStyle(palette.warning).textSelection(.enabled)
+                    Button("Reload saved intent") { Task { await entry.loadPaneIntent() } }
+                }.padding(8)
             }
             if terminals, let task, active {
                 missingCheckout
@@ -1188,7 +1221,19 @@ struct SessionsContentView: View {
                         }
                     }
             }
-            if key.kind == .wave, active {
+            if let task, task.task.awaitsStart, active {
+                // The Session slot offers Start; its brief stays beside it.
+                GeometryReader { geometry in
+                    HStack(spacing: 0) {
+                        TaskStartOffer(model: model, task: task.task)
+                            .frame(width: geometry.size.width * 0.62)
+                            .background(theme.terminal.background.color)
+                        Divider()
+                        WorkSurfaceView(model: model, onOpenSession: openSession, onNewSession: newTaskSession)
+                        if navigation.showsActivity { WorkActivityView(model: model).frame(minWidth: 230, maxWidth: 360) }
+                    }
+                }
+            } else if key.kind == .wave, active {
                 GeometryReader { geometry in
                     HStack(spacing: 0) {
                         WorkspacePanesView(workspace: entry, isFocused: navigation.palette == nil, sessions: store, model: model,
@@ -1228,7 +1273,7 @@ struct SessionsContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: PaneGeometry.workspaceCornerRadius))
         .overlay {
-            if context { RoundedRectangle(cornerRadius: PaneGeometry.workspaceCornerRadius).strokeBorder(active ? palette.borderActive : palette.border, lineWidth: 1).allowsHitTesting(false) }
+            RoundedRectangle(cornerRadius: PaneGeometry.workspaceCornerRadius).strokeBorder(palette.borderActive, lineWidth: 1).allowsHitTesting(false)
         }
         .accessibilityIdentifier("work-workspace-\(key.id)")
     }
@@ -1278,15 +1323,8 @@ struct SessionsContentView: View {
         navigation.restorePaletteFocus = false
         navigation.palette = nil
         switch destination {
-        case .repository: model.select(nil)
-        case .openRepository(let path): model.openRepository?(path, nil)
-        case .wave(let id): model.openPaletteWave(id)
-        case .task(let id):
-            let trace = UUID().uuidString
-            Perf.$inputTrace.withValue(trace) {
-                Perf.agentInput("task_click", task: id, detail: "source=palette")
-                Task { await model.openPaletteTask(id) }
-            }
+        case .repository, .dashboard, .openRepository, .wave, .task:
+            model.jump(to: destination, source: "palette")
             return
         case .graph(let name): navigation.palette = .graph(name)
         case .workflow(let name): navigation.palette = .workflow(name)
@@ -1306,11 +1344,10 @@ struct SessionsContentView: View {
     }
 
     private func openSession(_ record: SessionRecord) {
-        model.openSession(record, store: store, besideFocused: NSEvent.modifierFlags.contains(.command))
+        model.openSession(record, store: store)
     }
 
     private func openTask(_ work: WorkReference) {
-        if NSEvent.modifierFlags.contains(.command) { model.select(work, besideFocused: true) }
         let trace = UUID().uuidString
         Perf.$inputTrace.withValue(trace) {
             Perf.agentInput("task_click", task: work.id)
@@ -1320,7 +1357,7 @@ struct SessionsContentView: View {
 
     private func openRepositoryConversation() {
         guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
-        model.select(nil, besideFocused: NSEvent.modifierFlags.contains(.command))
+        model.select(nil)
         navigation.content = .terminals
         let entry = workspace
         Task { await entry.openPrimaryConversation(store: store, registry: workspaces) }
@@ -1328,7 +1365,7 @@ struct SessionsContentView: View {
 
     private func openWaveConversation(_ work: WorkReference) {
         guard let wave = model.wave(id: work.id)?.wave else { return }
-        model.select(work, besideFocused: NSEvent.modifierFlags.contains(.command))
+        model.select(work)
         navigation.content = .terminals
         let entry = workspace
         Task { await entry.openPrimaryConversation(wave: wave.name, store: store, registry: workspaces) }
@@ -1419,40 +1456,6 @@ private struct SidebarDivider: View {
     }
 }
 
-private struct WorkLayoutView<Content: View>: View {
-    let layout: WorkLayout
-    let resize: (WorkWorkspaceKey, WorkWorkspaceKey, Double) -> Void
-    @ViewBuilder let content: (WorkWorkspaceKey) -> Content
-
-    var body: some View {
-        switch layout {
-        case .workspace(let key): content(key)
-        case .split(let axis, let first, let second, let ratio):
-            GeometryReader { geometry in
-                // Reflow whole workspaces vertically when side-by-side panes would be too narrow.
-                let vertical = axis == .vertical && geometry.size.width >= 720
-                let extent = vertical ? geometry.size.width : geometry.size.height
-                let effectiveAxis: SplitAxis = vertical ? .vertical : .horizontal
-                let sizing = SplitSizing(extent: extent, firstMinimum: vertical ? 360 : 200,
-                                         secondMinimum: vertical ? 360 : 200)
-                let displayedRatio = sizing.constrain(ratio)
-                let stack = vertical ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
-                stack {
-                    WorkLayoutView(layout: first, resize: resize, content: content)
-                        .frame(width: vertical ? max(0, extent * displayedRatio - sizing.divider / 2) : nil,
-                               height: vertical ? nil : max(0, extent * displayedRatio - sizing.divider / 2))
-                    SplitDivider(axis: effectiveAxis, ratio: displayedRatio, sizing: sizing, update: { value in
-                        if let firstKey = first.keys.first, let secondKey = second.keys.first {
-                            resize(firstKey, secondKey, value)
-                        }
-                    })
-                    WorkLayoutView(layout: second, resize: resize, content: content)
-                }
-            }
-        }
-    }
-}
-
 private enum SessionsShortcut {
     case toggleShell
     case toggleFiles
@@ -1519,8 +1522,6 @@ private struct SessionsShortcutMonitor: NSViewRepresentable {
             let modifiers = event.modifierFlags.intersection([
                 .command, .shift, .option, .control,
             ])
-            // Shift is the one modifier `charactersIgnoringModifiers` keeps, so
-            // ⌘⇧D arrives as "D".
             let key = event.charactersIgnoringModifiers?.lowercased()
             if modifiers == [.control], key == "`" { return .toggleShell }
             if modifiers == [.command, .shift], key == "e" { return .toggleFiles }
@@ -1549,3 +1550,156 @@ private struct SessionsShortcutMonitor: NSViewRepresentable {
 }
 
 #endif
+
+extension SessionsWorkspace {
+    func startPersistence(query: RegistryQuery, repoPath: String?) {
+        guard persistenceQuery == nil, let repoPath else { return }
+        persistenceQuery = query
+        persistenceRepo = repoPath
+        persistenceTask = Task { [weak self] in await self?.loadPaneIntent() }
+    }
+
+    func portableLayout() -> WorkPaneLayout {
+        let place = taskFiles.map { files in
+            WorkViewPlan.Location(machineID: files.execution?.machineID ?? location?.machineId ?? localMachineId ?? "",
+                                  cwd: files.store.cwd)
+        }
+        return multiplexer.paneLayout(work: key, revision: paneRevision,
+            files: place.flatMap { place in taskFiles?.store.paneIntent(location: place) },
+            drafts: (place.flatMap { place in taskFiles?.store.drafts(location: place) } ?? []) + unavailableDrafts)
+    }
+
+    func loadPaneIntent() async {
+        guard let query = persistenceQuery, let repo = persistenceRepo, !persistenceWriting, !isRestoringIntent else { return }
+        isRestoringIntent = true
+        defer { isRestoringIntent = false }
+        let before = portableLayout()
+        let hadLocalTools = multiplexer.layout.allPanes.count > 1 || multiplexer.layout.allPanes.contains {
+            switch $0.content { case .shell, .files, .graphLog: true; case .empty, .session: false }
+        }
+        let preserveCurrent = persistenceLoaded || persistenceError != nil || hadLocalTools
+        persistenceError = nil
+        do {
+            let saved = try await query.paneLayout(work: key.selector, repoPath: repo)
+            let needsSave: Bool
+            if let saved {
+                guard saved.work == key else { throw RegistryQueryError("Saved layout belongs to different Work; local edits retained.") }
+                let current = portableLayout()
+                let restored = current == before && !preserveCurrent ? saved : Self.merging(saved, with: current)
+                multiplexer.restore(restored)
+                paneRevision = saved.revision
+                unavailableDrafts = restored.drafts
+                if let file = restored.tree?.fileIntent,
+                   case .files(let place?, let tabs, let selected) = file {
+                    let fileQuery = place.machineID == localMachineId ? query : query.onMachine(place.machineID, repository: key.repository)
+                    let documents = files(issue: key.id, cwd: place.cwd, query: fileQuery)
+                    documents.restoreTabs(tabs, selected: selected)
+                    documents.restoreDrafts(restored.drafts, location: place)
+                    unavailableDrafts.removeAll { $0.location == place }
+                    // Reconcile every recovered base, including documents with closed tabs.
+                    for draft in restored.drafts where draft.location == place {
+                        do {
+                            let disk = try await fileQuery.taskFile(issue: key.id, path: draft.path, cwd: place.cwd)
+                            await documents.document(draft.path).reconcile(disk)
+                        } catch { persistenceError = error.localizedDescription }
+                    }
+                }
+                needsSave = portableLayout() != saved
+            } else {
+                needsSave = multiplexer.layout.allPanes.contains { $0.content != .empty }
+            }
+            // Reloads reuse the workspace's existing observation chain.
+            if !persistenceLoaded {
+                persistenceLoaded = true
+                observePaneIntent()
+            }
+            isRestoringIntent = false
+            if needsSave { await savePaneIntent() }
+        } catch { persistenceError = error.localizedDescription }
+    }
+
+    private func observePaneIntent() {
+        withObservationTracking { _ = portableLayout() } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.observePaneIntent()
+                guard self.persistenceError == nil, !self.persistenceWriting, !self.isRestoringIntent else { return }
+                self.persistenceTask?.cancel()
+                self.persistenceTask = Task { [weak self] in
+                    do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+                    await self?.savePaneIntent()
+                }
+            }
+        }
+    }
+
+    func savePaneIntent() async {
+        guard persistenceLoaded, !persistenceWriting, !isRestoringIntent, persistenceError == nil,
+              let query = persistenceQuery, let repo = persistenceRepo else { return }
+        persistenceWriting = true
+        defer { persistenceWriting = false }
+        do {
+            // Serial writes absorb edits arriving during the previous write without
+            // reusing its revision or applying its older content to the workspace.
+            while true {
+                let submitted = portableLayout()
+                let saved = try await query.savePaneLayout(submitted, repoPath: repo)
+                let unchanged = portableLayout() == submitted
+                paneRevision = saved.revision
+                if unchanged { break }
+            }
+        } catch { persistenceError = error.localizedDescription }
+    }
+
+    /// A delayed read contributes missing retained content; current edits own selection and geometry.
+    private static func merging(_ saved: WorkPaneLayout, with current: WorkPaneLayout) -> WorkPaneLayout {
+        var pending = saved.tree?.panes ?? []
+        func merge(_ node: WorkPaneTree) -> WorkPaneTree {
+            switch node {
+            case .split(let axis, let ratio, let first, let second):
+                return .split(axis: axis, ratio: ratio, first: merge(first), second: merge(second))
+            case .pane(let id, let content):
+                let index = pending.firstIndex { prior in
+                    if prior.0 == id { return true }
+                    switch (prior.1, content) {
+                    case (.shell, .shell), (.files, .files), (.empty, .empty): return true
+                    case (.session(let a, _), .session(let b, _)): return a == b
+                    default: return false
+                    }
+                }
+                guard let index else { return node }
+                let old = pending.remove(at: index).1
+                switch (old, content) {
+                case (.shell(let oldTabs, _), .shell(let tabs, let selected)):
+                    return .pane(id: id, content: .shell(tabs: tabs + oldTabs.filter { old in !tabs.contains { $0.id == old.id } }, selected: selected))
+                case (.files(let oldPlace, let oldTabs, _), .files(let place, let tabs, let selected)) where oldPlace == place:
+                    return .pane(id: id, content: .files(location: place, tabs: tabs + oldTabs.filter { old in !tabs.contains { $0.id == old.id || $0.path == old.path } }, selected: selected))
+                default: return node
+                }
+            }
+        }
+        var tree = current.tree.map(merge)
+        for (id, content) in pending {
+            if case .empty = content { continue }
+            let leaf = WorkPaneTree.pane(id: id, content: content)
+            tree = tree.map { .split(axis: .vertical, ratio: 0.618, first: $0, second: leaf) } ?? leaf
+        }
+        let drafts = current.drafts + saved.drafts.filter { old in
+            !current.drafts.contains { $0.path == old.path && $0.location == old.location }
+        }
+        return WorkPaneLayout(work: current.work, revision: saved.revision, tree: tree, focused: current.focused,
+                              zoomed: current.zoomed, hidden: current.hidden, drafts: drafts)
+    }
+}
+
+private extension WorkPaneTree {
+    var panes: [(String, WorkPaneIntent)] {
+        switch self {
+        case .pane(let id, let content): [(id, content)]
+        case .split(_, _, let first, let second): first.panes + second.panes
+        }
+    }
+    var fileIntent: WorkPaneIntent? {
+        panes.first { if case .files = $0.1 { true } else { false } }?.1
+    }
+}

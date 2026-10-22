@@ -609,7 +609,7 @@ mod tests {
 
     #[test]
     fn presentation_commands_do_not_route_to_the_execution_machine() {
-        for argv in [["desktop", "list"].as_slice(), ["open"].as_slice()] {
+        for argv in [["desktop", "state"].as_slice(), ["open"].as_slice()] {
             let cli = Cli::try_parse_from(["lf", "--task", "LOO-427"].iter().chain(argv)).unwrap();
             assert_eq!(launch_task(&cli), None);
         }

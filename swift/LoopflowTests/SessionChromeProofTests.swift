@@ -186,17 +186,12 @@ struct SessionChromeProofTests {
         let invocation = try #require(entry["id"] as? String)
         var plan = try #require(JSONSerialization.jsonObject(with: placingTaskWorktrees(in: Data(contentsOf:
             fixtures.appendingPathComponent("roadmap_snapshot.json")), at: "/src/loopflow")) as? [String: Any])
-        var waves = try #require(plan["waves"] as? [[String: Any]])
-        let waveIndex = try #require(waves.firstIndex { wave in
-            let tasks = wave["tasks"] as? [String: Any]
-            return (tasks?["items"] as? [[String: Any]])?.contains { ($0["task"] as? [String: Any])?["id"] as? String == "issue-review" } == true
-        })
-        var tasks = try #require(waves[waveIndex]["tasks"] as? [String: Any])
+        var tasks = try #require(plan["tasks"] as? [String: Any])
         var items = try #require(tasks["items"] as? [[String: Any]])
         let taskIndex = try #require(items.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-review" })
         items[taskIndex]["latest_graph_process"] = latest
         items[taskIndex]["execution"] = ["state": "running", "reason": "Running", "step": NSNull(), "captured": NSNull()]
-        tasks["items"] = items; waves[waveIndex]["tasks"] = tasks; plan["waves"] = waves
+        tasks["items"] = items; plan["tasks"] = tasks
         return (String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self), invocation)
     }
 

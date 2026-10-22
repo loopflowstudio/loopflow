@@ -1600,10 +1600,12 @@ fn task_ownership_never_routes_to_another_persons_machine() {
     let plan = SharedPlan::new(&fixture);
     let task = plan.task();
     let mini = plan.remote.local_machine().unwrap().id;
-    // Kim claims on mini, a Machine this laptop also has registered.
+    // Kim claims on mini, a Machine this laptop also has registered. Her
+    // person key, not the Machine, says whose claim it is.
     let entry = serde_json::json!({
         "id": format!("own_{}", uuid::Uuid::new_v4().simple()),
         "task_id": task.as_str(), "kind": "claim", "person": "Kim",
+        "person_key": "kim@example.com",
         "machine_id": mini.as_str(),
         "at": time::OffsetDateTime::now_utc().unix_timestamp(),
     });

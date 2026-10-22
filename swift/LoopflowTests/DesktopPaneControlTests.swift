@@ -16,20 +16,32 @@ struct DesktopPaneControlTests {
 
     private var workKey: WorkWorkspaceKey { WorkWorkspaceKey(repository: repository, kind: .task, id: "task") }
 
-    private func register(_ router: WorkLinkRouter, window: UUID, registry: SessionsWorkspaceRegistry, model: WorkModel = WorkModel(query: RegistryQuery { _, _ in
-        throw RegistryQueryError("Pane controls must not launch Work")
-    })) {
-        router.register(window, repository: repository, focus: {},
-            inspect: { repository, incarnation in
-                DesktopWindowInspection(repository: repository, window: incarnation.uuidString, path: "/repo",
-                    selectionKind: nil, selectionId: nil, reading: "unavailable", reason: "Offline",
-                    task: nil, session: nil, supportedOperations: ["list", "hide", "restore", "focus", "move", "resize", "zoom"],
-                    workspaces: registry.inspect(), opening: nil)
-            }, controlPane: { try registry.controlPane($0, model: model) }, readText: { try registry.readText($0) }) { _ in }
-    }
-
-    private func target(_ pane: PaneState, window: UUID, machine: String = "machine-a") -> DesktopPaneTarget {
-        DesktopPaneTarget(repository: repository, window: window.uuidString, work: WorkWorkspaceKey(repository: repository, kind: .task, id: machine == identity.machineId ? "task" : "other"), pane: pane.id, incarnation: pane.incarnation)
+    @Test("State uses the resolved repository plan identity, never its opening path")
+    func stateUsesDurableRepositoryIdentity() async throws {
+        let plan = "repo_11111111111111111111111111111111"
+        let router = WorkLinkRouter()
+        let query = RegistryQuery { _, _ in
+            "{\"id\":\"\(plan)\",\"locators\":[\"\(plan)\"]}"
+        }
+        let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
+        let scene = try await router.openRepository(path: path, link: nil, query: query, openWindow: { _ in })
+        #expect(scene.id == plan)
+        #expect(scene.path != plan)
+        let registry = SessionsWorkspaceRegistry()
+        let key = WorkWorkspaceKey(repository: scene.id, kind: .repository, id: scene.id)
+        registry.open(key, title: "Repository", location: nil)
+        router.register(UUID(), repository: scene.id, focus: {}, inspect: { repository, window in
+            DesktopWindowInspection(repository: repository, window: window.uuidString, path: scene.path,
+                selectionKind: "repository", selectionId: repository, reading: "current", reason: nil,
+                task: nil, session: nil, supportedOperations: ["state"], workspaces: registry.inspect(),
+                openWork: registry.openWork, view: nil, opening: nil)
+        }, controlPane: { _ in throw RegistryQueryError("No mutation expected") },
+        readText: { _ in throw RegistryQueryError("No terminal expected") }, receive: { _ in })
+        let window = try #require(router.inspect().windows.first)
+        #expect(window.repository == plan)
+        #expect(window.openWork == [key])
+        #expect(window.workspaces.first?.work.repository == plan)
+        #expect(window.path != window.repository)
     }
 
     @Test("A Task starts with Files at the golden ratio; switching preserves resized and closed panes")
@@ -55,10 +67,94 @@ struct DesktopPaneControlTests {
         #expect(store.layout == retained)
         workspace.closePane(browser.id)
         workspace.prepareTaskPanes()
-        #expect(store.layout.allPanes == [main])
+        #expect(store.layout.allPanes.count == 1)
+        #expect(workspace.filesPane == nil)
+        #expect(store.layout.pane(for: main.id) == main)
+        workspace.toggleFiles()
+        #expect(store.layout.allPanes.count == 2)
+        #expect(workspace.filesPane?.content == browser.content)
     }
 
+    @Test("Companion switches retain the shell and file draft; close retires the hidden shell")
+    func companionSwitchRetainsViews() throws {
+        let workspace = SessionsWorkspace(key: workKey, title: "Task", location: identity, localMachineId: identity.machineId)
+        let store = workspace.multiplexer
+        store.load(sessionId: "main", location: identity)
+        let main = store.focusedPane
+        let shell = try #require(store.newShell(command: ["retained-shell"], location: identity))
+        #if canImport(GhosttyKit)
+        let terminal = try #require(shell.terminal)
+        let view = workspace.surfaces.view(for: terminal)
+        #endif
+        let content = PaneContent.files(taskId: "task", location: identity)
+        let files = try workspace.files(for: content, task: nil, query: RegistryQuery { _, _ in "{}" })
+        files.selection = "draft.txt"
+        files.document("draft.txt").editor.string = "retained draft"
+        try workspace.selectContent(content, in: shell)
+        #expect(store.focusedPane.content == content)
+        #expect(store.layout.allPanes.count == 3)
+        #if canImport(GhosttyKit)
+        #expect(workspace.surfaces.view(for: terminal) === view)
+        #endif
+        try workspace.selectContent(.shell(location: identity), in: store.focusedPane)
+        #expect(store.layout.pane(for: shell.id)?.content.selectedShell?.command == ["retained-shell"])
+        #if canImport(GhosttyKit)
+        #expect(workspace.surfaces.view(for: terminal) === view)
+        #endif
+        try workspace.selectContent(content, in: store.focusedPane)
+        #expect(files.selection == "draft.txt")
+        #expect(files.document("draft.txt").editor.string == "retained draft")
+        #expect(store.layout.pane(for: main.id) == main)
+        workspace.closePane(shell.id)
+        #expect(store.layout.pane(for: shell.id)?.content.selectedShell?.command == nil)
+        #if canImport(GhosttyKit)
+        #expect(workspace.surfaces.view(for: terminal) !== view)
+        #endif
+    }
 
+    private func register(_ router: WorkLinkRouter, window: UUID, registry: SessionsWorkspaceRegistry, model: WorkModel = WorkModel(query: RegistryQuery { _, _ in
+        throw RegistryQueryError("Pane controls must not launch Work")
+    })) {
+        router.register(window, repository: repository, focus: {},
+            inspect: { repository, incarnation in
+                DesktopWindowInspection(repository: repository, window: incarnation.uuidString, path: "/repo",
+                    selectionKind: nil, selectionId: nil, reading: "unavailable", reason: "Offline",
+                    task: nil, session: nil, supportedOperations: ["state", "hide", "restore", "focus", "move", "resize", "zoom"],
+                    workspaces: registry.inspect(), openWork: registry.openWork, view: nil, opening: nil)
+            }, controlPane: { try registry.controlPane($0, model: model) }, readText: { try registry.readText($0) }) { _ in }
+    }
+
+    private func target(_ pane: PaneState, window: UUID, machine: String = "machine-a") -> DesktopPaneTarget {
+        DesktopPaneTarget(repository: repository, window: window.uuidString, work: WorkWorkspaceKey(repository: repository, kind: .task, id: machine == identity.machineId ? "task" : "other"), pane: pane.id, incarnation: pane.content.selectedShell?.incarnation ?? pane.incarnation, tab: pane.content.selectedShell?.id)
+    }
+
+    @Test("Session targets use captured location, never the enclosing workspace")
+    func sessionLocationOwnsTargetingAndSplit() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
+        let workspace = registry.open(workKey, title: "Task", location: identity)
+        let peer = WorkspaceIdentity(machineId: "peer", worktree: identity.worktree)
+        workspace.multiplexer.load(sessionId: "conversation", location: peer)
+        let pane = workspace.multiplexer.focusedPane
+        #expect(pane.terminal == .session("conversation", machineId: "peer"))
+        let before = workspace.multiplexer.layout
+        registry.reconcileMembership([])
+        #expect(workspace.multiplexer.layout == before)
+        let added = try #require(try workspace.newShell())
+        #expect(added.content.location == identity)
+        #expect(workspace.multiplexer.pane(forSessionId: "conversation") == pane)
+        let router = WorkLinkRouter(), window = UUID()
+        register(router, window: window, registry: registry)
+        let stale = target(pane, window: window)
+        _ = try router.controlPane(.init(target: stale, action: .hide))
+        workspace.multiplexer.updateSessionLocation("conversation", location: identity)
+        #expect(throws: RegistryQueryError.self) {
+            try router.controlPane(.init(target: stale, action: .hide))
+        }
+        let split = try #require(try workspace.newShell())
+        #expect(split.content.location == identity)
+        workspace.multiplexer.updateSessionLocation("conversation", location: nil)
+        #expect((try #require(workspace.multiplexer.pane(forSessionId: "conversation"))).terminal == nil)
+    }
 
     @Test func literalTextDoesNotInterpretEscapesOrAcceptControlKeys() throws {
         for text in ["", "héλ🙂 e\u{301}", #""$(literal)"; \n"#] {
@@ -96,17 +192,15 @@ struct DesktopPaneControlTests {
         #expect(registry.surfaces.programStatus(for: .shell(shell.pane, machineId: identity.machineId)) == nil)
     }
 
-
     @Test("Shell observation and exit use the pane's location, not the workspace path")
     func shellOwnsExecutionLocation() throws {
         let workspace = fixtureWork(fixtureWorkspace("/repository"))
         let location = WorkspaceIdentity(machineId: "peer", worktree: "/remote/task")
         let shell = try #require(workspace.multiplexer.newShell(command: ["peer-shell"], location: location))
-        let tab = try #require(shell.content.selectedShell)
-        let terminal = TerminalIdentity.shell(tab.id, machineId: "peer")
+        let terminal = TerminalIdentity.shell(try #require(shell.content.selectedShell).id, machineId: "peer")
         #expect(shell.terminal == terminal)
         NotificationCenter.default.post(name: .ghosttySurfaceClosed,
-            object: TerminalIdentity.shell(tab.id, machineId: fixtureMachineId))
+            object: TerminalIdentity.shell(try #require(shell.content.selectedShell).id, machineId: fixtureMachineId))
         #expect(workspace.multiplexer.layout.pane(for: shell.id) == shell)
         NotificationCenter.default.post(name: .ghosttySurfaceClosed, object: terminal)
         #expect(workspace.multiplexer.focusedPane.content == .empty)
@@ -140,7 +234,7 @@ struct DesktopPaneControlTests {
         #expect(store.layout == before)
         #expect(store.focusedPane == focus)
         #expect(store.layout.pane(for: shell.id)?.content.selectedShell?.command == ["retained-command"])
-        #expect(registry.surfaces.programStatus(for: shell.terminal!) == nil)
+        #expect(registry.surfaces.programStatus(for: try #require(shell.terminal)) == nil)
         #expect(registry.keys == [workKey])
     }
 
@@ -183,8 +277,8 @@ struct DesktopPaneControlTests {
         let pane = store.focusedPane
         store.load(sessionId: "other", location: identity)
         let otherPane = store.focusedPane
-        let terminal = pane.terminal!
-        let other = otherPane.terminal!
+        let terminal = try #require(pane.terminal)
+        let other = try #require(otherPane.terminal)
         let view = registry.surfaces.view(for: terminal), otherView = registry.surfaces.view(for: other)
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 800, height: 300),
                               styleMask: [.titled], backing: .buffered, defer: false)
@@ -266,7 +360,7 @@ struct DesktopPaneControlTests {
         let store = registry.open(workKey, title: "Task", location: identity).multiplexer
         store.newShell(location: identity)
         let pane = store.focusedPane
-        let terminal = pane.terminal!
+        let terminal = try #require(pane.terminal)
         let view = registry.surfaces.view(for: terminal)
         view.setFrameSize(CGSize(width: 400, height: 300))
         view.workingDirectory = NSTemporaryDirectory()
@@ -378,7 +472,7 @@ struct DesktopPaneControlTests {
         let workspace = registry.open(workKey, title: "Task", location: identity), store = workspace.multiplexer
         store.load(sessionId: "retained-session", location: identity)
         let session = store.focusedPane
-        let source = DesktopPaneTarget(repository: repository, window: window.uuidString, work: workKey, pane: session.id, incarnation: session.incarnation)
+        let source = DesktopPaneTarget(repository: repository, window: window.uuidString, work: workKey, pane: session.id, incarnation: session.incarnation, tab: nil)
         store.newShell(command: ["retained-shell-command"], location: identity)
         let selected = store.focusedPane
         store.setZoom(selected.id, enabled: true)
@@ -400,12 +494,13 @@ struct DesktopPaneControlTests {
         #expect(!store.collapsedPaneIds.contains(files.id))
         #expect(store.layout.pane(for: files.id) == files)
         let shellReceipt = try router.controlPane(.init(target: source, action: .shell))
+        #expect(store.shell(shellReceipt.tab ?? "")?.location == identity)
         #expect(shellReceipt.pane == selected.id)
         #expect(store.layout.allPanes.count == 4)
         #expect(store.layout.pane(for: session.id) == session)
         #expect(store.focusedPaneId == selected.id)
         #expect(store.zoomedPaneId == selected.id)
-        #expect(store.shell(selected.content.selectedShell!.id)?.command == ["retained-shell-command"])
+        #expect(store.shell(try #require(selected.content.selectedShell).id)?.command == ["retained-shell-command"])
         #expect(document.editor.string == "unfinished draft")
         #expect(document.editor.selectedRange() == NSRange(location: 2, length: 4))
         #expect(model.selection == nil)
@@ -470,7 +565,7 @@ struct DesktopPaneControlTests {
         document.editor.string = "unfinished draft"
         document.editor.setSelectedRange(NSRange(location: 3, length: 5))
         #if GHOSTTY_ENABLED
-        let shellView = registry.surfaces.view(for: shell.terminal!)
+        let shellView = registry.surfaces.view(for: try #require(shell.terminal))
         let sessionView = registry.surfaces.view(for: .session("retained-session", machineId: identity.machineId))
         #endif
         register(router, window: window, registry: registry)
@@ -502,7 +597,7 @@ struct DesktopPaneControlTests {
         #expect(registry.open(workKey, title: "Task", location: identity) === workspace)
         #expect(workspace.surfaces === registry.surfaces)
         #if GHOSTTY_ENABLED
-        #expect(registry.surfaces.view(for: shell.terminal!) === shellView)
+        #expect(registry.surfaces.view(for: try #require(shell.terminal)) === shellView)
         #expect(registry.surfaces.view(for: .session("retained-session", machineId: identity.machineId)) === sessionView)
         #endif
         _ = try router.controlPane(.init(target: shellTarget, action: .focus))
@@ -519,8 +614,8 @@ struct DesktopPaneControlTests {
         let peer = target(store.focusedPane, window: window)
         register(router, window: window, registry: registry)
         let before = store.layout, focus = store.focusedPaneId
-        let actions: [DesktopPaneAction] = [.hide, .restore, .focus, .shell,
-            .move(destination: peer, axis: .vertical), .resize(toward: peer, ratio: 0.6), .zoom(enabled: true), .files(task: "task"), .graphLog(task: "task"),
+        let actions: [DesktopPaneAction] = [.hide, .restore, .focus,
+            .move(destination: peer, axis: .vertical), .resize(toward: peer, ratio: 0.6), .zoom(enabled: true), .shell, .files(task: "task"), .graphLog(task: "task"),
             .text(surface: "stale", text: "draft"), .key(surface: "stale", key: .enter)]
         for action in actions {
             #expect(throws: RegistryQueryError.self) { try router.controlPane(.init(target: old, action: action)) }
@@ -543,7 +638,7 @@ struct DesktopPaneControlTests {
         register(router, window: window, registry: registry)
         let before = store.layout
         let outside = DesktopPaneTarget(repository: "different-plan", window: window.uuidString,
-            work: workKey, pane: peer.pane, incarnation: peer.incarnation)
+            work: workKey, pane: peer.pane, incarnation: peer.incarnation, tab: nil)
         for destination in [stale, shell, outside, target(store.focusedPane, window: UUID()),
                             target(store.focusedPane, window: window, machine: "peer")] {
             for action in [DesktopPaneAction.move(destination: destination, axis: .vertical),

@@ -38,18 +38,22 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
     public let session: DesktopSessionInspection?
     public let supportedOperations: [String]
     public let workspaces: [DesktopWorkspaceInspection]
+    public let view: WorkViewPlan?
+    /// Work shown in this window, in slot fill order.
+    public let openWork: [WorkWorkspaceKey]
     public let opening: DesktopOpening?
 
     public init(repository: String, window: String, path: String?, selectionKind: String?, selectionId: String?,
                 reading: String, reason: String?, task: DesktopTaskInspection?,
-                session: DesktopSessionInspection?, supportedOperations: [String], workspaces: [DesktopWorkspaceInspection], opening: DesktopOpening?) {
+                session: DesktopSessionInspection?, supportedOperations: [String], workspaces: [DesktopWorkspaceInspection], openWork: [WorkWorkspaceKey], view: WorkViewPlan?, opening: DesktopOpening?) {
         self.repository = repository; self.window = window; self.path = path
         self.selectionKind = selectionKind; self.selectionId = selectionId
         self.reading = reading; self.reason = reason; self.task = task
-        self.session = session; self.supportedOperations = supportedOperations; self.workspaces = workspaces; self.opening = opening
+        self.session = session; self.supportedOperations = supportedOperations; self.workspaces = workspaces; self.openWork = openWork; self.view = view; self.opening = opening
     }
     enum CodingKeys: String, CodingKey {
-        case repository, window, path, reading, reason, task, session, workspaces, opening
+        case repository, window, path, reading, reason, task, session, workspaces, view, opening
+        case openWork = "open_work"
         case selectionKind = "selection_kind", selectionId = "selection_id"
         case supportedOperations = "supported_operations"
     }
@@ -123,6 +127,13 @@ public struct DesktopWorkspaceInspection: Codable, Sendable, Equatable {
 
 /// Children retain first/second order; a pane has no children. Values are copied
 /// from MultiplexerStore at inspection, never written back as layout authority.
+public struct DesktopShellInspection: Codable, Sendable, Equatable {
+    public let id: String
+    public let incarnation: String
+    public let surface: String?
+    public let location: WorkspaceIdentity?
+}
+
 public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
     public let pane: String?
     public let incarnation: String?
@@ -133,12 +144,26 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
     public let ratio: Double?
     public let children: [DesktopLayoutInspection]
     public let location: WorkspaceIdentity?
+    public let tabs: [DesktopShellInspection]
+    public let selectedTab: String?
 
-    public init(_ layout: LayoutNode, surface: (PaneState) -> String?) {
+    enum CodingKeys: String, CodingKey {
+        case pane, incarnation, surface, content, subject, axis, ratio, children, location, tabs
+        case selectedTab = "selected_tab"
+    }
+
+    public init(_ layout: LayoutNode, surface: (PaneContent) -> String?) {
         switch layout {
         case .leaf(let state):
+            if case .shell(let shells, let selected) = state.content {
+                tabs = shells.map { tab in
+                    let content = PaneContent.shell(tabs: [tab], selected: tab.id)
+                    return DesktopShellInspection(id: tab.id, incarnation: tab.incarnation, surface: surface(content), location: tab.location)
+                }
+                selectedTab = selected
+            } else { tabs = []; selectedTab = nil }
             location = state.content.location
-            pane = state.id; incarnation = state.incarnation; self.surface = surface(state); axis = nil; ratio = nil; children = []
+            pane = state.id; incarnation = state.incarnation; self.surface = surface(state.content); axis = nil; ratio = nil; children = []
             switch state.content {
             case .empty: content = "empty"; subject = nil
             case .shell: content = "shell"; subject = nil
@@ -147,6 +172,7 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
             case .graphLog(let id, _, _): content = "graph_log"; subject = id
             }
         case .split(let splitAxis, let first, let second, let splitRatio):
+            tabs = []; selectedTab = nil
             location = nil
             pane = nil; incarnation = nil; self.surface = nil; content = nil; subject = nil; axis = splitAxis.rawValue; ratio = splitRatio
             children = [Self(first, surface: surface), Self(second, surface: surface)]
@@ -162,13 +188,23 @@ public struct DesktopPaneTarget: Codable, Sendable, Equatable {
     public let work: WorkWorkspaceKey
     public let pane: String
     public let incarnation: String
+    public let tab: String?
 
     public init(repository: String, window: String, work: WorkWorkspaceKey,
-                pane: String, incarnation: String) {
-        self.repository = repository; self.window = window; self.work = work; self.pane = pane; self.incarnation = incarnation
+                pane: String, incarnation: String, tab: String?) {
+        self.repository = repository; self.window = window; self.work = work; self.pane = pane; self.incarnation = incarnation; self.tab = tab
     }
     enum CodingKeys: String, CodingKey {
-        case repository, window, work, pane, incarnation
+        case repository, window, work, pane, incarnation, tab
+    }
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(repository, forKey: .repository)
+        try values.encode(window, forKey: .window)
+        try values.encode(work, forKey: .work)
+        try values.encode(pane, forKey: .pane)
+        try values.encode(incarnation, forKey: .incarnation)
+        try values.encode(tab, forKey: .tab)
     }
 }
 
@@ -180,14 +216,15 @@ public struct DesktopPaneReceipt: Codable, Sendable, Equatable {
     public let work: WorkWorkspaceKey
     public let pane: String
     public let observedAt: Int64
+    public let tab: String?
 
-    public init(target: DesktopPaneTarget, pane: String, observedAt: Int64) {
+    public init(target: DesktopPaneTarget, pane: String, tab: String?, observedAt: Int64) {
         repository = target.repository; window = target.window
         work = target.work
-        self.pane = pane; self.observedAt = observedAt
+        self.pane = pane; self.tab = tab; self.observedAt = observedAt
     }
     enum CodingKeys: String, CodingKey {
-        case repository, window, work, pane
+        case repository, window, work, pane, tab
         case observedAt = "observed_at"
     }
 }

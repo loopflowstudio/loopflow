@@ -6,8 +6,8 @@ use crate::error::CoreError;
 use crate::graph::Skill;
 use crate::prompt::structured_reply::{structured_replies_for_context, ClientContext};
 use crate::prompt::{
-    drop_duplicate_docs, format_first_turn, gather_context, Document, DocumentSource,
-    GatherContextOpts, PromptComponents, RelatedRepoContext, Surface,
+    drop_duplicate_docs, format_first_turn, gather_context, ClipboardContext, Document,
+    DocumentSource, GatherContextOpts, PromptComponents, RelatedRepoContext, Surface,
 };
 
 /// Optional per-source overrides for context gathering.
@@ -97,7 +97,12 @@ fn prepare_prompt(
     docs.extend(requested_docs);
     let diff_files = source_overrides.diff_files.unwrap_or(config.diff_files);
     let diff = source_overrides.diff.unwrap_or(config.diff);
-    let clipboard = source_overrides.clipboard.unwrap_or(config.paste);
+    let clipboard = match source_overrides.clipboard {
+        Some(true) => ClipboardContext::Required,
+        Some(false) => ClipboardContext::Off,
+        None if config.paste => ClipboardContext::IfAvailable,
+        None => ClipboardContext::Off,
+    };
 
     let opts = GatherContextOpts {
         repo_root: repo_root.clone(),
@@ -115,7 +120,7 @@ fn prepare_prompt(
         wave,
         include_diff: diff,
         include_diff_files: diff_files,
-        include_clipboard: clipboard,
+        clipboard,
         related_repos,
     };
 

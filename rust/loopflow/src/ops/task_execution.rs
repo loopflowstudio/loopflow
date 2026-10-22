@@ -44,7 +44,15 @@ pub(crate) async fn task_execution_and_graph(
     store: &SharedStore,
     task_id: &TaskId,
 ) -> StoreResult<(TaskExecutionSnapshot, Option<GraphProcessDetail>)> {
-    let Some(graph) = store.sqlite.task_graphs(task_id)?.pop() else {
+    execution_of_latest_graph(store, store.sqlite.task_graphs(task_id)?.pop()).await
+}
+
+/// Execution and the Graph record of a Task whose latest Graph is already read.
+pub(crate) async fn execution_of_latest_graph(
+    store: &SharedStore,
+    graph: Option<GraphProcess>,
+) -> StoreResult<(TaskExecutionSnapshot, Option<GraphProcessDetail>)> {
+    let Some(graph) = graph else {
         return Ok((
             TaskExecutionSnapshot {
                 state: TaskExecutionState::Idle,

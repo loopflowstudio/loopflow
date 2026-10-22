@@ -77,6 +77,8 @@ pub(crate) struct WaveLocatorUpdate {
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error(transparent)]
+    Selection(#[from] crate::work::selection::SelectionError),
+    #[error(transparent)]
     Planning(#[from] crate::linear::LinearBindingError),
     #[error(transparent)]
     TaskData(#[from] crate::work::task::TaskDataError),
@@ -477,12 +479,10 @@ impl Store {
     pub(crate) async fn wave_retirement_blockers(
         &self,
         wave_id: &WaveId,
-        replacement: &WaveId,
     ) -> StoreResult<Vec<String>> {
         let wave_id = wave_id.clone();
-        let replacement = replacement.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.wave_retirement_blockers(&wave_id, &replacement)
+            store.wave_retirement_blockers(&wave_id)
         })
         .await
     }
@@ -1538,6 +1538,8 @@ mod tests {
             expected.pm_snapshot_synced_at = Some(17);
             assert!(accepted.updated_at >= task.updated_at);
             expected.updated_at = accepted.updated_at;
+            // Placement records the Task's branch in its plan.
+            expected.revision = task.revision + 1;
             if !mapped {
                 expected.linear_id = None;
             }
@@ -1985,7 +1987,8 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(retried, accepted);
-            assert_eq!(retried.revision, task.revision);
+            // Only the first placement records its branch in the plan.
+            assert_eq!(retried.revision, task.revision + 1);
             assert_eq!(retried.linear_id, task.linear_id);
             assert_eq!(retried.identifier, task.identifier);
             assert_eq!(retried.title, task.title);
@@ -2999,7 +3002,7 @@ mod tests {
         assert_eq!(ownership.owner.unwrap().machine.id, Some(home));
         let saved = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(saved.id, task.id);
-        assert_eq!(saved.revision, task.revision);
+        assert_eq!(saved.revision, task.revision + 1);
         assert_eq!(saved.linear_id, task.linear_id);
         assert_eq!(saved.identifier, task.identifier);
         assert_eq!(saved.title, task.title);

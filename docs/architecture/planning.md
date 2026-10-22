@@ -39,8 +39,8 @@ Sync writes only changed fields; plan-only sends nothing. A missing default-bran
 ref or GOAL.md blocks mutation instead of clearing the provider summary.
 Creation preserves authored IDs and bytes and writes missing GOAL.md/MEMORY.md
 files. Reads never provision. Registry relocation changes addresses without moving authored files.
-Workflow definitions remain separately stored: provisioning and the draft migration
-import `.lf/workflows/`, and Wave workflow selection updates the stored definition.
+Workflow definitions are repository files (`.lf/workflows/`) or builtins; a Wave
+records only the selected name, which travels with planning.
 Wave list, status and roadmap emit each Wave's `machine` from the reader's
 Machine-local Wave → Machine default (the Wave, then its parents), or
 `machine: null` when unset, never a fabricated local Machine.

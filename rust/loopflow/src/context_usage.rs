@@ -588,7 +588,7 @@ pub fn render_report(report: &ContextReport) -> String {
     for step in &report.steps {
         let mut line = format!(
             "{:<12}  {:<16}",
-            format_time(step.observed_at),
+            crate::lf::output::format_time(step.observed_at),
             crate::lf::output::truncate(step.skill.as_deref().unwrap_or(&step.harness), 16)
         );
         for usage in &step.sources {
@@ -649,16 +649,6 @@ fn budget_note(budget: Option<u64>, over: bool) -> Option<String> {
 
 fn cell(tokens: Option<u64>) -> String {
     tokens.map_or_else(|| "-".to_string(), crate::lf::output::format_int)
-}
-
-fn format_time(unix: i64) -> String {
-    chrono::DateTime::from_timestamp(unix, 0)
-        .map(|utc| {
-            utc.with_timezone(&chrono::Local)
-                .format("%b %-d %H:%M")
-                .to_string()
-        })
-        .unwrap_or_else(|| unix.to_string())
 }
 
 #[cfg(test)]

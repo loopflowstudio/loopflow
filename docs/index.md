@@ -9,7 +9,7 @@ lf debug -c
 Build software with other people and their coding agents. Each task has one
 owner, its own working copy and one pull request, so several people's agents can
 work in one project without colliding. The plan is shared through Linear or a shared
-Git ref; a comment on a Linear task reaches its agents before their next step;
+Git ref; a comment on a task reaches its agents before their next step;
 and each task's workflow stops for a person where judgment counts. Skills, Graphs
 and workflows are files in the project, reviewed like code. Conversations stay on
 your computer; only the plan travels.

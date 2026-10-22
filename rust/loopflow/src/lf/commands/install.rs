@@ -2600,7 +2600,10 @@ fn promote_published_from_installation(
             "only a published candidate may advance a receipt-managed installation"
         ));
     }
-    render_human(&preview);
+    // Newcomers see only the outcome; a refusal lists its reasons below.
+    if preview_only {
+        render_human(&preview);
+    }
     if let Some(prior) = &prior {
         if prior.selection.store != store_path {
             eprintln!(

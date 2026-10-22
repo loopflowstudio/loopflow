@@ -1937,7 +1937,7 @@ fn builtin_deploy_uses_ops_land_item() {
 }
 
 fn roadmap_task(repo: &Path, home: &Path) -> serde_json::Value {
-    lf_json(repo, home, &["wave", "show", "--json"])["waves"][0]["tasks"]["items"][0].clone()
+    lf_json(repo, home, &["wave", "show", "--json"])["tasks"]["items"][0].clone()
 }
 
 fn labels(compiled: &serde_json::Value) -> Vec<&str> {
@@ -2034,11 +2034,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
     observe_planning(&task, &checkout);
     task.store
         .sqlite
-        .select_wave_workflow(
-            task.task.wave_id.as_ref().unwrap(),
-            "feature",
-            loopflow::workflow::builtin_workflow("feature").unwrap(),
-        )
+        .select_wave_workflow(task.task.wave_id.as_ref().unwrap(), "feature")
         .unwrap();
     for skill in [
         "implement-proof",

@@ -513,7 +513,7 @@ pub enum Commands {
     },
     /// Open Work's conversation in Desktop, this cmux/Herdr host or a terminal
     Open(commands::open::OpenArgs),
-    /// Inspect and control Loopflow Desktop panes (macOS only)
+    /// Select Work and control Loopflow Desktop panes
     Desktop {
         #[command(subcommand)]
         cmd: DesktopCommand,
@@ -606,6 +606,93 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
+    /// Show a Work selection, or derive a passive plan for external hosts
+    View {
+        /// wave/task/query/kind/state expression; omitted uses the repository default
+        expression: Option<String>,
+        /// Print the derived plan as JSON without opening Desktop or starting a provider
+        #[arg(long)]
+        plan: bool,
+        /// Print the opening receipt as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create or edit a Dashboard query with revision checking; prints the Dashboard as JSON
+    Query {
+        /// Dashboard name or query:ID
+        container: String,
+        /// Selection expression, as for `lf desktop view`
+        expression: String,
+        /// Last observed revision; omit only when creating a new Dashboard
+        #[arg(long)]
+        revision: Option<i64>,
+    },
+
+    /// Pin a Dashboard in repository discovery; prints the Dashboard as JSON
+    Pin {
+        /// Dashboard name or query:ID
+        query: String,
+        /// The Dashboard's last read revision; a stale one writes nothing
+        #[arg(long)]
+        revision: i64,
+    },
+    /// Unpin a Dashboard without changing its membership or arrangement; prints the Dashboard as JSON
+    Unpin {
+        /// Dashboard name or query:ID
+        query: String,
+        /// The Dashboard's last read revision; a stale one writes nothing
+        #[arg(long)]
+        revision: i64,
+    },
+    /// Rename a Dashboard or Task through its shared owner; prints the owner's record as JSON
+    Rename {
+        /// query:ID or task:<durable-id>
+        target: String,
+        /// The new name, written to the shared owner so labels and crumbs follow
+        name: String,
+        /// The target's last read revision; a stale one writes nothing
+        #[arg(long)]
+        revision: u64,
+    },
+    /// Replace a Dashboard's occurrence order and hidden members from JSON on stdin; prints the Dashboard as JSON
+    Arrange {
+        /// Dashboard name or query:ID
+        query: String,
+        /// The Dashboard's last read revision; a stale one writes nothing
+        #[arg(long)]
+        revision: i64,
+    },
+    /// Replace a Dashboard's slot layout from JSON on stdin; `null` restores the default
+    Slots {
+        /// Dashboard name or query:ID
+        query: String,
+        /// The Dashboard's last read revision; a stale one writes nothing
+        #[arg(long)]
+        revision: i64,
+    },
+    /// Move a member into another's place: the repository's Task order, or a Dashboard's with --query; prints the result as JSON
+    Order {
+        /// Member to move: task:<durable-id>, or wave:<durable-id> on a Dashboard
+        member: String,
+        /// Member whose place it takes
+        #[arg(long)]
+        to: String,
+        /// Dashboard whose order to edit instead of the repository's Task order
+        #[arg(long, requires = "revision")]
+        query: Option<String>,
+        /// The Dashboard's last read revision; a stale one writes nothing
+        #[arg(long, requires = "query")]
+        revision: Option<i64>,
+    },
+    /// Read portable pane intent as JSON, or save a complete revision-checked record from stdin
+    Layout {
+        /// repository, wave:<durable-id> or task:<durable-id>
+        work: String,
+        /// Replace the record from JSON on stdin instead of reading it
+        #[arg(long)]
+        save: bool,
+    },
+
     /// Insert literal text at an exact surface's cursor; never submits or clears a draft
     Text {
         #[arg(long)]
@@ -650,14 +737,14 @@ pub enum DesktopCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Focus an exact pane in its retained workspace (does not select Work)
+    /// Focus an exact pane, opening its retained workspace when needed
     Focus {
         #[arg(long)]
         pane: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Add a shell tab on the Task’s recorded Machine
+    /// Add and select a shell tab at the Task’s recorded location
     Shell {
         #[arg(long)]
         pane: Option<String>,
@@ -710,7 +797,7 @@ pub enum DesktopCommand {
         json: bool,
     },
     /// Read actual windows and panes without launching, focusing, or acquiring clients
-    List {
+    State {
         #[arg(long)]
         json: bool,
     },
@@ -747,13 +834,10 @@ impl WavePlanTarget {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveWorkflowCommand {
-    /// Read the authored definition without creating a repository file
-    Source { name: String, wave: Option<String> },
+    /// Print a definition from `.lf/workflows/` or the builtins
+    Source { name: String },
     /// List Workflow definitions, including unavailable local files
     List {
-        /// Include this Wave's stored Workflow definitions
-        #[arg(long)]
-        wave: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -763,14 +847,9 @@ pub enum WaveWorkflowCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Select the Workflow future Tasks take up; captured Tasks stay unchanged
-    Set {
-        name: String,
-        wave: Option<String>,
-        /// Store this definition in the Wave
-        #[arg(long)]
-        file: Option<std::path::PathBuf>,
-    },
+    /// Select the Workflow future Tasks take up; captured Tasks stay unchanged.
+    /// Definitions are committed `.lf/workflows/<name>.yaml` files or builtins.
+    Set { name: String, wave: Option<String> },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1741,11 +1820,14 @@ pub enum CronCommand {
         /// Daily or every-minute cron expression, or a schedule alias
         #[arg(long, default_value = "daily")]
         schedule: String,
+        /// Let teammates see this cron; crons are private by default
+        #[arg(long)]
+        publish: bool,
         /// Arguments passed to lf, after --
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
-    /// List installed loopflow cron jobs
+    /// List jobs installed here, then teammates' published ones
     List {
         /// Only commands with this --wave selector
         #[arg(short = 'w', long)]
@@ -1757,23 +1839,22 @@ pub enum CronCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Validate configured commands and your Wave Machine without installing jobs
-    Preflight {
-        /// Only commands with this --wave selector
+    /// Let teammates see an installed cron (pushed to origin)
+    Publish {
+        name: String,
+        /// The cron's Wave, when the name is installed for more than one
         #[arg(short = 'w', long)]
         wave: Option<String>,
-        /// Only commands with this --task selector
-        #[arg(long)]
-        task: Option<String>,
     },
-    /// Reconcile installed jobs with the repository configuration's cron list
-    Sync {
-        /// Only commands with this --wave selector
-        #[arg(short = 'w', long, conflicts_with = "repo")]
+    /// Make an installed cron private again
+    Unpublish {
+        name: String,
+        /// The cron's Wave, when the name is installed for more than one
+        #[arg(short = 'w', long)]
         wave: Option<String>,
-        /// Only commands with this --task selector
-        #[arg(long, conflicts_with = "repo")]
-        task: Option<String>,
+    },
+    /// Reinstall this Machine's jobs with the current lf
+    Sync {
         /// Install the finite repository Task check on this Machine
         #[arg(long)]
         repo: bool,
@@ -1917,7 +1998,8 @@ pub enum RepoCommand {
         #[arg(long = "team-name")]
         team_name: Option<String>,
     },
-    /// Refresh shared planning from Linear
+    /// Refresh shared planning now: Linear per Wave, or the repository's Git
+    /// planning ref (Git ignores the Wave selection; its exchange is per repository)
     Refresh {
         wave: Option<String>,
         #[arg(long, conflicts_with = "wave")]
@@ -2021,6 +2103,7 @@ pub enum MachineCommand {
     /// Install a separate login on an added machine using this laptop's browser.
     Connect {
         target: String,
+        /// github, claude, codex, opencode or linear
         provider: crate::provider_auth::Provider,
         email: Option<String>,
         #[arg(long)]
@@ -2031,6 +2114,9 @@ pub enum MachineCommand {
         #[command(subcommand)]
         cmd: MachineCredentialCommand,
     },
+    /// Name this Machine for teammates, or `off` to make it private again.
+    /// A private Machine's ownership entries and published crons carry only its id.
+    Public { name: String },
     /// Print this machine's stable local Machine identity.
     Id {
         #[arg(long)]

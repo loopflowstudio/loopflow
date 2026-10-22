@@ -431,9 +431,9 @@ fn check_continuity(events: &[LfProcess], obligations: &[CronObligation], now: i
             &obligation.wave
         };
         let sync = if obligation.target_kind == crate::ops::CronTargetKind::Repository {
-            "lf wave cron sync --repo".to_string()
+            "lf cron sync --repo"
         } else {
-            format!("lf wave cron sync --wave {wave}")
+            "lf cron sync"
         };
         missing.push(format!(
             "{}/{} on Machine {} expected interval {} ({}) has no scheduled receipt; \
@@ -859,7 +859,7 @@ mod tests {
             "lf wave cron history --wave infrastructure --graph telemetry-daily --days 2",
             "configured executable /usr/local/bin/lf",
             "inspect log /src/loopflow/.lf/logs/cron.log",
-            "lf wave cron sync --wave infrastructure",
+            "lf cron sync",
         ] {
             assert!(
                 check.detail.contains(expected),
@@ -877,7 +877,7 @@ mod tests {
         cron.target_kind = CronTargetKind::Repository;
         let check = check_continuity(&[], &[cron], now);
         assert_eq!(check.status, Status::Fail);
-        assert!(check.detail.contains("lf wave cron sync --repo"));
+        assert!(check.detail.contains("lf cron sync --repo"));
         assert!(check
             .detail
             .contains("lf wave cron history --wave '' --graph"));

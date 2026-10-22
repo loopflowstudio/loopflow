@@ -3,8 +3,9 @@
 Status: implemented and published as PR #1648 on 2026-10-21. Its first gate never
 ran because lf could not select a managed Claude account; Jack Heart reconnected
 jack@loopflow.studio on October 21 and asked for gate and land of the published PR.
-The branch now carries current `main` (ed568b1, merged cleanly 2026-10-21; the
-PR diff is exactly the eight code files plus scratch). Design unchanged. Product
+The branch now carries current `main` (845e8b7, PR #1647, merged cleanly
+2026-10-21 after ed568b1; the PR diff is exactly the eight code files, the
+README/docs trust prose, and scratch). Design unchanged. Product
 decision accepted by Jack Heart on October 21: lf pre-accepts Claude's folder
 trust for worktrees lf itself creates. Demo/review (real Claude pty on macOS and
 fresh Linux) still remains.
@@ -187,6 +188,6 @@ Out:
 - Kickoff: real-Claude pty probes of the four trust cases → findings above.
 - Implement/compress: `env -u LF_HOME cargo test -p loopflow --lib -- claude_trust git_worktree_add < /dev/null` → 7 pass; `--test integration -- claude_opens_lf_created_worktree_already_trusted` → pass; clippy `--all-targets -D warnings` clean. Gate owns affected suites.
 - Concept review (2026-10-21): accepted model holds (lf-created provenance = git admin marker; trust decided at launch for the child's config). One consequence found: README/docs/lf.md trust prose contradicts shipped behaviour → implement item 4. No open product choice.
-- Realign (post-merge tree, HEAD 7c1054e): `env -u LF_* cargo test -p loopflow --lib -- claude_trust git_worktree_add < /dev/null` → 7 pass; no repair needed.
+- Realign (post-merge tree, HEAD 7c1054e): `env -u LF_* cargo test -p loopflow --lib -- claude_trust git_worktree_add < /dev/null` → 7 pass; no repair needed. Second realign (HEAD ca86724, docs item 4 committed, main 845e8b7 merged): prose and CI-policy changes only, pass still applies, no rerun.
 - Compress (2026-10-21, second pass): dropped the redundant `canonicalize` in `git::lf_created_worktree` (git's `--show-toplevel` already returns the realpath); same 7 unit tests pass, clippy clean. Nothing else left to reduce.
 - Land owns CI: PR checks show SKIPPED while scratch is committed; the full matrix runs once `lf pr land` clears scratch. Demo/review owns the real-Claude pty probes.

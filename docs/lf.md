@@ -436,12 +436,7 @@ plan does not move another machine's Workflow or clean its checkout.
 
 ## Work with another person
 
-```yaml
-# .lf/config.yaml: commit it so you both read one plan
-planning:
-  provider: git
-  shared: team
-```
+You both read one plan by default: the shared Git ref on `origin`.
 
 ```bash
 lf user                                  # your name on claims and comments; set one first

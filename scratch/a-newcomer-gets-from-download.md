@@ -41,13 +41,12 @@ delivery. Reuse existing `lf auth github` and account for its `gh` executable
 dependency on a clean Mac. Verify and reuse an existing sign-in. Authentication
 does not authorize creating repositories or publishing code automatically.
 
-See [account requirements review](account-requirements-review.md) and
-[init review](init-setup-review.md). Jack chose "drag to app -> open" as the
-primary acquisition path. See [DMG review](dmg-first-launch-review.md). Jack
+Jack chose "drag to app -> open" as the primary acquisition path. Jack
 prefers scoped sessions and is content to avoid an init conversation here.
 Initial setup uses app actions; a repo-wide init is a separate possibility,
-not part of this Task. The mechanism for installing `gh` is an implementation
-detail to resolve under the no-package-manager constraint.
+not part of this Task. `lf install gh` resolves the no-package-manager `gh`
+constraint (choice in `questions.md`). The account, init and DMG review notes
+are in git at `8278b4a210` (`scratch/*-review.md`).
 
 ## The demo
 
@@ -91,7 +90,7 @@ and account connection. It does not launch an onboarding conversation, create
 a synthetic Session scope, or require init after choosing a project. The
 existing repo init remains available separately; redesigning it is out of scope.
 Reuse installation and auth operations underneath the app rather than copying
-the broad init skill into Swift. See `scratch/init-setup-review.md`.
+the broad init skill into Swift.
 
 ### Download, drag into Applications, open
 
@@ -466,6 +465,7 @@ open findings are folded into Remaining above.
 | Installer/agent slice (2026-10-22) | `cargo test -p loopflow --lib` for install::{shell_path,bundle,published,agent}, machine_install, app_activation_tests, engine::agent: all passed (38 + 64 + 16 in focused runs). Fresh `zsh -ic` resolves a path with spaces/quotes/`$`/backquotes. Built `lf install shell-path` with `env -i` HOME/ZDOTDIR twice: one block, `command -v lf` resolves. `activate-app` on a non-bundle and on a mismatched helper refuses before any state read. `test_shell_installer.py` 19 passed. clippy/fmt/ruff clean. | No real signed bundle, promotion, provider installer download, or clean account. Affected-suite gate not run. |
 | After main sync + recovery fix `257ed79113` (2026-10-22) | `cargo test -p loopflow --lib -- lf::commands::install machine_install app_activation_tests`: 37 passed, 2 ignored. | Same fixture limits. |
 | Setup actions (2026-10-22) | `cargo test --lib -- lf::commands::account provider_auth`: 120 passed; integration `auth_tests` 11 passed (missing→installed→connected without a repo; default agent written only on success; malformed config kept); `install::gh` 2 passed; Swift `DTOFixtureTests` 50 passed; clippy/fmt clean; CLI reference regenerated. | Stub CLIs; no real provider, browser, Keychain or GitHub download. |
+| Compress (2026-10-22) | One local `AccountRow` path, `connect` split into sign-in/verify, config write inlined in `update_global_config_at`; clippy clean; account_status/portfolio lib tests and 3 integration auth tests passed. Unrelated `session_record::manifest_round_trips…` fails on missing `graph_process_steps` (untouched by branch). | Same stub limits. |
 
 Proposed Wave memory update after landing (memory is read-only here): items 1,
 3 and 7 of "What stands between a newcomer and a first task" are addressed in

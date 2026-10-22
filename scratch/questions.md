@@ -27,7 +27,7 @@
   work; determine the boundary with LOO-316.
 - Jack confirmed GitHub sign-in during initial setup: "make sure theyre signed
   in asap". Require verified sign-in before **Open project…**, reusing an
-  existing connection. See `account-requirements-review.md`.
+  existing connection.
 - 2026-10-22 choice (reversible): `gh` comes from GitHub's own release
   archive (`gh_<v>_macOS_<arch>.zip`, checksum-verified) into `~/.local/bin`,
   not the admin-only `.pkg`. No quarantine is applied by an lf download; the
@@ -40,10 +40,10 @@
   adds it). Claude scoping its Keychain item by `CLAUDE_CONFIG_DIR` is
   inferred from `claude_keychain_service`, not checked against a live login.
 - Jack prefers scoped sessions and is content to avoid init here: app actions,
-  no onboarding conversation or required init. See `init-setup-review.md`.
+  no onboarding conversation or required init.
 - The Task ends at an open Loopflow with one obvious action (Open project);
   creating a project/first Task remains LOO-316.
-- Jack confirmed "drag to app -> open". See `dmg-first-launch-review.md`.
+- Jack confirmed "drag to app -> open".
 - Guided setup supports Codex and Claude Code; an existing OpenCode setup keeps
   working. No provider cost, entitlement, quota or purchase is assumed.
 - Default Mac zsh gets automatic PATH persistence; other shells get the

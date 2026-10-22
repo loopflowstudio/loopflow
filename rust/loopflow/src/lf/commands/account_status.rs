@@ -136,10 +136,12 @@ pub(super) async fn run(
 
 const NATIVE_STATUS_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// One fresh reading of a provider CLI's ordinary login.
+/// One reading of a local login: fresh from the provider's CLI, or the
+/// cached evidence for a provider without one.
 #[derive(Debug, PartialEq, Eq)]
-struct NativeReading {
-    executable: Executable,
+struct LocalReading {
+    executable: Option<Executable>,
+    source: &'static str,
     verification: Verification,
     login: Option<String>,
     diagnostic: Option<String>,
@@ -152,11 +154,12 @@ async fn native_reading(
     provider: Provider,
     program: Option<PathBuf>,
     timeout: Duration,
-) -> NativeReading {
+) -> LocalReading {
     let connect = Some(format!("lf account connect {provider}"));
     let Some(program) = program else {
-        return NativeReading {
-            executable: Executable::Missing,
+        return LocalReading {
+            executable: Some(Executable::Missing),
+            source: "native_cli",
             verification: Verification::Unavailable,
             login: None,
             diagnostic: Some(format!(
@@ -197,8 +200,9 @@ async fn native_reading(
                 None,
             ),
         };
-    NativeReading {
-        executable: Executable::Installed,
+    LocalReading {
+        executable: Some(Executable::Installed),
+        source: "native_cli",
         verification,
         login,
         diagnostic,
@@ -227,60 +231,41 @@ async fn local_rows(
             Some(service) => service.cached_status(provider).await?,
             None => None,
         };
-        if let Some(reading) = reading {
-            rows.push(AccountRow {
-                provider,
-                account_id: None,
-                login: reading.login,
-                scope: Scope::Local,
-                source: "native_cli".into(),
-                executable: Some(reading.executable),
-                cached_credential_state: snapshot
-                    .as_ref()
-                    .map(|s| s.status.as_str())
-                    .unwrap_or("uninspected")
-                    .into(),
-                verification: reading.verification,
-                diagnostic: reading.diagnostic,
-                recovery: reading.recovery,
-                observed_plan: None,
-                configured_plan: None,
-                routing: None,
-                cooldown_until: None,
-                expires_at: snapshot.and_then(|s| s.expires_at),
-                windows: vec![],
-                verified_windows: vec![],
-                reset_credits: None,
-            });
-            continue;
-        }
-        rows.push(AccountRow {
-            provider,
-            account_id: None,
-            login: snapshot.as_ref().and_then(|s| s.status.login()),
-            scope: Scope::Local,
+        let cached_credential_state = snapshot
+            .as_ref()
+            .map(|s| s.status.as_str())
+            .unwrap_or("uninspected")
+            .into();
+        let reading = reading.unwrap_or_else(|| LocalReading {
             executable: None,
             source: if snapshot.is_some() {
                 "stored_token"
             } else {
                 "ambient_uninspected"
-            }
-            .into(),
-            cached_credential_state: snapshot
-                .as_ref()
-                .map(|s| s.status.as_str())
-                .unwrap_or("uninspected")
-                .into(),
+            },
             verification: if verify {
                 Verification::Unavailable
             } else {
                 Verification::NotChecked
             },
+            login: snapshot.as_ref().and_then(|s| s.status.login()),
             diagnostic: verify.then(|| {
                 "server verification is unavailable for local credentials; cached evidence only"
                     .into()
             }),
             recovery: None,
+        });
+        rows.push(AccountRow {
+            provider,
+            account_id: None,
+            login: reading.login,
+            scope: Scope::Local,
+            source: reading.source.into(),
+            executable: reading.executable,
+            cached_credential_state,
+            verification: reading.verification,
+            diagnostic: reading.diagnostic,
+            recovery: reading.recovery,
             observed_plan: None,
             configured_plan: None,
             routing: None,
@@ -927,7 +912,7 @@ mod tests {
         let wait = std::time::Duration::from_secs(10);
 
         let missing = native_reading(Provider::Claude, None, wait).await;
-        assert_eq!(missing.executable, Executable::Missing);
+        assert_eq!(missing.executable, Some(Executable::Missing));
         assert_eq!(missing.recovery.as_deref(), Some("lf install agent claude"));
 
         let signed_out = stub(
@@ -936,7 +921,7 @@ mod tests {
             r#"echo '{"loggedIn":false}'; exit 1"#,
         );
         let signed_out = native_reading(Provider::Claude, Some(signed_out), wait).await;
-        assert_eq!(signed_out.executable, Executable::Installed);
+        assert_eq!(signed_out.executable, Some(Executable::Installed));
         assert_eq!(signed_out.verification, Verification::Rejected);
         assert_eq!(
             signed_out.recovery.as_deref(),

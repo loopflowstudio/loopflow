@@ -278,11 +278,42 @@ async fn connect(raw_provider: &str, selection: Option<&str>, default_agent: boo
                 .ok_or_else(|| anyhow!("--default-agent chooses codex or claude, not {provider}"))
         })
         .transpose()?;
-    if let Some(agent) = agent {
-        if let Some(login) = native_login(provider).await? {
-            return choose_default_agent(agent, login.as_deref());
+    // An agent whose CLI already reports a login only needs choosing.
+    let signed_in = match agent {
+        Some(_) => native_login(provider).await?,
+        None => None,
+    };
+    let login = match signed_in {
+        Some(login) => login,
+        None => {
+            sign_in_locally(provider, selection).await?;
+            match (native_login(provider).await?, native_cli(provider)) {
+                (Some(login), _) => login,
+                (None, Some(cli)) => bail!(
+                    "sign-in finished, but `{cli}` reports no login; retry lf account connect {provider}"
+                ),
+                (None, None) => None,
+            }
         }
-    }
+    };
+    let Some(agent) = agent else {
+        println!("Connected local {}", provider.display_name());
+        return Ok(());
+    };
+    crate::config::set_default_agent(agent.name)?;
+    let login = login
+        .map(|login| format!(" as {login}"))
+        .unwrap_or_default();
+    println!(
+        "Connected local {}{login}; it is now the default agent",
+        agent.display_name
+    );
+    Ok(())
+}
+
+/// Open the sign-in page: the default browser for a provider CLI with no
+/// remembered Chrome profile, otherwise the selected or remembered profiles.
+async fn sign_in_locally(provider: Provider, selection: Option<&str>) -> Result<()> {
     let store = open_account_store().await?;
     let remembered = !store
         .list_auth_browser_profiles(Some(provider), None)
@@ -294,27 +325,9 @@ async fn connect(raw_provider: &str, selection: Option<&str>, default_agent: boo
             "Connecting local {} in your browser...",
             provider.display_name()
         );
-        sign_in(provider, &AuthBrowser::Default).await?;
+        sign_in(provider, &AuthBrowser::Default).await
     } else {
-        connect_through_chrome(&store, provider, selection).await?;
-    }
-    let Some(login) = native_login(provider).await? else {
-        return match native_cli(provider) {
-            Some(cli) => Err(anyhow!(
-                "sign-in finished, but `{cli}` reports no login; retry lf account connect {provider}"
-            )),
-            None => {
-                println!("Connected local {}", provider.display_name());
-                Ok(())
-            }
-        };
-    };
-    match agent {
-        Some(agent) => choose_default_agent(agent, login.as_deref()),
-        None => {
-            println!("Connected local {}", provider.display_name());
-            Ok(())
-        }
+        connect_through_chrome(&store, provider, selection).await
     }
 }
 
@@ -331,18 +344,6 @@ async fn native_login(provider: Provider) -> Result<Option<Option<String>>> {
         AuthStatus::Active { login } => Some(login),
         AuthStatus::Pending | AuthStatus::None | AuthStatus::Expired => None,
     })
-}
-
-fn choose_default_agent(agent: crate::agent::GuidedAgent, login: Option<&str>) -> Result<()> {
-    crate::config::set_default_agent(agent.name)?;
-    let login = login
-        .map(|login| format!(" as {login}"))
-        .unwrap_or_default();
-    println!(
-        "Connected local {}{login}; it is now the default agent",
-        agent.display_name
-    );
-    Ok(())
 }
 
 async fn connect_through_chrome(

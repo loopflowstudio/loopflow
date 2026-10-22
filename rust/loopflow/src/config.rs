@@ -741,19 +741,6 @@ pub fn repository_root() -> Result<Option<PathBuf>, LoadError> {
     })
 }
 
-/// Persist a Machine-local configuration mapping without exposing partial YAML.
-pub(crate) fn write_global_config_at(
-    path: &Path,
-    value: &serde_yaml_ng::Value,
-) -> anyhow::Result<()> {
-    let parent = path.parent().expect("config path has a parent");
-    let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    file.write_all(serde_yaml_ng::to_string(value)?.as_bytes())?;
-    file.as_file().sync_all()?;
-    file.persist(path)?;
-    Ok(())
-}
-
 fn global_config_path() -> PathBuf {
     crate::store::lf_home_dir().join("config.yaml")
 }
@@ -780,7 +767,7 @@ pub(crate) fn read_global_config_at(path: &Path) -> anyhow::Result<serde_yaml_ng
 }
 
 /// Change `home`'s configuration under its lock, preserving every other value.
-/// A malformed file is reported and left as it is.
+/// A malformed file is reported and left as it is; readers never see partial YAML.
 pub(crate) fn update_global_config_at<T>(
     home: &Path,
     change: impl FnOnce(&mut serde_yaml_ng::Value) -> anyhow::Result<T>,
@@ -796,7 +783,10 @@ pub(crate) fn update_global_config_at<T>(
     let path = home.join("config.yaml");
     let mut config = read_global_config_at(&path)?;
     let changed = change(&mut config)?;
-    write_global_config_at(&path, &config)?;
+    let mut file = tempfile::NamedTempFile::new_in(home)?;
+    file.write_all(serde_yaml_ng::to_string(&config)?.as_bytes())?;
+    file.as_file().sync_all()?;
+    file.persist(&path)?;
     Ok(changed)
 }
 

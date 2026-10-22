@@ -432,6 +432,12 @@ the JSON field is `long_lived_token_expires_at` (account_status.rs, the
 the field is unreleased. Check: account_status + dto tests and
 `cargo clippy --all-targets -- -D warnings` pass.
 
+## Concept review (2026-10-22, after the long-lived token rename, headless)
+
+No change. One name for the credential remains across `lf account`, its
+JSON, the store and docs; Jack's steer is met as built. Q8 stays open for
+Jack and does not block the demo.
+
 ## Status and remaining work
 
 Built 2026-10-21 (implement, compress, copy-up implement, compress, post-review implement): the draft

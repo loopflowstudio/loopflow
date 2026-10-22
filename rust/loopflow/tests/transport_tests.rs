@@ -920,6 +920,178 @@ read -r answer < /dev/tty
     }
 }
 
+/// Closing every view of a conversation ends its agent once
+/// `session.end_detached_after` passes. A viewer, a turn in progress or a Flow
+/// keeps it running. The ended conversation reopens from saved history and
+/// stays out of `lf resume --all`.
+#[test]
+fn detached_sessions_end_after_their_limit() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.home.path().join("config.yaml"),
+        "session:\n  end_detached_after: 2s\n",
+    )
+    .unwrap();
+    let bin = fixture.home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let provider = bin.join("claude");
+    std::fs::write(
+        &provider,
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+read -r answer < /dev/tty
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let launches = |count: usize| -> Vec<String> {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let text =
+                std::fs::read_to_string(fixture.home.path().join("launches")).unwrap_or_default();
+            let lines: Vec<String> = text.lines().map(str::to_owned).collect();
+            if lines.len() >= count {
+                return lines;
+            }
+            assert!(Instant::now() < deadline, "{count} launches; saw {lines:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    // Each starts viewed, so nothing ends while the fixture is arranged.
+    let mut owners = Vec::new();
+    let mut viewers = Vec::new();
+    for input in ["idle", "viewed", "busy", "flow"] {
+        let mut owner = fixture.serve(
+            true,
+            &[
+                env!("CARGO_BIN_EXE_lf"),
+                "--interactive",
+                "--agent",
+                "claude",
+                ":",
+                input,
+            ],
+        );
+        owner.env("PATH", &path);
+        let owner = fixture.owner(owner);
+        viewers.push(fixture.viewer(&owner, false));
+        owners.push(owner);
+    }
+    let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
+    launches(4);
+    let session_of = |line: &str| -> String {
+        sql.query_row(
+            "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
+            [line.split(':').nth(1).unwrap()],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    let session_of_owner = |owner: &str| -> String {
+        sql.query_row(
+            "SELECT id FROM agent_sessions WHERE transport_lf_process_id=?1",
+            [owner],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    let idle = session_of_owner(&owners[0]);
+    sql.execute(
+        r#"INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded,agent_process_id,program_status)
+           SELECT id,0,1,0,0,agent_process_id,'{"seen":true,"records":[{"state":"working","id":null,"kind":null,"progress":null,"app":null,"title":null,"msg":null}]}' FROM agent_sessions WHERE id=?1"#,
+        [session_of_owner(&owners[2])],
+    )
+    .unwrap();
+    sql.execute(
+        "INSERT INTO flow_processes(lf_process_id,flow,graph)
+         SELECT id,'fixture','{}' FROM processes WHERE parent_lf_process_id=?1 LIMIT 1",
+        [&owners[3]],
+    )
+    .unwrap();
+    let running = |owner: &str| -> bool {
+        sql.query_row(
+            "SELECT completed_at IS NULL FROM processes WHERE id=?1",
+            [owner],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    let ends = |owner: &str| {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while running(owner) {
+            assert!(
+                Instant::now() < deadline,
+                "{owner} kept running; logs: {:?}",
+                std::fs::read_to_string(fixture.home.path().join("logs/transport.log"))
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    // Closing the window: the idle, busy and Flow owners lose their viewers.
+    let viewed = viewers.remove(1);
+    drop(viewers);
+    ends(&owners[0]);
+    let detached_at: Option<i64> = sql
+        .query_row(
+            "SELECT detached_at FROM processes WHERE id=?1",
+            [&owners[0]],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(detached_at.is_some(), "detach time was not recorded");
+    // Several judgments later, everything else still runs.
+    std::thread::sleep(Duration::from_secs(4));
+    for owner in &owners[1..] {
+        assert!(running(owner), "{owner} ended");
+    }
+    let resumed = fixture
+        .command(&["resume", "--all", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(
+        resumed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&resumed.stdout).unwrap(),
+        json!([])
+    );
+    // Its last viewer leaving lets the viewed one end too.
+    drop(viewed);
+    ends(&owners[1]);
+    // `lf resume` reopens the ended conversation from its saved history.
+    let mut reopen = fixture.serve(
+        true,
+        &[env!("CARGO_BIN_EXE_lf"), "session", "connect", &idle],
+    );
+    reopen.env("PATH", &path);
+    let reopened = fixture.owner(reopen);
+    let _viewer = fixture.viewer(&reopened, false);
+    let line = launches(5).pop().unwrap();
+    assert!(
+        line.contains(" --resume ") && session_of(&line) == idle,
+        "reopened without history: {line}"
+    );
+    for owner in [&owners[2], &owners[3], &reopened] {
+        let pid: i64 = sql
+            .query_row("SELECT pid FROM processes WHERE id=?1", [owner], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        // SAFETY: test-owned owner PIDs recorded by this fixture's store.
+        unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+    }
+}
+
 #[test]
 fn nested_cli_execution_survives_its_calling_provider_and_viewer() {
     let fixture = Fixture::new();

@@ -817,7 +817,7 @@ pub fn workflow_set(issue: &str, node: &str, note: Option<&str>) -> OpsResult<St
 }
 
 /// Validate the captured graph for both explicit moves and their effect-free previews.
-fn validate_workflow_move(
+pub(crate) fn validate_workflow_move(
     workflow: Option<&crate::ops::workflow::Workflow>,
     issue: &str,
     node: &str,
@@ -1711,7 +1711,10 @@ pub(crate) async fn task_worktree_blocker(
     }))
 }
 
-fn load_task_flow(repo: &Path, requested: &str) -> OpsResult<(String, Vec<ConcreteStep>)> {
+pub(crate) fn load_task_flow(
+    repo: &Path,
+    requested: &str,
+) -> OpsResult<(String, Vec<ConcreteStep>)> {
     let definition = load_flow(requested, repo)
         .map_err(|error| task_error(format!("failed to load Task flow {requested:?}: {error}")))?;
     let steps = compile_flow(&definition, repo).map_err(|error| {

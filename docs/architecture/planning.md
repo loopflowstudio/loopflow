@@ -166,7 +166,8 @@ local delivery receipts and mutation identity. Execution columns are absent from
 this writer. Local creation attaches machine-specific metadata afterward in the
 same transaction. Import never creates execution placement or provider attempts.
 
-Repository configuration selects Linear, personal Git (the default) or shared Git.
+Repository configuration selects Linear, shared Git (`shared/main` by default) or
+personal Git.
 Repository `planning` overrides the personal setting as one value. Linear-connected
 machines acquire and deliver independently through their existing local receipts.
 An outage buffers changes locally; Git cannot take over. Git transports code in

@@ -244,7 +244,9 @@ Sessions, Flows and Task shells survive closing their terminal. Reattach to a
 Session with `lf session attach SESSION`;
 `--observe` leaves input control unchanged. `lf resume` opens the retained native
 terminal, or explicitly transitions a structured Run to native UI without replaying
-its input. Ctrl+] steps away without stopping it.
+its input. Ctrl+] steps away without stopping it. A Session nobody views stops
+its agent after a day (`session.end_detached_after: 24h`, or `off`); `lf resume`
+reopens it from history.
 
 ```bash
 lf resume --all     # after a reboot or crash: reopen every interrupted conversation

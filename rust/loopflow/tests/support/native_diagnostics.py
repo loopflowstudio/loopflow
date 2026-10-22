@@ -56,7 +56,6 @@ def _exercise(lf: str, provider: str, home: Path, repo: str) -> None:
         "CODEX_HOME": str(home / ".codex"),
         "CLAUDE_CONFIG_DIR": str(home / ".claude"),
         "TERM": "xterm-256color",
-        "RUST_LOG": "warn",
         "CMUX_WORKSPACE_ID": "fixture",
         "CMUX_SURFACE_ID": "fixture",
     }
@@ -106,12 +105,11 @@ def _exercise(lf: str, provider: str, home: Path, repo: str) -> None:
         assert renamed.returncode == 0, renamed.stderr
 
         def _diagnostics() -> bytes:
-            return b"".join(
-                path.read_bytes() for path in (home / "machine/logs").glob("terminal-*.log")
-            )
+            log = home / "machine/logs/lf.log"
+            return log.read_bytes() if log.exists() else b""
 
-        _read_until(lambda: b"cmux title update failed" in _diagnostics())
-        assert b"cmux title update failed" not in output, output
+        _read_until(lambda: b"title update failed" in _diagnostics())
+        assert b"title update failed" not in output, output
         fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 100, 0, 0))
         _read_until(lambda: b"RESIZED 100x32" in output)
         os.write(master, b"\x7f ready")
@@ -128,8 +126,8 @@ def _exercise(lf: str, provider: str, home: Path, repo: str) -> None:
             assert time.monotonic() < deadline, output
         assert child.wait(timeout=5) == 0, output
         assert (home / "submitted").read_text() == "café 雪 🦀 ready"
-        assert b"cmux title update failed" not in output
-        assert b"Loopflow recorded diagnostics:" in output
+        assert b"title update failed" not in output
+        assert b"diagnostics:" not in output, output
         if provider != "opencode":
             assert b"EDITOR_EXIT" not in output, output
             # Replaced exit text survives in the execution owner's log.

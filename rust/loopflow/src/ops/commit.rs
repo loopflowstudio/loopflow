@@ -6,11 +6,11 @@ use serde_json::json;
 
 use crate::agent::{run_agent, AgentConfig, ProcessConfig};
 use crate::config::load_config_or_default;
-use crate::flow::load_skill;
 use crate::git::{
     commit, current_branch, git_stdout, git_stdout_inheriting, is_clean, push, push_with_upstream,
     stage_all,
 };
+use crate::graph::load_skill;
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;

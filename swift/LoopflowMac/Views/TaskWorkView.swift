@@ -141,7 +141,7 @@ struct TaskWorkflowHeader: View {
                 set: { if $0 { expandedTasks.insert(task.id) } else { expandedTasks.remove(task.id) } }
             )) {
                 if let workflow = work.value?.workflow {
-                    WorkflowGraph(
+                    WorkflowDiagram(
                         nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
                         // Ship it is the one way into `end`.
                         choices: workflow.outgoing.filter { workflow.edges.indices.contains($0) && workflow.edges[$0].to != "end" },
@@ -322,17 +322,17 @@ struct TaskDueDateView: View {
     }
 }
 
-/// Every Flow process in the Task's checkout, newest first, whatever started
+/// Every Graph process in the Task's checkout, newest first, whatever started
 /// it: one line each, opening to its launched graph and steps. It is not the
 /// Workflow's history: a process that carried an edge and one started ad hoc
 /// are the same kind of row. A multiplexer pane on the page surface.
-struct FlowProcessLog: View {
+struct GraphProcessLog: View {
     let model: WorkModel
     let taskId: String
     let location: WorkspaceIdentity?
     var execution: TaskLocationObservation? = nil
     var query: RegistryQuery = RegistryQueryLocal.shared
-    @State private var captured: [FlowProcessDetail]?
+    @State private var captured: [GraphProcessDetail]?
     @State private var error: String?
     @State private var refresh = 0
     @Environment(\.palette) private var palette
@@ -346,21 +346,21 @@ struct FlowProcessLog: View {
             VStack(alignment: .leading, spacing: 0) {
                 if !readsWindow {
                     Button("Refresh") { refresh += 1 }
-                    if let error { Text("Flow processes could not be read: \(error)").padding(.vertical, 6) }
+                    if let error { Text("Graph processes could not be read: \(error)").padding(.vertical, 6) }
                 }
-                if let flows = captured?.map(\.entry) ?? (readsWindow ? reading?.value?.flowProcesses : nil) {
-                    ForEach(Array(flows.reversed().enumerated()), id: \.element.id) { index, flow in
+                if let graphs = captured?.map(\.entry) ?? (readsWindow ? reading?.value?.graphProcesses : nil) {
+                    ForEach(Array(graphs.reversed().enumerated()), id: \.element.id) { index, graph in
                         if index > 0 { Divider().overlay(palette.border.opacity(0.6)) }
-                        FlowProcessView(model: model, flow: flow, run: captured?.first { $0.entry.id == flow.id } ?? (readsWindow ? model.flowProcesses[flow.id] : nil))
+                        GraphProcessView(model: model, graph: graph, run: captured?.first { $0.entry.id == graph.id } ?? (readsWindow ? model.graphProcesses[graph.id] : nil))
                     }
-                    if flows.isEmpty {
-                        Text("No Flow has run.").padding(.vertical, 6)
-                            .accessibilityIdentifier("task-flow-processes-empty")
+                    if graphs.isEmpty {
+                        Text("No Graph has run.").padding(.vertical, 6)
+                            .accessibilityIdentifier("task-graph-processes-empty")
                     }
                 } else if let error = error ?? reading?.errorMessage {
-                    Text("Flow processes could not be read: \(error)").padding(.vertical, 6)
+                    Text("Graph processes could not be read: \(error)").padding(.vertical, 6)
                 } else {
-                    Text(task == nil ? "Task unavailable" : "Reading Flow processes…").padding(.vertical, 6)
+                    Text(task == nil ? "Task unavailable" : "Reading Graph processes…").padding(.vertical, 6)
                 }
             }
             .padding(.horizontal, 14)
@@ -372,7 +372,7 @@ struct FlowProcessLog: View {
         .textSelection(.enabled)
         .background(palette.background)
         .environment(\.colorScheme, .light)
-        .accessibilityIdentifier("task-flow-processes")
+        .accessibilityIdentifier("task-graph-processes")
         .task(id: refresh) {
             guard !readsWindow else { return }
             do {
@@ -395,9 +395,9 @@ struct FlowProcessLog: View {
                     subject = task?.runtime?.workId ?? taskId
                     cwd = location.worktree
                 }
-                let flows = try await ownerQuery.taskFlowProcesses(task: subject, cwd: cwd)
+                let graphs = try await ownerQuery.taskGraphProcesses(task: subject, cwd: cwd)
                 try Task.checkCancellation()
-                captured = flows
+                captured = graphs
                 error = nil
             } catch { self.error = error.localizedDescription }
         }
@@ -420,8 +420,8 @@ struct TaskDiagnosticsView: View {
 }
 
 /// The Task's conversations and mechanical Processes, including headless work and
-/// conversations without turns: raw records, shown under Debug. Its Flow
-/// processes are listed by `FlowProcessLog`.
+/// conversations without turns: raw records, shown under Debug. Its Graph
+/// processes are listed by `GraphProcessLog`.
 struct TaskWorkView: View {
     let model: WorkModel
     let task: RoadmapTask
@@ -468,18 +468,18 @@ struct TaskWorkView: View {
     }
 }
 
-/// One Flow process of the Task: its Flow, state, when it started and how long
+/// One Graph process of the Task: its Graph, state, when it started and how long
 /// it ran, opening to its id, launched graph, where it stands and each step
 /// it started. Every process reads the same way, whoever started it.
-struct FlowProcessView: View {
+struct GraphProcessView: View {
     let model: WorkModel
-    let flow: FlowProcessInventoryEntry
-    let run: FlowProcessDetail?
-    private var expanded: Bool { model.navigation.expandedFlowProcesses.contains(flow.id) }
+    let graph: GraphProcessInventoryEntry
+    let run: GraphProcessDetail?
+    private var expanded: Bool { model.navigation.expandedGraphProcesses.contains(graph.id) }
     @State private var inspected: UInt32?
     @Environment(\.palette) private var palette
 
-    private var started: Int64 { run?.steps.first?.startedAt ?? flow.updatedAt }
+    private var started: Int64 { run?.steps.first?.startedAt ?? graph.updatedAt }
 
     /// How long the process ran; a running one has no length yet.
     static func duration(_ seconds: Int64) -> String {
@@ -492,21 +492,21 @@ struct FlowProcessView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Button {
-                if expanded { model.navigation.expandedFlowProcesses.remove(flow.id) }
-                else { model.navigation.expandedFlowProcesses.insert(flow.id) }
+                if expanded { model.navigation.expandedGraphProcesses.remove(graph.id) }
+                else { model.navigation.expandedGraphProcesses.insert(graph.id) }
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 9, weight: .semibold))
                         .frame(width: 10)
                         .accessibilityHidden(true)
-                    Text(flow.name).font(Typography.code(12)).foregroundStyle(palette.text)
-                    Text(flow.state == .current ? "running" : flow.state.rawValue)
+                    Text(graph.name).font(Typography.code(12)).foregroundStyle(palette.text)
+                    Text(graph.state == .current ? "running" : graph.state.rawValue)
                         .foregroundStyle(tone?.ink(in: palette) ?? palette.textSecondary)
                     Spacer()
                     Text(Date(timeIntervalSince1970: TimeInterval(started))
                         .formatted(date: .abbreviated, time: .shortened))
-                    if let ended = flow.endedAt {
+                    if let ended = graph.endedAt {
                         Text(Self.duration(ended - started)).monospacedDigit()
                             .frame(minWidth: 52, alignment: .trailing)
                     }
@@ -516,14 +516,14 @@ struct FlowProcessView: View {
             }
             .buttonStyle(WorkPlainButtonStyle())
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-            .accessibilityIdentifier("task-work-\(flow.id)")
+            .accessibilityIdentifier("task-work-\(graph.id)")
             if expanded { detail.padding(.leading, 18) }
         }
         .padding(.vertical, 6)
     }
 
     private var tone: WorkTone? {
-        switch flow.state {
+        switch graph.state {
         case .current: .running
         case .stopped: .stopped
         case .completed: nil
@@ -532,17 +532,17 @@ struct FlowProcessView: View {
 
     @ViewBuilder
     private var detail: some View {
-        Text(flow.id).font(Typography.code(10)).foregroundStyle(palette.textTertiary)
-            .accessibilityIdentifier("flow-process-id-\(flow.id)")
+        Text(graph.id).font(Typography.code(10)).foregroundStyle(palette.textTertiary)
+            .accessibilityIdentifier("graph-process-id-\(graph.id)")
         if let run {
-            FlowDiagram(graph: run.graph, latest: run, inspected: $inspected)
-            Text([run.presentation.reason, flowIterationLabel(run.iterations)]
+            GraphDiagram(compiled: run.compiled, latest: run, inspected: $inspected)
+            Text([run.presentation.reason, graphIterationLabel(run.iterations)]
                 .compactMap { $0 }.joined(separator: " · "))
-                .accessibilityIdentifier("flow-process-status-\(flow.id)")
+                .accessibilityIdentifier("graph-process-status-\(graph.id)")
             ForEach(run.steps) { step in
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Text(step.label).font(Typography.code(11))
-                    if let iteration = flowIterationLabel(step.iterations) { Text(iteration).monospacedDigit() }
+                    if let iteration = graphIterationLabel(step.iterations) { Text(iteration).monospacedDigit() }
                     Spacer()
                     Text(step.outcome ?? (step.completedAt == nil ? "running" : "no recorded exit"))
                     if let completed = step.completedAt {
@@ -551,10 +551,10 @@ struct FlowProcessView: View {
                     }
                 }
                 .help(step.lfProcessId)
-                .accessibilityIdentifier("flow-process-step-\(step.lfProcessId)")
+                .accessibilityIdentifier("graph-process-step-\(step.lfProcessId)")
             }
         } else {
-            Text("Reading Flow…")
+            Text("Reading Graph…")
         }
     }
 }

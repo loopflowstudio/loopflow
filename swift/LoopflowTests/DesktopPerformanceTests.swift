@@ -25,7 +25,7 @@ struct DesktopPerformanceTests {
         let journal = try PerformanceJournal(url: output)
         let soakSeconds = Double(environment["LF_DESKTOP_PERF_SOAK_SECONDS"] ?? "0") ?? 0
         let scenarios = ["full", "fold", "expand", "compact", "filter", "scroll_refresh",
-                         "flow_log_active", "flow_log_empty", "session_return", "combined_zoom", "combined_restore", "task_details", "task_flow", "task_history", "file_edit_refresh", "new_pty"]
+                         "graph_log_active", "graph_log_empty", "session_return", "combined_zoom", "combined_restore", "task_details", "task_graph", "task_history", "file_edit_refresh", "new_pty"]
         try journal.write(["event": "plan", "population_version": "desktop-v5",
                            "populations": ["small": 8, "large": 256], "samples": samples,
                            "scenarios": scenarios, "endpoint": "native_capture_ocr_and_pty_reply",
@@ -506,22 +506,22 @@ struct DesktopPerformanceTests {
             try await wait(window) { window.firstResponder === terminals[0] }
             // SessionsView is hosted alone; its window root is what scopes the reader.
             model.syncWorkScope()
-            try await sample("flow_log_active", population, attempt, journal, window, action: {
-                // This Task already has a retained Session choice; the Flow
+            try await sample("graph_log_active", population, attempt, journal, window, action: {
+                // This Task already has a retained Session choice; the Graph
                 // process log opens alongside it.
-                multiplexer.show(.flowLog(taskId: "perf-task-0"))
+                multiplexer.show(.graphLog(taskId: "perf-task-0"))
             }, ready: {
-                hasRendered(window, "task-work-perf-flow-0")
+                hasRendered(window, "task-work-perf-graph-0")
                     && !terminals.contains { window.firstResponder === $0 }
-                    && multiplexer.focusedPane.content == .flowLog(taskId: "perf-task-0")
+                    && multiplexer.focusedPane.content == .graphLog(taskId: "perf-task-0")
             })
             let logPane = multiplexer.focusedPaneId
-            try await sample("flow_log_empty", population, attempt, journal, window, action: {
-                // A Task no Flow has run for: scoping the reader to it is part of the wait.
+            try await sample("graph_log_empty", population, attempt, journal, window, action: {
+                // A Task no Graph has run for: scoping the reader to it is part of the wait.
                 try openTask(.task(id: "perf-task-1"))
                 model.syncWorkScope()
-                multiplexer.show(.flowLog(taskId: "perf-task-1"))
-            }, ready: { hasRendered(window, "task-flow-processes-empty") })
+                multiplexer.show(.graphLog(taskId: "perf-task-1"))
+            }, ready: { hasRendered(window, "task-graph-processes-empty") })
             try await sample("session_return", population, attempt, journal, window, action: {
                 navigator.onOpenSession(first)
             }, ready: {
@@ -544,31 +544,31 @@ struct DesktopPerformanceTests {
             try await sample("combined_zoom", population, attempt, journal, window, action: {
                 multiplexer.setFocusedPane(logPane)
                 multiplexer.toggleZoom(logPane)
-            }, ready: { hasRendered(window, "task-work-perf-flow-0") && terminals[0].window == nil })
+            }, ready: { hasRendered(window, "task-work-perf-graph-0") && terminals[0].window == nil })
             try await sample("combined_restore", population, attempt, journal, window, action: {
                 multiplexer.toggleZoom(logPane)
                 multiplexer.updateRatio(between: sessionPane, and: logPane, ratio: 0.6)
                 navigator.onOpenSession(first)
             }, ready: {
                 window.firstResponder === terminals[0] && terminals.allSatisfy { $0.window === window }
-                    && hasRendered(window, "task-work-perf-flow-0")
+                    && hasRendered(window, "task-work-perf-graph-0")
             })
             try await sample("task_overview", population, attempt, journal, window, action: {
                 files.page = .task
                 let pane = try #require(multiplexer.layout.pane(for: sessionPane))
                 try workspace.selectContent(.files(taskId: "perf-task-0", location: pane.content.location), in: pane)
             }, ready: { hasRendered(window, "browser-task-overview") })
-            try await sample("task_flow", population, attempt, journal, window, action: {
-                multiplexer.show(.flowLog(taskId: "perf-task-0"))
+            try await sample("task_graph", population, attempt, journal, window, action: {
+                multiplexer.show(.graphLog(taskId: "perf-task-0"))
                 model.syncWorkScope()
-                try pressElement("task-work-perf-flow-0", in: window)
+                try pressElement("task-work-perf-graph-0", in: window)
                 try await wait(window) {
                     guard let content = window.contentView else { return false }
-                    return accessible(content).contains { accessibility($0, "Identifier") as? String == "flow-node-2" }
+                    return accessible(content).contains { accessibility($0, "Identifier") as? String == "graph-node-2" }
                 }
-                try pressElement("flow-node-2", in: window)
+                try pressElement("graph-node-2", in: window)
             }, ready: {
-                model.navigation.expandedFlowProcesses.contains("perf-flow-0")
+                model.navigation.expandedGraphProcesses.contains("perf-graph-0")
                     && window.allText.contains { $0.contains("realign") }
             })
             try await sample("file_edit_refresh", population, attempt, journal, window, action: {
@@ -897,10 +897,10 @@ struct DesktopPerformanceTests {
         if let index = Int(id.replacingOccurrences(of: "work-task-perf-task-", with: "")) {
             return window.outlineText.contains { $0.contains(String(format: "Task %03d", index)) }
         }
-        // A Flow process's row shows its Flow's name.
-        if id == "task-work-perf-flow-0" { return window.contentText.contains { $0.contains("benchflow") } }
-        if id == "task-flow-processes-empty" {
-            return window.contentText.joined(separator: " ").contains("No Flow has run")
+        // A Graph process's row shows its Graph's name.
+        if id == "task-work-perf-graph-0" { return window.contentText.contains { $0.contains("benchflow") } }
+        if id == "task-graph-processes-empty" {
+            return window.contentText.joined(separator: " ").contains("No Graph has run")
         }
         return false
     }
@@ -1008,7 +1008,7 @@ struct DesktopPerformanceTests {
              "title": String(format: "Conversation %03d", index), "detail": "Benchmark fixture",
              "cwd": checkout, "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
              "actions": sessionActionFixture(state: "active"),
-             "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": ["perf-work-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
+             "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": ["perf-work-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
         })
         let historyTemplate = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             root.appendingPathComponent("tests/fixtures/dto/session_history_summary.json"))) as? [String: Any])
@@ -1023,7 +1023,7 @@ struct DesktopPerformanceTests {
         let commentsJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("task_comments.json"), encoding: .utf8)
         let contextJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("context_report.json"), encoding: .utf8)
         let workflowJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("workflow_catalog.json"), encoding: .utf8)
-        let catalogJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("flow_catalog.json"), encoding: .utf8)
+        let catalogJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("graph_catalog.json"), encoding: .utf8)
         let sessionJSON = String(decoding: sessions, as: UTF8.self)
         let reader = PerformanceReader(planning: planning, sessions: sessionJSON)
         let query = RegistryQuery(watchWork: { await reader.open() }) { args, _ in
@@ -1031,7 +1031,7 @@ struct DesktopPerformanceTests {
             switch args.first {
             case "machine" where args.dropFirst().first == "id": return "{\"id\":\"\(fixtureMachineId)\"}"
             case "wave" where args.dropFirst().first == "show": return await planning.read()
-            case "flow" where args.dropFirst().first == "list" && args.contains("--json"): return catalogJSON
+            case "graph" where args.dropFirst().first == "list" && args.contains("--json"): return catalogJSON
             case "project" where args.dropFirst().prefix(2) == ["workflow", "list"]: return workflowJSON
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
@@ -1068,7 +1068,7 @@ struct DesktopPerformanceFixtureTests {
         let task = try #require(model.task(id: "perf-task-0"))
         #expect(task.task.reference.workspace?.identity == fixtureWorkspace("/src/loopflow"))
         #expect(model.sessions.value?.first?.workspace?.identity == task.task.reference.workspace?.identity)
-        await model.loadFlowCatalog()
+        await model.loadGraphCatalog()
         model.select(.task(id: task.task.id))
         model.syncWorkScope()
         while model.taskWork[task.task.id].value == nil {
@@ -1076,7 +1076,7 @@ struct DesktopPerformanceFixtureTests {
             try await Task.sleep(for: .milliseconds(5))
         }
         await model.loadTaskContext(task: task.task)
-        #expect(model.flowCatalog.errorMessage == nil)
+        #expect(model.graphCatalog.errorMessage == nil)
         #expect(model.taskWork[task.task.id].errorMessage == nil)
         #expect(model.taskContext[task.task.id].errorMessage == nil)
         await model.loadSessionHistory(task: task.task)
@@ -1129,18 +1129,18 @@ private final class PerformanceReader {
         send("sessions", request.id,
              #"{"repo":"\#(repo)","includes_headless":\#(scope.headless),"entries":\#(sessions)}"#)
         guard let task = scope.task else { return }
-        // Only the first Task has a Flow process.
-        let flows = task == "PERF-0" ? #"""
-            [{"id":"perf-flow-0","name":"benchflow","state":"completed","task_id":null,"wave_id":null,
+        // Only the first Task has a Graph process.
+        let graphs = task == "PERF-0" ? #"""
+            [{"id":"perf-graph-0","name":"benchflow","state":"completed","task_id":null,"wave_id":null,
               "updated_at":1790270400,"repo":"/src/loopflow","ended_at":1790270460}]
             """# : "[]"
         var runs = "[]"
         if task == "PERF-0" {
             let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            if let data = try? Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/flow_detail.json")),
+            if let data = try? Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/graph_detail.json")),
                var detail = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                var entry = detail["entry"] as? [String: Any] {
-                entry["id"] = "perf-flow-0"
+                entry["id"] = "perf-graph-0"
                 detail["entry"] = entry
                 if let encoded = try? JSONSerialization.data(withJSONObject: [detail]) {
                     runs = String(decoding: encoded, as: UTF8.self)
@@ -1148,7 +1148,7 @@ private final class PerformanceReader {
             }
         }
         send("task", request.id, #"""
-            {"task":"\#(task)","work":{"sessions":[],"flow_processes":\#(flows),"processes":[],"workflow":null},"flow_processes":\#(runs),"comments":{"identifier":"\#(task)","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}}
+            {"task":"\#(task)","work":{"sessions":[],"graph_processes":\#(graphs),"processes":[],"workflow":null},"graph_processes":\#(runs),"comments":{"identifier":"\#(task)","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}}
             """#)
     }
 
@@ -1508,7 +1508,7 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     // Copied launch authority is never exercised. This transport permits only local
     // reads; no network, Session connection, watcher, worker or provider can start.
     let verb = args.prefix(2).joined(separator: " ")
-    guard args.first == "history" || ["wave show", "wave list", "wave status", "session list", "session history", "machine id", "task status", "task files", "task diff", "flow list"].contains(verb) else {
+    guard args.first == "history" || ["wave show", "wave list", "wave status", "session list", "session history", "machine id", "task status", "task files", "task diff", "graph list"].contains(verb) else {
         throw RegistryQueryError("Snapshot does not execute \(verb)")
     }
     let process = Process()

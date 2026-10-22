@@ -11,8 +11,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::LoadError;
-use crate::flow::runner::{ExecutionCursor, NestedCursor};
-use crate::flow::{compile_flow, load_authored_flow, parse_flow_source, ConcreteStep};
+use crate::graph::runner::{ExecutionCursor, NestedCursor};
+use crate::graph::{compile_graph, load_authored_graph, parse_flow_source, ConcreteStep};
 use crate::skills::first_prose_line;
 
 pub const START: &str = "start";
@@ -177,24 +177,24 @@ fn after(steps: &[ConcreteStep], place: &Place) -> Option<Place> {
 impl CapturedGraph {
     /// Compile the graph named `name` as the repository defines it now.
     pub fn load(name: &str, repo: &Path) -> Result<Option<Self>, LoadError> {
-        let flow = match load_authored_flow(name, repo) {
-            Ok(flow) => flow,
-            Err(LoadError::FlowNotFound(_)) => return Ok(None),
+        let graph = match load_authored_graph(name, repo) {
+            Ok(graph) => graph,
+            Err(LoadError::GraphNotFound(_)) => return Ok(None),
             Err(error) => return Err(error),
         };
-        let steps = compile_flow(&flow, repo)?;
+        let steps = compile_graph(&graph, repo)?;
         Ok(Some(Self {
-            name: flow.name,
+            name: graph.name,
             steps,
         }))
     }
 
     /// Compile authored text kept outside the repository, such as a Wave's stored graph.
     pub fn from_source(name: &str, content: &str, repo: &Path) -> Result<Self, LoadError> {
-        let flow = parse_flow_source(name, content, repo)?;
-        let steps = compile_flow(&flow, repo)?;
+        let graph = parse_flow_source(name, content, repo)?;
+        let steps = compile_graph(&graph, repo)?;
         Ok(Self {
-            name: flow.name,
+            name: graph.name,
             steps,
         })
     }
@@ -208,11 +208,11 @@ impl CapturedGraph {
         }
     }
 
-    fn stages(&self) -> Vec<(Place, &crate::flow::ConcreteSkill)> {
+    fn stages(&self) -> Vec<(Place, &crate::graph::ConcreteSkill)> {
         fn collect<'a>(
             steps: &'a [ConcreteStep],
             path: &[(usize, String)],
-            out: &mut Vec<(Place, &'a crate::flow::ConcreteSkill)>,
+            out: &mut Vec<(Place, &'a crate::graph::ConcreteSkill)>,
         ) {
             for (index, step) in steps.iter().enumerate() {
                 match step {
@@ -320,7 +320,7 @@ pub struct WorkflowCatalogEntry {
 /// Every graph available in the repository, projected as a Workflow; a graph
 /// that does not compile or route stays listed with the reason.
 pub fn workflow_catalog(repo: &Path) -> Result<Vec<WorkflowCatalogEntry>, LoadError> {
-    crate::flow::available_flow_names(repo)?
+    crate::graph::available_graph_names(repo)?
         .into_iter()
         .map(|name| {
             let (workflow, unavailable) = match load_workflow(&name, repo) {
@@ -329,7 +329,7 @@ pub fn workflow_catalog(repo: &Path) -> Result<Vec<WorkflowCatalogEntry>, LoadEr
                 Err(error) => (None, Some(error.to_string())),
             };
             Ok(WorkflowCatalogEntry {
-                source: crate::flow::find_flow_source_path(&name, repo)?.map(|path| {
+                source: crate::graph::find_graph_source_path(&name, repo)?.map(|path| {
                     path.strip_prefix(repo)
                         .unwrap_or(&path)
                         .to_string_lossy()
@@ -351,16 +351,16 @@ pub fn load_workflow(name: &str, repo: &Path) -> Result<Option<WorkflowDefinitio
     graph
         .project()
         .map(|(definition, _)| Some(definition))
-        .map_err(|error| LoadError::InvalidFlow(format!("graph {name}: {error}")))
+        .map_err(|error| LoadError::InvalidGraph(format!("graph {name}: {error}")))
 }
 
 /// The authored text of graph `name`: the repository's file, else the builtin.
 pub fn read_workflow_source(name: &str, repo: &Path) -> Result<Option<String>, LoadError> {
-    if let Some(path) = crate::flow::find_flow_source_path(name, repo)? {
+    if let Some(path) = crate::graph::find_graph_source_path(name, repo)? {
         return Ok(Some(std::fs::read_to_string(path)?));
     }
-    Ok(crate::builtins::resolve_builtin_flow(name)
-        .and_then(crate::builtins::get_builtin_flow)
+    Ok(crate::builtins::resolve_builtin_graph(name)
+        .and_then(crate::builtins::get_builtin_graph)
         .map(str::to_owned))
 }
 
@@ -374,7 +374,7 @@ pub(crate) fn validate_workflow_name(name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{load_workflow, workflow_catalog, CapturedGraph, END, START};
-    use crate::flow::runner::ExecutionCursor;
+    use crate::graph::runner::ExecutionCursor;
 
     fn write(repo: &std::path::Path, path: &str, content: &str) {
         let path = repo.join(path);
@@ -458,12 +458,12 @@ mod tests {
         assert_eq!(start("review-design", "kickoff"), Some(0));
         let pursue = start("review-design", "pursue").unwrap();
         assert!(
-            matches!(&graph.steps[pursue], crate::flow::ConcreteStep::Skill(s) if s.sources.get(1).map(String::as_str) == Some("pursue"))
+            matches!(&graph.steps[pursue], crate::graph::ConcreteStep::Skill(s) if s.sources.get(1).map(String::as_str) == Some("pursue"))
         );
         assert_eq!(start("demo", "pursue"), Some(pursue));
         let deliver = start("demo", "deliver").unwrap();
         assert!(
-            matches!(&graph.steps[deliver], crate::flow::ConcreteStep::Skill(s) if s.skill.name == "gate")
+            matches!(&graph.steps[deliver], crate::graph::ConcreteStep::Skill(s) if s.skill.name == "gate")
         );
         let research = CapturedGraph::load("research", repo.path())
             .unwrap()
@@ -485,7 +485,7 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         write(
             repo.path(),
-            ".lf/flows/conditional.yaml",
+            ".lf/graphs/conditional.yaml",
             "- implement\n- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n- gate\n",
         );
         let graph = CapturedGraph::load("conditional", repo.path())
@@ -514,17 +514,17 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         write(
             repo.path(),
-            ".lf/flows/twice.yaml",
+            ".lf/graphs/twice.yaml",
             "- implement\n- interactive: demo\n- loop: implement\n  interactive: demo\n",
         );
         write(
             repo.path(),
-            ".lf/flows/across.yaml",
+            ".lf/graphs/across.yaml",
             "- implement\n- interactive: demo\n- loop: implement\n",
         );
         write(
             repo.path(),
-            ".lf/flows/same-route.yaml",
+            ".lf/graphs/same-route.yaml",
             "- implement\n- loop: implement\n  interactive: demo\n- implement\n",
         );
         let catalog = workflow_catalog(repo.path()).unwrap();

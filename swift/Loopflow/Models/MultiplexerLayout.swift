@@ -15,8 +15,8 @@ public enum PaneContent: Codable, Sendable, Equatable {
     case session(id: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
     /// Unknown locations remain unavailable, never a local-shell fallback.
     case shell(tabs: [ShellTab], selected: String)
-    /// Every Flow process of a Task.
-    case flowLog(taskId: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
+    /// Every Graph process of a Task.
+    case graphLog(taskId: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
     /// A Task's worktree files.
     case files(taskId: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
 
@@ -26,8 +26,8 @@ public enum PaneContent: Codable, Sendable, Equatable {
             .session(id: StructuredIdentity.session(id), location: location, execution: execution)
         case .files(let id, let location, let execution):
             .files(taskId: StructuredIdentity.prefixed(id, "task_"), location: location, execution: execution)
-        case .flowLog(let id, let location, let execution):
-            .flowLog(taskId: StructuredIdentity.prefixed(id, "task_"), location: location, execution: execution)
+        case .graphLog(let id, let location, let execution):
+            .graphLog(taskId: StructuredIdentity.prefixed(id, "task_"), location: location, execution: execution)
         case .empty, .shell: self
         }
     }
@@ -49,7 +49,7 @@ public enum PaneContent: Codable, Sendable, Equatable {
         case .empty: return nil
         case .session(_, let location, _): return location
         case .shell: return selectedShell?.location
-        case .files(_, let location, let execution), .flowLog(_, let location, let execution):
+        case .files(_, let location, let execution), .graphLog(_, let location, let execution):
             guard let execution else { return location }
             guard case .recorded(_, let checkout?) = execution.location else { return nil }
             return WorkspaceIdentity(machineId: execution.machineID, worktree: checkout)
@@ -61,7 +61,7 @@ public enum PaneContent: Codable, Sendable, Equatable {
         switch self {
         case .shell: return selectedShell?.execution
         case .session(_, _, let execution),
-             .files(_, _, let execution), .flowLog(_, _, let execution): return execution
+             .files(_, _, let execution), .graphLog(_, _, let execution): return execution
         case .empty: return nil
         }
     }

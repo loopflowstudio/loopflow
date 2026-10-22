@@ -5,8 +5,8 @@ title: Architecture
 
 # Architecture
 
-Loopflow records commands, preserves agent conversations, and drives Flows.
-Process records an lf command and its outcome; LfSession records a conversation; a Flow is one lf process
+Loopflow records commands, preserves agent conversations, and drives Graphs.
+Process records an lf command and its outcome; LfSession records a conversation; a Graph is one lf process
 and the step processes it starts.
 
 This guide specifies the accepted model. The reference owns
@@ -76,7 +76,7 @@ operations available to helpers without becoming standing Work identities.
 ```text
 one Skill run
     |
-    +-- Flow: compose Skills, mechanical operations, and review boundaries
+    +-- Graph: compose Skills, mechanical operations, and review boundaries
     |
     +-- Work: preserve purpose and input across independent processes
     |
@@ -92,7 +92,7 @@ one Skill run
 | Area | What it adds | Start here |
 | --- | --- | --- |
 | Execution | Skill discovery, prompt assembly, provider routing, harnesses, command and conversation history | [Execution](architecture/execution.md) |
-| Planning | Flow composition, Wave/Task Work, Steer, questions, review FlowSteps | [Planning](architecture/planning.md) |
+| Planning | Graph composition, Wave/Task Work, Steer, questions, review GraphSteps | [Planning](architecture/planning.md) |
 | Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](architecture/delivery.md) |
 | Machines | Task ownership, SSH routing, installation | [Machines and processes](architecture/machines.md) |
 | Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](architecture/data.md) |
@@ -108,14 +108,14 @@ project
 task
 
 ops/chapter.rs                deterministic chapter rotation
-ops/task.rs                   Task launch: a fresh Flow in the Task checkout
-lf/commands/flow.rs           Flow process: one process per Flow
+ops/task.rs                   Task launch: a fresh Graph in the Task checkout
+lf/commands/graph.rs           Graph process: one process per Graph
 
-execution kernel: flow/ + agent/ + prompt/ + harness/ + command and conversation history
+execution kernel: graph/ + agent/ + prompt/ + harness/ + command and conversation history
 composition surfaces: lf/ + bin/
 ```
 
-`work` never imports the Flow runner. The execution kernel works without either
+`work` never imports the Graph runner. The execution kernel works without either
 layer and never loads Work. CLI callers resolve Work identity and Wave memory,
 then pass ordinary launch inputs into the kernel.
 
@@ -145,7 +145,7 @@ data flow, and ends with the contracts that neighboring areas may rely on.
 
 ```text
                                       shared truth
-                              Linear     GitHub     providers
+                              planning   GitHub     providers
                                  ^          ^           ^
                                  |          |           |
 user / agent --> lf CLI --------+----------+-----------+
@@ -154,7 +154,7 @@ user / agent --> lf CLI --------+----------+-----------+
           |                    |
           v                    v
   authored definitions    tracked Work
-  Skills / Flows /       Wave -> Linear Project -> Task
+  Skills / Graphs /       Wave -> Project -> Task
   goals / memory                  |
           |                       +---------> Task delivery
           |                       |                ^
@@ -177,8 +177,8 @@ another machine is another Machine; cross it explicitly with `lf --machine`
 
 There is no central Loopflow server. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
-definitions and memory. Linear and GitHub keep shared planning and delivery
-truth. Readers join those sources; they do not replace them with a universal
+definitions and memory. The planning provider (a Git ref or Linear) and GitHub
+keep shared planning and delivery truth. Readers join those sources; they do not replace them with a universal
 ledger.
 
 ## Core models
@@ -186,34 +186,34 @@ ledger.
 ```text
 Repository
   `-- Wave                    enduring objective, memory and cadence
-        `-- Linear Project    status + shared chapter name + Flow + KRs
-              `-- Task        identity, worktree, PR and every Flow process for it
+        `-- Project           status + shared chapter name + Graph + KRs
+              `-- Task        identity, worktree, PR and every Graph process for it
 
 Process                          one actual lf process; immutable causal parent
 LfSession                  one conversation; nullable attached LfProcess
   `-- history                 provider starts, outcomes, retries and usage
-Flow                          one lf process; cursor in its memory, graph in FlowProcess
-  `-- step processes              plain commands; the Flow process records each one's node
+Graph                          one lf process; cursor in its memory, graph in GraphProcess
+  `-- step processes              plain commands; the Graph process records each one's node
 ```
 
 | Model | Represents | Primary truth |
 | --- | --- | --- |
 | Skill | Reusable instructions and declared context | Repository, builtin or installed Markdown |
-| Flow | Reusable graph of agent, mechanical and routing steps | Repository or builtin YAML |
+| Graph | Reusable graph of agent, mechanical and routing steps | Repository or builtin YAML |
 | Process | One actual lf process, its caller and command completion | `processes` |
 | LfSession | An interactive or headless conversation across attachments and native reconnection | `agent_sessions`, subordinate history and provider-native conversation |
-| Running Flow | One Flow process and the steps it starts, including taskless execution | The Flow process and its child step processes in `processes` |
-| Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and Linear Initiative membership |
-| Chapter | Shared name of each Wave's In Progress Project | Linear Project statuses; no Chapter row or packet |
-| Project | A Wave's plan, KRs and targets | Linear Project and its synchronized `projects` row |
-| Task | A concrete change, investigation or document | `tasks`, Linear Issue, Git and GitHub |
+| Running Graph | One Graph process and the steps it starts, including taskless execution | The Graph process and its child step processes in `processes` |
+| Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and, with Linear, Initiative membership |
+| Chapter | Shared name of each Wave's In Progress Project | Project statuses; no Chapter row or packet |
+| Project | A Wave's plan, KRs and targets | `projects` row, shared through the planning provider |
+| Task | A concrete change, investigation or document | `tasks`, the planning provider, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
 | Machine | A machine's store, credentials and exact process authority | Machine identity and observed route |
 | Task ownership | Who works on a Task, on which Machine, or unowned | Append-only `task_ownership` log; each person's Machine-local Wave → Machine default places their unowned Work |
 
 An LfSession keeps its ID, name, feedback and native conversation when its
 command process changes. Its `interactive` field is independent of purpose,
-Flow membership and completion. Default conversation views show interactive
+Graph membership and completion. Default conversation views show interactive
 Sessions; explicit filters expose headless and completed history. Large captured
 payloads remain files, but readers select and page rows before opening them.
 
@@ -230,30 +230,30 @@ The provider's AgentProcess resolves to its attached LfProcess at child admissio
 A delayed command from a replaced provider retains historical provenance; old
 Process parents are never rewritten. Causal ancestry grants no control authority.
 
-Every Flow naming a Task, or run in its checkout, is equally its work;
+Every Graph naming a Task, or run in its checkout, is equally its work;
 none is privileged. `task run` always runs a fresh one.
-Taskless and Task-owned Flows use the same Flow runner. The Flow process holds the compiled graph
+Taskless and Task-owned Graphs use the same Graph runner. The Graph process holds the compiled graph
 and cursor in memory; template composition compiles into the graph, and loop
 passes are positions in it. Each step is a real child Process whose argv carries
-the Flow name, launch sequence and position. A step's result is how its process
+the Graph name, launch sequence and position. A step's result is how its process
 exited; a deciding or routing step also answers through the Session turn its
 Process captured. Mechanical work creates no agent conversation. A Session reaches
-its Flow through the step Process that captured its input. A killed Flow process leaves
+its Graph through the step Process that captured its input. A killed Graph process leaves
 its Processes as history; nothing resumes it, and its caller launches fresh work.
 
 Task requires repository identity and may belong to a Project; its Wave is derived
 from that Project. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
 target and writes; Desktop confirms it. Bind cannot clear or move an assignment
-or change Flow membership. Done and landed Tasks remain valid targets. Earlier
+or change Graph membership. Done and landed Tasks remain valid targets. Earlier
 usage retains its recorded owner; binding affects subsequent work, and uncertain
 mid-turn allocation remains unknown.
 
 Reserving actual Task work (`lf task run` or `lf task checkout` allocating a
 checkout) claims an unowned Task in its append-only ownership log. Recording an
 inspection command's Process does not claim a Task. Chapter retirement
-also checks authored work, PRs and Flows; missing history alone cannot
-prove untouched backlog. Rotation converges from fresh Linear facts using the
+also checks authored work, PRs and Graphs; missing history alone cannot
+prove untouched backlog. Rotation converges from fresh provider facts using the
 explicit target name and stable Project identities. A partially rotated repository
 must be retryable; unrelated competing plans remain unresolved.
 
@@ -289,24 +289,24 @@ lf task status INF-123 --json
 without starting execution. Publication creates its optional, sole PR. Each `--task` command
 starts an independent LfSession in that worktree; several may overlap and write distinct
 scratch paths. Any caller may then use the ordinary Work and delivery commands.
-Those commands act on delivery facts, not on Flow-driving authority. `submit` and `land` therefore work the same whether the Task was pursued by a
-Task Flow, piecemeal helper LfSessions, or another system.
+Those commands act on delivery facts, not on Graph-driving authority. `submit` and `land` therefore work the same whether the Task was pursued by a
+Task Graph, piecemeal helper LfSessions, or another system.
 
-### Task Flows
+### Task Graphs
 
 ```bash
-lf --wave product wave-operate        # one finite planning pass
+lf --wave product wave-operate        # one finite pass over your started Tasks
 lf task run INF-123
 lf --wave <wave> wave-operate "ship invoices first"
 lf wave status product
 ```
 
-`task run` places the Task, then runs a fresh Flow in its checkout exactly as
-`lf --task ISSUE flow FLOW` does, returning when the Flow ends; it never
+`task run` places the Task, then runs a fresh Graph in its checkout exactly as
+`lf --task ISSUE graph GRAPH` does, returning when the Graph ends; it never
 continues an earlier one. Repository rotation converges every Wave on the
 requested Project name, preserving active Task identity and execution. Direct
-questions and helpers use attributed LfSessions without gaining Flow
-authority. Flows hold autonomous steps only; review happens in the Task
+questions and helpers use attributed LfSessions without gaining Graph
+authority. Graphs hold autonomous steps only; review happens in the Task
 conversation.
 
 ### Another machine
@@ -328,7 +328,7 @@ the behavior.
 | If you are changing… | Read |
 | --- | --- |
 | provider launch, retries, usage, or telemetry | [Execution](architecture/execution.md) |
-| Flow semantics, Work state, Steer, questions, review FlowSteps, chapter rotation and Task advancement | [Planning](architecture/planning.md) |
+| Graph semantics, Work state, Steer, questions, review GraphSteps, chapter rotation and Task advancement | [Planning](architecture/planning.md) |
 | worktrees, commits, PR ranges, checks, or landing | [Delivery](architecture/delivery.md) |
 | remote execution, Task ownership, process control, promotion | [Machines and processes](architecture/machines.md) |
 | schema, files, projections, DTOs, or consistency | [Data and persistence](architecture/data.md) |

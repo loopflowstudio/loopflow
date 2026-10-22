@@ -137,7 +137,7 @@ async fn read_task_run(
             checkout.display()
         );
     }
-    let choice = match select_task_run(store, &task, checkout, options.flow.as_deref()) {
+    let choice = match select_task_run(store, &task, checkout, options.graph.as_deref()) {
         Ok(choice) => choice,
         Err(error) => {
             report.impediments.push(error.to_string());

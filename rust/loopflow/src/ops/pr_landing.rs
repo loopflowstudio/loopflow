@@ -11,14 +11,14 @@ use time::OffsetDateTime;
 
 use crate::agent::{run_agent, AgentConfig, ProcessConfig};
 use crate::config::load_config_or_default;
-use crate::flow::load_skill;
 use crate::git::current_branch;
+use crate::graph::load_skill;
 use crate::pr_landing::{
     LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
     SUPERVISOR_STALE_AFTER,
 };
 use crate::session_record::{
-    AgentProcessRequest, CaptureHandle, SessionCaptureSpec, SessionFlowMembership,
+    AgentProcessRequest, CaptureHandle, SessionCaptureSpec, SessionGraphMembership,
 };
 use crate::store::sqlite::automation::RepairAttempt;
 use crate::store::{open_store, storage_config_from_env, SharedStore};
@@ -375,7 +375,7 @@ fn admit_ci_fix(
                 iterations: None,
                 task_id: landing.task_id.clone(),
                 wave_id: None,
-                flow_lf_process_id: None,
+                graph_lf_process_id: None,
                 work_source: landing
                     .task_id
                     .as_ref()
@@ -702,7 +702,7 @@ fn process_ci_fix(
             worktree: Some(landing.worktree.clone()),
             skill: Some("ci-fix".to_string()),
             subjects: Vec::new(),
-            flow: SessionFlowMembership::Independent,
+            graph: SessionGraphMembership::Independent,
             work: landing
                 .task_id
                 .clone()
@@ -1461,19 +1461,19 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         eprintln!("Task {} has merged; retained its checkout until completion. Inspect remaining work with `lf task status {}`.", task.identifier, task.identifier);
         return Ok(());
     }
-    // Only a Flow still being driven needs the checkout; a stopped one is history.
+    // Only a Graph still being driven needs the checkout; a stopped one is history.
     if store
         .sqlite
-        .flows_at(&landing.worktree)
+        .graphs_at(&landing.worktree)
         .map_err(|error| OpsError::Message(error.to_string()))?
         .iter()
-        .any(|flow| {
-            flow.process.completed_at.is_none()
-                && crate::journal::process_evidence(&store.sqlite, flow.id())
+        .any(|graph| {
+            graph.process.completed_at.is_none()
+                && crate::journal::process_evidence(&store.sqlite, graph.id())
                     != crate::journal::ProcessIdentityEvidence::Dead
         })
     {
-        eprintln!("PR merged; retained its checkout for the Flow that landed it.");
+        eprintln!("PR merged; retained its checkout for the Graph that landed it.");
         return Ok(());
     }
     if crate::git::worktrees::is_persistent_worktree(&landing.worktree)? {

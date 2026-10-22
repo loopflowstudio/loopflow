@@ -23,7 +23,7 @@ complexity.
 | --- | --- | ---: | --- |
 | CLI and presentation | `rust/loopflow/src/lf/`, `src/bin/` | 31,700 | command grammar, dispatch, status/read models, terminal output |
 | Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task/Project operations, sessions, PR, Git, release, metrics, PM |
-| Prompt assembly, Flow runner and provider processes | `rust/loopflow/src/prompt/`, `agent/`, `flow/`, `skills/`, `src/harness/` | 29,300 | Skill/Flow discovery, prompt assembly, provider subprocess streams |
+| Prompt assembly, Graph runner and provider processes | `rust/loopflow/src/prompt/`, `agent/`, `graph/`, `skills/`, `src/harness/` | 29,300 | Skill/Graph discovery, prompt assembly, provider subprocess streams |
 | Tracked Work | `work/`, `pm/` | — | Wave/Task facts, Task PR identity, planning-provider models |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite, migrations, durable domain rows, outer command receipts |
 | Provider authority | `provider_auth/`, `provider_account/` | 7,500 | login, encrypted tokens, account homes and routes |
@@ -42,14 +42,14 @@ subprocess edge to one concept.
 | Behavior | Begin at | Main object passed onward |
 | --- | --- | --- |
 | command parsing | [`lf/mod.rs`](../../rust/loopflow/src/lf/mod.rs) | command args and launch context |
-| Skill/Flow discovery | [`definition/mod.rs`](../../rust/loopflow/src/definition/mod.rs) | selected Skill or Flow |
+| Skill/Graph discovery | [`definition/mod.rs`](../../rust/loopflow/src/definition/mod.rs) | selected Skill or Graph |
 | prompt assembly | [`prompt/mod.rs`](../../rust/loopflow/src/prompt/mod.rs) | system/task prompt pair |
 | provider routing | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | selected account route |
 | provider streams | [`harness/`](../../rust/loopflow/src/harness/) | normalized conversation and usage |
 | Session capture evidence | [`session_record.rs`](../../rust/loopflow/src/session_record.rs) | manifest, append events, terminal receipt |
 | shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work/) | `WorkRef`, status, inputs, Task ownership, Wave/Task facts |
 | Project operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave-operate` conversation |
-| Flow process | [`lf/commands/flow.rs`](../../rust/loopflow/src/lf/commands/flow.rs) | one lf process holding the graph and cursor, starting each step as a child Process |
+| Graph process | [`lf/commands/graph.rs`](../../rust/loopflow/src/lf/commands/graph.rs) | one lf process holding the graph and cursor, starting each step as a child Process |
 | Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave/) | identity, config, memory, repository scope |
 | Wave facts | [`work/wave/`](../../rust/loopflow/src/work/wave/) | goals, metrics, memory, relocation |
 | store abstraction | [`store/`](../../rust/loopflow/src/store/) | domain rows and transactions |
@@ -59,7 +59,7 @@ subprocess edge to one concept.
 ## Public process surfaces
 
 ```text
-lf                         foreground command and Skill/Flow launches
+lf                         foreground command and Skill/Graph launches
 lf-prompt                  prompt-oriented executable surface
 lf-world                   builds fake worlds for demos and tests through production writers
 lf __context-block         provider turn-boundary hook: context at start/compaction, steers at tool and prompt boundaries, Linear acquisition at turn end
@@ -67,11 +67,11 @@ Loopflow.app               pure client over CLI/HTTP DTOs
 ```
 
 Internal process names are implementation surfaces, not a second user API.
-Flows may invoke the named internal operations that own their exact boundary.
+Graphs may invoke the named internal operations that own their exact boundary.
 
 | Public family | Owns |
 | --- | --- |
-| `lf <skill>`, `lf flow` | direct execution and composition |
+| `lf <skill>`, `lf graph` | direct execution and composition |
 | `lf wave`, `repo`, `task` | planning and Work coordination |
 | `lf session` | durable Sessions and resolution |
 | `lf wt`, `commit`, `sync`, `pr`, `ci` | worktree and delivery operations |
@@ -87,8 +87,8 @@ round-trip the same fixtures under `tests/fixtures/dto/`.
 
 `lf checkout` belongs to tracked Work and delivery: it starts no execution.
 `lf task run ISSUE` places the Task and fills its defaults, then is
-`lf --task ISSUE flow FLOW` in that checkout. `lf --task ... <skill>` goes directly through execution with
-Task attribution and never moves a Flow's position.
+`lf --task ISSUE graph GRAPH` in that checkout. `lf --task ... <skill>` goes directly through execution with
+Task attribution and never moves a Graph's position.
 
 ## Dependency direction
 
@@ -104,7 +104,7 @@ work      ⇏ task launch
 ```
 
 Keep these directions literal. Work types own Project/Task domain progression;
-Task launch joins them by starting an ordinary Flow in the Task checkout.
+Task launch joins them by starting an ordinary Graph in the Task checkout.
 Execution accepts preassembled Wave memory and opaque Work attribution; it does
 not resolve either from the planning store.
 

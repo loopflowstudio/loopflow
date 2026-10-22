@@ -6,7 +6,7 @@ DROP TRIGGER task_workflow_graph_is_fixed;
 DELETE FROM task_workflows WHERE NOT (node='end' AND edge IS NULL);
 UPDATE task_workflows SET graph=json_object('name',json_extract(graph,'$.name'),'steps',json('[]'));
 CREATE TRIGGER task_workflow_graph_is_fixed BEFORE UPDATE OF graph ON task_workflows BEGIN
-    SELECT RAISE(ABORT,'Workflow graph is fixed once taken up');
+    SELECT RAISE(ABORT,'A Workflow graph is fixed when taken up');
 END;
 
 -- `lf ship` approves a Task by appending a `shipped` move. SQLite cannot widen a

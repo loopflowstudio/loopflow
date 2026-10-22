@@ -38,7 +38,7 @@ impl SqliteStore {
                  OR EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
                     AND json_extract(kind_json,'$.kind')='started')
                  OR EXISTS({})
-                 OR EXISTS(SELECT 1 FROM flow_process_steps WHERE flow_lf_process_id IN ({}))",
+                 OR EXISTS(SELECT 1 FROM graph_process_steps WHERE graph_lf_process_id IN ({}))",
                 super::task_work::session_ids("?1"),
                 super::task_work::lf_process_ids(&conn, "?1")?,
             ),

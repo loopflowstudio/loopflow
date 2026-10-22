@@ -1,9 +1,0 @@
-# Design, build and deliver. You review the plan and try the change in the
-# Task conversation; everything between those stages runs on its own.
-- kickoff
-- loop: kickoff
-  interactive: review-design
-- flow: pursue
-- loop: implement
-  interactive: demo
-- flow: deliver

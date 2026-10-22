@@ -91,8 +91,8 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
                 subject
             })
             .collect(),
-        // A replay re-executes recorded inputs; it is not the Flow occurrence.
-        flow: crate::session_record::SessionFlowMembership::Independent,
+        // A replay re-executes recorded inputs; it is not the Graph occurrence.
+        graph: crate::session_record::SessionGraphMembership::Independent,
         work: None,
     };
     let capture = CaptureHandle::begin_replay_at(home, spec, request, source.artifact_key)
@@ -262,7 +262,7 @@ for line in sys.stdin:
                 worktree: Some(home.path().to_path_buf()),
                 skill: Some("implement".to_string()),
                 subjects: Vec::new(),
-                flow: crate::session_record::SessionFlowMembership::Independent,
+                graph: crate::session_record::SessionGraphMembership::Independent,
                 work: None,
             },
             request.clone(),

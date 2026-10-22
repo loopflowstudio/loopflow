@@ -9,8 +9,8 @@ use sha2::{Digest, Sha256};
 
 use crate::definition::name::portable_name;
 use crate::error::LoadError;
-use crate::flow::instructions::render_flow_instructions;
-use crate::flow::{compile_flow_with_catalog, split_frontmatter, DefinitionLoader};
+use crate::graph::instructions::render_graph_instructions;
+use crate::graph::{compile_graph_with_catalog, split_frontmatter, DefinitionLoader};
 use crate::skills::catalog::{is_generated, SkillCatalog, SkillDialect, SkillSource};
 
 const SKILL_FILE_NAME: &str = "SKILL.md";
@@ -75,19 +75,19 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
         home.as_deref(),
         options.global_home.is_none(),
     )?;
-    let flows = match &options.repo {
-        Some(repo) => crate::flow::repo_flow_names(repo)?,
-        None => crate::builtins::builtin_flow_names()
+    let graphs = match &options.repo {
+        Some(repo) => crate::graph::repo_graph_names(repo)?,
+        None => crate::builtins::builtin_graph_names()
             .into_iter()
             .map(str::to_string)
             .collect(),
     };
     let repo = options.repo.as_ref().map(std::path::absolute).transpose()?;
-    let mut all_flows = crate::builtins::builtin_flow_names()
+    let mut all_graphs = crate::builtins::builtin_graph_names()
         .into_iter()
         .map(str::to_string)
         .collect::<Vec<_>>();
-    all_flows.extend(flows.iter().cloned());
+    all_graphs.extend(graphs.iter().cloned());
     let mut recipes = BTreeMap::new();
     let mut targets = Vec::new();
     let mut report = SkillSyncReport::default();
@@ -112,29 +112,29 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
             }
             exports.insert(name.clone(), render_skill(skill, name, vendor)?);
         }
-        for (name, flow) in project_names(flows.iter().map(String::as_str)) {
+        for (name, graph) in project_names(graphs.iter().map(String::as_str)) {
             if skills.contains_key(&name) {
                 let path = root.join(&name).join(SKILL_FILE_NAME);
                 eprintln!(
-                    "warning: skipping Flow {flow:?}: skill owns the native name {name:?} at {}",
+                    "warning: skipping Graph {graph:?}: skill owns the native name {name:?} at {}",
                     path.display()
                 );
                 report.skipped.push(path);
                 continue;
             }
-            let recipe = match recipes.entry(flow.clone()) {
+            let recipe = match recipes.entry(graph.clone()) {
                 std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
                 std::collections::btree_map::Entry::Vacant(entry) => {
                     let definition = DefinitionLoader::new(options.repo.as_deref(), &catalog)
-                        .load_flow(&flow)?;
-                    let steps = compile_flow_with_catalog(&definition, &catalog)?;
-                    entry.insert(render_flow_instructions(&flow, &steps, &all_flows)?)
+                        .load_graph(&graph)?;
+                    let steps = compile_graph_with_catalog(&definition, &catalog)?;
+                    entry.insert(render_graph_instructions(&graph, &steps, &all_graphs)?)
                 }
             };
-            sources.insert(name.clone(), flow.clone());
+            sources.insert(name.clone(), graph.clone());
             exports.insert(
                 name.clone(),
-                render_flow_skill(&flow, &name, vendor, recipe),
+                render_graph_skill(&graph, &name, vendor, recipe),
             );
         }
         let blocked = exports
@@ -248,13 +248,13 @@ fn writable_target(base: &Path, root: &Path, name: &str) -> bool {
         || fs::read_dir(&directory).is_ok_and(|mut entries| entries.next().is_none())
 }
 
-fn render_flow_skill(flow: &str, name: &str, vendor: Vendor, recipe: &str) -> String {
+fn render_graph_skill(graph: &str, name: &str, vendor: Vendor, recipe: &str) -> String {
     let user_only = if vendor == Vendor::Claude {
         "disable-model-invocation: true\n"
     } else {
         ""
     };
-    format!("---\nname: {name}\ndescription: Follow the {name} Flow in this conversation.\nloopflow: true\nloopflow-kind: flow\nloopflow-flow: {}\n{user_only}---\n{recipe}", yaml_string(flow))
+    format!("---\nname: {name}\ndescription: Follow the {name} Graph in this conversation.\nloopflow: true\nloopflow-kind: graph\nloopflow-graph: {}\n{user_only}---\n{recipe}", yaml_string(graph))
 }
 
 fn write_targets(
@@ -477,7 +477,7 @@ fn prune_empty_skill_dir(skill_file: &Path, target_root: &Path) -> Result<(), Lo
 mod tests {
     use super::{customize, sync_skills, SkillSyncOptions, SKILL_FILE_NAME};
     use crate::builtins;
-    use crate::flow::split_frontmatter;
+    use crate::graph::split_frontmatter;
     use std::fs;
     use tempfile::TempDir;
 
@@ -556,15 +556,15 @@ mod tests {
     }
 
     #[test]
-    fn portable_flow_export_yields_to_third_party_skills_in_any_scope() {
+    fn portable_graph_export_yields_to_third_party_skills_in_any_scope() {
         let home = TempDir::new().unwrap();
         let repo = TempDir::new().unwrap();
         let native = home.path().join(".claude/skills/team/ship/SKILL.md");
         fs::create_dir_all(native.parent().unwrap()).unwrap();
         fs::write(&native, "Third-party owns team-ship").unwrap();
-        fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
+        fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
         fs::write(
-            repo.path().join(".lf/flows/team-ship.yaml"),
+            repo.path().join(".lf/graphs/team-ship.yaml"),
             "- implement\n",
         )
         .unwrap();
@@ -604,12 +604,12 @@ mod tests {
     }
 
     #[test]
-    fn portable_flow_exports_are_scoped_and_idempotent() {
+    fn portable_graph_exports_are_scoped_and_idempotent() {
         let home = TempDir::new().unwrap();
         let repo = TempDir::new().unwrap();
-        fs::create_dir_all(repo.path().join(".lf/flows/team")).unwrap();
+        fs::create_dir_all(repo.path().join(".lf/graphs/team")).unwrap();
         fs::write(
-            repo.path().join(".lf/flows/team/ship.yaml"),
+            repo.path().join(".lf/graphs/team/ship.yaml"),
             "- implement\n",
         )
         .unwrap();
@@ -629,15 +629,15 @@ mod tests {
         for provider in [".agents", ".claude"] {
             let root = repo.path().join(provider).join("skills");
             let wrapper = fs::read_to_string(root.join("team-ship/SKILL.md")).unwrap();
-            assert!(wrapper.contains("# Flow: team/ship"));
+            assert!(wrapper.contains("# Graph: team/ship"));
             assert!(wrapper.contains("1. Run `lf -b implement`."));
-            assert!(wrapper.contains("loopflow-kind: flow"));
+            assert!(wrapper.contains("loopflow-kind: graph"));
             assert!(!wrapper.contains("--instructions"));
             assert!(root.join("team-check/SKILL.md").exists());
             assert!(!root.join("pursue/SKILL.md").exists());
         }
         assert!(sync_skills(&options).unwrap().written.is_empty());
-        fs::remove_file(repo.path().join(".lf/flows/team/ship.yaml")).unwrap();
+        fs::remove_file(repo.path().join(".lf/graphs/team/ship.yaml")).unwrap();
         assert_eq!(sync_skills(&options).unwrap().pruned.len(), 2);
     }
 
@@ -664,9 +664,9 @@ mod tests {
         ));
         assert!(!original.contains("Personal decision criteria"));
 
-        fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
-        let flow = repo.path().join(".lf/flows/pursue.yaml");
-        fs::write(&flow, "- interactive: {name: demo, id: review}\n").unwrap();
+        fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
+        let graph = repo.path().join(".lf/graphs/pursue.yaml");
+        fs::write(&graph, "- interactive: {name: demo, id: review}\n").unwrap();
         let options = SkillSyncOptions {
             repo: Some(repo.path().to_path_buf()),
             ..options_for(&home)
@@ -676,7 +676,7 @@ mod tests {
         assert!(fs::read_to_string(&local)
             .unwrap()
             .contains("1. Execute the skill `demo` in this conversation."));
-        fs::write(&flow, "- compress\n").unwrap();
+        fs::write(&graph, "- compress\n").unwrap();
         sync_skills(&options).unwrap();
         let updated = fs::read_to_string(local).unwrap();
         assert!(updated.contains("1. Run `lf -b compress`."));
@@ -699,19 +699,19 @@ mod tests {
     }
 
     #[test]
-    fn portable_exports_preserve_colliding_skills_and_flows() {
+    fn portable_exports_preserve_colliding_skills_and_graphs() {
         let home = TempDir::new().unwrap();
         let repo = TempDir::new().unwrap();
-        for (kind, extension) in [("skills", "md"), ("flows", "yaml")] {
+        for (kind, extension) in [("skills", "md"), ("graphs", "yaml")] {
             for (name, body) in [("team/check", "Slash"), ("team-check", "Dash")] {
-                let name = if kind == "flows" {
+                let name = if kind == "graphs" {
                     name.replace("check", "ship")
                 } else {
                     name.to_string()
                 };
                 let path = repo.path().join(format!(".lf/{kind}/{name}.{extension}"));
                 fs::create_dir_all(path.parent().unwrap()).unwrap();
-                let content = if kind == "flows" {
+                let content = if kind == "graphs" {
                     format!(
                         "- {}\n",
                         if name.contains('/') {
@@ -749,7 +749,7 @@ mod tests {
                         content.contains(&format!(
                             "loopflow-{}: {source}\n",
                             if source.contains("ship") {
-                                "flow"
+                                "graph"
                             } else {
                                 "skill"
                             }
@@ -772,7 +772,7 @@ mod tests {
     }
 
     #[test]
-    fn portable_flow_collisions_yield_to_skills_without_prefixes() {
+    fn portable_graph_collisions_yield_to_skills_without_prefixes() {
         let home = TempDir::new().unwrap();
         fs::create_dir_all(home.path().join(".lf/skills")).unwrap();
         fs::write(
@@ -787,8 +787,8 @@ mod tests {
             assert!(report.skipped.contains(&path));
             let body = fs::read_to_string(path).unwrap();
             assert!(body.contains("Skill owns this name"));
-            assert!(!body.contains("loopflow-kind: flow"));
-            assert!(!root.join("flow-pursue").exists());
+            assert!(!body.contains("loopflow-kind: graph"));
+            assert!(!root.join("graph-pursue").exists());
         }
     }
 
@@ -972,6 +972,29 @@ mod tests {
             assert!(control.contains("lf machine use"));
             let implement = fs::read_to_string(root.join("implement/SKILL.md")).unwrap();
             assert!(!implement.contains("lf machine use"));
+        }
+    }
+
+    #[test]
+    fn operator_skills_stay_on_existing_work() {
+        for name in ["repo-operate", "wave-operate"] {
+            let skill = builtins::get_builtin_skill(name).unwrap();
+            for planning in [
+                "lf task create",
+                "update-plan",
+                "new-chapter",
+                "lf task claim",
+                "KR",
+            ] {
+                assert!(!skill.contains(planning), "{name} names {planning:?}");
+            }
+            assert!(skill.contains("lf config user"), "{name} omits ownership");
+        }
+        for name in ["s1", "s2", "s3", "s4", "s5"] {
+            let skill = builtins::get_builtin_skill(name).unwrap();
+            for planning in ["lf task create", "update-plan", "new-chapter"] {
+                assert!(!skill.contains(planning), "{name} names {planning:?}");
+            }
         }
     }
 

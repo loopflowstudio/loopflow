@@ -141,7 +141,7 @@ def _run(
         return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
-def _probe(claude: str, model: str, lf: str, flow: bool, terminal: bool, command: bool) -> bool:
+def _probe(claude: str, model: str, lf: str, graph: bool, terminal: bool, command: bool) -> bool:
     requests = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -230,10 +230,10 @@ def _probe(claude: str, model: str, lf: str, flow: bool, terminal: bool, command
             collision = home / ".claude/skills/lf-mapping/SKILL.md"
             collision.parent.mkdir(parents=True)
             collision.write_text("---\ndescription: Wrong source\n---\nWRONG_SOURCE\n")
-            if flow:
-                flows = workspace / ".lf/flows"
-                flows.mkdir(parents=True)
-                (flows / "mapping.yaml").write_text("- lf-mapping\n")
+            if graph:
+                graphs = workspace / ".lf/graphs"
+                graphs.mkdir(parents=True)
+                (graphs / "mapping.yaml").write_text("- lf-mapping\n")
                 child = fixture_bin / "lf"
                 child.write_text(
                     "#!/bin/sh\nrm -f "
@@ -245,7 +245,7 @@ def _probe(claude: str, model: str, lf: str, flow: bool, terminal: bool, command
                 child.chmod(0o755)
                 env["LF_BIN"] = str(child)
                 # A newly visible collision must not replace the captured source.
-                target = ["flow", "mapping", argument]
+                target = ["graph", "mapping", argument]
             result = _run(
                 [
                     lf,
@@ -325,11 +325,11 @@ def _probe(claude: str, model: str, lf: str, flow: bool, terminal: bool, command
                         original_source.replace("${CLAUDE_SKILL_DIR}", str(skill.parent))
                     )
                 )
-            if flow:
+            if graph:
                 observation["checks"]["removed_source_not_reselected"] = (
                     not skill.exists() and "WRONG_SOURCE" not in json.dumps(requests)
                 )
-            print(json.dumps({"channel": "lf-flow" if flow else "lf", **observation}), flush=True)
+            print(json.dumps({"channel": "lf-graph" if graph else "lf", **observation}), flush=True)
             if result.returncode:
                 print(result.stderr, file=sys.stderr)
                 for event in provider_events:
@@ -355,9 +355,9 @@ def main() -> int:
         help="Exercise headless native dispatch through this lf binary",
     )
     parser.add_argument(
-        "--flow",
+        "--graph",
         action="store_true",
-        help="Remove the selected source after Flow capture, with a same-name collision",
+        help="Remove the selected source after Graph capture, with a same-name collision",
     )
     args = parser.parse_args()
     if not args.claude:
@@ -368,7 +368,7 @@ def main() -> int:
             str(Path(args.claude).resolve()),
             args.model,
             str(args.lf.resolve()),
-            args.flow,
+            args.graph,
             args.terminal,
             args.command,
         )

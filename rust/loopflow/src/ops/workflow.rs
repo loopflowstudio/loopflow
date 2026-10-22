@@ -1,10 +1,10 @@
 //! A Task's Workflow: the graph it took up, fixed from then on, and where the
 //! Task stands on it. Position is live state a person or a conversation
 //! moves: at a stage, or on a route with the Task run carrying it. `lf task
-//! run` chooses a route, runs its slice of the graph, again when a Flow
+//! run` chooses a route, runs its slice of the graph, again when a Graph
 //! process fails, and writes the arrival when one succeeds; `lf task workflow
 //! move` sets a stage outright. Every change is appended to the Task's
-//! history. Nothing here launches or controls a Flow.
+//! history. Nothing here launches or controls a Graph.
 
 use serde::{Deserialize, Serialize};
 
@@ -33,7 +33,7 @@ pub enum WorkflowPosition {
     /// The Task waits on a person at this stage, or stands at `start` or `end`.
     Node { node: String },
     /// The Task is on this edge. `lf_process_id` is the `lf task run` carrying it;
-    /// each Flow process it starts is that Process's child. `running` is read from
+    /// each Graph process it starts is that Process's child. `running` is read from
     /// that Process: an edge whose Task run has ended has stopped and holds the
     /// Task until it is chosen again or the Task is moved.
     Edge {
@@ -212,7 +212,7 @@ impl Workflow {
                 return format!("{summary}. A person takes part again when that run finishes.");
             }
             WorkflowPosition::Edge { .. } => vec![format!(
-                "{summary}. Read `lf flow list --for-task {issue}` before choosing: run it again, take another edge leaving {}, or move the Task.",
+                "{summary}. Read `lf graph list --for-task {issue}` before choosing: run it again, take another edge leaving {}, or move the Task.",
                 self.node()
             )],
             WorkflowPosition::Node { node } => vec![match self.definition.node(node) {
@@ -293,7 +293,7 @@ mod tests {
             guidance.contains("stopped on pursue (review-design → demo)"),
             "{guidance}"
         );
-        assert!(guidance.contains("`lf flow list --for-task INF-1`"));
+        assert!(guidance.contains("`lf graph list --for-task INF-1`"));
         assert!(guidance.contains("`lf -b task run INF-1 pursue`"));
         assert!(guidance.contains("`lf -b task run INF-1 kickoff`"));
         // The research graph's last edge runs nothing.

@@ -7,25 +7,25 @@ import Testing
 
 @Suite("RegistryQuery")
 struct RegistryQueryTests {
-    @Test("Flow logs read captured execution from the content Machine, never a peer path locally")
-    func contentRoutedFlowLog() async throws {
+    @Test("Graph logs read captured execution from the content Machine, never a peer path locally")
+    func contentRoutedGraphLog() async throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let detail = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/flow_detail.json"), encoding: .utf8)
-        let expected = try JSONDecoder().decode(FlowProcessDetail.self, from: Data(detail.utf8))
+        let detail = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/graph_detail.json"), encoding: .utf8)
+        let expected = try JSONDecoder().decode(GraphProcessDetail.self, from: Data(detail.utf8))
         let entry = String(decoding: try JSONEncoder().encode(expected.entry), as: UTF8.self)
         let query = RegistryQuery { args, cwd in
             guard args.starts(with: ["--machine", "peer", "--repository", "plan"]), cwd == nil else {
-                throw RegistryQueryError("A peer Flow log must never use local execution")
+                throw RegistryQueryError("A peer Graph log must never use local execution")
             }
             let command = Array(args.dropFirst(4))
-            if command.starts(with: ["flow", "list"]) {
+            if command.starts(with: ["graph", "list"]) {
                 return "{\"entries\":[\(entry)],\"next\":null}"
             }
-            if command == ["flow", "show", expected.entry.id, "--processes", "--json"] { return detail }
+            if command == ["graph", "show", expected.entry.id, "--processes", "--json"] { return detail }
             throw RegistryQueryError("Unexpected execution")
         }
-        let flows = try await query.onMachine("peer", repository: "plan").taskFlowProcesses(task: "task", cwd: "/peer/checkout")
-        #expect(flows == [expected])
+        let graphs = try await query.onMachine("peer", repository: "plan").taskGraphProcesses(task: "task", cwd: "/peer/checkout")
+        #expect(graphs == [expected])
     }
 
     @Test("Recording a remote reading preserves its Machine and transport", arguments: [false, true])
@@ -292,7 +292,7 @@ struct RegistryQueryTests {
           "owner": {"person": "Jack Heart", "machine": {"id": null, "label": null}}
         },
         "directive": null,
-        "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
+        "workflow_name":"feature","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
         "next_move": {
           "owner": "task",
           "reason": "ready"
@@ -520,7 +520,7 @@ struct RegistryQueryTests {
 
     @Test("Activity requires Session and input identity instead of unrelated process fallbacks")
     func invocationActivityIsNotSessionHistory() async throws {
-        let json = #"{"generated_at":1784606400,"since":1784001600,"limit":50,"truncated":false,"items":[{"id":"event","recorded_at":1784606300,"summary":"Input completed","work":{"kind":"task","id":"task-1"},"subject":"LOO-1","fact":{"kind":"input_completion_recorded","flow_lf_process_id":"invocation-1","trace_id":"trace-1","lf_process_id":"process-1","status":"ok"}}]}"#
+        let json = #"{"generated_at":1784606400,"since":1784001600,"limit":50,"truncated":false,"items":[{"id":"event","recorded_at":1784606300,"summary":"Input completed","work":{"kind":"task","id":"task-1"},"subject":"LOO-1","fact":{"kind":"input_completion_recorded","graph_lf_process_id":"invocation-1","trace_id":"trace-1","lf_process_id":"process-1","status":"ok"}}]}"#
         let query = RegistryQuery { _, _ in json }
         await #expect(throws: (any Error).self) { try await query.workActivity() }
     }

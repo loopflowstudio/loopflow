@@ -42,7 +42,7 @@
                 "items": [
                   {
                     "actions": {
-                      "reason": "run the next work with `lf task run`; inspect earlier Flows and independent Sessions first",
+                      "reason": "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first",
                       "recommended": "resume"
                     },
                     "condition": {
@@ -62,11 +62,11 @@
                     },
                     "execution": {
                       "captured": null,
-                      "reason": "No Task Flow has run; independent Sessions may still be active",
+                      "reason": "No Task Graph has run; independent Sessions may still be active",
                       "state": "idle",
                       "step": null
                     },
-                    "latest_flow_process": null,
+                    "latest_graph_process": null,
                     "next_move": {
                       "owner": "wave",
                       "reason": "ready"
@@ -86,7 +86,7 @@
                     "runtime": {
                       "completion_pending": null,
                       "provider": "codex",
-                      "reason": "No Task Flow has run; independent Sessions may still be active",
+                      "reason": "No Task Graph has run; independent Sessions may still be active",
                       "owner": null,
                       "status": "not_ready",
                       "updated_at": "2026-10-08T23:28:31Z",
@@ -143,11 +143,11 @@
                     },
                     "execution": {
                       "captured": null,
-                      "reason": "Flow delivery finished; nothing further is launched",
+                      "reason": "Graph delivery finished; nothing further is launched",
                       "state": "idle",
                       "step": null
                     },
-                    "latest_flow_process": {
+                    "latest_graph_process": {
                       "completed": [
                         0,
                         1
@@ -164,7 +164,7 @@
                         "updated_at": 1791502111,
                         "wave_id": "acc0f56c-1de7-4218-8646-5ce621b094f1"
                       },
-                      "graph": {
+                      "compiled": {
                         "interactions": {
                           "stages": [],
                           "transitions": [
@@ -375,7 +375,7 @@
             "items": [
               {
                 "actions": {
-                  "reason": "run the next work with `lf task run`; inspect earlier Flows and independent Sessions first",
+                  "reason": "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first",
                   "recommended": "resume"
                 },
                 "condition": {
@@ -395,11 +395,11 @@
                 },
                 "execution": {
                   "captured": null,
-                  "reason": "No Task Flow has run; independent Sessions may still be active",
+                  "reason": "No Task Graph has run; independent Sessions may still be active",
                   "state": "idle",
                   "step": null
                 },
-                "latest_flow_process": null,
+                "latest_graph_process": null,
                 "next_move": {
                   "owner": "wave",
                   "reason": "ready"
@@ -419,7 +419,7 @@
                 "runtime": {
                   "completion_pending": null,
                   "provider": "codex",
-                  "reason": "No Task Flow has run; independent Sessions may still be active",
+                  "reason": "No Task Graph has run; independent Sessions may still be active",
                   "owner": null,
                   "status": "not_ready",
                   "updated_at": "2026-10-08T23:28:31Z",
@@ -476,11 +476,11 @@
                 },
                 "execution": {
                   "captured": null,
-                  "reason": "Flow delivery finished; nothing further is launched",
+                  "reason": "Graph delivery finished; nothing further is launched",
                   "state": "idle",
                   "step": null
                 },
-                "latest_flow_process": {
+                "latest_graph_process": {
                   "completed": [
                     0,
                     1
@@ -497,7 +497,7 @@
                     "updated_at": 1791502111,
                     "wave_id": "acc0f56c-1de7-4218-8646-5ce621b094f1"
                   },
-                  "graph": {
+                  "compiled": {
                     "interactions": {
                       "stages": [],
                       "transitions": [
@@ -706,7 +706,7 @@
       "copy": null,
       "part": "planning",
       "revisions": {
-        "flows": 3,
+        "graphs": 3,
         "planning": 50,
         "processes": 23,
         "sessions": 0,
@@ -737,11 +737,11 @@
       },
       "execution": {
         "captured": null,
-        "reason": "Flow delivery finished; nothing further is launched",
+        "reason": "Graph delivery finished; nothing further is launched",
         "state": "idle",
         "step": null
       },
-      "latest_flow_process": {
+      "latest_graph_process": {
         "completed": [
           0,
           1
@@ -758,7 +758,7 @@
           "updated_at": 1791502111,
           "wave_id": "acc0f56c-1de7-4218-8646-5ce621b094f1"
         },
-        "graph": {
+        "compiled": {
           "interactions": {
             "stages": [],
             "transitions": [
@@ -958,7 +958,7 @@
         ],
         "execution": {
           "captured": null,
-          "reason": "Flow delivery finished; nothing further is launched",
+          "reason": "Graph delivery finished; nothing further is launched",
           "state": "idle",
           "step": null
         },
@@ -990,7 +990,7 @@
         },
         "pm_snapshot_synced_at": 1791502111,
         "pm_writeback": {
-          "error": "Saved locally; pending Linear synchronization",
+          "error": "Saved locally; pending planning synchronization",
           "operation": "complete_task",
           "state": "pending"
         },
@@ -1085,7 +1085,7 @@
         ],
         "wave": "product",
         "work": {
-          "flow_processes": [
+          "graph_processes": [
             {
               "ended_at": 1791502111,
               "id": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
@@ -1442,7 +1442,7 @@
           "pending_sync": [],
           "refresh_error": null
         },
-        "flow_processes": [
+        "graph_processes": [
           {
             "completed": [
               0,
@@ -1460,7 +1460,7 @@
               "updated_at": 1791502111,
               "wave_id": "acc0f56c-1de7-4218-8646-5ce621b094f1"
             },
-            "graph": {
+            "compiled": {
               "interactions": {
                 "stages": [],
                 "transitions": [
@@ -1553,7 +1553,7 @@
         ],
         "task": "FIX-1",
         "work": {
-          "flow_processes": [
+          "graph_processes": [
             {
               "ended_at": 1791502111,
               "id": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
@@ -1901,7 +1901,7 @@
       "copy": null,
       "part": "task",
       "revisions": {
-        "flows": 3,
+        "graphs": 3,
         "planning": 50,
         "processes": 23,
         "sessions": 0,
@@ -1954,7 +1954,7 @@
                 "items": [
                   {
                     "actions": {
-                      "reason": "run the next work with `lf task run`; inspect earlier Flows and independent Sessions first",
+                      "reason": "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first",
                       "recommended": "resume"
                     },
                     "condition": {
@@ -1974,11 +1974,11 @@
                     },
                     "execution": {
                       "captured": null,
-                      "reason": "No Task Flow has run; independent Sessions may still be active",
+                      "reason": "No Task Graph has run; independent Sessions may still be active",
                       "state": "idle",
                       "step": null
                     },
-                    "latest_flow_process": null,
+                    "latest_graph_process": null,
                     "next_move": {
                       "owner": "wave",
                       "reason": "ready"
@@ -1998,7 +1998,7 @@
                     "runtime": {
                       "completion_pending": null,
                       "provider": "codex",
-                      "reason": "No Task Flow has run; independent Sessions may still be active",
+                      "reason": "No Task Graph has run; independent Sessions may still be active",
                       "owner": null,
                       "status": "not_ready",
                       "updated_at": "2026-10-08T23:28:31Z",
@@ -2059,7 +2059,7 @@
                       "state": "running",
                       "step": "__telemetry-scorecard"
                     },
-                    "latest_flow_process": {
+                    "latest_graph_process": {
                       "completed": [],
                       "current": 0,
                       "cwd": "/tmp/.tmp6k7XyI",
@@ -2073,7 +2073,7 @@
                         "updated_at": 1791502111,
                         "wave_id": "acc0f56c-1de7-4218-8646-5ce621b094f1"
                       },
-                      "graph": {
+                      "compiled": {
                         "interactions": {
                           "stages": [],
                           "transitions": [
@@ -2272,7 +2272,7 @@
             "items": [
               {
                 "actions": {
-                  "reason": "run the next work with `lf task run`; inspect earlier Flows and independent Sessions first",
+                  "reason": "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first",
                   "recommended": "resume"
                 },
                 "condition": {
@@ -2292,11 +2292,11 @@
                 },
                 "execution": {
                   "captured": null,
-                  "reason": "No Task Flow has run; independent Sessions may still be active",
+                  "reason": "No Task Graph has run; independent Sessions may still be active",
                   "state": "idle",
                   "step": null
                 },
-                "latest_flow_process": null,
+                "latest_graph_process": null,
                 "next_move": {
                   "owner": "wave",
                   "reason": "ready"
@@ -2316,7 +2316,7 @@
                 "runtime": {
                   "completion_pending": null,
                   "provider": "codex",
-                  "reason": "No Task Flow has run; independent Sessions may still be active",
+                  "reason": "No Task Graph has run; independent Sessions may still be active",
                   "owner": null,
                   "status": "not_ready",
                   "updated_at": "2026-10-08T23:28:31Z",
@@ -2377,7 +2377,7 @@
                   "state": "running",
                   "step": "__telemetry-scorecard"
                 },
-                "latest_flow_process": {
+                "latest_graph_process": {
                   "completed": [],
                   "current": 0,
                   "cwd": "/tmp/.tmp6k7XyI",
@@ -2391,7 +2391,7 @@
                     "updated_at": 1791502111,
                     "wave_id": "acc0f56c-1de7-4218-8646-5ce621b094f1"
                   },
-                  "graph": {
+                  "compiled": {
                     "interactions": {
                       "stages": [],
                       "transitions": [
@@ -2588,7 +2588,7 @@
       "copy": null,
       "part": "planning",
       "revisions": {
-        "flows": 2,
+        "graphs": 2,
         "planning": 48,
         "processes": 13,
         "sessions": 0,
@@ -2623,7 +2623,7 @@
         "state": "running",
         "step": "__telemetry-scorecard"
       },
-      "latest_flow_process": {
+      "latest_graph_process": {
         "completed": [],
         "current": 0,
         "cwd": "/tmp/.tmp6k7XyI",
@@ -2637,7 +2637,7 @@
           "updated_at": 1791502111,
           "wave_id": "acc0f56c-1de7-4218-8646-5ce621b094f1"
         },
-        "graph": {
+        "compiled": {
           "interactions": {
             "stages": [],
             "transitions": [
@@ -2857,7 +2857,7 @@
         },
         "pm_snapshot_synced_at": 1791502111,
         "pm_writeback": {
-          "error": "Saved locally; pending Linear synchronization",
+          "error": "Saved locally; pending planning synchronization",
           "operation": "complete_task",
           "state": "pending"
         },
@@ -2952,7 +2952,7 @@
         ],
         "wave": "product",
         "work": {
-          "flow_processes": [
+          "graph_processes": [
             {
               "ended_at": null,
               "id": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
@@ -3215,7 +3215,7 @@
           "pending_sync": [],
           "refresh_error": null
         },
-        "flow_processes": [
+        "graph_processes": [
           {
             "completed": [],
             "current": 0,
@@ -3230,7 +3230,7 @@
               "updated_at": 1791502111,
               "wave_id": "acc0f56c-1de7-4218-8646-5ce621b094f1"
             },
-            "graph": {
+            "compiled": {
               "interactions": {
                 "stages": [],
                 "transitions": [
@@ -3311,7 +3311,7 @@
         ],
         "task": "FIX-1",
         "work": {
-          "flow_processes": [
+          "graph_processes": [
             {
               "ended_at": null,
               "id": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
@@ -3565,7 +3565,7 @@
       "copy": null,
       "part": "task",
       "revisions": {
-        "flows": 2,
+        "graphs": 2,
         "planning": 48,
         "processes": 13,
         "sessions": 0,
@@ -3642,7 +3642,7 @@
                       "state": "running",
                       "step": "__telemetry-scorecard"
                     },
-                    "latest_flow_process": {
+                    "latest_graph_process": {
                       "completed": [],
                       "current": 0,
                       "cwd": "/tmp/.tmp6k7XyI",
@@ -3656,7 +3656,7 @@
                         "updated_at": 1791502111,
                         "wave_id": "acc0f56c-1de7-4218-8646-5ce621b094f1"
                       },
-                      "graph": {
+                      "compiled": {
                         "interactions": {
                           "stages": [],
                           "transitions": [
@@ -3879,7 +3879,7 @@
                   "state": "running",
                   "step": "__telemetry-scorecard"
                 },
-                "latest_flow_process": {
+                "latest_graph_process": {
                   "completed": [],
                   "current": 0,
                   "cwd": "/tmp/.tmp6k7XyI",
@@ -3893,7 +3893,7 @@
                     "updated_at": 1791502111,
                     "wave_id": "acc0f56c-1de7-4218-8646-5ce621b094f1"
                   },
-                  "graph": {
+                  "compiled": {
                     "interactions": {
                       "stages": [],
                       "transitions": [
@@ -4090,7 +4090,7 @@
       "copy": null,
       "part": "planning",
       "revisions": {
-        "flows": 2,
+        "graphs": 2,
         "planning": 36,
         "processes": 8,
         "sessions": 0,
@@ -4125,7 +4125,7 @@
         "state": "running",
         "step": "__telemetry-scorecard"
       },
-      "latest_flow_process": {
+      "latest_graph_process": {
         "completed": [],
         "current": 0,
         "cwd": "/tmp/.tmp6k7XyI",
@@ -4139,7 +4139,7 @@
           "updated_at": 1791502111,
           "wave_id": "acc0f56c-1de7-4218-8646-5ce621b094f1"
         },
-        "graph": {
+        "compiled": {
           "interactions": {
             "stages": [],
             "transitions": [
@@ -4456,7 +4456,7 @@
         ],
         "wave": "product",
         "work": {
-          "flow_processes": [
+          "graph_processes": [
             {
               "ended_at": null,
               "id": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
@@ -4656,7 +4656,7 @@
           "pending_sync": [],
           "refresh_error": null
         },
-        "flow_processes": [
+        "graph_processes": [
           {
             "completed": [],
             "current": 0,
@@ -4671,7 +4671,7 @@
               "updated_at": 1791502111,
               "wave_id": "acc0f56c-1de7-4218-8646-5ce621b094f1"
             },
-            "graph": {
+            "compiled": {
               "interactions": {
                 "stages": [],
                 "transitions": [
@@ -4752,7 +4752,7 @@
         ],
         "task": "FIX-1",
         "work": {
-          "flow_processes": [
+          "graph_processes": [
             {
               "ended_at": null,
               "id": "e96e3d37-09ff-44ed-9145-137cc7ed295a",
@@ -4943,7 +4943,7 @@
       "copy": null,
       "part": "task",
       "revisions": {
-        "flows": 2,
+        "graphs": 2,
         "planning": 36,
         "processes": 8,
         "sessions": 0,

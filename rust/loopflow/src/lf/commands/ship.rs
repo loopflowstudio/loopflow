@@ -8,9 +8,9 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::flow::output::FlowOutput;
-use crate::flow::runner::SkillOutcome;
-use crate::flow::transitions::{FlowDecision, FlowVerdict};
+use crate::graph::output::GraphOutput;
+use crate::graph::runner::SkillOutcome;
+use crate::graph::transitions::{GraphDecision, GraphVerdict};
 use crate::lf::Cli;
 use crate::ops::task::ship::{ship_begin, ship_next, stand_in_message, ShipStart, ShipStep};
 use crate::ops::task::TaskProcessOptions;
@@ -54,12 +54,12 @@ pub fn run(
                 repeat,
             } => {
                 eprintln!("{issue}: standing in at {stage} with {skill}");
-                let output = repeat.as_ref().map(|_| FlowOutput::Decision);
+                let output = repeat.as_ref().map(|_| GraphOutput::Decision);
                 let mut message = stand_in_message(&stage, repeat.is_some());
                 if let Some(output) = &output {
                     message.push_str(&output.instructions());
                 }
-                let outcome = super::flow::run_task_skill(
+                let outcome = super::graph::run_task_skill(
                     cli,
                     task.id.as_str(),
                     &worktree,
@@ -72,15 +72,15 @@ pub fn run(
                 }
                 let (edge, note) = match (outcome, repeat) {
                     (
-                        Some(SkillOutcome::Decided(FlowVerdict {
-                            decision: FlowDecision::Iterate,
+                        Some(SkillOutcome::Decided(GraphVerdict {
+                            decision: GraphDecision::Iterate,
                             summary,
                         })),
                         Some(repeat),
                     ) => (repeat, format!("{stage} (stand-in) → repeat: {summary}")),
                     (
-                        Some(SkillOutcome::Decided(FlowVerdict {
-                            decision: FlowDecision::Blocked,
+                        Some(SkillOutcome::Decided(GraphVerdict {
+                            decision: GraphDecision::Blocked,
                             summary,
                         })),
                         Some(repeat),
@@ -89,8 +89,8 @@ pub fn run(
                         format!("{stage} (stand-in) → repeat, blocked: {summary}"),
                     ),
                     (
-                        Some(SkillOutcome::Decided(FlowVerdict {
-                            decision: FlowDecision::Advance,
+                        Some(SkillOutcome::Decided(GraphVerdict {
+                            decision: GraphDecision::Advance,
                             summary,
                         })),
                         _,
@@ -107,13 +107,13 @@ pub fn run(
             TaskProcessOptions {
                 wave: cli.wave.clone(),
                 agent: cli.agent.clone(),
-                flow: Some(edge),
+                graph: Some(edge),
                 reason: note,
                 ..TaskProcessOptions::default()
             },
         )?;
         if let Some(edge) = runs {
-            super::flow::run_task_edge_for(cli, task.id.as_str(), &edge, &worktree)?;
+            super::graph::run_task_edge_for(cli, task.id.as_str(), &edge, &worktree)?;
             crate::ops::task::workflow_arrive(&task)?;
         }
     }

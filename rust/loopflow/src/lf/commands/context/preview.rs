@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use crate::definition::{resolve_definition, DefinitionKind, Target};
-use crate::flow::graph::{FlowGraph, FlowNode, FlowNodeKind};
-use crate::flow::output::FlowOutput;
-use crate::flow::{compile_flow, FlowDefinition};
+use crate::graph::compiled::{CompiledGraph, GraphNode, GraphNodeKind};
+use crate::graph::output::GraphOutput;
+use crate::graph::{compile_graph, GraphDefinition};
 use crate::lf::commands::run;
 use crate::lf::Cli;
 use crate::ops::WorkBinding;
@@ -99,11 +99,11 @@ pub fn assemble(
         } else {
             let skill = match resolve_definition(cwd, name, kind)? {
                 Target::Skill(skill) => skill,
-                Target::Flow(flow) => {
-                    return preview_flow(&flow, message, &launch, cwd, binding.as_ref())
-                        .map(|preview| ContextPreview::Flow(Box::new(preview)));
+                Target::Graph(graph) => {
+                    return preview_graph(&graph, message, &launch, cwd, binding.as_ref())
+                        .map(|preview| ContextPreview::Graph(Box::new(preview)));
                 }
-                _ => unreachable!("definitions resolve to skills or Flows"),
+                _ => unreachable!("definitions resolve to skills or Graphs"),
             };
             SkillInvocation {
                 skill,
@@ -123,19 +123,19 @@ pub fn assemble(
     .map(|preview| ContextPreview::Prompt(Box::new(preview)))
 }
 
-/// A direct prompt or a Flow's graph and presently knowable input.
+/// A direct prompt or a compiled Graph and presently knowable input.
 #[derive(Debug, serde::Serialize)]
 #[serde(untagged)]
 pub enum ContextPreview {
     Prompt(Box<PromptPreview>),
-    Flow(Box<FlowContextPreview>),
+    Graph(Box<GraphContextPreview>),
 }
 
 impl ContextPreview {
     pub fn render(&self) -> String {
         match self {
             Self::Prompt(prompt) => prompt.render(),
-            Self::Flow(flow) => flow.render(),
+            Self::Graph(graph) => graph.render(),
         }
     }
 }
@@ -174,41 +174,41 @@ impl PromptPreview {
     }
 }
 
-/// A fresh Flow preview, not a resumed cursor or a prediction of branch outcomes.
+/// A fresh Graph preview, not a resumed cursor or a prediction of branch outcomes.
 #[derive(Debug, serde::Serialize)]
-pub struct FlowContextPreview {
+pub struct GraphContextPreview {
     pub checkout: PathBuf,
-    pub graph: FlowGraph,
-    pub inputs: Vec<FlowNodeInput>,
+    pub compiled: CompiledGraph,
+    pub inputs: Vec<GraphNodeInput>,
 }
 
 #[derive(Debug, serde::Serialize)]
-pub struct FlowNodeInput {
+pub struct GraphNodeInput {
     pub node: u32,
     #[serde(flatten)]
-    pub input: FlowInput,
+    pub input: GraphInput,
 }
 
 #[derive(Debug, serde::Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
-pub enum FlowInput {
+pub enum GraphInput {
     Current { input: Box<PromptPreview> },
     Unavailable { reason: String },
     NotAgent,
 }
 
-fn preview_flow(
-    flow: &FlowDefinition,
+fn preview_graph(
+    graph: &GraphDefinition,
     message: Option<&str>,
     cli: &Cli,
     repo: &Path,
     binding: Option<&WorkBinding>,
-) -> Result<FlowContextPreview> {
-    let items = compile_flow(flow, repo)?;
-    let graph = FlowGraph::new(&flow.name, &items);
+) -> Result<GraphContextPreview> {
+    let items = compile_graph(graph, repo)?;
+    let compiled = CompiledGraph::new(&graph.name, &items);
     let mut current = if let Some(skill) = match items.first() {
-        Some(crate::flow::ConcreteStep::Skill(skill)) => Some(skill.clone()),
-        Some(crate::flow::ConcreteStep::Xor(branch)) => Some(branch.router_skill()),
+        Some(crate::graph::ConcreteStep::Skill(skill)) => Some(skill.clone()),
+        Some(crate::graph::ConcreteStep::Xor(branch)) => Some(branch.router_skill()),
         _ => None,
     } {
         let mut launch = cli.process_options();
@@ -217,7 +217,7 @@ fn preview_flow(
             arguments: message.unwrap_or_default().to_owned(),
         });
         let mut input = message.unwrap_or_default().to_owned();
-        if let Some(instructions) = items.first().and_then(FlowOutput::for_step_instructions) {
+        if let Some(instructions) = items.first().and_then(GraphOutput::for_step_instructions) {
             input.push_str(&instructions);
         }
         Some(Box::new(run::preview_prompt(
@@ -232,21 +232,21 @@ fn preview_flow(
         None
     };
     fn collect(
-        nodes: &[FlowNode],
+        nodes: &[GraphNode],
         current: &mut Option<Box<PromptPreview>>,
-        inputs: &mut Vec<FlowNodeInput>,
+        inputs: &mut Vec<GraphNodeInput>,
     ) {
         for node in nodes {
-            let input = if node.kind == FlowNodeKind::Op {
-                FlowInput::NotAgent
+            let input = if node.kind == GraphNodeKind::Op {
+                GraphInput::NotAgent
             } else if let Some(input) = current.take() {
-                FlowInput::Current { input }
+                GraphInput::Current { input }
             } else {
-                FlowInput::Unavailable {
+                GraphInput::Unavailable {
                     reason: "Future input depends on preceding execution, branch choices, feedback and then-current files/Work. No preceding steps ran; repeat-pass input is also unavailable.".into(),
                 }
             };
-            inputs.push(FlowNodeInput {
+            inputs.push(GraphNodeInput {
                 node: node.key,
                 input,
             });
@@ -256,17 +256,17 @@ fn preview_flow(
         }
     }
     let mut inputs = Vec::new();
-    collect(&graph.steps, &mut current, &mut inputs);
-    Ok(FlowContextPreview {
+    collect(&compiled.steps, &mut current, &mut inputs);
+    Ok(GraphContextPreview {
         checkout: repo.to_path_buf(),
-        graph,
+        compiled,
         inputs,
     })
 }
 
-impl FlowContextPreview {
+impl GraphContextPreview {
     pub fn render(&self) -> String {
-        fn labels(nodes: &[FlowNode], text: &mut String) {
+        fn labels(nodes: &[GraphNode], text: &mut String) {
             for node in nodes {
                 text.push_str(&format!("\n{}: {}", node.key, node.label));
                 if let Some(target) = node.returns_to {
@@ -278,19 +278,19 @@ impl FlowContextPreview {
                 }
             }
         }
-        let mut text = format!("Flow {} — fresh start, current snapshot only; no steps ran. Repeat-pass input is unavailable.", self.graph.name);
-        labels(&self.graph.steps, &mut text);
+        let mut text = format!("Graph {} — fresh start, current snapshot only; no steps ran. Repeat-pass input is unavailable.", self.compiled.name);
+        labels(&self.compiled.steps, &mut text);
         for node in &self.inputs {
             text.push_str(&format!("\n\nNode {} input: ", node.node));
             match &node.input {
-                FlowInput::Current { input } => {
+                GraphInput::Current { input } => {
                     text.push_str("current snapshot\n");
                     text.push_str(&input.render());
                 }
-                FlowInput::Unavailable { reason } => {
+                GraphInput::Unavailable { reason } => {
                     text.push_str(&format!("unavailable: {reason}"))
                 }
-                FlowInput::NotAgent => text.push_str("not an agent prompt (command not executed)"),
+                GraphInput::NotAgent => text.push_str("not an agent prompt (command not executed)"),
             }
         }
         text

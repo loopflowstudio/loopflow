@@ -50,7 +50,7 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let runtime: TaskRuntimeSnapshot?
     public let workflowName: String?
     public let workflowSource: String?
-    public let latestFlowProcess: FlowProcessDetail?
+    public let latestGraphProcess: GraphProcessDetail?
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
     public let shipControl: TaskRunControl
@@ -65,7 +65,7 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
         case task, reference, runtime, directive, condition, actions, pr, execution
         case workflowName = "workflow_name"
         case workflowSource = "workflow_source"
-        case latestFlowProcess = "latest_flow_process"
+        case latestGraphProcess = "latest_graph_process"
         case runControl = "run_control"
         case shipControl = "ship_control"
         case shipping
@@ -226,7 +226,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let actions: TaskActionModel
     public let workflowName: String?
     public let workflowSource: String?
-    public let latestFlowProcess: FlowProcessDetail?
+    public let latestGraphProcess: GraphProcessDetail?
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
     public let shipControl: TaskRunControl
@@ -238,7 +238,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
         case task, reference, runtime, condition, actions, execution, section, pr
         case workflowName = "workflow_name"
         case workflowSource = "workflow_source"
-        case latestFlowProcess = "latest_flow_process"
+        case latestGraphProcess = "latest_graph_process"
         case runControl = "run_control"
         case shipControl = "ship_control"
         case shipping

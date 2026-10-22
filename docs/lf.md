@@ -23,7 +23,7 @@ lf wave ensure intelligence --json
 
 Ensure reuses the shared configured Project, activates it if needed, or recovers
 one reserved creation. Existing Project selection is explicit by UUID. Names,
-chapters and default Flows are optional. Failed reads preserve the binding;
+chapters and default Graphs are optional. Failed reads preserve the binding;
 status and show never create Projects. Desktop prepares the Project on opening
 and offers Retry while retaining the cached plan and independent conversation.
 
@@ -43,7 +43,7 @@ for the input format.
 
 ## Use one Machine
 
-Ordinary commands, Task Flows and agent tools use the installed `lf` and
+Ordinary commands, Task Graphs and agent tools use the installed `lf` and
 `~/.lf`. Source builds forward there too. For an explicit disposable experiment:
 
 ```bash
@@ -62,21 +62,21 @@ lf task run LOO-438 pursue -a claude:opus
 
 `--agent` / `-a` is global: place it before or after any command. It selects
 `harness[:model]` for the entire invocation, overriding agents named in Tasks,
-Flows and skills, including nested Flows and child `lf` commands. Without it,
+Graphs and skills, including nested Graphs and child `lf` commands. Without it,
 definitions and defaults apply. Put literal skill arguments after `--`.
 Use `lf connect SESSION -a codex` to continue the same Session on another provider
 from its saved conversation history. Missing history leaves the Session unchanged.
 
-## Run a Flow interactively
+## Run a Graph interactively
 
 ```bash
-lf -i -a claude flow my-flow
+lf -i -a claude graph my-graph
 ```
 
 Each skill opens in the native agent conversation. Exit the conversation
 successfully to advance to the next step; an interrupted or failed step stops
-the Flow. Without `-i`, every step runs headlessly, even from a terminal.
-Task Flow launches follow the same rule.
+the Graph. Without `-i`, every step runs headlessly, even from a terminal.
+Task Graph launches follow the same rule.
 
 ## Select where work happens
 
@@ -90,7 +90,7 @@ lf -b task run EXP-12       # place the Task, run its default
 lf -b task run EXP-12 pursue # take the workflow edge that runs pursue
 lf task run EXP-12 end       # take an edge that runs nothing
 lf task workflow move EXP-12 demo     # put the Task at a node, running nothing
-lf --task EXP-12 flow incident # run a Flow without moving the Task
+lf --task EXP-12 graph incident # run a Graph without moving the Task
 lf task run EXP-12 --reason "take the smaller approach"
 ```
 
@@ -125,7 +125,7 @@ It does not connect, select, fetch or publish planning. An ID already locating
 another checkout on the same Machine cannot be rebound to this one.
 An explicit Task from another repository is rejected rather than silently retargeted.
 
-[Select Git planning](#select-git-planning) to exchange planning. Import never
+[Select Git planning](#choose-planning-synchronization) to exchange planning. Import never
 moves local Workflows or transfers a started Task to another Machine.
 
 ```bash
@@ -187,30 +187,37 @@ cancelled: the earlier claimant keeps its claim locally, `lf task status` report
 
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
 it cannot override a Task's owning Wave. `task run` places the Task's
-worktree, defaults to its Project's Flow, then starts
-`lf --task ISSUE flow FLOW`: it prints the Flow's output and returns when the
-Flow ends. A Flow that fails is started again from its first step, three
+worktree, defaults to its Project's Graph, then starts
+`lf --task ISSUE graph GRAPH`: it prints the Graph's output and returns when the
+Graph ends. A Graph that fails is started again from its first step, three
 times at most; one that is blocked, interrupted or waiting on a landing is
 not. Background it yourself when you will not wait. It never continues
-an earlier Flow. `--reason` publishes direction to the Task first. Every
-Flow process for a Task is equally its work.
+an earlier Graph. `--reason` publishes direction to the Task first. Every
+Graph process for a Task is equally its work.
 
 `lf task run EXP-12 --name fix` selects its first checkout name. Names use the
 same normalization as `lf wt create`; single words and longer names are accepted.
+Branches start with your Git user name (`jack/exp-12-…`), so a teammate's never
+collide with yours; a Linear issue's recorded branch is reused.
 
-Flow output shows each step's position and name followed by the agent's messages.
-Use `lf -v -b task run EXP-12 pursue` for context token accounting and INFO
-diagnostics. Codex Sessions start through the provider protocol and attach the
+Graph output shows each step's position and name followed by the agent's messages.
+Diagnostics go to `logs/lf.log` in the Loopflow home, not the terminal. Use
+`lf -v -b task run EXP-12 pursue` to see them, with context token accounting and
+INFO detail, on stderr. Codex Sessions start through the provider protocol and attach the
 native terminal. Prompts and instructions stay off the command line. Conversation
 capture requires no hook approval; context refresh uses stable launch hooks.
 Review new or changed declarations with Codex’s `/hooks`; headless runs skip
-untrusted hooks. Loopflow never writes provider trust decisions.
+untrusted hooks. Loopflow writes no hook trust. It pre-accepts Claude's folder
+trust only for the exact worktrees it created (`lf`, Task checkouts,
+`lf wt create`) by writing that path's `hasTrustDialogAccepted` entry in the
+config the launched child reads; the main checkout, hand-made worktrees and
+every other setting are untouched.
 
 A Task takes up its Wave's workflow or repository default and moves through its nodes.
 Each `task run` takes one edge leaving the current node: the only one, or the
-one whose Flow you name. At a node the Task waits on you in its conversation;
-no command approves a node. A Flow that does not leave the node is refused
-with the edges that do. A Flow that stops, or fails every attempt, leaves the Task on its edge until
+one whose Graph you name. At a node the Task waits on you in its conversation;
+no command approves a node. A Graph that does not leave the node is refused
+with the edges that do. A Graph that stops, or fails every attempt, leaves the Task on its edge until
 you choose again or `lf task workflow move EXP-12 <node>` puts it at a node outright. `lf task run EXP-12 code` takes up another workflow from
 its start. See [workflows](authoring.md#workflows).
 
@@ -221,16 +228,16 @@ lf wave workflow set code WAVE     # selection for future Tasks
 lf wave workflow source feature WAVE # read the definition
 lf task workflow show EXP-12             # captured graph, position and history
 lf task workflow restart EXP-12          # move to start; retain graph and history
-lf flow list                             # autonomous Flow definitions
-lf flow customize pursue                 # print its local source path
+lf graph list                            # autonomous Graph definitions
+lf graph customize pursue                # print its local source path
 ```
 
-A Flow whose process died leaves its Processes as history. No command resumes it. To change direction or recover:
+A Graph whose process died leaves its Processes as history. No command resumes it. To change direction or recover:
 
 ```bash
 lf task interrupt EXP-12             # end the active provider turn
-lf task status EXP-12                # the latest Flow and all Task work
-lf flow show ID --processes --json    # one Flow's steps, by its Flow process ID
+lf task status EXP-12                # the latest Graph and all Task work
+lf graph show ID --processes --json   # one Graph's steps, by its Graph process ID
 lf -b task run EXP-12       # run fresh work
 ```
 
@@ -244,10 +251,9 @@ its protocol after the terminal connects.
 Claude reads its first turn from stdin, then uses the terminal for keyboard input.
 OpenCode first turns still use argv; a first turn exceeding its argument cap is
 refused before spawning the provider.
-OpenCode launches and resumes print an `OpenCode diagnostics:` path before opening
-the terminal. Full stderr is retained in that private `opencode.stderr.log` file
-beside the Session's capture. Read or tail it from another terminal; native
-errors and retries remain visible in OpenCode without raw logs covering input.
+OpenCode's full stderr is retained in a private `opencode.stderr.log` beside the
+Session's capture. Read or tail it from another terminal; native errors and
+retries remain visible in OpenCode without raw logs covering input.
 
 Interactive startup shows the current preparation stage and elapsed seconds.
 The indicator clears before the native terminal opens; redirected output stays clean.
@@ -255,7 +261,7 @@ The indicator clears before the native terminal opens; redirected output stays c
 Wave goals use the same whole-file, excerpt and listing rules as memory.
 Distinct source files remain separate even when their text matches.
 
-Launching a Flow for an existing Task uses valid cached planning regardless of age.
+Launching a Graph for an existing Task uses valid cached planning regardless of age.
 Known invalidation, removal, terminal state or ownership changes still block.
 `--reason` requires successful Linear publication before the launch. Status
 retains the planning observation's original age.
@@ -276,7 +282,7 @@ Restore a lost Task branch only after locating its committed history:
 lf task checkout EXP-12 --recover-from COMMIT
 ```
 
-Recovery uses the recorded checkout and branch without starting a Flow or
+Recovery uses the recorded checkout and branch without starting a Graph or
 changing Task identity. It never replaces an existing branch or checkout with
 a different commit. Without an explicit recovery commit, a lost started branch
 is not recreated from its old base.
@@ -361,30 +367,43 @@ or treating missing local evidence as completion.
 
 ## Choose planning synchronization
 
-Planning defaults to your Git ref on `origin`. Select a shared ref or Linear in
-`.lf/config.yaml`, or set a personal default in `~/.lf/config.yaml`:
+Planning defaults to one shared Git ref on `origin`,
+`refs/loopflow/planning/shared/main`: everyone who clones the repository reads
+and writes the same plan. Want another shared ref, a plan only you see, Linear,
+Asana or Notion? Select it in `.lf/config.yaml`, or set a personal default in
+`~/.lf/config.yaml`:
 
 ```yaml
 planning:
   provider: git
   remote: origin
-  shared: team
+  shared: team        # refs/loopflow/planning/shared/team
 ```
 
 ```yaml
 planning:
-  provider: linear
-linear:
-  team: <team-id>
+  provider: git
+  personal: true      # refs/loopflow/planning/users/<user-key>
 ```
 
-Repository `planning` replaces the personal selection as a whole. Omit `shared`
-for `refs/loopflow/planning/users/<user-key>`; shared names use
-`refs/loopflow/planning/shared/<name>`. Existing `linear.team` selects Linear
-when `planning` is omitted. Every machine uses the selected transport independently.
-Linear unavailability leaves saves buffered locally; it never switches to Git. All Tasks in a Linear
-repository are queued for publication, including Tasks created offline. Retry a
-specific Task with `lf task sync <task>`: it publishes the saved Project/Task
+```yaml
+planning:
+  provider: linear              # or asana, or notion
+  team: "<team-id-or-url>"      # Linear Team, Asana team, or Notion page
+```
+
+[Plan and share Tasks](planning.md) explains what each choice does for coworkers
+and meetings, and what flows between Loopflow and the tracker.
+
+Repository `planning` replaces the personal selection as a whole. `shared` and
+`personal` are exclusive. A plan published by an older build to an unconfigured
+personal ref moves to `shared/main` on the first save after upgrade, with its
+identifiers, comments and ownership; the old ref stays on the remote until you
+delete it with `git push origin :<ref>`. Machines still on an older build keep
+publishing to their personal ref until they upgrade. Every machine uses the
+selected transport independently. Linear unavailability leaves saves buffered
+locally; it never switches to Git. All Tasks in a Linear repository are queued
+for publication, including Tasks created offline. Retry a specific Task with `lf task sync <task>`: it publishes the saved Project/Task
 identity before synchronizing state, fields, and comments. An uncertain creation remains
 pending instead of silently creating a duplicate. To deliberately retry an
 uncertain issue creation, use `lf task sync <task> --retry-creation`. This reuses
@@ -394,12 +413,7 @@ For an uncertain saved state or field update, `lf task sync <task> --retry-updat
 retries that saved intention after reading Linear again. Observed conflicts still
 win; this flag does not retry deletion or allocate another issue.
 `lf repo connect <wave>` saves the repository Team and selects Linear, overriding
-a personal Git preference.
-
-This build implements the enrollment baseline below. LOO-412 replaces it with one
-configured transport per repository; that unmerged configuration path is not
-included here. Manual per-Wave enrollment is superseded direction, and mixed
-Linear/Git exchange is not a target. `lf planning status` and key recovery remain.
+a Git preference in `~/.lf/config.yaml`.
 
 ```bash
 lf planning status --json
@@ -407,7 +421,7 @@ lf planning key                    # show this machine's personal planning key
 lf planning key --recover <uuid>   # reuse it on a fresh second machine
 ```
 
-The first personal Git connection creates the key. Recover the same key before
+The first `personal: true` connection creates the key. Recover the same key before
 starting personal synchronization on another machine. Shared refs require no key.
 Ref separation is not access control; choose a remote appropriate for the plan.
 Configuration selects the repository's entire plan, including retained history.
@@ -425,6 +439,57 @@ Only planning travels: Tasks, Project content, comments and planning disposition
 Workflows, Sessions, Processes, checkouts and machine control stay local. A completed
 plan does not move another machine's Workflow or clean its checkout.
 
+## Work with another person
+
+You both read one plan by default: the shared Git ref on `origin`.
+
+```bash
+lf user                                  # your name on claims and comments; set one first
+lf planning status                       # which plan you read: shared ref, personal ref or Linear
+lf task status ETU-20                    # owner and state; fetches a Task you don't have yet
+lf task claim ETU-20                     # take it; the earlier owner's Sessions are told
+lf comment ETU-20 "keep the GPU fallback" # with Linear, also steers the owner's agents
+lf pr request-review --reviewer dustin   # a teammate reviews through the pull request
+lf sync                                  # merge what a teammate landed into your checkout
+```
+
+What travels between you: the plan (Tasks, Projects, KRs, comments, ownership
+notes), committed repository files (`.lf/config.yaml`, each Wave's `GOAL.md` and
+`MEMORY.md`, Skills, Graphs, Workflows) and pull requests. What stays on each
+Machine: Sessions and their history, Graph runs and Workflow position, checkouts
+and scratch, usage, accounts and routes, and installed crons. Each of you has
+your own conversation for a Wave or a Task.
+
+- **Names.** Claims compare display names: a Task claimed under your name, or
+  with no name on either side, reads as yours. Give each person a distinct
+  `lf user` name before claiming.
+- **Branches.** A Task's branch starts with your Git user name
+  (`dustin/etu-20-…`), so two people's branches don't collide. A Linear issue's
+  recorded branch is reused by whoever runs it.
+- **Taking over.** The owner pushes commits and scratch, then runs
+  `lf task unclaim`; you `lf task claim` and `lf task run`. Their Workflow
+  position, Graph history and Sessions stay on their Machine;
+  `lf task workflow move ETU-20 demo` puts you where they were. With Git
+  planning a takeover gets your own branch, so a new pull request.
+- **Operating Waves.** `wave-operate` and `repo-operate` act on every owned
+  Task, and a teammate's live Graph is invisible from your Machine: their Task
+  looks idle. Agree who operates each Wave.
+- **Reviewing.** A Workflow's design and demo nodes happen in the owner's
+  conversation. A teammate reviews the pull request: publish a draft at the
+  design node with `lf pr publish`.
+- **Comments.** With Git planning, a teammate's comment syncs but does not
+  steer your agents; with Linear it does.
+- **Crons.** Repository `crons:` run on every Machine that syncs them. One
+  person installs each Wave's jobs.
+- **Process.** A repository Skill or Graph outranks a personal one of the same
+  name, so change the team's in a pull request. To try your own variant, save
+  it under a new name in `~/.lf/skills`.
+- **Wave memory.** Each pull request may fold into `MEMORY.md`. Keep it as short,
+  independent sections so two people's edits merge cleanly.
+- **Linear.** Each person needs a login in the repository's Linear Team.
+  Signing in uses the Linear OAuth app: set `LINEAR_CLIENT_ID` and
+  `LINEAR_CLIENT_SECRET`, or provide them through Doppler.
+
 ## Connect planning and create work
 
 ```bash
@@ -438,7 +503,8 @@ lf wave show --json                   # plans and Tasks across Waves
 lf wave status exports --json       # one Wave's detailed evidence
 ```
 
-Connected planning needs a Linear login and repository Team. Connection names
+Git planning needs no connection: start at `lf task create`. Linear planning
+needs a Linear login and repository Team. Connection names
 missing access and the command to obtain it. Authored Waves remain discoverable
 before connection. Planning setup is separate from direct local execution.
 
@@ -447,8 +513,9 @@ generates the Task ID; later edits, Project rotation and synchronization preserv
 `lf task create --json` returns the saved Task, with its local `id`, `project_id`,
 `title`, `description` and optional `linear_id` binding, not a Linear issue.
 Connected repositories report pending sync. Field receipts retain titles, notes, assignment and ordering
-with their provider baselines; observed conflicts adopt Linear and retire the losing
-intention. An active Task connection delivers mapped titles, notes, assignment,
+with their provider baselines; the change sent last wins, so an unsent save rebases
+onto a provider edit and still delivers, while a provider edit after an attempted
+write is adopted. An active Task connection delivers mapped titles, notes, assignment,
 membership, deletion, Project fields and Task ordering after recovery. Reordering
 saves one Project-wide intention; partial delivery and lost replies retain that identity. Deletion retains execution
 and checkout history. Missing provider evidence keeps deletion pending; newer
@@ -489,6 +556,8 @@ lf context --task EXP-12 --json     # effective context limits, sources and usag
 lf wt timing                        # how long real `lf wt list` runs took here
 ```
 
+Usage covers Sessions recorded on this Machine; a teammate's runs appear on theirs.
+
 `lf history show SESSION` also prints private Codex relay failures with their
 AgentProcess identity. `--events` includes the diagnostic JSON. Retention keeps
 the first 16 failures per captured input, with each error capped at 2048 bytes;
@@ -505,7 +574,9 @@ operating instructions. Reopening keeps those instructions and native history.
 client and history survive. Each explicit fresh request creates another; ordinary
 connect recovers the current primary after an uncertain reply. Fresh accepts scope
 selection, not a Session ID. First-use trust or sign-in prompts stay open until
-answered or canceled.
+answered or canceled; Claude's folder trust prompt does not appear in
+worktrees lf created, because lf wrote that path's `hasTrustDialogAccepted`
+entry at launch.
 
 `connect --prepare` and `resume --prepare` print a terminal command without
 launching the provider. Add `--json` for connection data. Remote preparation
@@ -540,18 +611,20 @@ inspection and replay; they do not select these Session actions.
 | Task | `lf task-operate EXP-12` | `lf connect --task EXP-12` |
 
 Each conversation is its scope's operator and carries the matching operate
-procedure. It leaves running Flows alone, reads a stopped or failed Flow before
-running its remaining work fresh, and names what waits on you, including a Task
-at a workflow node. Unstarted backlog stays unstarted. A conversation acts
-only during a turn: between turns, running Flows and any installed background
+procedure. On Tasks you own, it leaves running Graphs alone, reads a stopped or
+failed Graph before running its remaining work fresh, and names what waits on
+you, including a Task at a workflow node. Another person's Task is listed with
+its owner and left alone. Unstarted backlog stays unstarted, and operators
+neither edit KRs or plans nor file Tasks. A conversation acts
+only during a turn: between turns, running Graphs and any installed background
 checks continue on their own.
-New commands, hooks and Flow children select the current CLI through the stable
+New commands, hooks and Graph children select the current CLI through the stable
 installed entry. Retry a failed command in the same Session and checkout.
 Installation does not restart existing processes; they may fail naturally.
 Clients launched before this behavior can retain old executable paths. After
 their provider exits, use `lf connect SESSION` through the installed
 `~/.local/bin/lf` to reopen the same native history with fresh hooks. Reattaching
-to a live provider retains its environment. Inspect failed Flow history and
+to a live provider retains its environment. Inspect failed Graph history and
 effects before selecting remaining work; do not repeat uncertain steers.
 
 An open conversation keeps the instructions it launched with. To start a new
@@ -639,7 +712,7 @@ or re-arming the merged PR.
 `lf task complete EXP-12` completes without moving the Workflow. Moving or
 arriving at `end` records the movement, then requests completion. A failed
 request shows **Completion pending**; retry `lf task complete EXP-12`, without
-replaying the Flow. Completion requires a verified merge when the Task has a PR. Linear completion and reopening change
+replaying the Graph. Completion requires a verified merge when the Task has a PR. Linear completion and reopening change
 status without moving the Workflow or stopping Processes; reopening supersedes
 an older completion request. `lf task reopen EXP-12` does the same locally,
 including offline: it returns planning to unstarted and keeps the PR, checkout,
@@ -680,7 +753,7 @@ lf cron add daily-review --schedule daily -- --wave product --batch skill wave/o
 ```
 
 Commands use ordinary `lf` arguments, including `--wave` and `--task`.
-Reading or cloning the repository installs nothing. An explicit `crons: []`
+Reading or cloning the repository installs nothing. Each Machine that syncs runs the jobs, so with two people, one installs them. An explicit `crons: []`
 removes the repository's jobs when synced; an absent list leaves them alone.
 Scope-filtered sync only changes matching jobs. Existing job names and Wave
 selectors retain installed identities and receipt history.
@@ -695,7 +768,7 @@ lf cron sync --repo --disable       # remove the schedule
 ```
 
 Checks continue with Desktop closed while this Machine's user is logged in.
-They record CI failures and settle verified merges. Flow recovery belongs to its
+They record CI failures and settle verified merges. Graph recovery belongs to its
 caller: inspect execution and effect history before launching fresh work.
 
 ## Repair failed CI
@@ -726,7 +799,7 @@ automation: {retries: 1}
 
 Use `lf task automate EXP-12 off` to hold future CI repair, and
 `lf task automate EXP-12 on` to enable it again. These settings never resume a
-Flow. One failed repair startup may retry; a completed blocked repair waits for
+Graph. One failed repair startup may retry; a completed blocked repair waits for
 changed evidence.
 Pending or missing CI checks keep waiting; elapsed time alone never starts repair.
 Use an always-available Machine for progress through laptop logout or shutdown.
@@ -735,12 +808,12 @@ Use an always-available Machine for progress through laptop logout or shutdown.
 
 ```bash
 lf account connect codex work@example.com --chrome-profile Work
-lf --account codex=work@ flow pursue
-lf --only-account codex=work@ flow pursue
+lf --account codex=work@ graph pursue
+lf --only-account codex=work@ graph pursue
 lf account route set codex work@ personal@
 ```
 
-A preference permits fallback; a restriction limits spending. A Flow takes
+A preference permits fallback; a restriction limits spending. A Graph takes
 one selection per provider and carries it through its child steps. Remote
 launches install missing selected logins in the foreground and use the same
 account on the target. Credentials remain resident there.
@@ -758,7 +831,7 @@ lf list skill
 Use shortcuts: `lf land`, `lf ps`, and `lf history list`.
 Omit owners or abbreviate command names when the result is unique. Ambiguous
 shortcuts list their matching command paths. Exact commands take precedence
-over authored definitions; `lf skill NAME` and `lf flow NAME` select a kind.
+over authored definitions; `lf skill NAME` and `lf graph NAME` select a kind.
 
 Help and catalog reads launch no agent. The [command reference](lf-reference.md)
 names canonical owners and arguments. [Authoring](authoring.md) explains workflows;
@@ -768,7 +841,7 @@ names canonical owners and arguments. [Authoring](authoring.md) explains workflo
 
 ```sh
 lf implement --context --json
-lf flow pursue --context --json
+lf graph pursue --context --json
 lf implement --context --explain
 lf task run LOO-427 --explain --json
 lf open loopflow://loopflow/task/LOO-427 --diff --explain --json
@@ -784,19 +857,19 @@ Task input lists changed paths with their committed, staged, unstaged and untrac
 states. It includes a small text patch when available; omitted patches and exact
 file bytes remain in the checkout. The inventory is not a content-hash receipt.
 
-For a Flow, preview shows the compiled graph and input states keyed by node.
+For a Graph, preview shows the compiled graph and input states keyed by node.
 Only the initial skill or router gets current-snapshot input. Later nodes and
 repeat passes are unavailable: files, Work, feedback and branch choices may change.
 Command nodes are labeled `not_agent`, never executed to discover later input.
 This is a fresh-start preview, not a resumed execution. Native skill arguments and
 router instructions use the same owners as launch. If an operator would prepare a
 scope checkout, its input stays unavailable until previewed from that checkout;
-CLI aliases and captured Flow steps use the same resolved-skill decision.
+CLI aliases and captured Graph steps use the same resolved-skill decision.
 
 `--explain` reads selected Work without executing the invocation. Task commands,
 Desktop opening, Session connection and exact Process history lookup are supported;
 other command shapes fail before effects. Combine both flags for identity plus input.
-`task run --explain` also reports the intended Workflow edge (or ad-hoc Flow),
+`task run --explain` also reports the intended Workflow edge (or ad-hoc Graph),
 selected execution Machine, observed impediments and missing evidence. Omit the Task
 to use its checkout or `--task`. JSON separates `resolution`, `action`, `impediments`
 and `unavailable`; no Workflow is taken up or moved. Owned Tasks route to the
@@ -817,7 +890,7 @@ previews read ownership without claiming.
 `task workflow move TASK NODE --explain` and `task workflow restart TASK --explain`
 validate the captured Workflow without moving it. JSON adds the intended `action`
 (including the exact prior node/edge and reason), `impediments` and
-`unavailable` to `resolution`. Restart means move to `start`, not run a Flow.
+`unavailable` to `resolution`. Restart means move to `start`, not run a Graph.
 Moving to `end` records arrival before requesting completion. Settlement checks PR
 gates and may clean an eligible checkout; preview performs none of these effects.
 Missing or remote execution evidence stays unavailable.
@@ -860,7 +933,7 @@ its own repository, Work and input. Preview skips provider/account preparation,
 planning refresh and Process recording on both Machines. Missing identity or
 transport fails explicitly, with no local execution fallback; missing Work remains
 unavailable evidence. This observes the selected Machine, not peer-exclusive start
-permission. Flow-wide input is still undefined. Bare-agent and new operator-checkout
+permission. Graph-wide input is still undefined. Bare-agent and new operator-checkout
 input is not predicted by creating Work. `lf context` remains the budget report.
 
 ## Open Work
@@ -882,19 +955,20 @@ one folder name need `?repository=<id>`; an unqualified link to them changes
 nothing and lists the qualified links. Emitted links add the qualifier when needed.
 
 `--host auto` opens where you are: a new workspace in this Herdr pane or cmux
-workspace, then Loopflow Desktop when installed (macOS), then a plain terminal:
-this terminal for a person at a prompt, otherwise a new Terminal window on macOS
-or the desktop's terminal launcher on Linux. A host is current only through its
-own caller context (`HERDR_*`, `CMUX_*`, Desktop's `LF_DESKTOP`); nothing scans
+workspace, or a new window right after this one in tmux, then Loopflow Desktop
+when installed (macOS), then a plain terminal: this terminal for a person at a
+prompt, otherwise a new Terminal window on macOS or the desktop's terminal
+launcher on Linux. A host is current only through its own caller context
+(`HERDR_*`, `TMUX`/`TMUX_PANE`, `CMUX_*`, Desktop's `LF_DESKTOP`); nothing scans
 running applications. A clicked link carries no caller, so it opens in Desktop.
-Use `--host desktop` from a cmux or Herdr shell to open in Desktop anyway. An
+Use `--host desktop` from a cmux, tmux or Herdr shell to open in Desktop anyway. An
 explicit `--host` wins. A destination that refuses lets the next one try; an
 unanswered request is reported and never repeated elsewhere.
 
 Terminal destinations run `lf session connect` for the resolved Work, so its
 primary conversation, admission and attachment fences decide what opens. A
-conversation already live in a cmux or Herdr workspace is focused there, draft
-intact, when this caller is in that host. Live in any other client, it is
+conversation already live in a cmux or Herdr workspace or a tmux pane is
+focused there, draft intact, when this caller is in that host. Live in any other client, it is
 reported as `elsewhere` with its `--takeover` command; ordinary opening never
 moves it. Openings of one Work are serialized: a repeat while its new workspace
 is still starting focuses that workspace instead of creating another. `--available` opens
@@ -1033,11 +1107,11 @@ A receipt confirms the operation, not terminal readiness or usable rendering. In
 ```sh
 lf --task LOO-427 desktop shell --pane "$pane"
 lf --task LOO-427 desktop files --pane "$pane"
-lf --task LOO-427 desktop flow-log --pane "$pane"
+lf --task LOO-427 desktop graph-log --pane "$pane"
 ```
 
 Companions fill an empty pane or open beside occupied content, retaining focus,
-zoom and Work. Files/Flow-log reuse the Task's pane. Shell opens on the recorded
+zoom and Work. Files/Graph-log reuse the Task's pane. Shell opens on the recorded
 execution Machine and rechecks the checkout before launch; it never falls back to
 a local shell. Repeating Shell creates another shell, so inspect after a lost reply.
 Remote filesystem events update retained documents; disconnects retain drafts.
@@ -1066,10 +1140,10 @@ lf open loopflow://loopflow/task/LOO-303
 lf wave show --task LOO-303 --all --json
 ```
 
-Task links open the Task's conversation without starting a Flow, including
+Task links open the Task's conversation without starting a Graph, including
 retained and completed Tasks.
-Press ⌘K in the desktop to search Waves, Tasks, Sessions and Flow and Workflow definitions.
-Task destinations open details; selecting a Flow opens its folded graph.
+Press ⌘K in the desktop to search Waves, Tasks, Sessions and Graph and Workflow definitions.
+Task destinations open details; selecting a Graph opens its folded graph.
 
 ### Inspect all work in a Task
 
@@ -1095,11 +1169,11 @@ terminal emission remain follow-up work.
 `--all` changes repository scope, `--interactive all` includes background work,
 and `--history` includes completed conversations and historical reviews.
 
-Task status lists Sessions, Flows and Processes from the checkout and explicit binds,
+Task status lists Sessions, Graphs and Processes from the checkout and explicit binds,
 including headless and completed work. A Task on a workflow also shows its
-nodes, edges, position and the edges it has taken. No Flow is privileged; the execution
+nodes, edges, position and the edges it has taken. No Graph is privileged; the execution
 line observes the most recently launched one. Live or unresolved work preserves
-the checkout. A stopped Flow is history and blocks nothing.
+the checkout. A stopped Graph is history and blocks nothing.
 
 ## Keep a document workspace
 

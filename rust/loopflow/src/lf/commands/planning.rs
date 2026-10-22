@@ -53,17 +53,14 @@ async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
 
 async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
     let config = crate::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
-    if matches!(
-        config.planning_transport(),
-        crate::config::PlanningConfig::Linear {}
-    ) {
+    if let Some(provider) = config.planning_transport().remote_name() {
         if json {
             println!(
                 "{}",
-                serde_json::json!({"transport":"linear","destinations":[]})
+                serde_json::json!({"transport":provider.to_ascii_lowercase(),"destinations":[]})
             );
         } else {
-            println!("Planning: Linear. Unavailable transport leaves local saves pending.");
+            println!("Planning: {provider}. Unavailable transport leaves local saves pending.");
         }
         return Ok(());
     }
@@ -80,7 +77,7 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
         return Ok(());
     }
     if !destinations.iter().any(|d| d.active) {
-        println!("Planning: user-keyed Git (configured remote; local saves wait when unavailable)");
+        println!("Planning: Git (configured remote; local saves wait when unavailable)");
     }
     for destination in destinations {
         println!(

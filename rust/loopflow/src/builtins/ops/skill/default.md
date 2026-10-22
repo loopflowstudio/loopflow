@@ -9,7 +9,7 @@ nothing to do with this repository or Loopflow.
 
 Use Tasks and Waves when the request explicitly calls for them or continues
 an existing Task. Read `lf help skill work` for that contract. A substantial effort,
-worktree, PR, or Flow does not by itself call for Task creation or repository
+worktree, PR, or Graph does not by itself call for Task creation or repository
 operation. Follow the user's chosen tools and workflow.
 
 Let the conversation set the agenda. Do not begin with a Session inventory,

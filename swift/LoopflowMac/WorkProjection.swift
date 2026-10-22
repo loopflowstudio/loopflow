@@ -216,7 +216,7 @@ final class WorkNavigation {
     enum Palette: Equatable {
         case search
         case sidebarSearch
-        case flow(String)
+        case graph(String)
         case workflow(String)
     }
     @MainActor @Observable
@@ -255,7 +255,7 @@ final class WorkNavigation {
     }
     var renaming: SessionRenameDraft?
     var binding: SessionBindingDraft?
-    /// Flow drafts by planning Task id; they survive Task and Session navigation.
+    /// Graph drafts by planning Task id; they survive Task and Session navigation.
     var taskRunDrafts: [String: TaskRunDraft] = [:]
     var startingTaskSessions: Set<String> = []
     var taskSessionErrors: [String: String] = [:]
@@ -267,8 +267,8 @@ final class WorkNavigation {
     var expandedHistory: Set<String> = []
     /// Wave planning notices whose Details are open, keyed by Task ID.
     var expandedNotices: Set<String> = []
-    /// Flow processes whose graph and steps are open, keyed by Flow process.
-    var expandedFlowProcesses: Set<String> = []
+    /// Graph processes whose graph and steps are open, keyed by Graph process.
+    var expandedGraphProcesses: Set<String> = []
     var selection: WorkReference?
     /// Repository-local visits; nil names the repository conversation.
     var backStack: [WorkReference?] = []

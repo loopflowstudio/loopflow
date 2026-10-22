@@ -115,7 +115,7 @@ struct TaskSessionLaunchProofTests {
             switch args.first {
             case "wave" where args.dropFirst().first == "show": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session", "flow": return "[]"
+            case "session", "graph": return "[]"
             case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             case "pm": return #"{"identifier":"W2-131","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}"#
             default: throw RegistryQueryError("Unexpected read in preparation proof")

@@ -108,7 +108,7 @@ pub enum Compatibility {
 pub struct ExecutableFailure {
     pub work_kind: String,
     pub work_id: String,
-    pub flow: String,
+    pub graph: String,
     pub catalog_root: String,
     pub reason: String,
 }
@@ -221,10 +221,10 @@ pub fn decide(
                 .first()
                 .map(|failure| {
                     format!(
-                        "{} {} flow {:?} in {}: {}",
+                        "{} {} graph {:?} in {}: {}",
                         failure.work_kind,
                         failure.work_id,
-                        failure.flow,
+                        failure.graph,
                         failure.catalog_root,
                         failure.reason
                     )
@@ -370,21 +370,21 @@ fn _read_executable_references(
     references
 }
 
-fn _validate_executable_skill(skill: &crate::flow::Skill) -> Result<()> {
+fn _validate_executable_skill(skill: &crate::graph::Skill) -> Result<()> {
     if skill.content.is_none() {
         return Err(anyhow!("skill not found: {}", skill.name));
     }
     Ok(())
 }
 
-fn _validate_executable_steps(steps: &[crate::flow::ConcreteStep]) -> Result<()> {
+fn _validate_executable_steps(steps: &[crate::graph::ConcreteStep]) -> Result<()> {
     for step in steps {
         match step {
-            crate::flow::ConcreteStep::Skill(skill) => {
+            crate::graph::ConcreteStep::Skill(skill) => {
                 _validate_executable_skill(&skill.skill)?;
             }
-            crate::flow::ConcreteStep::Command(_) => {}
-            crate::flow::ConcreteStep::Xor(branch) => {
+            crate::graph::ConcreteStep::Command(_) => {}
+            crate::graph::ConcreteStep::Xor(branch) => {
                 _validate_executable_skill(&branch.router)?;
                 for path in branch.paths.values() {
                     _validate_executable_steps(&path.steps)?;
@@ -396,7 +396,7 @@ fn _validate_executable_steps(steps: &[crate::flow::ConcreteStep]) -> Result<()>
 }
 
 /// Validate installed-state semantics against the schema this candidate will
-/// run on. A migration may repair a persisted flow name, so checking the
+/// run on. A migration may repair a persisted graph name, so checking the
 /// pre-migration rows would reject the candidate the migration makes valid:
 /// a pending frontier is migrated in a private snapshot, never the live
 /// database. An exact frontier has nothing to apply, so it is read in place —
@@ -462,25 +462,25 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
     let mut failures = Vec::new();
     let mut validated = 0usize;
     let mut absent = 0usize;
-    for (work_kind, work_id, flow, catalog_root) in &references {
+    for (work_kind, work_id, graph, catalog_root) in &references {
         let catalog_path = Path::new(catalog_root);
         // A placed ref whose catalog root is gone — the worktree or checkout was
         // cleaned up, but the durable Work row was never retired — can never run
-        // its flow again under *any* binary. It therefore says nothing about
+        // its graph again under *any* binary. It therefore says nothing about
         // whether this candidate is safe, so it is out of scope for candidate
         // compatibility. Excluding it (rather than failing the whole promotion)
         // is not a loosening of the safety intent: every ref whose catalog root
         // still exists is validated exactly as before, so a build that dropped or
-        // renamed a flow is still caught by every live worktree. We only stop
+        // renamed a graph is still caught by every live worktree. We only stop
         // treating "the world moved on" as "the candidate is broken."
         if !catalog_path.is_dir() {
             absent += 1;
             continue;
         }
-        let result = crate::flow::load_flow(flow, catalog_path)
+        let result = crate::graph::load_graph(graph, catalog_path)
             .map_err(anyhow::Error::from)
             .and_then(|loaded| {
-                crate::flow::compile_flow(&loaded, catalog_path)
+                crate::graph::compile_graph(&loaded, catalog_path)
                     .map_err(anyhow::Error::from)
                     .and_then(|steps| _validate_executable_steps(&steps))
             });
@@ -489,7 +489,7 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
             Err(error) => failures.push(ExecutableFailure {
                 work_kind: work_kind.clone(),
                 work_id: work_id.clone(),
-                flow: flow.clone(),
+                graph: graph.clone(),
                 catalog_root: catalog_root.clone(),
                 reason: error.to_string(),
             }),
@@ -583,10 +583,10 @@ fn render_human(preview: &PromotionPreview) {
             );
             for failure in failures.iter().take(10) {
                 println!(
-                    "    - {} {} flow {:?} in {}: {}",
+                    "    - {} {} graph {:?} in {}: {}",
                     failure.work_kind,
                     failure.work_id,
-                    failure.flow,
+                    failure.graph,
                     failure.catalog_root,
                     failure.reason
                 );

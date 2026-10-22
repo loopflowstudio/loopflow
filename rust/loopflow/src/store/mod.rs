@@ -148,7 +148,7 @@ fn default_lf_home_dir() -> PathBuf {
     machine_home_dir().join(".lf")
 }
 
-pub(crate) fn lf_home_dir() -> PathBuf {
+pub fn lf_home_dir() -> PathBuf {
     std::env::var_os("LF_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
@@ -1569,9 +1569,9 @@ mod tests {
             ).unwrap();
             let definition = crate::workflow::CapturedGraph {
                 name: "review".into(),
-                steps: vec![crate::flow::ConcreteStep::Skill(
-                    crate::flow::ConcreteSkill {
-                        skill: crate::flow::Skill::named("review"),
+                steps: vec![crate::graph::ConcreteStep::Skill(
+                    crate::graph::ConcreteSkill {
+                        skill: crate::graph::Skill::named("review"),
                         id: None,
                         interactive: true,
                         returns: None,
@@ -2615,7 +2615,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn chapter_transfer_preserves_flow_pr_and_rejects_stale_parent_updates() {
+    async fn chapter_transfer_preserves_graph_pr_and_rejects_stale_parent_updates() {
         let directory = tempfile::tempdir().unwrap();
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
             directory.path().join("registry.db"),
@@ -2631,15 +2631,15 @@ mod tests {
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
         // An operation step run in the checkout is started work.
-        store.sqlite.test_flow(
+        store.sqlite.test_graph(
             "code",
             &task.worktree.as_ref().unwrap().to_string_lossy(),
             &[("commit -m work", Some("succeeded"))],
             None,
         );
         assert!(store.chapter_task_evidence(&task.id).await.unwrap().begun);
-        let flows = store.sqlite.task_flows(&task.id).unwrap();
-        assert_eq!(flows.len(), 1);
+        let graphs = store.sqlite.task_graphs(&task.id).unwrap();
+        assert_eq!(graphs.len(), 1);
 
         let mut successor = make_project(&wave);
         successor.linear_id = Some(LinearProjectId::new("next-chapter").unwrap());
@@ -2650,7 +2650,7 @@ mod tests {
         assert_eq!(moved.project_id, Some(successor.id));
         assert_eq!(moved.worktree, task.worktree);
         assert_eq!(moved.linear_id, task.linear_id);
-        assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flows);
+        assert_eq!(store.sqlite.task_graphs(&task.id).unwrap(), graphs);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         store
             .append_task_event(
@@ -3905,7 +3905,7 @@ mod tests {
         assert!(encrypted);
     }
     #[tokio::test]
-    async fn task_abandonment_refuses_launch_and_retains_flow_history() {
+    async fn task_abandonment_refuses_launch_and_retains_graph_history() {
         let directory = tempfile::tempdir().unwrap();
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
             directory.path().join("store.db"),
@@ -3920,7 +3920,7 @@ mod tests {
         let task = make_task(&store, &wave, &project);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
-        store.sqlite.test_flow(
+        store.sqlite.test_graph(
             "code",
             &task.worktree.as_ref().unwrap().to_string_lossy(),
             &[("implement", Some("failed"))],
@@ -3930,7 +3930,7 @@ mod tests {
         store.sqlite.require_task_launch(&task.id).unwrap();
         store.abandon(&work, "canceled").await.unwrap();
         assert!(store.sqlite.require_task_launch(&task.id).is_err());
-        assert_eq!(store.sqlite.task_flows(&task.id).unwrap().len(), 1);
+        assert_eq!(store.sqlite.task_graphs(&task.id).unwrap().len(), 1);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         assert!(store
             .get_task_by_issue(&task.identifier)

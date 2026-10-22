@@ -47,8 +47,30 @@ fn initialize(home: &Path) {
 }
 
 #[test]
-fn personal_git_is_automatic_and_key_recovery_selects_the_same_ref() {
+fn default_git_plan_is_the_shared_main_ref() {
     let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    initialize(home.path());
+    let status: Value =
+        serde_json::from_str(&run(repo.path(), home.path(), &["status", "--json"])).unwrap();
+    assert_eq!(status["transport"], "git");
+    assert_eq!(
+        status["destinations"][0]["reference"],
+        "refs/loopflow/planning/shared/main"
+    );
+    assert_eq!(status["destinations"][0]["active"], true);
+    assert!(!invoke(repo.path(), home.path(), &["key"]).status.success());
+}
+
+#[test]
+fn personal_git_is_explicit_and_key_recovery_selects_the_same_ref() {
+    let repo = TestRepo::new();
+    std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    std::fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "planning:\n  provider: git\n  personal: true\n",
+    )
+    .unwrap();
     let left = tempfile::tempdir().unwrap();
     let right = tempfile::tempdir().unwrap();
     initialize(left.path());
@@ -61,6 +83,10 @@ fn personal_git_is_automatic_and_key_recovery_selects_the_same_ref() {
     run(repo.path(), right.path(), &["key", "--recover", &key]);
     let other: Value =
         serde_json::from_str(&run(repo.path(), right.path(), &["status", "--json"])).unwrap();
+    assert_eq!(
+        status["destinations"][0]["reference"],
+        format!("refs/loopflow/planning/users/{key}")
+    );
     assert_eq!(
         status["destinations"][0]["reference"],
         other["destinations"][0]["reference"]
@@ -119,7 +145,7 @@ fn unavailable_linear_saves_locally_without_publishing_a_git_plan() {
     std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
     std::fs::write(
         repo.path().join(".lf/config.yaml"),
-        "planning:\n  provider: linear\nlinear:\n  team: unavailable-fixture\n",
+        "planning:\n  provider: linear\n  team: unavailable-fixture\n",
     )
     .unwrap();
     let output = invoke_lf(
@@ -170,7 +196,7 @@ fn git_checkout_miss_does_not_fall_back_to_retained_linear_bindings() {
     initialize(home.path());
     repo.create_file(
         ".lf/config.yaml",
-        "planning:\n  provider: git\n  shared: fixture\nlinear:\n  team: retained-team\n",
+        "planning:\n  provider: git\n  shared: fixture\n",
     );
     repo.create_file(
         ".lf/wave/product/GOAL.md",

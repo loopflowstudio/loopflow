@@ -54,7 +54,7 @@ targets or freshness.
 
 `lf wave show` buckets this repository's work by what it needs: **Now** (live
 and advancing), **Waiting**, **Available**, **Later**. It overlays live evidence
-on the Linear-backed plan. Each Task carries one semantic condition — clear,
+on the shared plan. Each Task carries one semantic condition — clear,
 waiting, blocked, or unknown — while `lf session list` is the separate list of
 unresolved conversations. Add `--all` for the machine-wide projection.
 
@@ -80,8 +80,8 @@ symlink aliases. Explicit repo/Wave Sessions remain separate. `--orphan` only
 filters inventory; it cannot opt a new Session out of Task membership.
 
 Use Session identity to return to a conversation and its native history. A
-successful provider turn, the command's outcome and the Flow's progress can
-differ: the agent's process can finish after the `lf` process that started it dies, and a finished Flow
+successful provider turn, the command's outcome and the Graph's progress can
+differ: the agent's process can finish after the `lf` process that started it dies, and a finished Graph
 leaves its Task at a workflow node, available for you to review there.
 
 `lf history show` retains exact Session/input selectors; `lf replay` resolves captured requests.
@@ -131,8 +131,8 @@ lf session list --available --json              # conversations available for yo
 lf connect <session-id> --prepare --json           # recover one exact conversation
 ```
 
-Task comments save steers locally and sync when Linear is configured. Acquired
-Linear comments also become steers. Each associated Session receives them
+Task comments save steers locally and travel with planning sync. Acquired
+Linear comments also become steers; comments imported through Git planning do not. Each associated Session receives them
 independently at its next supported provider boundary. Idle Sessions stay idle.
 Inspect delivery with `lf session steers SESSION`; retry an uncertain delivery
 with `lf session steers SESSION --retry STEER_ID`. Delivery evidence does not
@@ -140,10 +140,10 @@ prove the agent followed the steer. See [The Agent API](agent-api.md#steer).
 
 Headless work that lacks required input explains its failure and stops. Read
 its existing status and logs; discuss unresolved judgment in the ongoing Wave
-chat. Review happens in the Task conversation; Flows hold autonomous steps only.
+chat. Review happens in the Task conversation; Graphs hold autonomous steps only.
 Use `lf --task <task> : "<prompt>"` when another agent perspective is needed.
 
-A Flow whose process died stays as history. Nothing resumes it. Read
+A Graph whose process died stays as history. Nothing resumes it. Read
 `lf task status <task>`, then launch fresh work with `lf task run <task>`.
 
 ## Inspect and resume

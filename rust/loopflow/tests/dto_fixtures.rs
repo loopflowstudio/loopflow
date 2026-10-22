@@ -82,7 +82,7 @@ fn task_comments_keep_authorship_and_require_every_field() {
 }
 
 #[test]
-fn wave_detail_preserves_flow_and_machine() {
+fn wave_detail_preserves_graph_and_machine() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
     assert_eq!(
         snapshot.wave.machine.as_ref().unwrap().label.as_deref(),
@@ -414,10 +414,10 @@ fn task_status_preserves_canonical_work_and_acquisition_evidence() {
 }
 
 #[test]
-fn flow_compositions_round_trip_distinct_compositions_and_required_children() {
-    use loopflow::flow::graph::FlowCatalogEntry;
-    let json = include_str!("../../../tests/fixtures/dto/flow_composition.json");
-    let entry: FlowCatalogEntry = serde_json::from_str(json).unwrap();
+fn graph_compositions_round_trip_distinct_compositions_and_required_children() {
+    use loopflow::graph::compiled::GraphCatalogEntry;
+    let json = include_str!("../../../tests/fixtures/dto/graph_composition.json");
+    let entry: GraphCatalogEntry = serde_json::from_str(json).unwrap();
     let value: serde_json::Value = serde_json::from_str(json).unwrap();
     assert_eq!(serde_json::to_value(&entry).unwrap(), value);
     let mut missing = value;
@@ -425,9 +425,9 @@ fn flow_compositions_round_trip_distinct_compositions_and_required_children() {
         .as_object_mut()
         .unwrap()
         .remove("items");
-    assert!(serde_json::from_value::<FlowCatalogEntry>(missing).is_err());
-    let catalog: Vec<FlowCatalogEntry> = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/flow_catalog.json"
+    assert!(serde_json::from_value::<GraphCatalogEntry>(missing).is_err());
+    let catalog: Vec<GraphCatalogEntry> = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/graph_catalog.json"
     ))
     .unwrap();
     assert!(catalog[0].composition.is_some() && catalog[1].composition.is_none());
@@ -462,14 +462,14 @@ fn task_work_preserves_all_owners() {
     let input = include_str!("../../../tests/fixtures/dto/task_work.json");
     let work: loopflow::task_work::TaskWork = serde_json::from_str(input).unwrap();
     assert_eq!(work.sessions.len(), 2);
-    assert_eq!(work.flow_processes.len(), 1);
+    assert_eq!(work.graph_processes.len(), 1);
     assert!(!work.processes.is_empty());
     let workflow = work.workflow.as_ref().expect("fixture Task has a workflow");
     assert_eq!(
         workflow.position,
         loopflow::ops::workflow::WorkflowPosition::Edge {
             edge: 2,
-            lf_process_id: work.flow_processes[0].summary.id.clone(),
+            lf_process_id: work.graph_processes[0].summary.id.clone(),
             running: true,
         }
     );
@@ -522,9 +522,9 @@ fn context_report_keeps_unknown_sources_distinct_from_zero() {
 }
 
 #[test]
-fn flow_detail_keeps_its_launched_graph_and_every_step() {
-    let input = include_str!("../../../tests/fixtures/dto/flow_detail.json");
-    let detail: loopflow::durable::FlowProcessDetail = serde_json::from_str(input).unwrap();
+fn graph_detail_keeps_its_launched_graph_and_every_step() {
+    let input = include_str!("../../../tests/fixtures/dto/graph_detail.json");
+    let detail: loopflow::durable::GraphProcessDetail = serde_json::from_str(input).unwrap();
     assert_eq!(detail.steps.len(), 6);
     // The running step is the second pass of the node the loop returned to.
     let running = detail.steps.last().unwrap();
@@ -573,9 +573,9 @@ fn work_frames_keep_each_part_and_require_every_envelope_field() {
     };
     assert_eq!(heartbeat.projections["planning"], 3);
     let WorkContent::Task(Some(task)) = &frames[6].content else {
-        panic!("the read Task part carries its work and Flow runs");
+        panic!("the read Task part carries its work and Graph runs");
     };
-    assert_eq!(task.work.flow_processes.len(), task.flow_processes.len());
+    assert_eq!(task.work.graph_processes.len(), task.graph_processes.len());
     for field in ["sequence", "home", "part"] {
         let mut missing = source[0].clone();
         missing.as_object_mut().unwrap().remove(field);
@@ -706,7 +706,7 @@ fn planning_sync_preserves_delivery_and_losing_values() {
         Some(serde_json::json!("Linear title"))
     );
     assert_eq!(serde_json::to_value(&sync).unwrap(), value);
-    assert!(sync.lines()[3].contains("Linear: null"));
+    assert!(sync.lines()[3].contains("provider: null"));
 }
 
 #[test]

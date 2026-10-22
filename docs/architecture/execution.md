@@ -10,7 +10,7 @@ These commands use the current parser. This guide specifies the accepted
 lifecycle; [cutover status](../architecture-reference.md#cutover-status) records
 which owners and proofs remain unfinished.
 
-The command has a process. The agent has an LfSession. A Flow is one lf process and the step processes it starts. Their completion and authority are different
+The command has a process. The agent has an LfSession. A Graph is one lf process and the step processes it starts. Their completion and authority are different
 facts.
 
 ## Request flow
@@ -33,7 +33,7 @@ argv -> Process admission -> Skill discovery -> prompt -> provider route
 The same admission applies to headless and interactive skills, inline prompts,
 helpers and reviews. It needs no planning parents, but requires its Machine's
 writable conversation store before provider launch. Optional Work enrichment
-confers no Flow authority. A failed admission cannot become an invisible file-only
+confers no Graph authority. A failed admission cannot become an invisible file-only
 conversation. Large captured payloads remain outside SQLite behind indexed references.
 
 ## Capture intent once
@@ -43,9 +43,9 @@ assembly captures the selected instructions, exact provider strings, attribution
 explicit documents and launch options. Definitions are not reconstructed from
 current files when continuing historical work.
 
-A Flow process compiles its graph and all routing alternatives before the
+A Graph process compiles its graph and all routing alternatives before the
 first step and holds them in memory. A direct conversation captures its selected
-Skill or inline prompt. Reconnect retains that conversation; a new Flow compiles
+Skill or inline prompt. Reconnect retains that conversation; a new Graph compiles
 current source. Current credentials and checkout contents remain live inputs to execution,
 not evidence that old captured intent changed.
 
@@ -65,7 +65,7 @@ them from inventory. Shell helpers do not become fake lf invocations. After hand
 commands from the continuing provider name the newly attached LfProcess; delayed commands from
 a replaced provider retain their historical origin. A parent exiting never
 rewrites existing descendants. These causal links grant neither signaling nor
-Flow authority.
+Graph authority.
 
 Process completion records the observed command result, end time and known exit
 code or signal. Missing terminal evidence stays unknown. Installation/bootstrap
@@ -195,7 +195,7 @@ a complete native-client relay exchange.
 A passive viewer subscribes without claiming the Session. A formerly attached LfProcess can
 keep receiving and retaining provider history after transfer but cannot start or
 steer a turn or change current attachment, connection, process evidence or stream
-attention. Retaining history grants no native-write or Flow authority.
+attention. Retaining history grants no native-write or Graph authority.
 
 Native request correlation freezes its initiating Process, Work and capture before sending, not when a delayed
 start arrives. Claude input UUIDs, OpenCode message IDs and Codex request/reply
@@ -204,9 +204,9 @@ late correlated replies can fill it, but cannot borrow a newer capture or bind.
 The snapshot supplies history only and never authorizes dispatch.
 
 Headless Claude uses the same stream-input harness and correlated turn history as
-chat. Deciding Flow steps pass their JSON schema to Claude, including correction
+chat. Deciding Graph steps pass their JSON schema to Claude, including correction
 turns. Headless Claude, Codex and OpenCode all use their harness; unknown provider
-names fail instead of selecting Claude. Flow decisions and final-answer reads use
+names fail instead of selecting Claude. Graph decisions and final-answer reads use
 only correlated native `started`/`output`/successful `completed` rows. Capture
 prose remains history, never an answer fallback. Terminal launches retain native
 terminal behavior. Headless human-readable output prints assistant text without
@@ -232,29 +232,29 @@ authority, and recovery never authorizes killing a shared AgentProcess for one t
 ## Outcomes, retries and usage
 
 LfSession history owns provider outcomes. Process owns command completion. A
-provider can succeed before the command fails later, and a stopped Flow's history
+provider can succeed before the command fails later, and a stopped Graph's history
 outlives its command. Failed or interrupted conversation work remains history;
 continuation appends a new result to the same conversation.
 
-The Flow process holds the cursor and starts each step as a child `lf` process: the
+The Graph process holds the cursor and starts each step as a child `lf` process: the
 plain command, `lf -b skill <name> [message]` or the operation's own. A step
-knows nothing of its Flow. The Flow process appends the step's Process, graph node and
-iteration counts to FlowProcess, beside the Flow's name and launched graph. A
+knows nothing of its Graph. The Graph process appends the step's Process, graph node and
+iteration counts to GraphProcess, beside the Graph's name and launched graph. A
 step's result is how its process exited. A deciding or routing step gets its
-answer contract in its message and the Flow process reads the final answer of the
+answer contract in its message and the Graph process reads the final answer of the
 Session turn that step Process captured; an invalid answer is corrected by
 resuming the same conversation (`lf -b connect ID --message TEXT`), at most
-twice, then the Flow fails. A mechanical step is its own child Process and invents
-no LfSession. After an operation the Flow process stops the Flow when a landing of
-its checkout is still being watched; neither failed. A killed Flow process leaves its Processes
+twice, then the Graph fails. A mechanical step is its own child Process and invents
+no LfSession. After an operation the Graph process stops the Graph when a landing of
+its checkout is still being watched; neither failed. A killed Graph process leaves its Processes
 as history; nothing resumes it. The caller inspects them before launching fresh
 work. Unknown liveness stays unknown. Cursor movement cannot prove exactly-once
 external effects.
 
-Blocked records the reason and stops at the current Flow position. Existing logs
+Blocked records the reason and stops at the current Graph position. Existing logs
 and outcomes provide the evidence. The Wave operator resolves
 impediments or discusses missing judgment in its ongoing chat. Nothing retries
-or resumes a stopped Flow.
+or resumes a stopped Graph.
 
 Usage keeps provider-authored stream/receipt identity. Reduce cumulative samples
 once; never add checkpoints as independent consumption. Retries retain separate
@@ -269,17 +269,17 @@ start/assignment evidence; uncertainty never becomes an invented token split.
 
 ## Read indexed history
 
-Conversation, Flow and command summaries filter and page in SQL before opening
+Conversation, Graph and command summaries filter and page in SQL before opening
 payloads. Exact detail can load the selected captured input, transcript or final
 answer. Without correlated native output from a completed turn, the final answer
 is absent; retained transcript prose never substitutes for it.
 
-Session inventory reads the selected rows, Work labels and indexed Flow metadata;
+Session inventory reads the selected rows, Work labels and indexed Graph metadata;
 it does not decode captures or Session history. Readiness text remains the exact
 recorded Session field. Local active-client receipts may establish Active; without
 that observation, explicit readiness or closure, the displayed state is Unknown.
 It does not mean failed or unavailable for connection. Connect and completion
-validate the exact capture and native history before acting. A recorded Flow with
+validate the exact capture and native history before acting. A recorded Graph with
 no selected occurrence keeps its membership with an unknown position; missing
 historical membership never becomes Independent. Unknown or corrupt detail remains
 available for exact inspection instead of preventing unrelated rows from listing.
@@ -299,5 +299,5 @@ Current-state conversion and its preservation boundary belong in
 [Data and persistence](data.md#reads-and-cutover). Runtime reads use the SQLite
 owners, with no legacy import or file fallback.
 
-[Planning](planning.md) owns Flow progression and planning ancestry.
+[Planning](planning.md) owns Graph progression and planning ancestry.
 [Data and persistence](data.md) distinguishes record ownership from payload storage.

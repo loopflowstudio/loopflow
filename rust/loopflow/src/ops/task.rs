@@ -77,7 +77,7 @@ pub struct TaskProcessOptions {
     pub reason: Option<String>,
     pub agent: Option<String>,
     pub name: Option<String>,
-    pub flow: Option<String>,
+    pub graph: Option<String>,
     pub stack_on: Option<String>,
     pub directive: Option<String>,
     /// An existing branch the Task takes as its own, with the checkout that has it.
@@ -493,7 +493,7 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 /// agent, `reason` as a steer, and the route. A Task on a graph sets out on
 /// the outgoing edge named, or on its only one; otherwise the Task takes up
 /// the graph named, then its Wave or repository default. The caller then runs
-/// the edge's slice as `lf --task ISSUE flow __edge`; `None` is an edge that
+/// the edge's slice as `lf --task ISSUE graph __edge`; `None` is an edge that
 /// runs nothing. The returned name is the edge's.
 pub fn task_place(
     repo: &Path,
@@ -501,7 +501,7 @@ pub fn task_place(
     options: TaskProcessOptions,
 ) -> OpsResult<(Task, Option<String>)> {
     let TaskProcessOptions {
-        flow,
+        graph,
         agent,
         reason,
         ..
@@ -517,12 +517,12 @@ pub fn task_place(
             .sqlite
             .require_task_launch(&task.id)
             .map_err(task_error)?;
-        let flow = traverse_workflow(&store, &task, flow.as_deref(), reason).await?;
+        let graph = traverse_workflow(&store, &task, graph.as_deref(), reason).await?;
         select_task_agent(&store, &mut task, agent.as_deref()).await?;
         if let Some(reason) = reason {
             append_task_comment(&store, &task, reason, true)?;
         }
-        Ok((task, flow))
+        Ok((task, graph))
     })
 }
 
@@ -567,7 +567,7 @@ pub(crate) fn select_task_run(
 ) -> OpsResult<TaskRunSelection> {
     if store.sqlite.task_state(&task.id).map_err(task_error)? == crate::durable::TaskState::Paused {
         return Err(task_error(format!(
-            "Task is paused; use `lf task resume {}` before running a Flow",
+            "Task is paused; use `lf task resume {}` before running a Graph",
             task.identifier
         )));
     }
@@ -611,7 +611,7 @@ pub(crate) fn select_task_run(
         (_, None) => {
             let selection = task_workflow_default(store, task)?;
             let Some((name, source)) = selection else {
-                let available = crate::flow::available_flow_names(checkout)
+                let available = crate::graph::available_graph_names(checkout)
                     .map_err(task_error)?
                     .join(", ");
                 return Err(task_error(format!(
@@ -656,7 +656,7 @@ pub(crate) fn select_task_run(
     let node = workflow.node();
     let refuse = |asked: String| {
         task_error(format!(
-            "Task {issue} is at {node} of graph {name}: {asked}. Outgoing edges: {}. `lf task workflow move {issue} <stage>` puts the Task at a stage without running anything; `lf task run {issue} <graph>` takes up another graph; `lf flow <flow>` in the Task worktree runs a Flow without moving the Task",
+            "Task {issue} is at {node} of graph {name}: {asked}. Outgoing edges: {}. `lf task workflow move {issue} <stage>` puts the Task at a stage without running anything; `lf task run {issue} <graph>` takes up another graph; `lf graph <graph>` in the Task worktree runs a Graph without moving the Task",
             workflow.describe_outgoing(),
         ))
     };
@@ -679,7 +679,7 @@ pub(crate) fn select_task_run(
         (Some(edge), None) => edge,
         (None, _) | (Some(_), Some(_)) => {
             return Err(refuse(match requested {
-                Some(flow) => format!("{flow} does not leave {node}"),
+                Some(graph) => format!("{graph} does not leave {node}"),
                 None if node == END => format!("graph {name} has reached its end"),
                 None => format!(
                     "{node} has more than one outgoing edge; name one as `lf task run {issue} <name>`"
@@ -779,7 +779,7 @@ pub fn workflow_show(issue: &str) -> OpsResult<Option<crate::ops::workflow::Work
 }
 
 /// Put the Task at `node` of its Workflow without running anything: go back,
-/// skip ahead, or record work that finished elsewhere. A Flow still running
+/// skip ahead, or record work that finished elsewhere. A Graph still running
 /// on an edge is left alone and no longer moves the Task when it ends.
 /// `end` records a durable completion request after moving.
 pub fn workflow_set(issue: &str, node: &str, note: Option<&str>) -> OpsResult<String> {
@@ -819,7 +819,7 @@ pub fn workflow_set(issue: &str, node: &str, note: Option<&str>) -> OpsResult<St
 }
 
 /// Validate the captured graph for both explicit moves and their effect-free previews.
-fn validate_workflow_move(
+pub(crate) fn validate_workflow_move(
     workflow: Option<&crate::ops::workflow::Workflow>,
     issue: &str,
     node: &str,
@@ -900,13 +900,19 @@ fn prepare_task(
                 .unwrap_or_default()
                 .planning_transport()
             {
-                crate::config::PlanningConfig::Linear {} => {
+                crate::config::PlanningConfig::Linear { .. } => {
                     super::linear::acquire_task(&main, issue, super::linear::LinearRefresh::Auto)
                         .await?
                 }
                 crate::config::PlanningConfig::Git { .. } => {
                     return Err(task_error(format!(
                         "Task {issue:?} not found in selected Git planning"
+                    )));
+                }
+                remote => {
+                    return Err(task_error(format!(
+                        "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
+                        remote.remote_name().unwrap_or("provider")
                     )));
                 }
             },
@@ -948,11 +954,11 @@ fn prepare_task(
             ));
         }
         let task = if task.worktree.is_none() {
-            if let Some(flow) = options.flow.as_deref().filter(|flow| *flow != END) {
-                if super::project::load_workflow(&store, task.wave_id.as_ref(), flow, repo)?
+            if let Some(graph) = options.graph.as_deref().filter(|graph| *graph != END) {
+                if super::project::load_workflow(&store, task.wave_id.as_ref(), graph, repo)?
                     .is_none()
                 {
-                    return Err(task_error(format!("graph {flow:?} is not defined")));
+                    return Err(task_error(format!("graph {graph:?} is not defined")));
                 }
             }
             // A retained provider branch may already own Git work. It is metadata,
@@ -1592,7 +1598,7 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
 pub(crate) fn resolve_task_agent(
     worktree: &Path,
     agent: Option<&str>,
-    skill: Option<&crate::flow::Skill>,
+    skill: Option<&crate::graph::Skill>,
 ) -> String {
     crate::prompt::process::resolve_agent(agent, skill, &load_config_or_default(Some(worktree)))
 }
@@ -1614,7 +1620,7 @@ async fn select_task_agent(
     Ok(())
 }
 
-fn task_configuration_refusal(task: &Task, skill: Option<&crate::flow::Skill>) -> Option<String> {
+fn task_configuration_refusal(task: &Task, skill: Option<&crate::graph::Skill>) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
     checkout_execution_boundary(
         worktree,
@@ -2627,7 +2633,7 @@ pub(crate) fn attach_task_github_pr(
         }
         // Linear linkage is idempotent. A failed or interrupted writeback cannot
         // erase the GitHub identity already committed above.
-        link_pr_to_linear(&store, &task, &mut pr).await;
+        link_pr_to_planning(&store, &task, &mut pr).await;
         pr.updated_at = time::OffsetDateTime::now_utc();
         store
             .update_task_pr(&pr)
@@ -3076,7 +3082,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
             }
         }
         let inspection =
-            if task.is_none() && super::linear_observe::connected(&repo.to_string_lossy()) {
+            if task.is_none() && super::planning_client::is_linear(&repo.to_string_lossy()) {
                 let selector = issue.ok_or_else(|| task_error("this checkout has no Task"))?;
                 let read = super::linear::inspect_task_planning_async(
                     repo,
@@ -3205,9 +3211,11 @@ pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsR
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
         let repository = repository_for_task(&store, &task)?;
         let repo = repository.as_path();
-        if !super::linear_observe::connected(&repo.to_string_lossy()) {
-            return Err(task_error("Task repository does not use Linear"));
-        }
+        let Some(provider) = super::planning_client::remote_name(repo) else {
+            return Err(task_error(
+                "Task repository has no remote planning provider",
+            ));
+        };
         if task.linear_id.is_none() {
             if let Some(project) = &task.project_id {
                 super::planning_export::sync_export(
@@ -3234,7 +3242,9 @@ pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsR
             .map_err(task_error)?
             .ok_or_else(|| task_error("Task is missing"))?;
         if task.linear_id.is_none() {
-            return Err(task_error("Task publication to Linear remains pending"));
+            return Err(task_error(format!(
+                "Task publication to {provider} remains pending"
+            )));
         }
         // State and field writes share Linear's issue revision. Finish the
         // state attempt first so our own field acknowledgement cannot make its
@@ -3380,11 +3390,12 @@ fn pr_link_state_label(pr: &TaskPr) -> String {
     }
 }
 
-/// Idempotently refresh the PR's Linear linkage (attachment + managed comment) and
-/// record the outcome on the PR. Best-effort: a degraded writeback lands in
+/// Idempotently show the PR on the Task's planning item and record the outcome
+/// on the PR: a Linear attachment and managed comment, or for Asana and Notion one
+/// comment per PR state. Best-effort: a degraded writeback lands in
 /// `linear_link_error` and leaves the GitHub result intact; the next publication
 /// command retries. Does nothing for a PR with no GitHub URL yet.
-async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
+pub(super) async fn link_pr_to_planning(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
     let Some(issue_id) = task.linear_id.as_ref() else {
         return;
     };
@@ -3401,6 +3412,25 @@ async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
             return;
         }
     };
+    if !super::planning_client::is_linear(&repo.to_string_lossy()) {
+        let posted = async {
+            super::planning_client::PlanningClient::for_items(&repo)
+                .await?
+                .sync_comment("", issue_id.as_str(), &body)
+                .await
+                .map_err(|error| task_error(error.to_string()))
+        }
+        .await;
+        if let Err(error) = &posted {
+            tracing::warn!(
+                issue = task.identifier,
+                pr = github.number,
+                "planning link degraded; the GitHub PR is published and the next publish retries: {error}"
+            );
+        }
+        pr.linear_link_error = posted.err().map(|error| error.to_string());
+        return;
+    }
     let prior = crate::ops::linear::PrLinkageIds {
         attachment_id: pr.linear_attachment_id.clone(),
         comment_id: pr.linear_comment_id.clone(),
@@ -4444,7 +4474,7 @@ pub(crate) async fn resolve_saved_task(
                 .unwrap_or_default()
                 .planning_transport()
             {
-                crate::config::PlanningConfig::Linear {} => {
+                crate::config::PlanningConfig::Linear { .. } => {
                     super::linear::acquire_task(repo, issue, super::linear::LinearRefresh::Force)
                         .await?
                 }
@@ -4452,6 +4482,12 @@ pub(crate) async fn resolve_saved_task(
                     return Err(task_error(format!(
                         "Task {issue:?} not found in selected Git planning"
                     )))
+                }
+                remote => {
+                    return Err(task_error(format!(
+                    "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
+                    remote.remote_name().unwrap_or("provider")
+                )))
                 }
             }
         }
@@ -4946,7 +4982,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dead_flow_is_history_while_a_live_flow_process_retains_the_checkout() {
+    fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
         let _ledger = crate::journal::TestLedgerGuard::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let fixture = runtime.block_on(task_fixture("WORK-1"));
@@ -4964,7 +5000,7 @@ mod tests {
             )
             .unwrap()
         };
-        fixture.store.sqlite.test_flow(
+        fixture.store.sqlite.test_graph(
             "code",
             &worktree,
             &[("implement", Some("failed"))],
@@ -4972,12 +5008,12 @@ mod tests {
         );
         assert!(
             blockers().is_empty(),
-            "a Flow whose process exited is history"
+            "a Graph whose process exited is history"
         );
         let live = fixture
             .store
             .sqlite
-            .test_flow("code", &worktree, &[("implement", None)], None);
+            .test_graph("code", &worktree, &[("implement", None)], None);
         assert!(blockers()
             .iter()
             .any(|reason| reason.contains(live.as_str())));
@@ -4989,7 +5025,7 @@ mod tests {
         .unwrap();
         assert!(blockers().is_empty());
 
-        // A reboot proves stale execution exited without settling the Flow.
+        // A reboot proves stale execution exited without settling the Graph.
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let process = crate::process::LfProcess {
             kind: crate::process::ProcessKind::Lf,
@@ -5056,7 +5092,7 @@ mod tests {
             fixture
                 .store
                 .sqlite
-                .task_flows(&fixture.task.id)
+                .task_graphs(&fixture.task.id)
                 .unwrap()
                 .len(),
             2

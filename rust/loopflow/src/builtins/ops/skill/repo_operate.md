@@ -1,10 +1,14 @@
 ---
-description: Clear obsolete work state, report activity, advance Waves, and capture Tasks.
+description: Clear your obsolete work state, report activity, and keep your started Tasks moving across the repository's Waves.
 ---
-Keep the repository's work state clean and its work moving. You are this
-repository's operator: clear old state that is no longer needed, keep every
-started Task moving through its Wave, summarize current activity, and capture
-new Tasks as direction emerges.
+Keep the repository's work state clean and your work moving. You are this
+repository's operator for your own work: clear old state that is no longer
+needed, keep your started Tasks moving through their Waves, and summarize
+current activity. A Task is yours when its owner's person is `lf config user`
+or names no person; another person's Task is listed as theirs and left alone,
+and unowned backlog is listed for the person to select. The pass works existing
+Tasks. It leaves plans, their key results and metric targets, chapter rotation,
+new Tasks and backlog to the person; report gaps it finds instead of filing them.
 
 ## Clear old work state
 
@@ -14,11 +18,14 @@ Read `lf wave show --json`, `lf session list --json`, and `lf wt list --json`.
 Join Task and Session state to worktrees using Loopflow's returned identities
 and paths. Inspect branches and PRs to explain gaps in that shared picture.
 
-Scope cleanup to the participant's own work. Read `gh api user --jq .login`
-and `git config user.email`, then check PR authorship and the repository's
-configured branch naming convention. A tip commit's author alone does not
-establish branch ownership. Leave uncertain ownership unresolved and continue with the rest; do not
-triage teammates' PRs or delete their branches.
+Scope cleanup to the participant's own work. A branch, PR or worktree linked
+to a Task is in scope only when that Task is yours. Never abandon or prune
+another person's Task, even when you authored its PR. For branches with no
+Task, read `gh api user --jq .login` and `git config user.email`, then check PR
+authorship and the repository's configured branch naming convention. A tip
+commit's author alone does not establish branch ownership. Leave uncertain
+ownership unresolved and continue with the rest; do not triage teammates' PRs
+or delete their branches.
 
 Use these checks where they help establish what can be cleared:
 
@@ -30,7 +37,7 @@ Use these checks where they help establish what can be cleared:
   before treating a branch as present or gone. Exclude the default branch
   and symbolic refs.
 - Worktree condition: inspect `git -C <path> status --short`, unpushed commits,
-  associated Tasks, and active Sessions/Flows. Run `lf wt prune --dry-run` to
+  associated Tasks, and active Sessions/Graphs. Run `lf wt prune --dry-run` to
   identify merged, squash-merged, closed-PR, remote-gone, terminal, and inactive
   cleanup candidates. Review the preview; inactivity alone is not abandonment.
 - Branch disposition: compare ahead/behind the repository's default branch,
@@ -60,12 +67,11 @@ An unresolved item need not hold up the rest of the upkeep.
 Use the appropriate operation:
 
 - **Ship / ship-partial:** use the delivery skill appropriate to the requested
-  outcome in the owning checkout. Preserve useful unfinished scope in a Task.
-  Keep running Flows and review conversations intact.
+  outcome in the owning checkout. Record useful unfinished scope in the punch
+  list. Keep running Graphs and review conversations intact.
 - **Abandon:** `lf task abandon <issue>` retires a Task and its delivery state
   together. For a branch without a Task, `lf pr abandon <branch>` closes its PR
-  and removes its checkout and branches. Use `lf task delete <issue>` only when
-  the issue itself should be removed.
+  and removes its checkout and branches.
 - **Prune:** `lf wt delete <branch>` removes the checkout, local branch, and
   origin branch while retaining PR and Task outcomes. It also accepts a full
   branch name with no worktree, including remote-only branches; omit the
@@ -77,8 +83,7 @@ Use the appropriate operation:
 - **Database upkeep:** use supported reconciliation and cleanup commands;
   inspect installed help for their exact scope. Do not edit SQLite directly
   or discard durable history as a substitute for reconciliation. If a needed
-  cleanup operation is missing, capture it as a Task, or leave the gap in the
-  punch list.
+  cleanup operation is missing, record the gap in the punch list.
 
 Preserve active work, dirty files, unpushed commits, and evidence needed for recovery.
 Resolve these findings before discarding work.
@@ -94,8 +99,9 @@ as success.
 ## Summarize current activity
 
 Give a concise update grouped in this order: what waits on the participant,
-what is moving, and what is stuck, then what finished. Include cleanup results
-and useful next moves. Use `lf wave list --json`, `lf wave status <wave> --json`, and Task status
+what is moving, what is stuck, and other people's work left alone, then what
+finished, due follow-ups, and backlog. Include cleanup results and useful
+next moves. Use `lf wave list --json`, `lf wave status <wave> --json`, and Task status
 for shared state; inspect PRs and branches where they explain a gap.
 
 Refresh relevant facts after actions and when an update is needed. Link Tasks
@@ -105,44 +111,17 @@ put routine progress in this conversation, not Task comments.
 
 ## Drive work through Waves
 
-Every started, unfinished Task in the repository ends this pass with one
-disposition and its evidence: **moving** (a live Flow process was observed),
-**acted** (continued, recovered or delivered here, then verified), **waiting on
-a person** (the named review, decision or merge click and its Session or PR),
-**waiting on a dependency or capacity**, **paused** (an explicit hold or
-instruction), or **unknown** (the missing read or liveness evidence). “Ready”,
-“needs reconciliation” and “its Wave owns this” are not dispositions. Unstarted
-backlog is listed and left alone: starting it is the person's selection.
-
-Operate each Wave that has started work with `wave-operate`: read its
-objective, memory, plan and current work, and give its started Tasks their
-dispositions. Do that here, or run
+Operate each Wave that has started work by following `lf help wave-operate`:
+it owns the ownership rule, dispositions and recovery. Do that here, or run
 `lf --wave <wave> wave-operate "<concrete direction>"` for a separate pass and
-read its result. Operate started Tasks outside any Wave with
-`lf task-operate <issue>`. Sending the user to another conversation is not
-operating. The repository view connects outcomes and dependencies across
-Waves; the Wave pass owns the detailed judgment within each Wave.
+read its result. Operate started Tasks you own outside any Wave with `lf task-operate <issue>`.
+Sending the user to another conversation is not operating. The repository view
+connects outcomes and dependencies across Waves; the Wave pass owns the
+detailed judgment within each Wave.
 
-Leave live Flows running. For a failed or stopped Flow, read its log and effects,
-repair the cause, and launch only authorized remaining work through
-`lf task run <issue> <flow> --reason "<what changed>"`. Verify from
-`lf task status <issue> --json`; nothing resumes a stopped Flow process. A Flow ends
-where authored. Work awaiting review or a new direction stays in the Task
-conversation, with the PR and remaining scope named.
-
-Preserve Task identity, Flow history, conversations and existing execution.
-Do not create a competing Flow process or require a repository pass before a Task
-can progress. Follow an intervention through to its observed result, then
+Do not create a competing Graph process or require a repository pass before a
+Task can progress. Follow an intervention through to its observed result, then
 include that result in the repository update.
-
-## Capture new Tasks
-
-Be ready to turn emerging requests, cleanup gaps, and discoveries into Tasks.
-Check existing work first; reuse the Task when it is the same problem. Capture
-the desired outcome, observable acceptance, and real constraints in the right
-Wave. Resolve unclear placement with the participant rather than inventing it.
-Filing a Task need not start execution. Keep tentative ideas distinct from
-accepted direction; use `concept-review` when existing work needs rethinking.
 
 ## Reviewer mode
 
@@ -183,147 +162,21 @@ perspective is an ordinary `lf --task <task> : "<prompt>"` contribution.
 Headless work that lacks required input explains its failure and stops; the
 Wave operator reads its logs.
 
-## Launching and advancing work
-
-Inspect whether the requested work already has a Task, prepared context, or
-running Flow before filing or launching. Keep the Task title and description
-focused on the current problem, desired experience, observable acceptance, and
-real constraints. Reconcile changed scope instead of appending amendments.
-Keep current blockers, dependencies, and accepted scope visible in the description.
-Keep speculative solutions tentative; detailed solutions belong in a separate
-design.
-
-To capture work without starting it:
-
-```bash
-lf task create --wave <wave> --title "<desired experience>" <<'BRIEF'
-<short user-problem brief>
-BRIEF
-```
-
-When execution is intended, start the captured Task or reuse an existing one:
-
-```bash
-lf task run <existing-issue>   # its workflow's next edge, or its Wave/repository default
-```
-
-Stdin becomes the durable Task description; `--directive` supplies
-direction and does not replace that brief.
-
-A Workflow has nodes where a person takes part
-in the Task conversation, joined by edges that each run one Flow. A Task on a
-workflow takes only an edge leaving its current node. Bare
-`lf task run <issue>` takes the only one or names the choices,
-`lf task run <issue> <flow>` picks one, and `lf task run <issue> end` takes an
-edge that runs nothing. A Task with no workflow takes up its Wave default, then repository `workflow:`; naming one
-(`code`, `feature`, `research`) takes that up from its start. `lf --task <issue> flow <flow>` runs any Flow
-without moving the Task.
-
-Use the workflow or Flow the user selected; otherwise the Wave default, then repository `workflow:`. Read the actual Flow before describing its
-review gates. Do not infer policy from obsolete fix/feature flags or
-first/loop/finally settings.
-
-Current planning edits use `lf update-plan --wave <wave> --plan <plan.json>`.
-The complete content object has `metric_targets` and `krs`; for example, `{"metric_targets":[],"krs":[]}`.
-It updates the Wave's one In Progress Linear Project. Planned Projects hold
-future plans; Completed Projects retain history. Future plan edits require an
-available Linear writer, not a current-plan update.
-
-Chapter rotation is repository-wide: preview with
-`lf repo new-chapter <name> --dry-run --json`, then apply the accepted name with
-`lf repo new-chapter <name> --json`. It takes no plan file or per-Wave selector.
-Follow the start-chapter direction and plan-review gates. Retry interruptions
-with the same name against fresh Linear state. Started unfinished Tasks retain identity and execution; proven untouched
-backlog is canceled, retaining issues and history. Predecessor Projects become
-Completed. Missing evidence and competing plans require resolution, never a
-new name chosen to bypass them. Rotation output is dated evidence, not another
-durable Chapter owner.
-
-For review feedback, preserve the agreed direction and discuss the next action
-in the existing conversation. Inspect exact execution and effect history before
-starting selected work. Session closure supplies no navigation authority. The
-`advance` skill resolves the next action from a review, Task, or unbound design.
-State what actually started after checking status.
-
-Use `lf task delete ISSUE` to remove a Task from Linear and reconcile its local
-record. Read any partial-outcome report and retry the same command. Authored files
-and retained PRs survive; deletion does not certify process termination.
-
-## Existing-design handoff
-
-When the user asks to file a Task and run a Flow from an existing design,
-keep the design separate. Reuse the Task if it is the same work; otherwise file
-a short user-problem brief under the selected Wave, with a design reference,
-its maturity, and open questions. Do not invent ownership.
-
-```bash
-lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
-lf checkout <issue> --json
-# Copy the selected design and required evidence into the returned worktree's scratch/.
-lf task run <issue>
-```
-
-Inspect the current context first: a design already in the Task worktree needs
-no transfer. For a separate source, copy the actual documents and supporting
-files before launch, preserve relative references, and check their contents in
-the destination. A path alone does not supply context. Preparation launches no
-Flow. Do not overwrite newer destination work.
-
-The destination becomes the working design; retain source provenance without
-maintaining competing active copies. Markdown under its recursive `scratch/`
-tree enters each step's context; other assets remain on disk. Preserve material
-needed after scratch cleanup in durable documentation or existing records.
-Do not pipe the design into Task creation: stdin becomes the Task description.
-
-Continue the design already present without treating its draft choices as
-approved. Report the Task link, destination design path, selected Flow, and
-observed launch result. Verify supplied context separately from the launch.
-
-If implementation already exists in the source checkout, preserve it and its
-writer. Document transfer does not adopt a checkout; current preparation does
-not adopt an unbound existing branch/worktree. Report that gap before launching
-a competing implementation. No automatic scratch-transfer flag is available.
-
-## Machines and bounded contributions
-
-Use shared readers: `lf wave list --json` for the repository, `lf wave status <wave> --json`
-for one Wave, and `lf wave show --json` for the plan joined to runtime evidence.
-Do not reconstruct their state from processes, checkouts or Linear alone.
+## Machines
 
 A Task is owned by a person on a Machine, or unowned. Each person picks their own
 Machine for a Wave's or the repository's new Tasks with `lf machine use <machine> <wave>`
 or `lf machine use <machine> --repo`, never committed; unset means the Machine running
-the command. Change one Task with `lf task claim`, `lf machine use <machine> --task <issue>`
-or `lf task unclaim`; they run on the Task's writer automatically. Use `lf id`, then `lf --wave <wave> wave-operate` locally or
-`lf --machine <machine-id> --wave <wave> wave-operate` on the Wave's Machine. `lf --machine` runs the target's `lf`;
-its SSH route may change without moving Work. Connect missing logins in the
-foreground with `lf machine connect`; work uses credentials resident on its Machine.
+the command. This pass changes no Task's owner or Machine. Use `lf id`, then
+`lf --wave <wave> wave-operate` locally or
+`lf --machine <machine-id> --wave <wave> wave-operate` on the Wave's Machine.
+`lf --machine` runs the target's `lf`; its SSH route may change without moving
+Work. Connect missing logins in the foreground with `lf machine connect`; work
+uses credentials resident on its Machine.
 
-Prepare a Task without launching it with `lf checkout <issue> --json`.
-For one bounded contribution use `lf --task <issue> research "<question>"` or
-`lf --wave <wave> wave-operate "<direction>"`. `--task TASK` / `--wave WAVE`
-attributes a skill, inline prompt, or Flow. Attribution resolves this command's
-`--task`, then the checkout's Task, then an ancestor's explicit `LF_AS` declaration.
-Process ancestry supplies no Work attribution. Every attributed contribution
-is equally the Task's work; none claims exclusive ownership. `task run` places
-the Task, records the workflow edge it takes when the Task has one, then is
-the same command as `lf --task <issue> flow <flow>`.
-
-Task scratch Markdown enters each contribution at launch. Give independent
-contributions distinct paths, wait for the artifacts needed, and inspect their
-contents. A bounded contributor leaves edits uncommitted and never claims
-unrelated dirty files. Checkpoint only after the coherent contributions finish.
-`lf task run <issue>` returns when its Flow ends; run it with
-your own background tool for pursuit you will not wait on. Dependent
-work starts as a separate Task with `--stack-on <parent-task>`; the child binds
-to the parent's active PR. Never create another branch for the same Task.
-
-When evidence invalidates the attempt, `lf task interrupt <issue>` its live
-execution, update the Task, and wait for required contributions. Then launch
-fresh work with `lf task run <issue> <flow> --reason "<changed direction>"`.
-The stopped Flow stays as history; Task, worktree and PR identity are unchanged.
-Reconcile prior scratch against the new evidence rather than treating it as
-approved design.
+When evidence invalidates an attempt on a Task you own, `lf task interrupt <issue>`
+its live execution and discuss the changed direction in the Task conversation.
+The stopped Graph stays as history; Task, worktree and PR identity are unchanged.
 
 ## Diagnose execution and auth
 

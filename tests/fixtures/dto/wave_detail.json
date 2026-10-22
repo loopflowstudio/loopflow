@@ -239,7 +239,7 @@
           "unresolved_execution": true
         },
         "workflow_name": "feature",
-        "latest_flow_process": {
+        "latest_graph_process": {
           "entry": {
             "id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
             "name": "feature",
@@ -250,7 +250,7 @@
             "repo": "/src/loopflow",
             "ended_at": null
           },
-          "graph": {
+          "compiled": {
             "name": "feature",
             "steps": [
               {
@@ -690,7 +690,7 @@
           "unresolved_execution": false
         },
         "workflow_name": "feature",
-        "latest_flow_process": null,
+        "latest_graph_process": null,
         "execution": {
           "state": "idle",
           "reason": "No active execution",

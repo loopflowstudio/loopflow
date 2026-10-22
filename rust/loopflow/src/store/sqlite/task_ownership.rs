@@ -28,9 +28,11 @@ fn read_kind(value: &str) -> StoreResult<OwnershipKind> {
 }
 
 fn log_in(conn: &Connection, task: &TaskId) -> StoreResult<Vec<Row>> {
+    // Entries the provider has not stamped yet share whole-second `at` values;
+    // insertion order keeps a claim and its handoff in the order they happened.
     let mut statement = conn.prepare(
         "SELECT id,kind,person,machine_id,at,written_here FROM task_ownership WHERE task_id=?1
-         ORDER BY ordered_at IS NULL,ordered_at,at,id",
+         ORDER BY ordered_at IS NULL,ordered_at,at,rowid",
     )?;
     let rows = statement.query_map([task.as_str()], |row| {
         Ok((
@@ -310,10 +312,10 @@ fn append_in(
         [task.as_str()],
         |row| row.get(0),
     )?;
-    let linear = crate::ops::linear_observe::connected(&repo);
-    // Without Linear, the planning journal is the provider and this write is its
+    let remote = crate::ops::planning_client::connected(&repo);
+    // Without a remote provider, the planning journal is the provider and this write is its
     // order: after every entry this Machine has seen, whatever their clocks said.
-    let ordered_at: Option<i64> = if linear {
+    let ordered_at: Option<i64> = if remote {
         None
     } else {
         Some(conn.query_row(
@@ -354,7 +356,7 @@ fn append_in(
             created_at: Some(created_at),
         },
     )?;
-    if linear {
+    if remote {
         match kind {
             OwnershipKind::Claim => {
                 let state: Option<String> = conn.query_row(
@@ -589,7 +591,7 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{read_log, Reading, Row};
+    use super::{log_in, read_log, Reading, Row};
     use crate::durable::{MachineId, OwnershipEntryId, OwnershipKind, TaskId, TaskOwnershipEntry};
 
     fn row(kind: OwnershipKind, person: &str, machine: &MachineId, here: bool) -> Row {
@@ -643,6 +645,29 @@ mod tests {
         assert_eq!(read_log(&rows, &laptop).owner, holder("Jack", &mini));
         rows.push(row(OwnershipKind::Unclaim, "Jack", &mini, false));
         assert_eq!(read_log(&rows, &laptop).owner, None);
+    }
+
+    #[test]
+    fn unstamped_entries_in_one_second_keep_their_written_order() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::store::migrations::apply_sqlite(&conn).unwrap();
+        let task = TaskId::new();
+        // Linear stamps provider order later; until then a claim and its handoff
+        // share a whole-second `at`, and the handoff's id may sort first.
+        for (id, kind) in [("own_zzzz", "claim"), ("own_aaaa", "handoff")] {
+            conn.execute(
+                "INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here)
+                 VALUES(?1,?2,?3,'Jack',?4,1,NULL,1)",
+                rusqlite::params![id, task.as_str(), kind, MachineId::new().as_str()],
+            )
+            .unwrap();
+        }
+        let kinds: Vec<OwnershipKind> = log_in(&conn, &task)
+            .unwrap()
+            .iter()
+            .map(|row| row.entry.kind)
+            .collect();
+        assert_eq!(kinds, [OwnershipKind::Claim, OwnershipKind::Handoff]);
     }
 
     #[test]

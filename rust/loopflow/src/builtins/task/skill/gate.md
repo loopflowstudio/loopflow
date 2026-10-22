@@ -59,10 +59,12 @@ re-derive what these already record.
      For Desktop, build the app and run view/interaction tests or offscreen
      snapshots. Do not require manual clicks or permission dialogs.
    - If this environment cannot run a check, use a headless equivalent or defer
-     it to capable CI and continue the Flow. Never mark a deferred check passed;
+     it to capable CI and continue the Graph. Never mark a deferred check passed;
      CI still owns its result. Leave display-dependent judgment to demo/review.
    - Record the command and result in one line; include any CI deferral.
    Fix failures—determine whether it's broken test or broken code. Add tests for key behavior changes. Keep them focused. Delete flaky tests rather than patching them.
+   A timeout on a required check gets investigated, not overridden by a later
+   green run: name what ran long and why before the branch ships.
 
 5. **Cleanup**
    - Remove dead code, debug prints, resolved TODOs

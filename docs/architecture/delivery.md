@@ -37,7 +37,7 @@ Task Work ----> managed worktree ----> commits
 
 | Object | Authority |
 | --- | --- |
-| Task directive and Project membership | Local planning; observed conflicts adopt Linear when connected |
+| Task directive and Project membership | Local planning; when connected, the change sent last wins |
 | managed checkout placement and optional PR state | Task delivery records plus resolved Git repository |
 | commits, branch ancestry, sync state | Git |
 | PR head, required checks, merge | GitHub |
@@ -54,7 +54,7 @@ The exact landing fence is modeled in
 creates or reuses its managed worktree without creating a PR. Saved planning
 works without Linear; an unknown provider alias needs initial acquisition.
 It starts no execution. `lf task run ISSUE` uses the same substrate and additionally
-runs a fresh Flow there. The repository identity—not the caller's
+runs a fresh Graph there. The repository identity—not the caller's
 current directory spelling—selects the Git directory and sibling worktree
 namespace.
 
@@ -117,7 +117,7 @@ GitHub auto-merge, record the landing, and return. Success means handoff;
 finite minute check on this Machine. Neither repairs CI; `lf ci watch` does. `submit` performs the
 same preparation but leaves the exact-head merge to a person. These delivery
 commands inspect Task delivery state when present; they do not require a running
-Task Flow or certify that a particular Flow ran.
+Task Graph or certify that a particular Graph ran.
 
 Scratch cleanup selects landing candidates for this repository's
 [hosted CI](../../TESTING.md); PR readiness alone does not select CI.
@@ -136,7 +136,7 @@ prepares and publishes a replacement head. Task completion remains separate:
 verified merge is required.
 
 `lf pr open` is the presenting verb; it opens the review surface after
-publishing. Headless Task flows use publish or land.
+publishing. Headless Task Graphs use publish or land.
 
 ## Serialize the exact Git races
 
@@ -355,12 +355,12 @@ completion alone. Accepted provider status changes clear superseded requests
 without touching Workflow or Process history. Reads never execute the trigger. A Task with a PR needs merge
 evidence; its follow-up Tasks need not be complete.
 A PR-less Task may finish with retained files and commits, without a landing
-ceremony. Completion is idempotent, including when the enclosing Flow later
+ceremony. Completion is idempotent, including when the enclosing Graph later
 arrives at end; planning writeback remains retryable.
 
-After a stopped Flow, inspect associated live work and retry only the unfinished
+After a stopped Graph, inspect associated live work and retry only the unfinished
 operation. A completed Task can receive comments without reopening execution.
-There is no special finishing Flow or new-work exception for completed Tasks.
+There is no special finishing Graph or new-work exception for completed Tasks.
 Do not replay gate or re-arm a merged PR to finish a comment or completion request.
 Dated follow-ups return on the owning Wave's next pass, including unstarted ones;
 unattended execution needs a concrete check already authorized in the brief.
@@ -397,7 +397,7 @@ cannot veto completion or cancellation; it can require retaining the checkout.
 
 ## Next
 
-[Planning →](planning.md) separates the Task objective from exact Flow positions.
+[Planning →](planning.md) separates the Task objective from exact Graph positions.
 [Machines and processes →](machines.md) owns the machine and process boundaries around
 delivery.
 
@@ -405,7 +405,7 @@ delivery.
 ## Scheduled Task admission
 
 Task owns its CI-repair hold and unchanged-failure retry count. A repository
-check never launches, continues or chooses a Flow. Session input reservations
+check never launches, continues or chooses a Graph. Session input reservations
 share a short checkout admission lock; automatic repair admission re-reads Hold
 under that boundary. Unknown process identity and live unrelated work defer
 admission.

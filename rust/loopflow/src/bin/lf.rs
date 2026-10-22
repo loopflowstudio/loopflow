@@ -11,7 +11,7 @@ use tracing_subscriber::EnvFilter;
 use loopflow::definition::DefinitionKind;
 use loopflow::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
 use loopflow::lf::{
-    Cli, Commands, FlowCommand, InstallCommand, SkillCommand, TaskCommand, WaveCommand,
+    Cli, Commands, GraphCommand, InstallCommand, SkillCommand, TaskCommand, WaveCommand,
 };
 
 use loopflow::ops::project::update_plan;
@@ -397,9 +397,9 @@ struct DefinitionInvocation<'a> {
 /// Read invocation syntax once for launch and preview, without loading definitions.
 fn definition_invocation(cli: &Cli) -> anyhow::Result<Option<DefinitionInvocation<'_>>> {
     let (rest, kind) = match &cli.command {
-        Some(Commands::Flow {
-            cmd: FlowCommand::External(rest),
-        }) => (rest, Some(DefinitionKind::Flow)),
+        Some(Commands::Graph {
+            cmd: GraphCommand::External(rest),
+        }) => (rest, Some(DefinitionKind::Graph)),
         Some(Commands::Skill {
             cmd: SkillCommand::External(rest),
         }) => (rest, Some(DefinitionKind::Skill)),
@@ -502,10 +502,10 @@ fn execute_target(
             })
         }
         composed => {
-            let flow = composed.into_flow();
+            let graph = composed.into_graph();
             let repo_root = loopflow::repo::working_directory()?;
             with_runtime(&repo_root, args, || {
-                loopflow::lf::commands::flow::run(&flow, message, cli, &repo_root, binding)
+                loopflow::lf::commands::graph::run(&graph, message, cli, &repo_root, binding)
             })
         }
     }
@@ -568,25 +568,6 @@ impl Drop for EnvGuard {
             std::env::remove_var(self.key);
         }
     }
-}
-
-fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
-    let value = value.trim();
-    let (number, multiplier) = if let Some(number) = value.strip_suffix('s') {
-        (number, 1)
-    } else if let Some(number) = value.strip_suffix('m') {
-        (number, 60)
-    } else if let Some(number) = value.strip_suffix('h') {
-        (number, 60 * 60)
-    } else {
-        (value, 1)
-    };
-    let amount: u64 = number
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid duration {value:?}; use seconds, 10s, 5m, or 1h"))?;
-    Ok(std::time::Duration::from_secs(
-        amount.saturating_mul(multiplier),
-    ))
 }
 
 /// One PR's line in `lf task status`. A degraded Linear linkage is named here
@@ -657,7 +638,7 @@ fn print_task_snapshot(
         if let Some(conflict) = &snapshot.completion_pending {
             println!("  error: {conflict}");
         }
-        println!("  latest Flow: {}", snapshot.execution.reason);
+        println!("  latest Graph: {}", snapshot.execution.reason);
         if let Some(run) = &snapshot.execution.captured {
             println!("  Session event: {run}");
         }
@@ -673,10 +654,10 @@ fn print_task_snapshot(
                 },
             );
         }
-        for flow in &snapshot.work.flow_processes {
+        for graph in &snapshot.work.graph_processes {
             println!(
-                "  Flow: {}  {}  {:?}",
-                flow.summary.id, flow.summary.name, flow.summary.state,
+                "  Graph: {}  {}  {:?}",
+                graph.summary.id, graph.summary.name, graph.summary.state,
             );
         }
         for process in &snapshot.work.processes {
@@ -1064,13 +1045,13 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             } else {
                 println!("{} · {}", issue.identifier, issue.title);
             }
-            if matches!(
-                loopflow::config::load_config_or_default(Some(repo)).planning_transport(),
-                loopflow::config::PlanningConfig::Linear {}
-            ) && issue.linear_id.is_none()
+            if let Some(provider) = loopflow::config::load_config_or_default(Some(repo))
+                .planning_transport()
+                .remote_name()
+                .filter(|_| issue.linear_id.is_none())
             {
                 eprintln!(
-                    "Saved locally; pending Linear sync. Retry with `lf task sync {}`.",
+                    "Saved locally; pending {provider} sync. Retry with `lf task sync {}`.",
                     issue.identifier
                 );
             }
@@ -1272,11 +1253,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Delete { issue } => {
             let identifier = loopflow::ops::task::task_delete(repo, issue)?;
             println!("{identifier}: removed locally; execution history retained");
-            if matches!(
-                loopflow::config::load_config_or_default(Some(repo)).planning_transport(),
-                loopflow::config::PlanningConfig::Linear {}
-            ) {
-                println!("Pending Linear sync");
+            if let Some(provider) = loopflow::config::load_config_or_default(Some(repo))
+                .planning_transport()
+                .remote_name()
+            {
+                println!("Pending {provider} sync");
             }
             Ok(())
         }
@@ -1367,7 +1348,10 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             } else {
                 loopflow::ops::task::TaskWaitUntil::Terminal
             };
-            let timeout = timeout.as_deref().map(parse_duration).transpose()?;
+            let timeout = timeout
+                .as_deref()
+                .map(loopflow::config::parse_duration)
+                .transpose()?;
             let task = loopflow::ops::task::task_wait(issue, until, timeout)?;
             print_task(&task, *json)
         }
@@ -1426,19 +1410,49 @@ fn main() -> std::process::ExitCode {
     std::process::ExitCode::from(code)
 }
 
+/// Diagnostics go to `logs/lf.log` in the selected home; the terminal shows
+/// what commands print and the errors they return. `-v` or `RUST_LOG` shows
+/// diagnostics on stderr instead.
 fn init_tracing(verbose: bool) {
-    let default_filter = if verbose {
-        "lf=info,loopflow=info"
-    } else {
-        "warn"
-    };
+    let filter = EnvFilter::try_from_default_env().ok();
+    if verbose || filter.is_some() {
+        tracing_subscriber::fmt()
+            .with_env_filter(filter.unwrap_or_else(|| EnvFilter::new("lf=info,loopflow=info")))
+            .with_writer(std::io::stderr)
+            .without_time()
+            .init();
+        return;
+    }
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter)),
-        )
-        .with_writer(std::io::stderr)
-        .without_time()
+        .with_env_filter(EnvFilter::new("warn"))
+        .with_ansi(false)
+        .with_writer(|| DiagnosticLog)
         .init();
+}
+
+/// Opened per event, so a command that logs nothing creates no home.
+struct DiagnosticLog;
+
+impl std::io::Write for DiagnosticLog {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let directory = loopflow::store::lf_home_dir().join("logs");
+        let log = std::fs::create_dir_all(&directory).and_then(|()| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(directory.join("lf.log"))
+        });
+        match log {
+            Ok(mut log) => log.write_all(bytes),
+            // An unwritable home still runs; its diagnostics stay visible.
+            Err(_) => std::io::stderr().write_all(bytes),
+        }?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {
@@ -1818,7 +1832,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     };
     // Reject non-agent context previews before any branch can consume stdin.
     anyhow::ensure!(!cli.context || invocation.is_some() || message.is_some(),
-        "--context requires a skill, Flow or inline agent request; use --explain to inspect Work without launch");
+        "--context requires a skill, Graph or inline agent request; use --explain to inspect Work without launch");
     let _cwd = cli
         .wt
         .as_deref()
@@ -1857,7 +1871,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     if let Some(Commands::Task {
         cmd:
             TaskCommand::Run {
-                flow,
+                graph,
                 name,
                 stack_on,
                 directive,
@@ -1873,7 +1887,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 reason: reason.clone(),
                 agent: cli.agent.clone(),
                 name: name.clone(),
-                flow: flow.clone(),
+                graph: graph.clone(),
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
                 branch: None,
@@ -2164,7 +2178,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             return Ok(());
         }
     }
-    // Own direct conversations and Flows. Delivery controllers may launch an
+    // Own direct conversations and Graphs. Delivery controllers may launch an
     // independently owned agent, but retain their own cancellation/lifetime.
     let execution = matches!(
         cli.command,
@@ -2172,8 +2186,8 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             | Some(Commands::Skill {
                 cmd: SkillCommand::External(_)
             })
-            | Some(Commands::Flow {
-                cmd: FlowCommand::External(_)
+            | Some(Commands::Graph {
+                cmd: GraphCommand::External(_)
             })
             | Some(Commands::Task {
                 cmd: TaskCommand::Run { .. }
@@ -2282,12 +2296,12 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         });
     }
     // `lf task run` places the Task and fills its defaults; from here it is
-    // `lf --task ISSUE flow FLOW`.
+    // `lf --task ISSUE graph GRAPH`.
     if let Some(Commands::Task {
         cmd:
             TaskCommand::Run {
                 issue,
-                flow,
+                graph,
                 name,
                 stack_on,
                 directive,
@@ -2302,7 +2316,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             .context("No Task selected")?;
         let directory = loopflow::repo::working_directory()?;
         let repo = selected_task_repository(&cli, &directory, Some(issue))?;
-        let (task, flow) = loopflow::ops::task::task_place(
+        let (task, graph) = loopflow::ops::task::task_place(
             &repo,
             issue,
             loopflow::ops::task::TaskProcessOptions {
@@ -2310,13 +2324,13 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 reason: reason.clone(),
                 agent: cli.agent.clone(),
                 name: name.clone(),
-                flow: flow.clone(),
+                graph: graph.clone(),
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
                 branch: None,
             },
         )?;
-        let Some(edge) = flow else {
+        let Some(edge) = graph else {
             // An edge that runs nothing: setting out on it is the whole move.
             println!(
                 "Task {} moved along an edge that runs nothing",
@@ -2327,7 +2341,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         // This process carries the edge and writes where it left the Task: at
         // the edge's target once an attempt at its slice succeeded, otherwise
         // still on the edge.
-        loopflow::lf::commands::flow::run_task_edge_for(
+        loopflow::lf::commands::graph::run_task_edge_for(
             &cli,
             task.id.as_str(),
             &edge,
@@ -2335,7 +2349,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         )?;
         return Ok(loopflow::ops::task::workflow_arrive(&task)?);
     }
-    if let Some(Commands::Ship { flow, reason }) = &cli.command {
+    if let Some(Commands::Ship { graph, reason }) = &cli.command {
         journal::admit_process(&std::env::current_dir()?, args);
         let issue = cli.task.clone().context("No Task selected")?;
         let directory = loopflow::repo::working_directory()?;
@@ -2344,7 +2358,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             &cli,
             &repo,
             &issue,
-            flow.as_deref(),
+            graph.as_deref(),
             reason.as_deref(),
         );
     }
@@ -2661,23 +2675,23 @@ fn execute_command(
         }) => {
             unreachable!("install dispatches before home routing")
         }
-        Some(Commands::Flow { cmd }) => match cmd {
-            FlowCommand::Edge => {
+        Some(Commands::Graph { cmd }) => match cmd {
+            GraphCommand::Edge => {
                 let repo_root = loopflow::repo::working_directory()?;
                 with_runtime(&repo_root, args, || {
-                    loopflow::lf::commands::flow::run_task_edge(cli, &repo_root, binding)
+                    loopflow::lf::commands::graph::run_task_edge(cli, &repo_root, binding)
                 })
             }
-            FlowCommand::List { json, inventory } if inventory.processes => {
-                loopflow::lf::commands::flow_inventory::list(inventory, *json)
+            GraphCommand::List { json, inventory } if inventory.processes => {
+                loopflow::lf::commands::graph_inventory::list(inventory, *json)
             }
-            FlowCommand::Show {
+            GraphCommand::Show {
                 name,
                 json,
                 processes: true,
                 ..
-            } => loopflow::lf::commands::flow_inventory::inspect(name, *json),
-            _ => anyhow::bail!("not a Flow inspection command: {cmd:?}"),
+            } => loopflow::lf::commands::graph_inventory::inspect(name, *json),
+            _ => anyhow::bail!("not a Graph inspection command: {cmd:?}"),
         },
         Some(Commands::Skill { .. } | Commands::External(_)) => {
             anyhow::bail!("a command target must name a builtin command")
@@ -2698,7 +2712,7 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
             Some(
                 loopflow::error::LoadError::TargetNotFound(_)
                     | loopflow::error::LoadError::SkillNotFound(_)
-                    | loopflow::error::LoadError::FlowNotFound(_)
+                    | loopflow::error::LoadError::GraphNotFound(_)
             )
         ) {
             let error =
@@ -2748,9 +2762,9 @@ mod tests {
         let _lock = PROCESS_STATE_LOCK.lock().unwrap();
         let repo = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
-        std::fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
+        std::fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
         std::fs::write(repo.path().join(".lf/skills/land.md"), "Review landing.").unwrap();
-        std::fs::write(repo.path().join(".lf/flows/land.yaml"), "- cmd: pr land\n").unwrap();
+        std::fs::write(repo.path().join(".lf/graphs/land.yaml"), "- cmd: pr land\n").unwrap();
         let _cwd = CwdGuard::enter(repo.path()).unwrap();
         let resolve = |args: &[&str]| {
             let args = loopflow::lf::navigation::normalize_args(
@@ -2763,12 +2777,12 @@ mod tests {
         };
 
         for args in [
-            vec!["lf", "flow", "land", "keep", "together"],
-            vec!["lf", "flow", "land:", "keep", "together"],
+            vec!["lf", "graph", "land", "keep", "together"],
+            vec!["lf", "graph", "land:", "keep", "together"],
             vec!["lf", "land:", "keep", "together"],
         ] {
             let (target, message) = resolve(&args);
-            assert!(matches!(target, Target::Flow(_)));
+            assert!(matches!(target, Target::Graph(_)));
             assert_eq!(message.as_deref(), Some("keep together"));
         }
         std::fs::create_dir_all(repo.path().join(".lf/skills/team")).unwrap();
@@ -2863,7 +2877,7 @@ mod tests {
         for invocation in [
             vec!["--task", "LOO-438", "skill", "task/session"],
             vec!["--wt", "feature", "skill", "debug"],
-            vec!["-b", "-c", "--account", "fixture", "flow", "ship-api"],
+            vec!["-b", "-c", "--account", "fixture", "graph", "ship-api"],
             vec!["task", "run", "LOO-438", "pursue"],
             vec!["pr", "publish"],
             vec!["pr", "open"],
@@ -2895,7 +2909,7 @@ mod tests {
         }
         for invocation in [
             vec!["lf", "skill", "debug", "--", "-a", "literal"],
-            vec!["lf", "flow", "debug", "--", "-a", "literal"],
+            vec!["lf", "graph", "debug", "--", "-a", "literal"],
             vec!["lf", "debug", "--", "-a", "literal"],
         ] {
             let args = invocation.into_iter().map(String::from).collect();

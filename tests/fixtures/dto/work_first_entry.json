@@ -21,9 +21,9 @@
     "availability": null,
     "cwd": "/private/tmp/.tmpRKKNhK.repo",
     "detail": "opencode:opencode/test-model",
-    "flow_membership": {
+    "graph_membership": {
       "kind": "unknown",
-      "reason": "Flow membership was not recorded"
+      "reason": "Graph membership was not recorded"
     },
     "id": "cc797f6de1e54aa4a1888591b7da9743",
     "interactive": true,
@@ -70,9 +70,9 @@
     "availability": null,
     "cwd": "/private/tmp/.tmpRKKNhK.repo",
     "detail": "opencode:opencode/test-model",
-    "flow_membership": {
+    "graph_membership": {
       "kind": "unknown",
-      "reason": "Flow membership was not recorded"
+      "reason": "Graph membership was not recorded"
     },
     "id": "cc797f6de1e54aa4a1888591b7da9743",
     "interactive": true,
@@ -165,7 +165,7 @@
               },
               "execution": {
                 "captured": null,
-                "reason": "No Task Flow has run; independent Sessions may still be active",
+                "reason": "No Task Graph has run; independent Sessions may still be active",
                 "state": "idle",
                 "step": null
               },
@@ -176,7 +176,7 @@
                 "reason": null,
                 "scope_notes": []
               },
-              "latest_flow_process": null,
+              "latest_graph_process": null,
               "next_move": {
                 "owner": "user",
                 "reason": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
@@ -204,7 +204,7 @@
               "runtime": {
                 "completion_pending": null,
                 "provider": "opencode",
-                "reason": "No Task Flow has run; independent Sessions may still be active",
+                "reason": "No Task Graph has run; independent Sessions may still be active",
                 "owner": {
                   "person": "Jack Heart",
                   "machine": {
@@ -293,7 +293,7 @@
           },
           "execution": {
             "captured": null,
-            "reason": "No Task Flow has run; independent Sessions may still be active",
+            "reason": "No Task Graph has run; independent Sessions may still be active",
             "state": "idle",
             "step": null
           },
@@ -304,7 +304,7 @@
             "reason": null,
             "scope_notes": []
           },
-          "latest_flow_process": null,
+          "latest_graph_process": null,
           "next_move": {
             "owner": "user",
             "reason": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
@@ -332,7 +332,7 @@
           "runtime": {
             "completion_pending": null,
             "provider": "opencode",
-            "reason": "No Task Flow has run; independent Sessions may still be active",
+            "reason": "No Task Graph has run; independent Sessions may still be active",
             "owner": {
               "person": "Jack Heart",
               "machine": {
@@ -392,9 +392,9 @@
       "availability": null,
       "cwd": "/private/tmp/.tmpRKKNhK.repo",
       "detail": "opencode:opencode/test-model",
-      "flow_membership": {
+      "graph_membership": {
         "kind": "unknown",
-        "reason": "Flow membership was not recorded"
+        "reason": "Graph membership was not recorded"
       },
       "id": "cc797f6de1e54aa4a1888591b7da9743",
       "interactive": true,
@@ -441,9 +441,9 @@
       "availability": null,
       "cwd": "/private/tmp/.tmpRKKNhK",
       "detail": "opencode:opencode/test-model",
-      "flow_membership": {
+      "graph_membership": {
         "kind": "unknown",
-        "reason": "Flow membership was not recorded"
+        "reason": "Graph membership was not recorded"
       },
       "id": "480d8ca67cdb41ffa963f79fdb34637c",
       "interactive": true,
@@ -495,7 +495,7 @@
       "availability": null,
       "cwd": "/private/tmp/.tmpRKKNhK.unscoped",
       "detail": "opencode",
-      "flow_membership": {
+      "graph_membership": {
         "kind": "independent"
       },
       "id": "session_bf12c20b53be450998e36bf24a58b56f",
@@ -544,9 +544,9 @@
     "availability": null,
     "cwd": "/private/tmp/.tmpRKKNhK",
     "detail": "opencode:opencode/test-model",
-    "flow_membership": {
+    "graph_membership": {
       "kind": "unknown",
-      "reason": "Flow membership was not recorded"
+      "reason": "Graph membership was not recorded"
     },
     "id": "480d8ca67cdb41ffa963f79fdb34637c",
     "interactive": true,

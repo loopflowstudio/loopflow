@@ -26,11 +26,11 @@ struct UserConfig {
 }
 
 /// Resolve a display name from personal Loopflow configuration or Git's user.name.
-pub fn load_user_name() -> Result<Option<String>, LoadError> {
+fn load_user_name() -> Result<Option<String>, LoadError> {
     if let Some(config) = load_yaml_file(&global_config_path())? {
         if let Some(user) = config.get("user").filter(|value| !value.is_null()) {
             let user: UserConfig = serde_yaml_ng::from_value(user.clone()).map_err(|error| {
-                LoadError::InvalidFlow(format!("Invalid personal user config: {error}"))
+                LoadError::InvalidGraph(format!("Invalid personal user config: {error}"))
             })?;
             if let Some(name) = user.name.as_deref().and_then(normalize_user_name) {
                 return Ok(Some(name));
@@ -58,7 +58,7 @@ pub fn participant_name() -> Result<Option<String>, LoadError> {
             None => load_user_name(),
         },
         Err(std::env::VarError::NotPresent) => load_user_name(),
-        Err(error) => Err(LoadError::InvalidFlow(format!(
+        Err(error) => Err(LoadError::InvalidGraph(format!(
             "Invalid {USER_NAME_ENV}: {error}"
         ))),
     }
@@ -152,6 +152,63 @@ pub struct SessionConfig {
     /// Machine-local terminal application used to present detached sessions.
     #[serde(default)]
     pub terminal: Option<String>,
+    /// How long a Session keeps its agent running after its last viewer leaves.
+    #[serde(default)]
+    pub end_detached_after: DetachedLimit,
+}
+
+/// When an unviewed Session's agent ends: `24h`, `90m`, `2d`, or `off`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum DetachedLimit {
+    Off,
+    After(std::time::Duration),
+}
+
+impl Default for DetachedLimit {
+    fn default() -> Self {
+        Self::After(std::time::Duration::from_secs(24 * 60 * 60))
+    }
+}
+
+impl TryFrom<String> for DetachedLimit {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, String> {
+        if value.trim() == "off" {
+            return Ok(Self::Off);
+        }
+        parse_duration(&value)
+            .map(Self::After)
+            .map_err(|error| format!("end_detached_after: {error}; or use off"))
+    }
+}
+
+impl From<DetachedLimit> for String {
+    fn from(limit: DetachedLimit) -> Self {
+        match limit {
+            DetachedLimit::Off => "off".into(),
+            DetachedLimit::After(duration) => format!("{}s", duration.as_secs()),
+        }
+    }
+}
+
+/// Parse `30`, `10s`, `5m`, `1h` or `2d`; a bare number is seconds.
+pub fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
+    let value = value.trim();
+    let (number, multiplier) = match value.char_indices().last() {
+        Some((at, 's')) => (&value[..at], 1),
+        Some((at, 'm')) => (&value[..at], 60),
+        Some((at, 'h')) => (&value[..at], 60 * 60),
+        Some((at, 'd')) => (&value[..at], 24 * 60 * 60),
+        _ => (value, 1),
+    };
+    let amount: u64 = number.parse().map_err(|_| {
+        anyhow::anyhow!("invalid duration {value:?}; use seconds, 10s, 5m, 1h, or 2d")
+    })?;
+    Ok(std::time::Duration::from_secs(
+        amount.saturating_mul(multiplier),
+    ))
 }
 
 /// Release configuration.
@@ -202,50 +259,156 @@ pub enum MergeMethod {
     Rebase,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub struct LinearConfig {
-    #[serde(default)]
-    #[serde(deserialize_with = "crate::id::deserialize_uuid_option")]
-    pub team: Option<String>,
-}
-
 /// One synchronization destination for the repository's local planning.
 /// Repository configuration overrides the personal default as one value.
+/// Every remote provider names the team that owns the repository's Tasks.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(try_from = "RawPlanningConfig", into = "RawPlanningConfig")]
 pub enum PlanningConfig {
+    Git {
+        remote: String,
+        plan: GitPlan,
+    },
+    /// The Linear Team's ID; `lf repo connect` finds or creates it.
+    Linear {
+        team: Option<String>,
+    },
+    /// The Asana team's gid or URL. Tasks live in the team project named
+    /// after the repository; Wave Projects are Asana projects in the team.
+    Asana {
+        team: String,
+    },
+    /// The Notion page's ID or URL. It holds the Tasks and Projects databases.
+    Notion {
+        team: String,
+    },
+}
+
+/// Which ref on the planning remote carries this repository's plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitPlan {
+    /// `refs/loopflow/planning/shared/<name>`, read and written by everyone.
+    Shared(String),
+    /// `refs/loopflow/planning/users/<planning user key>`, one person's plan.
+    Personal,
+}
+
+impl Default for GitPlan {
+    fn default() -> Self {
+        Self::Shared("main".into())
+    }
+}
+
+impl GitPlan {
+    /// A personal plan has no reference until its user key exists.
+    pub fn reference(&self, user_key: Option<&str>) -> Option<String> {
+        match self {
+            Self::Shared(name) => Some(format!("refs/loopflow/planning/shared/{name}")),
+            Self::Personal => user_key.map(|key| format!("refs/loopflow/planning/users/{key}")),
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
+enum RawPlanningConfig {
     Git {
         #[serde(default = "default_planning_remote")]
         remote: String,
-        /// Omit for this user's stable personal ref.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         shared: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        personal: bool,
     },
-    Linear {},
+    /// The Linear Team's ID; `lf repo connect` finds or creates it.
+    Linear {
+        #[serde(default, deserialize_with = "crate::id::deserialize_uuid_option")]
+        team: Option<String>,
+    },
+    /// The Asana team's gid or URL. Tasks live in the team project named
+    /// after the repository; Wave Projects are Asana projects in the team.
+    Asana { team: String },
+    /// The Notion page's ID or URL. It holds the Tasks and Projects databases.
+    Notion { team: String },
+}
+
+impl TryFrom<RawPlanningConfig> for PlanningConfig {
+    type Error = String;
+
+    fn try_from(raw: RawPlanningConfig) -> Result<Self, Self::Error> {
+        let (remote, shared, personal) = match raw {
+            RawPlanningConfig::Git {
+                remote,
+                shared,
+                personal,
+            } => (remote, shared, personal),
+            RawPlanningConfig::Linear { team } => return Ok(Self::Linear { team }),
+            RawPlanningConfig::Asana { team } => return Ok(Self::Asana { team }),
+            RawPlanningConfig::Notion { team } => return Ok(Self::Notion { team }),
+        };
+        let plan = match (shared, personal) {
+            (Some(name), true) => {
+                return Err(format!(
+                    "planning sets both `shared: {name}` and `personal: true`; keep one"
+                ))
+            }
+            (Some(name), false) => GitPlan::Shared(name),
+            (None, true) => GitPlan::Personal,
+            (None, false) => GitPlan::default(),
+        };
+        Ok(Self::Git { remote, plan })
+    }
+}
+
+impl From<PlanningConfig> for RawPlanningConfig {
+    fn from(config: PlanningConfig) -> Self {
+        match config {
+            PlanningConfig::Git { remote, plan } => {
+                let (shared, personal) = match plan {
+                    GitPlan::Shared(name) => (Some(name), false),
+                    GitPlan::Personal => (None, true),
+                };
+                Self::Git {
+                    remote,
+                    shared,
+                    personal,
+                }
+            }
+            PlanningConfig::Linear { team } => Self::Linear { team },
+            PlanningConfig::Asana { team } => Self::Asana { team },
+            PlanningConfig::Notion { team } => Self::Notion { team },
+        }
+    }
 }
 
 fn default_planning_remote() -> String {
     "origin".into()
 }
 
+impl PlanningConfig {
+    /// The remote planning provider's product name; Git planning has none.
+    pub fn remote_name(&self) -> Option<&'static str> {
+        match self {
+            Self::Git { .. } => None,
+            Self::Linear { .. } => Some("Linear"),
+            Self::Asana { .. } => Some("Asana"),
+            Self::Notion { .. } => Some("Notion"),
+        }
+    }
+}
+
 impl Default for PlanningConfig {
     fn default() -> Self {
         Self::Git {
             remote: default_planning_remote(),
-            shared: None,
+            plan: GitPlan::default(),
         }
     }
 }
 
 impl Config {
     pub fn planning_transport(&self) -> PlanningConfig {
-        self.planning.clone().unwrap_or_else(|| {
-            if self.linear.team.is_some() {
-                PlanningConfig::Linear {}
-            } else {
-                PlanningConfig::default()
-            }
-        })
+        self.planning.clone().unwrap_or_default()
     }
 }
 
@@ -343,10 +506,6 @@ pub struct Config {
     #[serde(default)]
     pub release: ReleaseConfig,
 
-    /// Repository binding used by Linear synchronization.
-    #[serde(default)]
-    pub linear: LinearConfig,
-
     /// Run provider conversations in the selected account's own home rather
     /// than the provider's native one. `--shared` overrides it per launch.
     #[serde(default)]
@@ -403,7 +562,6 @@ impl Default for Config {
             summaries: Vec::new(),
             summary_tokens: default_summary_tokens(),
             release: ReleaseConfig::default(),
-            linear: LinearConfig::default(),
             isolate: false,
             disk_budget: None,
         }
@@ -438,10 +596,34 @@ fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError
     if content.trim().is_empty() {
         return Ok(None);
     }
-    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).map_err(|e| {
-        LoadError::InvalidFlow(format!("YAML parse error in {}: {}", path.display(), e))
+    let mut value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).map_err(|e| {
+        LoadError::InvalidGraph(format!("YAML parse error in {}: {}", path.display(), e))
     })?;
+    fold_linear_team(&mut value);
     Ok(Some(value))
+}
+
+/// Released lf reads the Linear Team from `linear.team`, so a repository
+/// keeps that block while either build may run in it. Read it as Linear
+/// planning's team; an explicit `planning.team` wins. LOO-560 removes this
+/// once a release with `planning.team` is installed.
+fn fold_linear_team(value: &mut serde_yaml_ng::Value) {
+    let Some(mapping) = value.as_mapping_mut() else {
+        return;
+    };
+    let Some(linear) = mapping.remove("linear") else {
+        return;
+    };
+    let Some(team) = linear.get("team").cloned() else {
+        return;
+    };
+    if let Some(planning) = mapping.get_mut("planning").and_then(|p| p.as_mapping_mut()) {
+        if planning.get("provider").and_then(|p| p.as_str()) == Some("linear")
+            && !planning.contains_key("team")
+        {
+            planning.insert("team".into(), team);
+        }
+    }
 }
 
 /// Merge global and repo config. Repo wins for scalars, additive keys combine.
@@ -513,7 +695,7 @@ pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError
             if let Some(budgets) = data.get("context_budgets") {
                 let budgets: BTreeMap<BudgetKey, usize> =
                     serde_yaml_ng::from_value(budgets.clone()).map_err(|e| {
-                        LoadError::InvalidFlow(format!(
+                        LoadError::InvalidGraph(format!(
                             "Invalid context_budgets in {}: {e}",
                             path.display()
                         ))
@@ -525,7 +707,7 @@ pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError
     let merged = merge_config_values(global_data, repo_data);
 
     let mut config: Config = serde_yaml_ng::from_value(merged)
-        .map_err(|e| LoadError::InvalidFlow(format!("Config validation error: {}", e)))?;
+        .map_err(|e| LoadError::InvalidGraph(format!("Config validation error: {}", e)))?;
 
     config.context_budget_sources = sources;
     Ok(Some(config))
@@ -538,7 +720,7 @@ pub fn load_global_config() -> Result<Option<Config>, LoadError> {
     };
     serde_yaml_ng::from_value(value)
         .map(Some)
-        .map_err(|error| LoadError::InvalidFlow(format!("Config validation error: {error}")))
+        .map_err(|error| LoadError::InvalidGraph(format!("Config validation error: {error}")))
 }
 
 /// Repository lookup belongs to the selected Machine, never repository config.
@@ -549,7 +731,7 @@ pub fn repository_root() -> Result<Option<PathBuf>, LoadError> {
         return Ok(None);
     };
     serde_yaml_ng::from_value(value).map_err(|error| {
-        LoadError::InvalidFlow(format!("Invalid repo_root in {}: {error}", path.display()))
+        LoadError::InvalidGraph(format!("Invalid repo_root in {}: {error}", path.display()))
     })
 }
 
@@ -580,7 +762,7 @@ pub fn load_repo_config(repo_root: &Path) -> Result<Option<Config>, LoadError> {
     };
     serde_yaml_ng::from_value(value)
         .map(Some)
-        .map_err(|error| LoadError::InvalidFlow(format!("Config validation error: {error}")))
+        .map_err(|error| LoadError::InvalidGraph(format!("Config validation error: {error}")))
 }
 
 /// Get config or default if no config files exist.
@@ -665,17 +847,32 @@ mod tests {
     }
 
     #[test]
-    fn config_parses_linear_settings() {
-        let yaml = r#"
-linear:
-  team: "9876543210"
-"#;
+    fn repo_config_reads_the_released_linear_team() {
+        let team = "3871bed0-8c95-4077-ab72-728327d615b3";
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::create_dir_all(temp.path().join(".lf")).expect("create .lf dir");
+        std::fs::write(
+            temp.path().join(".lf/config.yaml"),
+            format!("planning:\n  provider: linear\nlinear:\n  team: {team}\n"),
+        )
+        .expect("write config");
+        let config = load_repo_config(temp.path()).unwrap().unwrap();
+        assert_eq!(
+            config.planning_transport(),
+            PlanningConfig::Linear {
+                team: Some(team.to_string())
+            }
+        );
+    }
 
+    #[test]
+    fn config_parses_planning_team() {
+        let yaml = "planning:\n  provider: asana\n  team: \"9876543210\"\n";
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(
-            config.linear,
-            LinearConfig {
-                team: Some("9876543210".to_string()),
+            config.planning_transport(),
+            PlanningConfig::Asana {
+                team: "9876543210".to_string(),
             }
         );
     }
@@ -779,6 +976,36 @@ session:
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.session.terminal.as_deref(), Some("Ghostty"));
+    }
+
+    #[test]
+    fn detached_sessions_end_after_a_day_unless_configured() {
+        use super::DetachedLimit;
+        use std::time::Duration;
+        let parse = |yaml: &str| serde_yaml_ng::from_str::<Config>(yaml).map(|c| c.session);
+        assert_eq!(
+            parse("agent: claude").unwrap().end_detached_after,
+            DetachedLimit::After(Duration::from_secs(86_400))
+        );
+        assert_eq!(
+            parse("session: {end_detached_after: 90m}")
+                .unwrap()
+                .end_detached_after,
+            DetachedLimit::After(Duration::from_secs(5_400))
+        );
+        assert_eq!(
+            parse("session: {end_detached_after: 2d}")
+                .unwrap()
+                .end_detached_after,
+            DetachedLimit::After(Duration::from_secs(172_800))
+        );
+        assert_eq!(
+            parse("session: {end_detached_after: off}")
+                .unwrap()
+                .end_detached_after,
+            DetachedLimit::Off
+        );
+        assert!(parse("session: {end_detached_after: soon}").is_err());
     }
 
     #[test]
@@ -1047,26 +1274,11 @@ supported_harnesses:
         let config = load_config_or_default(Some(temp.path()));
         assert_eq!(config.agent.as_deref(), Some("codex"));
     }
-
-    #[test]
-    fn load_repo_config_reads_linear_team() {
-        let temp = tempfile::tempdir().expect("create temp dir");
-        let config_dir = temp.path().join(".lf");
-        std::fs::create_dir_all(&config_dir).expect("create .lf dir");
-        std::fs::write(
-            config_dir.join("config.yaml"),
-            "linear:\n  team: team-loo\n",
-        )
-        .expect("write config");
-
-        let config = load_repo_config(temp.path()).unwrap().unwrap();
-        assert_eq!(config.linear.team.as_deref(), Some("team-loo"));
-    }
 }
 
 #[cfg(test)]
 mod planning_config_tests {
-    use super::{merge_config_values, Config, PlanningConfig};
+    use super::{merge_config_values, Config, GitPlan, PlanningConfig};
 
     #[test]
     fn repository_transport_replaces_personal_provider_fields() {
@@ -1074,29 +1286,38 @@ mod planning_config_tests {
             "planning:\n  provider: git\n  remote: private\n  shared: solo\n",
         )
         .unwrap();
-        let repository = serde_yaml_ng::from_str("planning:\n  provider: linear\n").unwrap();
+        let repository =
+            serde_yaml_ng::from_str("planning:\n  provider: linear\n  team: team\n").unwrap();
         let config: Config =
             serde_yaml_ng::from_value(merge_config_values(Some(personal), Some(repository)))
                 .unwrap();
-        assert_eq!(config.planning_transport(), PlanningConfig::Linear {});
-        let selected: Config = serde_yaml_ng::from_str(
-            "linear:\n  team: team\nplanning:\n  provider: git\n  shared: employees\n",
-        )
-        .unwrap();
         assert_eq!(
-            selected.planning_transport(),
-            PlanningConfig::Git {
-                remote: "origin".into(),
-                shared: Some("employees".into())
+            config.planning_transport(),
+            PlanningConfig::Linear {
+                team: Some("team".into())
             }
         );
         assert_eq!(
             Config::default().planning_transport(),
             PlanningConfig::Git {
                 remote: "origin".into(),
-                shared: None
+                plan: GitPlan::Shared("main".into())
             }
         );
+        let personal: Config =
+            serde_yaml_ng::from_str("planning:\n  provider: git\n  personal: true\n").unwrap();
+        assert_eq!(
+            personal.planning_transport(),
+            PlanningConfig::Git {
+                remote: "origin".into(),
+                plan: GitPlan::Personal
+            }
+        );
+        let both = serde_yaml_ng::from_str::<Config>(
+            "planning:\n  provider: git\n  shared: team\n  personal: true\n",
+        )
+        .unwrap_err();
+        assert!(both.to_string().contains("personal: true"), "{both}");
         assert!(serde_yaml_ng::from_str::<Config>(
             "planning:\n  provider: linear\n  shared: employees\n"
         )

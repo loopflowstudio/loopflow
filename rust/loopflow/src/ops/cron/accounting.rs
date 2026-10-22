@@ -15,7 +15,7 @@ use crate::durable::{CronReceiptId, MachineId};
 use crate::ops::{OpsError, OpsResult};
 
 /// `<receipt>:<fd>`: the receipt a scheduled release accounts to and the job
-/// lock its launcher holds. Flow steps inherit it with the descriptor.
+/// lock its launcher holds. Graph steps inherit it with the descriptor.
 pub(crate) const CRON_EXECUTION_ENV: &str = "LF_CRON_EXECUTION";
 
 #[derive(Debug)]
@@ -56,7 +56,7 @@ pub(crate) fn validate_execution(
     }
     // SAFETY: fd was returned by successful dup and is owned here.
     let inherited = unsafe { File::from_raw_fd(fd) };
-    let key = fingerprint(&(&context.repo, &context.wave, &context.flow))?;
+    let key = fingerprint(&(&context.repo, &context.wave, &context.graph))?;
     let path = home.join("cron/locks").join(key);
     let expected = OpenOptions::new().read(true).write(true).open(path)?;
     let a = inherited.metadata()?;
@@ -86,7 +86,7 @@ struct Trigger {
 fn trigger_path(spec: &CronSpec) -> OpsResult<PathBuf> {
     let key = fingerprint(&(
         &spec.working_directory.canonicalize()?,
-        (&spec.host.machine_id, &spec.wave, &spec.flow),
+        (&spec.host.machine_id, &spec.wave, &spec.graph),
     ))?;
     Ok(spec
         .host
@@ -173,7 +173,7 @@ pub struct ObligationSegment {
     #[serde(alias = "home_id")]
     pub machine_id: MachineId,
     pub wave: String,
-    pub flow: String,
+    pub graph: String,
     pub schedule: String,
     pub timezone: String,
     pub installation_activated_at: i64,
@@ -339,7 +339,7 @@ pub(crate) fn claim_execution(spec: &CronSpec) -> OpsResult<Option<File>> {
     let key = fingerprint(&(
         &spec.working_directory.canonicalize()?,
         &spec.wave,
-        &spec.flow,
+        &spec.graph,
     ))?;
     let file = OpenOptions::new()
         .create(true)
@@ -532,19 +532,19 @@ pub(super) fn read(home: &Path) -> OpsResult<Vec<ObligationSegment>> {
                     r.activated_at,
                     r.repo.clone(),
                     r.wave.clone(),
-                    r.flow.clone(),
+                    r.graph.clone(),
                 )
             })
         })
         .collect();
-    for (prior, boundary, repo, wave, flow) in replacements {
+    for (prior, boundary, repo, wave, graph) in replacements {
         let previous = result
             .iter_mut()
             .find(|r| r.id == prior)
             .ok_or_else(|| failure(format!("missing predecessor obligation {prior}")))?;
         if previous.repo != repo
             || previous.wave != wave
-            || previous.flow != flow
+            || previous.graph != graph
             || previous.activated_at > boundary
         {
             return Err(failure("invalid obligation replacement boundary"));
@@ -658,7 +658,7 @@ fn derive_coverage(records: &mut [ObligationSegment]) -> OpsResult<()> {
 }
 
 pub(super) fn materialize(record: &mut ObligationSegment, now: i64) -> OpsResult<()> {
-    if record.flow != "release-run" {
+    if record.graph != "release-run" {
         return Ok(());
     }
     let zone: Tz = record
@@ -716,7 +716,7 @@ pub(crate) fn observe(
     let _lock = lock(&spec.host.lf_home)?;
     let repo = spec.working_directory.canonicalize()?;
     let mut records = read(&spec.host.lf_home)?;
-    records.retain(|r| r.repo == repo && r.wave == spec.wave && r.flow == spec.flow);
+    records.retain(|r| r.repo == repo && r.wave == spec.wave && r.graph == spec.graph);
     if let Some(current) = records.iter().find(|r| {
         r.closed_at.is_none()
             && r.machine_id == spec.host.machine_id
@@ -743,7 +743,7 @@ pub(crate) fn observe(
         &repo,
         &spec.host.machine_id,
         &spec.wave,
-        &spec.flow,
+        &spec.graph,
         spec.schedule.expression(),
         segment_start,
         timezone,
@@ -755,7 +755,7 @@ pub(crate) fn observe(
         repo,
         machine_id: spec.host.machine_id.clone(),
         wave: spec.wave.clone(),
-        flow: spec.flow.clone(),
+        graph: spec.graph.clone(),
         schedule: spec.schedule.expression().to_string(),
         timezone: timezone.to_string(),
         installation_activated_at: activated_at,
@@ -784,7 +784,7 @@ pub(crate) fn close(spec: &CronSpec, now: i64) -> OpsResult<()> {
     for mut record in read(&spec.host.lf_home)? {
         if record.repo == repo
             && record.wave == spec.wave
-            && record.flow == spec.flow
+            && record.graph == spec.graph
             && record.closed_at.is_none()
         {
             record.closed_at = Some(now);
@@ -832,7 +832,7 @@ pub(crate) fn telemetry_due(
     let Some(segment) = segments.iter().find(|s| {
         s.repo == context.repo
             && s.wave == context.wave
-            && s.flow == "telemetry-daily"
+            && s.graph == "telemetry-daily"
             && s.machine_id == context.machine_id
             && s.activated_at <= opportunity.due_at
             && s.closed_at.is_none_or(|end| opportunity.due_at < end)
@@ -869,10 +869,10 @@ pub(crate) fn telemetry_due(
             (r.repo == segment.repo || r.repo.canonicalize().ok().as_ref() == Some(&segment.repo))
                 && r.machine_id == segment.machine_id
                 && r.wave == segment.wave
-                && r.flow == segment.flow
+                && r.graph == segment.graph
                 && r.schedule == segment.schedule
                 && r.source == CronSource::Scheduled
-                && r.target_kind == super::CronTargetKind::Flow
+                && r.target_kind == super::CronTargetKind::Graph
                 && r.started_at >= due
                 && r.started_at < end
         })
@@ -896,7 +896,7 @@ pub(crate) fn begin(
     if record.repo != receipt.repo.canonicalize()?
         || record.machine_id != receipt.machine_id
         || record.wave != receipt.wave
-        || record.flow != receipt.flow
+        || record.graph != receipt.graph
         || record.schedule != receipt.schedule
         || record.closed_at.is_some()
     {
@@ -1471,12 +1471,12 @@ mod tests {
     fn spec(root: &Path) -> CronSpec {
         CronSpec {
             wave: "infrastructure".into(),
-            flow: "release-run".into(),
+            graph: "release-run".into(),
             command: vec![
                 "--wave".into(),
                 "infrastructure".into(),
                 "--batch".into(),
-                "flow".into(),
+                "graph".into(),
                 "release-run".into(),
             ],
             schedule: parse_schedule("0 0 10 * * *").unwrap(),
@@ -1498,7 +1498,7 @@ mod tests {
             runner_started_at: None,
             machine_id: spec.host.machine_id.clone(),
             wave: spec.wave.clone(),
-            flow: spec.flow.clone(),
+            graph: spec.graph.clone(),
             target_kind: spec.target_kind().unwrap(),
             source: CronSource::Scheduled,
             schedule: spec.schedule.expression().into(),
@@ -1969,7 +1969,7 @@ mod tests {
         let release = spec(temp.path());
         let release_id = observe(&release, 0, 0, "UTC").unwrap();
         let mut telemetry = release.clone();
-        telemetry.flow = "telemetry-daily".into();
+        telemetry.graph = "telemetry-daily".into();
         telemetry.schedule = parse_schedule("0 0 9 * * *").unwrap();
         let first = observe(&telemetry, 0, 0, "UTC").unwrap();
         let mut failed = receipt(&telemetry, 32401);
@@ -2025,7 +2025,7 @@ mod tests {
         assert_eq!(moved.closed_at, Some(4 * 86400));
         assert!(segments
             .iter()
-            .filter(|s| s.flow == "telemetry-daily")
+            .filter(|s| s.graph == "telemetry-daily")
             .all(|s| s.opportunities.is_empty()));
         assert_eq!(serde_json::to_vec(&receipts[0]).unwrap(), failure_bytes);
     }
@@ -2036,7 +2036,7 @@ mod tests {
         let release = spec(temp.path());
         let release_id = observe(&release, 0, 0, "UTC").unwrap();
         let mut telemetry = release.clone();
-        telemetry.flow = "telemetry-daily".into();
+        telemetry.graph = "telemetry-daily".into();
         telemetry.schedule = parse_schedule("0 0 9 * * *").unwrap();
         let id = observe(&telemetry, 0, 86400, "UTC").unwrap();
         super::close(&telemetry, 86400 + 40000).unwrap();

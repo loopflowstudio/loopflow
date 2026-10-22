@@ -33,9 +33,9 @@
   },
   {
     "name": "proof",
-    "source": ".lf/flows/proof.yaml",
+    "source": ".lf/graphs/proof.yaml",
     "workflow": null,
-    "unavailable": "invalid flow: graph proof: two routes leave demo as implement; compose one of them as a graph of its own"
+    "unavailable": "invalid graph: graph proof: two routes leave demo as implement; compose one of them as a graph of its own"
   },
   {
     "name": "research",

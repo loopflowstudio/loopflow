@@ -455,7 +455,7 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
         "roadmap": fixture.json(&["wave", "show", "--all", "--json"]),
     });
     assert_eq!(fixture.count("agent_sessions"), 3);
-    assert_eq!(fixture.count("flow_processes"), 0);
+    assert_eq!(fixture.count("graph_processes"), 0);
     assert!(task.task.worktree.is_some());
     assert_work_first_capture(&population);
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -514,7 +514,7 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
         .repo
         .create_file(".lf/skills/inspect-parser.md", "Inspect the parser.");
     fixture.repo.create_file(
-        ".lf/flows/proof.yaml",
+        ".lf/graphs/proof.yaml",
         "- inspect-parser\n- interactive: {name: demo, id: review}\n",
     );
     fixture.repo.stage_all();
@@ -602,10 +602,10 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
     let final_status = fixture.json(&["task", "status", task_id, "--json"]);
     assert_eq!(final_status["execution"]["status"], "active");
     assert_eq!(fixture.count("agent_sessions"), 2);
-    let flows = support::recorded_flows(fixture.home.path());
-    assert_eq!(flows.len(), 1);
-    assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
-    assert_eq!(flows[0].1.len(), 1);
+    let graphs = support::recorded_graphs(fixture.home.path());
+    assert_eq!(graphs.len(), 1);
+    assert_eq!(graphs[0].0.as_deref(), Some("succeeded"));
+    assert_eq!(graphs[0].1.len(), 1);
     // Provider deletion remains a refusal at native resume; it grants no provider launch.
     // Change only planning ownership in this disposable fixture, retaining the Session.
     fixture
@@ -825,7 +825,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             caller_artifact_key: None,
             task_id: (index >= 110).then(|| task.task.id.clone()),
             wave_id: None,
-            flow_lf_process_id: None,
+            graph_lf_process_id: None,
             work_source: (index >= 110).then_some(loopflow::session::WorkSource::Declared),
             bound_at: None,
             id: id.clone().into(),
@@ -1537,7 +1537,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     assert!(members("INF-125").is_empty());
     assert_eq!(fixture.count("agent_sessions"), before);
     // A retained Task whose checkout disappeared restores its recorded branch
-    // before creating the conversation; it neither resets Git nor starts a Flow.
+    // before creating the conversation; it neither resets Git nor starts a Graph.
     let head = Command::new("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(&empty_path)
@@ -1802,7 +1802,7 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_process_parent() {
 
 #[test]
 #[ignore = "requires disposable Linux account with no installed Loopflow"]
-fn declared_agent_can_start_another_tasks_flow() {
+fn declared_agent_can_start_another_tasks_graph() {
     assert!(Path::new("/.dockerenv").is_file());
     assert!(!loopflow::installation::root().unwrap().exists());
     let fixture = Fixture::new(false);
@@ -1812,9 +1812,9 @@ fn declared_agent_can_start_another_tasks_flow() {
         support::register_task_with_pr(fixture.home.path(), &y, "task-y", &fixture.repo.head_sha());
     let x = fixture.repo.create_named_worktree("task-x");
     let caller = support::register_sibling_task(&target, "INF-124", "task-x", &x);
-    std::fs::create_dir_all(y.join(".lf/flows")).unwrap();
+    std::fs::create_dir_all(y.join(".lf/graphs")).unwrap();
     std::fs::write(
-        y.join(".lf/flows/switch-proof.yaml"),
+        y.join(".lf/graphs/switch-proof.yaml"),
         "- cmd: sync --plan\n- interactive: demo\n",
     )
     .unwrap();
@@ -1822,14 +1822,14 @@ fn declared_agent_can_start_another_tasks_flow() {
         .unwrap();
     // Saved Task defaults stay local to each Task. An explicit --agent would
     // override Y too, selecting OpenCode without a managed checkout boundary.
-    // Y's mechanical Flow never starts a provider; X's OpenCode issues the command.
+    // Y's mechanical Graph never starts a provider; X's OpenCode issues the command.
     store.set_task_agent(&caller.id, "opencode").unwrap();
     store.set_task_agent(&target.task.id, "claude").unwrap();
     store
         .select_wave_workflow(
             target.task.wave_id.as_ref().unwrap(),
             "switch-proof",
-            &std::fs::read_to_string(y.join(".lf/flows/switch-proof.yaml")).unwrap(),
+            &std::fs::read_to_string(y.join(".lf/graphs/switch-proof.yaml")).unwrap(),
         )
         .unwrap();
     let bin = fixture.home.path().join("bin");
@@ -1863,22 +1863,22 @@ fn declared_agent_can_start_another_tasks_flow() {
     )
     .unwrap();
     assert_eq!(result["code"], 0, "{result}");
-    // The run blocked until Y's Flow finished.
-    let flows = support::recorded_flows(fixture.home.path());
-    assert_eq!(flows.len(), 1);
-    assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
+    // The run blocked until Y's Graph finished.
+    let graphs = support::recorded_graphs(fixture.home.path());
+    assert_eq!(graphs.len(), 1);
+    assert_eq!(graphs[0].0.as_deref(), Some("succeeded"));
     assert_eq!(
         std::fs::read_to_string(fixture.home.path().join("step-declaration")).unwrap(),
         format!("task:{}", target.task.id)
     );
-    // The step ran in Y's checkout under a Flow process X's conversation started.
+    // The step ran in Y's checkout under a Graph process X's conversation started.
     let observed: (String, String) = fixture
         .db()
         .query_row(
             "WITH RECURSIVE ancestors(cwd,id,parent_lf_process_id,caller_session_id) AS (
             SELECT step.cwd,step.id,step.parent_lf_process_id,step.caller_session_id
             FROM processes step
-            JOIN flow_process_steps recorded ON recorded.lf_process_id=step.id
+            JOIN graph_process_steps recorded ON recorded.lf_process_id=step.id
             UNION ALL
             SELECT a.cwd,p.id,p.parent_lf_process_id,p.caller_session_id
             FROM processes p JOIN ancestors a ON p.id=a.parent_lf_process_id
@@ -1992,12 +1992,18 @@ fn malformed_caller_cannot_use_library_agent_admission() {
 #[test]
 fn unavailable_store_starts_no_provider() {
     let fixture = Fixture::new(false);
-    saved_flow_stand_in(&fixture);
+    saved_graph_stand_in(&fixture);
     let store = LockedStore::new(&fixture);
     for args in [
         LAUNCH.as_slice(),
         &["--batch", "--agent", "opencode", ":", "Tidy the parser"],
-        &["--agent", "opencode", "flow", "work-then-decide", "--batch"],
+        &[
+            "--agent",
+            "opencode",
+            "graph",
+            "work-then-decide",
+            "--batch",
+        ],
     ] {
         let mut launch = fixture.command(args);
         store.select(&mut launch);
@@ -2122,16 +2128,16 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
 }
 
 /// A native provider fixture that returns a schema-constrained final result.
-fn saved_flow_stand_in(fixture: &Fixture) {
+fn saved_graph_stand_in(fixture: &Fixture) {
     std::fs::write(fixture.home.path().join("decide-enabled"), "").unwrap();
     let lf = fixture.repo.path().join(".lf");
     std::fs::create_dir_all(lf.join("skills")).unwrap();
-    std::fs::create_dir_all(lf.join("flows")).unwrap();
+    std::fs::create_dir_all(lf.join("graphs")).unwrap();
     std::fs::write(lf.join("skills/work-proof.md"), "Do the fixture work.").unwrap();
     std::fs::write(lf.join("skills/review-proof.md"), "Review the fixture.").unwrap();
     std::fs::write(lf.join("skills/decide-proof.md"), "Decide the fixture.").unwrap();
     std::fs::write(
-        lf.join("flows/work-then-decide.yaml"),
+        lf.join("graphs/work-then-decide.yaml"),
         "- work-proof\n- loop: work-proof\n  step: decide-proof\n",
     )
     .unwrap();
@@ -2143,7 +2149,7 @@ fn saved_flow_stand_in(fixture: &Fixture) {
 fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversation() {
     for exhausted in [false, true] {
         let fixture = Fixture::new(false);
-        saved_flow_stand_in(&fixture);
+        saved_graph_stand_in(&fixture);
         std::fs::write(
             fixture.home.path().join(if exhausted {
                 "invalid-output-always"
@@ -2153,7 +2159,13 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             "",
         )
         .unwrap();
-        let output = fixture.run(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
+        let output = fixture.run(&[
+            "--agent",
+            "opencode",
+            "graph",
+            "work-then-decide",
+            "--batch",
+        ]);
         assert_eq!(
             output.status.success(),
             !exhausted,
@@ -2178,10 +2190,10 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             )
             .unwrap();
         assert_eq!(starts, if exhausted { 4 } else { 3 });
-        // One Flow: its work step, then the decision and each correction of it.
-        let flows = support::recorded_flows(fixture.home.path());
-        assert_eq!(flows.len(), 1);
-        let (outcome, steps) = &flows[0];
+        // One Graph: its work step, then the decision and each correction of it.
+        let graphs = support::recorded_graphs(fixture.home.path());
+        assert_eq!(graphs.len(), 1);
+        let (outcome, steps) = &graphs[0];
         assert_eq!(
             outcome.as_deref(),
             Some(if exhausted { "failed" } else { "succeeded" })
@@ -2235,10 +2247,15 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
 #[test]
 fn failed_taskless_decision_stops_and_keeps_its_history() {
     let fixture = Fixture::new(false);
-    saved_flow_stand_in(&fixture);
+    saved_graph_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("blocked-once"), "").unwrap();
-    let mut command =
-        fixture.command(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
+    let mut command = fixture.command(&[
+        "--agent",
+        "opencode",
+        "graph",
+        "work-then-decide",
+        "--batch",
+    ]);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -2257,10 +2274,10 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
         std::thread::sleep(Duration::from_millis(20));
     };
     assert!(!status.success());
-    // The Flow stopped at its decision; its Flow process says why.
-    let flows = support::recorded_flows(fixture.home.path());
-    assert_eq!(flows.len(), 1);
-    let (outcome, steps) = &flows[0];
+    // The Graph stopped at its decision; its Graph process says why.
+    let graphs = support::recorded_graphs(fixture.home.path());
+    assert_eq!(graphs.len(), 1);
+    let (outcome, steps) = &graphs[0];
     assert_eq!(outcome.as_deref(), Some("failed"));
     assert_eq!(steps.len(), 2);
     let stopped = &steps[1];
@@ -2270,7 +2287,7 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
     let error: String = fixture
         .db()
         .query_row(
-            "SELECT d.error FROM processes d JOIN flow_processes f ON f.lf_process_id=d.id",
+            "SELECT d.error FROM processes d JOIN graph_processes g ON g.lf_process_id=d.id",
             [],
             |row| row.get(0),
         )
@@ -2296,10 +2313,10 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
 #[test]
 fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
     let fixture = Fixture::new(false);
-    saved_flow_stand_in(&fixture);
-    std::fs::write(fixture.repo.path().join(".lf/flows/choose.yaml"),
+    saved_graph_stand_in(&fixture);
+    std::fs::write(fixture.repo.path().join(".lf/graphs/choose.yaml"),
         "- xor:\n    router: decide-proof\n    paths:\n      alpha:\n        description: Do the selected work\n        skill: work-proof\n      zeta:\n        description: Leave this path untouched\n        skill: review-proof\n").unwrap();
-    let output = fixture.run(&["--agent", "opencode", "flow", "choose", "--batch"]);
+    let output = fixture.run(&["--agent", "opencode", "graph", "choose", "--batch"]);
     assert!(
         output.status.success(),
         "{}",
@@ -2315,9 +2332,9 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
         2,
         "router and selected path once each"
     );
-    let flows = support::recorded_flows(fixture.home.path());
-    assert_eq!(flows.len(), 1);
-    let (outcome, steps) = &flows[0];
+    let graphs = support::recorded_graphs(fixture.home.path());
+    assert_eq!(graphs.len(), 1);
+    let (outcome, steps) = &graphs[0];
     assert_eq!(outcome.as_deref(), Some("succeeded"));
     assert_eq!(steps.len(), 2);
     // The router is the XOR's own node; the selected path's step lies inside it.
@@ -2328,20 +2345,26 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
 }
 
 #[test]
-fn public_taskless_flow_records_distinct_completed_loop_passes() {
+fn public_taskless_graph_records_distinct_completed_loop_passes() {
     let fixture = Fixture::new(false);
-    saved_flow_stand_in(&fixture);
+    saved_graph_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("remaining-passes"), "2").unwrap();
-    let output = fixture.run(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
+    let output = fixture.run(&[
+        "--agent",
+        "opencode",
+        "graph",
+        "work-then-decide",
+        "--batch",
+    ]);
     assert!(
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    // One Flow process ran all three passes; each decision names its own pass.
-    let flows = support::recorded_flows(fixture.home.path());
-    assert_eq!(flows.len(), 1);
-    let (outcome, steps) = &flows[0];
+    // One Graph process ran all three passes; each decision names its own pass.
+    let graphs = support::recorded_graphs(fixture.home.path());
+    assert_eq!(graphs.len(), 1);
+    let (outcome, steps) = &graphs[0];
     assert_eq!(outcome.as_deref(), Some("succeeded"));
     let passes: Vec<(String, serde_json::Value)> = steps
         .iter()
@@ -2370,9 +2393,15 @@ fn public_taskless_flow_records_distinct_completed_loop_passes() {
 #[test]
 fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
     let fixture = Fixture::new(false);
-    saved_flow_stand_in(&fixture);
+    saved_graph_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("disconnect-after-tool"), "").unwrap();
-    let output = fixture.run(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
+    let output = fixture.run(&[
+        "--agent",
+        "opencode",
+        "graph",
+        "work-then-decide",
+        "--batch",
+    ]);
     assert!(!output.status.success(), "{output:?}");
     assert!(fixture.home.path().join("tool-effect").exists());
     let rows: (i64, i64) = fixture
@@ -2385,27 +2414,33 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
         )
         .unwrap();
     assert_eq!(rows, (1, 0));
-    // The Flow stopped at its first step and launched nothing after it.
-    let flows = support::recorded_flows(fixture.home.path());
-    assert_eq!(flows.len(), 1);
-    assert_eq!(flows[0].1.len(), 1);
+    // The Graph stopped at its first step and launched nothing after it.
+    let graphs = support::recorded_graphs(fixture.home.path());
+    assert_eq!(graphs.len(), 1);
+    assert_eq!(graphs[0].1.len(), 1);
     assert_eq!(
         fixture.launches().len(),
         1,
         "uncertain effect is not silently retried"
     );
-    assert_eq!(flows[0].0.as_deref(), Some("failed"));
+    assert_eq!(graphs[0].0.as_deref(), Some("failed"));
 }
 
 #[test]
 fn opencode_transient_failure_does_not_invent_a_continuation_or_accept_failed_output() {
     let fixture = Fixture::new(false);
-    saved_flow_stand_in(&fixture);
+    saved_graph_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("transient-once"), "").unwrap();
-    let output = fixture.run(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
+    let output = fixture.run(&[
+        "--agent",
+        "opencode",
+        "graph",
+        "work-then-decide",
+        "--batch",
+    ]);
     assert!(!output.status.success());
-    let flows = support::recorded_flows(fixture.home.path());
-    assert_eq!(flows[0].0.as_deref(), Some("failed"));
+    let graphs = support::recorded_graphs(fixture.home.path());
+    assert_eq!(graphs[0].0.as_deref(), Some("failed"));
     assert_eq!(
         fixture.launches().len(),
         2,
@@ -2414,7 +2449,7 @@ fn opencode_transient_failure_does_not_invent_a_continuation_or_accept_failed_ou
     assert_eq!(fixture.captures(), 2);
     assert!(
         !fixture.home.path().join("decide.log").exists(),
-        "failed answer cannot advance the Flow"
+        "failed answer cannot advance the Graph"
     );
 }
 
@@ -2498,7 +2533,7 @@ fn repository_upgrade_and_move_resume_the_same_native_conversation() {
 }
 
 #[test]
-fn pi_managed_flow_routes_one_branch_and_nested_lf_retains_task_and_checkout() {
+fn pi_managed_graph_routes_one_branch_and_nested_lf_retains_task_and_checkout() {
     let fixture = Fixture::new(false);
     let task = support::register_task_without_pr(
         fixture.home.path(),
@@ -2529,7 +2564,7 @@ fn pi_managed_flow_routes_one_branch_and_nested_lf_retains_task_and_checkout() {
     fixture
         .repo
         .create_file(".lf/skills/review-proof.md", "UNSELECTED_PATH");
-    fixture.repo.create_file(".lf/flows/choose.yaml", "- xor:\n    router: route-proof\n    paths:\n      alpha:\n        description: Select work\n        skill: work-proof\n      zeta:\n        description: Skip work\n        skill: review-proof\n");
+    fixture.repo.create_file(".lf/graphs/choose.yaml", "- xor:\n    router: route-proof\n    paths:\n      alpha:\n        description: Select work\n        skill: work-proof\n      zeta:\n        description: Skip work\n        skill: review-proof\n");
     let received = fixture.home.path().join("pi-received.json");
     let output = fixture
         .command(&[
@@ -2537,7 +2572,7 @@ fn pi_managed_flow_routes_one_branch_and_nested_lf_retains_task_and_checkout() {
             task.task.id.as_str(),
             "--agent",
             "pi:fixture/model",
-            "flow",
+            "graph",
             "choose",
             "--batch",
         ])
@@ -2570,10 +2605,10 @@ fn pi_managed_flow_routes_one_branch_and_nested_lf_retains_task_and_checkout() {
         .as_str()
         .unwrap()
         .contains(task.task.id.as_str()));
-    let flows = support::recorded_flows(fixture.home.path());
-    assert_eq!(flows.len(), 1);
-    assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
-    let labels: Vec<_> = flows[0]
+    let graphs = support::recorded_graphs(fixture.home.path());
+    assert_eq!(graphs.len(), 1);
+    assert_eq!(graphs[0].0.as_deref(), Some("succeeded"));
+    let labels: Vec<_> = graphs[0]
         .1
         .iter()
         .map(|step| step["label"].as_str().unwrap())

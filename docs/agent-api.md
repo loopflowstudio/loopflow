@@ -6,8 +6,8 @@ is no SDK. The verbs are the same binary you use; every read surface takes
 launcher contract (`LOOPFLOW.md`) in its context. Work-associated launches also
 receive the `work` skill body. Read `lf help skill work` before using Task, Wave or
 Project APIs in an existing conversation. Choose the commands and Skills that
-fit the requested work. Work context does not select a Flow or authorize Wave
-memory maintenance; the selected Loopflow Flow owns that procedure.
+fit the requested work. Work context does not select a Graph or authorize Wave
+memory maintenance; the selected Loopflow Graph owns that procedure.
 
 ## Inspect instruction selection
 
@@ -52,7 +52,7 @@ A Wave directing a task is the internal case:
 lf checkout INF-123                              # tracked Work, no execution
 lf --task INF-123 research "write scratch/api.md"    # independent conversation
 lf task run INF-123                                  # start built-in Task automation
-lf comment INF-123 "take the smaller approach"    # post a Linear Task comment
+lf comment INF-123 "take the smaller approach"    # post a Task comment
 lf task status INF-123 --json                        # inspect durable state
 lf wait INF-123 --until terminal                # block until it settles
 ```
@@ -60,18 +60,18 @@ lf wait INF-123 --until terminal                # block until it settles
 ## The owners
 
 Tracked Work follows Wave → Task in navigation. A Wave owns its objective and
-memory; its current Linear Project owns Tasks, KRs and targets.
-A Task owns its checkout and its PR history, with one current PR. Every conversation and Flow attributed
+memory; its current Project owns Tasks, KRs and targets.
+A Task owns its checkout and its PR history, with one current PR. Every conversation and Graph attributed
 to it is equally its work; none is privileged.
 
 Process records an actual lf command process. LfSession keeps a continuable
-conversation, whether interactive or headless. A Flow is one lf process and
+conversation, whether interactive or headless. A Graph is one lf process and
 the step processes it starts. Provider turns and retries remain history
 inside the conversation; they do not create another generic execution object.
 
 A child command records its causal parent and, when issued by an agent, its
 calling conversation and AgentProcess. That evidence grants neither
-process-control authority nor permission to move a Flow cursor. An attachment
+process-control authority nor permission to move a Graph cursor. An attachment
 handoff retains conversation identity while fencing the old writer.
 Passive observation acquires no claim. See the [contract and cutover status](architecture-reference.md#cutover-status)
 for the remaining reader, wire and lifecycle conversion.
@@ -80,7 +80,7 @@ for the remaining reader, wire and lifecycle conversion.
 
 ```bash
 lf checkout INF-123                    # ensure Work and worktree only
-lf -b task run INF-123                 # place an existing Linear issue, run its Flow, return when it ends
+lf -b task run INF-123                 # place an existing Task, run its Graph, return when it ends
 lf task create --wave <wave> --title "add passkeys"  # file the issue; run it with `lf task run`
 pbpaste | lf task create --wave <wave>               # report from stdin; first line is the title
 lf task run INF-124 --stack-on INF-123 # dependent work before the parent PR merges
@@ -106,10 +106,10 @@ lf comment INF-123 --steer "keep the public API"  # save a steer from an agent S
 lf session steers SESSION --json                 # inspect delivery
 lf session steers SESSION --retry STEER_ID        # retry one delivery
 lf --wave <wave> wave-operate "prioritize the parser"
-lf --wave <wave> wave-operate "reassess Project priorities"
+lf --wave <wave> wave-operate "recover the failed parser Graph"
 ```
 
-Save a Task comment locally, or comment in Linear when sync is configured.
+Save a Task comment locally; planning sync shares it, and Linear comments arrive as steers.
 Each associated Session receives acquired steers independently, including
 conversations associated through the checkout or `--task`. Repository and Wave
 steers apply downward through the Work tree; direct Session steers apply only
@@ -139,9 +139,9 @@ Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
 tmux name. Project operations are ordinary finite conversations; they have no long-running
 process to interrupt, resume, wait for, or attach to.
 
-Work survives its provider process. A Flow whose process died leaves its Processes
+Work survives its provider process. A Graph whose process died leaves its Processes
 as history; nothing resumes it. Inspect
-`lf task status ISSUE` and `lf flow show ID --processes --json`, then launch
+`lf task status ISSUE` and `lf graph show ID --processes --json`, then launch
 fresh work with `lf task run INF-123`. The Task keeps its durable
 direction, worktree and PR. `task run` never reopens terminal Work; create a
 new Task for new work.
@@ -158,7 +158,7 @@ skills. Edit their definition or goal when the guidance should persist.
 ## Memory
 
 `.lf/wave/<name>/MEMORY.md` is the Wave's durable memory. Read it for context;
-a selected Loopflow Flow maintains it through ordinary file edits. Standalone
+a selected Loopflow Graph maintains it through ordinary file edits. Standalone
 Work use keeps proposed changes in scratch. The file remains the source of
 truth; there is no separate memory CLI or server surface.
 
@@ -167,7 +167,7 @@ after an incomplete operation, even after planning refresh or chapter replacemen
 Missing provider data does not confirm deletion.
 Deletion cancels unfinished placed work or cleans completed delivery before trashing
 the issue. Live or unresolved execution and dirty checkouts block it; a stopped
-Flow is history and blocks nothing. Task, PR and
+Graph is history and blocks nothing. Task, PR and
 Run history remain readable; confirmed provider trash makes retries idempotent.
 
 ## Ship
@@ -203,7 +203,7 @@ lf ps --json                # one OS-live process frame
 ```
 
 `lf wave list` is the registry plane, `lf wave status` is the focused operational view,
-and `lf wave show` joins the current Linear plan to that runtime truth.
+and `lf wave show` joins the current plan to that runtime truth.
 `lf history` is the ordered durable history; each item reuses `WorkRef` and
 carries one typed fact with its execution, Task PR, or Steer evidence. Agents consume
 those projections; they do not rebuild the joins.
@@ -224,6 +224,6 @@ the current Session. Standalone native skills retain their own guidance.
 
 Task- and Wave-associated launches also receive Work guidance. Read
 `lf help skill work` when entering Work APIs from an existing conversation.
-Association supplies context and ownership; the selected skill or Flow supplies
+Association supplies context and ownership; the selected skill or Graph supplies
 the procedure. Keep repeatable instructions with that skill and repository rules
 in its agent guide.

@@ -338,7 +338,7 @@ recorded repository; outside a repository, ticket aliases must be globally uniqu
 lf task edit <id> --rank 0 --assignee <person-id>
 lf task edit <id> --unassign
 lf wave edit-plan WAVE --name "Parser" --summary "Retain quoted input"
-lf wave workflow set review WAVE      # .lf/workflows/review.yaml or a builtin
+lf wave workflow set review WAVE      # .lf/graphs/review.yaml or a builtin
 lf wave edit-plan WAVE --description "Preserve quoted text across machines."
 lf wave update-plan --wave parser --plan /tmp/plan.json
 ```

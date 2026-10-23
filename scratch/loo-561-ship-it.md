@@ -103,25 +103,12 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
 
 ## Remaining
 
-0. **Docs drift (third concept review, 2026-10-22).** Docs still teach the deleted
-   `.lf/workflows/` directory and the old Task-level node/edge words:
-   - `README.md:346` model table: Workflow lives in `.lf/workflows/*.yaml` and "gives a Task
-     nodes … joined by the Graphs between them". It is a graph in `.lf/graphs/` whose
-     `interactive:` steps are stages; `README.md:163` "take the edge" → route.
-   - `docs/authoring.md:297-316`: "edge"/"node" for the Task position (→ route/stage); builtins
-     listed as `feature` (design, demo, land), `code` (demo, land), `research` (findings). Stage
-     ids are skill names: `feature` (review-design, demo, then `deliver`), `code` (demo, then
-     `deliver`), `research` (research, no PR). The customize recipe writes `.lf/workflows/`; use
-     `lf graph customize feature` (copies into `.lf/graphs/`), then `lf wave workflow set`.
-   - `docs/lf.md:341` and `docs/waves.md:353` comments: `.lf/workflows/` → `.lf/graphs/`.
-   Graph-level "backward edge" (loopflow) stays: it is a graph term, not a Task position.
-
 1. **Re-demo** on the branch build. The pending items are under Demo findings: the heading
    placement (variant B), the `loopflow://` world links and `unstarted` world Tasks.
 2. **Not in this Task:** the `automation:` config key now names a deleted concept (its only field
    is repair startup retries). `.lf/config.yaml` is read by released lf, so a rename needs the
-   shared-file fallback plus a removal Task; leave it. (Docs drift from the 2026-10-22 concept
-   review is fixed: authoring/config/planning teach `interactive:` stages, lf.md the repair backoff.)
+   shared-file fallback plus a removal Task; leave it. (Both 2026-10-22 concept reviews' docs drift is fixed: docs teach `interactive:` stages, routes,
+   `.lf/graphs/` and the repair backoff.)
 3. **Gate.** Run the acceptance check below. Also clear the shared-runner isolation failures:
    `planning_lookup_tests` and some planning/store tests fail only when they share a runner with
    `ship`/`task_work`/`ops::linear` and pass alone. The pre-existing

@@ -350,7 +350,7 @@ See [Machines and processes](architecture/machines.md) and
 ```bash
 lf wave status infra --json
 lf update-plan --wave infra --plan plan.json
-lf wave workflow set research WAVE    # only the workflow; .lf/workflows/ or builtin
+lf wave workflow set research WAVE    # only the workflow; .lf/graphs/ or builtin
 ```
 
 `plan.json` contains the complete current plan:

@@ -294,26 +294,27 @@ Shipping begins with `lf ship` or with any route into `end`, and
 
 On its first `lf task run`, a Task selects the Workflow you name, then its Wave
 default, then repository `workflow:`. It keeps the graph as it was then.
-The Task's position is stored. Choosing an edge puts the Task on it; the
-process that ran the edge puts the Task at its target when the Graph succeeds.
+The Task's position is stored. Choosing a route puts the Task on it; the
+process that ran the route puts the Task at its target when the Graph succeeds.
 A Graph that stops or fails leaves the Task on the route, shown as stopped:
 choose it again, choose another one leaving the same stage, or
 `lf task workflow move ISSUE STAGE`. `task workflow move` puts the Task at any stage and runs
 nothing: go back for another round, skip ahead, or record a landing that
-settled after its Graph stopped. An edge cannot be chosen while another is
-running. `lf task status ISSUE --json` carries the position, the edges that
+settled after its Graph stopped. A route cannot be chosen while another is
+running. `lf task status ISSUE --json` carries the position, the routes that
 can be chosen now and every move with who made it and its `--reason`. There
 is no approve or complete command. Give feedback in the Task conversation,
-which is told its node's skill and the command for each edge leaving it. `lf --task ISSUE graph GRAPH` runs a Graph without moving the Task.
+which is told its stage's skill and the command for each route leaving it. `lf --task ISSUE graph GRAPH` runs a Graph without moving the Task.
 
-Builtins are `feature` (design, demo, land), `code` (demo, land) and
-`research` (findings, no PR). `lf wave workflow list` lists Workflows;
-`lf graph list` lists autonomous Graphs. To edit a Workflow, copy its source into
-`.lf/workflows/`, edit and commit it, then select it for the Wave:
+Builtins are `feature` (review-design, demo, then `deliver`), `code` (demo,
+then `deliver`) and `research` (research, no PR). `lf wave workflow list`
+lists Workflows; `lf graph list` lists autonomous Graphs. To edit a Workflow,
+copy the builtin into `.lf/graphs/`, edit and commit it, then select it for
+the Wave:
 
 ```bash
-lf wave workflow source feature > .lf/workflows/feature.yaml
-# Edit .lf/workflows/feature.yaml and commit it.
+lf graph customize feature       # prints .lf/graphs/feature.yaml, copied from the builtin
+# Edit .lf/graphs/feature.yaml and commit it.
 lf wave workflow set feature WAVE
 ```
 

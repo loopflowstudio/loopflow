@@ -1,7 +1,7 @@
 # LOO-561 · Ship it — plan
 
 Status (2026-10-22, realign): design accepted (Jack Heart, 2026-10-21/22); every accepted
-slice is built and committed. What's left: re-demo and gate (see Remaining). Post-merge verify is
+slice is built and committed. What's left: doc fixes, re-demo and gate (see Remaining). Post-merge verify is
 on hold. This Task's schema draft is `store/migrations/drafts/ship_it.sql`, the only draft on the branch.
 
 ## Direction from Jack Heart (2026-10-21, design review)

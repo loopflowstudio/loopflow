@@ -3491,6 +3491,28 @@ fn promote_unreleased_dir(repo: &Path, version: &str) -> OpsResult<()> {
         let entry = entry?;
         let dest = target.join(entry.file_name());
         if dest.exists() {
+            let incoming = fs::read_to_string(entry.path())?;
+            let existing = fs::read_to_string(&dest)?;
+            if incoming == existing {
+                fs::remove_file(entry.path())?;
+                continue;
+            }
+            // A repair cut under the same version adds its own compatibility lines.
+            if entry.file_name() == "BREAKING.md" {
+                let mut merged = existing.clone();
+                for line in incoming.lines() {
+                    if !existing.lines().any(|known| known == line) {
+                        if !merged.is_empty() && !merged.ends_with('\n') {
+                            merged.push('\n');
+                        }
+                        merged.push_str(line);
+                        merged.push('\n');
+                    }
+                }
+                write_atomic(&dest, merged.as_bytes())?;
+                fs::remove_file(entry.path())?;
+                continue;
+            }
             return Err(OpsError::Message(format!(
                 "cannot promote {}: {} already exists",
                 entry.path().display(),
@@ -5901,6 +5923,30 @@ version = "2.0.0"
         assert_eq!(
             fs::read_to_string(version_dir.join("NOTES.md")).unwrap(),
             "backfilled notes",
+        );
+    }
+
+    #[test]
+    fn promote_unreleased_appends_a_repair_cuts_breaking_lines() {
+        let tmp = tempfile::tempdir().unwrap();
+        let unreleased = tmp.path().join("release").join("unreleased");
+        fs::create_dir_all(&unreleased).unwrap();
+        fs::write(
+            unreleased.join("BREAKING.md"),
+            "floor raised by b\nfloor raised by a\n",
+        )
+        .unwrap();
+
+        let version_dir = tmp.path().join("release").join("v0.9.10");
+        fs::create_dir_all(&version_dir).unwrap();
+        fs::write(version_dir.join("BREAKING.md"), "floor raised by a\n").unwrap();
+
+        promote_unreleased_dir(tmp.path(), "0.9.10").unwrap();
+
+        assert!(!unreleased.exists());
+        assert_eq!(
+            fs::read_to_string(version_dir.join("BREAKING.md")).unwrap(),
+            "floor raised by a\nfloor raised by b\n",
         );
     }
 

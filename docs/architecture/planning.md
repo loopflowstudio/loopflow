@@ -500,8 +500,8 @@ step processes, with no separate record or process.
 Every Graph naming a Task, or run in its checkout, is equally that Task's
 work; none is selected or privileged. Taskless and Task execution share the
 Graph runner. Each `task run` starts a fresh Graph as a child `lf graph`, and a fresh
-one again when that Graph process fails. Graphs hold autonomous
-steps only: launching one with a `human: true` step is rejected. Finishing
+one again when that Graph process fails. A Graph runs autonomous steps and stops at its first
+`interactive:` stage (`GraphOutcome::Staged`); a Task carries it on from there. Finishing
 retains history and chooses no successor; Graph completion alone does not
 complete Task Work.
 

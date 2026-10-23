@@ -109,13 +109,13 @@ lf sync-skills --repo
 
 Select the Graph's name as a native skill. Its `SKILL.md` contains a direct
 checklist: ordinary steps run `lf -b implement` and wait for the result;
-`human: true` steps execute the skill in the current conversation and wait for
+`interactive:` steps execute the skill in the current conversation and wait for
 the participant's response.
 
 ```yaml
 - step: {name: implement, id: build}
 - loop: build
-- step: {name: demo, id: review, human: true}
+- interactive: {name: demo, id: review}
 ```
 
 Default loops use natural-language instructions: continue when this boundary's

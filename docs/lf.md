@@ -797,8 +797,9 @@ Set repository defaults in `.lf/config.yaml`:
 automation: {retries: 1}
 ```
 
-One failed repair startup may retry; a completed blocked repair waits for
-changed evidence.
+`retries` caps startup retries within one repair attempt. A finished attempt
+that leaves the PR blocked is followed by a fresh one after a backoff that grows
+from 1 to 30 minutes, so repair never gives up on an open PR.
 Pending or missing CI checks keep waiting; elapsed time alone never starts repair.
 Use an always-available Machine for progress through laptop logout or shutdown.
 

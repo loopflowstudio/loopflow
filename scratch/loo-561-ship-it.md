@@ -1,7 +1,7 @@
 # LOO-561 · Ship it — plan
 
-Status (2026-10-22, concept review): design accepted (Jack Heart, 2026-10-21/22); every accepted
-slice is built and committed. What's left: item 0 doc drift, re-demo and gate (see Remaining). Post-merge verify is
+Status (2026-10-22, third concept review): design accepted (Jack Heart, 2026-10-21/22); every accepted
+slice is built and committed. What's left: item 0 vocabulary drift, re-demo and gate (see Remaining). Post-merge verify is
 on hold. This Task's schema draft is `store/migrations/drafts/ship_it.sql`, the only draft on the branch.
 
 ## Direction from Jack Heart (2026-10-21, design review)
@@ -107,6 +107,20 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
 
 ## Remaining
 
+0. **Vocabulary drift (third concept review, 2026-10-22). Implement next.** Docs and `lf help`
+   teach stages and routes; what people and stand-ins read at run time still says edges or `human:`.
+   - `PROMPTS.md:91-96` shows `human: true` on a step; replace with `- interactive: review-design`.
+   - Run-time text says "edge" for a route: `ops/task.rs` `select_task_run` errors ("neither an
+     edge leaving", "Outgoing edges", "more than one outgoing edge"), `ops/task/ship.rs:410`
+     ("no edge leaves it for another stage"), `ops/workflow.rs:205,217` (stand-in/person lines:
+     "take another edge", "chooses the edge"), `lf/commands/graph.rs:136,141` ("Edge {edge}
+     failed"), `bin/lf.rs:2331` ("moved along an edge that runs nothing"). Say route; keep
+     `describe_outgoing` output consistent. Internal types, wire fields (`edge`, `edges`) and loop
+     "backward edges" in graph YAML stay: those are graph structure, not the Task's path.
+   - Stale comments: `world/mod.rs:574` ("A requested Graph that is no edge runs off any
+     Workflow"; it now takes the graph up), `graph/compiled.rs:194,463` ("human occurrence",
+     "human-boundary"; say stage).
+
 1. **Re-demo** on the branch build. The pending items are under Demo findings: the heading
    placement (variant B), the `loopflow://` world links and `unstarted` world Tasks.
 2. **Not in this Task:** the `automation:` config key now names a deleted concept (its only field
@@ -203,8 +217,11 @@ The hosted merge-queue run is left to demo.
   (`TaskShipControl`, 3f906af16f); re-demo pending.
 - `loopflow://` links in the dev app resolve against the real `~/.lf`, not the world's
   `LF_HOME`. Not checked against main.
-- World Tasks that ran a Graph read `unstarted` on the branch; main's builder says a Graph in a
-  checkout starts its Task. Possible regression, unverified.
+- World Tasks that ran a Graph read `unstarted` on the branch. Not a state regression: main's
+  `task_state_sql` also derived from Workflow position (`ready` at `start`, `active` past it);
+  the branch renamed those to `unstarted`/`working`. A Graph run taskless in a Task's checkout
+  never moved the Workflow on either. Kept position-derived; whether checkout work alone should
+  read `working` is an open question for Jack at re-demo (scratch/questions.md).
 
 Check (2026-10-22): clippy/fmt clean; `dto_fixtures` 42 ok; lib pr_landing/chapter/children/waves/
 task_execution ok; mixed-runner planning/store failures pass alone (owner: gate).

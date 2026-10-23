@@ -42,3 +42,8 @@ design rewrite, each reversible before implementation:
   a failed completion. Removing them needs its own shared-wire Task. Reversible.
 - In Review↔shipping is not built: `queue_in` targets Linear state types, and In Review is a
   named `started` state that needs a per-team lookup by name plus a reconcile rule.
+- `unstarted` vs `working` (third concept review, 2026-10-22): kept main's position-derived rule
+  (`working` once the Workflow leaves `start`), renamed from `ready`/`active`. A Task with Sessions
+  or a taskless Graph in its checkout but still at `start` reads `unstarted`. Jack's "it should be
+  live state" was about ship intent, so it doesn't settle this. Question for re-demo: should any
+  work in a Task's checkout make it `working`?

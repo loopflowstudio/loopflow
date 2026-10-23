@@ -1904,24 +1904,12 @@ final class WorkModel {
         workflowCatalogRevisions[key] = revision
     }
 
-    /// The repository file that defines the Workflow; a builtin is first copied
-    /// into `.lf/workflows/` so the edit is committed with the code.
-    func workflowDefinitionFile(_ entry: WorkflowCatalogEntry) async throws -> URL {
-        guard let repoPath else { throw RegistryQueryError("No repository is open") }
-        let root = URL(fileURLWithPath: repoPath)
-        if let source = entry.source { return root.appendingPathComponent(source) }
-        let content = try await query.workflowSource(entry.name, cwd: repoPath)
-        let url = root.appendingPathComponent(".lf/workflows/\(entry.name).yaml")
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(content.utf8).write(to: url, options: .withoutOverwriting)
-        await loadWorkflowCatalog(force: true)
-        return url
-    }
-
-    func definitionSource(_ entry: GraphCatalogEntry) async throws -> URL {
-        let path = try await query.customizeGraph(entry.name, cwd: repoPath)
-        await loadGraphCatalog(force: true)
+    /// The repository file that defines graph `name`; a builtin is first copied
+    /// into `.lf/graphs/` so the edit is committed with the code. A Workflow is
+    /// a graph, so both catalogues may change.
+    func definitionFile(_ name: String) async throws -> URL {
+        let path = try await query.customizeGraph(name, cwd: repoPath)
+        await rereadDefinitions()
         return URL(fileURLWithPath: path)
     }
 

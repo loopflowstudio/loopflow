@@ -100,6 +100,10 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
 - `ops/task_automation.rs` and `store/sqlite/automation.rs` deleted (63f13b3805): execution blockers live in `ops/task_execution.rs`, repair admission
   (`RepairAttempt`, `RepairReservation`) in `store/sqlite/ci_incidents.rs`, `repository_tasks`
   in `pr_landing.rs`; the stand-in decision in `lf/commands/ship.rs` reads as one match.
+- Desktop Customize for Graphs and Workflows is one `WorkModel.definitionFile` over `lf graph customize`
+  (`.lf/graphs/`); Swift `workflowSource` deleted. `two_people` and `WorkCLISubscriptionTests` fixtures
+  author graphs with `interactive:` stages. Check: `cargo test --test two_people` ok; `swift test --filter
+  'customizedWorkflow|taskLifecycleUpdatesOpenSidebar'` ok.
 
 ## Remaining
 

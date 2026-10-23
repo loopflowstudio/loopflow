@@ -339,16 +339,12 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([WorkflowCatalogEntry].self, from: stdout)
     }
 
-    public func workflowSource(_ name: String, cwd: String?) async throws -> String {
-        try await run(["wave", "workflow", "source", name], cwd)
-    }
-
     public func customizeGraph(_ name: String, cwd: String?) async throws -> String {
         try await run(["graph", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Run a fresh Graph for the Task headless, placing it when needed. Without
-    /// `graph`, Rust takes the Task's edge or its Project's workflow.
+    /// `graph`, Rust takes the Task's route or its Wave's Workflow.
     public func runTask(issue: String, graph: String?, cwd: String?) async throws {
         var args = ["-b", "task", "run", issue]
         if let graph { args.append(graph) }

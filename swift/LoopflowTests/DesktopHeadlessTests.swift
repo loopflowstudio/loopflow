@@ -91,31 +91,23 @@ struct DesktopHeadlessTests {
         }
     }
 
-    @Test("Customizing a builtin Workflow copies it into the repository's .lf/workflows")
+    @Test("A builtin Workflow offers Customize beside its stages")
     func customizedWorkflow() async throws {
-        let repo = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: repo) }
         var entries = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             fixtures.appendingPathComponent("workflow_catalog.json"))) as? [[String: Any]])
         entries[0]["name"] = "code"
         entries[0]["source"] = NSNull()
         let catalog = String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
-        let source = "nodes: {review: demo}\nedges: []\n"
         let model = WorkModel(query: RegistryQuery { args, _ in
             if args.prefix(3) == ["wave", "workflow", "list"] { return catalog }
-            if args == ["wave", "workflow", "source", "code"] { return source }
             throw RegistryQueryError("Unexpected command: \(args)")
-        }, repoPath: repo.path)
+        }, repoPath: "/tmp/repo")
         await model.loadWorkflowCatalog()
         let entry = try #require(model.workflowCatalog.value?.first { $0.name == "code" })
         let view = WorkflowCatalogInspector(entry: entry, model: model)
         #expect(try view.inspect().find(text: "builtin Workflow").string() == "builtin Workflow")
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
         _ = try view.inspect().find(button: "Customize")
-        let url = try await model.workflowDefinitionFile(entry)
-        #expect(url.path.hasSuffix(".lf/workflows/code.yaml"))
-        #expect(try String(contentsOf: url, encoding: .utf8) == source)
     }
 
     @Test("An unplaced Task and its CLI comment thread render without a display")

@@ -370,13 +370,17 @@ struct SessionPaneView: View {
         .clipShape(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius))
         // Retained pane selection is not proof of native keyboard focus. Only the
         // frame animates: an animated pane would animate its terminal's layout too.
-        .animation(DesignAnimation.standard(reduceMotion)) { pane in
-            pane.overlay {
-                RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)
-                    .strokeBorder(isFocused ? theme.palette.borderStrong : theme.palette.border, lineWidth: 1)
-                    .allowsHitTesting(false)
-            }
-            .shadow(color: theme.palette.shadow.opacity(isFocused ? 0.08 : 0), radius: 2, y: 1)
+        .overlay {
+            RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)
+                .strokeBorder(isFocused ? theme.palette.borderStrong : theme.palette.border, lineWidth: 1)
+                .animation(DesignAnimation.standard(reduceMotion), value: isFocused)
+                .allowsHitTesting(false)
+        }
+        .background {
+            RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)
+                .fill(theme.terminal.background.color)
+                .shadow(color: theme.palette.shadow.opacity(isFocused ? 0.08 : 0), radius: 2, y: 1)
+                .animation(DesignAnimation.standard(reduceMotion), value: isFocused)
         }
         .renderFlash()
         .accessibilityElement(children: .contain)

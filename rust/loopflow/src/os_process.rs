@@ -243,6 +243,8 @@ pub(crate) fn resolve_lf_binary() -> Result<PathBuf> {
             .filter(|value| !value.is_empty())
             .or_else(|| std::env::var_os("CARGO_BIN_EXE_lf"))
             .map(PathBuf::from)
+    } else if let Some(helper) = crate::installation::desktop_helper() {
+        Some(helper)
     } else {
         // The gate selects and verifies the installed artifact when executed.
         let gate = crate::installation::entry_gate_path(

@@ -118,7 +118,7 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
    `planning_lookup_tests` and some planning/store tests fail only when they share a runner with
    `ship`/`task_work`/`ops::linear` and pass alone. The pre-existing
    `agent_session_identity_is_durable…` failures are still open.
-   Check (2026-10-22, on 71dd11e3c8): both flagged launch tests pass alone; the chooser refuses a
+   Check (2026-10-22, on 71dd11e3c8, rerun on 042a007194): both flagged launch tests pass alone; the chooser refuses a
    bare run at `review` naming both routes, and a failed completion at `end` keeps the arrival,
    leaves completion pending and never replays (main's
    `successful_final_graph_keeps_arrival_when_completion_fails_and_never_replays`).
@@ -126,6 +126,10 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
    failures (22/22 alone); clippy ok. Deleted
    `a_task_takes_up_the_workflow_when_an_autonomous_graph_has_the_same_name`:
    with one definition kind in `.lf/graphs/` it overwrote the Workflow it meant to shadow.
+   Open for review: the step feedback on 12c90521fa read a failed completion at `end` as one that
+   should let `lf task run` exit 0. 71dd11e3c8 kept main's contract instead: the run exits
+   non-zero naming the unmerged PR, and the arrival and pending completion stay. Making it exit 0
+   would change main's pinned behaviour, so that call belongs to Jack Heart at review.
 
 Settled (2026-10-22):
 - State-model cleanup (was item 3). `AbandonIntent`/`abandon_requested_at` and the duplicate DTO

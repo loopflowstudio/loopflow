@@ -805,7 +805,26 @@ final class WorkModel {
     var projection: WorkProjection {
         WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: sessions.value ?? [])
     }
+    /// Built from the whole projection, so it is computed once per change to
+    /// what it reads, not on each of the several reads per window render.
     var breadcrumb: WorkBreadcrumb? {
+        _ = breadcrumbGeneration
+        if let memo = breadcrumbMemo { return memo.value }
+        let value = withObservationTracking { currentBreadcrumb() } onChange: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.breadcrumbMemo = nil
+                self.breadcrumbGeneration &+= 1
+            }
+        }
+        breadcrumbMemo = BreadcrumbMemo(value: value)
+        return value
+    }
+    private var breadcrumbGeneration = 0
+    @ObservationIgnored private var breadcrumbMemo: BreadcrumbMemo?
+    private struct BreadcrumbMemo { let value: WorkBreadcrumb? }
+
+    private func currentBreadcrumb() -> WorkBreadcrumb? {
         // A Dashboard heads its own trail; no member Task or Session does.
         if navigation.showsSelection { return nil }
         if let current = projection.breadcrumb(selection: selection, sessionId: navigation.selectedSessionId) {

@@ -105,7 +105,23 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
 
 1. **Re-demo** on the branch build. The pending items are under Demo findings: the heading
    placement (variant B), the `loopflow://` world links and `unstarted` world Tasks.
-2. **Gate.** Run the acceptance check below. Also clear the shared-runner isolation failures:
+2. **Docs still teach the deleted model** (concept review, 2026-10-22). The code is right; fix
+   the prose before the gate:
+   - `docs/authoring.md` "Graphs in chat" teaches `human: true` and its YAML example uses
+     `step: {…, human: true}`. Use `interactive: {name: demo, id: review}`; the chat recipe text
+     (`graph/instructions.rs`) already says to wait for the participant there.
+   - `docs/config.md` ("Graphs hold autonomous steps only; a `human: true` step is rejected at
+     launch") and `docs/architecture/planning.md` ("launching one with a `human: true` step is
+     rejected") describe a rejection that no longer exists. `lf graph` runs to its first stage and
+     stops ("Reached {stage}… a Task carries the graph on from there", `GraphOutcome::Staged`).
+   - `docs/lf.md` under `automation: {retries: 1}`: "a completed blocked repair waits for changed
+     evidence" contradicts "never gives up". A finished attempt is followed by `<identity>#n+1`
+     after a 1→30 min backoff (`pr_landing::next_attempt`); `retries` caps only startup retries
+     within one attempt. Say that.
+   - Not in this Task: the `automation:` config key now names a deleted concept (its only field is
+     repair startup retries). `.lf/config.yaml` is read by released lf, so a rename needs the
+     shared-file fallback plus a removal Task; leave it.
+3. **Gate.** Run the acceptance check below. Also clear the shared-runner isolation failures:
    `planning_lookup_tests` and some planning/store tests fail only when they share a runner with
    `ship`/`task_work`/`ops::linear` and pass alone. The pre-existing
    `agent_session_identity_is_durable…` failures are still open.
@@ -125,7 +141,7 @@ Settled (2026-10-22):
 - Placement (Jack, variant B): main-pane heading only, hover-revealed. Variant C (Workflow rail)
   comes later and is still unsettled.
 
-3. **Post-merge `verify` (Jack Heart, 2026-10-22). ON HOLD — do not build yet.** Jack then
+4. **Post-merge `verify` (Jack Heart, 2026-10-22). ON HOLD — do not build yet.** Jack then
    added: "its notable that right now verify often wants to be human, and its very task by task
    if needed" and "im not exactly sure how to fit that into our model". Then, correcting the
    operator's "human-only stage" reading: "no verify is not a stage only humans can do". So verify

@@ -856,7 +856,11 @@ final class WorkModel {
             for (repo, navigation) in navigationByRepo {
                 guard let selection = navigation.selection, selection.kind == .task else { continue }
                 if let task = roadmap.value?.tasks.items.first(where: { $0.id == selection.id || $0.runtime?.workId == selection.id }) {
-                    navigation.selectedTaskEvidence = (roadmap.value?.waves.first { $0.wave.id == task.task.waveId }, task)
+                    let wave = roadmap.value?.waves.first { $0.wave.id == task.task.waveId }
+                    // A tuple is not Equatable, so an unchanged write would still notify.
+                    if navigation.selectedTaskEvidence?.task != task || navigation.selectedTaskEvidence?.wave != wave {
+                        navigation.selectedTaskEvidence = (wave, task)
+                    }
                 }
             }
         }
@@ -1347,7 +1351,10 @@ final class WorkModel {
                 break
             }
             guard body.task == task.task.identifier else { return }
-            comments.receive(body.comments, for: task.id)
+            // TaskReadings is not Equatable; skip unchanged comments unless a read is superseded.
+            if comments.inFlight.contains(task.id) || comments[task.id] != .available(body.comments) {
+                comments.receive(body.comments, for: task.id)
+            }
             let next = WorkReading.available(body.work)
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
             let runs = Dictionary(body.graphProcesses.map { ($0.entry.id, $0) }) { _, newer in newer }
@@ -1360,7 +1367,8 @@ final class WorkModel {
                 break
             }
             guard body.task == task.task.identifier else { return }
-            taskDiagnostics.values[task.id] = .available(body.work)
+            let diagnostics = WorkReading.available(body.work)
+            if taskDiagnostics[task.id] != diagnostics { taskDiagnostics.values[task.id] = diagnostics }
         case .wave(let body):
             guard answers >= scopeFloor, let detailWaveId else { return }
             guard body == nil || body?.wave == detailWaveId else { return }
@@ -1373,7 +1381,7 @@ final class WorkModel {
                 break
             }
             guard body.scope == scope else { return }
-            workActivityScope = scope
+            if workActivityScope != scope { workActivityScope = scope }
             let next = WorkReading.available(body.snapshot)
             if workActivity != next { workActivity = next }
         case .activity(let body):

@@ -1,7 +1,7 @@
 # LOO-561 · Ship it — plan
 
-Status (2026-10-22, realign): design accepted (Jack Heart, 2026-10-21/22); every accepted
-slice is built and committed. What's left: doc fixes, re-demo and gate (see Remaining). Post-merge verify is
+Status (2026-10-22, concept review): design accepted (Jack Heart, 2026-10-21/22); every accepted
+slice is built and committed. What's left: item 0 doc drift, re-demo and gate (see Remaining). Post-merge verify is
 on hold. This Task's schema draft is `store/migrations/drafts/ship_it.sql`, the only draft on the branch.
 
 ## Direction from Jack Heart (2026-10-21, design review)
@@ -102,6 +102,19 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
   in `pr_landing.rs`; the stand-in decision in `lf/commands/ship.rs` reads as one match.
 
 ## Remaining
+
+0. **Docs drift (third concept review, 2026-10-22).** Docs still teach the deleted
+   `.lf/workflows/` directory and the old Task-level node/edge words:
+   - `README.md:346` model table: Workflow lives in `.lf/workflows/*.yaml` and "gives a Task
+     nodes … joined by the Graphs between them". It is a graph in `.lf/graphs/` whose
+     `interactive:` steps are stages; `README.md:163` "take the edge" → route.
+   - `docs/authoring.md:297-316`: "edge"/"node" for the Task position (→ route/stage); builtins
+     listed as `feature` (design, demo, land), `code` (demo, land), `research` (findings). Stage
+     ids are skill names: `feature` (review-design, demo, then `deliver`), `code` (demo, then
+     `deliver`), `research` (research, no PR). The customize recipe writes `.lf/workflows/`; use
+     `lf graph customize feature` (copies into `.lf/graphs/`), then `lf wave workflow set`.
+   - `docs/lf.md:341` and `docs/waves.md:353` comments: `.lf/workflows/` → `.lf/graphs/`.
+   Graph-level "backward edge" (loopflow) stays: it is a graph term, not a Task position.
 
 1. **Re-demo** on the branch build. The pending items are under Demo findings: the heading
    placement (variant B), the `loopflow://` world links and `unstarted` world Tasks.

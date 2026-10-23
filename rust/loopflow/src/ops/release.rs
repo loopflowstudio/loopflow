@@ -1337,12 +1337,32 @@ fn release_run_inner(
             commit
         } else if let Some(pr) = existing_pr {
             match pr.state.as_str() {
-                "MERGED" => pr.merge_commit.map(|commit| commit.oid).ok_or_else(|| {
-                    OpsError::Message(format!(
-                        "release PR #{} is merged but its merge commit is unavailable",
-                        pr.number
-                    ))
-                })?,
+                "MERGED" => {
+                    let release_commit =
+                        pr.merge_commit.map(|commit| commit.oid).ok_or_else(|| {
+                            OpsError::Message(format!(
+                                "release PR #{} is merged but its merge commit is unavailable",
+                                pr.number
+                            ))
+                        })?;
+                    // No candidate was built yet, so the version is unspent: corrections
+                    // merged after the release PR ship under the same version.
+                    let main_ref = format!("origin/{default_branch}");
+                    let current_main = run_stdout(&main_repo, "git", &["rev-parse", &main_ref])?;
+                    // A minor publishes its patch's exact snapshot, never a later main.
+                    if minor.is_none()
+                        && current_main != release_commit
+                        && is_ancestor(&main_repo, &release_commit, &current_main)
+                    {
+                        progress.status(&format!(
+                            "Release PR #{} merged at {release_commit}; building {main_ref} at {current_main} with the fixes merged since...",
+                            pr.number
+                        ));
+                        current_main
+                    } else {
+                        release_commit
+                    }
+                }
                 "OPEN" => {
                     let head_sha = pr.head_ref_oid.as_deref().ok_or_else(|| {
                         OpsError::Message(format!(
@@ -5200,6 +5220,14 @@ fn run_release_hooks(
         })?;
     }
     Ok(())
+}
+
+fn is_ancestor(repo: &Path, ancestor: &str, descendant: &str) -> bool {
+    Command::new("git")
+        .args(["merge-base", "--is-ancestor", ancestor, descendant])
+        .current_dir(repo)
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn run_stdout(repo: &Path, command: &str, args: &[&str]) -> OpsResult<String> {

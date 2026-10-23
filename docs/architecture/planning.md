@@ -698,12 +698,12 @@ and Graph membership never substitute for that authority.
 ## Author and discover executable targets
 
 `Target` is the shared executable value: Skill, Command, Graph, or Xor.
-A `Graph` contains `Step { target, id, human, repeat }`; Xor paths contain the same Steps.
+A `Graph` contains `Step { target, id, interactive, returns }`; Xor paths contain the same Steps.
 Loading resolves bare names and `graph:` names graph-first, including nested Graph
 bodies, and rejects recursive references. `step:` selects a Skill explicitly,
 retaining its name and options until compilation; Xor router names also load then.
 Loading a Graph alone does not capture all instruction bodies.
-There is no separate GraphRef node. Review IDs and repeat edges belong to the
+There is no separate GraphRef node. Occurrence IDs and return targets belong to the
 Step itself, not to a reusable Target.
 
 Compilation produces `ConcreteStep` plans containing every Skill body and Xor

@@ -20,7 +20,6 @@
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -37,8 +36,16 @@ use uuid::Uuid;
 use crate::build_info::{self, MigrationAuthority};
 use crate::store::migrations;
 
+mod agent;
+mod bundle;
+mod gh;
 mod published;
+mod shell_path;
+pub use agent::install_agent;
+pub use bundle::{activate_app, app_destination};
+pub use gh::install_gh;
 pub use published::{latest, schedule};
+pub use shell_path::configure as configure_shell_path;
 
 /// The candidate binary's identity. The process running `lf install` *is* the
 /// candidate, so every field comes from its own compiled-in build metadata.
@@ -1461,16 +1468,15 @@ fn retained_binary_path(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
 }
 
 fn app_executable_paths(
-    selection: &crate::installation::InstallSelection,
+    selection: Option<&crate::installation::InstallSelection>,
     app_target: Option<&Path>,
 ) -> Vec<PathBuf> {
     let Some(bundle) = app_target else {
         return Vec::new();
     };
     let mut paths = selection
-        .artifact_set
-        .artifacts
-        .iter()
+        .into_iter()
+        .flat_map(|selection| &selection.artifact_set.artifacts)
         .filter(|artifact| {
             matches!(
                 artifact.role,
@@ -1677,11 +1683,6 @@ fn quiesce_app_processes(paths: &[PathBuf]) -> Result<()> {
     if paths.is_empty() {
         return Ok(());
     }
-    let _ = Command::new("/usr/bin/osascript")
-        .args(["-e", "tell application id \"com.loopflow.mac\" to quit"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
     let deadline = Instant::now() + Duration::from_secs(10);
     let force_at = Instant::now() + Duration::from_secs(5);
     loop {
@@ -1725,20 +1726,20 @@ fn quiesce_app_processes(_paths: &[PathBuf]) -> Result<()> {
 }
 
 fn quiesce_switch_app(root: &Path, receipt: &mut crate::installation::SwitchReceipt) -> Result<()> {
-    let paths = receipt
-        .prior
-        .as_ref()
-        .map(|prior| app_executable_paths(prior, receipt.activation.app.as_deref()))
-        .unwrap_or_default();
-    receipt.app_was_running = !running_app_processes(&paths)?.is_empty();
+    let paths = app_executable_paths(receipt.prior.as_ref(), receipt.activation.app.as_deref());
+    // Helpers alone do not mean a window was open. Preserve an earlier
+    // observation when recovering after the app has already stopped.
+    receipt.app_was_running |= running_app_processes(&paths)?
+        .iter()
+        .any(|(_, path)| path.file_name().is_some_and(|name| name == "Loopflow"));
     crate::installation::write_switch(root, receipt)?;
     quiesce_app_processes(&paths)
 }
 
-#[cfg(target_os = "macos")]
-fn resume_switch_app(receipt: &crate::installation::SwitchReceipt) -> Result<()> {
+#[cfg(any(target_os = "macos", test))]
+fn app_to_resume(receipt: &crate::installation::SwitchReceipt) -> Result<Option<&Path>> {
     if !receipt.app_was_running {
-        return Ok(());
+        return Ok(None);
     }
     let app = receipt
         .activation
@@ -1748,22 +1749,30 @@ fn resume_switch_app(receipt: &crate::installation::SwitchReceipt) -> Result<()>
     let selection = if receipt.target_store_advance_started {
         &receipt.target
     } else {
-        receipt.prior.as_ref().context("no prior app to resume")?
+        // Before a first install advances, the copied app is still in place.
+        // Its bytes must match the retained candidate before reopening it.
+        receipt.prior.as_ref().unwrap_or(&receipt.target)
     };
     verify_selected_app_bundle(app, &selection.artifact_set)?;
-    let status = Command::new("/usr/bin/open")
-        .args(["-g"])
-        .arg(app)
-        .status()
-        .with_context(|| format!("restart installed app {}", app.display()))?;
-    if !status.success() {
-        return Err(anyhow!("restart installed app {}: {status}", app.display()));
-    }
+    Ok(Some(app))
+}
+
+#[cfg(target_os = "macos")]
+fn resume_switch_app(receipt: &crate::installation::SwitchReceipt) -> Result<()> {
+    let Some(app) = app_to_resume(receipt)? else {
+        return Ok(());
+    };
     let expected = [app.join("Contents/MacOS/Loopflow")];
+    // A previous attempt may have opened the app before the coordinator exited.
+    // Observe it before asking Launch Services to open another window.
+    if !running_app_processes(&expected)?.is_empty() {
+        return Ok(());
+    }
+    open_installed_app(app)?;
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         if !running_app_processes(&expected)?.is_empty() {
-            verify_selected_app_bundle(app, &selection.artifact_set)?;
+            app_to_resume(receipt)?;
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -1772,6 +1781,26 @@ fn resume_switch_app(receipt: &crate::installation::SwitchReceipt) -> Result<()>
         "installed app {} did not report the expected executable within 10s",
         app.display()
     ))
+}
+
+#[cfg(all(target_os = "macos", not(test)))]
+fn open_installed_app(app: &Path) -> Result<()> {
+    let status = Command::new("/usr/bin/open")
+        .args(["-g"])
+        .arg(app)
+        .status()
+        .with_context(|| format!("restart installed app {}", app.display()))?;
+    if !status.success() {
+        return Err(anyhow!("restart installed app {}: {status}", app.display()));
+    }
+    Ok(())
+}
+
+// Unit tests may observe fixture processes, but must never open a GUI on the
+// developer's account. A missing fixture process exercises failed-open recovery.
+#[cfg(all(target_os = "macos", test))]
+fn open_installed_app(_app: &Path) -> Result<()> {
+    Err(anyhow!("app launch unavailable in isolated process tests"))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -1953,6 +1982,12 @@ fn bootstrap_published_install(
         selection,
         published_fallback: fallback.clone(),
         retained_published_sets: vec![fallback],
+        activation: Some(crate::installation::ActivationTargets {
+            cli: artifacts.cli_target.to_path_buf(),
+            daemon: None,
+            app: artifacts.app_target.map(Path::to_path_buf),
+            legacy_app: None,
+        }),
     };
     crate::installation::write_active(root, &active)?;
     Ok(active)
@@ -2063,21 +2098,13 @@ fn restore_before_advance(
     lock: crate::promotion_lock::PromotionLock,
     error: anyhow::Error,
 ) -> anyhow::Error {
-    let clear = crate::installation::clear_switch(root, &receipt.id);
+    let restore = cancel_unadvanced_switch(root, receipt);
     drop(lock);
-    let app = resume_switch_app(receipt);
-    match (clear, app) {
-        (Ok(()), Ok(())) => error,
-        (clear, app) => anyhow!(
-            "{error}; restoring the prior install also failed (receipt: {}, app: {})",
-            clear
-                .err()
-                .map(|error| error.to_string())
-                .unwrap_or_else(|| "ok".to_string()),
-            app.err()
-                .map(|error| error.to_string())
-                .unwrap_or_else(|| "ok".to_string())
-        ),
+    match restore {
+        Ok(()) => error,
+        Err(restore) => {
+            anyhow!("{error}; prior installation recovery remains pending: {restore:#}")
+        }
     }
 }
 
@@ -2316,8 +2343,21 @@ fn exact_published_switch_candidate(
 }
 
 fn active_install_from_switch(
+    root: &Path,
     receipt: &crate::installation::SwitchReceipt,
-) -> crate::installation::ActiveInstall {
+) -> Result<crate::installation::ActiveInstall> {
+    // A replacement coordinator keeps the record an earlier one already wrote.
+    // Until then, the recorded install names the fallback being replaced; the
+    // receipt's own copy becomes the target's once the selection commits.
+    let recorded = crate::installation::active_install(root)?;
+    if let Some(active) = recorded.as_ref() {
+        if active.selection == receipt.target {
+            return Ok(active.clone());
+        }
+    }
+    let prior_fallback = recorded
+        .map(|active| active.published_fallback)
+        .or_else(|| receipt.published_fallback.clone());
     let published_fallback = match receipt.target.source {
         crate::installation::InstallSource::Published => receipt
             .target_published_fallback
@@ -2328,15 +2368,16 @@ fn active_install_from_switch(
             .clone()
             .expect("validated development switch retains a published fallback"),
     };
-    crate::installation::ActiveInstall {
+    Ok(crate::installation::ActiveInstall {
         schema_version: 1,
         selection: receipt.target.clone(),
         retained_published_sets: retained_published_sets(
             &published_fallback,
-            receipt.published_fallback.as_ref(),
+            prior_fallback.as_ref(),
         ),
         published_fallback,
-    }
+        activation: Some(receipt.activation.clone()),
+    })
 }
 
 /// A settled install keeps its published fallback and the one it replaced.
@@ -2349,7 +2390,7 @@ fn retained_published_sets(
     retained
 }
 
-fn settle_switch(
+fn commit_switch_selection(
     root: &Path,
     receipt: &mut crate::installation::SwitchReceipt,
     active: &crate::installation::ActiveInstall,
@@ -2357,10 +2398,28 @@ fn settle_switch(
     receipt.published_fallback = Some(active.published_fallback.clone());
     receipt.phase = crate::installation::SwitchPhase::Settled;
     receipt.active_selection_committed = true;
-    crate::installation::write_switch(root, receipt)?;
+    // Ordinary app/helper startup now routes to the target, while the active
+    // receipt still owns the unfinished app reopen.
+    crate::installation::write_switch(root, receipt)
+}
+
+fn finish_switch(
+    root: &Path,
+    receipt: &crate::installation::SwitchReceipt,
+    active: &crate::installation::ActiveInstall,
+) -> Result<()> {
+    resume_switch_app(receipt)?;
     crate::installation::settle_switch(root, receipt, active)?;
     prune_superseded_artifacts(root, &lf_bin_dir(), active);
     Ok(())
+}
+
+fn cancel_unadvanced_switch(
+    root: &Path,
+    receipt: &crate::installation::SwitchReceipt,
+) -> Result<()> {
+    resume_switch_app(receipt)?;
+    crate::installation::clear_switch(root, &receipt.id)
 }
 
 fn is_content_addressed(name: &str, labels: &[&str]) -> bool {
@@ -2491,17 +2550,15 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     if receipt.phase == crate::installation::SwitchPhase::Settled
         && receipt.active_selection_committed
     {
-        let active = active_install_from_switch(&receipt);
-        crate::installation::settle_switch(&root, &receipt, &active)?;
-        prune_superseded_artifacts(&root, &lf_bin_dir(), &active);
+        let active = active_install_from_switch(&root, &receipt)?;
+        finish_switch(&root, &receipt, &active)?;
         drop(lock);
         return Ok(());
     }
 
     if !receipt.target_store_advance_started {
-        crate::installation::clear_switch(&root, &receipt.id)?;
+        cancel_unadvanced_switch(&root, &receipt)?;
         drop(lock);
-        resume_switch_app(&receipt)?;
         return Ok(());
     }
 
@@ -2536,13 +2593,9 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
             | crate::installation::SwitchPhase::Quiesced
             | crate::installation::SwitchPhase::Planned
     );
-    let mut paths = receipt
-        .prior
-        .as_ref()
-        .map(|prior| app_executable_paths(prior, receipt.activation.app.as_deref()))
-        .unwrap_or_default();
+    let mut paths = app_executable_paths(receipt.prior.as_ref(), receipt.activation.app.as_deref());
     paths.extend(app_executable_paths(
-        &receipt.target,
+        Some(&receipt.target),
         receipt.activation.app.as_deref(),
     ));
     paths.sort();
@@ -2555,9 +2608,9 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
         crate::installation::write_switch(&root, &receipt)?;
     }
 
-    let active = active_install_from_switch(&receipt);
-    settle_switch(&root, &mut receipt, &active)?;
-    resume_switch_app(&receipt)?;
+    let active = active_install_from_switch(&root, &receipt)?;
+    commit_switch_selection(&root, &mut receipt, &active)?;
+    finish_switch(&root, &receipt, &active)?;
     if let Some(legacy) = receipt.activation.legacy_app.as_deref() {
         remove_path(legacy)?;
     }
@@ -2624,6 +2677,9 @@ fn promote_published_from_installation(
         println!("  (preview only: no target changed)");
         return Ok(());
     }
+    if let Some(app_source) = artifacts.app_source {
+        bundle::verify_signed_app(app_source)?;
+    }
 
     if prior.is_none() && store_path.exists() {
         prior = Some(bootstrap_published_install(&root, &artifacts)?);
@@ -2670,7 +2726,7 @@ fn promote_published_from_installation(
         prior: prior.as_ref().map(|prior| prior.selection.clone()),
         target: target.clone(),
         published_fallback: prior.as_ref().map(|prior| prior.published_fallback.clone()),
-        target_published_fallback: Some(target_published_fallback.clone()),
+        target_published_fallback: Some(target_published_fallback),
         phase: crate::installation::SwitchPhase::Planned,
         recovery_owner: crate::installation::RecoveryOwner::Coordinator,
         target_store_advance_started: false,
@@ -2720,18 +2776,10 @@ fn promote_published_from_installation(
     )?;
     switch.phase = crate::installation::SwitchPhase::Activated;
     crate::installation::write_switch(&root, &switch)?;
-    let active = crate::installation::ActiveInstall {
-        schema_version: 1,
-        selection: target.clone(),
-        published_fallback: target_published_fallback.clone(),
-        retained_published_sets: retained_published_sets(
-            &target_published_fallback,
-            prior.as_ref().map(|prior| &prior.published_fallback),
-        ),
-    };
+    let active = active_install_from_switch(&root, &switch)?;
     settle_app_artifacts(&prepared)?;
-    settle_switch(&root, &mut switch, &active)?;
-    resume_switch_app(&switch)?;
+    commit_switch_selection(&root, &mut switch, &active)?;
+    finish_switch(&root, &switch, &active)?;
     println!(
         "promoted published {}: {} -> {} (store {})",
         preview.candidate.display_version(),
@@ -2760,7 +2808,44 @@ pub fn promote(
     {
         delegate_switch_recovery(&receipt)?;
     } else {
+        // A published app update without an explicit destination replaces the
+        // copy this machine recorded, never a second one in /Applications.
+        let resolved_app_target;
+        let resolved_legacy_target;
+        let mut artifacts = artifacts;
+        if artifacts.app_source.is_some() && artifacts.app_target.is_none() {
+            resolved_app_target = app_destination()?;
+            let parent = resolved_app_target
+                .parent()
+                .expect("an app destination has a parent directory");
+            fs::create_dir_all(parent)
+                .with_context(|| format!("create application directory {}", parent.display()))?;
+            resolved_legacy_target = parent.join("Concerto.app");
+            artifacts.app_target = Some(&resolved_app_target);
+            artifacts.legacy_app_target = artifacts
+                .legacy_app_target
+                .or(Some(&resolved_legacy_target));
+        }
         let current = fs::canonicalize(std::env::current_exe()?)?;
+        // A published helper invoked from the app must leave the bundle before
+        // quiescing its processes or replacing its files. Keep the same PID and
+        // invocation, now backed by retained bytes outside the activation target.
+        if !preview_only {
+            let in_bundle = [artifacts.app_source, artifacts.app_target]
+                .into_iter()
+                .flatten()
+                .map(crate::store::canonicalize_with_missing_tail)
+                .collect::<std::io::Result<Vec<_>>>()?
+                .iter()
+                .any(|bundle| current.starts_with(bundle));
+            if in_bundle {
+                let retained = stage_binary(&current, &lf_bin_dir())?;
+                return Err(Command::new(&retained)
+                    .args(std::env::args_os().skip(1))
+                    .exec())
+                .context("continue promotion outside the app bundle");
+            }
+        }
         promote_published_from_installation(artifacts, &current, sync_skills, preview_only)?;
     }
     if sync_skills && !preview_only {
@@ -2840,7 +2925,7 @@ fn rollback_from_store(cli_target: &Path, candidate: &Path, bin_dir: &Path) -> R
 mod artifact_tests {
     use super::{
         app_executable_paths, commit_cli_symlink, copy_tree, prune_superseded_artifacts,
-        retained_published_sets, stage_binary, tree_digest,
+        retained_published_sets, stage_app_copy, stage_binary, tree_digest,
     };
     use crate::installation::{
         ActiveInstall, ArtifactIdentity, ArtifactRole, ArtifactSet, InstallSelection, InstallSource,
@@ -2882,8 +2967,11 @@ mod artifact_tests {
             store: "/store/loopflow.db".into(),
         };
 
-        assert!(app_executable_paths(&selection, None).is_empty());
-        let paths = app_executable_paths(&selection, Some(Path::new("/Applications/Loopflow.app")));
+        assert!(app_executable_paths(Some(&selection), None).is_empty());
+        let paths = app_executable_paths(
+            Some(&selection),
+            Some(Path::new("/Applications/Loopflow.app")),
+        );
         assert_eq!(
             paths,
             [
@@ -2955,6 +3043,7 @@ mod artifact_tests {
             },
             retained_published_sets: retained_published_sets(&fallback, Some(&prior)),
             published_fallback: fallback,
+            activation: None,
         };
         prune_superseded_artifacts(&root, &bin, &active);
         let survived = running.exists();
@@ -3034,5 +3123,461 @@ mod artifact_tests {
                 & 0o777,
             0o755
         );
+    }
+
+    #[test]
+    fn staging_a_copied_app_at_its_own_destination_preserves_the_original() {
+        let directory = tempfile::tempdir().unwrap();
+        let app = directory.path().join("Loopflow.app");
+        fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        fs::write(app.join("Contents/MacOS/Loopflow"), b"app").unwrap();
+        let original = tree_digest(&app).unwrap();
+
+        let staged = stage_app_copy(&app, &app).unwrap();
+
+        assert_ne!(staged, app);
+        assert_eq!(tree_digest(&app).unwrap(), original);
+        assert_eq!(tree_digest(&staged).unwrap(), original);
+    }
+}
+
+#[cfg(test)]
+mod app_activation_tests {
+    use std::fs;
+    use std::path::Path;
+
+    use super::{app_to_resume, copy_tree};
+    use crate::installation::{
+        ActivationTargets, ArtifactIdentity, ArtifactRole, ArtifactSet, InstallSelection,
+        InstallSource, RecoveryOwner, SwitchPhase, SwitchReceipt,
+    };
+
+    fn first_install(directory: &Path) -> SwitchReceipt {
+        let directory = directory.canonicalize().unwrap();
+        let app = directory.join("Applications/Loopflow.app");
+        let binaries = app.join("Contents/MacOS");
+        fs::create_dir_all(&binaries).unwrap();
+        for name in ["Loopflow", "lf"] {
+            fs::copy("/bin/sleep", binaries.join(name)).unwrap();
+        }
+        fs::write(
+            app.join("Contents/version"),
+            directory.to_string_lossy().as_bytes(),
+        )
+        .unwrap();
+        let retained = directory.join("retained/Loopflow.app");
+        fs::create_dir_all(retained.parent().unwrap()).unwrap();
+        copy_tree(&app, &retained).unwrap();
+        fs::write(directory.join("cli"), b"cli").unwrap();
+        let cli = ArtifactIdentity::capture(ArtifactRole::Cli, &directory.join("cli")).unwrap();
+        let set = ArtifactSet {
+            id: "published-test".to_string(),
+            source: InstallSource::Published,
+            source_revision: "test-revision".to_string(),
+            source_identity: "test-identity".to_string(),
+            content_sha256: crate::installation::artifact_set_sha256(
+                &cli.path,
+                None,
+                Some(&retained),
+            )
+            .unwrap(),
+            artifacts: vec![
+                cli.clone(),
+                ArtifactIdentity::capture(
+                    ArtifactRole::App,
+                    &retained.join("Contents/MacOS/Loopflow"),
+                )
+                .unwrap(),
+                ArtifactIdentity::capture(
+                    ArtifactRole::AppHelper("lf".to_string()),
+                    &retained.join("Contents/MacOS/lf"),
+                )
+                .unwrap(),
+            ],
+        };
+        SwitchReceipt {
+            schema_version: 1,
+            id: "switch-first-app".to_string(),
+            prior: None,
+            target: InstallSelection {
+                installation_id: "published-test".to_string(),
+                source: InstallSource::Published,
+                artifact_set: set.clone(),
+                store: directory.join("loopflow.db"),
+            },
+            published_fallback: None,
+            target_published_fallback: Some(set),
+            phase: SwitchPhase::Planned,
+            recovery_owner: RecoveryOwner::Coordinator,
+            target_store_advance_started: false,
+            target_store_advanced: false,
+            active_selection_committed: false,
+            coordinator: cli.clone(),
+            candidate: cli,
+            activation: ActivationTargets {
+                cli: directory.join("bin/lf"),
+                daemon: None,
+                app: Some(app),
+                legacy_app: None,
+            },
+            app_was_running: false,
+            disposable_store_owned: false,
+        }
+    }
+
+    fn activated_install(directory: &Path) -> SwitchReceipt {
+        let mut receipt = first_install(directory);
+        receipt.phase = SwitchPhase::Activated;
+        receipt.recovery_owner = RecoveryOwner::Candidate;
+        receipt.target_store_advance_started = true;
+        receipt.target_store_advanced = true;
+        receipt
+    }
+
+    fn pending_switch(root: &Path) -> SwitchReceipt {
+        match crate::installation::read_state(root).unwrap() {
+            crate::installation::InstallationState::Switching(receipt) => *receipt,
+            state => panic!("expected pending recovery, got {state:?}"),
+        }
+    }
+
+    fn assert_target_startup(root: &Path, receipt: &SwitchReceipt) {
+        let app = receipt.activation.app.as_ref().unwrap();
+        for (path, role) in [
+            (receipt.candidate.path.clone(), ArtifactRole::Cli),
+            (app.join("Contents/MacOS/lf"), ArtifactRole::Cli),
+        ] {
+            assert_eq!(
+                crate::installation::authorize(root, &path, &role).unwrap(),
+                Some(receipt.target.clone()),
+            );
+        }
+    }
+
+    #[test]
+    fn helper_only_installation_completes_without_opening_an_app() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("machine");
+        let mut receipt = activated_install(directory.path());
+        crate::installation::write_switch(&root, &receipt).unwrap();
+        let active = super::active_install_from_switch(&root, &receipt).unwrap();
+        super::commit_switch_selection(&root, &mut receipt, &active).unwrap();
+        assert_target_startup(&root, &pending_switch(&root));
+
+        super::finish_switch(&root, &receipt, &active).unwrap();
+
+        assert!(matches!(
+            crate::installation::read_state(&root).unwrap(),
+            crate::installation::InstallationState::Settled(found) if *found == active
+        ));
+        assert!(!receipt.app_was_running);
+    }
+
+    #[test]
+    fn first_install_reopens_only_the_verified_copied_app() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut receipt = first_install(directory.path());
+        assert_eq!(app_to_resume(&receipt).unwrap(), None);
+        receipt.app_was_running = true;
+        assert_eq!(
+            app_to_resume(&receipt).unwrap(),
+            receipt.activation.app.as_deref()
+        );
+        receipt.target_store_advance_started = true;
+        assert_eq!(
+            app_to_resume(&receipt).unwrap(),
+            receipt.activation.app.as_deref()
+        );
+        fs::write(
+            receipt
+                .activation
+                .app
+                .as_ref()
+                .unwrap()
+                .join("Contents/resource"),
+            b"changed",
+        )
+        .unwrap();
+        assert!(app_to_resume(&receipt).is_err());
+    }
+
+    #[test]
+    fn interrupted_update_resumes_prior_bytes_only_until_store_advance() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut receipt = first_install(directory.path());
+        let prior_directory = tempfile::tempdir().unwrap();
+        let prior = first_install(prior_directory.path());
+        receipt.prior = Some(prior.target);
+        receipt.activation.app = prior.activation.app;
+        receipt.app_was_running = true;
+
+        assert_eq!(
+            app_to_resume(&receipt).unwrap(),
+            receipt.activation.app.as_deref()
+        );
+        receipt.target_store_advance_started = true;
+        assert!(app_to_resume(&receipt).is_err());
+        let target = receipt.activation.app.as_ref().unwrap();
+        fs::remove_dir_all(target).unwrap();
+        copy_tree(&directory.path().join("retained/Loopflow.app"), target).unwrap();
+        assert_eq!(
+            app_to_resume(&receipt).unwrap(),
+            receipt.activation.app.as_deref()
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    mod processes {
+        use std::process::{Child, Command};
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        use super::{activated_install, assert_target_startup, first_install, pending_switch};
+        use crate::installation::{self, ArtifactRole, InstallSource, InstallationState};
+        use crate::lf::commands::install::{quiesce_switch_app, running_app_processes};
+
+        struct FixtureProcess(Child);
+
+        impl Drop for FixtureProcess {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+
+        fn start_app(receipt: &installation::SwitchReceipt) -> FixtureProcess {
+            let path = receipt
+                .activation
+                .app
+                .as_ref()
+                .unwrap()
+                .join("Contents/MacOS/Loopflow");
+            let process = FixtureProcess(Command::new(&path).arg("30").spawn().unwrap());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while running_app_processes(std::slice::from_ref(&path))
+                .unwrap()
+                .is_empty()
+            {
+                assert!(Instant::now() < deadline, "fixture app did not start");
+                thread::sleep(Duration::from_millis(10));
+            }
+            process
+        }
+
+        #[test]
+        fn failed_reopen_preserves_target_startup_and_retry_completes_without_restart() {
+            for (update, source) in [
+                (false, InstallSource::Published),
+                (true, InstallSource::Published),
+                (true, InstallSource::Development),
+            ] {
+                let directory = tempfile::tempdir().unwrap();
+                let root = directory.path().join("machine");
+                let mut receipt = activated_install(directory.path());
+                let prior_directory = tempfile::tempdir().unwrap();
+                let mut expected_releases = Vec::new();
+                if update {
+                    let prior = first_install(prior_directory.path());
+                    expected_releases = vec![prior.target.artifact_set.clone()];
+                    let active = super::super::active_install_from_switch(&root, &prior).unwrap();
+                    installation::write_active(&root, &active).unwrap();
+                    receipt.coordinator = prior.candidate;
+                    receipt.published_fallback = Some(prior.target.artifact_set.clone());
+                    receipt.prior = Some(prior.target);
+                }
+                receipt.target.source = source;
+                receipt.target.artifact_set.source = source;
+                if source == InstallSource::Development {
+                    receipt.target_published_fallback = None;
+                } else {
+                    // A settled install keeps its fallback and the one it replaced.
+                    expected_releases.insert(0, receipt.target.artifact_set.clone());
+                }
+                receipt.app_was_running = true;
+                installation::write_switch(&root, &receipt).unwrap();
+                // Interruption before selection commit preserves ordinary startup's
+                // prior-store routing (and refuses an unfinished first install).
+                let mut receipt = pending_switch(&root);
+                if let Some(prior) = &receipt.prior {
+                    assert_eq!(
+                        installation::authorize(
+                            &root,
+                            &receipt.coordinator.path,
+                            &ArtifactRole::Cli
+                        )
+                        .unwrap(),
+                        Some(prior.clone()),
+                    );
+                } else {
+                    assert!(installation::authorize(
+                        &root,
+                        &receipt.candidate.path,
+                        &ArtifactRole::Cli
+                    )
+                    .is_err());
+                }
+                let active = super::super::active_install_from_switch(&root, &receipt).unwrap();
+                assert_eq!(active.retained_published_sets, expected_releases);
+                super::super::commit_switch_selection(&root, &mut receipt, &active).unwrap();
+                // Read durable state as a replacement coordinator would.
+                let receipt = pending_switch(&root);
+                let recovered = super::super::active_install_from_switch(&root, &receipt).unwrap();
+                assert_eq!(recovered, active);
+                assert_target_startup(&root, &receipt);
+                let error = super::super::finish_switch(&root, &receipt, &active).unwrap_err();
+                assert!(error.to_string().contains("app launch unavailable"));
+                assert_eq!(pending_switch(&root), receipt);
+                assert!(!root
+                    .join("receipts")
+                    .join(format!("{}.json", receipt.id))
+                    .exists());
+
+                // Simulate interruption after the app starts but before archival.
+                let mut app = start_app(&receipt);
+                super::super::resume_switch_app(&receipt).unwrap();
+                let receipt = pending_switch(&root);
+                super::super::finish_switch(&root, &receipt, &active).unwrap();
+                assert!(app.0.try_wait().unwrap().is_none());
+                assert!(matches!(
+                    installation::read_state(&root).unwrap(),
+                    InstallationState::Settled(found) if *found == active
+                ));
+                assert_target_startup(&root, &receipt);
+                // Model an exit after active.json and the archive are durable,
+                // but before removal of the active switch. Recovery must keep
+                // the exact retained selections and accept the immutable archive.
+                installation::write_switch(&root, &receipt).unwrap();
+                let recovered = super::super::active_install_from_switch(&root, &receipt).unwrap();
+                assert_eq!(recovered, active);
+                super::super::finish_switch(&root, &receipt, &recovered).unwrap();
+                assert!(app.0.try_wait().unwrap().is_none());
+                assert!(matches!(
+                    installation::read_state(&root).unwrap(),
+                    InstallationState::Settled(_)
+                ));
+                // No active receipt remains for later startup to replay.
+                assert!(root
+                    .join("receipts")
+                    .join(format!("{}.json", receipt.id))
+                    .is_file());
+            }
+        }
+
+        #[test]
+        fn failed_rollback_reopen_keeps_prior_selection_until_app_returns() {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path().join("machine");
+            let mut receipt = first_install(directory.path());
+            let prior_directory = tempfile::tempdir().unwrap();
+            let prior = first_install(prior_directory.path());
+            let active = super::super::active_install_from_switch(&root, &prior).unwrap();
+            installation::write_active(&root, &active).unwrap();
+            receipt.coordinator = prior.candidate;
+            receipt.activation.app = prior.activation.app;
+            receipt.published_fallback = Some(prior.target.artifact_set.clone());
+            receipt.prior = Some(prior.target.clone());
+            receipt.app_was_running = true;
+            installation::write_switch(&root, &receipt).unwrap();
+
+            assert!(super::super::cancel_unadvanced_switch(&root, &receipt).is_err());
+            let receipt = pending_switch(&root);
+            assert_eq!(
+                installation::authorize(&root, &receipt.coordinator.path, &ArtifactRole::Cli)
+                    .unwrap(),
+                Some(prior.target),
+            );
+            let mut app = start_app(&receipt);
+            super::super::cancel_unadvanced_switch(&root, &receipt).unwrap();
+            assert!(app.0.try_wait().unwrap().is_none());
+            assert!(matches!(
+                installation::read_state(&root).unwrap(),
+                InstallationState::Settled(found) if *found == active
+            ));
+            assert!(!root.join("receipts").exists());
+        }
+
+        #[test]
+        fn stopping_a_background_helper_does_not_request_an_app_window() {
+            let directory = tempfile::tempdir().unwrap();
+            let mut receipt = first_install(directory.path());
+            let helper = receipt
+                .activation
+                .app
+                .as_ref()
+                .unwrap()
+                .join("Contents/MacOS/lf");
+            let mut process = FixtureProcess(Command::new(&helper).arg("30").spawn().unwrap());
+            let waiter = thread::spawn(move || process.0.wait().unwrap());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while running_app_processes(std::slice::from_ref(&helper))
+                .unwrap()
+                .is_empty()
+            {
+                assert!(Instant::now() < deadline, "fixture helper did not start");
+                thread::sleep(Duration::from_millis(10));
+            }
+
+            quiesce_switch_app(directory.path(), &mut receipt).unwrap();
+
+            assert!(!waiter.join().unwrap().success());
+            assert!(!receipt.app_was_running);
+            assert_eq!(super::app_to_resume(&receipt).unwrap(), None);
+        }
+
+        #[test]
+        fn first_install_stops_its_app_and_helpers_without_stopping_another_copy() {
+            let directory = tempfile::tempdir().unwrap();
+            let mut receipt = first_install(directory.path());
+            let other = tempfile::tempdir().unwrap();
+            let other_receipt = first_install(other.path());
+            let app = receipt
+                .activation
+                .app
+                .as_ref()
+                .unwrap()
+                .join("Contents/MacOS/Loopflow");
+            let helper = receipt
+                .activation
+                .app
+                .as_ref()
+                .unwrap()
+                .join("Contents/MacOS/lf");
+            let other_app = other_receipt
+                .activation
+                .app
+                .as_ref()
+                .unwrap()
+                .join("Contents/MacOS/Loopflow");
+            let mut unrelated = FixtureProcess(Command::new(other_app).arg("30").spawn().unwrap());
+            let mut waiters = Vec::new();
+            for path in [&app, &helper] {
+                let mut process = FixtureProcess(Command::new(path).arg("30").spawn().unwrap());
+                waiters.push(thread::spawn(move || process.0.wait().unwrap()));
+            }
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while running_app_processes(&[app.clone(), helper.clone()])
+                .unwrap()
+                .len()
+                != 2
+            {
+                assert!(Instant::now() < deadline, "fixture processes did not start");
+                thread::sleep(Duration::from_millis(10));
+            }
+
+            quiesce_switch_app(directory.path(), &mut receipt).unwrap();
+
+            assert!(receipt.app_was_running);
+            for waiter in waiters {
+                assert!(!waiter.join().unwrap().success());
+            }
+            assert!(unrelated.0.try_wait().unwrap().is_none());
+            quiesce_switch_app(directory.path(), &mut receipt).unwrap();
+            assert!(receipt.app_was_running, "retry lost the restart intent");
+            let saved = crate::installation::read_state(directory.path()).unwrap();
+            let crate::installation::InstallationState::Switching(saved) = saved else {
+                panic!("expected a recoverable switch");
+            };
+            assert!(saved.app_was_running);
+        }
     }
 }

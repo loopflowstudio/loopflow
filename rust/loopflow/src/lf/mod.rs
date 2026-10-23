@@ -1617,6 +1617,27 @@ pub enum InstallCommand {
         #[arg(value_enum, default_value = "weekly")]
         frequency: InstallFrequency,
     },
+    /// Install Codex or Claude Code with its official installer
+    Agent {
+        /// codex or claude
+        agent: String,
+    },
+    /// Install the GitHub CLI from GitHub's checksummed release into ~/.local/bin
+    Gh,
+    /// Activate a Loopflow.app the person copied, from its bundled helper.
+    #[command(hide = true)]
+    ActivateApp {
+        /// The opened Loopflow.app bundle.
+        #[arg(long)]
+        bundle: PathBuf,
+    },
+    /// Put the install directory on PATH for new zsh terminals.
+    #[command(hide = true)]
+    ShellPath {
+        /// Directory holding lf (default: the install directory).
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
     /// Continue one interrupted installation switch from its pinned candidate.
     #[command(hide = true)]
     RecoverSwitch {
@@ -2186,6 +2207,9 @@ pub enum AccountCommand {
         /// Read the provider's API key environment variable
         #[arg(long, conflicts_with = "email")]
         api_key: bool,
+        /// Once codex or claude reports the login, make it the default agent
+        #[arg(long, conflicts_with_all = ["email", "import", "api_key"])]
+        default_agent: bool,
     },
     /// Edit account configuration or remembered browser choices
     Set {

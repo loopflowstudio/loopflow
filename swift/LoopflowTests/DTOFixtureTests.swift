@@ -67,6 +67,25 @@ struct DTOFixtureTests {
         }
     }
 
+    @Test func providerAccountsCarryTheNativeSetupReading() throws {
+        let data = try loadFixtureData("auth_status.json")
+        let report = try JSONDecoder().decode(ProviderAccountReport.self, from: data)
+        #expect(report.local("codex")?.setupState == .connected(login: nil))
+        #expect(report.local("github")?.setupState == .missing)
+        #expect(report.local("github")?.recovery == "lf install gh")
+        #expect(report.local("claude")?.setupState == .signedOut)
+        #expect(report.accounts.last?.setupState == .unavailable(reason: "login status did not answer within 20s"))
+        #expect(report.accounts.first?.executable == nil)
+        #expect(try JSONDecoder().decode(ProviderAccountReport.self, from: JSONEncoder().encode(report)) == report)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var rows = try #require(wire["accounts"] as? [[String: Any]])
+        rows[0].removeValue(forKey: "verification")
+        wire["accounts"] = rows
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(ProviderAccountReport.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
     @Test func workLinksCarryReadableLabelsRoutesAndConversationRelation() throws {
         let data = try loadFixtureData("work_links.json")
         let links = try JSONDecoder().decode([WorkLink].self, from: data)

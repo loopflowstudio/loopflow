@@ -69,6 +69,7 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
             },
             published_fallback: set.clone(),
             retained_published_sets: vec![set],
+            activation: None,
         }
     };
     let prior = selection(&failing);

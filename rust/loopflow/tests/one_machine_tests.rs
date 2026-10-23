@@ -179,6 +179,7 @@ fn default_and_nested_commands_use_the_installed_cli_and_main_home() {
             },
             published_fallback: set.clone(),
             retained_published_sets: vec![set],
+            activation: None,
         },
     )
     .unwrap();

@@ -95,6 +95,124 @@ fn account_status_preserves_local_evidence_without_provider_executables() {
     );
 }
 
+#[test]
+fn local_codex_status_moves_from_missing_to_connected_without_a_repository() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], &home.path().join("lf"));
+    let bin = home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let reading = || {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .current_dir(home.path())
+            .args(["account", "codex", "--json"])
+            .env("HOME", home.path())
+            .env("PATH", &bin)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let row = report["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["scope"] == "local")
+            .unwrap()
+            .clone();
+        (
+            row["executable"].as_str().unwrap().to_string(),
+            row["verification"].as_str().unwrap().to_string(),
+            row["recovery"].as_str().map(str::to_string),
+        )
+    };
+    let codex = |status: &str| {
+        let path = bin.join("codex");
+        std::fs::write(&path, format!("#!/bin/sh\nexit {status}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    };
+
+    let missing = reading();
+    assert_eq!(missing.0, "missing");
+    assert_eq!(missing.2.as_deref(), Some("lf install agent codex"));
+    codex("1");
+    let signed_out = reading();
+    assert_eq!(
+        (signed_out.0.as_str(), signed_out.1.as_str()),
+        ("installed", "rejected")
+    );
+    assert_eq!(signed_out.2.as_deref(), Some("lf account connect codex"));
+    // A failed sign-in leaves the same reading; the retry that succeeds shows.
+    assert_eq!(reading(), signed_out);
+    codex("0");
+    assert_eq!(
+        reading(),
+        ("installed".to_string(), "accepted".to_string(), None)
+    );
+}
+
+#[test]
+fn default_agent_is_written_only_after_the_cli_reports_a_login() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::TempDir::new().unwrap();
+    let lf_home = home.path().join("lf");
+    let _env = EnvGuard::with_lf_home(&[], &lf_home);
+    let bin = home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let config = lf_home.join("config.yaml");
+    std::fs::create_dir_all(&lf_home).unwrap();
+    std::fs::write(&config, "agent: codex\nyolo: true\n").unwrap();
+    // `auth login` exits before naming a sign-in page, so no browser opens.
+    let claude = |logged_in: bool| {
+        let path = bin.join("claude");
+        let status = if logged_in {
+            r#"echo '{"loggedIn":true,"email":"kim@example.com"}'"#
+        } else {
+            "exit 1"
+        };
+        std::fs::write(
+            &path,
+            format!("#!/bin/sh\n[ \"$1 $2\" = 'auth status' ] || exit 1\n{status}\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    let connect = || {
+        Command::new(env!("CARGO_BIN_EXE_lf"))
+            .current_dir(home.path())
+            .args(["account", "connect", "claude", "--default-agent"])
+            .env("HOME", home.path())
+            .env("PATH", &bin)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
+    };
+
+    claude(false);
+    assert!(!connect().status.success());
+    assert_eq!(
+        std::fs::read_to_string(&config).unwrap(),
+        "agent: codex\nyolo: true\n"
+    );
+
+    claude(true);
+    let connected = connect();
+    assert!(connected.status.success(), "{connected:?}");
+    assert!(String::from_utf8_lossy(&connected.stdout).contains("now the default agent"));
+    let written: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+    assert_eq!(written["agent"], "claude");
+    assert_eq!(written["yolo"], true);
+
+    std::fs::write(&config, "- not a mapping\n").unwrap();
+    let malformed = connect();
+    assert!(!malformed.status.success());
+    assert!(String::from_utf8_lossy(&malformed.stderr).contains("configuration mapping"));
+    assert_eq!(
+        std::fs::read_to_string(&config).unwrap(),
+        "- not a mapping\n"
+    );
+}
+
 fn account(account_id: &str, home: std::path::PathBuf) -> ProviderAccount {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     ProviderAccount {

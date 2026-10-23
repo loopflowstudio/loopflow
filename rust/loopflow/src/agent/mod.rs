@@ -1631,15 +1631,53 @@ fn format_timeout(timeout: Option<Duration>) -> String {
         .unwrap_or_else(|| "unknown duration".to_string())
 }
 
-/// What to tell someone whose agent CLI is missing.
+/// A coding tool Loopflow installs and signs in to during setup. Its official
+/// native installer needs no package manager.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuidedAgent {
+    pub name: &'static str,
+    pub display_name: &'static str,
+    pub installer_url: &'static str,
+    pub shell: &'static str,
+    pub docs_url: &'static str,
+}
+
+pub const GUIDED_AGENTS: [GuidedAgent; 2] = [
+    GuidedAgent {
+        name: "codex",
+        display_name: "Codex",
+        installer_url: "https://chatgpt.com/codex/install.sh",
+        shell: "/bin/sh",
+        docs_url: "https://learn.chatgpt.com/docs/codex/cli",
+    },
+    GuidedAgent {
+        name: "claude",
+        display_name: "Claude Code",
+        installer_url: "https://claude.ai/install.sh",
+        shell: "/bin/bash",
+        docs_url: "https://code.claude.com/docs/en/setup",
+    },
+];
+
+pub fn guided_agent(name: &str) -> Option<GuidedAgent> {
+    GUIDED_AGENTS.into_iter().find(|agent| agent.name == name)
+}
+
+/// What to tell someone whose agent CLI is missing. A guided tool also names
+/// the other one, so an implicit launch with nothing installed offers both.
 pub fn missing_agent_message(cli: &str) -> String {
+    if let Some(agent) = guided_agent(cli) {
+        let other = GUIDED_AGENTS
+            .into_iter()
+            .find(|other| other.name != cli)
+            .expect("two guided agents");
+        return format!(
+            "'{cli}' is not installed. Install {} with `lf install agent {cli}`, then sign in with \
+             `lf account connect {cli}`. {} also works: `lf install agent {}`. Setup: {}",
+            agent.display_name, other.display_name, other.name, agent.docs_url
+        );
+    }
     let hint = match cli {
-        "claude" => {
-            "Install it with `npm install -g @anthropic-ai/claude-code`, then sign in with `lf account connect claude`."
-        }
-        "codex" => {
-            "Install it with `npm install -g @openai/codex`, then sign in with `lf account connect codex`."
-        }
         "pi" => "Install Pi 1.3 or later with `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`. Configure its model and credentials in Pi.",
         "opencode" => "Install OpenCode 2 or later with `npm install -g @opencode/cli`; the `opencode-ai` package stops at 1.x.",
         _ => "Install it, or choose another agent with `-a claude` or `-a codex`.",
@@ -1655,6 +1693,15 @@ pub fn check_cli_available(cli: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_guided_agent_offers_both_native_installs() {
+        let message = missing_agent_message("codex");
+        assert!(message.starts_with("'codex' is not installed."));
+        assert!(message.contains("`lf install agent codex`"));
+        assert!(message.contains("`lf install agent claude`"));
+        assert!(!message.contains("npm"));
+    }
 
     #[test]
     #[cfg(unix)]

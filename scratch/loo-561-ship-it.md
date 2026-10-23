@@ -112,7 +112,8 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
 2. **Not in this Task:** the `automation:` config key now names a deleted concept (its only field
    is repair startup retries). `.lf/config.yaml` is read by released lf, so a rename needs the
    shared-file fallback plus a removal Task; leave it. (Both 2026-10-22 concept reviews' docs drift is fixed: docs teach `interactive:` stages, routes,
-   `.lf/graphs/` and the repair backoff.)
+   `.lf/graphs/` and the repair backoff; run-time text and the work, launch-plan and
+   wave-operate skills say route and stage. Loop backward edges and wire `edge` fields stay.)
 3. **Gate.** Run the acceptance check below. Also clear the shared-runner isolation failures:
    `planning_lookup_tests` and some planning/store tests fail only when they share a runner with
    `ship`/`task_work`/`ops::linear` and pass alone. The pre-existing

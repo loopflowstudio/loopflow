@@ -572,7 +572,7 @@ codebase tree, and registry health.
   it has no separate operator.
 - **Task workspace presentation** reads `lf diff --files --json`,
   `lf diff --json` and `lf file --json`.
-  Lifecycle mutations remain `lf task run` and `lf interrupt`; review nodes use
+  Lifecycle mutations remain `lf task run` and `lf interrupt`; review stages use
   the Task's persisted graph position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
   `lf wave list/show/status`, `lf monitor`, and `lf history` JSON commands; the app does not

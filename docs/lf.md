@@ -868,7 +868,7 @@ CLI aliases and captured Graph steps use the same resolved-skill decision.
 `--explain` reads selected Work without executing the invocation. Task commands,
 Desktop opening, Session connection and exact Process history lookup are supported;
 other command shapes fail before effects. Combine both flags for identity plus input.
-`task run --explain` also reports the intended Workflow edge (or ad-hoc Graph),
+`task run --explain` also reports the intended Workflow route (or ad-hoc Graph),
 selected execution Machine, observed impediments and missing evidence. Omit the Task
 to use its checkout or `--task`. JSON separates `resolution`, `action`, `impediments`
 and `unavailable`; no Workflow is taken up or moved. Owned Tasks route to the

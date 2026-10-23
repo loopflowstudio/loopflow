@@ -89,9 +89,9 @@ already holds a disposition above.
   report an unchanged failure instead of repeating it.
 - **A Graph ends where authored.** A finished Graph or published PR does not
   complete the Task. Name what remains and the PR or Task conversation awaiting
-  a decision. A Task on a workflow (`execution.work.workflow`) at a node its
-  last edge reached is available to the person there; rerun an edge that stopped or
-  failed with `lf task run <issue> <graph>`, and take no other edge for them;
+  a decision. A Task on a workflow (`execution.work.workflow`) at a stage its
+  last route reached is available to the person there; rerun a route that stopped or
+  failed with `lf task run <issue> <graph>`, and take no other route for them;
   do not choose a new direction or arm an unapproved merge.
 - **Retry completion alone.** A durable completion request at end retries with
   `lf task complete <issue>`, never `task run` or gate. Completion, Workflow
@@ -150,7 +150,7 @@ perform a Graph's steps here. Preserve Graph history, conversation reviews,
 worktrees, ownership and execution history.
 
 - Continue a Task you own with `lf task run <issue-id>`; it takes the Task's
-  Workflow edge or default Graph. Each run is a fresh Graph and returns when it
+  Workflow route or default Graph. Each run is a fresh Graph and returns when it
   ends; background it with your own tool. Leave a live one running instead of
   duplicating it.
 - Use supported Task/Work operations, not raw stores, unclaimed process

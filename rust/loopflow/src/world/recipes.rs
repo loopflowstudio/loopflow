@@ -46,7 +46,7 @@ pub const RECIPES: &[Recipe] = &[
         name: "portfolio",
         rung: Rung::Artifacts,
         demos: "dashboards and Portfolio: several Waves with KRs and Tasks in every state, \
-                including a stopped Workflow edge and a hand-moved Workflow",
+                including a stopped Workflow route and a hand-moved Workflow",
         build: portfolio,
     },
     Recipe {

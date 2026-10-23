@@ -1,6 +1,6 @@
 # LOO-561 · Ship it — plan
 
-Status (2026-10-22, fourth concept review): design accepted (Jack Heart, 2026-10-21/22); every accepted
+Status (2026-10-22, fifth concept review): design accepted (Jack Heart, 2026-10-21/22); every accepted
 slice is built and committed, vocabulary drift included. What's left: re-demo and gate (see Remaining). Post-merge verify is
 on hold. This Task's schema draft is `store/migrations/drafts/ship_it.sql`, the only draft on the branch.
 
@@ -126,10 +126,11 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
    failures (22/22 alone); clippy ok. Deleted
    `a_task_takes_up_the_workflow_when_an_autonomous_graph_has_the_same_name`:
    with one definition kind in `.lf/graphs/` it overwrote the Workflow it meant to shadow.
-   Open for review: the step feedback on 12c90521fa read a failed completion at `end` as one that
-   should let `lf task run` exit 0. 71dd11e3c8 kept main's contract instead: the run exits
-   non-zero naming the unmerged PR, and the arrival and pending completion stay. Making it exit 0
-   would change main's pinned behaviour, so that call belongs to Jack Heart at review.
+   Settled (fifth concept review, 2026-10-22): a failed completion at `end` exits non-zero
+   naming the unmerged PR; arrival and pending completion stay, nothing replays. The accepted
+   contract already implies it: reaching `end` *requests* completion and a failed request
+   retries, so the run reports a real failure rather than success. `lf ship` never meets this
+   case because `deliver` lands before `end`. No code change.
 
 Settled (2026-10-22):
 - State-model cleanup (was item 3). `AbandonIntent`/`abandon_requested_at` and the duplicate DTO

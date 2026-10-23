@@ -5,13 +5,22 @@ import UniformTypeIdentifiers
 struct DashboardSidebar: View {
     @Bindable var model: WorkModel
     @State private var creating = false
+    /// The whole section reveals New Dashboard; only the button reads it.
+    @State private var hover = HoverFlag()
     @Environment(\.palette) private var palette
     var body: some View {
+        // Matches the sidebar stack's spacing, so grouping changes no layout.
+        VStack(alignment: .leading, spacing: 5) { section }.hoverSource(hover)
+    }
+
+    @ViewBuilder private var section: some View {
         HStack {
             Text("DASHBOARDS").font(Typography.code(10)).foregroundStyle(palette.textSecondary)
             Spacer()
-            Button { creating = true } label: { Image(systemName: "plus") }
-                .accessibilityLabel("New Dashboard")
+            HoverRevealed(flag: hover) {
+                Button { creating = true } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("New Dashboard")
+            }
         }.padding(10)
             .sheet(isPresented: $creating) { DashboardEditor(model: model, plan: nil) }
         Button { model.selectWorkingTasksDashboard() } label: {

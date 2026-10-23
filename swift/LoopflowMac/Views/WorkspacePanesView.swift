@@ -60,10 +60,12 @@ struct WorkspacePanesView: View {
 
 /// Inputs compared without `onFocus`: a closure never compares equal, so it
 /// would re-run every pane on each parent render. It captures only references.
-extension WorkspacePanesView: @MainActor Equatable {
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.workspace === rhs.workspace && lhs.isFocused == rhs.isFocused && lhs.sessions === rhs.sessions
-            && lhs.model === rhs.model && lhs.face == rhs.face
+extension WorkspacePanesView: Equatable {
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        MainActor.assumeIsolated {
+            lhs.workspace === rhs.workspace && lhs.isFocused == rhs.isFocused && lhs.sessions === rhs.sessions
+                && lhs.model === rhs.model && lhs.face == rhs.face
+        }
     }
 }
 

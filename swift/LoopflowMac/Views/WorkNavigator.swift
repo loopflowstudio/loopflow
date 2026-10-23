@@ -228,8 +228,10 @@ struct WorkNavigator: View {
 
 /// Compared by model alone: its callbacks are closures over references, and
 /// every row reads what it needs from the model itself.
-extension WorkNavigator: @MainActor Equatable {
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model === rhs.model }
+extension WorkNavigator: Equatable {
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        MainActor.assumeIsolated { lhs.model === rhs.model }
+    }
 }
 
 struct WorkBreadcrumbs: View {

@@ -7,7 +7,7 @@ import SwiftUI
 /// Focus never rewrites the base weights.
 enum FocusSizing {
     static let golden = 0.618
-    static let animation = Animation.spring(duration: 0.25)
+    static let animation = Animation.spring(duration: 0.35)
 
     static func shares(_ weights: [Double], focused: Int?) -> [Double] {
         let total = weights.reduce(0, +)

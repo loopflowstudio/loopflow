@@ -164,6 +164,7 @@ struct DashboardTile: View {
     let workingTasks: Bool
     let focused: Bool
     @Environment(\.palette) private var palette
+    @State private var frame = TileFrame()
 
     var body: some View {
         let content = plan.contents.first { $0.work == member.work }
@@ -173,7 +174,7 @@ struct DashboardTile: View {
         let arrangeable = plan.dashboardID != nil
         return VStack(spacing: 0) {
             HStack(spacing: Spacing.sm) {
-                Button { model.zoomTile(member, plan: plan) } label: {
+                Button { zoom() } label: {
                     if let task { TaskHeading(task: task.task) }
                     else { Text(content?.title ?? member.work.id).lineLimit(1) }
                 }.buttonStyle(.plain)
@@ -183,7 +184,7 @@ struct DashboardTile: View {
                         label: { Image(systemName: "ellipsis") }
                         .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
                 }
-                Button { model.zoomTile(member, plan: plan) } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                Button { zoom() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
                     .help("Open this Work in full")
                 if arrangeable {
                     Button { model.hideInDashboard(plan, hidden: plan.arrangement.hidden + [member]) } label: { Image(systemName: "eye.slash") }
@@ -235,13 +236,60 @@ struct DashboardTile: View {
             .contentShape(Rectangle())
             .renderFlash()
             .simultaneousGesture(TapGesture().onEnded { workspaces.focus(member.work) })
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ZoomFromTile.space)) } action: { frame.rect = $0 }
+    }
+
+    private func zoom() {
+        model.zoomTile(member, plan: plan, workingTasks: workingTasks, origin: frame.rect)
+    }
+}
+
+/// Where a tile sits, kept for the zoom transition. Not observed: the frame
+/// moves on every focus-animation frame and no body reads it.
+final class TileFrame {
+    var rect: CGRect?
+}
+
+/// Grows a zoomed member's full Work out of its tile. A transform, so the
+/// terminals inside lay out once at full size rather than on every frame.
+struct ZoomFromTile: ViewModifier, @MainActor Animatable {
+    static let space = "work-content"
+    let origin: CGRect
+    var progress: Double
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        content.visualEffect { [origin, progress] effect, proxy in
+            let full = proxy.frame(in: .named(Self.space))
+            let rest = 1 - CGFloat(progress)
+            let scaleX = full.width > 0 ? origin.width / full.width : 1
+            let scaleY = full.height > 0 ? origin.height / full.height : 1
+            return effect
+                .scaleEffect(x: scaleX + (1 - scaleX) * (1 - rest), y: scaleY + (1 - scaleY) * (1 - rest), anchor: .topLeading)
+                .offset(x: (origin.minX - full.minX) * rest, y: (origin.minY - full.minY) * rest)
+        }
+    }
+}
+
+extension AnyTransition {
+    /// Inserted views grow out of `origin`; without one they simply appear.
+    static func zoom(from origin: CGRect?) -> AnyTransition {
+        guard let origin else { return .identity }
+        return .asymmetric(
+            insertion: .modifier(active: ZoomFromTile(origin: origin, progress: 0), identity: ZoomFromTile(origin: origin, progress: 1)),
+            removal: .identity)
     }
 }
 
 extension WorkModel {
-    func zoomTile(_ member: WorkMemberRef, plan: WorkViewPlan) {
-        guard let id = plan.dashboardID, let work = member.work.reference else { return select(member.work.reference) }
-        zoom(into: work, from: id)
+    func zoomTile(_ member: WorkMemberRef, plan: WorkViewPlan, workingTasks: Bool, origin: CGRect?) {
+        let board: WorkNavigation.Board? = plan.dashboardID.map { .saved($0) } ?? (workingTasks ? .workingTasks : nil)
+        guard let board, let work = member.work.reference else { return select(member.work.reference) }
+        navigation.zoomOrigin = origin
+        withAnimation(FocusSizing.animation) { zoom(into: work, from: board) }
     }
 
     /// Hide or restore occurrences. Rust decides the mode; hiding never touches the order.

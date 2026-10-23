@@ -1106,19 +1106,23 @@ struct SessionsContentView: View {
                     }
                     SidebarDivider(navigation: navigation, availableWidth: geometry.size.width)
                 }
-                if navigation.showsSelection {
-                    DashboardView(model: model, workspaces: workspaces, sessions: store)
-                } else if let key = workspaces.selectedWork {
-                    VStack(spacing: 0) {
-                        workspacePanel(key).id(key)
+                ZStack {
+                    if navigation.showsSelection {
+                        DashboardView(model: model, workspaces: workspaces, sessions: store)
+                    } else if let key = workspaces.selectedWork {
+                        VStack(spacing: 0) {
+                            workspacePanel(key).id(key)
+                        }
+                        .padding([.horizontal, .bottom], PaneGeometry.windowInset)
+                        .background(palette.surfaceMuted)
+                        .accessibilityIdentifier("work-layout")
+                        .transition(.zoom(from: navigation.zoomOrigin))
+                    } else {
+                        ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
+                            description: Text("Open a repository, Wave or Task from the sidebar."))
                     }
-                    .padding([.horizontal, .bottom], PaneGeometry.windowInset)
-                    .background(palette.surfaceMuted)
-                    .accessibilityIdentifier("work-layout")
-                } else {
-                    ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
-                        description: Text("Open a repository, Wave or Task from the sidebar."))
                 }
+                .coordinateSpace(.named(ZoomFromTile.space))
             }
         }
         .background(palette.background)

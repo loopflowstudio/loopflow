@@ -376,7 +376,7 @@ struct SessionPaneView: View {
                     .strokeBorder(isFocused ? theme.palette.borderStrong : theme.palette.border, lineWidth: 1)
                     .allowsHitTesting(false)
             }
-            .shadow(color: theme.palette.shadow.opacity(isFocused ? 0.22 : 0.08), radius: isFocused ? 4 : 1, y: isFocused ? 2 : 1)
+            .shadow(color: theme.palette.shadow.opacity(isFocused ? 0.08 : 0), radius: 2, y: 1)
         }
         .renderFlash()
         .accessibilityElement(children: .contain)

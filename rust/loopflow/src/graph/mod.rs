@@ -103,8 +103,9 @@ pub struct Command {
     pub args: Vec<String>,
 }
 
-// Saved invocations outlive CLI spellings. Migrate their operation owner while
-// retaining the captured arguments and topology instead of reloading a Graph.
+// Authored and saved invocations outlive CLI spellings. Both take the current
+// operation owner, keeping their arguments and topology, so a fresh Graph and a
+// captured Workflow route record the same step.
 impl<'de> Deserialize<'de> for Command {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
@@ -787,7 +788,9 @@ fn parse_command_value(value: &Value) -> Result<Step, LoadError> {
         .to_string();
     let args = parts.map(ToString::to_string).collect();
 
-    Ok(Step::new(Target::Command(Command { command, args })))
+    Ok(Step::new(Target::Command(
+        Command { command, args }.current(),
+    )))
 }
 
 /// `loop: <target>` runs a deciding skill last, `step`, `interactive` or

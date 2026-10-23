@@ -117,14 +117,10 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
 3. **Gate.** Run the acceptance check below. Also clear the shared-runner isolation failures:
    `planning_lookup_tests` and some planning/store tests fail only when they share a runner with
    `ship`/`task_work`/`ops::linear` and pass alone. The pre-existing
-   `agent_session_identity_is_durable…` failures are still open. Also failing on 9a6d278264,
-   alone: `task_graph_launch_tests::a_landing_edge_that_returns_to_its_node_can_be_taken_again`
-   (bare `lf task run` at `review` of `rounds` succeeds instead of naming both routes) and
-   `every_task_launch_runs_in_the_foreground_under_the_same_checks` ("cannot complete: its pull
-   request has not merged").
-   Check (route vocabulary, 2026-10-22): `cargo test --lib -- workflow graph:: ship` 192/195, the
-   three failures above (planning_lookup passes alone); `--test integration documented` ok;
-   clippy ok. Deleted `a_task_takes_up_the_workflow_when_an_autonomous_graph_has_the_same_name`:
+   `agent_session_identity_is_durable…` failures are still open.
+   Check (2026-10-22, after the stale launch tests): `cargo test --lib -- workflow graph:: ship`
+   192/194, only the two `planning_lookup` isolation failures (22/22 alone); clippy ok. Deleted
+   `a_task_takes_up_the_workflow_when_an_autonomous_graph_has_the_same_name`:
    with one definition kind in `.lf/graphs/` it overwrote the Workflow it meant to shadow.
 
 Settled (2026-10-22):

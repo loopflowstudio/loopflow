@@ -677,12 +677,13 @@ pub(crate) fn select_task_run(
     let (index, _) = match (edges.next(), edges.next()) {
         (Some(edge), None) => edge,
         (None, _) | (Some(_), Some(_)) => {
-            return Err(refuse(match requested {
-                Some(graph) => format!("{graph} does not leave {node}"),
-                None if node == END => format!("graph {name} has reached its end"),
-                None => format!(
+            // A requested name reaches here only as the one route it names.
+            return Err(refuse(if node == END {
+                format!("graph {name} has reached its end")
+            } else {
+                format!(
                     "{node} has more than one route leaving it; name one as `lf task run {issue} <name>`"
-                ),
+                )
             }));
         }
     };

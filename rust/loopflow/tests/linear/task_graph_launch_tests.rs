@@ -463,16 +463,17 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             continue;
         }
         // Each launch has finished when its command returns, and is its own
-        // Graph; none continues another.
+        // Graph; none continues another. The Task run takes up `proof` and
+        // reaches its end; completion waits for the unmerged PR.
         for (launched, launch) in LAUNCHES.iter().enumerate() {
             let output = run(launch);
-            assert!(!String::from_utf8_lossy(&output.stderr)
-                .contains("Started requires recorded Task work"));
-            assert!(
-                output.status.success(),
-                "{launch:?}: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+            let error = String::from_utf8_lossy(&output.stderr);
+            assert!(!error.contains("Started requires recorded Task work"));
+            if launched == 0 {
+                assert!(error.contains("pull request has not merged"), "{error}");
+            } else {
+                assert!(output.status.success(), "{launch:?}: {error}");
+            }
             let graphs = support::recorded_graphs(home.path());
             assert_eq!(graphs.len(), launched + 1, "{launch:?}");
             assert!(graphs
@@ -490,15 +491,15 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             serde_json::json!(["sync", "--plan"])
         );
         assert!(recorded.iter().all(|(_, steps)| *steps == recorded[0].1));
-        // The repository names a Graph, which is not a Workflow: a
-        // run that names nothing is refused and starts no Graph.
+        // At its end the Task has no route to run; completion retries without
+        // replaying the one it took.
         let output = run(&["-b", "task", "run", "INF-123"]);
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            error.contains("repository Workflow \"proof\" is unavailable"),
-            "{error}"
-        );
+        assert!(error.contains("graph proof has reached its end"), "{error}");
+        let output = run(&["task", "complete", "INF-123"]);
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("pull request has not merged"), "{error}");
         assert_eq!(support::recorded_graphs(home.path()).len(), 3);
         let status = run(&["task", "status", "INF-123", "--json"]);
         assert!(
@@ -519,8 +520,12 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             .unwrap()
             .iter()
             .all(|graph| graph["state"] == "completed"));
-        // The Task took up no workflow and ran every named Graph ad hoc.
-        assert!(status["execution"]["work"]["workflow"].is_null());
+        let workflow = &status["execution"]["work"]["workflow"];
+        assert_eq!(
+            (&workflow["name"], &workflow["position"]),
+            (&"proof".into(), &at("end"))
+        );
+        assert!(status["execution"]["completion_pending"].is_string());
         let task = runtime
             .block_on(registered.store.get_task(&registered.task.id))
             .unwrap()
@@ -537,7 +542,6 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         // The worker's entry points are gone; nothing restarts a Graph.
         for removed in [
             vec!["--task", "INF-123", "graph", "start", "proof"],
-            vec!["task", "restart", "INF-123"],
             vec!["task", "create", "--run", "--title", "x"],
             vec!["task", "__worker", registered.task.id.as_str()],
         ] {
@@ -1182,8 +1186,8 @@ fn a_landing_edge_that_returns_to_its_node_can_be_taken_again() {
     // Two edges leave review, so the entry asks which, and names them.
     let error = refusal(task.run(&["-b", "task", "run", "INF-123"]));
     assert!(error.contains("land-proof (to review)"), "{error}");
-    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "proof"]));
-    assert!(error.contains("proof does not leave review"), "{error}");
+    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "accepted"]));
+    assert!(error.contains("neither a route leaving review"), "{error}");
     assert_eq!(chosen(&task.workflow()), [0, 1, 1]);
 }
 

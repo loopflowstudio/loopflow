@@ -744,8 +744,7 @@ impl SkillExecutor for &RunningGraph<'_> {
         crate::ops::linear_observe::sync_repository(&self.store, &self.cwd.to_string_lossy()).await;
         let label = ops.item.display_name();
         eprintln!("op: {label}");
-        // Authored spellings outlive the CLI's; the step runs today's.
-        let argv = ops.item.clone().current().argv();
+        let argv = ops.item.argv();
         let parsed = crate::lf::navigation::normalize_args(argv.clone())
             .and_then(Cli::try_parse_from)
             .ok();

@@ -47,3 +47,11 @@ design rewrite, each reversible before implementation:
   or a taskless Graph in its checkout but still at `start` reads `unstarted`. Jack's "it should be
   live state" was about ship intent, so it doesn't settle this. Question for re-demo: should any
   work in a Task's checkout make it `working`?
+- Launch tests (2026-10-22): the two "regressions" were stale expectations from merging graphs and
+  Workflows into one kind, so the tests changed, not the chooser. Bare `lf task run` at `review`
+  already names both routes. `lf task run X proof` takes up graph `proof` as docs/lf.md says, and
+  reaching `end` with an unmerged PR refuses and leaves completion pending without replay, as
+  `successful_final_graph_keeps_arrival_when_completion_fails_and_never_replays` pins. Product fix
+  found on the way: authored `cmd:` steps now parse into the current CLI spelling, so a route and a
+  plain Graph record the same step label (`sync --plan`, not `task sync --plan`).
+  `lf task restart` now resolves to `task workflow restart`, so it left the removed-command list.

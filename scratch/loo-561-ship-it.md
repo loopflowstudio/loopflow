@@ -107,20 +107,6 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
 
 ## Remaining
 
-0. **Vocabulary drift (third concept review, 2026-10-22). Implement next.** Docs and `lf help`
-   teach stages and routes; what people and stand-ins read at run time still says edges or `human:`.
-   - `PROMPTS.md:91-96` shows `human: true` on a step; replace with `- interactive: review-design`.
-   - Run-time text says "edge" for a route: `ops/task.rs` `select_task_run` errors ("neither an
-     edge leaving", "Outgoing edges", "more than one outgoing edge"), `ops/task/ship.rs:410`
-     ("no edge leaves it for another stage"), `ops/workflow.rs:205,217` (stand-in/person lines:
-     "take another edge", "chooses the edge"), `lf/commands/graph.rs:136,141` ("Edge {edge}
-     failed"), `bin/lf.rs:2331` ("moved along an edge that runs nothing"). Say route; keep
-     `describe_outgoing` output consistent. Internal types, wire fields (`edge`, `edges`) and loop
-     "backward edges" in graph YAML stay: those are graph structure, not the Task's path.
-   - Stale comments: `world/mod.rs:574` ("A requested Graph that is no edge runs off any
-     Workflow"; it now takes the graph up), `graph/compiled.rs:194,463` ("human occurrence",
-     "human-boundary"; say stage).
-
 1. **Re-demo** on the branch build. The pending items are under Demo findings: the heading
    placement (variant B), the `loopflow://` world links and `unstarted` world Tasks.
 2. **Not in this Task:** the `automation:` config key now names a deleted concept (its only field
@@ -130,7 +116,15 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
 3. **Gate.** Run the acceptance check below. Also clear the shared-runner isolation failures:
    `planning_lookup_tests` and some planning/store tests fail only when they share a runner with
    `ship`/`task_work`/`ops::linear` and pass alone. The pre-existing
-   `agent_session_identity_is_durable…` failures are still open.
+   `agent_session_identity_is_durable…` failures are still open. Also failing on 9a6d278264,
+   alone: `task_graph_launch_tests::a_landing_edge_that_returns_to_its_node_can_be_taken_again`
+   (bare `lf task run` at `review` of `rounds` succeeds instead of naming both routes) and
+   `every_task_launch_runs_in_the_foreground_under_the_same_checks` ("cannot complete: its pull
+   request has not merged").
+   Check (route vocabulary, 2026-10-22): `cargo test --lib -- workflow graph:: ship` 192/195, the
+   three failures above (planning_lookup passes alone); `--test integration documented` ok;
+   clippy ok. Deleted `a_task_takes_up_the_workflow_when_an_autonomous_graph_has_the_same_name`:
+   with one definition kind in `.lf/graphs/` it overwrote the Workflow it meant to shadow.
 
 Settled (2026-10-22):
 - State-model cleanup (was item 3). `AbandonIntent`/`abandon_requested_at` and the duplicate DTO

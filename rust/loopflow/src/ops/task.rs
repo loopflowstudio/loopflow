@@ -491,7 +491,7 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 
 /// Place the Task and fill what a run leaves unsaid: `agent` as the Task's
 /// agent, `reason` as a steer, and the route. A Task on a graph sets out on
-/// the outgoing edge named, or on its only one; otherwise the Task takes up
+/// the route named, or on its only one; otherwise the Task takes up
 /// the graph named, then its Wave or repository default. The caller then runs
 /// the edge's slice as `lf --task ISSUE graph __edge`; `None` is an edge that
 /// runs nothing. The returned name is the edge's.
@@ -588,7 +588,7 @@ pub(crate) fn select_task_run(
                 .map_err(task_error)?
                 .ok_or_else(|| {
                     task_error(format!(
-                        "{name:?} is neither an edge leaving {} nor a graph. Outgoing edges: {}",
+                        "{name:?} is neither a route leaving {} nor a graph. Routes: {}",
                         current.as_ref().map_or(START, |workflow| workflow.node()),
                         current
                             .as_ref()
@@ -655,7 +655,7 @@ pub(crate) fn select_task_run(
     let node = workflow.node();
     let refuse = |asked: String| {
         task_error(format!(
-            "Task {issue} is at {node} of graph {name}: {asked}. Outgoing edges: {}. `lf task workflow move {issue} <stage>` puts the Task at a stage without running anything; `lf task run {issue} <graph>` takes up another graph; `lf graph <graph>` in the Task worktree runs a Graph without moving the Task",
+            "Task {issue} is at {node} of graph {name}: {asked}. Routes: {}. `lf task workflow move {issue} <stage>` puts the Task at a stage without running anything; `lf task run {issue} <graph>` takes up another graph; `lf graph <graph>` in the Task worktree runs a Graph without moving the Task",
             workflow.describe_outgoing(),
         ))
     };
@@ -681,7 +681,7 @@ pub(crate) fn select_task_run(
                 Some(graph) => format!("{graph} does not leave {node}"),
                 None if node == END => format!("graph {name} has reached its end"),
                 None => format!(
-                    "{node} has more than one outgoing edge; name one as `lf task run {issue} <name>`"
+                    "{node} has more than one route leaving it; name one as `lf task run {issue} <name>`"
                 ),
             }));
         }

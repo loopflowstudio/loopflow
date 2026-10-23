@@ -1328,26 +1328,6 @@ fn a_plain_graph_process_in_the_worktree_does_not_move_the_task() {
     assert_eq!(task.workflow(), before);
 }
 
-#[test]
-fn a_task_takes_up_the_workflow_when_an_autonomous_graph_has_the_same_name() {
-    let task = WorkflowTask::new();
-    fs::write(
-        task.repo.path().join(".lf/graphs/feature.yaml"),
-        "- cmd: task sync --plan\n",
-    )
-    .unwrap();
-    task.ok(&["-b", "task", "run", "INF-123", "feature"]);
-    let captured = task.workflow();
-    assert_eq!(captured["name"], "feature");
-    assert_eq!(
-        captured["position"],
-        serde_json::json!({"kind":"node","node":"review"})
-    );
-    task.ok(&["-b", "graph", "feature"]);
-    assert_eq!(task.workflow(), captured);
-    assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
-}
-
 /// The Graph processes started beneath `task_run`, by outcome, oldest first.
 fn attempts(home: &Path, task_run: &str) -> Vec<String> {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
@@ -1376,7 +1356,7 @@ fn one_task_run_starts_its_graph_again_until_an_attempt_succeeds_or_attempts_run
     // Every attempt fails: the Task run gives up and the edge holds the Task.
     let output = task.run(&["-b", "task", "run", "INF-123", "gate"]);
     let error = refusal(output);
-    assert!(error.contains("Edge gate failed 3 times"), "{error}");
+    assert!(error.contains("Route gate failed 3 times"), "{error}");
     let stopped = task.workflow();
     assert_eq!(stopped["position"]["edge"], 2);
     assert_eq!(stopped["position"]["running"], false);

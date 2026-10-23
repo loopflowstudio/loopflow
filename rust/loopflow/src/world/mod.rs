@@ -568,10 +568,11 @@ impl World {
 
     /// Run `requested` for `task` the way `lf task run` does: take up a
     /// Workflow it names (or the Wave or repository default), set out on the
-    /// edge it selects and record that edge's Graph, each step lasting
+    /// route it selects and record that route's Graph, each step lasting
     /// `minutes` and the last ending `ended_days_ago`. A Graph that succeeds
-    /// puts the Task at the edge's target; one that fails leaves it stopped on
-    /// the edge. A requested Graph that is no edge runs off any Workflow.
+    /// puts the Task at the route's target stage; one that fails leaves it
+    /// stopped on the route. A requested Graph that is no route becomes the
+    /// Task's Workflow.
     pub fn task_run(
         &self,
         task: &Task,

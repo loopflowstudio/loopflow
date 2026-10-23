@@ -362,7 +362,7 @@ struct DesktopHeadlessTests {
             try running.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-2")
         }
 
-        // Stopped, it holds the Task and is offered again with the other edge leaving its node.
+        // Stopped, it holds the Task and is offered again with the other route leaving its stage.
         let process = "11111111-1111-4111-8111-111111111111"
         let stopped = try view(
             position: ["kind": "edge", "edge": 2, "lf_process_id": process, "running": false], outgoing: [1, 2])

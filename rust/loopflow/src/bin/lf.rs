@@ -2328,7 +2328,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         let Some(edge) = graph else {
             // An edge that runs nothing: setting out on it is the whole move.
             println!(
-                "Task {} moved along an edge that runs nothing",
+                "Task {} moved along a route that runs nothing",
                 task.identifier
             );
             return Ok(());

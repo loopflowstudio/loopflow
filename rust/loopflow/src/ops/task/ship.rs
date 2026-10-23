@@ -407,7 +407,7 @@ fn next_step(workflow: &Workflow, issue: &str) -> OpsResult<ShipStep> {
         WorkflowPosition::Node { node } => {
             let (advance, repeat) = routes_from(workflow, node).ok_or_else(|| {
                 task_error(format!(
-                    "Task {issue} is at {node} of graph {}, and no edge leaves it for another stage",
+                    "Task {issue} is at {node} of graph {}, and no route leaves it for another stage",
                     definition.name
                 ))
             })?;

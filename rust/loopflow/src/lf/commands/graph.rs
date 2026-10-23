@@ -68,14 +68,14 @@ pub fn run(
 /// writes the arrival when this process succeeds.
 pub fn run_task_edge(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> Result<()> {
     let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) else {
-        anyhow::bail!("`lf graph __edge` runs a Task's edge; name the Task with --task");
+        anyhow::bail!("`lf graph __edge` runs a Task's route; name the Task with --task");
     };
     let store = block_on(open_graph_store())?;
     store.sqlite.require_task_launch(task)?;
     let (graph, start, edge, _) = store
         .sqlite
         .workflow_edge_slice(task)?
-        .context("the Task is not on an edge that runs steps; `lf task run` chooses one")?;
+        .context("the Task is not on a route that runs steps; `lf task run` chooses one")?;
     print_pipeline_header(&format!("{} · {edge}", graph.name), &graph.steps);
     execute(&graph.name, &graph.steps, start, None, cli, repo, binding)
 }
@@ -133,12 +133,12 @@ pub fn run_task_edge_for(cli: &Cli, issue: &str, edge: &str, checkout: &Path) ->
                 .is_some_and(|child| matches!(store.graph_process(child.as_str()), Ok(Some(_))));
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {
-                eprintln!("Edge {edge} failed {attempt} times; this Task run stops here.");
+                eprintln!("Route {edge} failed {attempt} times; this Task run stops here.");
             }
             return Err(exit_of(status).into());
         }
         eprintln!(
-            "Edge {edge} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again."
+            "Route {edge} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again."
         );
         attempt += 1;
     }

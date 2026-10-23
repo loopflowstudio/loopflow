@@ -49,7 +49,7 @@ pub enum WorkflowPosition {
 pub enum WorkflowMoveKind {
     /// The Task took up this graph, at `to`.
     TookUp,
-    /// An edge leaving `from` was chosen; an edge that runs steps then carries the Task.
+    /// A route leaving `from` was chosen; a route that runs steps then carries the Task.
     Chose,
     /// The edge's run succeeded and its process put the Task at `to`.
     Arrived,
@@ -202,7 +202,7 @@ impl Workflow {
                 return format!("{summary}. A person takes part again when that run finishes.");
             }
             WorkflowPosition::Edge { .. } => vec![format!(
-                "{summary}. Read `lf graph list --for-task {issue}` before choosing: run it again, take another edge leaving {}, or move the Task.",
+                "{summary}. Read `lf graph list --for-task {issue}` before choosing: run it again, take another route leaving {}, or move the Task.",
                 self.node()
             )],
             WorkflowPosition::Node { node } => vec![match self.definition.node(node) {
@@ -214,7 +214,7 @@ impl Workflow {
             }],
         };
         if !self.outgoing.is_empty() {
-            lines.push("The person's feedback in the conversation chooses the edge; background the command with your own tool:".into());
+            lines.push("The person's feedback in the conversation chooses the route; background the command with your own tool:".into());
         }
         for index in &self.outgoing {
             let edge = &self.definition.edges[*index as usize];

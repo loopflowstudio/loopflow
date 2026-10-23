@@ -191,7 +191,7 @@ pub struct InteractionGraph {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InteractionTransition {
-    /// Structural human occurrence or `@start` / `@end` anchor.
+    /// Structural interactive stage or `@start` / `@end` anchor.
     pub from: String,
     pub to: String,
     pub nodes: Vec<String>,
@@ -460,7 +460,7 @@ pub(crate) fn location(
 
 /// Ordered backward-edge traversal counts at each active nesting level, outermost
 /// first. Empty levels are retained so nested counts never masquerade as root
-/// counts. Visit tokens used for human-boundary identity are deliberately absent.
+/// counts. Visit tokens used for stage identity are deliberately absent.
 pub fn graph_iterations(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> Vec<Vec<u32>> {
     let counts = (0..steps.len())
         .filter(|index| return_target(steps, *index).is_some())

@@ -151,7 +151,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tokio-tungstenite = "0.30"
 tempfile = "3.27"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
-vt100 = "0.16"
+vt100 = "0.18"
 vte = "0.15"
 
 # ARM file-selection latency includes hashing the executable for install authority.

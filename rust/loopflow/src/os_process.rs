@@ -235,7 +235,8 @@ pub(crate) fn current_process_group_id() -> Option<u32> {
     u32::try_from(process_group).ok().filter(|id| *id > 1)
 }
 
-/// Resolve a stable installed entry, or an explicit private-Home executable.
+/// Resolve a stable installed entry, the Desktop helper running this process,
+/// or an explicit private-Home executable.
 /// Keep symlinks intact so later launches pick up installation changes.
 pub(crate) fn resolve_lf_binary() -> Result<PathBuf> {
     let candidate = if crate::store::custom_home_selected() {

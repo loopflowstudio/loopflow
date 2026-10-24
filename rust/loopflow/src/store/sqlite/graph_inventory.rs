@@ -581,5 +581,13 @@ mod tests {
         .unwrap();
         assert!(stored.is_none_or(|stored| !stored.contains("\"flow\"")));
         drop(conn);
+        let events = store.task_events_after(&task, 0).unwrap();
+        assert!(
+            events.iter().any(|event| matches!(
+                &event.kind,
+                crate::work::task::TaskEventKind::GraphFinished { graph, .. } if graph == "pursue"
+            )),
+            "{events:?}"
+        );
     }
 }

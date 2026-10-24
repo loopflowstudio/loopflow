@@ -413,8 +413,6 @@ struct DesktopHeadlessTests {
         // A shipping Task offers Stop shipping in place of Ship it.
         let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
         let shipped = TaskShipControl(model: model, task: shipping, revealed: true) { _ in }
-        #expect(try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-shipping").text().string()
-            .hasPrefix(shipping.shipping!.label))
         #expect(throws: (any Error).self) {
             try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
         }

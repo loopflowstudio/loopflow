@@ -157,8 +157,6 @@ struct WorkSurfaceView: View {
     @Environment(\.palette) private var palette
     @State private var controlError: String?
     @State private var editingTask: RoadmapTask?
-    @State private var headingHovered = false
-    @State private var shipNotice: ShipNotice?
 
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
     private var queryError: String? { model.roadmap.errorMessage }
@@ -288,11 +286,7 @@ struct WorkSurfaceView: View {
                             .help("Open an independent conversation with this Task's context in its worktree. No Graph is started.")
                             .accessibilityIdentifier("task-new-session")
                         }
-                        TaskShipControl(model: model, task: task, revealed: headingHovered) { shipped in
-                            shipNotice = ShipNotice(task: task, shipped: shipped)
-                        }
                     }
-                    .onHover { headingHovered = $0 }
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                         Text(task.condition.reason)
                             .font(Typography.body(13))
@@ -363,27 +357,6 @@ struct WorkSurfaceView: View {
                     .accessibilityIdentifier("work-task-directive")
                 }
                 TaskCommentsView(model: model, task: task)
-            }
-            .overlay(alignment: .bottom) {
-                if let notice = shipNotice, notice.taskID == task.id {
-                    ShipNoticeToast(notice: notice) {
-                        Task {
-                            await model.stopShipping(task)
-                            if model.navigation.taskRunDrafts[task.id]?.error == nil {
-                                shipNotice = ShipNotice(task: task, shipped: false)
-                            }
-                        }
-                    }
-                    .padding(.bottom, 18)
-                    .zIndex(ZIndex.toast)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
-            .animation(.easeOut(duration: 0.18), value: shipNotice)
-            .task(id: shipNotice) {
-                guard shipNotice != nil else { return }
-                try? await Task.sleep(for: .seconds(6))
-                if !Task.isCancelled { shipNotice = nil }
             }
             .onChange(of: task.id, initial: true) { _, id in
                 Perf.endAfterCommit(Perf.taskWorkspaceReady, id: id)

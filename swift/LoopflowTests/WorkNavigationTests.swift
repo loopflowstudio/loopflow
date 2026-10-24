@@ -110,6 +110,8 @@ struct WorkNavigationTests {
         for scope in ["repository", "wave-wave-1"] {
             _ = try crumbs.inspect().find(viewWithAccessibilityIdentifier: "work-jump-" + scope)
         }
+        // Ship it rides the selected Task's heading, whatever pane layout is open.
+        _ = try crumbs.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
         #expect(throws: (any Error).self) { try crumbs.inspect().find(text: "This Mac") }
         #expect(throws: (any Error).self) { try crumbs.inspect().find(viewWithAccessibilityLabel: "Navigate Tasks, Waves and repositories") }
         #expect(model.jumpRows(.repository, filter: "").map(\.id) == [.wave("wave-1")])
@@ -123,13 +125,14 @@ struct WorkNavigationTests {
         #expect(model.navigation.palette == nil)
     }
 
-    @Test("The heading's started state is durable Task evidence, never Linear's planning state")
+    @Test("The heading reads the Task's lifecycle, never Linear's planning state")
     func headingAgreesWithWorkingTasks() throws {
-        let snapshot = try roadmap()
-        let review = try #require(snapshot.tasks.items.first { $0.id == "issue-review" })
-        #expect(review.task.state == "unstarted")
-        #expect(TaskHeading(task: review).state == "Started")
-        #expect(TaskHeading(task: try #require(snapshot.tasks.items.first { $0.id == "issue-now" })).state == "Unstarted")
+        let tasks = try roadmap().tasks.items
+        func state(_ id: String) throws -> String { TaskHeading(task: try #require(tasks.first { $0.id == id })).state }
+        #expect(tasks.first { $0.id == "issue-now" }?.task.state == "unstarted")
+        #expect(try state("issue-now") == "Shipping · CI running on #1650")
+        #expect(try state("issue-review") == "Unstarted")
+        #expect(try state("issue-later") == "Done")
     }
 
     @Test("Working Tasks opens as a Dashboard; a sidebar Task then shows that Task, not a stale trail")

@@ -385,11 +385,11 @@ struct DesktopHeadlessTests {
         #expect(throws: (any Error).self) {
             try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-4")
         }
-        // Ship it sits on the Task heading, not in the Workflow header.
+        // Ship it sits in the Workflow bar, not in the detail page's Workflow header.
         #expect(throws: (any Error).self) {
             try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
         }
-        let control = TaskShipControl(model: model, task: task, revealed: true)
+        let control = TaskShipControl(model: model, task: task)
         try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship").button().tap()
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls == [["-b", "--task", task.task.identifier, "ship"]])
@@ -412,7 +412,7 @@ struct DesktopHeadlessTests {
 
         // A shipping Task offers Stop shipping in place of Ship it.
         let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
-        let shipped = TaskShipControl(model: model, task: shipping, revealed: true)
+        let shipped = TaskShipControl(model: model, task: shipping)
         #expect(throws: (any Error).self) {
             try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
         }
@@ -430,6 +430,39 @@ struct DesktopHeadlessTests {
         let back = ShipNoticeToast(notice: ShipNotice(task: task, shipped: false)) {}
         #expect(throws: (any Error).self) {
             try back.inspect().find(viewWithAccessibilityIdentifier: "task-ship-undo")
+        }
+    }
+
+    @Test("The Workflow bar shows the stages, what runs now and Ship it, and opens to its stage cells")
+    func taskWorkflowBar() throws {
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
+        let wave = try #require(roadmap.waves.first)
+        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && $0.shipping == nil })
+        let work = try JSONDecoder().decode(TaskOverview.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("task_work.json")))
+        let workflow = try #require(work.workflow)
+        let model = WorkModel(query: RegistryQuery { _, _ in "{}" })
+
+        // The fixture is on `pursue`, running from review-design to demo.
+        let bar = TaskWorkflowBar(model: model, task: task, work: .available(work))
+        #expect(bar.live == "pursue → demo")
+        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name").text().string() == "feature")
+        _ = try bar.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
+        let stages = TaskWorkflowBar.stages(workflow, shipping: false)
+        #expect(stages.map(\.name) == ["review-design", "demo", "end"])
+        #expect(stages.map(\.place) == [.passed, .going, .ahead])
+        #expect(stages.map(\.who) == ["you", "you", nil])
+        // Shipping hands the stages ahead to stand-ins, and the reason is the live line.
+        #expect(TaskWorkflowBar.stages(workflow, shipping: true).map(\.who) == ["you", "stand-in", nil])
+        let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
+        let shipped = TaskWorkflowBar(model: model, task: shipping, work: .available(work))
+        #expect(shipped.live == shipping.shipping?.reason)
+        _ = try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop")
+
+        // Stage cells stay closed until the dots are clicked.
+        #expect(throws: (any Error).self) {
+            try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-stage-demo")
         }
     }
 

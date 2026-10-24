@@ -33,7 +33,7 @@ struct TaskWorkflowHeader: View {
                         .lineLimit(1)
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-workflow-position")
-                    // Routes into `end` are Ship it, on the Task heading.
+                    // Routes into `end` are Ship it, in the Workflow bar.
                     ForEach(workflow.outgoing, id: \.self) { index in
                         if workflow.edges.indices.contains(index), workflow.edges[index].to != "end" {
                             let edge = workflow.edges[index]
@@ -223,13 +223,12 @@ struct TaskWorkflowHeader: View {
     }
 }
 
-/// Ship it beside the state on the window's Task heading, revealed while the
-/// heading is hovered; while shipping the same spot holds Stop shipping. Rust
-/// decides whether shipping can start. Sidebar rows and menus carry no ship control.
+/// Ship it at the right end of the Workflow bar, always visible; while
+/// shipping the same spot holds Stop shipping. Rust decides whether shipping
+/// can start. Sidebar rows and menus carry no ship control.
 struct TaskShipControl: View {
     let model: WorkModel
     let task: RoadmapTask
-    let revealed: Bool
 
     private var acting: Bool { model.navigation.taskRunDrafts[task.id]?.acting == true }
 
@@ -256,10 +255,158 @@ struct TaskShipControl: View {
                     .accessibilityIdentifier("task-ship")
             }
         }
-        .opacity(revealed ? 1 : 0)
-        .offset(x: revealed ? 0 : 4)
         .fixedSize()
-        .animation(.easeOut(duration: 0.12), value: revealed)
+    }
+}
+
+/// The selected Task's Workflow under the jump bar: its stages as dots, what
+/// is happening now, and Ship it or Stop shipping. Clicking the dots opens a
+/// row with each stage, who takes part there and what happened. Rust owns the
+/// graph, the position and the shipping reason; this only arranges them.
+struct TaskWorkflowBar: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    /// The Task part of the workspace stream, as last read.
+    let work: WorkReading<TaskOverview>
+    /// Per viewer: the bar opens to its stage cells.
+    @State private var expanded = false
+    @Environment(\.palette) private var palette
+
+    /// One dot: a stage where a person takes part, or `end`.
+    struct Stage: Equatable {
+        enum Place: Equatable { case passed, here, going, ahead }
+        let name: String
+        let place: Place
+        /// You, or a stand-in while shipping; `end` has no one.
+        let who: String?
+        let note: String
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: Spacing.md) {
+                if let workflow = work.value?.workflow {
+                    Text(workflow.name).fontWeight(.semibold).fixedSize()
+                        .accessibilityIdentifier("task-workflow-bar-name")
+                    dots(Self.stages(workflow, shipping: task.shipping != nil))
+                }
+                Text(live)
+                    .lineLimit(1).truncationMode(.tail)
+                    .foregroundStyle(task.shipping?.state == .restarting ? palette.warning : palette.textSecondary)
+                    .help(live)
+                    .accessibilityIdentifier("task-workflow-bar-live")
+                Spacer(minLength: 0)
+                TaskShipControl(model: model, task: task)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 34)
+            if expanded, let workflow = work.value?.workflow {
+                cells(Self.stages(workflow, shipping: task.shipping != nil))
+            }
+        }
+        .font(Typography.body(12))
+        .background(palette.background)
+        .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("task-workflow-bar")
+    }
+
+    private func dots(_ stages: [Stage]) -> some View {
+        Button { expanded.toggle() } label: {
+            HStack(spacing: 5) {
+                ForEach(stages, id: \.name) { stage in
+                    Circle()
+                        .fill(fill(stage.place))
+                        .overlay(Circle().strokeBorder(stage.place == .ahead ? palette.borderStrong : .clear))
+                        .frame(width: stage.place == .here || stage.place == .going ? 9 : 7,
+                               height: stage.place == .here || stage.place == .going ? 9 : 7)
+                        .help(stage.who.map { "\(stage.name) (\($0))" } ?? stage.name)
+                }
+                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(palette.textTertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .help(expanded ? "Hide stages" : "Show stages")
+        .accessibilityLabel("Stages")
+        .accessibilityIdentifier("task-workflow-bar-dots")
+    }
+
+    private func cells(_ stages: [Stage]) -> some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            ForEach(stages, id: \.name) { stage in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(stage.who ?? " ").font(Typography.caption(10)).foregroundStyle(palette.textTertiary)
+                    Text(stage.name).fontWeight(.semibold)
+                    Text(stage.note).foregroundStyle(palette.textSecondary).lineLimit(2)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 6).fill(
+                    stage.place == .here || stage.place == .going ? palette.surfaceElement : palette.surface))
+                .accessibilityIdentifier("task-workflow-bar-stage-\(stage.name)")
+            }
+        }
+        .padding(.horizontal, 14).padding(.bottom, 8)
+    }
+
+    private func fill(_ place: Stage.Place) -> Color {
+        switch place {
+        case .passed: palette.textTertiary
+        case .here: palette.text
+        case .going: task.shipping != nil ? palette.success : palette.working
+        case .ahead: .clear
+        }
+    }
+
+    /// What is happening now, in one line.
+    var live: String {
+        if let shipping = task.shipping { return shipping.reason }
+        guard let workflow = work.value?.workflow else {
+            if let error = work.errorMessage { return "Workflow could not be read: \(error)" }
+            if work.value == nil { return "Reading workflow…" }
+            return task.workflowName.map { "Takes up \($0) when it starts" } ?? "No workflow selected"
+        }
+        switch workflow.position {
+        case .node("start"): return "Not started"
+        case .node("end"): return "At its end"
+        case .node(let node): return "At \(node) · yours to try"
+        case .edge(let index, let process, let running):
+            guard workflow.edges.indices.contains(index) else { return "Workflow position unavailable" }
+            let edge = workflow.edges[index]
+            guard running else { return "\(edge.name) stopped before \(edge.to)" }
+            let step = model.graphProcesses[process]?.presentation.reason
+            return [edge.name + " → " + edge.to, step].compactMap { $0 }.joined(separator: " · ")
+        }
+    }
+
+    /// The Workflow's stages in order, then `end`, each placed against the
+    /// Task's position. While shipping, stand-ins take the stages ahead.
+    static func stages(_ workflow: Workflow, shipping: Bool) -> [Stage] {
+        let names = workflow.nodes.map(\.name) + ["end"]
+        let (at, going): (String, Bool) = switch workflow.position {
+        case .node(let node): (node, false)
+        case .edge(let index, _, let running):
+            workflow.edges.indices.contains(index) ? (workflow.edges[index].to, running) : ("start", false)
+        }
+        let here = names.firstIndex(of: at) ?? -1
+        let arrived = Dictionary(workflow.history.filter { $0.kind == .arrived || $0.kind == .set }
+            .map { ($0.to, $0.at) }) { _, later in later }
+        return names.enumerated().map { index, name in
+            let place: Stage.Place = index < here ? .passed : index == here ? (going ? .going : .here) : .ahead
+            let who: String? = name == "end" ? nil : (shipping && index >= here ? "stand-in" : "you")
+            let note: String = switch place {
+            case .here: "here now"
+            case .going: "on the way"
+            case .passed: arrived[name].map { "arrived " + Date(timeIntervalSince1970: TimeInterval($0))
+                .formatted(.dateTime.month(.abbreviated).day()) } ?? "passed"
+            case .ahead: shipping ? "agents will run it" : "ahead"
+            }
+            return Stage(name: name, place: place, who: who, note: note)
+        }
     }
 }
 
@@ -342,9 +489,10 @@ struct TaskHeading: View {
     let task: RoadmapTask
 
     /// The Task's lifecycle, the state Working Tasks and Shipping list by;
-    /// Linear's planning state never overrides it.
+    /// Linear's planning state never overrides it. What shipping is doing
+    /// now reads in the Workflow bar.
     var state: String {
-        if let shipping = task.shipping { return "Shipping · \(shipping.reason)" }
+        if task.shipping != nil { return "Shipping" }
         switch task.runtime?.status {
         case .paused: return "Paused"
         case .working: return "Working"
@@ -366,22 +514,6 @@ struct TaskHeading: View {
             Text(state).foregroundStyle(.secondary).fixedSize()
                 .accessibilityIdentifier("task-heading-state")
         }
-    }
-}
-
-/// The window's Task heading: hovering it fades in Ship it beside the state.
-struct ShippableTaskHeading: View {
-    let model: WorkModel
-    let task: RoadmapTask
-    @State private var hovered = false
-
-    var body: some View {
-        HStack(spacing: 8) {
-            TaskHeading(task: task)
-            TaskShipControl(model: model, task: task, revealed: hovered)
-        }
-        .contentShape(Rectangle())
-        .onHover { hovered = $0 }
     }
 }
 

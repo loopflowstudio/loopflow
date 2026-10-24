@@ -57,6 +57,9 @@ struct RepoView: View {
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
+            if let task = model.breadcrumb?.task?.task {
+                TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
+            }
             Group {
                 if let repoPath = model.repoPath {
                     SessionsView(

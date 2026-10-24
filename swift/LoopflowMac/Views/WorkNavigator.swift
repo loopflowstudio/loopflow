@@ -260,7 +260,7 @@ struct WorkBreadcrumbs: View {
                 if model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
             }
             if let task = model.breadcrumb?.task {
-                ShippableTaskHeading(model: model, task: task.task)
+                TaskHeading(task: task.task)
             }
             if let target = model.machineTarget {
                 WorkMachineControl(model: model, target: target).padding(.leading, 6)

@@ -853,7 +853,7 @@ final class WorkModel {
         didSet {
             // Retain the latest observed Task across temporary chapter membership
             // gaps, including selections saved in another repository.
-            for (repo, navigation) in navigationByRepo {
+            for navigation in navigationByRepo.values {
                 guard let selection = navigation.selection, selection.kind == .task else { continue }
                 if let task = roadmap.value?.tasks.items.first(where: { $0.id == selection.id || $0.runtime?.workId == selection.id }) {
                     let wave = roadmap.value?.waves.first { $0.wave.id == task.task.waveId }

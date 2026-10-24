@@ -290,7 +290,7 @@ final class TileFrame {
 /// Grows a zoomed member's full Work out of its tile. A transform, so the
 /// terminals inside lay out once at full size rather than on every frame.
 struct ZoomFromTile: ViewModifier, Animatable {
-    static let space = "work-content"
+    nonisolated static let space = "work-content"
     let origin: CGRect
     var progress: Double
     nonisolated var animatableData: Double {

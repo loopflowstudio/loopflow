@@ -3,8 +3,9 @@
 Status (2026-10-24): design accepted (Jack Heart, 2026-10-21/22); every accepted slice is built
 and committed, including the 2026-10-24 pass (Workflow bar, ship-restart backoff, post-merge
 verify). What's left: re-demo on the Workflow-bar build, and gate (see Remaining).
-This Task's schema draft is `store/migrations/drafts/ship_it.sql`, the only draft on the branch
-(main's #1655 event rewrite released in `0.14.15.002`).
+Main merged at 7f63da1649 (2026-10-24). This Task's schema draft is
+`store/migrations/drafts/ship_it.sql`; main's unreleased `pools_and_rentals.sql` (#1653) sits
+beside it and touches none of the same tables (main's #1655 rewrite released in `0.14.15.002`).
 
 ## Direction from Jack Heart (2026-10-21, design review)
 
@@ -54,6 +55,11 @@ Verbatim:
   carrier. No schedule, no setting. Accepted gap: a Machine nothing reads recovers on next read.
 - **Desktop views** (Jack: "default should filter them out"): build on #1580; the Working query
   excludes `state:shipping`; Shipping is a `state:shipping` query, not a `SidebarFilter` case.
+- **Placement** (Jack, 2026-10-24: "dots with some progressive disclosure or click to expand"):
+  a Workflow bar under the jump bar holds the stages and Ship it / Stop shipping, always
+  visible. Supersedes the hover control in the jump-bar heading (2026-10-23) and "variant C later".
+- **Post-merge verify** (Jack, 2026-10-23: "yea sound good"; pass approved 2026-10-24): see
+  Remaining 4. The replayed 2026-10-22 hold steer (4a36e3f0) is superseded.
 
 ## Landing evidence (Jack's infrastructure pass, 2026-10-21, comment 6e0e4ba4)
 
@@ -89,7 +95,7 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
   `Building|Landing|Repairing|Restarting|Paused` and `ship_control` on `TaskDetailSnapshot`/
   `RoadmapTask`. `Shipped` move kind deleted. Released `0.14.15.002` (#1655) rewrites `task_events`
   `flow_finished` rows; the branch's serde alias stays for Project `TaskObserved` copies.
-- Desktop: `TaskShipControl` on the main-pane Task heading (`TaskWorkView.swift`) holds **Ship
+- Desktop: `TaskShipControl` in the Workflow bar (`TaskWorkflowBar`, `TaskWorkView.swift`) holds **Ship
   it** (`task-ship`, the only route into `end`) and, while shipping, `state · reason` with **Stop
   shipping**. `ShipNoticeToast` Undo = Stop. `RegistryQuery.shipTask` runs `-b --task X ship`
   detached. Sidebar rows and `TaskActionItems` menus carry no ship control, and there's no
@@ -131,13 +137,18 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
   planning deadline under load); `swift test --filter 'DesktopHeadless|WorkNavigationTests'` 52 ok;
   clippy/fmt clean. Integration `land_tests::waited_task_landing_completes_at_workflow_end…`
   (still drives deleted `lf ci watch`) and `cli_discovery::graph_help_validates…` fail; this pass
-  didn't touch either path, but neither was rerun on the earlier HEAD (owner: gate).
+  didn't touch either path, but both are the branch's: `land_tests` still runs `ci watch
+  --once` (lines ~1872, ~2326), which this branch deleted; the graph-help test exercises the
+  branch's `interactive:` validation (failure cause not yet diagnosed). Rewrite the land tests to drive the ship process / lazy
+  recovery instead (owner: gate, item 3).
 - Compress (2026-10-24): `merge_target`'s `Option<Option<&str>>` became `reached`; the Workflow
   bar computes its stages once. `cargo test --lib task_ship_` 7/7 (with `LOOPFLOW_TEST_LF` set:
   the support crate's compiled-in `CARGO` path is stale here), `ops::task::ship` 4/4, clippy clean, Mac build ok.
 
-1. **Re-demo** on the branch build: Ship it beside the state in the jump bar (built
-   2026-10-23), the `loopflow://` world links and `unstarted` world Tasks.
+1. **Re-demo** on the branch build: the Workflow bar (dots, click-to-expand stage cells, live
+   line, Ship it / Stop shipping), a failed stand-in that backs off and names its cause instead
+   of the hot loop, the `loopflow://` world links and `unstarted` world Tasks. Still open from
+   Re-demo 2: should `lf ship` take an issue positional (`lf ship LOO-1`) like `lf task run`?
 2. **Not in this Task:** the `automation:` config key now names a deleted concept (its only field
    is repair startup retries). `.lf/config.yaml` is read by released lf, so a rename needs the
    shared-file fallback plus a removal Task; leave it. (Both 2026-10-22 concept reviews' docs drift is fixed: docs teach `interactive:` stages, routes,
@@ -173,12 +184,10 @@ Settled (2026-10-22):
 - Completion on merge is the ship process's job: before each route it reads the PR and completes
   the Task once merged. A non-shipping Task still follows "merge leaves the Task open until
   completion"; `lf pr reconcile`, `lf land` and reads settle it.
-- Placement (Jack, variant B): main-pane heading only, hover-revealed. Variant C (Workflow rail)
-  comes later and is still unsettled.
 - Sixth concept review (2026-10-23, jump-bar slice): nothing to change. The heading reads one
   lifecycle; a paused shipping Task reads "Shipping · Paused…" and keeps Stop shipping, which
-  matches "paused is a hold". Open items stay Jack's: Variant C, and whether
-  checkout work alone reads `working`. None blocks re-demo or gate.
+  matches "paused is a hold". Open item stays Jack's: whether checkout work alone reads
+  `working`. None blocks re-demo or gate.
 
 4. **Post-merge `verify`: built 2026-10-24 (see above); the shape below is the reference.** The hold steer of 2026-10-22
    was the operator's, posted under Jack's name while the shape was in discussion; Jack then

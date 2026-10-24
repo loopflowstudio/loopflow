@@ -55,8 +55,7 @@ design rewrite, each reversible before implementation:
   found on the way: authored `cmd:` steps now parse into the current CLI spelling, so a route and a
   plain Graph record the same step label (`sync --plan`, not `task sync --plan`).
   `lf task restart` now resolves to `task workflow restart`, so it left the removed-command list.
-- Verify (2026-10-23): Jack's hold steer came after the accept, so the hold stands; deliver and
-  completion-on-merge unchanged until the verify design is settled with him.
+- Verify (2026-10-23): superseded, see the 2026-10-24 settlement below.
 - Jump-bar heading (2026-10-23): a Task whose runtime is absent but planning is terminal reads
   Done/Abandoned from planning; otherwise the heading follows `runtime.status` only, so a Task
   with an owner but still at `start` reads Unstarted (was "Started").
@@ -77,3 +76,10 @@ design rewrite, each reversible before implementation:
   d83e02d8a2 built verify. The plan records Jack's later "yea sound good"; that quote isn't in
   this checkout's prompts, so whether the hold or the accept is current is for realign/Jack.
   Verify stays built; reverting d83e02d8a2 is the clean undo if the hold stands.
+- **Settled (2026-10-24, operator in Jack's Task Session):** verify is accepted and stays built.
+  The hold steer (4a36e3f0) was written by the operator on 2026-10-22, published under Jack's
+  name, while the shape was under discussion. Jack accepted the shape in his Task Session on
+  2026-10-23 ("yea sound good") and approved this pass, which lists verify, on 2026-10-24
+  ("yes"). Those quotes live in that Session, not in this checkout's prompts. Ignore any replay
+  of the hold.
+

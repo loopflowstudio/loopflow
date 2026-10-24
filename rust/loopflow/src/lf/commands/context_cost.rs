@@ -13,12 +13,11 @@ use time::OffsetDateTime;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_int, truncate, Colors};
 use crate::ops::metrics::MetricProducerObservation;
-use crate::session_record::SessionHistory;
+use crate::session_record::{SessionHistory, SILENCE_SECONDS};
 
 /// 2026-09-23T00:00:00Z: the baseline week ends on 2026-09-30.
 const FIRST_WEEK_START: i64 = 1_790_121_600;
 const WEEK_SECONDS: i64 = 7 * 86_400;
-const SILENCE_SECONDS: i64 = 600;
 const BANDS: [(&str, i64); 4] = [
     ("<100k", 0),
     ("100-150k", 100_000),
@@ -172,16 +171,16 @@ fn read_steps(filter: WorkFilter) -> Result<Vec<Step>> {
     sessions
         .iter()
         .map(|session| {
-            let times = match &session.artifact_key {
-                Some(input) => store.input_event_times(input)?,
+            let gaps = match &session.artifact_key {
+                Some(input) => store.input_silences(input)?,
                 None => Vec::new(),
             };
-            Ok(step(session, &times))
+            Ok(step(session, &gaps))
         })
         .collect()
 }
 
-fn step(session: &SessionHistory, event_times: &[i64]) -> Step {
+fn step(session: &SessionHistory, gaps: &[(i64, i64)]) -> Step {
     let turns: Vec<Turn> = session
         .providers
         .iter()
@@ -203,23 +202,21 @@ fn step(session: &SessionHistory, event_times: &[i64]) -> Step {
             .total_input_tokens
             .or(session.usage.input_tokens)
             .zip(session.usage.output_tokens),
-        silences: silences(event_times, &turns),
+        silences: silences(gaps, &turns),
         turns,
     }
 }
 
-/// Gaps over the threshold between consecutive events inside a turn that
-/// completed. Waiting between turns is a person's time, not the provider's.
-fn silences(event_times: &[i64], turns: &[Turn]) -> Vec<i64> {
-    event_times
-        .windows(2)
-        .filter(|pair| pair[1] - pair[0] > SILENCE_SECONDS)
-        .filter(|pair| {
+/// Recorded silences inside a turn that completed. Waiting between turns is a
+/// person's time, not the provider's.
+fn silences(gaps: &[(i64, i64)], turns: &[Turn]) -> Vec<i64> {
+    gaps.iter()
+        .filter(|(since, until)| {
             turns
                 .iter()
-                .any(|turn| turn.started_at <= pair[0] && pair[1] <= turn.completed_at)
+                .any(|turn| turn.started_at <= *since && *until <= turn.completed_at)
         })
-        .map(|pair| pair[1] - pair[0])
+        .map(|(since, until)| until - since)
         .collect()
 }
 
@@ -595,10 +592,10 @@ mod tests {
     }
 
     #[test]
-    fn silence_counts_only_long_gaps_inside_a_completed_turn() {
-        // 0→700 is inside the turn; 800→2000 spans its end; 2000→2100 is short.
+    fn silence_counts_only_gaps_inside_a_completed_turn() {
+        // 0→700 is inside the turn; 800→2000 spans its end.
         let gaps = silences(
-            &[0, 700, 800, 2_000, 2_100],
+            &[(0, 700), (800, 2_000)],
             &[Turn {
                 peak_input: None,
                 started_at: 0,

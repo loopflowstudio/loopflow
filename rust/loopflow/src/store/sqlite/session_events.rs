@@ -39,16 +39,17 @@ impl SqliteStore {
             .collect()
     }
 
-    /// When each retained event of one input was observed, in input order.
-    pub(crate) fn input_event_times(&self, input: &str) -> StoreResult<Vec<i64>> {
+    /// Each silence the recorder observed in one input, as `(since, until)`.
+    pub(crate) fn input_silences(&self, input: &str) -> StoreResult<Vec<(i64, i64)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
-            "SELECT unixepoch(json_extract(e.payload,'$.evidence.observed_at')) AS observed FROM session_events e
+            "SELECT json_extract(e.payload,'$.evidence.since'),json_extract(e.payload,'$.evidence.observed_at')
+             FROM session_events e
              JOIN session_events c ON c.seq=e.captured_event AND c.kind='captured' AND c.receipt_key=?1
-             WHERE e.kind='observed' AND substr(e.receipt_key,1,length(?1)+14)=?1||':events.jsonl:' AND observed IS NOT NULL
-             ORDER BY CAST(substr(e.receipt_key,length(?1)+15) AS INTEGER),e.seq",
+             WHERE e.kind='observed' AND substr(e.receipt_key,1,length(?1)+9)=?1||':silence:'
+             ORDER BY CAST(substr(e.receipt_key,length(?1)+10) AS INTEGER),e.seq",
         )?;
-        let rows = query.query_map([input], |row| row.get(0))?;
+        let rows = query.query_map([input], |row| Ok((row.get(0)?, row.get(1)?)))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
@@ -781,7 +782,7 @@ mod tests {
     }
 
     #[test]
-    fn event_times_follow_input_order_and_skip_untimed_events() {
+    fn silences_follow_input_order() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
@@ -789,36 +790,27 @@ mod tests {
             crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
                 .unwrap();
         let session = store.session("conversation").unwrap().unwrap();
-        // Retained out of order: the later event is imported first.
-        for (seq, evidence) in [
-            (
-                2,
-                json!({"observed_at":"2026-10-01T00:20:00.5Z","type":"usage"}),
-            ),
-            (
-                0,
-                json!({"observed_at":"2026-10-01T00:00:00Z","type":"user_input"}),
-            ),
-            (1, json!({"unparsed":"partial historical event"})),
-        ] {
-            let source = format!("events.jsonl:{seq}");
+        // Retained out of order: the later silence is imported first.
+        for (seq, since, until) in [(12, 5_000, 6_000), (3, 100, 900)] {
+            let source = format!("silence:{seq}");
             store
                 .retain_session_observation(
                     &session,
                     &crate::session::SessionObservation {
                         artifact_key: input.clone(),
                         source: source.clone(),
-                        observed_at: 1,
+                        observed_at: until,
                         task_id: None,
                         wave_id: None,
-                        payload: json!({"input_id":input,"source":source,"evidence":evidence}),
+                        payload: json!({"input_id":input,"source":source,
+                            "evidence":{"since":since,"observed_at":until}}),
                     },
                 )
                 .unwrap();
         }
         assert_eq!(
-            store.input_event_times(&input).unwrap(),
-            [1_790_812_800, 1_790_814_000]
+            store.input_silences(&input).unwrap(),
+            [(100, 900), (5_000, 6_000)]
         );
     }
 

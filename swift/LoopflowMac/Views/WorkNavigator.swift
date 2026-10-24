@@ -316,12 +316,17 @@ struct WorkMachineControl: View {
 
     private func load() async {
         error = nil
-        do { machines = try await model.machines(for: target) } catch { self.error = error.localizedDescription }
+        // A newer load or a navigation cancels this one; that is not a failure to show.
+        do { machines = try await model.machines(for: target) }
+        catch is CancellationError {}
+        catch { self.error = error.localizedDescription }
     }
 
     private func use(_ id: String) async {
         error = nil
-        do { try await model.useMachine(id, for: target) } catch { self.error = error.localizedDescription }
+        do { try await model.useMachine(id, for: target) }
+        catch is CancellationError {}
+        catch { self.error = error.localizedDescription }
     }
 }
 

@@ -100,8 +100,7 @@ struct DashboardQueryField: View {
             .textFieldStyle(.plain).font(Typography.code(11))
             .disabled(model.dashboardSaving)
             .onSubmit(submit)
-            .onAppear { draft = plan.selection.queryText }
-            .onChange(of: plan.selection.queryText) { _, query in draft = query }
+            .onChange(of: plan.selection.queryText, initial: true) { _, query in draft = query }
             .accessibilityIdentifier("dashboard-query")
     }
 

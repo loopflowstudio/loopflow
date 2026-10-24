@@ -825,7 +825,8 @@ const HERDR_WORKSPACE: &str = "HERDR_WORKSPACE_ID";
 const HERDR_PANE: &str = "HERDR_PANE_ID";
 const TMUX: &str = "TMUX";
 const TMUX_PANE: &str = "TMUX_PANE";
-/// Set by Loopflow Desktop on every child, including its terminals' agents.
+/// Set by Loopflow Desktop on every child, including its terminals' agents,
+/// to its own bundle identifier.
 const DESKTOP: &str = "LF_DESKTOP";
 
 /// Terminal-host context a direct caller carries. The link receiver removes
@@ -848,6 +849,18 @@ fn in_cmux() -> bool {
 
 fn in_desktop() -> bool {
     set(DESKTOP)
+}
+
+/// The Desktop a caller runs in, else the installed app.
+pub(crate) fn desktop_bundle() -> String {
+    named_bundle(std::env::var(DESKTOP).ok().as_deref()).to_owned()
+}
+
+fn named_bundle(desktop: Option<&str>) -> &str {
+    // Released Desktop builds set "1"; LOO-571 removes that reading.
+    desktop
+        .filter(|value| !value.is_empty() && *value != "1")
+        .unwrap_or(DESKTOP_BUNDLE)
 }
 
 fn in_herdr() -> bool {
@@ -992,7 +1005,7 @@ struct DesktopBatch {
 impl DesktopBatch {
     fn installed(&mut self) -> bool {
         *self.installed.get_or_insert_with(|| {
-            crate::work::link_receiver::application_for_bundle(DESKTOP_BUNDLE).is_some()
+            crate::work::link_receiver::application_for_bundle(&desktop_bundle()).is_some()
         })
     }
 
@@ -1002,7 +1015,7 @@ impl DesktopBatch {
             return Ok(());
         }
         let mut command = Command::new("open");
-        command.args(["-b", DESKTOP_BUNDLE]);
+        command.arg("-b").arg(desktop_bundle());
         if !focus {
             command.arg("-g");
         }
@@ -1720,5 +1733,21 @@ impl Cwd {
 impl Drop for Cwd {
     fn drop(&mut self) {
         let _ = std::env::set_current_dir(&self.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{named_bundle, DESKTOP_BUNDLE};
+
+    #[test]
+    fn desktop_bundle_defaults_to_the_installed_app() {
+        for desktop in [None, Some(""), Some("1")] {
+            assert_eq!(named_bundle(desktop), DESKTOP_BUNDLE, "{desktop:?}");
+        }
+        assert_eq!(
+            named_bundle(Some("com.loopflow.mac.dev")),
+            "com.loopflow.mac.dev"
+        );
     }
 }

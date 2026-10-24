@@ -605,10 +605,11 @@ issue read. No Task was filed or changed by these records.
 ## Workspace redesign decisions
 
 Jack Heart approved LOO-489's Console hybrid and Swift demo on October 17,
-superseding dashboard/grid, favorites, attention sorting and auto-collapse. Stable working Tasks precede direct Wave rows in one scrolling
+superseding dashboard/grid, favorites, attention sorting and automatic sidebar
+collapse proposals. Stable working Tasks precede direct Wave rows in one scrolling
 sidebar. One native titlebar holds breadcrumbs, tools and actions; Lato controls,
 mono excerpts, neutral selection and quiet Dark burgundy replace older serif/Ink
-on Paper navigation. Rejected compositions and limits:
+on Paper navigation. Prior rejected compositions and limits remain at
 `ac973064c6:.lf/wave/product/MEMORY.md`, this heading.
 
 Explicitly opening started, unpaused work appends once; attention/filter changes
@@ -624,19 +625,21 @@ terminal tabs; Files owns document/Brief/Changes tabs. Hiding tools preserves th
 clients and drafts. Existing workspace/layout/surface owners remain authoritative;
 the unused compact tile renderer was removed. LOO-497 retains dashboards/public
 APIs, LOO-416 cross-launch attachment, LOO-452 rebinding. Cmd-number uses stable
-slots; Ctrl-Tab cycles them; history retains Cmd-brackets. LOO-568 polishes
-the merged LOO-497.
+slots; Ctrl-Tab cycles them; history retains Cmd-brackets. Publication for demo
+review is authorized, not merge or Task completion.
 
 Preview freshness is separate from execution state: Codex records thread/turn/time,
-clears on turn start, fences replacement attachments. Swift pairs status/text
-from one Session; running text falls back to summary after 30 s; Available results
-keep their age. Other providers lack qualified previews.
+clears on turn start and fences replacement attachments. Swift pairs status/text
+from one Session; running text falls back to summary after 30 seconds, Available
+results retain their age. Other providers lack qualified previews.
 
-October 17 recovery: Claude → Codex failed before Claude saved a transcript.
-Preparation now reads requested-provider history before terminal release; failure
-preserves concurrent Session updates for retry. Missing history is not an empty
-conversation; an exited status writer restarts on a later event. Mounted retention
-and visual acceptance remain open. Jack Heart cut Open in editor on October 17.
+October 17 recovery: the demo retained a Codex draft but Claude → Codex failed
+before Claude saved a transcript; later transfer succeeded. Preparation now reads
+requested-provider history before terminal release; failure preserves concurrent
+Session updates and permits retry. Missing history is not an empty conversation.
+An exited status writer restarts on a later event. Headless checks cover refusal,
+retry, new-turn clearing and observation recovery; mounted retention and visual
+acceptance remain open. Jack Heart cut Open in editor on October 17.
 
 October 16–17, LOO-497/489/416: Jack Heart separated selection from arrangement.
 One Task layout projects primary Session or explicit zoom, never focus. Defaults
@@ -645,7 +648,8 @@ paused/idle. Jack chose first-wins duplicates and lfdb persistence. First-visibl
 tree traversal is the implementation interpretation; incomplete evidence retains
 geometry/order because reordering can promote duplicates. Hide preserves edits.
 
-Jack accepted breadcrumbs, Attention first, arrivals at the end, Available and cross-repo Cmd K Find Work.
+Jack accepted implementation/review publication, not merge/completion; breadcrumbs,
+Attention first, arrivals at the end, Available and cross-repo Cmd K Find Work.
 Other repos open separate windows; Edit view is separate. Repo scope is implicit;
 backlog selection starts nothing. October 17: independent Dashboards reuse Task
 workspaces; repository/Wave defaults cannot be replaced. Work bindings were removed.
@@ -662,21 +666,25 @@ Jack's October 17 tab decision: each Task has at most one Shell and one Files pa
 shell tabs own independent processes, file tabs share Task/path documents. No
 tear-out, extra tool panes or repo/Wave/Dashboard shells. Creation selects a tab;
 arrangement groups existing panes. Shell identity is independent of pane/selection;
-empty Files keeps location. Delayed reads merge missing content without replacing
-newer tabs, selection, geometry or drafts.
-Revision conflicts preserve live and durable edits. Cold shells have no launch
-command and native launch records no Shell Process ID, so cold attachment and
-restart/cross-machine continuity stay unproved (416).
-Panes belong to Task.repository_id, not Project/Wave membership.
+empty Files keeps location. October 18 application tests cover delayed reads
+merging missing content without replacing newer tabs, selection, geometry or drafts.
+Revision conflicts preserve live and durable edits. Cold shells have no launch command. Native
+launch still records no Shell Process ID, so cold attachment and mounted restart/
+cross-machine continuity remain unproved with 416.
+Pane ownership follows Task.repository_id, not optional Project/Wave membership;
+leaving a Project must preserve the same saved panes and drafts.
 
 October 15, LOO-492: Jack Heart clarified that nested corner curves need even
-clearance, not just text padding. Workspace radius derives from pane radius plus
-inset; terminal clearance sits outside Ghostty's measurement, and native grid
-padding remains for block hit testing. Headless checks cover radius/inset, not the
-conditional outer stroke or native frames; visual acceptance with visible
-workspace borders remains pending. Fallback builds do not prove Ghostty behavior.
+clearance; text padding alone does not satisfy the defect. The implementation
+derives workspace radius from pane radius plus inset. Terminal clearance sits
+outside Ghostty's measurement; native grid padding remains because block hit
+testing shares it. Focused headless checks cover radius/inset relationships,
+not the conditional outer stroke or native frames. Geometry proof with visible
+workspace borders and visual acceptance remain pending. AGENTS.md records the
+ViewInspector Observation limitation; fallback builds do not prove Ghostty behavior.
 
-LOO-298/299/300 keep historical allocations; archiving does not close them. Rust owns grouping and binding; September 30's primary repo conversation
+LOO-298/299/300 retain their historical allocations; the archive does not close
+them. Rust owns grouping and binding; September 30's primary repo conversation
 supersedes deferring waveless entry. Trace removed features through state and
 Undo (`536b0fd56:scratch/compress-pane-state.md`), not just visible controls.
 

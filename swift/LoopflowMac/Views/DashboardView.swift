@@ -18,7 +18,10 @@ struct DashboardSidebar: View {
             Text("DASHBOARDS").font(Typography.code(10)).foregroundStyle(palette.textSecondary)
             Spacer()
             HoverRevealed(flag: hover) {
-                Button { creating = true } label: { Image(systemName: "plus") }
+                // Plain, like the rows: a bordered button tracks the pointer
+                // itself, so reaching it ended the section's hover and hid it.
+                Button { creating = true } label: { Image(systemName: "plus").contentShape(Rectangle()) }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("New Dashboard")
             }
         }.padding(10)
@@ -83,6 +86,37 @@ struct DashboardEditor: View {
     }
 }
 
+/// The board's query, edited in place. Return saves a Dashboard's query; on
+/// Working Tasks or an unsaved view it opens the edited query as a view.
+struct DashboardQueryField: View {
+    let model: WorkModel
+    let plan: WorkViewPlan
+    @State private var draft = ""
+
+    var body: some View {
+        TextField("Query", text: $draft)
+            .textFieldStyle(.plain).font(Typography.code(11))
+            .disabled(model.dashboardSaving)
+            .onSubmit(submit)
+            .onAppear { draft = plan.selection.queryText }
+            .onChange(of: plan.selection.queryText) { _, query in draft = query }
+            .accessibilityIdentifier("dashboard-query")
+    }
+
+    private func submit() {
+        let expression = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !expression.isEmpty, expression != plan.selection.queryText else { return }
+        Task {
+            if let id = plan.dashboardID {
+                await model.saveDashboard(id: id, expression: expression, name: plan.name ?? id,
+                                          pinned: plan.pinned, revision: plan.savedRevision)
+            } else {
+                await model.openView(expression: expression)
+            }
+        }
+    }
+}
+
 struct DashboardView: View {
     let model: WorkModel
     let workspaces: SessionsWorkspaceRegistry
@@ -94,13 +128,7 @@ struct DashboardView: View {
         VStack(spacing: 8) {
             if let plan = model.selectedViewPlan {
                 HStack {
-                    if workingTasks {
-                        Text("\(WorkNavigation.workingTasksTitle) · \(model.workingTaskMembers.count)")
-                            .font(Typography.code(11))
-                    } else {
-                        Text(plan.selection.queryText).font(Typography.code(11)).textSelection(.enabled)
-                    }
-                    Spacer()
+                    DashboardQueryField(model: model, plan: plan)
                     if !workingTasks {
                         if plan.dashboardID != nil {
                             if editingSlots {

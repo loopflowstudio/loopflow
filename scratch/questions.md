@@ -55,3 +55,9 @@ design rewrite, each reversible before implementation:
   found on the way: authored `cmd:` steps now parse into the current CLI spelling, so a route and a
   plain Graph record the same step label (`sync --plan`, not `task sync --plan`).
   `lf task restart` now resolves to `task workflow restart`, so it left the removed-command list.
+- Verify (2026-10-23 implement): the plan records Jack accepting post-merge verify ("yea sound
+  good"), but the same pass was steered with the hold ("Hold item 7 … do not build it in this
+  pass"). Took the hold: deliver and completion-on-merge unchanged. Confirm before building.
+- Jump-bar heading (2026-10-23): a Task whose runtime is absent but planning is terminal reads
+  Done/Abandoned from planning; otherwise the heading follows `runtime.status` only, so a Task
+  with an owner but still at `start` reads Unstarted (was "Started").

@@ -1,6 +1,6 @@
 # LOO-561 · Ship it — plan
 
-Status (2026-10-22, fifth concept review): design accepted (Jack Heart, 2026-10-21/22); every accepted
+Status (2026-10-23, implement): design accepted (Jack Heart, 2026-10-21/22); every accepted
 slice is built and committed, vocabulary drift included. What's left: re-demo and gate (see Remaining). Post-merge verify is
 on hold. This Task's schema draft is `store/migrations/drafts/ship_it.sql`, the only draft on the branch.
 
@@ -107,8 +107,8 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
 
 ## Remaining
 
-1. **Re-demo** on the branch build. The pending items are under Demo findings: the heading
-   placement (variant B), the `loopflow://` world links and `unstarted` world Tasks.
+1. **Re-demo** on the branch build: Ship it beside the state in the jump bar (built
+   2026-10-23), the `loopflow://` world links and `unstarted` world Tasks.
 2. **Not in this Task:** the `automation:` config key now names a deleted concept (its only field
    is repair startup retries). `.lf/config.yaml` is read by released lf, so a rename needs the
    shared-file fallback plus a removal Task; leave it. (Both 2026-10-22 concept reviews' docs drift is fixed: docs teach `interactive:` stages, routes,
@@ -147,7 +147,9 @@ Settled (2026-10-22):
 - Placement (Jack, variant B): main-pane heading only, hover-revealed. Variant C (Workflow rail)
   comes later and is still unsettled.
 
-4. **Post-merge `verify` (Jack Heart, accepted 2026-10-23: "yea sound good"). Not built yet.**
+4. **Post-merge `verify` (Jack Heart, accepted 2026-10-23: "yea sound good"). Not built: the
+   2026-10-23 implement pass also received Jack's hold steer ("do not build it in this pass"),
+   so it stays unbuilt until one of them is confirmed (scratch/questions.md).**
    - Stage: `interactive: verify` after `deliver` (`… → deliver → interactive: verify → end`).
      Jack: "no verify is not a stage only humans can do". A person usually, a stand-in when
      shipping. Whether a Task has anything to verify is per Task ("its very task by task if
@@ -226,14 +228,13 @@ task_execution ok; mixed-runner planning/store failures pass alone (owner: gate)
 - Not this Task: "Layout not saved: error: root --json requires --context or --explain" banner.
   Desktop saves pane layout with `lf desktop layout <work> --save --json`; `desktop layout` has
   no own `--json`, so the root guard rejects it. Same code on origin/main.
-- **Placement corrected** (Jack, 2026-10-23: "I think near where it sys Started though"). Ship it
-  goes in the window's jump bar, beside the Task's state in `TaskHeading` (`WorkNavigator.swift`,
-  the breadcrumb that reads "LOO-… title Started", before the Machine control). It shows for
-  every selected Task, whatever pane layout is open. Hovering the heading fades in the green
-  Ship it next to the state; while shipping the same spot holds Stop shipping, and the Undo
-  toast stays. Delete `TaskShipControl` from `WorkSurfaceView`'s detail page (one place only).
-  That state text still says "Started"/"Unstarted" from the old model; it reads the lifecycle
-  instead: Unstarted, Working, Shipping · reason, Paused, Done, Abandoned.
+- **Placement corrected** (Jack, 2026-10-23: "I think near where it sys Started though"). Built:
+  `ShippableTaskHeading` in the jump bar (`WorkBreadcrumbs` trail) holds `TaskHeading` plus
+  `TaskShipControl`, fading in Ship it / Stop shipping on hover for every selected Task. The
+  heading state reads the lifecycle (Unstarted, Working, Shipping · reason, Paused, Done,
+  Abandoned). The toast is window-level (`WorkNavigation.shipNotice`, `ShipNoticeOverlay` on
+  `RepoView`). The detail page's control is gone. Check: `swift test --filter
+  'WorkNavigationTests|DesktopHeadless'` 51 ok.
 - Not this Task: the jump bar's Machine control shows "Swift.CancellationError" with a ⚠
   (`WorkMachineControl.load()` reports the cancelled `.task(id:)` load). Fixed in this Task at Jack's request (6a066d80a4: `CancellationError` is ignored).
 

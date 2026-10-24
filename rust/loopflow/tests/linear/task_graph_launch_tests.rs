@@ -2142,3 +2142,52 @@ fn task_ship_restarts_on_the_next_read_after_its_process_dies() {
     // The restart carries the same handoff; it is not shipped a second time.
     assert_eq!(handoffs(&task).len(), 1);
 }
+
+/// A Claude stand-in that records its first turn and fails at once, the way an
+/// expired login does.
+const FAILING_CLAUDE: &str = r#"#!/usr/bin/python3
+import json, os, sys
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+home = os.environ['LF_HOME']
+message = json.loads(sys.stdin.readline())
+with open(os.path.join(home, 'stand-ins.jsonl'), 'a') as turns:
+    turns.write(json.dumps(message['message']['content'][0]['text']) + '\n')
+sys.exit(3)
+"#;
+
+#[test]
+fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
+    let task = WorkflowTask::with_tools(&[("claude", FAILING_CLAUDE)]);
+    connect_fixture_claude(task.home.path(), &task.registered.store);
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(
+            task.registered
+                .store
+                .set_task_agent(&task.registered.task.id, "claude"),
+        )
+        .unwrap();
+    let output = task.run(&["-b", "--task", "INF-123", "ship"]);
+    assert!(!output.status.success());
+    assert_eq!(stand_ins(&task).len(), 1);
+    assert_eq!(task.state(), "shipping");
+    // Reads right after the failure leave the restart waiting its minute.
+    for _ in 0..3 {
+        task.ok(&["task", "list"]);
+    }
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(stand_ins(&task).len(), 1);
+    assert_eq!(task.state(), "shipping");
+    // The shipping reason names the stand-in's failure and the wait.
+    let shown = task.run(&["wave", "show", "--json"]);
+    let shown = String::from_utf8_lossy(&shown.stdout);
+    let reason = shown
+        .split("\"reason\":\"Ship failed: ")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .unwrap_or_else(|| panic!("no failed shipping reason in {shown}"));
+    assert!(reason.starts_with("agent exited with code 1"), "{reason}");
+    assert!(reason.ends_with("; retrying within a minute"), "{reason}");
+}

@@ -13,8 +13,8 @@ use crate::graph::runner::SkillOutcome;
 use crate::graph::transitions::{GraphDecision, GraphVerdict};
 use crate::lf::Cli;
 use crate::ops::task::ship::{
-    blocked_backoff, ship_begin, ship_complete_if_merged, ship_next, stand_in_message, ShipStart,
-    ShipStep,
+    blocked_backoff, ship_begin, ship_complete_if_merged, ship_next, ship_progressed,
+    stand_in_message, ShipStart, ShipStep,
 };
 use crate::ops::task::TaskProcessOptions;
 
@@ -70,6 +70,7 @@ pub fn run(
                     &message,
                     output.as_ref(),
                 )?;
+                ship_progressed(&task.id)?;
                 // Someone may have paused or stopped it while the stand-in ran.
                 let step = ship_next(&issue)?;
                 if matches!(step, ShipStep::Paused | ShipStep::Stopped) {
@@ -130,6 +131,7 @@ pub fn run(
         if let Some(edge) = runs {
             super::graph::run_task_edge_for(cli, task.id.as_str(), &edge, &worktree)?;
             crate::ops::task::workflow_arrive(&task)?;
+            ship_progressed(&task.id)?;
         }
     }
 }

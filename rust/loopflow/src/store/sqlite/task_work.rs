@@ -381,12 +381,14 @@ fn choose_edge_in(
     Ok(true)
 }
 
-/// A Task handed off to finish on its own: since when, and this Machine's
-/// process carrying it there.
+/// A Task handed off to finish on its own: since when, this Machine's
+/// process carrying it there, and how many times in a row that process was
+/// started again after it failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskShipping {
     pub shipped_at: i64,
     pub process: Option<LfProcessId>,
+    pub restarts: u32,
 }
 
 pub(super) fn shipping_in(
@@ -395,18 +397,20 @@ pub(super) fn shipping_in(
 ) -> StoreResult<Option<TaskShipping>> {
     use rusqlite::OptionalExtension;
     conn.query_row(
-        "SELECT shipped_at,ship_lf_process_id FROM tasks WHERE id=?1 AND shipped_at IS NOT NULL",
+        "SELECT shipped_at,ship_lf_process_id,ship_restarts FROM tasks
+         WHERE id=?1 AND shipped_at IS NOT NULL",
         [task.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )
     .optional()?
-    .map(|(shipped_at, process)| shipping(shipped_at, process))
+    .map(|(shipped_at, process, restarts)| shipping(shipped_at, process, restarts))
     .transpose()
 }
 
-fn shipping(shipped_at: i64, process: Option<String>) -> StoreResult<TaskShipping> {
+fn shipping(shipped_at: i64, process: Option<String>, restarts: u32) -> StoreResult<TaskShipping> {
     Ok(TaskShipping {
         shipped_at,
+        restarts,
         process: process
             .map(|id| {
                 LfProcessId::parse(&id)
@@ -431,7 +435,7 @@ pub(super) fn unship_in(
             ),
         )?;
         conn.execute(
-            "UPDATE tasks SET ship_lf_process_id=NULL WHERE id=?1",
+            "UPDATE tasks SET ship_lf_process_id=NULL,ship_restarts=0 WHERE id=?1",
             [task.as_str()],
         )?;
     }
@@ -478,6 +482,7 @@ fn ship_in(
     Ok(TaskShipping {
         shipped_at,
         process: Some(by.clone()),
+        restarts: shipping_in(tx, task)?.map_or(0, |shipping| shipping.restarts),
     })
 }
 
@@ -959,21 +964,47 @@ impl SqliteStore {
     pub(crate) fn local_shipping_tasks(&self) -> StoreResult<Vec<(TaskId, TaskShipping)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
-            "SELECT id,shipped_at,ship_lf_process_id FROM tasks WHERE shipped_at IS NOT NULL
+            "SELECT id,shipped_at,ship_lf_process_id,ship_restarts FROM tasks
+             WHERE shipped_at IS NOT NULL
              AND checkout_machine_id=(SELECT id FROM machines WHERE route='local')",
         )?;
         let rows = query
             .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get(1)?, row.get(2)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         rows.into_iter()
-            .map(|(id, shipped_at, process)| {
+            .map(|(id, shipped_at, process, restarts)| {
                 let id = TaskId::parse(&id)
                     .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
-                Ok((id, shipping(shipped_at, process)?))
+                Ok((id, shipping(shipped_at, process, restarts)?))
             })
             .collect()
+    }
+
+    /// Count one more restart after a failed ship process.
+    pub(crate) fn count_ship_restart(&self, task: &TaskId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE tasks SET ship_restarts=ship_restarts+1 WHERE id=?1",
+            [task.as_str()],
+        )?;
+        Ok(())
+    }
+
+    /// A ship step completed: the next failure restarts without waiting long.
+    pub(crate) fn reset_ship_restarts(&self, task: &TaskId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE tasks SET ship_restarts=0 WHERE id=?1",
+            [task.as_str()],
+        )?;
+        Ok(())
     }
 
     /// The node `by`'s edge enters, while the Task is still on that edge.

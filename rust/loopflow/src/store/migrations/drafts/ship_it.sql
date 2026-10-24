@@ -50,9 +50,11 @@ END;
 
 -- Shipping is a Task lifecycle state: `shipped_at` is when the Task was handed off
 -- to finish on its own (shared, like `paused`), and `ship_lf_process_id` is this
--- Machine's process carrying it there.
+-- Machine's process carrying it there. `ship_restarts` counts restarts in a row
+-- after a failed ship process; each waits longer, and a completed step resets it.
 ALTER TABLE tasks ADD COLUMN shipped_at INTEGER;
 ALTER TABLE tasks ADD COLUMN ship_lf_process_id TEXT REFERENCES processes(id);
+ALTER TABLE tasks ADD COLUMN ship_restarts INTEGER NOT NULL DEFAULT 0;
 
 -- CI repair has no per-Task setting: Pause holds it, and the ship process is the
 -- only repair starter.

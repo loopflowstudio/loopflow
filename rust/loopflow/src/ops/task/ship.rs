@@ -110,17 +110,37 @@ fn carrier_evidence(
     }
 }
 
-/// The Task's shipping, when it is shipping. `alive` is the ship process's liveness.
+/// When a ship process that failed at `failed_at` starts again: the landing's
+/// repair backoff, 1 minute up to 30, counted over restarts in a row.
+fn restart_due(shipping: &TaskShipping, failed_at: i64) -> i64 {
+    failed_at + crate::ops::pr_landing::repair_backoff(shipping.restarts.saturating_add(1))
+}
+
+/// When the ship process failed, and the error that caused it.
+fn carrier_failure(
+    sqlite: &crate::store::sqlite::SqliteStore,
+    shipping: &TaskShipping,
+) -> crate::store::StoreResult<Option<(i64, String)>> {
+    match &shipping.process {
+        Some(process) => sqlite.failure_cause(process),
+        None => Ok(None),
+    }
+}
+
+/// The Task's shipping, when it is shipping. `alive` is the ship process's
+/// liveness and `failure` when it failed and why.
 pub(crate) fn shipping_snapshot(
     workflow: Option<&Workflow>,
     shipping: &TaskShipping,
     status: TaskState,
     alive: ProcessIdentityEvidence,
+    failure: Option<&(i64, String)>,
     landing: Option<&PrLanding>,
 ) -> Option<ShippingSnapshot> {
     if !matches!(status, TaskState::Shipping | TaskState::Paused) {
         return None;
     }
+    let restart = failure.map(|(failed_at, error)| (restart_due(shipping, *failed_at), error));
     let shipping = |state, reason: String| {
         Some(ShippingSnapshot {
             shipped_at: shipping.shipped_at,
@@ -135,9 +155,27 @@ pub(crate) fn shipping_snapshot(
         );
     }
     if alive == ProcessIdentityEvidence::Dead {
+        let Some((due, error)) = restart else {
+            return shipping(
+                ShippingState::Restarting,
+                "Ship process exited; it restarts on the next read of this Machine's Tasks".into(),
+            );
+        };
+        let error = error
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .trim_end_matches('.');
+        let wait = due - crate::store::rows::now_unix();
+        let when = match wait {
+            ..=0 => "retrying on the next read of this Machine's Tasks".to_string(),
+            1..=60 => "retrying within a minute".to_string(),
+            _ => format!("retrying in {} min", (wait + 59) / 60),
+        };
         return shipping(
             ShippingState::Restarting,
-            "Ship process exited; it restarts on the next read of this Machine's Tasks".into(),
+            format!("Ship failed: {error}; {when}"),
         );
     }
     if let Some(landing) = landing {
@@ -180,12 +218,14 @@ pub(crate) fn read_shipping(
         return Ok(None);
     };
     let alive = carrier_evidence(sqlite, &shipping);
+    let failure = carrier_failure(sqlite, &shipping)?;
     let landing = sqlite.pending_task_landing(task)?;
     Ok(shipping_snapshot(
         workflow,
         &shipping,
         status,
         alive,
+        failure.as_ref(),
         landing.as_ref(),
     ))
 }
@@ -463,16 +503,33 @@ pub fn stand_in_message(stage: &str, repeats: bool) -> String {
     message
 }
 
+/// A ship step completed, so a later failure restarts after the shortest wait.
+pub fn ship_progressed(task: &crate::work::task::TaskId) -> OpsResult<()> {
+    block_on_task(async {
+        let store = task_store().await?;
+        store.sqlite.reset_ship_restarts(task).map_err(task_error)
+    })
+}
+
 /// Start `lf --task ISSUE ship` again for each shipping Task checked out on
 /// this Machine whose ship process has exited. Paused and finished Tasks wait.
+/// After a failure the restart waits, longer each time in a row; a process
+/// that ended without failing (killed, interrupted) restarts at once.
 pub(crate) fn restart_ships() -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;
+        let now = crate::store::rows::now_unix();
         for (id, shipping) in store.sqlite.local_shipping_tasks().map_err(task_error)? {
             if store.sqlite.task_state(&id).map_err(task_error)? != TaskState::Shipping
                 || carrier_evidence(&store.sqlite, &shipping) != ProcessIdentityEvidence::Dead
             {
                 continue;
+            }
+            let failure = carrier_failure(&store.sqlite, &shipping).map_err(task_error)?;
+            if let Some((failed_at, _)) = &failure {
+                if restart_due(&shipping, *failed_at) > now {
+                    continue;
+                }
             }
             let Some(task) = store.get_task(&id).await.map_err(task_error)? else {
                 continue;
@@ -487,6 +544,9 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
                 task.identifier.clone(),
                 "ship".into(),
             ];
+            if failure.is_some() {
+                store.sqlite.count_ship_restart(&id).map_err(task_error)?;
+            }
             crate::os_process::start_lf_session(worktree, &argv, &[], &|_| {})
                 .map_err(task_error)?;
             tracing::info!("restarted the ship process for {}", task.identifier);
@@ -510,6 +570,46 @@ mod tests {
     fn a_repeatedly_blocked_stand_in_waits_longer_up_to_half_an_hour() {
         let minutes = |n| super::blocked_backoff(n).as_secs() / 60;
         assert_eq!([1, 2, 3, 6, 20].map(minutes), [1, 2, 4, 30, 30]);
+    }
+
+    #[test]
+    fn a_failed_ship_restarts_later_each_time_and_says_why() {
+        let mut handoff = TaskShipping {
+            shipped_at: 5,
+            process: Some(LfProcessId::new()),
+            restarts: 0,
+        };
+        let minutes = |handoff: &TaskShipping| super::restart_due(handoff, 0) / 60;
+        assert_eq!(minutes(&handoff), 1);
+        handoff.restarts = 3;
+        assert_eq!(minutes(&handoff), 4);
+        handoff.restarts = 20;
+        assert_eq!(minutes(&handoff), 30);
+
+        let failed_at = crate::store::rows::now_unix();
+        let failure = (
+            failed_at,
+            "no eligible managed claude account.\ncaused by".into(),
+        );
+        let read = |failure| {
+            shipping_snapshot(
+                None,
+                &handoff,
+                TaskState::Shipping,
+                ProcessIdentityEvidence::Dead,
+                failure,
+                None,
+            )
+            .unwrap()
+        };
+        let failed = read(Some(&failure));
+        assert_eq!(failed.state, ShippingState::Restarting);
+        assert_eq!(
+            failed.reason,
+            "Ship failed: no eligible managed claude account; retrying in 30 min"
+        );
+        // A process that ended without failing restarts on the next read.
+        assert!(read(None).reason.starts_with("Ship process exited"));
     }
 
     #[test]
@@ -584,9 +684,10 @@ mod tests {
         let handoff = TaskShipping {
             shipped_at: 5,
             process: Some(LfProcessId::new()),
+            restarts: 0,
         };
         let read = |status, alive, landing: Option<&PrLanding>| {
-            shipping_snapshot(Some(&workflow), &handoff, status, alive, landing).unwrap()
+            shipping_snapshot(Some(&workflow), &handoff, status, alive, None, landing).unwrap()
         };
         let building = read(TaskState::Shipping, ProcessIdentityEvidence::Live, None);
         assert_eq!(building.shipped_at, 5);
@@ -641,6 +742,7 @@ mod tests {
             &handoff,
             TaskState::Done,
             ProcessIdentityEvidence::Live,
+            None,
             None
         )
         .is_none());

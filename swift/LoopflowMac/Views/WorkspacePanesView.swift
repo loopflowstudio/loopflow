@@ -58,6 +58,17 @@ struct WorkspacePanesView: View {
     }
 }
 
+/// Inputs compared without `onFocus`: a closure never compares equal, so it
+/// would re-run every pane on each parent render. It captures only references.
+extension WorkspacePanesView: Equatable {
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        MainActor.assumeIsolated {
+            lhs.workspace === rhs.workspace && lhs.isFocused == rhs.isFocused && lhs.sessions === rhs.sessions
+                && lhs.model === rhs.model && lhs.face == rhs.face
+        }
+    }
+}
+
 /// The Session slot before a conversation runs here: what that means and its
 /// one explicit action. Move here and an unstarted Task's Start share it.
 struct SessionSlotOffer<Description: View>: View {
@@ -123,12 +134,10 @@ struct PaneEmptyState<Description: View, Actions: View>: View {
 
     var body: some View {
         if compact {
-            HStack(spacing: Spacing.sm) {
-                Label(title, systemImage: systemImage)
-                    .lineLimit(1).truncationMode(.tail)
-                    .foregroundStyle(theme.palette.text)
-                    .help(summary ?? title)
-                actions.controlSize(.small).fixedSize()
+            // A narrow slot keeps the action and the state's icon rather than a clipped title.
+            ViewThatFits(in: .horizontal) {
+                compactRow(Label(title, systemImage: systemImage).fixedSize())
+                compactRow(Label(title, systemImage: systemImage).labelStyle(.iconOnly))
             }
             .font(Typography.body(12))
             .padding(Spacing.sm)
@@ -139,6 +148,15 @@ struct PaneEmptyState<Description: View, Actions: View>: View {
             } description: {
                 description.foregroundStyle(theme.palette.textSecondary)
             } actions: { actions }
+        }
+    }
+}
+
+extension PaneEmptyState {
+    fileprivate func compactRow(_ label: some View) -> some View {
+        HStack(spacing: Spacing.sm) {
+            label.foregroundStyle(theme.palette.text).help(summary ?? title)
+            actions.controlSize(.small).fixedSize()
         }
     }
 }
@@ -175,44 +193,41 @@ private struct MultiplexerNodeView: View {
 
     private var store: MultiplexerStore { workspace.multiplexer }
 
-    var body: some View {
+    // Structural, not AnyView: SwiftUI diffs panes and splits by their types.
+    @ViewBuilder var body: some View {
         switch node {
         case .leaf(let pane):
-            return AnyView(
-                SessionPaneView(
-                    pane: pane,
-                    isFocused: pane.id == focusedPaneId,
-                    sessions: sessions,
-                    workspace: workspace, model: model, onFocus: onFocus
-                )
-                .id(pane.id)
+            SessionPaneView(
+                pane: pane,
+                isFocused: pane.id == focusedPaneId,
+                sessions: sessions,
+                workspace: workspace, model: model, onFocus: onFocus
             )
+            .id(pane.id)
         case .split(let axis, let first, let second, let ratio):
-            return AnyView(
-                GeometryReader { geometry in
-                    let vertical = axis == .vertical
-                    let extent = vertical ? geometry.size.width : geometry.size.height
-                    let firstSize = first.minimumPaneSize
-                    let secondSize = second.minimumPaneSize
-                    let sizing = SplitSizing(extent: extent,
-                        firstMinimum: vertical ? firstSize.width : firstSize.height,
-                        secondMinimum: vertical ? secondSize.width : secondSize.height)
-                    let displayedRatio = sizing.constrain(ratio)
-                    let firstExtent = max(0, extent * displayedRatio - sizing.divider / 2)
-                    let secondExtent = max(0, extent - firstExtent - sizing.divider)
-                    let stack = vertical ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
-                    stack {
-                        _child(first)
-                            .frame(width: vertical ? firstExtent : nil, height: vertical ? nil : firstExtent)
-                            .clipped()
-                        SplitDivider(axis: axis, ratio: displayedRatio, sizing: sizing,
-                            update: { store.updateRatio(between: first.firstPane.id, and: second.firstPane.id, ratio: $0) })
-                        _child(second)
-                            .frame(width: vertical ? secondExtent : nil, height: vertical ? nil : secondExtent)
-                            .clipped()
-                    }
+            GeometryReader { geometry in
+                let vertical = axis == .vertical
+                let extent = vertical ? geometry.size.width : geometry.size.height
+                let firstSize = first.minimumPaneSize
+                let secondSize = second.minimumPaneSize
+                let sizing = SplitSizing(extent: extent,
+                    firstMinimum: vertical ? firstSize.width : firstSize.height,
+                    secondMinimum: vertical ? secondSize.width : secondSize.height)
+                let displayedRatio = sizing.constrain(ratio)
+                let firstExtent = max(0, extent * displayedRatio - sizing.divider / 2)
+                let secondExtent = max(0, extent - firstExtent - sizing.divider)
+                let stack = vertical ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+                stack {
+                    _child(first)
+                        .frame(width: vertical ? firstExtent : nil, height: vertical ? nil : firstExtent)
+                        .clipped()
+                    SplitDivider(axis: axis, ratio: displayedRatio, sizing: sizing,
+                        update: { store.updateRatio(between: first.firstPane.id, and: second.firstPane.id, ratio: $0) })
+                    _child(second)
+                        .frame(width: vertical ? secondExtent : nil, height: vertical ? nil : secondExtent)
+                        .clipped()
                 }
-            )
+            }
         }
     }
 
@@ -329,12 +344,10 @@ struct SessionPaneView: View {
     let onFocus: (String, String?) -> Void
 
     private var store: MultiplexerStore { workspace.multiplexer }
-    private var hover: PaneHover { workspace.hover }
+    private var hover: HoverFlag { workspace.stripHover(pane.id) }
     @State private var bellRinging = false
     @State private var terminalTitle: String?
     @State private var copyConfirmation: String?
-
-    private var hovering: Bool { hover.paneId == pane.id }
 
     private var item: SessionItem? {
         guard case .session(let id, _, _) = pane.content else { return nil }
@@ -357,14 +370,21 @@ struct SessionPaneView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.terminal.background.color)
         .clipShape(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius))
-        // Retained pane selection is not proof of native keyboard focus.
+        // Retained pane selection is not proof of native keyboard focus. Only the
+        // frame animates: an animated pane would animate its terminal's layout too.
         .overlay {
             RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)
                 .strokeBorder(isFocused ? theme.palette.borderStrong : theme.palette.border, lineWidth: 1)
+                .animation(DesignAnimation.standard(reduceMotion), value: isFocused)
                 .allowsHitTesting(false)
         }
-        .shadow(color: theme.palette.shadow.opacity(isFocused ? 0.22 : 0.08), radius: isFocused ? 4 : 1, y: isFocused ? 2 : 1)
-        .animation(DesignAnimation.standard(reduceMotion), value: isFocused)
+        .background {
+            RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)
+                .fill(theme.terminal.background.color)
+                .shadow(color: theme.palette.shadow.opacity(isFocused ? 0.08 : 0), radius: 2, y: 1)
+                .animation(DesignAnimation.standard(reduceMotion), value: isFocused)
+        }
+        .renderFlash()
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
         .accessibilityIdentifier(item.map { "session-pane-\($0.id)" } ?? "session-pane-empty")
@@ -451,24 +471,25 @@ struct SessionPaneView: View {
                     .foregroundStyle(theme.palette.available)
                     .accessibilityLabel("Session ready")
             }
-            if isFocused && hovering {
-                HStack(spacing: 2) {
-                    stripButton("xmark", label: "Close view", id: "pane-close", help: closeHelp, disabled: !store.canClose) {
-                        closePane()
+            if isFocused {
+                HoverRevealed(flag: hover) {
+                    HStack(spacing: 2) {
+                        stripButton("xmark", label: "Close view", id: "pane-close", help: closeHelp, disabled: !store.canClose) {
+                            closePane()
+                        }
                     }
+                    .accessibilityIdentifier("pane-actions")
                 }
-                .transition(.opacity)
-                .accessibilityIdentifier("pane-actions")
             }
         }
         .padding(.leading, 12)
         .padding(.trailing, 4)
         .frame(height: 28)
         .contentShape(Rectangle())
-        .background(PaneHoverRegion(identifier: "pane-hover-\(pane.id)") { inside in
-            if inside { hover.paneId = pane.id } else if hover.paneId == pane.id { hover.paneId = nil }
+        .background(PaneHoverRegion(identifier: "pane-hover-\(pane.id)") { [hover] inside in
+            if hover.isHovered != inside { hover.isHovered = inside }
         })
-        .animation(DesignAnimation.fast(reduceMotion), value: hovering)
+        .renderFlash()
         .onTapGesture { focusPane() }
         .contextMenu { paneActions }
         .accessibilityIdentifier("pane-strip-\(pane.id)")

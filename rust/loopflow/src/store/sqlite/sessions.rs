@@ -645,6 +645,28 @@ impl SqliteStore {
         .collect()
     }
 
+    /// The unfinished interactive conversation last opened in a checkout.
+    pub(crate) fn checkout_conversation(&self, root: &Path) -> StoreResult<Option<LfSession>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let root = root.to_string_lossy();
+        conn.query_row(
+            &format!(
+                "{SESSION_SELECT}
+                WHERE s.interactive=1 AND s.completed_at IS NULL
+                AND (s.cwd=?1 OR substr(s.cwd,1,length(?1)+1)=?1||'/')
+                ORDER BY COALESCE((
+                    SELECT MAX(json_extract(payload,'$.opened_at_ms'))
+                    FROM session_events WHERE session_id=s.id AND kind='observed'
+                    AND json_extract(payload,'$.type')='interactive_opened'
+                ), s.created_at*1000) DESC, s.id DESC LIMIT 1"
+            ),
+            [root.as_ref()],
+            read_session,
+        )
+        .optional()?
+        .transpose()
+    }
+
     /// The conversation a Task's primary pointer names, while it is unfinished.
     pub(crate) fn task_primary(&self, task: &TaskId) -> StoreResult<Option<LfSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");

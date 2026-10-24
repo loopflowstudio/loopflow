@@ -101,6 +101,37 @@ pub(crate) async fn connection_scope(
     cwd: &Path,
     target: SessionTarget<'_>,
 ) -> Result<crate::session::PrimaryScope> {
+    match checkout_scope(store, cwd, target).await? {
+        Some(scope) => Ok(scope),
+        None => Err(unassociated_checkout(cwd)?),
+    }
+}
+
+/// The conversation last opened in a linked checkout no Task, Wave or
+/// repository owns. Such a checkout has no primary to resolve or create.
+pub(super) async fn checkout_conversation(
+    store: &SharedStore,
+    cwd: &Path,
+) -> Result<Option<String>> {
+    let root = crate::git::worktree_root(cwd)?;
+    Ok(store
+        .sqlite
+        .checkout_conversation(&root)?
+        .map(|session| session.id.into()))
+}
+
+pub(super) fn unassociated_checkout(cwd: &Path) -> Result<anyhow::Error> {
+    let path = crate::repository::CanonicalRepo::discover(cwd)?.to_string();
+    let command = shlex::try_join(["lf", "--repo", path.as_str(), "connect"])?;
+    Ok(anyhow!("This worktree has no associated work conversation.\n  lf                         Start a new conversation in this worktree\n  {command}  Open the repository's ongoing conversation\n  lf connect SESSION         Continue a particular conversation"))
+}
+
+/// The scope that owns this checkout, or `None` for an unassociated linked one.
+pub(super) async fn checkout_scope(
+    store: &SharedStore,
+    cwd: &Path,
+    target: SessionTarget<'_>,
+) -> Result<Option<crate::session::PrimaryScope>> {
     use crate::session::PrimaryScope;
     let selection = match target {
         SessionTarget::Session(_) => bail!("an exact Session has no selected scope"),
@@ -118,7 +149,7 @@ pub(crate) async fn connection_scope(
         let work = crate::ops::run::select_work(store, cwd, selection)
             .await?
             .context("selected Work is unavailable")?;
-        return Ok(match work.task {
+        return Ok(Some(match work.task {
             Some(task) => PrimaryScope::Task(task.id),
             None => PrimaryScope::Wave(
                 work.wave
@@ -126,18 +157,18 @@ pub(crate) async fn connection_scope(
                     .id()
                     .clone(),
             ),
-        });
+        }));
     }
     let repo = crate::repository::CanonicalRepo::discover(cwd)?;
     if matches!(target, SessionTarget::Repository) {
-        return Ok(PrimaryScope::Repository(repo));
+        return Ok(Some(PrimaryScope::Repository(repo)));
     }
     let root = crate::git::worktree_root(cwd)?;
     if let Some(task) = crate::ops::task::task_for_checkout(store, &root).await? {
-        return Ok(PrimaryScope::Task(task.id));
+        return Ok(Some(PrimaryScope::Task(task.id)));
     }
     if root == repo.as_path() {
-        return Ok(PrimaryScope::Repository(repo));
+        return Ok(Some(PrimaryScope::Repository(repo)));
     }
     if crate::git::worktrees::is_persistent_worktree(&root)? {
         let matches = |scope: &PrimaryScope| -> Result<bool> {
@@ -148,17 +179,15 @@ pub(crate) async fn connection_scope(
             )
         };
         if matches(&PrimaryScope::Repository(repo.clone()))? {
-            return Ok(PrimaryScope::Repository(repo));
+            return Ok(Some(PrimaryScope::Repository(repo)));
         }
         for wave in store.list_waves(Some(&repo.to_string())).await? {
             if matches(&PrimaryScope::Wave(wave.id().clone()))? {
-                return Ok(PrimaryScope::Wave(wave.id().clone()));
+                return Ok(Some(PrimaryScope::Wave(wave.id().clone())));
             }
         }
     }
-    let path = repo.to_string();
-    let command = shlex::try_join(["lf", "--repo", path.as_str(), "connect"])?;
-    bail!("This worktree has no associated work conversation.\n  lf                         Start a new conversation in this worktree\n  {command}  Open the repository's ongoing conversation\n  lf connect SESSION         Continue a particular conversation")
+    Ok(None)
 }
 
 pub(crate) async fn select_connection(
@@ -171,7 +200,14 @@ pub(crate) async fn select_connection(
     if let SessionTarget::Session(id) = target {
         return Ok(id.to_owned());
     }
-    let scope = connection_scope(store, cwd, target).await?;
+    let Some(scope) = checkout_scope(store, cwd, target).await? else {
+        if !fresh {
+            if let Some(id) = checkout_conversation(store, cwd).await? {
+                return Ok(id);
+            }
+        }
+        return Err(unassociated_checkout(cwd)?);
+    };
     let session = match scope {
         PrimaryScope::Repository(repo) => {
             primary::ensure(store, repo.as_path(), None, fresh).await?

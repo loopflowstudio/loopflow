@@ -23,7 +23,7 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::chat::types::{ConversationEvent, ItemDelta, TurnUsage};
+use crate::chat::types::{ConversationEvent, TurnUsage};
 use crate::naming::generated_session_title;
 use crate::store::{StoreError, StoreResult};
 
@@ -446,137 +446,57 @@ impl SessionHistory {
     }
 }
 
-/// The part of one capture's event stream that SQLite history has yet to keep.
-///
-/// `events.jsonl` holds every provider increment verbatim. History keeps what
-/// the increments add up to: a run of deltas becomes one event at the first
-/// delta's position, a Turn's cumulative diff is kept once, and the raw
-/// notification behind each increment stays in the file alone. Storing one row
-/// per streamed token made increments two thirds of all history rows.
-/// A process that dies mid-run leaves that run in the file only.
+/// A gap between consecutive provider events long enough to count as a silence.
+pub(crate) const SILENCE_SECONDS: i64 = 600;
+
+/// What SQLite history keeps of one capture's stream. `events.jsonl` holds
+/// every event verbatim; history keeps the facts its readers use: attempts,
+/// accounts, provider sessions, usage, how each turn ended, and each silence
+/// longer than [`SILENCE_SECONDS`]. Provider text already lives in the
+/// provider's own transcript.
 #[derive(Debug, Default)]
-struct StreamedHistory {
-    run: Option<EventEnvelope>,
-    diff: Option<EventEnvelope>,
+struct RetainedHistory {
+    previous: Option<OffsetDateTime>,
 }
 
-impl StreamedHistory {
-    /// The events history keeps now that `event` has arrived. Readers order
-    /// history by capture position, so a held event may be kept late.
-    fn admit(&mut self, event: EventEnvelope) -> Vec<EventEnvelope> {
-        let conversation = match &event.event {
-            CaptureEvent::ProviderOutput { stream, line }
-                if stream == "notification" && is_provider_increment(line) =>
-            {
-                return Vec::new();
-            }
-            CaptureEvent::Conversation { event } => Some(&**event),
-            _ => None,
-        };
-        match conversation {
-            Some(ConversationEvent::DiffUpdated { turn_id, .. }) => {
-                let earlier_turn = self
-                    .diff
-                    .take()
-                    .filter(|held| diff_turn(held) != Some(turn_id));
-                self.diff = Some(event);
-                earlier_turn.into_iter().collect()
-            }
-            Some(
-                increment @ (ConversationEvent::TextDelta { .. }
-                | ConversationEvent::ReasoningDelta { .. }
-                | ConversationEvent::ItemUpdated { .. }),
-            ) => {
-                if self
-                    .run
-                    .as_mut()
-                    .is_some_and(|run| extend_run(run, increment))
-                {
-                    return Vec::new();
-                }
-                self.run.replace(event).into_iter().collect()
-            }
-            Some(ConversationEvent::TurnCompleted { .. }) => {
-                let mut kept = self.settle();
-                kept.push(event);
-                kept
-            }
-            _ => self.run.take().into_iter().chain([event]).collect(),
-        }
-    }
-
-    /// Everything still held.
-    fn settle(&mut self) -> Vec<EventEnvelope> {
-        self.run
-            .take()
-            .into_iter()
-            .chain(self.diff.take())
-            .collect()
+impl RetainedHistory {
+    /// The observations `event` adds, as `(source, evidence)` at its time.
+    fn admit(&mut self, event: &EventEnvelope) -> Vec<(String, serde_json::Value)> {
+        let at = event.observed_at;
+        let silence = self
+            .previous
+            .replace(at)
+            .filter(|since| (at - *since).whole_seconds() > SILENCE_SECONDS)
+            .map(|since| {
+                (
+                    format!("silence:{}", event.seq),
+                    serde_json::json!({"since": since.unix_timestamp(), "observed_at": at.unix_timestamp()}),
+                )
+            });
+        let fact = retained_in_history(&event.event).then(|| {
+            (
+                format!("events.jsonl:{}", event.seq),
+                serde_json::json!(event),
+            )
+        });
+        silence.into_iter().chain(fact).collect()
     }
 }
 
-fn diff_turn(held: &EventEnvelope) -> Option<&String> {
-    match &held.event {
-        CaptureEvent::Conversation { event } => match &**event {
-            ConversationEvent::DiffUpdated { turn_id, .. } => Some(turn_id),
-            _ => None,
-        },
-        _ => None,
+/// The store's retention prune applies the same rule to earlier captures.
+fn retained_in_history(event: &CaptureEvent) -> bool {
+    match event {
+        CaptureEvent::ProviderAttemptStarted { .. }
+        | CaptureEvent::ProviderAttemptFinished { .. }
+        | CaptureEvent::ProviderAccountSelected { .. }
+        | CaptureEvent::ProviderSessionObserved { .. }
+        | CaptureEvent::Usage { .. } => true,
+        CaptureEvent::Conversation { event } => matches!(
+            **event,
+            ConversationEvent::TurnCompleted { .. } | ConversationEvent::Error { .. }
+        ),
+        _ => false,
     }
-}
-
-fn extend_run(run: &mut EventEnvelope, increment: &ConversationEvent) -> bool {
-    let CaptureEvent::Conversation { event } = &mut run.event else {
-        return false;
-    };
-    match (&mut **event, increment) {
-        (
-            ConversationEvent::TextDelta { turn_id, content },
-            ConversationEvent::TextDelta {
-                turn_id: turn,
-                content: more,
-            },
-        )
-        | (
-            ConversationEvent::ReasoningDelta { turn_id, content },
-            ConversationEvent::ReasoningDelta {
-                turn_id: turn,
-                content: more,
-            },
-        ) if turn_id == turn => content.push_str(more),
-        (
-            ConversationEvent::ItemUpdated {
-                turn_id,
-                item_id,
-                data,
-            },
-            ConversationEvent::ItemUpdated {
-                turn_id: turn,
-                item_id: item,
-                data: more,
-            },
-        ) if turn_id == turn && item_id == item => match (data, more) {
-            (ItemDelta::Output { content }, ItemDelta::Output { content: more })
-            | (ItemDelta::PlanText { content }, ItemDelta::PlanText { content: more }) => {
-                content.push_str(more)
-            }
-            _ => return false,
-        },
-        _ => return false,
-    }
-    true
-}
-
-/// A provider notification that only adds to, or restates, a later complete one:
-/// `…/delta`, `…Delta`, `…_delta` and the cumulative Turn diff.
-fn is_provider_increment(line: &str) -> bool {
-    #[derive(Deserialize)]
-    struct Notification {
-        method: String,
-    }
-    serde_json::from_str::<Notification>(line).is_ok_and(|notification| {
-        notification.method.ends_with("elta") || notification.method == "turn/diff/updated"
-    })
 }
 
 #[derive(Debug)]
@@ -625,23 +545,24 @@ impl SessionRecorder {
                         payload: serde_json::json!({"input_id": writer_artifact_key, "source": source, "evidence": evidence}),
                     }).map_err(std::io::Error::other)
                 };
-                if let Err(error) = observe("manifest.json".into(), manifest.created_at, serde_json::json!(manifest)) {
+                // Replay reads the prompt from the capture's own manifest file.
+                let retained = SessionCaptureManifest { process: None, ..manifest };
+                if let Err(error) = observe("manifest.json".into(), retained.created_at, serde_json::json!(retained)) {
                     tracing::warn!(%error, "Session capture observation unavailable");
                 }
-                let retain = |events: Vec<EventEnvelope>| {
-                    events.into_iter().try_for_each(|event| {
-                        observe(format!("events.jsonl:{}", event.seq), event.observed_at, serde_json::json!(event))
+                let mut retained = RetainedHistory::default();
+                let mut retain = |event: &EventEnvelope| {
+                    retained.admit(event).into_iter().try_for_each(|(source, evidence)| {
+                        observe(source, event.observed_at, evidence)
                     })
                 };
-                let mut streamed = StreamedHistory::default();
                 while let Ok(message) = receiver.recv() {
                     let result = match message {
                         RecorderMessage::Event(event) => {
-                            let result = append_json_line(&writer_dir.join("events.jsonl"), &event);
-                            result.and(retain(streamed.admit(event)))
+                            append_json_line(&writer_dir.join("events.jsonl"), &event).and(retain(&event))
                         }
                         RecorderMessage::Drain(acknowledge) => {
-                            let result = retain(streamed.settle()).and(sync_telemetry(&writer_dir));
+                            let result = sync_telemetry(&writer_dir);
                             let _ = acknowledge.send(());
                             result
                         }
@@ -658,9 +579,6 @@ impl SessionRecorder {
                             tracing::debug!(%error, artifact_key = %writer_artifact_key, "Session recorder telemetry write failed");
                         }
                     }
-                }
-                if let Err(error) = retain(streamed.settle()) {
-                    tracing::debug!(%error, artifact_key = %writer_artifact_key, "Session recorder telemetry write failed");
                 }
             });
         match thread {
@@ -3093,11 +3011,13 @@ mod tests {
     use std::io::Write;
 
     use super::{
-        read_provider_session, AgentProcessRequest, CaptureHandle, SessionCaptureManifest,
-        SessionCaptureSpec, SubjectAttribution, TerminalReceipt,
+        read_provider_session, AgentProcessRequest, CaptureEvent, CaptureHandle, EventEnvelope,
+        RetainedHistory, SessionCaptureManifest, SessionCaptureSpec, SubjectAttribution,
+        TerminalReceipt, SCHEMA_VERSION,
     };
     use crate::agent::AgentConfig;
     use crate::chat::types::{ConversationEvent, TurnUsage};
+    use time::OffsetDateTime;
 
     #[test]
     fn pi_usage_recovery_finishes_the_existing_counter_without_double_counting() {
@@ -3852,7 +3772,7 @@ mod tests {
     }
 
     #[test]
-    fn history_keeps_what_streamed_increments_add_up_to() {
+    fn history_keeps_facts_and_the_file_keeps_the_stream() {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         let turn = || "turn-1".to_string();
@@ -3890,6 +3810,7 @@ mod tests {
         assert_eq!(file.matches("item/agentMessage/delta").count(), 4);
         assert_eq!(file.matches("\"type\":\"text_delta\"").count(), 4);
         assert_eq!(file.matches("\"type\":\"diff_updated\"").count(), 2);
+        assert_eq!(file.matches("item/completed").count(), 1);
 
         let history = super::row_store(&capture.artifact_dir())
             .unwrap()
@@ -3897,32 +3818,47 @@ mod tests {
             .unwrap();
         let kept: Vec<_> = history
             .iter()
-            .filter(|event| event["type"] == "conversation" || event["type"] == "provider_output")
-            .map(|event| {
-                let detail = &event["event"];
-                match event["type"].as_str().unwrap() {
-                    "provider_output" => event["line"].as_str().unwrap().to_string(),
-                    _ => format!(
-                        "{}:{}",
-                        detail["type"].as_str().unwrap(),
-                        detail["content"]
-                            .as_str()
-                            .or(detail["diff"].as_str())
-                            .unwrap_or_default()
-                    ),
-                }
+            .map(|event| match event["type"].as_str().unwrap() {
+                "conversation" => event["event"]["type"].as_str().unwrap().to_string(),
+                other => other.to_string(),
             })
             .collect();
+        assert_eq!(kept, ["turn_completed"]);
+    }
+
+    #[test]
+    fn history_records_a_long_gap_as_a_silence() {
+        let at =
+            |seconds: i64| OffsetDateTime::from_unix_timestamp(1_790_000_000 + seconds).unwrap();
+        let envelope = |seq, seconds, event| EventEnvelope {
+            schema_version: SCHEMA_VERSION,
+            seq,
+            observed_at: at(seconds),
+            event,
+        };
+        let text = || CaptureEvent::Text {
+            text: "thinking".into(),
+        };
+        let finished = CaptureEvent::ProviderAttemptFinished {
+            attempt_key: "attempt".into(),
+            outcome: "completed".into(),
+        };
+        let mut history = RetainedHistory::default();
+        let sources: Vec<_> = [
+            envelope(0, 0, text()),
+            envelope(1, 100, text()),
+            envelope(2, 800, finished),
+        ]
+        .iter()
+        .flat_map(|event| history.admit(event))
+        .collect();
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].0, "silence:2");
         assert_eq!(
-            kept,
-            [
-                "turn_started:",
-                "text_delta:streamed one token at a time",
-                "diff_updated:first\nsecond",
-                r#"{"method":"item/completed","params":{}}"#,
-                "turn_completed:",
-            ]
+            sources[0].1,
+            serde_json::json!({"since": 1_790_000_100, "observed_at": 1_790_000_800})
         );
+        assert_eq!(sources[1].0, "events.jsonl:2");
     }
 
     #[test]

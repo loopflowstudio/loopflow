@@ -128,11 +128,17 @@ final class WorkModel {
             return
         }
         let previous = selectionPlans.value ?? []
-        selectionPlans = .available(plans.map { plan in
+        let next = WorkReading.available(plans.map { plan in
             guard let id = plan.dashboardID, let old = previous.first(where: { $0.dashboardID == id }),
                   (old.savedRevision ?? 0) > (plan.savedRevision ?? 0) else { return plan }
             return old
         })
+        // A dictionary-subscript write notifies even when equal, and every frame
+        // carries a new observedAt that no view reads. The sidebar, Dashboards and
+        // title read these plans, so an unchanged frame must not republish them.
+        if case .available(let current) = selectionPlans, case .available(let fresh) = next,
+           current.count == fresh.count, zip(current, fresh).allSatisfy({ $0.matches($1) }) {
+        } else { selectionPlans = next }
         reconcileSelectionRepository()
         switch navigation.destination {
         case .dashboard, .workingTasks: if let plan = selectedViewPlan { presentView(plan) }
@@ -799,7 +805,26 @@ final class WorkModel {
     var projection: WorkProjection {
         WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: sessions.value ?? [])
     }
+    /// Built from the whole projection, so it is computed once per change to
+    /// what it reads, not on each of the several reads per window render.
     var breadcrumb: WorkBreadcrumb? {
+        _ = breadcrumbGeneration
+        if let memo = breadcrumbMemo { return memo.value }
+        let value = withObservationTracking { currentBreadcrumb() } onChange: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.breadcrumbMemo = nil
+                self.breadcrumbGeneration &+= 1
+            }
+        }
+        breadcrumbMemo = BreadcrumbMemo(value: value)
+        return value
+    }
+    private var breadcrumbGeneration = 0
+    @ObservationIgnored private var breadcrumbMemo: BreadcrumbMemo?
+    private struct BreadcrumbMemo { let value: WorkBreadcrumb? }
+
+    private func currentBreadcrumb() -> WorkBreadcrumb? {
         // A Dashboard heads its own trail; no member Task or Session does.
         if navigation.showsSelection { return nil }
         if let current = projection.breadcrumb(selection: selection, sessionId: navigation.selectedSessionId) {
@@ -828,10 +853,14 @@ final class WorkModel {
         didSet {
             // Retain the latest observed Task across temporary chapter membership
             // gaps, including selections saved in another repository.
-            for (repo, navigation) in navigationByRepo {
+            for navigation in navigationByRepo.values {
                 guard let selection = navigation.selection, selection.kind == .task else { continue }
                 if let task = roadmap.value?.tasks.items.first(where: { $0.id == selection.id || $0.runtime?.workId == selection.id }) {
-                    navigation.selectedTaskEvidence = (roadmap.value?.waves.first { $0.wave.id == task.task.waveId }, task)
+                    let wave = roadmap.value?.waves.first { $0.wave.id == task.task.waveId }
+                    // A tuple is not Equatable, so an unchanged write would still notify.
+                    if navigation.selectedTaskEvidence?.task != task || navigation.selectedTaskEvidence?.wave != wave {
+                        navigation.selectedTaskEvidence = (wave, task)
+                    }
                 }
             }
         }
@@ -1256,7 +1285,7 @@ final class WorkModel {
 
     private func apply(_ frame: WorkFrame) async {
         let part = frame.content.part
-        previewCopy = frame.copy
+        if previewCopy != frame.copy { previewCopy = frame.copy }
         // A preview copy is where the data lives, so it is the data identity.
         let dataDirectory = frame.copy ?? frame.home
         if case .heartbeat = frame.content {
@@ -1322,7 +1351,10 @@ final class WorkModel {
                 break
             }
             guard body.task == task.task.identifier else { return }
-            comments.receive(body.comments, for: task.id)
+            // TaskReadings is not Equatable; skip unchanged comments unless a read is superseded.
+            if comments.inFlight.contains(task.id) || comments[task.id] != .available(body.comments) {
+                comments.receive(body.comments, for: task.id)
+            }
             let next = WorkReading.available(body.work)
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
             let runs = Dictionary(body.graphProcesses.map { ($0.entry.id, $0) }) { _, newer in newer }
@@ -1335,7 +1367,8 @@ final class WorkModel {
                 break
             }
             guard body.task == task.task.identifier else { return }
-            taskDiagnostics.values[task.id] = .available(body.work)
+            let diagnostics = WorkReading.available(body.work)
+            if taskDiagnostics[task.id] != diagnostics { taskDiagnostics.values[task.id] = diagnostics }
         case .wave(let body):
             guard answers >= scopeFloor, let detailWaveId else { return }
             guard body == nil || body?.wave == detailWaveId else { return }
@@ -1348,7 +1381,7 @@ final class WorkModel {
                 break
             }
             guard body.scope == scope else { return }
-            workActivityScope = scope
+            if workActivityScope != scope { workActivityScope = scope }
             let next = WorkReading.available(body.snapshot)
             if workActivity != next { workActivity = next }
         case .activity(let body):
@@ -2415,9 +2448,9 @@ extension WorkModel {
     private func selectDestination(_ destination: WorkNavigation.Destination, recordingHistory: Bool = false) {
         switch destination {
         case .work(let work): select(work, preservingOpening: false, recordingHistory: recordingHistory)
-        case .zoomed(let dashboard, let work):
+        case .zoomed(let board, let work):
             select(work, preservingOpening: false, recordingHistory: recordingHistory)
-            navigation.destination = .zoomed(dashboard: dashboard, work: work)
+            navigation.destination = .zoomed(from: board, work: work)
         case .dashboard, .view, .workingTasks:
             if recordingHistory, navigation.destination != destination {
                 navigation.backStack.append(navigation.destination)
@@ -2448,8 +2481,8 @@ extension WorkModel {
             .filter { $0.work.kind == .task && seen.insert($0.work).inserted }
     }
 
-    func zoom(into work: WorkReference, from dashboard: String) {
-        selectDestination(.zoomed(dashboard: dashboard, work: work), recordingHistory: true)
+    func zoom(into work: WorkReference, from board: WorkNavigation.Board) {
+        selectDestination(.zoomed(from: board, work: work), recordingHistory: true)
     }
 
     private func presentView(_ plan: WorkViewPlan) {
@@ -2493,13 +2526,13 @@ extension WorkModel {
         }
     }
 
-    func arrangeDashboard(_ id: String, arrangement: WorkArrangement, revision: Int64) async {
+    func arrangeDashboard(_ id: String, order: [WorkMemberRef], hidden: [WorkMemberRef], revision: Int64) async {
         guard !dashboardSaving, let repoPath else { return }
         dashboardSaving = true
         dashboardError = nil
         defer { dashboardSaving = false }
         do {
-            _ = try await query.saveDashboardArrangement(id: id, arrangement: arrangement, revision: revision, repoPath: repoPath)
+            _ = try await query.saveDashboardArrangement(id: id, order: order, hidden: hidden, revision: revision, repoPath: repoPath)
             try await refreshDashboard(id, repoPath: repoPath)
         } catch { dashboardError = error.localizedDescription }
     }
@@ -2616,5 +2649,16 @@ enum TaskOrderDrag {
     static func token(_ workID: String) -> String { "task-order:" + workID }
     static func taskID(_ token: String) -> String? {
         token.hasPrefix("task-order:") ? String(token.dropFirst("task-order:".count)) : nil
+    }
+}
+
+extension WorkViewPlan {
+    /// Equal apart from when it was observed. Name each displayed field here.
+    func matches(_ other: WorkViewPlan) -> Bool {
+        name == other.name && pinned == other.pinned && dashboardID == other.dashboardID
+            && repository == other.repository && selection == other.selection
+            && savedRevision == other.savedRevision && resolution == other.resolution
+            && arrangement == other.arrangement && projection == other.projection
+            && slots == other.slots && contents == other.contents
     }
 }

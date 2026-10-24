@@ -3149,6 +3149,19 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
     })
 }
 
+/// Sessions copied here from rented Machines this Task ran on.
+pub fn task_copied_sessions(
+    task: &crate::durable::TaskId,
+) -> OpsResult<Vec<crate::machine_records::CopiedSession>> {
+    block_on_task(async {
+        let store = task_store().await?;
+        store
+            .sqlite
+            .copied_sessions(Some(task), None)
+            .map_err(task_error)
+    })
+}
+
 /// Complete the Task without changing its Workflow or Processes.
 pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<Task> {
     block_on_task(async {

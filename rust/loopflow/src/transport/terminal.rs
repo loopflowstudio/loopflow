@@ -34,12 +34,16 @@ impl vt100::Callbacks for Queries {
 
 pub(super) fn snapshot(screen: &vt100::Screen) -> Vec<u8> {
     let mut bytes = b"\x1b[0m\x1b[?25h".to_vec();
+    let mut history = screen.clone();
+    history.set_scrollback(usize::MAX);
     if screen.alternate_screen() {
         bytes.extend(b"\x1b[?1049h");
+    } else if untouched(screen, &history) {
+        // Nothing to redraw: the viewer's terminal keeps its own history and
+        // the owner's output flows from the cursor as any command's would.
+        return bytes;
     } else {
         bytes.extend(b"\x1b[?1049l\x1b[3J\x1b[H\x1b[2J");
-        let mut history = screen.clone();
-        history.set_scrollback(usize::MAX);
         for offset in (1..=history.scrollback()).rev() {
             history.set_scrollback(offset);
             if let Some(row) = history.rows_formatted(0, history.size().1).next() {
@@ -50,6 +54,13 @@ pub(super) fn snapshot(screen: &vt100::Screen) -> Vec<u8> {
     }
     bytes.extend(screen.state_formatted());
     bytes
+}
+
+/// A screen the owner has not drawn on: no history, nothing visible, cursor home.
+fn untouched(screen: &vt100::Screen, history: &vt100::Screen) -> bool {
+    history.scrollback() == 0
+        && screen.cursor_position() == (0, 0)
+        && screen.contents().trim().is_empty()
 }
 
 /// Reports may be inserted only between complete terminal sequences and UTF-8
@@ -126,6 +137,19 @@ impl Boundary {
 #[cfg(test)]
 mod tests {
     use super::{snapshot, Boundary, Queries};
+
+    #[test]
+    fn attaching_before_the_owner_draws_leaves_the_viewer_terminal_alone() {
+        let fresh = vt100::Parser::new(24, 80, 2000);
+        assert_eq!(snapshot(fresh.screen()), b"\x1b[0m\x1b[?25h");
+        let mut drawn = vt100::Parser::new(24, 80, 2000);
+        drawn.process(b"Error: no stock\r\n");
+        let bytes = snapshot(drawn.screen());
+        assert!(bytes.windows(4).any(|w| w == b"\x1b[2J"), "{bytes:?}");
+        let mut restored = vt100::Parser::new(24, 80, 2000);
+        restored.process(&bytes);
+        assert_eq!(restored.screen().contents().trim(), "Error: no stock");
+    }
 
     #[test]
     fn restores_grid_and_input_modes_without_replaying_terminal_queries() {

@@ -28,6 +28,7 @@ mod graph_inventory;
 mod linear_migration_tests;
 
 mod linear_team_checks;
+mod machine_records;
 mod metrics;
 pub(crate) mod planning_changes;
 pub(crate) mod planning_export;
@@ -42,7 +43,9 @@ pub(crate) mod project_content;
 mod project_rotation;
 pub(crate) mod project_selection;
 mod project_transitions;
+mod rentals;
 mod repositories;
+pub(crate) mod retention;
 mod revisions;
 mod scope_defaults;
 mod selections;
@@ -1198,6 +1201,63 @@ impl SqliteStore {
             }
         }
         Ok(accounts)
+    }
+
+    /// Store a long-lived token on an existing account. False when no such account.
+    pub fn set_long_lived_token(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        token: &str,
+        minted_at: i64,
+    ) -> StoreResult<bool> {
+        let encrypted = token_crypto::encrypt_token(token).map_err(|error| {
+            StoreError::InvalidData(format!(
+                "failed to encrypt long-lived token for account '{account_id}': {error}"
+            ))
+        })?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE provider_accounts
+             SET long_lived_token = ?3, long_lived_token_minted_at = ?4, updated_at = ?5
+             WHERE provider = ?1 AND account_id = ?2",
+            params![
+                provider,
+                account_id.as_str(),
+                encrypted,
+                minted_at,
+                now_unix()
+            ],
+        )?;
+        Ok(changed == 1)
+    }
+
+    pub fn long_lived_token(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<Option<super::LongLivedToken>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row: Option<(Option<String>, Option<i64>)> = conn
+            .query_row(
+                "SELECT long_lived_token, long_lived_token_minted_at FROM provider_accounts
+                 WHERE provider = ?1 AND account_id = ?2",
+                params![provider, account_id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((Some(encrypted), Some(minted_at))) = row else {
+            return Ok(None);
+        };
+        let token = token_crypto::decrypt_token(&encrypted).map_err(|error| {
+            StoreError::InvalidData(format!(
+                "failed to decrypt long-lived token for account '{account_id}': {error}"
+            ))
+        })?;
+        Ok(Some(super::LongLivedToken {
+            token: secrecy::SecretString::new(token),
+            minted_at,
+        }))
     }
 
     pub fn update_provider_account_lifecycle(&self, account: &ProviderAccount) -> StoreResult<()> {

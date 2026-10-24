@@ -8,7 +8,6 @@ struct WorkNavigator: View {
     let onOpenSession: (SessionRecord) -> Void
     var onNewTaskSession: ((String) -> Void)?
     @Environment(\.palette) private var palette
-    @State private var hoveredTask: String?
     @State private var actionTaskID: String?
     @FocusState private var focusedWork: WorkReference?
     @State private var focusMemory = SidebarResponderMemory()
@@ -42,6 +41,8 @@ struct WorkNavigator: View {
                 Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
             }
             WorkTaskList(navigation: model.navigation) {
+                // Read once: each read re-filters the plan and every Task's Sessions.
+                let taskIDs = model.sidebarTaskIDs
                 VStack(alignment: .leading, spacing: 5) {
                     if model.navigation.sidebarWaveID != nil {
                         Button { model.select(nil) } label: {
@@ -55,16 +56,19 @@ struct WorkNavigator: View {
                     HStack {
                         Text(listTitle.uppercased()).lineLimit(1)
                         Spacer()
-                        Text("\(model.sidebarTaskIDs.count)")
+                        Text("\(taskIDs.count)")
                     }.font(Typography.code(10)).foregroundStyle(palette.textSecondary).padding(10)
-                    ForEach(model.sidebarTaskIDs, id: \.self) { id in taskRow(id) }
-                    if model.sidebarTaskIDs.isEmpty {
+                    // One pass for every row's ⌘N slot; each lookup rebuilds the plan's members.
+                    let slots = Dictionary(model.workingTaskIDs.prefix(9).enumerated().map { ($1, "⌘\($0 + 1)") },
+                                           uniquingKeysWith: { first, _ in first })
+                    ForEach(taskIDs, id: \.self) { id in taskRow(id, slotHint: slots[id]) }
+                    if taskIDs.isEmpty {
                         Text(model.navigation.sidebarWaveID == nil ? "No working Tasks in this list" : "No open Tasks in this Wave")
                             .font(Typography.body(12))
                             .foregroundStyle(palette.textSecondary).padding(10)
                     }
                     if let selection = model.selection, selection.kind == .task,
-                       !model.sidebarTaskIDs.contains(where: { model.isSelected(.task(id: $0)) }) {
+                       !taskIDs.contains(where: { model.isSelected(.task(id: $0)) }) {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Open Task is outside this list")
                             Button("Show working tasks") {
@@ -133,36 +137,32 @@ struct WorkNavigator: View {
             model.select(focusedWork)
             return .handled
         }
+        .renderFlash()
         .onExitCommand { focusedWork = nil; focusMemory.restore() }
         .onDisappear { if focusedWork != nil { focusMemory.restore() } }
     }
 
-    private func taskRow(_ id: String) -> some View {
+    private func taskRow(_ id: String, slotHint: String?) -> some View {
         let found = model.task(id: id)
         let selected = model.isSelected(.task(id: id))
         let otherWave = model.selection?.kind == .wave && found?.wave?.wave.id != model.selection?.id
         let sessions = model.taskSessions(id)
         let status = SessionProgramStatus(sessions: sessions, unavailable: model.sessions.errorMessage)
         let title = found?.task.task.name ?? "Task unavailable · \(id)"
-        return VStack(alignment: .leading, spacing: 6) {
+        // Rows slide under the pointer while scrolling. Only the ⌘N hint reads the
+        // row's hover, so a crossing re-renders that hint, not rows or the sidebar.
+        return RowHover { hover in VStack(alignment: .leading, spacing: 6) {
             Text(title).font(Typography.strong(13)).lineLimit(2).help(title)
                 .allowsHitTesting(false)
-            TimelineView(.periodic(from: .now, by: 5)) { clock in
-                let preview = status.preview(now: clock.date, fallback: found?.task.task.description ?? "Planning unavailable", sessions: sessions)
-                let shipping = found?.task.shipping.map { "\($0.label) · \($0.reason)" }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(shipping ?? preview.text).font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
-                        .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
-                        .help(preview.help).allowsHitTesting(false)
-                    if let task = found?.task {
-                        TaskRowMetadata(task: task, status: status, selected: selected,
-                            slotHint: (model.navigation.showsSlotHints || hoveredTask == id)
-                                ? model.workingTaskIDs.firstIndex(of: id).flatMap { $0 < 9 ? "⌘\($0 + 1)" : nil } : nil,
-                            sourceAge: preview.age)
-                    } else {
-                        Text("Planning unavailable").font(Typography.code(10))
-                            .foregroundStyle(palette.textSecondary).allowsHitTesting(false)
-                    }
+            // Only a live excerpt ages; a row showing its summary needs no clock.
+            let fallback = found?.task.task.description ?? "Planning unavailable"
+            let current = status.preview(now: .now, fallback: fallback, sessions: sessions)
+            if current.age == nil {
+                rowDetail(current, slotHint: slotHint, found: found, status: status, selected: selected, hover: hover)
+            } else {
+                TimelineView(.periodic(from: .now, by: 5)) { clock in
+                    rowDetail(status.preview(now: clock.date, fallback: fallback, sessions: sessions),
+                              slotHint: slotHint, found: found, status: status, selected: selected, hover: hover)
                 }
             }
         }
@@ -184,7 +184,8 @@ struct WorkNavigator: View {
                 .frame(width: 2).padding(.vertical, 12).padding(.leading, 4)
                 .allowsHitTesting(false)
         }
-        .onHover { hoveredTask = $0 ? id : nil }
+        .renderFlash()
+        }
         .modifier(TaskOrderDragging(model: model, workID: model.navigation.sidebarWaveID == nil ? model.workingTaskWorkID(row: id) : nil))
         .contextMenu {
             actions(for: id)
@@ -196,12 +197,41 @@ struct WorkNavigator: View {
         }
     }
 
+    /// The preview line and metadata beneath a row's title.
+    private func rowDetail(_ preview: (text: String, help: String, age: String?), slotHint: String?, found: (wave: WaveRoadmap?, task: RoadmapTask)?,
+                           status: SessionProgramStatus, selected: Bool, hover: HoverFlag) -> some View {
+        let shipping = found?.task.shipping.map { "\($0.label) · \($0.reason)" }
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(shipping ?? preview.text).font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
+                .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
+                .help(preview.help).allowsHitTesting(false)
+            if let task = found?.task {
+                TaskRowMetadata(task: task, status: status, selected: selected,
+                    slotHint: slotHint,
+                    showsSlotHint: model.navigation.showsSlotHints, hover: hover,
+                    sourceAge: preview.age)
+            } else {
+                Text("Planning unavailable").font(Typography.code(10))
+                    .foregroundStyle(palette.textSecondary).allowsHitTesting(false)
+            }
+        }
+        .renderFlash()
+    }
+
     @ViewBuilder private func actions(for id: String) -> some View {
         if let found = model.task(id: id) {
             TaskActionItems(model: model, task: found.task, wave: found.wave?.wave,
                 newConversation: onNewTaskSession.map { action in { action(id) } },
                 openSession: onOpenSession)
         }
+    }
+}
+
+/// Compared by model alone: its callbacks are closures over references, and
+/// every row reads what it needs from the model itself.
+extension WorkNavigator: Equatable {
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        MainActor.assumeIsolated { lhs.model === rhs.model }
     }
 }
 
@@ -244,21 +274,23 @@ struct WorkBreadcrumbs: View {
                 model.navigation.content = .terminals
             }.lineLimit(1).fixedSize()
             WorkJumpSeparator(model: model, scope: .repository, label: "Waves and Dashboards")
-            if showWave, model.navigation.trailDashboardID == nil, let wave = model.breadcrumb?.wave {
+            if showWave, model.navigation.trailBoard == nil, let wave = model.breadcrumb?.wave {
                 Button(wave.roadmap.wave.displayName) {
                     model.select(.wave(id: wave.roadmap.wave.id))
                     model.navigation.content = .terminals
                 }.lineLimit(1).fixedSize()
                 WorkJumpSeparator(model: model, scope: .wave(wave.roadmap.wave.id), label: "Tasks in \(wave.roadmap.wave.displayName)")
             }
-            if model.navigation.destination == .workingTasks {
-                Text(WorkNavigation.workingTasksTitle).lineLimit(1).fixedSize()
-            }
-            if let id = model.navigation.trailDashboardID {
+            switch model.navigation.trailBoard {
+            case .saved(let id):
                 Button(model.dashboard(id)?.name ?? id) { model.selectDashboard(id) }
                     .lineLimit(1).fixedSize().disabled(model.navigation.dashboardID == id)
-                if model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
+            case .workingTasks:
+                Button(WorkNavigation.workingTasksTitle) { model.selectWorkingTasksDashboard() }
+                    .lineLimit(1).fixedSize().disabled(model.navigation.destination == .workingTasks)
+            case nil: EmptyView()
             }
+            if model.navigation.trailBoard != nil, model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
             if let task = model.breadcrumb?.task {
                 TaskHeading(task: task.task)
             }
@@ -464,6 +496,17 @@ private struct SidebarResponderCapture: NSViewRepresentable {
         weak var view: NSView?
         var monitor: Any?
         init(memory: SidebarResponderMemory) { self.memory = memory }
+    }
+}
+
+/// Owns one row's hover. Its body never reads the flag, so hovering does not
+/// re-run the row; leaves given the flag read it themselves.
+private struct RowHover<Content: View>: View {
+    @ViewBuilder let content: (HoverFlag) -> Content
+    @State private var hover = HoverFlag()
+
+    var body: some View {
+        content(hover).hoverSource(hover)
     }
 }
 

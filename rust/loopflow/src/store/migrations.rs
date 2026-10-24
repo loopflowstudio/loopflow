@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
 
 use super::migration_catalog::MIGRATIONS;
 pub use super::migration_catalog::{Migration, MigrationId};
@@ -595,7 +594,7 @@ pub(crate) fn apply_sqlite_with_backup(
                 backup_before_migration(conn, path).map(|_| ())
             });
             if migrated.is_ok() {
-                prune_migration_backups(path);
+                prune_migration_backups(path, 1);
             }
             migrated
         }
@@ -641,9 +640,6 @@ fn backup_before_migration(
         "{file_name}.backup-{safe_version}-{}",
         &history[..16]
     ));
-    if valid_backup(&backup_path, &history) {
-        return Ok(Some(backup_path));
-    }
 
     let unique = format!(
         "{file_name}.backup-{safe_version}.tmp-{}-{}",
@@ -651,30 +647,16 @@ fn backup_before_migration(
         time::OffsetDateTime::now_utc().unix_timestamp_nanos()
     );
     let temporary_path = path.with_file_name(unique);
-    let source = rusqlite::Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    let mut destination = rusqlite::Connection::open(&temporary_path)?;
-    let backup = rusqlite::backup::Backup::new(&source, &mut destination)?;
-    eprintln!("Backing up {} before migration...", path.display());
-    // The migration transaction already excludes writers. Sleeping between
-    // tiny batches only prolongs that exclusion on large retained stores.
-    if let Err(error) = backup.run_to_completion(4096, Duration::ZERO, None) {
-        drop(backup);
-        drop(destination);
-        drop(source);
-        let _ = std::fs::remove_file(&temporary_path);
-        return Err(error.into());
-    }
-    drop(backup);
-    drop(destination);
-    drop(source);
-    if let Err(error) = std::fs::File::open(&temporary_path).and_then(|file| file.sync_all()) {
-        let _ = std::fs::remove_file(&temporary_path);
-        return Err(StoreError::InvalidData(format!(
-            "failed to sync migration backup: {error}"
-        )));
+    // An APFS clone shares blocks, so the backup costs nothing at any size.
+    // Folding its WAL in keeps the published generation one file.
+    let sealed = super::copy::snapshot(path, &temporary_path).and_then(|()| {
+        let backup = rusqlite::Connection::open(&temporary_path)?;
+        backup.query_row("PRAGMA journal_mode = DELETE", [], |_| Ok(()))?;
+        Ok(())
+    });
+    if let Err(error) = sealed {
+        remove_with_sidecars(&temporary_path);
+        return Err(error);
     }
     if let Err(error) = std::fs::rename(&temporary_path, &backup_path) {
         return Err(StoreError::InvalidData(format!(
@@ -695,14 +677,11 @@ fn backup_before_migration(
     Ok(Some(backup_path))
 }
 
-/// Generations of pre-migration backups kept beside the store.
-const MIGRATION_BACKUPS_KEPT: usize = 2;
-
-/// Each release that migrates copies the whole store first. Nothing restores a
-/// generation older than the previous release, so once a migration commits only
-/// the newest generations stay. Names this writer did not produce are left
-/// alone, and a failed removal is retried by the next migration.
-fn prune_migration_backups(path: &Path) {
+/// Each release that migrates clones the store first. Once a migration commits
+/// only the generation it made stays, and once its install settles none does
+/// (`kept` 0). Names this writer did not produce are left alone, and a failed
+/// removal is retried by the next migration or settlement.
+pub(crate) fn prune_migration_backups(path: &Path, kept: usize) {
     let (Some(parent), Some(file_name)) = (
         path.parent(),
         path.file_name().and_then(|name| name.to_str()),
@@ -730,32 +709,23 @@ fn prune_migration_backups(path: &Path) {
         .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
         .collect();
     backups.sort();
-    let superseded = backups.len().saturating_sub(MIGRATION_BACKUPS_KEPT);
+    let superseded = backups.len().saturating_sub(kept);
     for (_, backup) in backups.into_iter().take(superseded) {
         if let Err(error) = std::fs::remove_file(&backup) {
             tracing::warn!(%error, backup = %backup.display(), "superseded migration backup was not removed");
             continue;
         }
-        for sidecar in ["-shm", "-wal"] {
-            let mut name = backup.clone().into_os_string();
-            name.push(sidecar);
-            let _ = std::fs::remove_file(name);
-        }
+        remove_with_sidecars(&backup);
     }
 }
 
-fn valid_backup(path: &Path, expected_history: &str) -> bool {
-    let Ok(connection) = rusqlite::Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) else {
-        return false;
-    };
-    let integrity: rusqlite::Result<String> =
-        connection.pragma_query_value(None, "integrity_check", |row| row.get(0));
-    integrity.as_deref() == Ok("ok")
-        && migration_history_fingerprint(&connection)
-            .is_ok_and(|history| history == expected_history)
+fn remove_with_sidecars(path: &Path) {
+    let _ = std::fs::remove_file(path);
+    for sidecar in ["-shm", "-wal"] {
+        let mut name = path.as_os_str().to_owned();
+        name.push(sidecar);
+        let _ = std::fs::remove_file(name);
+    }
 }
 
 fn migration_history_fingerprint(conn: &rusqlite::Connection) -> StoreResult<String> {
@@ -1750,9 +1720,9 @@ mod tests {
         apply_sqlite_with_backup, backup_before_migration, initialize_experimental_sqlite,
         latest_applied_version_sqlite, latest_known_version, latest_version_sqlite,
         migration_checksum, migration_sql_for_test, pending_migrations, product_schema,
-        validate_experimental_sqlite, validate_foreign_keys, validate_persisted_json,
-        validate_schema, validate_set, validate_sqlite, validate_sqlite_schema, Migration,
-        MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
+        prune_migration_backups, validate_experimental_sqlite, validate_foreign_keys,
+        validate_persisted_json, validate_schema, validate_set, validate_sqlite,
+        validate_sqlite_schema, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
     const GATE_PROPOSAL_REPAIR_NAME: &str = "repair_legacy_task_gate_proposals";
@@ -6559,7 +6529,7 @@ mod tests {
     }
 
     #[test]
-    fn a_committed_migration_keeps_only_the_newest_backup_generations() {
+    fn a_committed_migration_keeps_only_the_backup_it_made() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
         let conn = rusqlite::Connection::open(&path).unwrap();
@@ -6585,11 +6555,20 @@ mod tests {
         apply_sqlite_with_backup(&conn, &path).unwrap();
 
         find_backup(directory.path(), "loopflow.db.backup-0.10.001_initial-");
-        assert!(previous.exists());
+        assert!(!previous.exists());
         assert!(!oldest.exists());
         assert!(!sidecar.exists());
         assert!(by_hand.exists());
         assert!(unfingerprinted.exists());
+
+        prune_migration_backups(&path, 0);
+        let left: Vec<_> = std::fs::read_dir(directory.path())
+            .unwrap()
+            .filter_map(|entry| entry.unwrap().file_name().into_string().ok())
+            .filter(|name| name.contains(".backup-0.10.001_initial-"))
+            .collect();
+        assert!(left.is_empty(), "settled backup remains: {left:?}");
+        assert!(by_hand.exists());
     }
 
     #[test]

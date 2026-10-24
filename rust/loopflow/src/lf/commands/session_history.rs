@@ -107,11 +107,13 @@ pub fn inspect(
         .filter(|event| event.payload["source"] == "codex_relay")
         .collect();
     if events {
-        for event in store.input_events(&input)? {
-            match event.get("unparsed").and_then(serde_json::Value::as_str) {
-                Some(bytes) => println!("{bytes}"),
-                None => println!("{}", serde_json::to_string(&event)?),
+        match std::fs::read_to_string(dir.join("events.jsonl")) {
+            Ok(stream) => print!("{stream}"),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                eprintln!("stream file rotated; retained facts only");
+                print_retained_events(&store, &input)?;
             }
+            Err(error) => return Err(anyhow!("Capture stream unavailable: {error}")),
         }
         for event in &diagnostics {
             println!("{}", serde_json::to_string(event)?);
@@ -205,6 +207,17 @@ pub fn inspect(
         "{}",
         crate::context_usage::render_step(&crate::context_usage::step_context(&home, &snapshot))
     );
+    Ok(())
+}
+
+/// The facts history retained for an input whose stream file is gone.
+fn print_retained_events(store: &crate::store::sqlite::SqliteStore, input: &str) -> Result<()> {
+    for event in store.input_events(input)? {
+        match event.get("unparsed").and_then(serde_json::Value::as_str) {
+            Some(bytes) => println!("{bytes}"),
+            None => println!("{}", serde_json::to_string(&event)?),
+        }
+    }
     Ok(())
 }
 

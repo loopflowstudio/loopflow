@@ -71,6 +71,7 @@ pub struct CleanReport {
     pub worktrees: Vec<WorktreeRemoval>,
     pub build_output: Vec<WorktreeRemoval>,
     pub process_receipts: u32,
+    pub store: Option<crate::store::sqlite::retention::RetentionReport>,
     pub home: Option<RotationReport>,
     pub freed_bytes: u64,
     pub errors: Vec<String>,
@@ -237,6 +238,7 @@ fn clean(dry_run: bool, json: bool, keep_days: u64) -> Result<()> {
         worktrees: Vec::new(),
         build_output: Vec::new(),
         process_receipts: 0,
+        store: None,
         home: None,
         freed_bytes: 0,
         errors: Vec::new(),
@@ -317,6 +319,13 @@ fn clean(dry_run: bool, json: bool, keep_days: u64) -> Result<()> {
         Err(error) => report.errors.push(format!("process receipts: {error:#}")),
     }
 
+    if !dry_run {
+        match crate::disk::prune_store() {
+            Ok(store) => report.store = Some(store),
+            Err(error) => report.errors.push(format!("store: {error:#}")),
+        }
+    }
+
     let keep = Duration::from_secs(keep_days.saturating_mul(86400)).max(crate::disk::GRACE);
     match crate::disk::budget_bytes()
         .and_then(|budget| crate::disk::rotate_home(&home, budget, Some(keep), dry_run))
@@ -389,6 +398,19 @@ fn render_clean(report: &CleanReport) -> String {
             "{} {} dead process receipts\n",
             verb(report.dry_run),
             report.process_receipts
+        ));
+    }
+    if let Some(store) = report
+        .store
+        .as_ref()
+        .filter(|store| store.captures + store.processes > 0)
+    {
+        out.push_str(&format!(
+            "pruned {} stream rows from {} captures and {} inspection Processes from the store{}\n",
+            store.stream_rows,
+            store.captures,
+            store.processes,
+            if store.vacuumed { "; vacuumed" } else { "" }
         ));
     }
     if let Some(home) = &report.home {

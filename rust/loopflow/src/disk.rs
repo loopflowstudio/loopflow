@@ -570,7 +570,20 @@ pub(crate) fn rotate_when_due(home: &Path) {
         if let Err(error) = crate::lf::commands::top::prune_dead_process_receipts(&home, false) {
             tracing::warn!(error = %format!("{error:#}"), "automatic Process receipt prune failed");
         }
+        if let Err(error) = prune_store() {
+            tracing::warn!(error = %format!("{error:#}"), "automatic store prune failed");
+        }
     });
+}
+
+/// Run the store's retention prune on the selected database.
+pub(crate) fn prune_store() -> Result<crate::store::sqlite::retention::RetentionReport> {
+    let database = crate::store::default_db_path();
+    if !database.exists() {
+        return Ok(Default::default());
+    }
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    Ok(crate::store::sqlite::retention::prune(&database, now)?)
 }
 
 #[cfg(test)]

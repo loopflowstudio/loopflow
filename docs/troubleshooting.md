@@ -139,8 +139,10 @@ lf disk clean                          # remove it; logs each removal to ~/.lf/l
 
 `lf disk clean` removes worktrees `lf wt prune` would, completed Tasks' build
 output, dead process receipts, every database backup but the newest, and
-captures and logs older than `--keep-days` (7). It then rotates `~/.lf` to its
-budget. Set the budget in `~/.lf/config.yaml`:
+captures and logs older than `--keep-days` (7). It prunes the store to facts
+(provider stream lines stay in `runs/<capture>/events.jsonl`) and expires
+unreferenced inspection Processes older than seven days; Loopflow also does
+this hourly. It then rotates `~/.lf` to its budget. Set the budget in `~/.lf/config.yaml`:
 
 ```yaml
 disk_budget: 20G                       # the default

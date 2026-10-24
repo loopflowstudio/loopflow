@@ -46,6 +46,7 @@ pub(crate) mod project_selection;
 mod project_transitions;
 mod rentals;
 mod repositories;
+pub(crate) mod retention;
 mod revisions;
 mod scope_defaults;
 mod selections;

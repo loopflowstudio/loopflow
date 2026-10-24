@@ -156,6 +156,26 @@ struct WorkNavigationTests {
         #expect(model.navigation.destination == .workingTasks)
     }
 
+    @Test("Zooming a Working Tasks tile keeps Working Tasks in the trail, and Back returns to it")
+    func workingTasksZoomPassesThroughDashboard() throws {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing must not execute") }, repoPath: "/src/loopflow")
+        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        model.bindWorkspaces(registry, repository: "repo")
+        let tasks = ["issue-review", "issue-now"].map {
+            fixtureViewContent(work: .init(repository: "repo", kind: .task, id: $0), title: $0)
+        }
+        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: tasks)], reason: "")
+        model.selectWorkingTasksDashboard()
+        let plan = try #require(model.selectedViewPlan)
+        let member = try #require(model.workingTaskMembers.first { $0.work.id == "issue-now" })
+        model.zoomTile(member, plan: plan, workingTasks: true, origin: nil)
+        #expect(model.navigation.trailBoard == .workingTasks)
+        #expect(model.breadcrumb?.task?.task.id == "issue-now")
+        model.goBack()
+        #expect(model.navigation.destination == .workingTasks)
+    }
+
     @Test("An unstarted Task's Session slot offers Start; showing it starts nothing")
     func unstartedTaskOffersStart() async throws {
         let model = try model()

@@ -1417,7 +1417,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         .unwrap();
     let arranged = invoke_input(
         &["desktop", "arrange", "backlog", "--revision", "3"],
-        &serde_json::to_string(&arrangement).unwrap(),
+        &serde_json::to_string(&arrangement.to_edit()).unwrap(),
     );
     assert!(
         arranged.status.success(),
@@ -1433,7 +1433,14 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     let invalid = loopflow::work::selection::Arrangement::automatic(&[]);
     assert!(!invoke_input(
         &["desktop", "arrange", "backlog", "--revision", "4"],
-        &serde_json::to_string(&invalid).unwrap(),
+        &serde_json::to_string(&invalid.to_edit()).unwrap(),
+    )
+    .status
+    .success());
+    // The writer owns mode; input naming it is rejected rather than ignored.
+    assert!(!invoke_input(
+        &["desktop", "arrange", "backlog", "--revision", "4"],
+        &serde_json::to_string(&arranged.arrangement).unwrap(),
     )
     .status
     .success());

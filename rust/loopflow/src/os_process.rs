@@ -246,6 +246,8 @@ pub(crate) fn resolve_lf_binary() -> Result<PathBuf> {
     } else if crate::store::copy::selected().is_some() {
         // The copy belongs to the build that made it: children run this binary.
         Some(std::env::current_exe()?)
+    } else if let Some(helper) = crate::installation::desktop_helper() {
+        Some(helper)
     } else {
         // The gate selects and verifies the installed artifact when executed.
         let gate = crate::installation::entry_gate_path(

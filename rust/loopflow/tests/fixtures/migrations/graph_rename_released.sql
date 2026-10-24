@@ -1,5 +1,6 @@
 -- Released Flow records: a Flow process with one step, a Task mid-edge
--- on a Workflow whose edges name `flow`, a finished Flow in its history, and a Wave workflow authored with `flow:`.
+-- on a Workflow whose edges name `flow`, its finished-Flow event, and a Wave
+-- workflow authored with `flow:`.
 INSERT INTO processes(id,trace_id,command,cwd,repo,started_at)
     VALUES('00000000-0000-4000-8000-00000000f100','00000000-0000-4000-8000-0000000000aa','["lf","flow","pursue"]','{repo}','{repo}',1);
 INSERT INTO processes(id,trace_id,parent_lf_process_id,command,cwd,repo,started_at,completed_at,outcome,exit_code)
@@ -14,6 +15,8 @@ INSERT INTO tasks(id,repository_id,project_id,issue_identifier,created_at)
     VALUES('{task}','repo_00000000000040008000000000000001','{project}','PROOF-1',1);
 INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at)
     VALUES('{task}','{"name":"feature","nodes":[{"name":"demo","skill":"demo","description":null}],"edges":[{"from":"start","to":"demo","flow":"pursue"},{"from":"demo","to":"end","flow":null}]}','start',0,'00000000-0000-4000-8000-00000000f100',2);
+INSERT INTO task_events(task_id,kind_json,created_at)
+    VALUES('{task}','{"kind":"flow_finished","invocation_id":"00000000-0000-4000-8000-00000000f100","flow":"pursue","summary":"Implemented."}',3);
 INSERT INTO wave_workflows(wave_id,name,content)
     VALUES('{wave}','feature','# Build, then try it.
 nodes:
@@ -24,5 +27,3 @@ edges:
     to: end
     flow: ship
 ');
-INSERT INTO task_events(task_id,kind_json,created_at)
-    VALUES('{task}','{"kind":"flow_finished","invocation_id":"00000000-0000-4000-8000-00000000f1aa","flow":"pursue","summary":"Built the change."}',3);

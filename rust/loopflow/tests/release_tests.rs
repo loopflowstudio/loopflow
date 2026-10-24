@@ -1448,6 +1448,37 @@ fn release_run_proves_the_candidate_before_pushing_the_version_tag() {
 }
 
 #[test]
+fn release_run_builds_fixes_merged_after_the_release_pr() {
+    let repo = TestRepo::new();
+    let release_commit = prepare_candidate_release_repo(&repo);
+    fs::write(repo.path().join("fix.txt"), "late correction\n").expect("write fix");
+    git(&repo, &["add", "fix.txt"]);
+    git(&repo, &["commit", "-m", "Correct the release"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    let fixed = git_output(&repo, &["rev-parse", "HEAD"]);
+    let state = tempfile::tempdir().expect("release state");
+    let log_path = state.path().join("gh.log");
+    let gh_script = write_gh_candidate_release_script(&log_path.to_string_lossy(), "success")
+        .replace(
+            r#"head="$(git rev-parse HEAD)""#,
+            &format!(r#"head="{release_commit}""#),
+        );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let outcome = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect("corrected candidate should be tagged");
+
+    let ReleaseRunOutcome::Released(receipt) = outcome else {
+        panic!("expected a released receipt");
+    };
+    assert_eq!(receipt.commit, fixed);
+    assert_eq!(
+        git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
+        fixed
+    );
+}
+
+#[test]
 fn release_run_replaces_a_merged_candidate_with_unprepared_migrations() {
     prove_unprepared_candidate_recovery(false, false, "0.9.2");
 }

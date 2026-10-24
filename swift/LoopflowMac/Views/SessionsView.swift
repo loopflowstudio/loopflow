@@ -77,13 +77,6 @@ struct ConsoleCommands: Commands {
     }
 }
 
-/// The pane whose strip the pointer is over: only that pane shows Close.
-@MainActor
-@Observable
-final class PaneHover {
-    var paneId: String?
-}
-
 extension ShellTab {
     var terminal: TerminalIdentity? {
         location.map { .shell(id, machineId: $0.machineId) }
@@ -249,7 +242,15 @@ final class SessionsWorkspace {
             "--checkout", identity.worktree]
     }
     let multiplexer = MultiplexerStore()
-    let hover = PaneHover()
+    /// One flag per pane strip, read only by that strip's Close control, so a
+    /// crossing never re-renders another pane. Lookup itself is unobserved.
+    @ObservationIgnored private var stripHovers: [String: HoverFlag] = [:]
+    func stripHover(_ paneId: String) -> HoverFlag {
+        if let flag = stripHovers[paneId] { return flag }
+        let flag = HoverFlag()
+        stripHovers[paneId] = flag
+        return flag
+    }
     private(set) var isRestoringIntent = false
     private var unavailableDrafts: [WorkFileDraft] = []
     var persistenceError: String?
@@ -738,33 +739,37 @@ final class SessionsStore {
         // Working-set pages are filtered. Absence establishes neither deletion
         // nor completion and must not discard prepared commands or native drafts.
 
+        // Reconcile a copy and publish once: element writes notify even when equal,
+        // and every pane reads this array.
+        var next = sessions
         for record in records {
             let observedState: SessionItem.State = localTerminal(for: record) != nil
                 ? .live : record.action(.moveHere) != nil ? .elsewhere : .pending
-            if let index = _index(record.id) {
+            if let index = next.firstIndex(where: { $0.id == record.id }) {
                 // Keep a prepared command until the retained native view consumes it.
-                if case .prepared = sessions[index].state {
+                if case .prepared = next[index].state {
                     var observed = record
-                    observed.openArgv = sessions[index].record.openArgv
-                    sessions[index].record = observed
+                    observed.openArgv = next[index].record.openArgv
+                    next[index].record = observed
                     continue
                 }
-                sessions[index].record = record
-                if record.provider == sessions[index].agentOverride {
-                    sessions[index].agentOverride = nil
+                next[index].record = record
+                if record.provider == next[index].agentOverride {
+                    next[index].agentOverride = nil
                 }
-                if case .opening = sessions[index].state { continue }
+                if case .opening = next[index].state { continue }
                 if observedState == .pending {
-                    switch sessions[index].state {
+                    switch next[index].state {
                     case .failed, .ended: continue
                     default: break
                     }
                 }
-                sessions[index].state = observedState
+                next[index].state = observedState
             } else {
-                sessions.append(SessionItem(record: record, state: observedState))
+                next.append(SessionItem(record: record, state: observedState))
             }
         }
+        if next != sessions { sessions = next }
         surfaces.associateProgramStatus(sessions.map(\.record))
     }
 
@@ -996,6 +1001,36 @@ struct SessionsView: View {
 }
 
 /// Unified Work navigation around the existing retained native workspace.
+/// The sidebar's width, read here so a divider drag re-renders this column
+/// rather than the whole window.
+private struct SidebarColumn<Content: View>: View {
+    let navigation: WorkNavigation
+    let availableWidth: CGFloat
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content.frame(width: min(navigation.sidebarWidth, max(240, availableWidth - 360)))
+    }
+}
+
+/// Applies each Session reading to the window's stores. Zero-size, so a Session
+/// change re-runs this view and not the window that hosts it.
+private struct SessionsReconciler: View {
+    let model: WorkModel
+    let store: SessionsStore
+    let workspaces: SessionsWorkspaceRegistry
+
+    var body: some View {
+        Color.clear.frame(width: 0, height: 0)
+            .onChange(of: model.sessions.value, initial: true) { _, records in
+                guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
+                      let records else { return }
+                store.reconcile(records)
+                if model.sessions.errorMessage == nil { workspaces.reconcileMembership(records); model.revealPrimaryConversation() }
+            }
+    }
+}
+
 struct SessionsContentView: View {
     @Environment(\.theme) private var theme
     let machineId: String
@@ -1063,25 +1098,31 @@ struct SessionsContentView: View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
                 if navigation.showsNavigator {
-                    WorkNavigator(model: model, onOpenSession: openSession, onNewTaskSession: { id in
-                        Task { do { try await newTaskSession(id) } catch { launchError = error.localizedDescription } }
-                    })
-                        .frame(width: min(navigation.sidebarWidth, max(240, geometry.size.width - 360)))
+                    SidebarColumn(navigation: navigation, availableWidth: geometry.size.width) {
+                        WorkNavigator(model: model, onOpenSession: openSession, onNewTaskSession: { id in
+                            Task { do { try await newTaskSession(id) } catch { launchError = error.localizedDescription } }
+                        })
+                        .equatable()
+                    }
                     SidebarDivider(navigation: navigation, availableWidth: geometry.size.width)
                 }
-                if navigation.showsSelection {
-                    DashboardView(model: model, workspaces: workspaces, sessions: store)
-                } else if let key = workspaces.selectedWork {
-                    VStack(spacing: 0) {
-                        workspacePanel(key).id(key)
+                ZStack {
+                    if navigation.showsSelection {
+                        DashboardView(model: model, workspaces: workspaces, sessions: store)
+                    } else if let key = workspaces.selectedWork {
+                        VStack(spacing: 0) {
+                            workspacePanel(key).id(key)
+                        }
+                        .padding([.horizontal, .bottom], PaneGeometry.windowInset)
+                        .background(palette.surfaceMuted)
+                        .accessibilityIdentifier("work-layout")
+                        .transition(.zoom(from: navigation.zoomOrigin))
+                    } else {
+                        ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
+                            description: Text("Open a repository, Wave or Task from the sidebar."))
                     }
-                    .padding([.horizontal, .bottom], PaneGeometry.windowInset)
-                    .background(palette.surfaceMuted)
-                    .accessibilityIdentifier("work-layout")
-                } else {
-                    ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
-                        description: Text("Open a repository, Wave or Task from the sidebar."))
                 }
+                .coordinateSpace(.named(ZoomFromTile.space))
             }
         }
         .background(palette.background)
@@ -1128,7 +1169,7 @@ struct SessionsContentView: View {
                     case .adjacent(let offset): model.cycleWorkingTask(offset)
                     case .search, .toggleSidebar: break
                     }
-                }, modifiersChanged: { navigation.showsSlotHints = $0 }) {
+                }, modifiersChanged: { if navigation.showsSlotHints != $0 { navigation.showsSlotHints = $0 } }) {
                 navigation.palette = .search
             }.frame(width: 0, height: 0)
         }
@@ -1165,12 +1206,7 @@ struct SessionsContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
             navigation.showsSlotHints = false
         }
-        .onChange(of: model.sessions.value, initial: true) { _, records in
-            guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
-                  let records else { return }
-            store.reconcile(records)
-            if model.sessions.errorMessage == nil { workspaces.reconcileMembership(records); model.revealPrimaryConversation() }
-        }
+        .background { SessionsReconciler(model: model, store: store, workspaces: workspaces) }
 
         .onReceive(NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)) { notification in
             guard let terminal = notification.object as? TerminalIdentity else { return }
@@ -1238,6 +1274,7 @@ struct SessionsContentView: View {
                     HStack(spacing: 0) {
                         WorkspacePanesView(workspace: entry, isFocused: navigation.palette == nil, sessions: store, model: model,
                             onFocus: { pane, session in focusPane(pane, session: session, in: entry) })
+                            .equatable()
                             .frame(width: geometry.size.width * 0.62)
                         Divider()
                         WaveTaskInventory(model: model, waveID: key.id)
@@ -1246,6 +1283,7 @@ struct SessionsContentView: View {
             } else if terminals {
                 WorkspacePanesView(workspace: entry, isFocused: active && navigation.palette == nil, sessions: store, model: model,
                     onFocus: { pane, session in focusPane(pane, session: session, in: entry) })
+                    .equatable()
                     .overlay(alignment: .top) {
                         if let error = entry.conversationError {
                             HStack {

@@ -392,7 +392,7 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         let feature = load_workflow("feature", repo.path()).unwrap().unwrap();
         let stages: Vec<_> = feature.nodes.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(stages, ["review-design", "demo"]);
+        assert_eq!(stages, ["review-design", "demo", "verify"]);
         assert_eq!(feature.nodes[0].skill, "review-design");
         assert!(feature.nodes[0].description.is_some());
         assert_eq!(
@@ -412,7 +412,15 @@ mod tests {
             routes(&feature, "demo"),
             [
                 ("pursue".to_string(), "demo".to_string()),
-                ("deliver".to_string(), END.to_string())
+                ("deliver".to_string(), "verify".to_string())
+            ]
+        );
+        // After merge: fix forward through implement and demo, or finish.
+        assert_eq!(
+            routes(&feature, "verify"),
+            [
+                ("pursue".to_string(), "demo".to_string()),
+                (END.to_string(), END.to_string())
             ]
         );
         // A Task with no PR: its last route runs nothing.

@@ -866,6 +866,11 @@ impl WorkflowTask {
                 ".lf/graphs/rounds.yaml",
                 "- graph: proof\n- graph: land-proof\n- loop: land-proof\n  interactive: {name: demo, id: review}\n- graph: broken\n",
             ),
+            // Merged work is checked at a last stage before `end`.
+            (
+                ".lf/graphs/verified.yaml",
+                "- graph: proof\n- interactive: {name: demo, id: review}\n- graph: land-proof\n- interactive: {name: verify, id: check}\n",
+            ),
         ] {
             let path = repo.path().join(path);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -2099,21 +2104,54 @@ fn task_ship_completes_when_its_pr_merges_mid_ship() {
     fs::remove_file(task.home.path().join("hold")).unwrap();
     let output = first.wait_with_output().unwrap();
     assert!(output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stdout).contains("INF-123: its PR merged; completed"),
-        "{}",
-        String::from_utf8_lossy(&output.stdout)
-    );
     assert_eq!(task.state(), "done");
-    // Nothing ran after the merge was seen: the review route was never chosen.
+    // Review is this graph's last stage, so it checks merged work: the merge
+    // completes nothing until the stand-in there finishes into `end`.
     assert_eq!(
         moves(&task.workflow()),
         [
             ("took_up".into(), None),
             ("chose".into(), Some(0)),
             ("arrived".into(), Some(0)),
+            ("chose".into(), Some(1)),
         ]
     );
+}
+
+#[test]
+fn task_ship_takes_a_mid_ship_merge_on_to_verify_instead_of_completing() {
+    let task = shipping_task();
+    fs::write(task.home.path().join("hold"), "").unwrap();
+    let first = command(
+        task.repo.path(),
+        task.home.path(),
+        &["-b", "--task", "INF-123", "ship", "verified"],
+    )
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    wait_for("the stand-in", || !stand_ins(&task).is_empty());
+    // Someone merges the PR by hand while the review stand-in is working.
+    task.publish(true);
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    let output = first.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{stdout}");
+    assert!(
+        stdout.contains("INF-123: its PR merged; on to check"),
+        "{stdout}"
+    );
+    assert_eq!(task.state(), "done");
+    // The landing route never ran; a stand-in checked the merged work at
+    // `check`, then finished.
+    let turns = stand_ins(&task);
+    assert_eq!(turns.len(), 2);
+    assert!(turns[1].contains("at check"), "{}", turns[1]);
+    let moves = moves(&task.workflow());
+    assert_eq!(moves[3].0, "set");
+    assert_eq!(moves.len(), 5);
 }
 
 #[test]

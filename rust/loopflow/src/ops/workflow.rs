@@ -259,7 +259,7 @@ mod tests {
         assert_eq!(waiting.outgoing, [3, 4]);
         let guidance = waiting.guidance("INF-1");
         assert!(guidance.contains("with the demo skill"), "{guidance}");
-        assert!(guidance.contains("`lf -b task run INF-1 deliver` moves the Task to end"));
+        assert!(guidance.contains("`lf -b task run INF-1 deliver` moves the Task to verify"));
         assert!(guidance.contains("`lf task workflow move INF-1 <stage>`"));
 
         // On a running edge there is nothing to choose, only that the run runs.

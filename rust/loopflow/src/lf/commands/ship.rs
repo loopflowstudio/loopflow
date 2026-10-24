@@ -13,8 +13,8 @@ use crate::graph::runner::SkillOutcome;
 use crate::graph::transitions::{GraphDecision, GraphVerdict};
 use crate::lf::Cli;
 use crate::ops::task::ship::{
-    blocked_backoff, ship_begin, ship_complete_if_merged, ship_next, ship_progressed,
-    stand_in_message, ShipStart, ShipStep,
+    blocked_backoff, ship_begin, ship_next, ship_progressed, ship_settle_merge, stand_in_message,
+    ShipMerge, ShipStart, ShipStep,
 };
 use crate::ops::task::TaskProcessOptions;
 
@@ -45,8 +45,9 @@ pub fn run(
     // Blocked decisions in a row; each repeat after one waits longer.
     let mut blocked = 0;
     loop {
-        if merged(&issue) {
-            return Ok(());
+        match merged(&issue) {
+            ShipMerge::Done => return Ok(()),
+            ShipMerge::Verifying(_) | ShipMerge::Open => {}
         }
         let (edge, note) = match ship_next(&issue)? {
             ShipStep::Edge(edge) => (edge, None),
@@ -113,9 +114,12 @@ pub fn run(
             }
             step => return halt(&issue, &step),
         };
-        // Checked again here: a stand-in can run for a long time.
-        if merged(&issue) {
-            return Ok(());
+        // Checked again here: a stand-in can run for a long time. A merge
+        // that moved the Task replaces the route chosen before it.
+        match merged(&issue) {
+            ShipMerge::Done => return Ok(()),
+            ShipMerge::Verifying(_) => continue,
+            ShipMerge::Open => {}
         }
         let (task, runs) = crate::ops::task::task_place(
             repo,
@@ -136,19 +140,22 @@ pub fn run(
     }
 }
 
-/// A PR merged by anyone finishes the Task; nothing more runs on it. An
-/// unreadable PR leaves shipping to continue.
-fn merged(issue: &str) -> bool {
-    match ship_complete_if_merged(issue) {
-        Ok(done) => {
-            if done {
-                println!("{issue}: its PR merged; completed");
+/// A PR merged by anyone ends the building: the Task goes on to verify it,
+/// or finishes when its graph has no such stage. An unreadable PR leaves
+/// shipping to continue.
+fn merged(issue: &str) -> ShipMerge {
+    match ship_settle_merge(issue) {
+        Ok(merge) => {
+            match &merge {
+                ShipMerge::Done => println!("{issue}: its PR merged; completed"),
+                ShipMerge::Verifying(stage) => println!("{issue}: its PR merged; on to {stage}"),
+                ShipMerge::Open => {}
             }
-            done
+            merge
         }
         Err(error) => {
             eprintln!("{issue}: could not read its PR: {error}");
-            false
+            ShipMerge::Open
         }
     }
 }

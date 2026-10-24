@@ -384,19 +384,79 @@ pub fn ship_branch_task(repo: &std::path::Path, wave: Option<&str>) -> OpsResult
     )
 }
 
-/// Complete a shipping Task whose PR has merged, whoever merged it, so no
-/// further step runs on delivered work. Returns whether the Task is now done.
-pub fn ship_complete_if_merged(issue: &str) -> OpsResult<bool> {
+/// What a merged PR did to a shipping Task.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ShipMerge {
+    /// No merge to act on.
+    Open,
+    /// Its PR merged; the Task now stands at the stage that checks merged work.
+    Verifying(String),
+    /// Its PR merged and the Task is done.
+    Done,
+}
+
+/// The stage that checks merged work: the one whose route into `end` runs nothing.
+fn post_merge_stage(workflow: &Workflow) -> Option<&str> {
+    workflow
+        .definition
+        .edges
+        .iter()
+        .zip(&workflow.routes)
+        .find(|(edge, route)| edge.to == END && route.start.is_none())
+        .map(|(edge, _)| edge.from.as_str())
+        .filter(|stage| workflow.definition.node(stage).is_some())
+}
+
+/// Where a merge sends a shipping Task: to its post-merge stage, once, when it
+/// has not reached that stage on this graph yet; else nowhere. A Task whose
+/// graph has no such stage completes.
+fn merge_target(workflow: Option<&Workflow>) -> Option<Option<&str>> {
+    let Some(workflow) = workflow else {
+        return Some(None);
+    };
+    let Some(stage) = post_merge_stage(workflow) else {
+        return Some(None);
+    };
+    let reached = workflow
+        .history
+        .iter()
+        .any(|step| step.workflow == workflow.definition.name && step.to == stage);
+    (!reached).then_some(Some(stage))
+}
+
+/// Act on a shipping Task's merged PR, whoever merged it, so no further
+/// build step runs on delivered work: send it to the stage that checks merged
+/// work, or complete it when its graph has none.
+pub fn ship_settle_merge(issue: &str) -> OpsResult<ShipMerge> {
+    let process = crate::journal::current_lf_process_id()
+        .ok_or_else(|| task_error("lf ship requires a registered Process"))?;
     block_on_task(async {
         let store = task_store().await?;
         let mut task = task_by_issue(&store, issue).await?;
         let Some(pr) =
             super::reconcile_task_pr_observation(&store, &mut task, PrReadFreshness::Fresh).await?
         else {
-            return Ok(false);
+            return Ok(ShipMerge::Open);
         };
         if pr.phase() != PrPhase::Merged {
-            return Ok(false);
+            return Ok(ShipMerge::Open);
+        }
+        let workflow = store.sqlite.workflow(&task.id).map_err(task_error)?;
+        match merge_target(workflow.as_ref()) {
+            None => return Ok(ShipMerge::Open),
+            Some(Some(stage)) => {
+                store
+                    .sqlite
+                    .set_workflow_node(
+                        &task.id,
+                        stage,
+                        &process,
+                        Some("its PR merged while shipping"),
+                    )
+                    .map_err(task_error)?;
+                return Ok(ShipMerge::Verifying(stage.to_owned()));
+            }
+            Some(None) => {}
         }
         if let Some(request) = store
             .sqlite
@@ -405,7 +465,13 @@ pub fn ship_complete_if_merged(issue: &str) -> OpsResult<bool> {
         {
             super::settle_completion(&store, &mut task, request).await?;
         }
-        Ok(store.sqlite.task_state(&task.id).map_err(task_error)? == TaskState::Done)
+        Ok(
+            if store.sqlite.task_state(&task.id).map_err(task_error)? == TaskState::Done {
+                ShipMerge::Done
+            } else {
+                ShipMerge::Open
+            },
+        )
     })
 }
 
@@ -465,14 +531,23 @@ fn next_step(workflow: &Workflow, issue: &str) -> OpsResult<ShipStep> {
 }
 
 /// The edges a stand-in chooses between at `node`: the one that advances
-/// (toward `end` when one goes there, else the one edge for another stage)
-/// and the one that repeats the stage's loop.
+/// (toward `end` when one goes there, else the one to a later stage) and the
+/// one that repeats, back to this stage or an earlier one.
 fn routes_from(workflow: &Workflow, node: &str) -> Option<(String, Option<String>)> {
-    let (repeat, onward): (Vec<_>, Vec<_>) = workflow
-        .definition
+    let definition = &workflow.definition;
+    // `start` comes before every stage and `end` after.
+    let order = |stage: &str| match stage {
+        START => 0,
+        _ => definition
+            .nodes
+            .iter()
+            .position(|node| node.name == stage)
+            .map_or(usize::MAX, |index| index + 1),
+    };
+    let (repeat, onward): (Vec<_>, Vec<_>) = definition
         .outgoing(node)
         .map(|(_, edge)| edge)
-        .partition(|edge| edge.to == node);
+        .partition(|edge| order(&edge.to) <= order(node));
     let advance = onward
         .iter()
         .find(|edge| edge.to == END)
@@ -648,6 +723,26 @@ mod tests {
                 repeat: Some("pursue".into()),
             }
         );
+        // After merge, verify finishes into `end` or fixes forward through implement.
+        assert_eq!(
+            at("verify"),
+            ShipStep::StandIn {
+                stage: "verify".into(),
+                skill: "verify".into(),
+                advance: "end".into(),
+                repeat: Some("pursue".into()),
+            }
+        );
+        let workflow = Workflow::new(
+            definition.clone(),
+            routes.clone(),
+            WorkflowPosition::Node {
+                node: "demo".into(),
+            },
+            Vec::new(),
+        );
+        assert_eq!(super::post_merge_stage(&workflow), Some("verify"));
+        assert_eq!(super::merge_target(Some(&workflow)), Some(Some("verify")));
         assert_eq!(at("end"), ShipStep::Finished);
         // A stopped edge runs again.
         let stopped = Workflow::new(

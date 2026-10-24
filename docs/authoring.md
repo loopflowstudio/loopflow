@@ -268,6 +268,8 @@ take part in the Task conversation. Everything between stages runs on its own.
 - loop: implement
   interactive: demo            # you try the change
 - graph: deliver                # gate, then land and stay until it merges
+- loop: implement
+  interactive: verify            # you check it on main; fix forward or finish
 ```
 
 ```bash
@@ -280,7 +282,8 @@ lf task workflow move DES-123 review-design    # go back without running anythin
 
 `start` and `end` are implicit. Routes between stages are projected from the
 graph, never written: each is named by what it runs first (the composed graph,
-else the skill), so `pursue` and `deliver` above. A stage's description is its
+else the skill), so `pursue` and `deliver` above, and `end` for verify's route
+that runs nothing. A stage's description is its
 skill's first line of prose. `interactive:` may sit inside an `xor` path as a
 conditional stage. A graph with no stages runs whole; one with no PR, like
 builtin `research`, ends with a route into `end` that runs nothing.
@@ -290,7 +293,9 @@ standing in for you at each stage: it runs the stage's skill, decides advance or
 repeat, and records why in the Task history. A Task is `unstarted`, `working`,
 `shipping`, then `done` (or `abandoned`); `paused` holds working or shipping.
 Shipping begins with `lf ship` or with any route into `end`, and
-`lf ship --stop` returns it to working.
+`lf ship --stop` returns it to working. A PR merged while shipping, by anyone,
+sends the Task to its last stage before `end` (`verify`) once; with no such
+stage it completes. Verify finishes into `end` or fixes forward as a new PR.
 
 On its first `lf task run`, a Task selects the Workflow you name, then its Wave
 default, then repository `workflow:`. It keeps the graph as it was then.

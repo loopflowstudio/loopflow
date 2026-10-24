@@ -1923,18 +1923,26 @@ final class WorkModel {
         }
     }
 
-    /// Ship the Task, then confirm its subscription update; it moves to Shipping.
+    /// Ship the Task, then confirm its subscription update; it moves to Shipping
+    /// and the window's ship toast offers Undo.
     func shipTask(_ task: RoadmapTask) async {
         await performTaskAction(task.id) {
             try await query.shipTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
         }
+        noteShipping(task, shipped: true)
     }
 
-    /// Stop shipping the Task; it returns to Working.
+    /// Stop shipping the Task; it returns to Working and the toast says so.
     func stopShipping(_ task: RoadmapTask) async {
         await performTaskAction(task.id) {
             try await query.stopShipping(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
         }
+        noteShipping(task, shipped: false)
+    }
+
+    private func noteShipping(_ task: RoadmapTask, shipped: Bool) {
+        guard navigation.taskRunDrafts[task.id]?.error == nil else { return }
+        navigation.shipNotice = ShipNotice(task: task, shipped: shipped)
     }
 
     /// The Work the Machine control describes: the current started Task, else the

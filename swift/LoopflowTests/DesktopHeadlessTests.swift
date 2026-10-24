@@ -389,7 +389,7 @@ struct DesktopHeadlessTests {
         #expect(throws: (any Error).self) {
             try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
         }
-        let control = TaskShipControl(model: model, task: task, revealed: true) { _ in }
+        let control = TaskShipControl(model: model, task: task, revealed: true)
         try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship").button().tap()
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls == [["-b", "--task", task.task.identifier, "ship"]])
@@ -412,7 +412,7 @@ struct DesktopHeadlessTests {
 
         // A shipping Task offers Stop shipping in place of Ship it.
         let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
-        let shipped = TaskShipControl(model: model, task: shipping, revealed: true) { _ in }
+        let shipped = TaskShipControl(model: model, task: shipping, revealed: true)
         #expect(throws: (any Error).self) {
             try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
         }

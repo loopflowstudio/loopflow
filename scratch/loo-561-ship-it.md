@@ -233,8 +233,9 @@ task_execution ok; mixed-runner planning/store failures pass alone (owner: gate)
   `TaskShipControl`, fading in Ship it / Stop shipping on hover for every selected Task. The
   heading state reads the lifecycle (Unstarted, Working, Shipping · reason, Paused, Done,
   Abandoned). The toast is window-level (`WorkNavigation.shipNotice`, `ShipNoticeOverlay` on
-  `RepoView`). The detail page's control is gone. Check: `swift test --filter
-  'WorkNavigationTests|DesktopHeadless'` 51 ok.
+  `RepoView`). The detail page's control is gone; `WorkModel.shipTask`/`stopShipping` post the toast, so
+  the control and Undo carry no callback. Check: `swift test --filter
+  'WorkNavigationTests|DesktopHeadless'` 51 ok (2026-10-23, after compress).
 - Not this Task: the jump bar's Machine control shows "Swift.CancellationError" with a ⚠
   (`WorkMachineControl.load()` reports the cancelled `.task(id:)` load). Fixed in this Task at Jack's request (6a066d80a4: `CancellationError` is ignored).
 

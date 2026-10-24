@@ -230,8 +230,6 @@ struct TaskShipControl: View {
     let model: WorkModel
     let task: RoadmapTask
     let revealed: Bool
-    /// Runs once Rust accepts the change, with whether the Task now ships.
-    let changed: (Bool) -> Void
 
     private var acting: Bool { model.navigation.taskRunDrafts[task.id]?.acting == true }
 
@@ -244,14 +242,14 @@ struct TaskShipControl: View {
     var body: some View {
         Group {
             if task.shipping != nil {
-                Button("Stop shipping") { perform(ship: false) }
+                Button("Stop shipping") { Task { await model.stopShipping(task) } }
                     .buttonStyle(WorkOutlineButtonStyle())
                     .disabled(acting || readingUnavailable != nil)
                     .help("lf --task \(task.task.identifier) ship --stop: return it to working and disarm auto-merge")
                     .accessibilityIdentifier("task-ship-stop")
             } else if !(task.task.isTerminal || task.runtime?.status.isTerminal == true) {
                 let refusal = readingUnavailable ?? task.shipControl.unavailable
-                Button("Ship it") { perform(ship: true) }
+                Button("Ship it") { Task { await model.shipTask(task) } }
                     .buttonStyle(WorkShipButtonStyle())
                     .disabled(acting || refusal != nil)
                     .help(refusal ?? "lf --task \(task.task.identifier) ship: run every remaining step and land it")
@@ -262,13 +260,6 @@ struct TaskShipControl: View {
         .offset(x: revealed ? 0 : 4)
         .fixedSize()
         .animation(.easeOut(duration: 0.12), value: revealed)
-    }
-
-    private func perform(ship: Bool) {
-        Task {
-            if ship { await model.shipTask(task) } else { await model.stopShipping(task) }
-            if model.navigation.taskRunDrafts[task.id]?.error == nil { changed(ship) }
-        }
     }
 }
 
@@ -329,12 +320,7 @@ struct ShipNoticeOverlay: View {
             if let notice = navigation.shipNotice {
                 ShipNoticeToast(notice: notice) {
                     guard let task = model.task(id: notice.taskID)?.task else { return }
-                    Task {
-                        await model.stopShipping(task)
-                        if navigation.taskRunDrafts[task.id]?.error == nil {
-                            navigation.shipNotice = ShipNotice(task: task, shipped: false)
-                        }
-                    }
+                    Task { await model.stopShipping(task) }
                 }
                 .padding(.bottom, 18)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -392,9 +378,7 @@ struct ShippableTaskHeading: View {
     var body: some View {
         HStack(spacing: 8) {
             TaskHeading(task: task)
-            TaskShipControl(model: model, task: task, revealed: hovered) { shipped in
-                model.navigation.shipNotice = ShipNotice(task: task, shipped: shipped)
-            }
+            TaskShipControl(model: model, task: task, revealed: hovered)
         }
         .contentShape(Rectangle())
         .onHover { hovered = $0 }

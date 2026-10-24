@@ -387,18 +387,19 @@ impl std::fmt::Display for WorkStatus {
     }
 }
 
-/// Durable completion and abandonment, with Workflow readiness for unfinished Tasks.
+/// A Task's lifecycle: `unstarted → working → shipping → done`, or
+/// `abandoned`. Pause is a hold over working or shipping, shown in their place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskState {
-    /// Explicit hold; history and Workflow are retained.
+    /// Explicit hold; history, Workflow and shipping are retained.
     Paused,
-    /// The Task has taken up no Workflow.
-    NotReady,
-    /// At `start`.
-    Ready,
-    /// Past start, including end with completion pending.
-    Active,
+    /// No Workflow taken up, or still at its `start`.
+    Unstarted,
+    /// Past `start`, with a person still to take part.
+    Working,
+    /// Handed off: it finishes on its own, through every remaining step, to merge.
+    Shipping,
     /// Completed independently of Workflow position.
     Done,
     Abandoned,
@@ -408,9 +409,9 @@ impl TaskState {
     pub(crate) fn label(&self) -> &'static str {
         match self {
             Self::Paused => "paused",
-            Self::NotReady => "not_ready",
-            Self::Ready => "ready",
-            Self::Active => "active",
+            Self::Unstarted => "unstarted",
+            Self::Working => "working",
+            Self::Shipping => "shipping",
             Self::Done => "done",
             Self::Abandoned => "abandoned",
         }
@@ -419,9 +420,9 @@ impl TaskState {
     pub(crate) fn parse(label: &str) -> Option<Self> {
         [
             Self::Paused,
-            Self::NotReady,
-            Self::Ready,
-            Self::Active,
+            Self::Unstarted,
+            Self::Working,
+            Self::Shipping,
             Self::Done,
             Self::Abandoned,
         ]
@@ -433,10 +434,15 @@ impl TaskState {
         matches!(self, Self::Done | Self::Abandoned)
     }
 
+    /// Past `start` and still open, whether or not it is handed off.
+    pub fn is_started(&self) -> bool {
+        matches!(self, Self::Working | Self::Shipping)
+    }
+
     /// The Task as Work: open until it is done or abandoned.
     pub(crate) fn work_status(&self) -> WorkStatus {
         match self {
-            Self::Paused | Self::NotReady | Self::Ready | Self::Active => WorkStatus::Ready,
+            Self::Paused | Self::Unstarted | Self::Working | Self::Shipping => WorkStatus::Ready,
             Self::Done => WorkStatus::Done,
             Self::Abandoned => WorkStatus::Abandoned,
         }

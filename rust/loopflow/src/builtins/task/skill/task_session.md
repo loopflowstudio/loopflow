@@ -33,8 +33,7 @@ watch, check back or follow up later.
 
 - Within a turn, `lf task wait <issue> --until submitted` (or `terminal`, with
   `--timeout`) waits for a state change without polling.
-- Between turns, the Task's launched Graphs keep running independently. The periodic Task check
-  and the CI watcher help only where they are installed: read
-  `lf task automation` and `lf ci watch --status`, and say which are active.
+- Between turns, the Task's launched Graphs keep running independently. Once shipping,
+  its ship process lands and repairs it; reading its status restarts one that died.
 - This conversation keeps the instructions it launched with; start a new one
   after an install to receive changed guidance.

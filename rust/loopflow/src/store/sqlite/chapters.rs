@@ -53,7 +53,7 @@ impl SqliteStore {
         )?;
         let (abandoned, completed, active): (bool, bool, bool) = conn.query_row(
             &format!(
-                "SELECT state='abandoned',state='done',state='active' FROM (SELECT {} AS state FROM tasks t WHERE t.id=?1)",
+                "SELECT state='abandoned',state='done',state IN ('working','shipping') FROM (SELECT {} AS state FROM tasks t WHERE t.id=?1)",
                 super::durable::task_state_sql("t")
             ),
             [task.as_str()],

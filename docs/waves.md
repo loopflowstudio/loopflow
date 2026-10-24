@@ -350,7 +350,7 @@ See [Machines and processes](architecture/machines.md) and
 ```bash
 lf wave status infra --json
 lf update-plan --wave infra --plan plan.json
-lf wave workflow set research WAVE    # only the workflow; .lf/workflows/ or builtin
+lf wave workflow set research WAVE    # only the workflow; .lf/graphs/ or builtin
 ```
 
 `plan.json` contains the complete current plan:
@@ -411,9 +411,9 @@ Creation is standalone by default, even in a Wave-bound Session. Pass `--wave`
 to choose membership explicitly, or use `lf task move <task> --wave <wave>` later.
 
 Task Work owns one checkout and zero or one PR. Workflow selection follows
-Task → Wave → repository. Definitions live in `.lf/workflows/` or builtins. The Task moves through its
-nodes: each `lf task run` takes one edge leaving the current node and runs
-that edge's Graph, and at a node the Task waits on you in its conversation.
+Task → Wave → repository. A workflow is a graph in `.lf/graphs/` or builtins. The Task moves through its
+stages: each `lf task run` takes one route leaving the current stage and runs
+it up to the next, and at a stage the Task waits on you in its conversation.
 See [workflows](authoring.md#workflows).
 Each launch starts a fresh Graph: one Graph process holding the expanded graph
 and the step processes it starts. Every Graph remains history and none is privileged. A finished Graph

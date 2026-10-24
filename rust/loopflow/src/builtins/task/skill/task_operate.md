@@ -41,18 +41,18 @@ conflicts, verify and push, then reread status.
    launch competing implementation when existing code has no supported handoff.
 
 2. **Choose the Graph.** A Task on a workflow reports it as
-   `execution.work.workflow` in status: nodes where a person takes part,
-   joined by edges that each run one Graph. An edge alone does not prove a live
+   `execution.work.workflow` in status: stages where a person takes part,
+   joined by routes that each run one Graph. A route alone does not prove a live
    Graph process: check every associated Graph and unfinished Process against `lf ps --json`.
    Leave observed live work alone; unknown liveness never authorizes a second Graph process.
-   Before selecting another edge, recover verified merged delivery as described
-   below. At a node its last edge reached, the Task waits on a person in
-   its conversation; say which node and which edges leave it. At a node
-   because the last edge stopped or failed, that edge is the remaining work.
-   Only an edge leaving the current node moves the Task:
+   Before selecting another route, recover verified merged delivery as described
+   below. At a stage its last route reached, the Task waits on a person in
+   its conversation; say which stage and which routes leave it. At a stage
+   because the last route stopped or failed, that route is the remaining work.
+   Only a route leaving the current stage moves the Task:
    `lf task run <issue>` takes the only one or names them,
-   `lf task run <issue> <graph>` picks one, `lf task run <issue> end` takes an
-   edge that runs nothing. `lf --task <issue> graph <graph>` runs a Graph without
+   `lf task run <issue> <graph>` picks one, `lf task run <issue> end` takes a
+   route that runs nothing. `lf --task <issue> graph <graph>` runs a Graph without
    moving the Task. Without a workflow, choose as follows.
    Leave a Graph with a live process running. A stopped
    Graph is history: read what it finished and which effects it recorded before
@@ -104,7 +104,7 @@ conflicts, verify and push, then reread status.
    and commits; no placeholder PR or landing ceremony is required. Completion
    changes status without moving the Workflow and is safe to repeat after arrival.
    When status shows completion pending at end, retry `lf task complete <issue>`
-   alone. Never run the successful edge again. A newer reopening supersedes the
+   alone. Never run the successful route again. A newer reopening supersedes the
    old request; standing at end alone does not authorize another completion.
 
 6. **Report the outcome and what is available.** For completed work, state the

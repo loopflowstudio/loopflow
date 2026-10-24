@@ -91,31 +91,23 @@ struct DesktopHeadlessTests {
         }
     }
 
-    @Test("Customizing a builtin Workflow copies it into the repository's .lf/workflows")
+    @Test("A builtin Workflow offers Customize beside its stages")
     func customizedWorkflow() async throws {
-        let repo = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: repo) }
         var entries = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             fixtures.appendingPathComponent("workflow_catalog.json"))) as? [[String: Any]])
         entries[0]["name"] = "code"
         entries[0]["source"] = NSNull()
         let catalog = String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
-        let source = "nodes: {review: demo}\nedges: []\n"
         let model = WorkModel(query: RegistryQuery { args, _ in
             if args.prefix(3) == ["wave", "workflow", "list"] { return catalog }
-            if args == ["wave", "workflow", "source", "code"] { return source }
             throw RegistryQueryError("Unexpected command: \(args)")
-        }, repoPath: repo.path)
+        }, repoPath: "/tmp/repo")
         await model.loadWorkflowCatalog()
         let entry = try #require(model.workflowCatalog.value?.first { $0.name == "code" })
         let view = WorkflowCatalogInspector(entry: entry, model: model)
         #expect(try view.inspect().find(text: "builtin Workflow").string() == "builtin Workflow")
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
         _ = try view.inspect().find(button: "Customize")
-        let url = try await model.workflowDefinitionFile(entry)
-        #expect(url.path.hasSuffix(".lf/workflows/code.yaml"))
-        #expect(try String(contentsOf: url, encoding: .utf8) == source)
     }
 
     @Test("An unplaced Task and its CLI comment thread render without a display")
@@ -331,17 +323,17 @@ struct DesktopHeadlessTests {
         _ = try builtin.inspect().find(text: "builtin Workflow")
         _ = try builtin.inspect().find(button: "Customize")
         let invalid = view("proof")
-        _ = try invalid.inspect().find(ViewType.Text.self) { try $0.string().contains("unreachable") }
-        _ = try invalid.inspect().find(text: ".lf/workflows/proof.yaml")
+        _ = try invalid.inspect().find(ViewType.Text.self) { try $0.string().contains("two routes leave demo") }
+        _ = try invalid.inspect().find(text: ".lf/graphs/proof.yaml")
         _ = try invalid.inspect().find(button: "Edit")
     }
 
-    @Test("A Task's Workflow shows its running edge, offers a stopped edge again, and moves by choice or by node")
+    @Test("A Task's Workflow shows its running edge, offers a stopped edge again, ships into its end, and moves by node")
     func taskWorkflow() async throws {
         let planning = try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: planning)
         let wave = try #require(roadmap.waves.first)
-        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil })
+        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && $0.shipping == nil })
         var wire = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
         let started = Recorder()
@@ -349,7 +341,8 @@ struct DesktopHeadlessTests {
             start: { args, _ in await started.add(args) },
             run: { args, _ in
                 if args.prefix(2) == ["wave", "show"] { return String(decoding: planning, as: UTF8.self) }
-                if args.prefix(3) == ["task", "workflow", "move"] || args.prefix(2) == ["task", "complete"] { await started.add(args) }
+                if args.prefix(3) == ["task", "workflow", "move"] || args.prefix(2) == ["task", "complete"]
+                    || args.last == "--stop" { await started.add(args) }
                 return "{}"
             }))
         func view(position: [String: Any]? = nil, outgoing: [Int] = []) throws -> TaskWorkflowHeader {
@@ -369,7 +362,7 @@ struct DesktopHeadlessTests {
             try running.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-2")
         }
 
-        // Stopped, it holds the Task and is offered again with the other edge leaving its node.
+        // Stopped, it holds the Task and is offered again with the other route leaving its stage.
         let process = "11111111-1111-4111-8111-111111111111"
         let stopped = try view(
             position: ["kind": "edge", "edge": 2, "lf_process_id": process, "running": false], outgoing: [1, 2])
@@ -378,16 +371,28 @@ struct DesktopHeadlessTests {
         #expect(try !again.button().isDisabled())
         _ = try stopped.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-1")
 
-        // At `demo` the edges leaving it are the buttons, named by what they run.
+        // At `demo` the edges leaving it are the buttons, named by what they run;
+        // the one into `end` is Ship it, which runs every remaining step.
         let waiting = try view(position: ["kind": "node", "node": "demo"], outgoing: [3, 4])
         #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position").text().string() == "feature · demo")
         #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
             .accessibilityValue().string() == "Current")
-        let ship = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-action-4").button()
-        #expect(try ship.labelView().text().string() == "ship")
-        try ship.tap()
+        #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-action-3").button()
+            .labelView().text().string() == "pursue")
+        #expect(throws: (any Error).self) {
+            try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-action-4")
+        }
+        #expect(throws: (any Error).self) {
+            try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-4")
+        }
+        // Ship it sits on the Task heading, not in the Workflow header.
+        #expect(throws: (any Error).self) {
+            try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
+        }
+        let control = TaskShipControl(model: model, task: task, revealed: true)
+        try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship").button().tap()
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls == [["-b", "task", "run", task.task.identifier, "ship"]])
+        #expect(await started.calls == [["-b", "--task", task.task.identifier, "ship"]])
 
         // A Task that has taken up no workflow uses its Wave or repository default.
         wire["workflow"] = NSNull()
@@ -398,12 +403,34 @@ struct DesktopHeadlessTests {
         #expect(await started.calls.last == ["-b", "task", "run", task.task.identifier])
 
         // Going back is the same command a person would type.
-        await model.moveTask(to: "design", task: task)
-        #expect(await started.calls.last == ["task", "workflow", "move", task.task.identifier, "design"])
+        await model.moveTask(to: "review-design", task: task)
+        #expect(await started.calls.last == ["task", "workflow", "move", task.task.identifier, "review-design"])
 
         // Completion has its own operation and does not move the Workflow.
         await model.completeTask(task)
         #expect(await started.calls.last == ["task", "complete", task.task.identifier])
+
+        // A shipping Task offers Stop shipping in place of Ship it.
+        let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
+        let shipped = TaskShipControl(model: model, task: shipping, revealed: true)
+        #expect(throws: (any Error).self) {
+            try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
+        }
+        try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop").button().tap()
+        for _ in 0..<200 where await started.calls.last?.last != "--stop" { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(await started.calls.last == ["--task", shipping.task.identifier, "ship", "--stop"])
+
+        // The toast after Ship it offers Undo; after Stop shipping it only reports.
+        var undone = false
+        let toast = ShipNoticeToast(notice: ShipNotice(task: task, shipped: true)) { undone = true }
+        #expect(try toast.inspect().find(viewWithAccessibilityIdentifier: "task-ship-notice").text().string()
+            == "\(task.task.identifier) is shipping")
+        try toast.inspect().find(viewWithAccessibilityIdentifier: "task-ship-undo").button().tap()
+        #expect(undone)
+        let back = ShipNoticeToast(notice: ShipNotice(task: task, shipped: false)) {}
+        #expect(throws: (any Error).self) {
+            try back.inspect().find(viewWithAccessibilityIdentifier: "task-ship-undo")
+        }
     }
 
     @Test("Task lifecycle controls remain available without a Workflow", arguments: ["unstarted", "completed", "canceled"])
@@ -435,12 +462,22 @@ struct DesktopHeadlessTests {
         }
     }
 
+    @Test("A shipping Task says what shipping is doing and cannot be shipped again")
+    func shippingRow() throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
+        let shipped = try #require(snapshot.waves.first?.tasks.items.first { $0.shipping != nil })
+        #expect(shipped.runtime?.status == .shipping)
+        #expect(shipped.shipping?.label == "Landing")
+        #expect(shipped.shipControl.unavailable == "Task is already shipping")
+    }
+
     @Test("A workflow is drawn as a graph: circles, described nodes, a loop arc and an arrow per edge")
     func workflowGraph() async throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
         let wave = try #require(roadmap.waves.first)
-        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil })
+        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && $0.shipping == nil })
         let started = Recorder()
         let model = WorkModel(query: RegistryQuery(start: { args, _ in await started.add(args) }, run: { _, _ in "{}" }))
         var wire = try #require(JSONSerialization.jsonObject(
@@ -455,14 +492,14 @@ struct DesktopHeadlessTests {
             return TaskWorkflowHeader(model: model, task: task, work: .available(work))
         }
 
-        // `feature`, with the Task waiting at `design`.
+        // `feature`, with the Task waiting at `review-design`.
         let feature = try view {
-            $0["position"] = ["kind": "node", "node": "design"]
+            $0["position"] = ["kind": "node", "node": "review-design"]
             $0["outgoing"] = [1, 2]
         }
-        for node in ["start", "design", "demo", "end"] {
+        for node in ["start", "review-design", "demo", "end"] {
             let drawn = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-\(node)")
-            #expect(try drawn.accessibilityValue().string() == (node == "design" ? "Current" : ""))
+            #expect(try drawn.accessibilityValue().string() == (node == "review-design" ? "Current" : ""))
         }
         _ = try feature.inspect().find(text: "you review the plan")
         _ = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-edge-0")
@@ -472,31 +509,33 @@ struct DesktopHeadlessTests {
         #expect(drawn.arrows.map(\.route) == [.straight, .loop(level: 0), .straight, .loop(level: 0), .straight])
         #expect(drawn.boxes.map(\.terminal) == [true, false, false, true])
         // Each revise loop arcs over its own node, above the row.
-        let design = try #require(drawn.boxes.first { $0.name == "design" })
+        let design = try #require(drawn.boxes.first { $0.name == "review-design" })
         #expect(drawn.arrows[1].label.y < design.frame.minY)
         #expect(abs(drawn.arrows[1].label.x - design.frame.midX) < 1)
 
-        // A definition with no PR: the edge into `end` runs nothing and is chosen as `end`.
+        // A graph with no PR: its edge into `end` runs nothing, is drawn, and
+        // Ship it is the one control that takes it.
         let catalog = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("workflow_catalog.json"))) as? [[String: Any]])
         let research = try #require(catalog.first { $0["name"] as? String == "research" }?["workflow"] as? [String: Any])
         let findings = try view {
             $0.merge(research) { _, definition in definition }
-            $0["position"] = ["kind": "node", "node": "findings"]
+            $0["position"] = ["kind": "node", "node": "research"]
             $0["outgoing"] = [1, 2]
         }
-        #expect(try findings.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-findings")
+        #expect(try findings.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-research")
             .accessibilityValue().string() == "Current")
         _ = try findings.inspect().find(text: "you read the findings")
-        let finish = try findings.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-2").button()
-        #expect(try finish.labelView().text().string() == "finish")
-        try finish.tap()
+        _ = try findings.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-edge-2")
+        let again = try findings.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-1").button()
+        #expect(try again.labelView().text().string() == "research")
+        try again.tap()
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls == [["-b", "task", "run", task.task.identifier, "end"]])
+        #expect(await started.calls == [["-b", "task", "run", task.task.identifier, "research"]])
 
         // An edge that goes back, or passes over a node, takes its own lane below the row.
         let node = { Workflow.Node(name: $0, skill: "demo", description: nil) }
-        let edge = { Workflow.Edge(from: $0, to: $1, graph: $2) }
+        let edge = { Workflow.Edge(from: $0, to: $1, name: $2) }
         let lanes = WorkflowDiagramLayout(nodes: [node("a"), node("b")], edges: [
             edge("start", "a", "one"), edge("a", "b", "two"), edge("b", "a", "back"), edge("start", "b", "skip"),
         ])

@@ -666,7 +666,7 @@ mod tests {
 
         fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
         let graph = repo.path().join(".lf/graphs/pursue.yaml");
-        fs::write(&graph, "- step: {name: demo, id: review, human: true}\n").unwrap();
+        fs::write(&graph, "- interactive: {name: demo, id: review}\n").unwrap();
         let options = SkillSyncOptions {
             repo: Some(repo.path().to_path_buf()),
             ..options_for(&home)

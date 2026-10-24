@@ -44,6 +44,7 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::TaskRank(_)
         | WorkValue::TaskAssignee(_)
         | WorkValue::TaskPaused(_)
+        | WorkValue::TaskShippedAt(_)
         | WorkValue::TaskDueDate(_)
         | WorkValue::TaskDeletedAt(_)
         | WorkValue::TaskUrl(_)
@@ -78,6 +79,7 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::TaskRank(_) => "planning_rank",
         WorkValue::TaskAssignee(_) => "planning_assignee",
         WorkValue::TaskPaused(_) => "paused",
+        WorkValue::TaskShippedAt(_) => "shipped_at",
         WorkValue::TaskDueDate(_) => "planning_due_date",
         WorkValue::TaskDeletedAt(_) => "planning_deleted_at",
         WorkValue::TaskUrl(_) => "planning_url",
@@ -164,6 +166,19 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
     {
         values.push(WorkValue::TaskPaused(conn.query_row(
             "SELECT paused FROM tasks WHERE id=?1",
+            [id],
+            |row| row.get(0),
+        )?));
+    }
+    if table == "tasks"
+        && conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='shipped_at')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )?
+    {
+        values.push(WorkValue::TaskShippedAt(conn.query_row(
+            "SELECT shipped_at FROM tasks WHERE id=?1",
             [id],
             |row| row.get(0),
         )?));

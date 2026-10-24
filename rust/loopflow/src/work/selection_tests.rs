@@ -546,3 +546,52 @@ fn selection_portable_panes_round_trip_all_content_and_recovery() {
     assert_eq!(layout.drafts[0].text, "unsaved edits");
     assert_ne!(layout.focused, layout.zoomed);
 }
+
+#[test]
+fn shipping_tasks_leave_the_defaults_for_state_shipping() {
+    let wave = WaveId::new();
+    let work: Vec<_> = [("working", false), ("shipping", true)]
+        .into_iter()
+        .map(|(id, shipping)| SelectionWork {
+            key: key(id, WorkWorkspaceKind::Task),
+            parent_wave: Some(wave.clone()),
+            open: Some(true),
+            name: id.into(),
+            states: if shipping {
+                BTreeSet::from([SelectionState::Open, SelectionState::Shipping])
+            } else {
+                BTreeSet::from([SelectionState::Open])
+            },
+            activity_known: true,
+        })
+        .chain([SelectionWork {
+            key: key(wave.as_str(), WorkWorkspaceKind::Wave),
+            parent_wave: None,
+            open: None,
+            name: "wave".into(),
+            states: BTreeSet::new(),
+            activity_known: false,
+        }])
+        .collect();
+    let ids = |selection: Selection| {
+        selection
+            .resolve("repo", &work, &BTreeMap::new())
+            .unwrap()
+            .task_ids()
+    };
+    assert_eq!(
+        ids(node("repo", SelectionExpression::Repository)),
+        ["working"]
+    );
+    assert_eq!(
+        ids(node(
+            "wave",
+            SelectionExpression::Wave { wave: wave.clone() }
+        )),
+        ["working"]
+    );
+    assert_eq!(
+        ids(Selection::parse("state:shipping", None).unwrap()),
+        ["shipping"]
+    );
+}

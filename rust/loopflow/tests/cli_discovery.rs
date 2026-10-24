@@ -451,7 +451,7 @@ fn dual_kind_clients_share_selection_and_explicit_skill_steps_keep_review_metada
     assert!(resolve_definition(repo.path(), "solo", Some(DefinitionKind::Graph)).is_err());
     fs::write(
         repo.path().join(".lf/graphs/outer.yaml"),
-        "- paired\n- graph: paired\n- step:\n    name: paired\n    id: review\n    human: true\n",
+        "- paired\n- graph: paired\n- interactive:\n    name: paired\n    id: review\n",
     )
     .unwrap();
     let expanded = compile_graph(&load_graph("outer", repo.path()).unwrap(), repo.path()).unwrap();
@@ -459,7 +459,7 @@ fn dual_kind_clients_share_selection_and_explicit_skill_steps_keep_review_metada
     assert!(matches!(&expanded[0], ConcreteStep::Skill(step) if step.skill.name == "solo"));
     assert!(matches!(&expanded[1], ConcreteStep::Skill(step) if step.skill.name == "solo"));
     assert!(
-        matches!(&expanded[2], ConcreteStep::Skill(step) if step.skill.name == "paired" && step.human)
+        matches!(&expanded[2], ConcreteStep::Skill(step) if step.skill.name == "paired" && step.interactive)
     );
     fs::write(repo.path().join(".lf/graphs/paired.yaml"), "malformed: [").unwrap();
     assert!(resolve_definition(repo.path(), "paired", None)
@@ -921,21 +921,17 @@ fn graph_help_validates_expansion_and_review_boundaries_without_effects() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     let graph = repo.path().join(".lf/graphs/inspection.yaml");
-    fs::write(
-        &graph,
-        "- step:\n    name: solo\n    id: review\n    human: true\n",
-    )
-    .unwrap();
+    fs::write(&graph, "- interactive:\n    name: solo\n    id: review\n").unwrap();
     let output = success(run(
         repo.path(),
         home.path(),
         &["help", "graph", "inspection"],
     ));
-    assert!(String::from_utf8_lossy(&output).contains("Review steps: review"));
+    assert!(String::from_utf8_lossy(&output).contains("solo (interactive)"));
     for (definition, expected) in [
         ("- graph: absent-graph\n", "absent-graph"),
-        ("- step:\n    name: solo\n    human: true\n", "stable id"),
-        ("- step:\n    name: solo\n    id: review\n    human: true\n- step:\n    name: solo\n    id: review\n    human: true\n", "not unique"),
+        ("- step:\n    name: solo\n    human: true\n", "retired"),
+        ("- interactive:\n    name: solo\n    id: review\n- interactive:\n    name: solo\n    id: review\n", "not unique"),
     ] {
         fs::write(&graph, definition).unwrap();
         let output = run(repo.path(), home.path(), &["help", "graph", "inspection"]);

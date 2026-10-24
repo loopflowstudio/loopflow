@@ -136,7 +136,7 @@ fn wave_detail_preserves_graph_and_machine() {
 #[test]
 fn status_preserves_stranded_tasks_alongside_project_history() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
-    assert_eq!(snapshot.unavailable_tasks[0].status, TaskState::Ready);
+    assert_eq!(snapshot.unavailable_tasks[0].status, TaskState::Unstarted);
     let Evidence::Ok { items, .. } = snapshot.tasks else {
         panic!("available tasks")
     };
@@ -495,19 +495,6 @@ fn task_work_preserves_all_owners() {
 }
 
 #[test]
-fn task_automation_keeps_coverage_distinct_from_repair_hold() {
-    let value: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/task_automation.json"
-    ))
-    .unwrap();
-    let status: loopflow::ops::task_automation::AutomationStatus =
-        serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(status.coverage, "overdue");
-    assert_eq!(status.tasks[1].enabled, Some(false));
-    assert_eq!(serde_json::to_value(status).unwrap(), value);
-}
-
-#[test]
 fn context_report_keeps_unknown_sources_distinct_from_zero() {
     use loopflow::context_usage::{ContextReport, ContextSource};
     let input = include_str!("../../../tests/fixtures/dto/context_report.json");
@@ -816,11 +803,15 @@ fn task_run_explanations_preserve_actions_and_missing_evidence() {
     ));
     assert!(matches!(
         &reports[1].action,
-        Some(TaskRunAction::Edge { graph: None, .. })
+        Some(TaskRunAction::Edge { runs: false, .. })
     ));
     assert!(matches!(
         &reports[2].action,
-        Some(TaskRunAction::Graph { .. })
+        Some(TaskRunAction::Edge {
+            take_up: false,
+            runs: true,
+            ..
+        })
     ));
     assert!(reports[3].action.is_none());
     assert_eq!(

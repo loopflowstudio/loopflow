@@ -11,7 +11,7 @@ use crate::ops::workflow::{
 use crate::process::LfProcess;
 use crate::store::StoreResult;
 use crate::task_work::{TaskSession, TaskWork};
-use crate::workflow::{WorkflowDefinition, END, START};
+use crate::workflow::{CapturedGraph, Route, WorkflowDefinition, END, START};
 
 use super::SqliteStore;
 
@@ -192,9 +192,15 @@ fn latest_task_graphs(
         .collect()
 }
 
-/// The Task's workflow row: its definition, the node it waits at or left,
-/// and the edge it is on with the Process carrying it.
-type WorkflowRow = (WorkflowDefinition, String, Option<(u32, LfProcess)>);
+/// The Task's workflow row: the graph it took up and its projection, the
+/// stage it waits at or left, and the edge it is on with the Process carrying it.
+struct WorkflowRow {
+    graph: CapturedGraph,
+    definition: WorkflowDefinition,
+    routes: Vec<Route>,
+    node: String,
+    edge: Option<(u32, LfProcess)>,
+}
 
 fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<WorkflowRow>> {
     use rusqlite::OptionalExtension;
@@ -226,7 +232,20 @@ fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Optio
         )),
         None => None,
     };
-    Ok(Some((serde_json::from_str(&graph)?, node, edge)))
+    let graph: CapturedGraph = serde_json::from_str(&graph)?;
+    let (definition, routes) = graph.project().map_err(|error| {
+        crate::store::StoreError::InvalidData(format!(
+            "captured graph {} cannot be routed: {error}",
+            graph.name
+        ))
+    })?;
+    Ok(Some(WorkflowRow {
+        graph,
+        definition,
+        routes,
+        node,
+        edge,
+    }))
 }
 
 fn workflow_moves(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec<WorkflowMove>> {
@@ -323,7 +342,7 @@ fn choose_edge_in(
         WorkflowPosition::Node { .. } => None,
         WorkflowPosition::Edge { lf_process_id, .. } => Some(lf_process_id.as_str()),
     };
-    let carried = chosen.graph.is_some();
+    let carried = workflow.edge_runs(edge);
     let left = tx.execute(
         "UPDATE task_workflows SET node=?2,edge=?3,lf_process_id=?4,updated_at=?5
          WHERE task_id=?1 AND node=?6 AND lf_process_id IS ?7",
@@ -350,11 +369,125 @@ fn choose_edge_in(
         by,
         note,
     )?;
+    // No person takes part on a route into `end`: taking one hands the Task off.
+    if let (true, Some(by)) = (chosen.to == END, by) {
+        ship_in(
+            tx,
+            task,
+            by,
+            &format!("{} runs to the end with no stage left", chosen.name),
+        )?;
+    }
     Ok(true)
 }
 
+/// A Task handed off to finish on its own: since when, and this Machine's
+/// process carrying it there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskShipping {
+    pub shipped_at: i64,
+    pub process: Option<LfProcessId>,
+}
+
+pub(super) fn shipping_in(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+) -> StoreResult<Option<TaskShipping>> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        "SELECT shipped_at,ship_lf_process_id FROM tasks WHERE id=?1 AND shipped_at IS NOT NULL",
+        [task.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()?
+    .map(|(shipped_at, process)| shipping(shipped_at, process))
+    .transpose()
+}
+
+fn shipping(shipped_at: i64, process: Option<String>) -> StoreResult<TaskShipping> {
+    Ok(TaskShipping {
+        shipped_at,
+        process: process
+            .map(|id| {
+                LfProcessId::parse(&id)
+                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
+            })
+            .transpose()?,
+    })
+}
+
+/// End the Task's handoff, returning what it was, when it was shipping.
+pub(super) fn unship_in(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+) -> StoreResult<Option<TaskShipping>> {
+    let shipping = shipping_in(conn, task)?;
+    if shipping.is_some() {
+        super::planning_write::local(
+            conn,
+            &crate::work::edit::WorkEdit::for_target(
+                task.as_str(),
+                &[crate::work::edit::WorkValue::TaskShippedAt(None)],
+            ),
+        )?;
+        conn.execute(
+            "UPDATE tasks SET ship_lf_process_id=NULL WHERE id=?1",
+            [task.as_str()],
+        )?;
+    }
+    Ok(shipping)
+}
+
+fn ship_in(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+    by: &LfProcessId,
+    note: &str,
+) -> StoreResult<TaskShipping> {
+    let state = super::durable::task_state_in(tx, task)?;
+    if state.is_terminal() {
+        return Err(crate::store::StoreError::InvalidAuthority(format!(
+            "Task is {state}; it cannot ship"
+        )));
+    }
+    let shipped_at = match shipping_in(tx, task)? {
+        Some(shipping) => shipping.shipped_at,
+        None => {
+            let now = crate::store::rows::now_unix();
+            super::planning_write::local(
+                tx,
+                &crate::work::edit::WorkEdit::for_target(
+                    task.as_str(),
+                    &[crate::work::edit::WorkValue::TaskShippedAt(Some(now))],
+                ),
+            )?;
+            super::children::insert_task_event_in(
+                tx,
+                task,
+                &crate::work::task::TaskEventKind::Progress {
+                    summary: format!("Shipping: {note}"),
+                },
+            )?;
+            now
+        }
+    };
+    tx.execute(
+        "UPDATE tasks SET ship_lf_process_id=?2 WHERE id=?1",
+        rusqlite::params![task.as_str(), by.as_str()],
+    )?;
+    Ok(TaskShipping {
+        shipped_at,
+        process: Some(by.clone()),
+    })
+}
+
 fn arrive_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, by: &LfProcessId) -> StoreResult<()> {
-    let Some((definition, _, Some((edge, carrier)))) = workflow_row(tx, task)? else {
+    let Some(WorkflowRow {
+        definition,
+        edge: Some((edge, carrier)),
+        ..
+    }) = workflow_row(tx, task)?
+    else {
         return Ok(());
     };
     if &carrier.id != by {
@@ -384,7 +517,13 @@ fn set_node_in(
     by: Option<&LfProcessId>,
     note: Option<&str>,
 ) -> StoreResult<bool> {
-    let Some((definition, from, edge)) = workflow_row(tx, task)? else {
+    let Some(WorkflowRow {
+        graph,
+        node: from,
+        edge,
+        ..
+    }) = workflow_row(tx, task)?
+    else {
         return Ok(false);
     };
     tx.execute(
@@ -394,7 +533,7 @@ fn set_node_in(
     append_workflow_move(
         tx,
         task,
-        &definition.name,
+        &graph.name,
         WorkflowMoveKind::Set,
         (&from, node),
         edge.map(|(edge, _)| edge),
@@ -402,6 +541,26 @@ fn set_node_in(
         note,
     )?;
     Ok(true)
+}
+
+/// Where a graph taken up now places the Task: the last recorded position
+/// when it is one of the graph's stages, else `start`.
+fn placement_in(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+    definition: &WorkflowDefinition,
+) -> StoreResult<String> {
+    use rusqlite::OptionalExtension;
+    let last: Option<String> = conn
+        .query_row(
+            "SELECT to_node FROM task_workflow_moves WHERE task_id=?1 ORDER BY seq DESC LIMIT 1",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(last
+        .filter(|node| definition.node(node).is_some())
+        .unwrap_or_else(|| START.to_string()))
 }
 
 fn stands_at_end(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<bool> {
@@ -435,7 +594,7 @@ pub(super) fn reach_end_in(
         }
         EndMove::Set => {
             if !set_node_in(tx, task, END, by, note)? {
-                let unplanned = crate::workflow::unplanned();
+                let unplanned = CapturedGraph::unplanned();
                 tx.execute(
                     "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,?3,?4)",
                     rusqlite::params![
@@ -620,53 +779,92 @@ impl SqliteStore {
     }
 
     /// Whether the carrying Graph still runs is its Process's, read here.
-    fn read_workflow(
-        &self,
-        (definition, node, edge): WorkflowRow,
-        history: Vec<WorkflowMove>,
-    ) -> Workflow {
-        let position = match edge {
-            None => WorkflowPosition::Node { node },
+    fn read_workflow(&self, row: WorkflowRow, history: Vec<WorkflowMove>) -> Workflow {
+        let position = match row.edge {
+            None => WorkflowPosition::Node { node: row.node },
             Some((edge, process)) => WorkflowPosition::Edge {
                 edge,
                 lf_process_id: process.id.to_string(),
                 running: process.completed_at.is_none() && self.process_may_run(&process),
             },
         };
-        Workflow::new(definition, position, history)
+        Workflow::new(row.definition, row.routes, position, history)
     }
 
-    /// Take up `definition` for the Task as it is defined now, at `start`.
-    /// It replaces the Task's earlier Workflow; the history stays.
-    pub(crate) fn take_up_workflow(
+    /// The stage a graph taken up now is placed at: the Task's last recorded
+    /// position when the graph has that stage, else `start`.
+    pub(crate) fn workflow_placement(
         &self,
         task: &TaskId,
         definition: &WorkflowDefinition,
+    ) -> StoreResult<String> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        placement_in(&conn, task, definition)
+    }
+
+    /// Take up `graph` for the Task as it is defined now, placed by its
+    /// history. It replaces the Task's earlier Workflow; the history stays.
+    pub(crate) fn take_up_workflow(
+        &self,
+        task: &TaskId,
+        graph: &CapturedGraph,
         by: &LfProcessId,
         note: Option<&str>,
     ) -> StoreResult<()> {
+        let (definition, _) = graph
+            .project()
+            .map_err(crate::store::StoreError::InvalidData)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
+        let placed = placement_in(&tx, task, &definition)?;
         tx.execute(
             "INSERT OR REPLACE INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,?3,?4)",
             rusqlite::params![
                 task.as_str(),
-                serde_json::to_string(definition)?,
-                START,
+                serde_json::to_string(graph)?,
+                placed,
                 crate::store::rows::now_unix()
             ],
         )?;
         append_workflow_move(
             &tx,
             task,
-            &definition.name,
+            &graph.name,
             WorkflowMoveKind::TookUp,
-            (START, START),
+            (START, &placed),
             None,
             Some(by),
             note,
         )?;
         Ok(tx.commit()?)
+    }
+
+    /// The slice a Task on an edge runs: its captured graph, where the run
+    /// begins, the edge's name and the Process carrying it. `None` when the
+    /// Task is not on an edge that runs steps.
+    pub(crate) fn workflow_edge_slice(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<
+        Option<(
+            CapturedGraph,
+            crate::graph::runner::ExecutionCursor,
+            String,
+            LfProcess,
+        )>,
+    > {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let Some(row) = workflow_row(&conn, task)? else {
+            return Ok(None);
+        };
+        let Some((edge, carrier)) = row.edge else {
+            return Ok(None);
+        };
+        let Some(start) = row.routes[edge as usize].start.clone() else {
+            return Ok(None);
+        };
+        let name = row.definition.edges[edge as usize].name.clone();
+        Ok(Some((row.graph, start, name, carrier)))
     }
 
     /// Leave by `edge`, one of `workflow.outgoing`. An edge with a Graph puts
@@ -713,6 +911,71 @@ impl SqliteStore {
         Ok(set)
     }
 
+    /// Hand the Task off to finish on its own, carried by `by`. Shipping that
+    /// already began keeps its start; only the carrier changes.
+    pub(crate) fn ship_task(
+        &self,
+        task: &TaskId,
+        by: &LfProcessId,
+        note: &str,
+    ) -> StoreResult<TaskShipping> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let shipping = ship_in(&tx, task, by, note)?;
+        tx.commit()?;
+        Ok(shipping)
+    }
+
+    /// Return a shipping Task to working. Returns the process that carried
+    /// it, when it was shipping.
+    pub(crate) fn stop_shipping(
+        &self,
+        task: &TaskId,
+        note: &str,
+    ) -> StoreResult<Option<TaskShipping>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let Some(shipping) = unship_in(&tx, task)? else {
+            return Ok(None);
+        };
+        super::children::insert_task_event_in(
+            &tx,
+            task,
+            &crate::work::task::TaskEventKind::Progress {
+                summary: format!("Stopped shipping: {note}"),
+            },
+        )?;
+        tx.commit()?;
+        Ok(Some(shipping))
+    }
+
+    /// When the Task was handed off and the process carrying it, if it is shipping.
+    pub(crate) fn task_shipping(&self, task: &TaskId) -> StoreResult<Option<TaskShipping>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        shipping_in(&conn, task)
+    }
+
+    /// Handed-off Tasks whose checkout is on this Machine, with their handoffs.
+    pub(crate) fn local_shipping_tasks(&self) -> StoreResult<Vec<(TaskId, TaskShipping)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT id,shipped_at,ship_lf_process_id FROM tasks WHERE shipped_at IS NOT NULL
+             AND checkout_machine_id=(SELECT id FROM machines WHERE route='local')",
+        )?;
+        let rows = query
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(|(id, shipped_at, process)| {
+                let id = TaskId::parse(&id)
+                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+                Ok((id, shipping(shipped_at, process)?))
+            })
+            .collect()
+    }
+
     /// The node `by`'s edge enters, while the Task is still on that edge.
     pub(crate) fn workflow_edge_target(
         &self,
@@ -721,9 +984,11 @@ impl SqliteStore {
     ) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(match workflow_row(&conn, task)? {
-            Some((definition, _, Some((edge, carrier)))) if &carrier.id == by => {
-                Some(definition.edges[edge as usize].to.clone())
-            }
+            Some(WorkflowRow {
+                definition,
+                edge: Some((edge, carrier)),
+                ..
+            }) if &carrier.id == by => Some(definition.edges[edge as usize].to.clone()),
             _ => None,
         })
     }
@@ -759,7 +1024,7 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
 
     #[test]
-    fn paused_task_retains_workflow_and_resumes_without_execution() {
+    fn pause_holds_the_lifecycle_and_a_route_into_end_ships() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
@@ -813,14 +1078,17 @@ mod tests {
                 [task.as_str()],
             )
             .unwrap();
-        let definition = crate::workflow::WorkflowDefinition {
+        let definition = crate::workflow::CapturedGraph {
             name: "proof".into(),
-            nodes: vec![],
-            edges: vec![crate::workflow::WorkflowEdge {
-                from: "start".into(),
-                to: "end".into(),
-                graph: Some("pursue".into()),
-            }],
+            steps: vec![crate::graph::ConcreteStep::Skill(
+                crate::graph::ConcreteSkill {
+                    skill: crate::graph::Skill::named("pursue"),
+                    id: None,
+                    interactive: false,
+                    returns: None,
+                    sources: Vec::new(),
+                },
+            )],
         };
         store
             .take_up_workflow(&task, &definition, &by, None)
@@ -832,11 +1100,6 @@ mod tests {
             store.task_state(&task).unwrap(),
             crate::durable::TaskState::Paused
         );
-        assert!(!store
-            .task_automation(&task)
-            .unwrap()
-            .enabled
-            .unwrap_or(true));
         assert!(store
             .choose_workflow_edge(&task, &before, 0, &LfProcessId::new(), None)
             .is_err());
@@ -850,13 +1113,49 @@ mod tests {
         store.set_task_paused(&task, false).unwrap();
         assert_eq!(
             store.task_state(&task).unwrap(),
-            crate::durable::TaskState::Ready
+            crate::durable::TaskState::Unstarted
         );
         assert_eq!(store.workflow(&task).unwrap().unwrap(), before);
         assert_eq!(
             store.task(&task).unwrap().unwrap().worktree,
             Some(std::path::PathBuf::from("/repo/task"))
         );
+
+        // No stage remains on the route into `end`: taking it hands the Task off.
+        assert!(store
+            .choose_workflow_edge(&task, &before, 0, &by, None)
+            .unwrap());
+        let state = || store.task_state(&task).unwrap();
+        assert_eq!(state(), crate::durable::TaskState::Shipping);
+        let shipping = store.task_shipping(&task).unwrap().unwrap();
+        assert_eq!(shipping.process, Some(by.clone()));
+        // Only the checkout's Machine restarts its ship process.
+        assert!(store.local_shipping_tasks().unwrap().is_empty());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET checkout_machine_id=(SELECT id FROM machines WHERE route='local') WHERE id=?1",
+                [task.as_str()],
+            )
+            .unwrap();
+        assert_eq!(
+            store.local_shipping_tasks().unwrap(),
+            [(task.clone(), shipping.clone())]
+        );
+        // Pause holds shipping without ending it.
+        store.set_task_paused(&task, true).unwrap();
+        assert_eq!(state(), crate::durable::TaskState::Paused);
+        store.set_task_paused(&task, false).unwrap();
+        assert_eq!(state(), crate::durable::TaskState::Shipping);
+        // Shipping again keeps when it began.
+        let again = store.ship_task(&task, &by, "again").unwrap();
+        assert_eq!(again.shipped_at, shipping.shipped_at);
+        // Stop returns it to working, where it stands.
+        assert_eq!(store.stop_shipping(&task, "stop").unwrap(), Some(shipping));
+        assert_eq!(state(), crate::durable::TaskState::Working);
+        assert_eq!(store.stop_shipping(&task, "stop").unwrap(), None);
     }
 
     #[test]

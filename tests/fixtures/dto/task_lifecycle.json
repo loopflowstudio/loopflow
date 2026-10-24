@@ -105,19 +105,22 @@
                 "run_control": {
                   "unavailable": null
                 },
+                "ship_control": {
+                  "unavailable": null
+                },
+                "shipping": null,
                 "runtime": {
                   "completion_pending": null,
                   "provider": "codex",
                   "reason": "No Task Graph has run; independent Sessions may still be active",
                   "owner": null,
-                  "status": "not_ready",
+                  "status": "unstarted",
                   "updated_at": "2026-10-08T23:28:31Z",
                   "work_id": "task_e1d59e9bbca2470e8cd28742946bf876"
                 },
                 "section": "waiting",
                 "task": {
                   "assignee": null,
-                  "completed": false,
                   "completed_at": null,
                   "description": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
                   "due_date": "2026-10-09",
@@ -220,7 +223,7 @@
                     "name": "delivery",
                     "steps": [
                       {
-                        "human": false,
+                        "interactive": false,
                         "id": null,
                         "key": 0,
                         "kind": "op",
@@ -232,7 +235,7 @@
                         ]
                       },
                       {
-                        "human": false,
+                        "interactive": false,
                         "id": null,
                         "key": 1,
                         "kind": "op",
@@ -315,6 +318,10 @@
                 "run_control": {
                   "unavailable": "Task is complete"
                 },
+                "ship_control": {
+                  "unavailable": "Task is complete"
+                },
+                "shipping": null,
                 "runtime": {
                   "completion_pending": null,
                   "provider": "codex",
@@ -334,7 +341,6 @@
                 "section": "later",
                 "task": {
                   "assignee": null,
-                  "completed": true,
                   "completed_at": "2026-10-08T23:28:31.532538801Z",
                   "description": "",
                   "due_date": null,
@@ -479,7 +485,7 @@
           "name": "delivery",
           "steps": [
             {
-              "human": false,
+              "interactive": false,
               "id": null,
               "key": 0,
               "kind": "op",
@@ -491,7 +497,7 @@
               ]
             },
             {
-              "human": false,
+              "interactive": false,
               "id": null,
               "key": 1,
               "kind": "op",
@@ -574,6 +580,10 @@
       "run_control": {
         "unavailable": "Task is complete"
       },
+      "ship_control": {
+        "unavailable": "Task is complete"
+      },
+      "shipping": null,
       "runtime": {
         "completion_pending": null,
         "provider": "codex",
@@ -593,7 +603,6 @@
       "section": "later",
       "task": {
         "assignee": null,
-        "completed": true,
         "completed_at": "2026-10-08T23:28:31.532538801Z",
         "description": "",
         "due_date": null,
@@ -1018,7 +1027,7 @@
           "workflow": {
             "edges": [
               {
-                "graph": "delivery",
+                "name": "delivery",
                 "from": "start",
                 "to": "end"
               }
@@ -1178,7 +1187,7 @@
               "name": "delivery",
               "steps": [
                 {
-                  "human": false,
+                  "interactive": false,
                   "id": null,
                   "key": 0,
                   "kind": "op",
@@ -1190,7 +1199,7 @@
                   ]
                 },
                 {
-                  "human": false,
+                  "interactive": false,
                   "id": null,
                   "key": 1,
                   "kind": "op",
@@ -1528,7 +1537,7 @@
           "workflow": {
             "edges": [
               {
-                "graph": "delivery",
+                "name": "delivery",
                 "from": "start",
                 "to": "end"
               }
@@ -1701,19 +1710,22 @@
                 "run_control": {
                   "unavailable": null
                 },
+                "ship_control": {
+                  "unavailable": null
+                },
+                "shipping": null,
                 "runtime": {
                   "completion_pending": null,
                   "provider": "codex",
                   "reason": "No Task Graph has run; independent Sessions may still be active",
                   "owner": null,
-                  "status": "not_ready",
+                  "status": "unstarted",
                   "updated_at": "2026-10-08T23:28:31Z",
                   "work_id": "task_e1d59e9bbca2470e8cd28742946bf876"
                 },
                 "section": "waiting",
                 "task": {
                   "assignee": null,
-                  "completed": false,
                   "completed_at": null,
                   "description": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
                   "due_date": "2026-10-09",
@@ -1813,7 +1825,7 @@
                     "name": "delivery",
                     "steps": [
                       {
-                        "human": false,
+                        "interactive": false,
                         "id": null,
                         "key": 0,
                         "kind": "op",
@@ -1825,7 +1837,7 @@
                         ]
                       },
                       {
-                        "human": false,
+                        "interactive": false,
                         "id": null,
                         "key": 1,
                         "kind": "op",
@@ -1896,6 +1908,10 @@
                 "run_control": {
                   "unavailable": "Task is complete"
                 },
+                "ship_control": {
+                  "unavailable": "Task is complete"
+                },
+                "shipping": null,
                 "runtime": {
                   "completion_pending": null,
                   "provider": "codex",
@@ -1915,7 +1931,6 @@
                 "section": "later",
                 "task": {
                   "assignee": null,
-                  "completed": true,
                   "completed_at": "2026-10-08T23:28:31.532538801Z",
                   "description": "",
                   "due_date": null,
@@ -2057,7 +2072,7 @@
           "name": "delivery",
           "steps": [
             {
-              "human": false,
+              "interactive": false,
               "id": null,
               "key": 0,
               "kind": "op",
@@ -2069,7 +2084,7 @@
               ]
             },
             {
-              "human": false,
+              "interactive": false,
               "id": null,
               "key": 1,
               "kind": "op",
@@ -2140,6 +2155,10 @@
       "run_control": {
         "unavailable": "Task is complete"
       },
+      "ship_control": {
+        "unavailable": "Task is complete"
+      },
+      "shipping": null,
       "runtime": {
         "completion_pending": null,
         "provider": "codex",
@@ -2159,7 +2178,6 @@
       "section": "later",
       "task": {
         "assignee": null,
-        "completed": true,
         "completed_at": "2026-10-08T23:28:31.532538801Z",
         "description": "",
         "due_date": null,
@@ -2500,7 +2518,7 @@
           "workflow": {
             "edges": [
               {
-                "graph": "delivery",
+                "name": "delivery",
                 "from": "start",
                 "to": "end"
               }
@@ -2647,7 +2665,7 @@
               "name": "delivery",
               "steps": [
                 {
-                  "human": false,
+                  "interactive": false,
                   "id": null,
                   "key": 0,
                   "kind": "op",
@@ -2659,7 +2677,7 @@
                   ]
                 },
                 {
-                  "human": false,
+                  "interactive": false,
                   "id": null,
                   "key": 1,
                   "kind": "op",
@@ -2901,7 +2919,7 @@
           "workflow": {
             "edges": [
               {
-                "graph": "delivery",
+                "name": "delivery",
                 "from": "start",
                 "to": "end"
               }
@@ -3099,7 +3117,7 @@
                     "name": "delivery",
                     "steps": [
                       {
-                        "human": false,
+                        "interactive": false,
                         "id": null,
                         "key": 0,
                         "kind": "op",
@@ -3111,7 +3129,7 @@
                         ]
                       },
                       {
-                        "human": false,
+                        "interactive": false,
                         "id": null,
                         "key": 1,
                         "kind": "op",
@@ -3182,6 +3200,10 @@
                 "run_control": {
                   "unavailable": null
                 },
+                "ship_control": {
+                  "unavailable": null
+                },
+                "shipping": null,
                 "runtime": {
                   "completion_pending": null,
                   "provider": "codex",
@@ -3194,14 +3216,13 @@
                       "label": "mini"
                     }
                   },
-                  "status": "active",
+                  "status": "working",
                   "updated_at": "2026-10-08T23:28:31Z",
                   "work_id": "task_2bf8aab6a1c1455d84665ba72ef2fc8a"
                 },
                 "section": "now",
                 "task": {
                   "assignee": null,
-                  "completed": false,
                   "completed_at": null,
                   "description": "",
                   "due_date": null,
@@ -3343,7 +3364,7 @@
           "name": "delivery",
           "steps": [
             {
-              "human": false,
+              "interactive": false,
               "id": null,
               "key": 0,
               "kind": "op",
@@ -3355,7 +3376,7 @@
               ]
             },
             {
-              "human": false,
+              "interactive": false,
               "id": null,
               "key": 1,
               "kind": "op",
@@ -3426,6 +3447,10 @@
       "run_control": {
         "unavailable": null
       },
+      "ship_control": {
+        "unavailable": null
+      },
+      "shipping": null,
       "runtime": {
         "completion_pending": null,
         "provider": "codex",
@@ -3438,14 +3463,13 @@
             "label": "mini"
           }
         },
-        "status": "active",
+        "status": "working",
         "updated_at": "2026-10-08T23:28:31Z",
         "work_id": "task_2bf8aab6a1c1455d84665ba72ef2fc8a"
       },
       "section": "now",
       "task": {
         "assignee": null,
-        "completed": false,
         "completed_at": null,
         "description": "",
         "due_date": null,
@@ -3608,7 +3632,7 @@
         "project": "provider-destination",
         "project_id": "proj_a0b7b80262214dc6b24c91242560d139",
         "provider": "codex",
-        "status": "active",
+        "status": "working",
         "task_id": "task_2bf8aab6a1c1455d84665ba72ef2fc8a",
         "updated_at": [
           2026,
@@ -3725,7 +3749,7 @@
           "workflow": {
             "edges": [
               {
-                "graph": "delivery",
+                "name": "delivery",
                 "from": "start",
                 "to": "end"
               }
@@ -3872,7 +3896,7 @@
               "name": "delivery",
               "steps": [
                 {
-                  "human": false,
+                  "interactive": false,
                   "id": null,
                   "key": 0,
                   "kind": "op",
@@ -3884,7 +3908,7 @@
                   ]
                 },
                 {
-                  "human": false,
+                  "interactive": false,
                   "id": null,
                   "key": 1,
                   "kind": "op",
@@ -4063,7 +4087,7 @@
           "workflow": {
             "edges": [
               {
-                "graph": "delivery",
+                "name": "delivery",
                 "from": "start",
                 "to": "end"
               }

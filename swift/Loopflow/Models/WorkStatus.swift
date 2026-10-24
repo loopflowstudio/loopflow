@@ -43,13 +43,16 @@ public enum WorkStatus: Codable, Sendable, Hashable {
     }
 }
 
-/// Durable completion and abandonment, with Workflow readiness for unfinished Tasks.
+/// A Task's lifecycle: unstarted → working → shipping → done, or abandoned.
+/// Pause is a hold over working or shipping, shown in their place.
 public enum TaskState: String, Codable, Sendable, Hashable {
     case paused
-    /// The Task has taken up no Workflow.
-    case notReady = "not_ready"
-    case ready
-    case active
+    /// No Workflow taken up, or still at its start.
+    case unstarted
+    /// Past start, with a person still to take part.
+    case working
+    /// Handed off: it finishes on its own, through every remaining step, to merge.
+    case shipping
     case done
     case abandoned
 

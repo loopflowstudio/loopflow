@@ -1,0 +1,5 @@
+# Build and deliver. You try the change in the Task conversation.
+- graph: pursue
+- loop: implement
+  interactive: demo
+- graph: deliver

@@ -33,13 +33,14 @@ struct TaskWorkflowHeader: View {
                         .lineLimit(1)
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-workflow-position")
+                    // Routes into `end` are Ship it, on the Task heading.
                     ForEach(workflow.outgoing, id: \.self) { index in
-                        if workflow.edges.indices.contains(index) {
+                        if workflow.edges.indices.contains(index), workflow.edges[index].to != "end" {
                             let edge = workflow.edges[index]
-                            Button(edge.launchName) { Task { await model.startTask(edge.launchName, task: task) } }
+                            Button(edge.name) { Task { await model.startTask(edge.name, task: task) } }
                                 .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
                                 .disabled(unavailable != nil)
-                                .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.launchName)")
+                                .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.name)")
                                 .accessibilityIdentifier("task-workflow-action-\(index)")
                         }
                     }
@@ -124,9 +125,11 @@ struct TaskWorkflowHeader: View {
                 if let workflow = work.value?.workflow {
                     WorkflowDiagram(
                         nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
-                        choices: workflow.outgoing, unavailable: unavailable, fits: true,
-                        hint: { "lf task run \(task.task.identifier) \($0.launchName) · to \($0.to)" },
-                        choose: { edge in Task { await model.startTask(edge.launchName, task: task) } })
+                        // Ship it is the one way into `end`.
+                        choices: workflow.outgoing.filter { workflow.edges.indices.contains($0) && workflow.edges[$0].to != "end" },
+                        unavailable: unavailable, fits: true,
+                        hint: { "lf task run \(task.task.identifier) \($0.name) · to \($0.to)" },
+                        choose: { edge in Task { await model.startTask(edge.name, task: task) } })
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Text(task.task.description)
@@ -220,17 +223,138 @@ struct TaskWorkflowHeader: View {
     }
 }
 
+/// Ship it beside the state on the window's Task heading, revealed while the
+/// heading is hovered; while shipping the same spot holds Stop shipping. Rust
+/// decides whether shipping can start. Sidebar rows and menus carry no ship control.
+struct TaskShipControl: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    let revealed: Bool
+
+    private var acting: Bool { model.navigation.taskRunDrafts[task.id]?.acting == true }
+
+    private var readingUnavailable: String? {
+        if let error = model.roadmap.errorMessage { return error }
+        if model.showsSavedPlanning { return WorkCache.savedReason }
+        return nil
+    }
+
+    var body: some View {
+        Group {
+            if task.shipping != nil {
+                Button("Stop shipping") { Task { await model.stopShipping(task) } }
+                    .buttonStyle(WorkOutlineButtonStyle())
+                    .disabled(acting || readingUnavailable != nil)
+                    .help("lf --task \(task.task.identifier) ship --stop: return it to working and disarm auto-merge")
+                    .accessibilityIdentifier("task-ship-stop")
+            } else if !(task.task.isTerminal || task.runtime?.status.isTerminal == true) {
+                let refusal = readingUnavailable ?? task.shipControl.unavailable
+                Button("Ship it") { Task { await model.shipTask(task) } }
+                    .buttonStyle(WorkShipButtonStyle())
+                    .disabled(acting || refusal != nil)
+                    .help(refusal ?? "lf --task \(task.task.identifier) ship: run every remaining step and land it")
+                    .accessibilityIdentifier("task-ship")
+            }
+        }
+        .opacity(revealed ? 1 : 0)
+        .offset(x: revealed ? 0 : 4)
+        .fixedSize()
+        .animation(.easeOut(duration: 0.12), value: revealed)
+    }
+}
+
+/// What the last Ship it or Stop shipping on the heading did, shown briefly.
+struct ShipNotice: Equatable {
+    let id = UUID()
+    let taskID: String
+    let issue: String
+    let shipped: Bool
+
+    init(task: RoadmapTask, shipped: Bool) {
+        taskID = task.id
+        issue = task.task.identifier
+        self.shipped = shipped
+    }
+}
+
+/// The toast after Ship it; its Undo is Stop shipping.
+struct ShipNoticeToast: View {
+    let notice: ShipNotice
+    let undo: () -> Void
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: Spacing.md) {
+            Text(notice.shipped
+                 ? "\(notice.issue) is shipping"
+                 : "\(notice.issue) is back in Working · auto-merge disarmed")
+                .accessibilityIdentifier("task-ship-notice")
+            if notice.shipped {
+                Button("Undo", action: undo)
+                    .buttonStyle(.plain)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(palette.success)
+                    .help("Stop shipping")
+                    .accessibilityIdentifier("task-ship-undo")
+            }
+        }
+        .font(Typography.body(12))
+        .foregroundStyle(palette.text)
+        .padding(.leading, 14)
+        .padding(.trailing, 10)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 9).fill(palette.surfaceElement))
+        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(palette.border, lineWidth: 1))
+        .shadow(color: palette.shadow, radius: 8, y: 2)
+    }
+}
+
+/// The window's ship toast, shown for six seconds after the heading's Ship it
+/// or Stop shipping; its Undo is Stop shipping.
+struct ShipNoticeOverlay: View {
+    let model: WorkModel
+
+    var body: some View {
+        let navigation = model.navigation
+        ZStack {
+            if let notice = navigation.shipNotice {
+                ShipNoticeToast(notice: notice) {
+                    guard let task = model.task(id: notice.taskID)?.task else { return }
+                    Task { await model.stopShipping(task) }
+                }
+                .padding(.bottom, 18)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .zIndex(ZIndex.toast)
+        .animation(.easeOut(duration: 0.18), value: navigation.shipNotice)
+        .task(id: navigation.shipNotice) {
+            guard navigation.shipNotice != nil else { return }
+            try? await Task.sleep(for: .seconds(6))
+            if !Task.isCancelled { navigation.shipNotice = nil }
+        }
+    }
+}
+
 /// A Task's identity wherever it heads Work: the window trail and Dashboard tiles.
 /// Its container sets the primary and secondary text styles.
 struct TaskHeading: View {
     let task: RoadmapTask
 
-    /// Started is durable Task evidence, the definition Working Tasks lists by;
+    /// The Task's lifecycle, the state Working Tasks and Shipping list by;
     /// Linear's planning state never overrides it.
     var state: String {
-        if let label = task.task.terminalLabel { return label }
-        if task.runtime?.status == .paused { return "Paused" }
-        return task.runtime?.owner != nil ? "Started" : "Unstarted"
+        if let shipping = task.shipping { return "Shipping · \(shipping.reason)" }
+        switch task.runtime?.status {
+        case .paused: return "Paused"
+        case .working: return "Working"
+        case .shipping: return "Shipping"
+        case .done: return "Done"
+        case .abandoned: return "Abandoned"
+        case .unstarted, nil:
+            guard task.task.isTerminal else { return "Unstarted" }
+            return task.task.isSuccessful ? "Done" : "Abandoned"
+        }
     }
 
     var body: some View {
@@ -242,6 +366,22 @@ struct TaskHeading: View {
             Text(state).foregroundStyle(.secondary).fixedSize()
                 .accessibilityIdentifier("task-heading-state")
         }
+    }
+}
+
+/// The window's Task heading: hovering it fades in Ship it beside the state.
+struct ShippableTaskHeading: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TaskHeading(task: task)
+            TaskShipControl(model: model, task: task, revealed: hovered)
+        }
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
     }
 }
 

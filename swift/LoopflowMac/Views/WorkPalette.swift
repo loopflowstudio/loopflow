@@ -398,7 +398,7 @@ struct GraphCatalogInspector: View {
                 Button(entry.source == nil ? "Customize" : "Edit") {
                     Task {
                         do {
-                            let url = try await model.definitionSource(entry)
+                            let url = try await model.definitionFile(entry.name)
                             sourceError = nil
                             NSWorkspace.shared.open(url)
                         } catch { sourceError = error.localizedDescription }
@@ -432,7 +432,7 @@ struct WorkflowCatalogInspector: View {
                 Button(entry.source == nil ? "Customize" : "Edit") {
                     Task {
                         do {
-                            let url = try await model.workflowDefinitionFile(entry)
+                            let url = try await model.definitionFile(entry.name)
                             sourceError = nil
                             NSWorkspace.shared.open(url)
                         } catch { sourceError = error.localizedDescription }

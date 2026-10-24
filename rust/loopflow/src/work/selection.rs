@@ -111,6 +111,7 @@ pub enum SelectionState {
     Running,
     Blocked,
     Paused,
+    Shipping,
     Idle,
     Backlog,
     Done,
@@ -370,7 +371,9 @@ impl Selection {
                             }
                             // The repository lists started work; a Wave lists all its
                             // uncompleted Tasks, so unstarted ones can offer Start.
+                            // Shipping Tasks leave both for `state:shipping`.
                             in_scope
+                                && !item.states.contains(&SelectionState::Shipping)
                                 && match wave {
                                     None => item.open == Some(true),
                                     Some(_) => {

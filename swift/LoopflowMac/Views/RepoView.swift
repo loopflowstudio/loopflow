@@ -76,6 +76,7 @@ struct RepoView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .overlay(alignment: .bottom) { ShipNoticeOverlay(model: model) }
         .background(palette.background)
         .accessibilityElement(children: .contain)
         .navigationTitle(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Work")
@@ -129,14 +130,5 @@ struct RepoView: View {
             if let path { model.relocateRepository(to: path) }
         }
         .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
-        .task(id: model.repoPath) {
-            // Fixture and UI-test runs render without background helpers.
-            guard let repo = model.repoPath, AppTestMode.current() == nil else { return }
-            CIWatchers.shared.open(repo)
-            defer { CIWatchers.shared.close(repo) }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(3600))
-            }
-        }
     }
 }

@@ -196,13 +196,6 @@ impl Cli {
                     cmd: ReleaseCommand::Run { .. }
                         | ReleaseCommand::Bump { .. }
                         | ReleaseCommand::Notes { .. }
-                } | RepoCommand::Ci {
-                    cmd: Some(CiCommand::Watch {
-                        status: false,
-                        uninstall: false,
-                        ..
-                    }),
-                    ..
                 }
             ),
             Some(_) => false,
@@ -394,6 +387,22 @@ pub enum Commands {
     Wt {
         #[command(subcommand)]
         cmd: WtCommand,
+    },
+    /// Ship the Task: run every remaining step to merge and completion, standing in at each stage
+    ///
+    /// Runs in the foreground until the Task reaches its end; background it
+    /// yourself (`nohup lf ship &`). A second `lf ship` while one runs exits 0.
+    /// `--stop` returns a shipping Task to working and takes back its merge request.
+    Ship {
+        /// Take up this graph in place of the Task's remaining steps
+        #[arg(conflicts_with = "stop")]
+        graph: Option<String>,
+        /// Why, kept in the Task's history
+        #[arg(long)]
+        reason: Option<String>,
+        /// Stop shipping: end the ship process and disarm auto-merge it armed
+        #[arg(long)]
+        stop: bool,
     },
     /// Merge upstream into the current branch (default: main or stack parent)
     Sync(SyncArgs),
@@ -824,9 +833,9 @@ impl WavePlanTarget {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveWorkflowCommand {
-    /// Print a definition from `.lf/workflows/` or the builtins
+    /// Print a graph from `.lf/graphs/` or the builtins
     Source { name: String },
-    /// List Workflow definitions, including unavailable local files
+    /// List graphs, including unavailable local files
     List {
         #[arg(long)]
         json: bool,
@@ -837,8 +846,8 @@ pub enum WaveWorkflowCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Select the Workflow future Tasks take up; captured Tasks stay unchanged.
-    /// Definitions are committed `.lf/workflows/<name>.yaml` files or builtins.
+    /// Select the graph future Tasks take up; captured Tasks stay unchanged.
+    /// Graphs are committed `.lf/graphs/<name>.yaml` files or builtins.
     Set { name: String, wave: Option<String> },
 }
 
@@ -847,8 +856,8 @@ pub enum TaskWorkflowCommand {
     /// Move Workflow position without running anything; `end` requests completion
     Move {
         issue: String,
-        /// `start`, `end` or one of the workflow's nodes
-        node: String,
+        /// `start`, `end` or one of the graph's stages
+        stage: String,
         /// Why, kept in the Task's workflow history
         #[arg(long)]
         reason: Option<String>,
@@ -884,6 +893,9 @@ pub enum GraphCommand {
     /// Print the repository file that defines a Graph, creating
     /// it from the builtin when the repository has none
     Customize { name: String },
+    /// Run the slice of the Task's graph its current edge names; `lf task run` starts it
+    #[command(name = "__edge", hide = true)]
+    Edge,
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -1260,22 +1272,6 @@ pub enum TaskCommand {
         #[command(subcommand)]
         cmd: TaskWorkflowCommand,
     },
-    /// Inspect delivery scheduling and Task CI repair settings
-    Automation {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Check authorized deliveries once, then exit
-    Reconcile {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Enable or hold CI repair for a Task without interrupting running work
-    Automate {
-        issue: String,
-        #[arg(value_parser = ["on", "off"])]
-        state: String,
-    },
     /// Run a reserved CI repair in its own process
     #[command(name = "__repair", hide = true)]
     Repair { incident: String, launcher: String },
@@ -1301,8 +1297,9 @@ pub enum TaskCommand {
     /// Place a Task's worktree, then run a Graph there like `lf --task ISSUE graph GRAPH`
     Run {
         issue: Option<String>,
-        /// The edge's Graph, or a workflow to take up; the Task's only edge or its
-        /// Wave or repository default when omitted
+        /// A route from the Task's stage, or a graph to take up; the Task's only
+        /// route or its Wave or repository default when omitted
+        #[arg(value_name = "ROUTE")]
         graph: Option<String>,
         #[arg(long)]
         name: Option<String>,
@@ -1517,19 +1514,15 @@ pub enum TaskCommand {
 impl TaskCommand {
     pub fn selector(&self) -> Option<&str> {
         match self {
-            Self::List { .. }
-            | Self::Create { .. }
-            | Self::Sweep { .. }
-            | Self::Reconcile { .. }
-            | Self::Repair { .. }
-            | Self::Automation { .. } => None,
+            Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } | Self::Repair { .. } => {
+                None
+            }
             Self::Workflow {
                 cmd:
                     TaskWorkflowCommand::Show { issue, .. }
                     | TaskWorkflowCommand::Restart { issue }
                     | TaskWorkflowCommand::Move { issue, .. },
             } => Some(issue),
-            Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
@@ -1559,19 +1552,15 @@ impl TaskCommand {
 
     pub fn selector_mut(&mut self) -> Option<&mut String> {
         match self {
-            Self::List { .. }
-            | Self::Create { .. }
-            | Self::Sweep { .. }
-            | Self::Reconcile { .. }
-            | Self::Repair { .. }
-            | Self::Automation { .. } => None,
+            Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } | Self::Repair { .. } => {
+                None
+            }
             Self::Workflow {
                 cmd:
                     TaskWorkflowCommand::Show { issue, .. }
                     | TaskWorkflowCommand::Restart { issue }
                     | TaskWorkflowCommand::Move { issue, .. },
             } => Some(issue),
-            Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
@@ -1835,14 +1824,7 @@ pub enum CronCommand {
         wave: Option<String>,
     },
     /// Reinstall this Machine's jobs with the current lf
-    Sync {
-        /// Install the finite repository Task check on this Machine
-        #[arg(long)]
-        repo: bool,
-        /// Remove the repository schedule; running work retains its authority
-        #[arg(long, requires = "repo")]
-        disable: bool,
-    },
+    Sync,
     /// Execute one installed cron job and persist its terminal receipt
     #[command(hide = true)]
     Run {
@@ -1894,31 +1876,6 @@ pub enum CronCommand {
         /// Graph or skill name to remove
         #[arg(long = "graph")]
         graph: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum CiCommand {
-    /// Watch this repository's PR checks and start a ci-fix when a recorded landing fails
-    Watch {
-        /// Check every open PR once and exit
-        #[arg(long)]
-        once: bool,
-        /// Keep the watcher running in the background as a launchd service
-        #[arg(long, conflicts_with_all = ["once", "uninstall", "status"])]
-        install: bool,
-        /// Remove the background service
-        #[arg(long, conflicts_with_all = ["once", "status"])]
-        uninstall: bool,
-        /// Show whether a watcher is live, its last poll, and what it started
-        #[arg(long, conflicts_with = "once")]
-        status: bool,
-        /// Emit the status as JSON
-        #[arg(long, requires = "status")]
-        json: bool,
-        /// Stop when this process exits
-        #[arg(long = "parent-pid", hide = true)]
-        parent_pid: Option<u32>,
     },
 }
 
@@ -2013,8 +1970,6 @@ pub enum RepoCommand {
     },
     /// Show how failed CI is detected, repaired, and landed across this Machine
     Ci {
-        #[command(subcommand)]
-        cmd: Option<CiCommand>,
         /// Relative window (7d, 24h, 30m) or RFC3339 start
         #[arg(long, default_value = "7d")]
         since: String,
@@ -2655,7 +2610,6 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Repo { cmd: RepoCommand::Ci {
-                cmd: None,
                 since,
                 wave: Some(wave),
                 repo: Some(repo),
@@ -3009,8 +2963,8 @@ mod tests {
         ])
         .unwrap();
         assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Workflow { cmd: TaskWorkflowCommand::Move { issue, node, reason } } })
-                if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")));
+            Some(Commands::Task { cmd: TaskCommand::Workflow { cmd: TaskWorkflowCommand::Move { issue, stage, reason } } })
+                if issue == "LOO-42" && stage == "end" && reason.as_deref() == Some("Delivered")));
         let cli =
             Cli::try_parse_from(["lf", "task", "complete", "LOO-42", "--reason", "Delivered"])
                 .unwrap();

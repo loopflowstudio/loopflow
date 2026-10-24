@@ -133,6 +133,10 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         if state == crate::durable::TaskState::Paused {
             states.insert(SelectionState::Paused);
         }
+        // Pause holds a handoff without ending it.
+        if !state.is_terminal() && super::task_work::shipping_in(conn, &task.id)?.is_some() {
+            states.insert(SelectionState::Shipping);
+        }
         let mut activity_known = true;
         for session in sessions_by_task.get(&task.id).into_iter().flatten() {
             // A conversation Loopflow never attached cannot be running here.

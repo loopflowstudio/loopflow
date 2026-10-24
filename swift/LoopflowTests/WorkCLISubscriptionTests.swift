@@ -234,11 +234,8 @@ private struct WorkCLIFixture: Sendable {
     func prepare() async throws {
         let graphs = repo.appendingPathComponent(".lf/graphs")
         try FileManager.default.createDirectory(at: graphs, withIntermediateDirectories: true)
-        try Data("- cmd: graph show proof\n".utf8).write(to: graphs.appendingPathComponent("proof.yaml"))
-        let workflows = repo.appendingPathComponent(".lf/workflows")
-        try FileManager.default.createDirectory(at: workflows, withIntermediateDirectories: true)
-        try Data("nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: proof}\n".utf8)
-            .write(to: workflows.appendingPathComponent("proof.yaml"))
+        try Data("- cmd: graph show proof\n- interactive: {name: demo, id: review}\n".utf8)
+            .write(to: graphs.appendingPathComponent("proof.yaml"))
         for args in [["init", "-b", "main"], ["config", "user.name", "Fixture Person"],
                      ["config", "user.email", "fixture@example.invalid"], ["add", "."], ["commit", "-m", "Fixture"]] {
             _ = try await run(args, executable: "/usr/bin/git")

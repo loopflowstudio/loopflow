@@ -17,7 +17,7 @@
         "id": "begin",
         "label": "patch",
         "kind": "skill",
-        "human": false,
+        "interactive": false,
         "returns_to": null,
         "sources": [],
         "paths": []
@@ -27,7 +27,7 @@
         "id": null,
         "label": "route",
         "kind": "xor",
-        "human": false,
+        "interactive": false,
         "returns_to": null,
         "sources": [],
         "paths": [
@@ -40,7 +40,7 @@
                 "id": "begin",
                 "label": "patch",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [],
                 "paths": []
@@ -50,7 +50,7 @@
                 "id": null,
                 "label": "route",
                 "kind": "xor",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [],
                 "paths": [
@@ -63,7 +63,7 @@
                         "id": "begin",
                         "label": "patch",
                         "kind": "skill",
-                        "human": false,
+                        "interactive": false,
                         "returns_to": null,
                         "sources": [],
                         "paths": []
@@ -73,7 +73,7 @@
                         "id": "check",
                         "label": "check",
                         "kind": "skill",
-                        "human": false,
+                        "interactive": false,
                         "returns_to": 4,
                         "sources": [],
                         "paths": []
@@ -87,7 +87,7 @@
                 "id": "check",
                 "label": "check",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": 2,
                 "sources": [],
                 "paths": []
@@ -103,7 +103,7 @@
                 "id": "begin",
                 "label": "patch",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [],
                 "paths": []
@@ -113,7 +113,7 @@
                 "id": "check",
                 "label": "check",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": 7,
                 "sources": [],
                 "paths": []
@@ -127,7 +127,7 @@
         "id": "check",
         "label": "check",
         "kind": "skill",
-        "human": false,
+        "interactive": false,
         "returns_to": 0,
         "sources": [],
         "paths": []

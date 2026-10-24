@@ -11,7 +11,6 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::child::AbandonIntent;
 pub use crate::durable::TaskId;
 use crate::id::prefixed_uuid_id;
 use crate::id::WaveId;
@@ -496,8 +495,8 @@ pub struct Task {
     pub rank: u32,
     pub assignee: Option<String>,
     pub due_date: Option<String>,
+    /// Linear's state type, `completed` once done; the lifecycle is `TaskState`.
     pub state: Option<String>,
-    pub completed: bool,
     pub completed_at: Option<String>,
     /// Optional Linear binding, not a second owner of this record.
     pub linear_id: Option<LinearIssueId>,
@@ -516,9 +515,6 @@ pub struct Task {
     pub parent_pr_id: Option<TaskPrId>,
     /// Explicit choice for every Graph step; None uses the step/config defaults.
     pub agent: Option<String>,
-    /// Set when abandonment is *requested*, not when it is applied. No launch
-    /// path may start a Run for Task Work carrying this.
-    pub abandon_intent: Option<AbandonIntent>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
     /// Per-command view derived from the active PR's durable observation cache.
@@ -619,9 +615,12 @@ pub enum TaskEventKind {
         lf_process_ids: Vec<crate::id::LfProcessId>,
         reason: String,
     },
+    // Append-only events recorded before the Flow → Graph rename keep their bytes.
+    #[serde(alias = "flow_finished")]
     GraphFinished {
         #[serde(deserialize_with = "crate::id::deserialize_uuid")]
         invocation_id: String,
+        #[serde(alias = "flow")]
         graph: String,
         summary: String,
     },
@@ -724,9 +723,18 @@ pub struct LinearObservationOutcome {
 mod tests {
     use super::{
         GithubPr, LinearWritebackOperation, LinearWritebackState, PrPhase, PrPublication, Task,
-        TaskId, TaskPr, TaskPrId,
+        TaskEventKind, TaskId, TaskPr, TaskPrId,
     };
     use crate::linear::LinearIssueId;
+
+    #[test]
+    fn events_recorded_before_the_graph_rename_still_read() {
+        let kind: TaskEventKind = serde_json::from_str(
+            r#"{"kind":"flow_finished","invocation_id":"7d4455b3-f215-4762-965c-85ff2b0876a5","flow":"ship","summary":"merged"}"#,
+        )
+        .unwrap();
+        assert!(matches!(kind, TaskEventKind::GraphFinished { graph, .. } if graph == "ship"));
+    }
 
     fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();
@@ -750,14 +758,12 @@ mod tests {
             base_commit: "abc".to_string(),
             parent_pr_id: None,
             agent: None,
-            abandon_intent: None,
             created_at: now,
             updated_at: now,
             rank: 0,
             assignee: None,
             due_date: None,
             state: None,
-            completed: false,
             completed_at: None,
             observation: crate::work::task::Observation::NotRequired,
         }

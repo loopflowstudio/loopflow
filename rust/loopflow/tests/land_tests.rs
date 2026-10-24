@@ -2198,16 +2198,18 @@ fn waited_task_landing(destination: &str, failed_startup: bool) {
     }
     repo.create_branch("waited-repair");
     let worktree = repo.path().canonicalize().unwrap();
-    let workflow = if destination == "end" {
-        "nodes: {}\nedges:\n  - {from: start, to: end, graph: delivery-proof}\n"
-    } else {
-        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: delivery-proof}\n  - {from: review, to: end}\n"
-    };
+    // The graph lands, then reaches a stage or its end.
+    let mut graph = "- cmd: graph show deliver\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n".to_string();
+    if destination != "end" {
+        graph.push_str("- interactive: {name: demo, id: review}\n");
+    }
     for (path, contents) in [
         ("feature.txt", "keep the feature"),
-        (".lf/config.yaml", "agent: codex\nplanning:\n  provider: linear\n  team: team-task-pr-tests\n"),
-        (".lf/workflows/delivery-proof.yaml", workflow),
-        (".lf/graphs/delivery-proof.yaml", "- cmd: graph show ship\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n"),
+        (
+            ".lf/config.yaml",
+            "agent: codex\nplanning:\n  provider: linear\n  team: team-task-pr-tests\n",
+        ),
+        (".lf/graphs/delivery-proof.yaml", graph.as_str()),
     ] {
         let path = worktree.join(path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -2557,7 +2559,7 @@ esac
         );
         let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         let status = &status["execution"];
-        assert_eq!(status["status"], "not_ready", "{status}");
+        assert_eq!(status["status"], "unstarted", "{status}");
         assert_eq!(
             fs::read_to_string(worktree.join("feature.txt")).unwrap(),
             "retain until completion\n"

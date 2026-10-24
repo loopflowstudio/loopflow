@@ -160,7 +160,7 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 ```bash
 lf checkout INF-123                               # durable Task Work + worktree, no controller
 lf -b task run INF-123                            # place the Task, then run its Graph here until it ends
-lf task run INF-123 pursue                        # on a workflow: take the edge that runs pursue
+lf task run INF-123 pursue                        # on a workflow: take the route that runs pursue
 lf comment INF-123 "take the smaller approach"   # save a steer for the Task's Sessions
 lf interrupt INF-123                             # end the active turn
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
@@ -173,7 +173,6 @@ lf --task INF-123 skill task-session               # ongoing conversation that k
 lf arm                                             # request exact-head auto-merge and return
 lf land                                            # request merge; Task completion stays separate
 lf pr reconcile                                      # check recorded deliveries once and settle merges
-lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
 
 IDs accept any casing: `lf task status loo-506`, `TASK_…`, an uppercased Linear
@@ -344,7 +343,7 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | --- | --- | --- |
 | **Skill** | Gives the agent reusable instructions and context | `.lf/skills/*.md` |
 | **Graph** | Composes agent work and mechanical operations; a run is one lf process and the step processes it starts | `.lf/graphs/*.yaml` |
-| **Workflow** | Gives a Task nodes, where you take part in its conversation, joined by the Graphs between them | `.lf/workflows/*.yaml` |
+| **Workflow** | Gives a Task a graph whose `interactive:` steps are stages, where you take part in its conversation, and whose routes between them run Graphs | `.lf/graphs/*.yaml` |
 | **Wave** | Keeps the objective, memory, cadence, budget and instruments | `.lf/wave/<name>/` |
 | **Project** | Holds one Wave's plan, Tasks, KRs and targets | Local SQLite, shared through the planning provider (Git ref or Linear) |
 | **Chapter** | Names the repository's current group of In Progress Projects | Project names and statuses |

@@ -302,20 +302,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(WorkActivitySnapshot.self, from: stdout)
     }
 
-    public func automationStatus(cwd: String) async throws -> AutomationStatus {
-        try Self.decode(AutomationStatus.self, from: await run(["task", "automation", "--json"], cwd))
-    }
-
-    public func setAutomation(enabled: Bool, cwd: String) async throws {
-        var args = ["cron", "sync", "--repo"]
-        if !enabled { args.append("--disable") }
-        _ = try await run(args, cwd)
-    }
-
-    public func automateTask(issue: String, enabled: Bool, cwd: String) async throws {
-        _ = try await run(["task", "automate", issue, enabled ? "on" : "off"], cwd)
-    }
-
     /// Files changed by one Task, classified across commits, index, worktree,
     /// and untracked state relative to the Task's recorded base.
     public func taskChanges(issue: String, base: String = "parent", cwd: String?) async throws -> TaskChangesSnapshot {
@@ -353,16 +339,12 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([WorkflowCatalogEntry].self, from: stdout)
     }
 
-    public func workflowSource(_ name: String, cwd: String?) async throws -> String {
-        try await run(["wave", "workflow", "source", name], cwd)
-    }
-
     public func customizeGraph(_ name: String, cwd: String?) async throws -> String {
         try await run(["graph", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Run a fresh Graph for the Task headless, placing it when needed. Without
-    /// `graph`, Rust takes the Task's edge or its Project's workflow.
+    /// `graph`, Rust takes the Task's route or its Wave's Workflow.
     public func runTask(issue: String, graph: String?, cwd: String?) async throws {
         var args = ["-b", "task", "run", issue]
         if let graph { args.append(graph) }
@@ -371,6 +353,23 @@ public struct RegistryQuery: Sendable {
         } else {
             _ = try await run(args, cwd)
         }
+    }
+
+    /// Ship the Task: run its remaining Workflow to the end headless, standing
+    /// in at each stage. The process runs detached until the Task lands.
+    public func shipTask(issue: String, cwd: String?) async throws {
+        let args = ["-b", "--task", issue, "ship"]
+        if let start {
+            try await start(args, cwd)
+        } else {
+            _ = try await run(args, cwd)
+        }
+    }
+
+    /// Return a shipping Task to working: its ship process stops and any
+    /// auto-merge Loopflow armed is disabled.
+    public func stopShipping(issue: String, cwd: String?) async throws {
+        _ = try await run(["--task", issue, "ship", "--stop"], cwd)
     }
 
     /// Reopen every conversation on this Machine that a restart or crash cut off,

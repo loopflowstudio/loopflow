@@ -25,16 +25,6 @@ impl SqliteStore {
         super::children::require_task_planning(&conn, &task)?;
         let work = WorkRef::Task(task_id.clone());
         require_ready_work(&conn, &work)?;
-        let abandoning: bool = conn.query_row(
-            "SELECT abandon_requested_at IS NOT NULL FROM tasks WHERE id=?1",
-            [task_id.as_str()],
-            |row| row.get(0),
-        )?;
-        if abandoning {
-            return Err(StoreError::InvalidAuthority(
-                "Task cancellation is pending; retry task abandon".into(),
-            ));
-        }
         require_current_task_project(&conn, &work)
     }
 
@@ -208,7 +198,7 @@ impl SqliteStore {
         }
         if let WorkRef::Task(task_id) = work {
             tx.execute(
-                "UPDATE tasks SET abandon_requested_at=NULL,abandon_reason=?2 WHERE id=?1",
+                "UPDATE tasks SET abandon_reason=?2 WHERE id=?1",
                 params![task_id.as_str(), reason],
             )?;
             super::task_state_delivery::queue_in(&tx, task_id, "canceled")?;
@@ -461,13 +451,13 @@ fn map_machine_row(row: &rusqlite::Row<'_>) -> StoreResult<Machine> {
     })
 }
 
-/// Completion and abandonment are durable; unfinished readiness follows the Workflow.
+/// Completion, abandonment, pause and shipping are durable; whether an open
+/// Task has started follows its Workflow.
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
-        "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' WHEN {t}.planning_completed=1 THEN 'done' WHEN {t}.paused=1 THEN 'paused' ELSE COALESCE((
-            SELECT CASE WHEN wf.edge IS NOT NULL THEN 'active' WHEN wf.node='start' THEN 'ready'
-                ELSE 'active' END
-            FROM task_workflows wf WHERE wf.task_id={t}.id),'not_ready') END"
+        "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' WHEN {t}.planning_completed=1 THEN 'done' WHEN {t}.paused=1 THEN 'paused' WHEN {t}.shipped_at IS NOT NULL THEN 'shipping' ELSE COALESCE((
+            SELECT CASE WHEN wf.edge IS NULL AND wf.node='start' THEN 'unstarted' ELSE 'working' END
+            FROM task_workflows wf WHERE wf.task_id={t}.id),'unstarted') END"
     )
 }
 
@@ -717,7 +707,6 @@ mod durable_store_tests {
             pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
             wave_id: wave_id.clone(),
-            abandon_intent: None,
             created_at: now,
             updated_at: now,
         };
@@ -750,14 +739,12 @@ mod durable_store_tests {
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
             agent: None,
-            abandon_intent: None,
             created_at: now,
             updated_at: now,
             rank: 0,
             assignee: None,
             due_date: None,
             state: None,
-            completed: false,
             completed_at: None,
             observation: crate::work::task::Observation::NotRequired,
         };

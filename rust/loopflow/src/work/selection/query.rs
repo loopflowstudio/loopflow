@@ -385,6 +385,7 @@ impl Parser {
                 "running" => SelectionState::Running,
                 "blocked" => SelectionState::Blocked,
                 "paused" => SelectionState::Paused,
+                "shipping" => SelectionState::Shipping,
                 "idle" => SelectionState::Idle,
                 "backlog" => SelectionState::Backlog,
                 "done" => SelectionState::Done,

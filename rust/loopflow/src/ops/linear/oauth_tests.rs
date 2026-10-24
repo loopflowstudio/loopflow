@@ -120,7 +120,6 @@ async fn pm_read_linear_oauth_recovers() {
         pm_snapshot_synced_at: Some(1),
 
         wave_id: wave.id().clone(),
-        abandon_intent: None,
         created_at: timestamp,
         updated_at: timestamp,
     };
@@ -179,7 +178,6 @@ async fn pm_read_linear_oauth_recovers() {
     assert_eq!(refreshed.krs[0].text, "Fresh proof");
     assert_eq!(refreshed.id, project.id);
     assert_eq!(refreshed.wave_id, project.wave_id);
-    assert_eq!(refreshed.abandon_intent, project.abandon_intent);
     assert_eq!(refreshed.created_at, project.created_at);
     assert!(refreshed.updated_at >= project.updated_at);
     assert_eq!(refreshed.linear_id, project.linear_id);

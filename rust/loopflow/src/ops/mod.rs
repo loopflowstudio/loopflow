@@ -26,6 +26,7 @@ mod present;
 mod progress;
 pub mod project;
 mod read_retry;
+pub mod recovery;
 mod release;
 mod release_lock;
 mod run;
@@ -85,6 +86,3 @@ pub use sync::{
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
 pub use util::normalize_wave_name;
-
-pub mod ci_watch;
-pub mod task_automation;

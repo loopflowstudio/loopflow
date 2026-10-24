@@ -313,6 +313,17 @@ Delete a worktree and its local and remote branch; retain PR and Task outcomes
 | `--force / -f` | force Default: false. |
 | `--help / -h` | Print help |
 
+## lf ship
+
+Ship the Task: run every remaining step to merge and completion, standing in at each stage
+
+| Argument | What it does |
+|---|---|
+| `<graph>` | Take up this graph in place of the Task's remaining steps |
+| `--reason` | Why, kept in the Task's history |
+| `--stop` | Stop shipping: end the ship process and disarm auto-merge it armed Default: false. |
+| `--help / -h` | Print help (see more with '--help') |
+
 ## lf sync
 
 Merge upstream into the current branch (default: main or stack parent)
@@ -887,19 +898,6 @@ Show how failed CI is detected, repaired, and landed across this Machine
 | `--json` | Emit the complete incident report as JSON Default: false. |
 | `--help / -h` | Print help |
 
-## lf repo ci watch
-
-Watch this repository's PR checks and start a ci-fix when a recorded landing fails
-
-| Argument | What it does |
-|---|---|
-| `--once` | Check every open PR once and exit Default: false. |
-| `--install` | Keep the watcher running in the background as a launchd service Default: false. |
-| `--uninstall` | Remove the background service Default: false. |
-| `--status` | Show whether a watcher is live, its last poll, and what it started Default: false. |
-| `--json` | Emit the status as JSON Default: false. |
-| `--help / -h` | Print help |
-
 ## lf repo reteam
 
 Reconcile linked Waves to the repository's Linear Team
@@ -1446,7 +1444,7 @@ Select and inspect the Wave default Workflow
 
 ## lf wave workflow source
 
-Print a definition from `.lf/workflows/` or the builtins
+Print a graph from `.lf/graphs/` or the builtins
 
 | Argument | What it does |
 |---|---|
@@ -1455,7 +1453,7 @@ Print a definition from `.lf/workflows/` or the builtins
 
 ## lf wave workflow list
 
-List Workflow definitions, including unavailable local files
+List graphs, including unavailable local files
 
 | Argument | What it does |
 |---|---|
@@ -1474,7 +1472,7 @@ Show the Wave's default Workflow
 
 ## lf wave workflow set
 
-Select the Workflow future Tasks take up; captured Tasks stay unchanged. Definitions are committed `.lf/workflows/<name>.yaml` files or builtins
+Select the graph future Tasks take up; captured Tasks stay unchanged. Graphs are committed `.lf/graphs/<name>.yaml` files or builtins
 
 | Argument | What it does |
 |---|---|
@@ -1609,8 +1607,6 @@ Reinstall this Machine's jobs with the current lf
 
 | Argument | What it does |
 |---|---|
-| `--repo` | Install the finite repository Task check on this Machine Default: false. |
-| `--disable` | Remove the repository schedule; running work retains its authority Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron history
@@ -1754,7 +1750,7 @@ Move Workflow position without running anything; `end` requests completion
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `<node>` | `start`, `end` or one of the workflow's nodes |
+| `<stage>` | `start`, `end` or one of the graph's stages |
 | `--reason` | Why, kept in the Task's workflow history |
 | `--help / -h` | Print help |
 
@@ -1775,34 +1771,6 @@ Move the captured Workflow to start without executing or reloading it
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--help / -h` | Print help |
-
-## lf task automation
-
-Inspect delivery scheduling and Task CI repair settings
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task reconcile
-
-Check authorized deliveries once, then exit
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task automate
-
-Enable or hold CI repair for a Task without interrupting running work
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `<state>` | state |
 | `--help / -h` | Print help |
 
 ## lf task checkout
@@ -1827,7 +1795,7 @@ Place a Task's worktree, then run a Graph there like `lf --task ISSUE graph GRAP
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `<graph>` | The edge's Graph, or a workflow to take up; the Task's only edge or its Wave or repository default when omitted |
+| `<graph>` | A route from the Task's stage, or a graph to take up; the Task's only route or its Wave or repository default when omitted |
 | `--name` | name |
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |

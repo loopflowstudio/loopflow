@@ -1151,22 +1151,12 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
                                         change.field == "state" && change.error.is_some()
                                     })
                                 {
-                                    assert_eq!(
-                                        task.task.completed,
-                                        expected == loopflow::durable::TaskState::Done
-                                    );
+                                    let done = expected == loopflow::durable::TaskState::Done;
                                     assert_eq!(
                                         task.task.state.as_deref(),
-                                        Some(if task.task.completed {
-                                            "completed"
-                                        } else {
-                                            "unstarted"
-                                        })
+                                        Some(if done { "completed" } else { "unstarted" })
                                     );
-                                    assert_eq!(
-                                        task.task.completed_at.is_some(),
-                                        task.task.completed
-                                    );
+                                    assert_eq!(task.task.completed_at.is_some(), done);
                                     return runtime;
                                 }
                             }
@@ -1178,7 +1168,7 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     };
     for (operation, state) in [
         ("complete", loopflow::durable::TaskState::Done),
-        ("reopen", loopflow::durable::TaskState::NotReady),
+        ("reopen", loopflow::durable::TaskState::Unstarted),
     ] {
         let output = lf(home.path(), &["task", operation, "FIX-1"])
             .current_dir(home.wave.repo())
@@ -1194,7 +1184,7 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     drop(watch);
     let mut reopened = home.watch();
     reopened.request(scope);
-    await_state(&reopened, loopflow::durable::TaskState::NotReady);
+    await_state(&reopened, loopflow::durable::TaskState::Unstarted);
     let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
     assert!(task.worktree.is_none());
     assert!(home.store.task_prs(&task.id).unwrap().is_empty());

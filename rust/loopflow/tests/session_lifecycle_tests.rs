@@ -513,12 +513,9 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
     fixture
         .repo
         .create_file(".lf/skills/inspect-parser.md", "Inspect the parser.");
-    fixture
-        .repo
-        .create_file(".lf/graphs/proof.yaml", "- inspect-parser\n");
     fixture.repo.create_file(
-        ".lf/workflows/proof.yaml",
-        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: proof}\n  - {from: review, to: end}\n",
+        ".lf/graphs/proof.yaml",
+        "- inspect-parser\n- interactive: {name: demo, id: review}\n",
     );
     fixture.repo.stage_all();
     fixture.repo.commit("Native lifecycle fixture");
@@ -1818,14 +1815,14 @@ fn declared_agent_can_start_another_tasks_graph() {
     std::fs::create_dir_all(y.join(".lf/graphs")).unwrap();
     std::fs::write(
         y.join(".lf/graphs/switch-proof.yaml"),
-        "- cmd: sync --plan\n",
+        "- cmd: sync --plan\n- interactive: demo\n",
     )
     .unwrap();
-    // The Wave default reads the repository's committed definitions.
-    std::fs::create_dir_all(fixture.repo.path().join(".lf/workflows")).unwrap();
+    // The Wave default reads the repository's committed graphs.
+    std::fs::create_dir_all(fixture.repo.path().join(".lf/graphs")).unwrap();
     std::fs::write(
-        fixture.repo.path().join(".lf/workflows/switch-proof.yaml"),
-        "nodes:\n  demo: demo\nedges:\n  - { from: start, to: demo, graph: switch-proof }\n  - { from: demo, to: end }\n",
+        fixture.repo.path().join(".lf/graphs/switch-proof.yaml"),
+        "- cmd: sync --plan\n- interactive: demo\n",
     )
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))

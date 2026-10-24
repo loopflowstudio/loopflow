@@ -337,7 +337,7 @@ impl SqliteStore {
                 ConcreteStep::Skill(ConcreteSkill {
                     skill: Skill::named(label),
                     id: None,
-                    human: false,
+                    interactive: false,
                     returns: None,
                     sources: Vec::new(),
                 })
@@ -533,7 +533,7 @@ mod tests {
         let step = ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named("implement"),
             id: None,
-            human: false,
+            interactive: false,
             returns: None,
             sources: Vec::new(),
         });
@@ -570,24 +570,16 @@ mod tests {
         assert_eq!(entry.summary.id, "00000000-0000-4000-8000-00000000f100");
         assert_eq!(store.revisions().unwrap().graphs, revisions_before);
 
+        // A captured Workflow not at `end` is dropped by the ship draft; none
+        // that remains names its Graphs as `flow`.
         let conn = store.conn.lock().unwrap();
-        let stored: String = conn
-            .query_row(
-                "SELECT graph FROM task_workflows WHERE task_id=?1",
-                [task.as_str()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let workflow: crate::workflow::WorkflowDefinition = serde_json::from_str(&stored).unwrap();
-        assert_eq!(
-            workflow
-                .edges
-                .iter()
-                .map(|edge| edge.graph.as_deref())
-                .collect::<Vec<_>>(),
-            [Some("pursue"), None]
-        );
-        assert!(!stored.contains("\"flow\""), "{stored}");
+        let stored: Option<String> = rusqlite::OptionalExtension::optional(conn.query_row(
+            "SELECT graph FROM task_workflows WHERE task_id=?1",
+            [task.as_str()],
+            |row| row.get(0),
+        ))
+        .unwrap();
+        assert!(stored.is_none_or(|stored| !stored.contains("\"flow\"")));
         drop(conn);
         let events = store.task_events_after(&task, 0).unwrap();
         assert!(

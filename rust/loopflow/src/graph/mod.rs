@@ -15,7 +15,6 @@ use crate::definition::name::{portable_name, resolve_name};
 use crate::definition::{resolve_definition, DefinitionKind, Target};
 use crate::error::LoadError;
 use crate::skills::catalog::{SkillCatalog, SkillOrigin};
-use crate::workflow::names_workflow;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Skill {
@@ -60,29 +59,26 @@ impl Skill {
 /// The skill a `loop:` item runs when it names none.
 const DEFAULT_DECIDER: &str = "loop-or-next";
 
-fn validate_step_settings(id: Option<&str>, human: bool) -> Result<(), LoadError> {
+fn validate_step_settings(id: Option<&str>) -> Result<(), LoadError> {
     if id.is_some_and(|id| id.trim().is_empty()) {
         return Err(LoadError::InvalidGraph(
             "step id cannot be empty".to_string(),
-        ));
-    }
-    if human && id.is_none() {
-        return Err(LoadError::InvalidGraph(
-            "review steps require a stable id".to_string(),
         ));
     }
     Ok(())
 }
 
 /// An executable occurrence. Template names resolve to Target during loading;
-/// review and loop settings belong to this occurrence, not to the definition.
+/// stage and loop settings belong to this occurrence, not to the definition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Step {
     pub target: Target,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// A stage: a person takes part here, in the Task conversation. Written
+    /// `interactive: <skill>`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub human: bool,
+    pub interactive: bool,
     /// A deciding occurrence's authored target: the occurrence name or skill
     /// of an earlier step it can return to.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -94,7 +90,7 @@ impl Step {
         Self {
             target,
             id: None,
-            human: false,
+            interactive: false,
             returns: None,
         }
     }
@@ -107,8 +103,9 @@ pub struct Command {
     pub args: Vec<String>,
 }
 
-// Saved invocations outlive CLI spellings. Migrate their operation owner while
-// retaining the captured arguments and topology instead of reloading a Graph.
+// Authored and saved invocations outlive CLI spellings. Both take the current
+// operation owner, keeping their arguments and topology, so a fresh Graph and a
+// captured Workflow route record the same step.
 impl<'de> Deserialize<'de> for Command {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
@@ -216,10 +213,19 @@ pub struct GraphDefinition {
 pub struct ConcreteSkill {
     pub skill: Skill,
     pub id: Option<String>,
-    pub human: bool,
+    /// A stage where a person takes part; its id is `id`, else the skill name.
+    pub interactive: bool,
     /// A deciding occurrence returns this many steps back in its own body.
     pub returns: Option<usize>,
     pub sources: Vec<String>,
+}
+
+impl ConcreteSkill {
+    /// The stage this occurrence is, when a person takes part at it.
+    pub fn stage(&self) -> Option<&str> {
+        self.interactive
+            .then(|| self.id.as_deref().unwrap_or(&self.skill.name))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -399,22 +405,11 @@ impl<'a> DefinitionLoader<'a> {
             match self.load_graph(name) {
                 Ok(graph) => return Ok(Target::Graph(graph)),
                 Err(LoadError::GraphNotFound(_)) if kind.is_none() => {}
-                Err(LoadError::GraphNotFound(_))
-                    if self.repo.is_some_and(|repo| names_workflow(name, repo)) =>
-                {
-                    return Err(LoadError::Workflow(name.to_string()))
-                }
                 Err(error) => return Err(error),
             }
         }
         match self.catalog.load_skill(name) {
             Ok(skill) => Ok(Target::Skill(skill)),
-            // A name that is only a workflow is traversed, never run.
-            Err(LoadError::SkillNotFound(_))
-                if kind.is_none() && self.repo.is_some_and(|repo| names_workflow(name, repo)) =>
-            {
-                Err(LoadError::Workflow(name.to_string()))
-            }
             Err(LoadError::SkillNotFound(_)) if kind.is_none() => {
                 Err(LoadError::TargetNotFound(name.to_string()))
             }
@@ -438,20 +433,21 @@ impl<'a> DefinitionLoader<'a> {
                 (key.to_string(), content.to_string())
             }
         };
-        let value: Value = serde_yaml_ng::from_str(&content)
+        self.parse_source(resolved_name, &content)
+    }
+
+    /// Parse authored Graph text as the definition named `name`.
+    fn parse_source(&mut self, name: String, content: &str) -> Result<GraphDefinition, LoadError> {
+        let value: Value = serde_yaml_ng::from_str(content)
             .map_err(|err| LoadError::InvalidGraph(err.to_string()))?;
-        validate_graph_nesting(&self.sources, &resolved_name)?;
-        self.sources.push(resolved_name.clone());
+        validate_graph_nesting(&self.sources, &name)?;
+        self.sources.push(name.clone());
         let items = parse_graph_items(&value, self);
         self.sources.pop();
         // The outer definition exists. A missing child must not trigger
         // top-level fallback to a same-named local or cached skill.
-        let items =
-            items.map_err(|error| LoadError::InvalidGraph(format!("{resolved_name}: {error}")))?;
-        Ok(GraphDefinition {
-            name: resolved_name,
-            items,
-        })
+        let items = items.map_err(|error| LoadError::InvalidGraph(format!("{name}: {error}")))?;
+        Ok(GraphDefinition { name, items })
     }
 }
 
@@ -484,11 +480,49 @@ fn resolve_graph_with_catalog(
     let items = flatten_resolved(&resolved);
     let mut ids = HashSet::new();
     validate_occurrence_ids(&items, &mut ids)?;
+    validate_stages(&items, &mut HashSet::new())?;
     Ok(resolved)
 }
 
+/// Every stage has its own id, and no autonomous loop returns across one: a
+/// person decides at a stage, so nothing automatic may run back over it.
+fn validate_stages(items: &[ConcreteStep], stages: &mut HashSet<String>) -> Result<(), LoadError> {
+    for (index, item) in items.iter().enumerate() {
+        match item {
+            ConcreteStep::Skill(skill) => {
+                if let Some(stage) = skill.stage() {
+                    if !stages.insert(stage.to_string()) {
+                        return Err(LoadError::InvalidGraph(format!(
+                            "two stages are named {stage:?}; give one `interactive: {{name: {}, id: <stage>}}`",
+                            skill.skill.name
+                        )));
+                    }
+                } else if let Some(target) = return_target(items, index) {
+                    if let Some(crossed) = items[target..index].iter().find_map(|step| match step {
+                        ConcreteStep::Skill(step) => step.stage(),
+                        _ => None,
+                    }) {
+                        return Err(LoadError::InvalidGraph(format!(
+                            "loop at {} returns across stage {crossed:?}; a person decides there",
+                            skill.skill.name
+                        )));
+                    }
+                }
+            }
+            ConcreteStep::Xor(branch) => {
+                for path in branch.paths.values() {
+                    validate_stages(&path.steps, stages)?;
+                }
+            }
+            ConcreteStep::Command(_) => {}
+        }
+    }
+    Ok(())
+}
+
 /// Steps back from the end of `preceding` to the one occurrence `target`
-/// names: an occurrence id, else the only step running that skill.
+/// names: an occurrence id, else the only step running that skill, else the
+/// first step of the one composed graph with that name.
 fn resolve_loop_target(preceding: &[ConcreteStep], target: &str) -> Result<usize, LoadError> {
     let positions = |names: &dyn Fn(&ConcreteSkill) -> bool| -> Vec<usize> {
         preceding
@@ -505,6 +539,25 @@ fn resolve_loop_target(preceding: &[ConcreteStep], target: &str) -> Result<usize
     if found.is_empty() {
         let target_key = portable_name(target);
         found = positions(&|skill| portable_name(&skill.skill.name) == target_key);
+    }
+    if found.is_empty() {
+        // A composed graph begins where its name first appears among a step's sources.
+        let composed = |step: &ConcreteStep| {
+            let sources = match step {
+                ConcreteStep::Skill(skill) => &skill.sources,
+                ConcreteStep::Command(command) => &command.sources,
+                ConcreteStep::Xor(branch) => &branch.sources,
+            };
+            sources.iter().skip(1).any(|source| source == target)
+        };
+        found = preceding
+            .iter()
+            .enumerate()
+            .filter(|(index, step)| {
+                composed(step) && (*index == 0 || !composed(&preceding[index - 1]))
+            })
+            .map(|(index, _)| index)
+            .collect();
     }
     match found[..] {
         [index] => Ok(preceding.len() - index),
@@ -557,34 +610,6 @@ fn validate_occurrence_ids(
         }
     }
     Ok(())
-}
-
-pub fn human_occurrence_ids(
-    graph: &GraphDefinition,
-    repo: &Path,
-) -> Result<Vec<String>, LoadError> {
-    fn collect(items: &[ConcreteStep]) -> Vec<String> {
-        let mut human = Vec::new();
-        for item in items {
-            match item {
-                ConcreteStep::Skill(skill) if skill.human => human.push(
-                    skill
-                        .id
-                        .clone()
-                        .expect("validated human occurrence has an id"),
-                ),
-                ConcreteStep::Xor(branch) => {
-                    for path in branch.paths.values() {
-                        human.extend(collect(&path.steps));
-                    }
-                }
-                ConcreteStep::Skill(_) | ConcreteStep::Command(_) => {}
-            }
-        }
-        human
-    }
-
-    Ok(collect(&compile_graph(graph, repo)?))
 }
 
 pub fn load_skill(name: &str, repo: &Path) -> Result<Skill, LoadError> {
@@ -718,12 +743,22 @@ fn parse_graph_mapping(
                 "step metadata belongs inside the step mapping".to_string(),
             ));
         }
-        return parse_skill_value(skill_value);
+        return parse_skill_value(skill_value, false);
     }
-    if ["id", "human"]
-        .iter()
-        .any(|field| map.contains_key(key(field)))
-    {
+    if let Some(skill_value) = map.get(key("interactive")) {
+        if map.len() != 1 {
+            return Err(LoadError::InvalidGraph(
+                "an interactive item takes only the skill, or {name, id}".to_string(),
+            ));
+        }
+        return parse_skill_value(skill_value, true);
+    }
+    if map.contains_key(key("human")) {
+        return Err(LoadError::InvalidGraph(
+            "`human:` is retired; write `interactive: <skill>`".to_string(),
+        ));
+    }
+    if map.contains_key(key("id")) {
         return Err(LoadError::InvalidGraph(
             "occurrence metadata are valid only on skill nodes".to_string(),
         ));
@@ -738,7 +773,7 @@ fn parse_graph_mapping(
         return parse_xor_value(xor_value, loader);
     }
     Err(LoadError::InvalidGraph(
-        "graph item mapping must include step, loop, cmd, graph, or xor".to_string(),
+        "graph item mapping must include step, interactive, loop, cmd, graph, or xor".to_string(),
     ))
 }
 
@@ -753,11 +788,14 @@ fn parse_command_value(value: &Value) -> Result<Step, LoadError> {
         .to_string();
     let args = parts.map(ToString::to_string).collect();
 
-    Ok(Step::new(Target::Command(Command { command, args })))
+    Ok(Step::new(Target::Command(
+        Command { command, args }.current(),
+    )))
 }
 
-/// `loop: <target>` runs a deciding skill last, `step` or `loop-or-next`, which
-/// advances, returns to the target or stops blocked.
+/// `loop: <target>` runs a deciding skill last, `step`, `interactive` or
+/// `loop-or-next`, which advances, returns to the target or stops blocked. An
+/// interactive decider is a stage: the person there decides.
 fn parse_loop(map: &serde_yaml_ng::Mapping, target: &Value) -> Result<Step, LoadError> {
     let target = target
         .as_str()
@@ -766,60 +804,62 @@ fn parse_loop(map: &serde_yaml_ng::Mapping, target: &Value) -> Result<Step, Load
         .ok_or_else(|| LoadError::InvalidGraph("loop must name a preceding step".to_string()))?;
     if map
         .keys()
-        .any(|field| *field != key("loop") && *field != key("step"))
+        .any(|field| *field != key("loop") && *field != key("step") && *field != key("interactive"))
     {
         return Err(LoadError::InvalidGraph(
-            "a loop item takes only loop and step".to_string(),
+            "a loop item takes only loop and step or interactive".to_string(),
         ));
     }
-    let mut step = match map.get(key("step")) {
-        Some(decider) => parse_skill_value(decider)?,
-        None => Step::new(Target::Skill(Skill::named(DEFAULT_DECIDER))),
+    let mut step = match (map.get(key("step")), map.get(key("interactive"))) {
+        (Some(_), Some(_)) => {
+            return Err(LoadError::InvalidGraph(
+                "a loop decides through step or interactive, not both".to_string(),
+            ))
+        }
+        (Some(decider), None) => parse_skill_value(decider, false)?,
+        (None, Some(decider)) => parse_skill_value(decider, true)?,
+        (None, None) => Step::new(Target::Skill(Skill::named(DEFAULT_DECIDER))),
     };
-    if step.human {
-        return Err(LoadError::InvalidGraph(
-            "a loop's deciding step is autonomous".to_string(),
-        ));
-    }
     step.returns = Some(target.to_string());
     Ok(step)
 }
 
-/// The authored `step:` mapping flattens skill options and occurrence policy.
+/// The authored `step:` or `interactive:` mapping flattens skill options and
+/// the occurrence id.
 #[derive(Debug, Deserialize)]
 struct SkillMapping {
     #[serde(flatten)]
     skill: Skill,
     id: Option<String>,
-    #[serde(default)]
-    human: bool,
 }
 
-fn parse_skill_value(value: &Value) -> Result<Step, LoadError> {
+fn parse_skill_value(value: &Value, interactive: bool) -> Result<Step, LoadError> {
     match value {
-        Value::String(name) => Ok(Step::new(Target::Skill(Skill::named(name)))),
+        Value::String(name) => Ok(Step {
+            interactive,
+            ..Step::new(Target::Skill(Skill::named(name)))
+        }),
         Value::Mapping(map) => {
             if map.contains_key(key("repeat")) {
                 return Err(LoadError::InvalidGraph(
                     "step repeat is retired; follow the work with `- loop: <target>`".to_string(),
                 ));
             }
-            if map.contains_key(key("feedback")) || map.contains_key(key("interactive")) {
+            if map.contains_key(key("human")) || map.contains_key(key("interactive")) {
                 return Err(LoadError::InvalidGraph(
-                    "feedback and interactive graph metadata are retired; use stable id plus human"
-                        .to_string(),
+                    "`human:` is retired; write the item as `interactive: <skill>`".to_string(),
                 ));
             }
             let mut step: SkillMapping =
                 serde_yaml_ng::from_value(value.clone()).map_err(|error| {
                     LoadError::InvalidGraph(format!("invalid step mapping: {error}"))
                 })?;
-            validate_step_settings(step.id.as_deref(), step.human)?;
+            validate_step_settings(step.id.as_deref())?;
             step.skill.content = None;
             Ok(Step {
                 target: Target::Skill(step.skill),
                 id: step.id,
-                human: step.human,
+                interactive,
                 returns: None,
             })
         }
@@ -954,15 +994,18 @@ fn parse_xor_path_skills(
     items
         .iter()
         .map(|item| match item {
-            Value::String(_) => parse_skill_value(item),
+            Value::String(_) => parse_skill_value(item, false),
             Value::Mapping(skill_map) => {
                 if let Some(target) = skill_map.get(key("loop")) {
                     return parse_loop(skill_map, target);
                 }
                 if let Some(skill_value) = skill_map.get(key("step")) {
-                    return parse_skill_value(skill_value);
+                    return parse_skill_value(skill_value, false);
                 }
-                parse_skill_value(item)
+                if let Some(skill_value) = skill_map.get(key("interactive")) {
+                    return parse_skill_value(skill_value, true);
+                }
+                parse_skill_value(item, false)
             }
             _ => Err(LoadError::InvalidGraph(format!(
                 "xor path '{path_name}' skills must contain only skill items"
@@ -1037,7 +1080,7 @@ fn compile_steps(
     let mut items = Vec::new();
     for step in steps {
         if !matches!(step.target, Target::Skill(_))
-            && (step.id.is_some() || step.human || step.returns.is_some())
+            && (step.id.is_some() || step.interactive || step.returns.is_some())
         {
             return Err(LoadError::InvalidGraph(
                 "occurrence metadata are valid only on skill nodes".into(),
@@ -1057,7 +1100,7 @@ fn compile_steps(
             Target::Skill(skill) => items.push(ResolvedGraphItem::Skill(ConcreteSkill {
                 skill: resolve_skill_reference(skill, catalog)?,
                 id: step.id.clone(),
-                human: step.human,
+                interactive: step.interactive,
                 returns: step
                     .returns
                     .as_deref()
@@ -1079,8 +1122,8 @@ mod tests {
     use serde_yaml_ng::Value;
 
     use super::{
-        build_xor_routing_suffix, compile_branch, compile_graph, human_occurrence_ids, load_graph,
-        load_skill, ConcreteStep, DefinitionLoader, GraphDefinition, Skill, Step, XorDef, XorPath,
+        build_xor_routing_suffix, compile_branch, compile_graph, load_graph, load_skill,
+        ConcreteStep, DefinitionLoader, GraphDefinition, Skill, Step, XorDef, XorPath,
     };
     use crate::definition::Target;
     use crate::error::LoadError;
@@ -1258,26 +1301,39 @@ mod tests {
     }
 
     #[test]
-    fn human_skill_nodes_require_stable_ids() {
+    fn interactive_items_are_stages_named_by_their_skill_or_id() {
         let tmp = TempDir::new().unwrap();
         let graphs = tmp.path().join(".lf/graphs");
         fs::create_dir_all(&graphs).unwrap();
         fs::write(
             graphs.join("review.yaml"),
-            "- step:\n    name: review-design\n    human: true\n",
+            "- interactive: review-design\n- interactive: {name: demo, id: final-demo}\n",
         )
         .unwrap();
-
-        let error = load_graph("review", tmp.path()).unwrap_err();
-        assert!(error.to_string().contains("require a stable id"));
+        let graph = load_graph("review", tmp.path()).unwrap();
+        let items = compile_graph(&graph, tmp.path()).unwrap();
+        let stages: Vec<_> = items
+            .iter()
+            .filter_map(|item| match item {
+                ConcreteStep::Skill(skill) => skill.stage().map(str::to_owned),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(stages, ["review-design", "final-demo"]);
 
         fs::write(
             graphs.join("retired.yaml"),
-            "- step:\n    name: review-design\n    feedback: true\n",
+            "- step:\n    name: review-design\n    human: true\n",
         )
         .unwrap();
         let error = load_graph("retired", tmp.path()).unwrap_err();
-        assert!(error.to_string().contains("metadata are retired"));
+        assert!(error.to_string().contains("retired"), "{error}");
+        fs::write(graphs.join("item.yaml"), "- human: review-design\n").unwrap();
+        let error = load_graph("item", tmp.path()).unwrap_err();
+        assert!(
+            error.to_string().contains("interactive: <skill>"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -1329,7 +1385,11 @@ mod tests {
             ),
             (
                 "- implement\n- loop: implement\n  step: {name: demo, id: demo, human: true}\n",
-                "autonomous",
+                "retired",
+            ),
+            (
+                "- implement\n- loop: implement\n  step: demo\n  interactive: demo\n",
+                "not both",
             ),
             (
                 "- implement\n- step: {name: gate, repeat: {from: implement}}\n",
@@ -1362,13 +1422,13 @@ mod tests {
     }
 
     #[test]
-    fn nested_expansion_preserves_human_occurrence_identity() {
+    fn nested_expansion_preserves_stage_identity() {
         let tmp = TempDir::new().unwrap();
         let graphs = tmp.path().join(".lf/graphs");
         fs::create_dir_all(&graphs).unwrap();
         fs::write(
             graphs.join("inner.yaml"),
-            "- step:\n    id: revise\n    name: implement\n- step:\n    id: review_kickoff\n    name: review-design\n    human: true\n",
+            "- step:\n    id: revise\n    name: implement\n- interactive:\n    id: review_kickoff\n    name: review-design\n",
         )
         .unwrap();
         fs::write(graphs.join("outer.yaml"), "- graph: inner\n").unwrap();
@@ -1379,7 +1439,7 @@ mod tests {
             panic!("nested review node must compile to a skill")
         };
         assert_eq!(step.id.as_deref(), Some("review_kickoff"));
-        assert!(step.human);
+        assert!(step.interactive);
         assert_eq!(step.sources, vec!["outer", "inner"]);
     }
 
@@ -1390,7 +1450,7 @@ mod tests {
         fs::create_dir_all(&graphs).unwrap();
         fs::write(
             graphs.join("inner.yaml"),
-            "- step:\n    id: review_kickoff\n    name: review-design\n    human: true\n",
+            "- interactive:\n    id: review_kickoff\n    name: review-design\n",
         )
         .unwrap();
         fs::write(
@@ -1404,7 +1464,7 @@ mod tests {
             .to_string()
             .contains("not unique after expansion"));
 
-        fs::write(graphs.join("invalid.yaml"), "- cmd: sync\n  human: true\n").unwrap();
+        fs::write(graphs.join("invalid.yaml"), "- cmd: sync\n  id: review\n").unwrap();
         assert!(load_graph("invalid", tmp.path())
             .unwrap_err()
             .to_string()
@@ -1619,7 +1679,7 @@ Design the feature.
                     panic!("VSM should contain only its five skills");
                 };
                 assert_eq!(step.sources, ["vsm-operate"]);
-                assert!(!step.human);
+                assert!(!step.interactive);
                 assert!(step.returns.is_none());
                 let content = step.skill.content.as_ref().unwrap();
                 assert!(content.contains("lf wave list --current --json"));
@@ -1682,9 +1742,9 @@ Design the feature.
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let error = parse_graph_items(&value).expect_err("and steps are retired");
-        assert!(error
-            .to_string()
-            .contains("graph item mapping must include step, loop, cmd, graph, or xor"));
+        assert!(error.to_string().contains(
+            "graph item mapping must include step, interactive, loop, cmd, graph, or xor"
+        ));
     }
 
     #[test]
@@ -1698,9 +1758,9 @@ Design the feature.
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let error = parse_graph_items(&value).expect_err("or steps are not supported");
-        assert!(error
-            .to_string()
-            .contains("graph item mapping must include step, loop, cmd, graph, or xor"));
+        assert!(error.to_string().contains(
+            "graph item mapping must include step, interactive, loop, cmd, graph, or xor"
+        ));
     }
 
     #[test]
@@ -1926,7 +1986,7 @@ Design the feature.
         fs::write(tmp.path().join(".lf/skills/work.md"), "Captured work").unwrap();
         fs::write(
             tmp.path().join(".lf/graphs/inner.yaml"),
-            "- step:\n    name: work\n    id: review\n    human: true\n- cmd: pr land --local\n",
+            "- interactive:\n    name: work\n    id: review\n- cmd: pr land --local\n",
         )
         .unwrap();
         fs::write(tmp.path().join(".lf/graphs/outer.yaml"),
@@ -1945,16 +2005,13 @@ Design the feature.
         };
         branch.paths.get_mut("proceed").unwrap().steps = vec![Step::new(Target::Graph(inner))];
         assert_eq!(compile_graph(&outer, tmp.path()).unwrap(), named);
-        assert_eq!(
-            human_occurrence_ids(&outer, tmp.path()).unwrap(),
-            ["review"]
-        );
         let ConcreteStep::Xor(branch) = &named[0] else {
             panic!("captured branch")
         };
         let ConcreteStep::Skill(review) = &branch.paths["proceed"].steps[0] else {
             panic!("review")
         };
+        assert_eq!(review.stage(), Some("review"));
         assert_eq!(review.skill.content.as_deref(), Some("Captured work"));
         assert_eq!(review.sources, ["outer", "inner"]);
         let ConcreteStep::Command(command) = &branch.paths["proceed"].steps[1] else {
@@ -2085,10 +2142,9 @@ Design the feature.
               agent: claude
           - loop: nested-work
             step: pin-other
-          - step:
+          - interactive:
               name: pin-other
-              id: nested-human
-              human: true
+              id: nested-stage
       quiet:
         description: Nothing to do
 "#,
@@ -2096,10 +2152,6 @@ Design the feature.
         .unwrap();
         let graph = load_graph("pin-root", tmp.path()).unwrap();
         let pinned = compile_graph(&graph, tmp.path()).unwrap();
-        assert_eq!(
-            human_occurrence_ids(&graph, tmp.path()).unwrap(),
-            ["nested-human"]
-        );
         let saved = serde_json::to_string(&pinned).unwrap();
 
         fs::write(skills.join("pin-router.md"), "Changed router").unwrap();
@@ -2165,15 +2217,15 @@ Design the feature.
     }
 
     #[test]
-    fn xor_expansion_validates_nested_edges_and_human_ids() {
+    fn xor_expansion_validates_nested_edges_and_stage_ids() {
         let tmp = TempDir::new().unwrap();
         let graphs = tmp.path().join(".lf/graphs");
         fs::create_dir_all(&graphs).unwrap();
         fs::write(graphs.join("pin-validation.yaml"), "- step:\n    name: implement\n    id: outside\n- xor:\n    paths:\n      nested:\n        description: Nested\n        graph: pin-invalid\n").unwrap();
         for (body, expected) in [
             ("- xor:\n    paths:\n      inline:\n        description: Invalid edge\n        steps:\n          - loop: outside\n", "preceding step"),
-            ("- xor:\n    paths:\n      inline:\n        description: Invalid gate\n        steps:\n          - step:\n              name: demo\n              human: true\n", "stable id"),
-            ("- xor:\n    paths:\n      inline:\n        description: Duplicate gate\n        steps:\n          - step:\n              name: demo\n              id: outside\n              human: true\n", "not unique"),
+            ("- xor:\n    paths:\n      inline:\n        description: Invalid gate\n        steps:\n          - step:\n              name: demo\n              human: true\n", "retired"),
+            ("- xor:\n    paths:\n      inline:\n        description: Duplicate gate\n        steps:\n          - interactive:\n              name: demo\n              id: outside\n", "not unique"),
         ] {
             fs::write(graphs.join("pin-invalid.yaml"), body).unwrap();
             let error = load_graph("pin-validation", tmp.path())
@@ -2212,10 +2264,15 @@ Design the feature.
     }
 
     #[test]
-    fn deploy_graph_parses_and_compiles() {
+    fn deliver_graph_gates_then_lands_and_waits() {
         let tmp = TempDir::new().unwrap();
-        let graph = load_graph("deploy", tmp.path()).unwrap();
+        let graph = load_graph("deliver", tmp.path()).unwrap();
         let items = compile_graph(&graph, tmp.path()).unwrap();
-        assert_eq!(items.len(), 2); // gate, cmd: pr land
+        assert_eq!(items.len(), 2);
+        assert!(
+            matches!(&items[1], ConcreteStep::Command(command) if command.item.display_name() == "land --wait-and-fix")
+        );
+        assert!(load_graph("deploy", tmp.path()).is_err());
+        assert!(load_graph("ship", tmp.path()).is_err());
     }
 }

@@ -29,11 +29,10 @@ watch, check back or follow up later.
 
 - Within a turn, `lf task wait <issue> --until submitted` (or `terminal`, with
   `--timeout`) waits for a state change without polling.
-- Between turns, launched Graphs keep running independently. The periodic Task
-  check and CI watcher help only where installed: read `lf task automation`
-  and `lf ci watch --status`, and say which are active. `lf task reconcile`
-  checks deliveries once; it never resumes a stopped Graph. Inspect its history
-  and effects before selecting fresh work through `lf task run`.
+- Between turns, launched Graphs keep running independently. A shipping Task's
+  ship process lands and repairs it; reading its status restarts one that died.
+  Nothing resumes a stopped Graph: inspect its history and effects before
+  selecting fresh work through `lf task run`.
 - This conversation keeps the instructions it launched with.
   `lf connect --wave <wave> --fresh` gives the Wave a fresh conversation after an install.
 

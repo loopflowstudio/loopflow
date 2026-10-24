@@ -55,6 +55,9 @@ pub enum GraphOutcome {
     Completed,
     Waiting,
     Blocked(String),
+    /// The runner reached this stage, where a person takes part; the slice
+    /// before it is complete.
+    Staged(String),
 }
 
 #[async_trait]
@@ -123,6 +126,11 @@ impl<E: SkillExecutor> GraphRunner<E> {
         if leaf.progress.verdict.is_some() || leaf.route.is_some() {
             return settle_step(items, cursor);
         }
+        if let ConcreteStep::Skill(skill) = item {
+            if let Some(stage) = skill.stage() {
+                return Ok(Some(GraphOutcome::Staged(stage.to_string())));
+            }
+        }
         let ctx = ExecutionContext {
             progress: cursor.child.is_none().then_some(StepProgress {
                 index: cursor.index,
@@ -158,7 +166,7 @@ impl ConcreteXor {
         ConcreteSkill {
             skill: self.router.clone(),
             id: None,
-            human: false,
+            interactive: false,
             returns: None,
             sources: self.sources.clone(),
         }
@@ -488,7 +496,7 @@ mod tests {
         ConcreteSkill {
             skill: Skill::named(name),
             id: None,
-            human: false,
+            interactive: false,
             returns: None,
             sources: vec!["test".to_string()],
         }

@@ -6,7 +6,6 @@
       "name": "Clean backlog",
       "description": "",
       "rank": 5,
-      "completed": false,
       "assignee": null,
       "state": "unstarted",
       "completed_at": null,
@@ -65,6 +64,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -75,7 +78,6 @@
       "name": "Completed",
       "description": "",
       "rank": 6,
-      "completed": true,
       "assignee": null,
       "state": "completed",
       "completed_at": null,
@@ -166,7 +168,7 @@
             "id": null,
             "label": "implement",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "pursue"
@@ -178,7 +180,7 @@
             "id": null,
             "label": "compress",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "pursue"
@@ -190,7 +192,7 @@
             "id": null,
             "label": "sync",
             "kind": "op",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "pursue",
@@ -203,7 +205,7 @@
             "id": null,
             "label": "realign",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "pursue",
@@ -216,7 +218,7 @@
             "id": null,
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 0,
             "sources": [
               "pursue"
@@ -228,7 +230,7 @@
             "id": null,
             "label": "pr-publish",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "pursue"
@@ -406,6 +408,10 @@
     "run_control": {
       "unavailable": "Task is complete"
     },
+    "ship_control": {
+      "unavailable": "Task is complete"
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -416,7 +422,6 @@
       "name": "Stale active intent",
       "description": "",
       "rank": 7,
-      "completed": false,
       "assignee": null,
       "state": "unstarted",
       "completed_at": null,
@@ -449,7 +454,7 @@
     },
     "runtime": {
       "work_id": "ts_stale",
-      "status": "active",
+      "status": "working",
       "completion_pending": "Linear calls Task LOO-1 complete while it is active on its workflow; `lf task move LOO-1 end --force` completes it here",
       "reason": "ready",
       "updated_at": "2026-07-14T18:00:00Z",
@@ -507,7 +512,7 @@
             "id": "design",
             "label": "task-design",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -519,7 +524,7 @@
             "id": "implement",
             "label": "implement",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -532,7 +537,7 @@
             "id": null,
             "label": "realign",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -545,7 +550,7 @@
             "id": "decide",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -558,7 +563,7 @@
             "id": "demo",
             "label": "demo",
             "kind": "skill",
-            "human": true,
+            "interactive": true,
             "returns_to": null,
             "sources": [
               "feature",
@@ -571,7 +576,7 @@
             "id": "decide_delivery",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -584,7 +589,7 @@
             "id": null,
             "label": "xor-route",
             "kind": "xor",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -599,7 +604,7 @@
                     "id": "patch",
                     "label": "patch",
                     "kind": "skill",
-                    "human": false,
+                    "interactive": false,
                     "returns_to": null,
                     "sources": [],
                     "paths": []
@@ -618,7 +623,7 @@
             "id": null,
             "label": "pr land -c",
             "kind": "op",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -795,6 +800,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -805,7 +814,6 @@
       "name": "Unavailable evidence",
       "description": "",
       "rank": 8,
-      "completed": false,
       "assignee": null,
       "state": "unstarted",
       "completed_at": null,
@@ -838,7 +846,7 @@
     },
     "runtime": {
       "work_id": "ts_unavailable",
-      "status": "not_ready",
+      "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
       "updated_at": "2026-07-14T23:00:00Z",
@@ -887,6 +895,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -897,7 +909,6 @@
       "name": "User wait",
       "description": "",
       "rank": 2,
-      "completed": false,
       "assignee": null,
       "state": "unstarted",
       "completed_at": null,
@@ -930,7 +941,7 @@
     },
     "runtime": {
       "work_id": "task-user",
-      "status": "ready",
+      "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
       "updated_at": "2026-07-14T23:59:00Z",
@@ -988,7 +999,7 @@
             "id": "design",
             "label": "task-design",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -1000,7 +1011,7 @@
             "id": "implement",
             "label": "implement",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1013,7 +1024,7 @@
             "id": null,
             "label": "realign",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1026,7 +1037,7 @@
             "id": "decide",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -1039,7 +1050,7 @@
             "id": "demo",
             "label": "demo",
             "kind": "skill",
-            "human": true,
+            "interactive": true,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1052,7 +1063,7 @@
             "id": "decide_delivery",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -1065,7 +1076,7 @@
             "id": null,
             "label": "xor-route",
             "kind": "xor",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -1080,7 +1091,7 @@
                     "id": "patch",
                     "label": "patch",
                     "kind": "skill",
-                    "human": false,
+                    "interactive": false,
                     "returns_to": null,
                     "sources": [],
                     "paths": []
@@ -1099,7 +1110,7 @@
             "id": null,
             "label": "pr land -c",
             "kind": "op",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1277,6 +1288,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -1287,7 +1302,6 @@
       "name": "Dirty worktree",
       "description": "",
       "rank": 3,
-      "completed": false,
       "assignee": null,
       "state": "unstarted",
       "completed_at": null,
@@ -1320,7 +1334,7 @@
     },
     "runtime": {
       "work_id": "ts_dirty",
-      "status": "ready",
+      "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
       "updated_at": "2026-07-14T23:50:00Z",
@@ -1369,6 +1383,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -1379,7 +1397,6 @@
       "name": "Authored commits",
       "description": "",
       "rank": 4,
-      "completed": false,
       "assignee": null,
       "state": "unstarted",
       "completed_at": null,
@@ -1412,7 +1429,7 @@
     },
     "runtime": {
       "work_id": "ts_commits",
-      "status": "ready",
+      "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
@@ -1470,7 +1487,7 @@
             "id": "design",
             "label": "task-design",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -1482,7 +1499,7 @@
             "id": "implement",
             "label": "implement",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1495,7 +1512,7 @@
             "id": null,
             "label": "realign",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1508,7 +1525,7 @@
             "id": "decide",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -1521,7 +1538,7 @@
             "id": "demo",
             "label": "demo",
             "kind": "skill",
-            "human": true,
+            "interactive": true,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1534,7 +1551,7 @@
             "id": "decide_delivery",
             "label": "loop-or-next",
             "kind": "skill",
-            "human": false,
+            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -1547,7 +1564,7 @@
             "id": null,
             "label": "xor-route",
             "kind": "xor",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -1562,7 +1579,7 @@
                     "id": "patch",
                     "label": "patch",
                     "kind": "skill",
-                    "human": false,
+                    "interactive": false,
                     "returns_to": null,
                     "sources": [],
                     "paths": []
@@ -1581,7 +1598,7 @@
             "id": null,
             "label": "pr land -c",
             "kind": "op",
-            "human": false,
+            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1757,6 +1774,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,

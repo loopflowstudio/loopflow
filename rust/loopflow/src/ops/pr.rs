@@ -1,5 +1,8 @@
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
@@ -638,6 +641,12 @@ pub(crate) fn merge_needs_integration(state: Option<&str>, request: Option<&Merg
 pub(crate) struct PrMergeObservation {
     pub pr: PrInfo,
     pub request: Option<MergeRequest>,
+    /// Why GitHub last dropped the merge request: a queue removal reason or an
+    /// auto-merge disable code, lower-cased. `None` once it was armed or queued
+    /// again, or when it merged.
+    pub merge_exit: Option<String>,
+    /// The pull request's GraphQL node id.
+    pub node_id: String,
     merge_queue_enabled: bool,
     methods: MergeMethods,
 }
@@ -691,10 +700,29 @@ struct GhPrMerge {
     // Value requires the fields to exist while allowing GitHub's null values.
     auto_merge_request: serde_json::Value,
     merge_queue_entry: serde_json::Value,
+    timeline_items: GhMergeTimeline,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhMergeTimeline {
+    nodes: Vec<GhMergeEvent>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "__typename", rename_all_fields = "camelCase")]
+enum GhMergeEvent {
+    #[serde(rename = "RemovedFromMergeQueueEvent")]
+    RemovedFromQueue { reason: Option<String> },
+    #[serde(rename = "AutoMergeDisabledEvent")]
+    AutoMergeDisabled { reason_code: Option<String> },
+    #[serde(rename = "AutoMergeEnabledEvent")]
+    AutoMergeEnabled {},
+    #[serde(rename = "AddedToMergeQueueEvent")]
+    AddedToQueue {},
 }
 
 pub(crate) fn observe_pr_merge(repo: &Path, number: u64) -> OpsResult<PrMergeObservation> {
-    let query = "query LoopflowPrMerge($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed pullRequest(number:$number){id number url state isDraft headRefName headRefOid mergedAt mergeCommit{oid} mergeStateStatus isMergeQueueEnabled autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}";
+    let query = "query LoopflowPrMerge($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed pullRequest(number:$number){id number url state isDraft headRefName headRefOid mergedAt mergeCommit{oid} mergeStateStatus isMergeQueueEnabled autoMergeRequest{enabledAt} mergeQueueEntry{id} timelineItems(last:1,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT,AUTO_MERGE_DISABLED_EVENT,AUTO_MERGE_ENABLED_EVENT,ADDED_TO_MERGE_QUEUE_EVENT]){nodes{__typename ...on RemovedFromMergeQueueEvent{reason} ...on AutoMergeDisabledEvent{reasonCode}}}}}}";
     let observation = Command::new("gh")
         .args([
             "api",
@@ -749,7 +777,7 @@ fn parse_pr_merge(output: &[u8]) -> OpsResult<PrMergeObservation> {
         state => return Err(OpsError::Parse(format!("unknown PR state: {state}"))),
     };
     let request = if !pr.merge_queue_entry.is_null() {
-        Some(MergeRequest::Queued(pr.id))
+        Some(MergeRequest::Queued(pr.id.clone()))
     } else if pr.auto_merge_request.is_null() {
         None
     } else if pr.is_merge_queue_enabled {
@@ -757,7 +785,19 @@ fn parse_pr_merge(output: &[u8]) -> OpsResult<PrMergeObservation> {
     } else {
         Some(MergeRequest::Auto)
     };
+    let merge_exit = match pr.timeline_items.nodes.into_iter().last() {
+        Some(GhMergeEvent::RemovedFromQueue { reason }) => {
+            Some(reason.unwrap_or_default().to_ascii_lowercase())
+                .filter(|reason| reason != "merged")
+        }
+        Some(GhMergeEvent::AutoMergeDisabled { reason_code }) => {
+            Some(reason_code.unwrap_or_default().to_ascii_lowercase())
+        }
+        Some(GhMergeEvent::AutoMergeEnabled {} | GhMergeEvent::AddedToQueue {}) | None => None,
+    };
     Ok(PrMergeObservation {
+        merge_exit,
+        node_id: pr.id,
         merge_queue_enabled: pr.is_merge_queue_enabled,
         methods: serde_json::from_value(response["data"]["repository"].clone()).map_err(
             |error| OpsError::Parse(format!("failed to read repository merge methods: {error}")),
@@ -816,6 +856,31 @@ pub(crate) fn disable_auto_merge(
     }
     Err(OpsError::CommandFailed {
         command: description,
+        stderr: stderr_from_output(&output),
+    })
+}
+
+/// Put an armed pull request back in its merge queue at exactly `head_sha`.
+/// GitHub leaves auto-merge on after some queue removals and never re-enters.
+pub(crate) fn enqueue_pr(repo: &Path, node_id: &str, head_sha: &str) -> OpsResult<()> {
+    let output = Command::new("gh")
+        .args([
+            "api",
+            "graphql",
+            "-f",
+            "query=mutation($id:ID!,$head:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head}){clientMutationId}}",
+            "-f",
+            &format!("id={node_id}"),
+            "-f",
+            &format!("head={head_sha}"),
+        ])
+        .current_dir(repo)
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(OpsError::CommandFailed {
+        command: format!("gh api graphql [enqueue pull request at {head_sha}]"),
         stderr: stderr_from_output(&output),
     })
 }
@@ -1115,7 +1180,11 @@ pub(crate) fn merge_gate_state(
         };
         checks.extend(contexts.nodes);
         if !contexts.page_info.has_next_page {
-            return Ok(project_checks(checks));
+            let producers = match &page.base {
+                Some(base) => RequiredProducers::read(repo, &required_contexts_for(repo, base)),
+                None => RequiredProducers::default(),
+            };
+            return Ok(project_checks(checks, &producers));
         }
         let next = contexts.page_info.end_cursor.ok_or_else(|| {
             OpsError::Message(format!(
@@ -1134,7 +1203,7 @@ pub(crate) fn merge_gate_state(
 const CHECKS_QUERY: &str = r#"query LoopflowPrChecks($owner:String!,$name:String!,$number:Int!,$endCursor:String) {
   repository(owner:$owner,name:$name) {
     pullRequest(number:$number) {
-      headRefOid
+      headRefOid baseRefName
       commits(last:1) { nodes { commit {
         oid
         statusCheckRollup { contexts(first:100,after:$endCursor) {
@@ -1162,7 +1231,7 @@ fn read_check_page(repo: &Path, number: u64, cursor: Option<&str>) -> OpsResult<
     command.args([
         "api", "graphql", "-F", "owner={owner}", "-F", "name={repo}",
         "-F", &format!("number={number}"), "-f", &format!("query={CHECKS_QUERY}"),
-        "--jq", ".data.repository.pullRequest | {head: .headRefOid, commit: .commits.nodes[0].commit.oid, contexts: .commits.nodes[0].commit.statusCheckRollup.contexts}",
+        "--jq", ".data.repository.pullRequest | {head: .headRefOid, base: .baseRefName, commit: .commits.nodes[0].commit.oid, contexts: .commits.nodes[0].commit.statusCheckRollup.contexts}",
     ]);
     if let Some(cursor) = cursor {
         command.args(["-f", &format!("endCursor={cursor}")]);
@@ -1187,6 +1256,7 @@ fn read_check_page(repo: &Path, number: u64, cursor: Option<&str>) -> OpsResult<
 #[derive(Debug, Deserialize)]
 struct GhCheckPage {
     head: String,
+    base: Option<String>,
     commit: Option<String>,
     contexts: Option<GhCheckContexts>,
 }
@@ -1249,7 +1319,10 @@ enum GhCheckIdentity {
     Status(String),
 }
 
-fn project_checks(mut contexts: Vec<GhCheckContext>) -> Option<MergeGateReading> {
+fn project_checks(
+    mut contexts: Vec<GhCheckContext>,
+    producers: &RequiredProducers,
+) -> Option<MergeGateReading> {
     contexts.sort_by_key(|context| {
         std::cmp::Reverse(match context {
             GhCheckContext::CheckRun { started_at, .. } => *started_at,
@@ -1259,6 +1332,7 @@ fn project_checks(mut contexts: Vec<GhCheckContext>) -> Option<MergeGateReading>
     let mut seen = std::collections::HashSet::new();
     let mut required = Vec::new();
     let mut full = Vec::new();
+    let mut fails_required = false;
     for context in contexts {
         let (identity, name, state, link, is_required) = match context {
             GhCheckContext::CheckRun {
@@ -1274,12 +1348,17 @@ fn project_checks(mut contexts: Vec<GhCheckContext>) -> Option<MergeGateReading>
                     Some(run) => (run.workflow.map(|workflow| workflow.name), Some(run.event)),
                     None => (None, None),
                 };
-                let identity = GhCheckIdentity::Run(name.clone(), workflow, event);
                 let state = if status == "COMPLETED" {
                     conclusion.unwrap_or_default()
                 } else {
                     status
                 };
+                // A failed job a required aggregate needs fails that aggregate
+                // before GitHub even creates its check run.
+                fails_required |= !is_required
+                    && GhCheck::new(name.clone(), &state, None).failed()
+                    && producers.fails_required(workflow.as_deref(), &name);
+                let identity = GhCheckIdentity::Run(name.clone(), workflow, event);
                 (identity, name, state, details_url, is_required)
             }
             GhCheckContext::StatusContext {
@@ -1304,7 +1383,191 @@ fn project_checks(mut contexts: Vec<GhCheckContext>) -> Option<MergeGateReading>
         }
         full.push(check);
     }
-    (!required.is_empty()).then(|| MergeGateReading::from_checks(required, full))
+    if required.is_empty() && !fails_required {
+        return None;
+    }
+    let mut reading = MergeGateReading::from_checks(required, full);
+    reading.failing |= fails_required;
+    Some(reading)
+}
+
+// Required checks and the jobs that produce them
+
+const REQUIRED_TTL: Duration = Duration::from_secs(3600);
+
+/// Required check names by (checkout, base branch), with when they were read.
+type RequiredCache = HashMap<(PathBuf, String), (Instant, BTreeSet<String>)>;
+
+static REQUIRED: LazyLock<Mutex<RequiredCache>> = LazyLock::new(Default::default);
+
+/// Required check names from a `rules/branches/{branch}` or classic
+/// `protection/required_status_checks` response.
+pub(crate) fn required_contexts(body: &str) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return names;
+    };
+    let mut collect = |checks: &serde_json::Value| {
+        for check in checks.as_array().into_iter().flatten() {
+            if let Some(name) = check.as_str().or_else(|| check["context"].as_str()) {
+                names.insert(name.to_string());
+            }
+        }
+    };
+    for rule in value.as_array().into_iter().flatten() {
+        if rule["type"] == "required_status_checks" {
+            collect(&rule["parameters"]["required_status_checks"]);
+        }
+    }
+    collect(&value["contexts"]);
+    collect(&value["checks"]);
+    names
+}
+
+/// The base branch's required check names, reread hourly. An unreadable rule
+/// set contributes nothing: the landing then waits for the required check itself.
+fn required_contexts_for(repo: &Path, base: &str) -> BTreeSet<String> {
+    let key = (repo.to_path_buf(), base.to_string());
+    if let Some((read_at, names)) = REQUIRED.lock().expect("required cache poisoned").get(&key) {
+        if read_at.elapsed() < REQUIRED_TTL {
+            return names.clone();
+        }
+    }
+    let mut names = BTreeSet::new();
+    for path in [
+        format!("repos/{{owner}}/{{repo}}/rules/branches/{base}"),
+        format!("repos/{{owner}}/{{repo}}/branches/{base}/protection/required_status_checks"),
+    ] {
+        if let Ok(output) = Command::new("gh")
+            .args(["api", &path])
+            .current_dir(repo)
+            .output()
+        {
+            if output.status.success() {
+                names.extend(required_contexts(&String::from_utf8_lossy(&output.stdout)));
+            }
+        }
+    }
+    REQUIRED
+        .lock()
+        .expect("required cache poisoned")
+        .insert(key, (Instant::now(), names.clone()));
+    names
+}
+
+/// The workflow jobs whose failure fails a required check: each required
+/// check's producing job and everything it transitively `needs`, read from the
+/// checkout's `.github/workflows`. A required check with no producer here is
+/// judged only when its own check run reports.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct RequiredProducers {
+    /// (workflow name, job name) pairs.
+    jobs: HashSet<(String, String)>,
+    /// The required checks some job here produces.
+    produced: BTreeSet<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkflowFile {
+    name: Option<String>,
+    #[serde(default)]
+    jobs: HashMap<String, WorkflowJob>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkflowJob {
+    name: Option<String>,
+    #[serde(default)]
+    needs: WorkflowNeeds,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(untagged)]
+enum WorkflowNeeds {
+    #[default]
+    None,
+    One(String),
+    Many(Vec<String>),
+}
+
+impl RequiredProducers {
+    pub(crate) fn read(checkout: &Path, required: &BTreeSet<String>) -> Self {
+        let directory = checkout.join(".github").join("workflows");
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            return Self::default();
+        };
+        let mut files: Vec<_> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "yml" || extension == "yaml")
+            })
+            .filter_map(|path| {
+                let source = std::fs::read_to_string(&path).ok()?;
+                let relative = path
+                    .strip_prefix(checkout)
+                    .ok()?
+                    .to_string_lossy()
+                    .into_owned();
+                Some((relative, source))
+            })
+            .collect();
+        files.sort();
+        Self::parse(&files, required)
+    }
+
+    fn parse(files: &[(String, String)], required: &BTreeSet<String>) -> Self {
+        let mut jobs = HashSet::new();
+        let mut produced = BTreeSet::new();
+        for (path, source) in files {
+            let Ok(workflow) = serde_yaml_ng::from_str::<WorkflowFile>(source) else {
+                continue;
+            };
+            // GitHub names an unnamed workflow by its path.
+            let workflow_name = workflow.name.clone().unwrap_or_else(|| path.clone());
+            let display = |key: &str| -> String {
+                workflow.jobs[key]
+                    .name
+                    .clone()
+                    .filter(|name| !name.contains("${{"))
+                    .unwrap_or_else(|| key.to_string())
+            };
+            for key in workflow.jobs.keys() {
+                if !required.contains(&display(key)) {
+                    continue;
+                }
+                produced.insert(display(key));
+                let mut pending = vec![key.clone()];
+                let mut seen = HashSet::new();
+                while let Some(key) = pending.pop() {
+                    if !seen.insert(key.clone()) {
+                        continue;
+                    }
+                    let Some(job) = workflow.jobs.get(&key) else {
+                        continue;
+                    };
+                    match &job.needs {
+                        WorkflowNeeds::None => {}
+                        WorkflowNeeds::One(need) => pending.push(need.clone()),
+                        WorkflowNeeds::Many(needs) => pending.extend(needs.iter().cloned()),
+                    }
+                    jobs.insert((workflow_name.clone(), display(&key)));
+                }
+            }
+        }
+        Self { jobs, produced }
+    }
+
+    /// Whether this check run, by its workflow and job, is one a required check
+    /// is made of. Matrix runs (`rust-test (library, 3, 5)`) match their job.
+    pub(crate) fn fails_required(&self, workflow: Option<&str>, check: &str) -> bool {
+        let Some(workflow) = workflow else {
+            return false;
+        };
+        let job = check.split_once(" (").map_or(check, |(job, _)| job);
+        self.jobs.contains(&(workflow.to_string(), job.to_string()))
+    }
 }
 
 /// The merge-gate reading for one head: whether the required checks block the
@@ -2039,7 +2302,8 @@ mod tests {
                 "id":"pr", "number":1, "url":"https://example.test/pr/1", "state":"OPEN", "isDraft":false,
                 "headRefName":"release", "headRefOid":"exact-head", "mergedAt":null, "mergeCommit":null,
                 "mergeStateStatus":"BEHIND", "isMergeQueueEnabled":queue_enabled,
-                "autoMergeRequest":auto, "mergeQueueEntry":entry
+                "autoMergeRequest":auto, "mergeQueueEntry":entry,
+                "timelineItems":{"nodes":[]}
             }}}});
             let observation = super::parse_pr_merge(&serde_json::to_vec(&value).unwrap()).unwrap();
             assert_eq!(
@@ -2056,9 +2320,9 @@ mod tests {
     use super::{
         classify_pr_read_failure, disable_auto_merge, is_missing_pr, merge_gate_state,
         merge_needs_integration, normalize_task_pr_copy, observe_merge_request,
-        parse_generated_pr_copy, parse_pr_merge, pr_number_from_url, project_checks, GhCheck,
-        GhRestHead, GhRestPr, MergeGateReading, MergeRequest, PrCopy, RequiredChecks,
-        TaskPrCopyLifecycle,
+        parse_generated_pr_copy, parse_pr_merge, pr_number_from_url, project_checks,
+        required_contexts, GhCheck, GhRestHead, GhRestPr, MergeGateReading, MergeRequest, PrCopy,
+        RequiredChecks, RequiredProducers, TaskPrCopyLifecycle,
     };
     use crate::ops::task::TaskPrContext;
     use serde_json::{json, Value};
@@ -2181,7 +2445,8 @@ esac
             "state":state, "isDraft":false, "headRefName":"feature", "headRefOid":"head-1",
             "mergedAt":"2026-09-29T05:02:15Z", "mergeCommit":{"oid":"merge-1"},
             "mergeStateStatus":"BEHIND", "isMergeQueueEnabled":true,
-            "autoMergeRequest":request, "mergeQueueEntry":queue
+            "autoMergeRequest":request, "mergeQueueEntry":queue,
+            "timelineItems":{"nodes":[]}
         }}}})
     }
 
@@ -2344,7 +2609,7 @@ esac
         other_event["detailsUrl"] = json!("https://ci/push");
         let contexts =
             serde_json::from_value(json!([old, new, other_workflow, other_event])).unwrap();
-        let reading = project_checks(contexts).unwrap();
+        let reading = project_checks(contexts, &RequiredProducers::default()).unwrap();
         assert!(!reading.failing);
         let urls: Vec<_> = reading
             .failing_leaves
@@ -2371,9 +2636,11 @@ esac
         ] {
             let required = run("required", state, true, "2026-09-29T00:00:00Z");
             let optional = run("optional", "FAILURE", false, "2026-09-29T00:00:00Z");
-            let reading =
-                project_checks(serde_json::from_value(json!([required, optional])).unwrap())
-                    .unwrap();
+            let reading = project_checks(
+                serde_json::from_value(json!([required, optional])).unwrap(),
+                &RequiredProducers::default(),
+            )
+            .unwrap();
             assert_eq!(
                 (reading.failing, reading.pending),
                 (failing, pending),
@@ -2383,7 +2650,11 @@ esac
         }
         let mut pending = run("required", "FAILURE", true, "2026-09-29T00:00:00Z");
         pending["status"] = json!("IN_PROGRESS");
-        let reading = project_checks(serde_json::from_value(json!([pending])).unwrap()).unwrap();
+        let reading = project_checks(
+            serde_json::from_value(json!([pending])).unwrap(),
+            &RequiredProducers::default(),
+        )
+        .unwrap();
         assert!(!reading.failing);
         assert!(reading.pending);
     }
@@ -2394,12 +2665,105 @@ esac
         let mut pending = run("integration", "SUCCESS", true, "2026-10-17T00:00:00Z");
         pending["status"] = json!("IN_PROGRESS");
         pending["conclusion"] = json!(null);
-        let reading =
-            project_checks(serde_json::from_value(json!([failed, pending])).unwrap()).unwrap();
+        let reading = project_checks(
+            serde_json::from_value(json!([failed, pending])).unwrap(),
+            &RequiredProducers::default(),
+        )
+        .unwrap();
         assert!(reading.failing);
         assert!(reading.pending);
         assert_eq!(reading.failing_leaves.len(), 1);
         assert_eq!(reading.failing_leaves[0].name, "lint");
+    }
+
+    const WORKFLOW: &str = r#"
+name: CI
+on: [pull_request]
+jobs:
+  scratch-clear:
+    runs-on: ubuntu-latest
+  rust-build:
+    needs: scratch-clear
+    runs-on: ubuntu-latest
+  rust-test:
+    needs: [scratch-clear, rust-build]
+    strategy:
+      matrix:
+        shard: [0, 1]
+    runs-on: ubuntu-latest
+  docs:
+    runs-on: ubuntu-latest
+  tests-result:
+    if: ${{ always() }}
+    needs: [rust-test]
+    runs-on: ubuntu-latest
+"#;
+
+    fn producers() -> RequiredProducers {
+        RequiredProducers::parse(
+            &[(".github/workflows/ci.yml".into(), WORKFLOW.into())],
+            &["tests-result".to_string()].into(),
+        )
+    }
+
+    #[test]
+    fn required_checks_come_from_rulesets_or_classic_protection() {
+        let rules = r#"[{"type":"deletion"},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"tests-result","integration_id":15368}]}}]"#;
+        assert_eq!(
+            required_contexts(rules),
+            ["tests-result".to_string()].into()
+        );
+        let classic = r#"{"contexts":["tests-result"],"checks":[{"context":"lint","app_id":1}]}"#;
+        assert_eq!(
+            required_contexts(classic),
+            ["lint".to_string(), "tests-result".to_string()].into()
+        );
+        assert!(required_contexts(r#"{"message":"Branch not protected"}"#).is_empty());
+    }
+
+    #[test]
+    fn required_producers_follow_needs_and_match_matrix_runs() {
+        let producers = producers();
+        for job in [
+            "tests-result",
+            "rust-test (0)",
+            "rust-build",
+            "scratch-clear",
+        ] {
+            assert!(producers.fails_required(Some("CI"), job), "{job}");
+        }
+        assert!(!producers.fails_required(Some("CI"), "docs"));
+        assert!(!producers.fails_required(Some("Other"), "rust-build"));
+        assert!(!producers.fails_required(None, "rust-build"));
+    }
+
+    #[test]
+    fn a_needed_job_fails_the_gate_before_its_aggregate_reports() {
+        // GitHub creates no `tests-result` run until everything it needs finishes.
+        let contexts = json!([
+            run("rust-test (1)", "FAILURE", false, "2026-10-21T00:00:00Z"),
+            run("docs", "FAILURE", false, "2026-10-21T00:00:00Z"),
+        ]);
+        assert!(
+            project_checks(
+                serde_json::from_value(contexts.clone()).unwrap(),
+                &RequiredProducers::default()
+            )
+            .is_none(),
+            "without producers the gate is unreported"
+        );
+        let reading =
+            project_checks(serde_json::from_value(contexts).unwrap(), &producers()).unwrap();
+        assert!(reading.failing);
+        let leaves: Vec<_> = reading
+            .failing_leaves
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(leaves, ["rust-test (1)", "docs"]);
+        // An optional failure alone still leaves the gate unreported.
+        let optional = json!([run("docs", "FAILURE", false, "2026-10-21T00:00:00Z")]);
+        assert!(project_checks(serde_json::from_value(optional).unwrap(), &producers()).is_none());
     }
 
     #[test]
@@ -2411,7 +2775,11 @@ esac
             {"__typename":"StatusContext","context":"test","state":"SUCCESS",
              "targetUrl":"https://legacy/older","isRequired":true}
         ]);
-        let reading = project_checks(serde_json::from_value(contexts).unwrap()).unwrap();
+        let reading = project_checks(
+            serde_json::from_value(contexts).unwrap(),
+            &RequiredProducers::default(),
+        )
+        .unwrap();
         assert!(reading.failing);
         assert_eq!(
             reading.failing_leaves[0].url.as_deref(),

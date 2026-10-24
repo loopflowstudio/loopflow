@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ship it placement</title>
+<style>
+:root {
+  --bg: #ececef; --win: #ffffff; --side: #f3f2f5; --line: #e2e1e6; --text: #1d1d1f;
+  --muted: #6e6e73; --faint: #a6a6ab; --sel: #e3e2e9; --hover: #ebeaef;
+  --green: #1a9b4c; --green-bg: #e1f5e8; --green-ink: #ffffff; --amber: #d18b0b;
+  --term: #1b1b1d; --term-text: #c9c9ce; --term-dim: #7a7a80; --term-green: #5fd38a;
+  --menu: #ffffff; --shadow: 0 12px 32px rgba(0,0,0,.14), 0 1px 3px rgba(0,0,0,.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111113; --win: #1d1d1f; --side: #232326; --line: #34343a; --text: #f2f2f7;
+    --muted: #a1a1a8; --faint: #6c6c72; --sel: #37373d; --hover: #2c2c30;
+    --green: #2fbf62; --green-bg: #183a25; --green-ink: #06200f; --amber: #e7a531;
+    --term: #121214; --term-text: #c7c7cc; --term-dim: #6c6c72; --term-green: #5fd38a;
+    --menu: #2a2a2e; --shadow: 0 12px 32px rgba(0,0,0,.5), 0 1px 3px rgba(0,0,0,.4);
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; }
+.page { max-width: 1080px; margin: 0 auto; padding: 28px 16px 60px; }
+h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -.01em; }
+.sub { color: var(--muted); margin: 0 0 20px; max-width: 720px; }
+.tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.tab { border: 1px solid var(--line); background: var(--win); color: var(--text); border-radius: 8px;
+  padding: 8px 12px; cursor: pointer; font: inherit; text-align: left; min-width: 200px; flex: 1; }
+.tab b { display: block; font-size: 13px; }
+.tab span { color: var(--muted); font-size: 12px; }
+.tab.on { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+.blurb { margin: 0 0 14px; color: var(--muted); max-width: 820px; }
+.blurb b { color: var(--text); font-weight: 600; }
+.controls { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; color: var(--muted); font-size: 12px; }
+.controls button { font: inherit; border: 1px solid var(--line); background: var(--win); color: var(--text);
+  border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+
+/* window */
+.win { background: var(--win); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+  box-shadow: var(--shadow); display: grid; grid-template-columns: 300px 1fr; height: 580px; position: relative; }
+.side { background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
+.lights { display: flex; gap: 8px; padding: 14px 14px 10px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
+.lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.repo { padding: 0 14px 8px; font-weight: 600; font-size: 12px; color: var(--muted); }
+.filters { display: flex; gap: 2px; margin: 0 10px 8px; background: var(--hover); border-radius: 7px; padding: 2px; }
+.filters button { flex: 1; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px;
+  padding: 4px 0; border-radius: 5px; cursor: pointer; }
+.filters button.on { background: var(--win); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.filters em { font-style: normal; color: var(--faint); margin-left: 3px; }
+.rows { overflow: auto; padding: 0 6px; flex: 1; }
+.row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: default;
+  position: relative; min-height: 46px; }
+.row:hover { background: var(--hover); }
+.row.sel { background: var(--sel); }
+.row .txt { min-width: 0; flex: 1; }
+.row .id { font: 11px ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); }
+.row .ti { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .pg { font-size: 11px; color: var(--green); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.empty { color: var(--faint); padding: 18px 10px; font-size: 12px; }
+
+/* status icons */
+.st { width: 16px; height: 16px; flex: none; display: inline-block; position: relative; border: 0; padding: 0;
+  background: transparent; }
+.st svg { width: 16px; height: 16px; display: block; }
+button.st { cursor: pointer; border-radius: 50%; }
+button.st:hover { box-shadow: 0 0 0 3px var(--hover), 0 0 0 4px var(--line); }
+.spin { transform-origin: 8px 8px; animation: spin 1.1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* main */
+.main { display: flex; flex-direction: column; min-width: 0; position: relative; }
+.head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line);
+  min-height: 48px; position: relative; }
+.head .id { font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+.head .ti { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+.head .state { color: var(--muted); white-space: nowrap; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--win);
+  color: var(--text); font: inherit; border-radius: 999px; padding: 3px 10px 3px 7px; cursor: pointer; white-space: nowrap; }
+.chip:hover { background: var(--hover); }
+.chip .caret { color: var(--faint); font-size: 10px; }
+.kbd { font: 11px ui-monospace, Menlo, monospace; color: var(--faint); border: 1px solid var(--line);
+  border-radius: 4px; padding: 0 4px; }
+
+.btn-ship { background: var(--green); color: var(--green-ink); border: 0; font: inherit; font-weight: 600;
+  border-radius: 7px; padding: 5px 12px; cursor: pointer; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
+.btn-ship:hover { filter: brightness(1.07); }
+.btn-stop { background: transparent; color: var(--text); border: 1px solid var(--line); font: inherit;
+  border-radius: 7px; padding: 4px 10px; cursor: pointer; white-space: nowrap; }
+.btn-stop:hover { background: var(--hover); }
+
+/* B: hover reveal */
+.hover-ship { opacity: 0; transform: translateX(4px); transition: opacity .12s, transform .12s;
+  background: var(--green); color: var(--green-ink); border: 0; font: inherit; font-size: 12px; font-weight: 600;
+  border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+.row:hover .hover-ship, .head:hover .hover-ship, .v-L .main:hover .hover-ship, .v-L .main:hover .hover-stop, .hover-ship:focus { opacity: 1; transform: none; }
+.hover-stop { opacity: 0; transition: opacity .12s; background: transparent; border: 1px solid var(--line);
+  color: var(--text); font: inherit; font-size: 12px; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+.row:hover .hover-stop, .head:hover .hover-stop { opacity: 1; }
+.lslot { width: 74px; flex: none; display: flex; }
+
+/* A: menu */
+.menu { position: absolute; z-index: 5; background: var(--menu); border: 1px solid var(--line); border-radius: 9px;
+  box-shadow: var(--shadow); padding: 5px; width: 290px; }
+.menu .mi { display: flex; gap: 9px; align-items: flex-start; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.menu .mi:hover { background: var(--hover); }
+.menu .mi.cur { color: var(--muted); }
+.menu .mi .k { margin-left: auto; }
+.menu .mi small { display: block; color: var(--muted); font-size: 11px; }
+.menu .mi.ship b { color: var(--green); }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
+
+/* C: rail */
+.rail { display: flex; align-items: center; gap: 0; padding: 12px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; row-gap: 10px; }
+.stages { display: flex; align-items: flex-start; flex: 1; min-width: 0; }
+.stage { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; position: relative; min-width: 0; border-radius: 8px; padding: 4px 0; transition: background .15s; }
+.stage::before { content: ""; position: absolute; top: 12px; left: -50%; right: 50%; height: 2px; background: var(--line); z-index: 0; }
+.stage:first-child::before { display: none; }
+.stage.done::before, .stage.current::before { background: var(--muted); }
+.stage.auto::before { background: repeating-linear-gradient(90deg, var(--green) 0 4px, transparent 4px 7px); }
+.stage.shipdone::before { background: var(--green); }
+.dot { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line); background: var(--win); z-index: 1; position: relative; }
+.stage.done .dot { background: var(--muted); border-color: var(--muted); }
+.stage.shipdone .dot { background: var(--green); border-color: var(--green); }
+.stage.current .dot { border-color: var(--text); box-shadow: 0 0 0 3px var(--hover); }
+.stage.current.auto .dot, .stage.current.shipping .dot { border-color: var(--green); box-shadow: 0 0 0 4px var(--green-bg); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 7px var(--green-bg); } }
+.stage.auto .dot { border-color: var(--green); border-style: dashed; }
+.stage .nm { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.stage .who { font-size: 10px; color: var(--faint); height: 13px; }
+.stage.current .nm { font-weight: 600; }
+.stage .who.si { color: var(--green); }
+.railend { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; margin-left: 14px; }
+.railend small { color: var(--muted); font-size: 11px; max-width: 210px; text-align: right; }
+/* hovering Ship it previews what agents will stand in for */
+.rail:has(.btn-ship:hover) .stage.ahead { background: var(--green-bg); }
+.rail:has(.btn-ship:hover) .stage.ahead .who.h { color: var(--green); }
+.rail:has(.btn-ship:hover) .stage.ahead .who.h::after { content: " → stand-in"; }
+
+/* session */
+.term { flex: 1; background: var(--term); color: var(--term-text); font: 12px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+  padding: 14px 16px; overflow: auto; margin: 0; white-space: pre-wrap; }
+.term .d { color: var(--term-dim); } .term .g { color: var(--term-green); }
+.term .you { color: #8ab4ff; }
+.banner { display: flex; gap: 10px; align-items: center; padding: 8px 16px; background: var(--green-bg); color: var(--text);
+  border-bottom: 1px solid var(--line); font-size: 12px; }
+.banner b { color: var(--green); }
+.banner .grow { flex: 1; }
+
+.toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--text); color: var(--win);
+  border-radius: 9px; padding: 8px 10px 8px 14px; display: flex; gap: 14px; align-items: center; box-shadow: var(--shadow);
+  font-size: 12px; z-index: 6; white-space: nowrap; animation: up .18s ease-out; }
+.toast button { background: transparent; border: 0; color: var(--green); font: inherit; font-weight: 600; cursor: pointer; }
+@keyframes up { from { transform: translate(-50%, 8px); opacity: 0; } }
+
+.notes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 22px; }
+.note { background: var(--win); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.note h3 { margin: 0 0 6px; font-size: 13px; }
+.note ul { margin: 0; padding-left: 16px; color: var(--muted); }
+.note li { margin: 2px 0; }
+.note .plus { color: var(--green); } .note .minus { color: var(--amber); }
+.note.on { box-shadow: 0 0 0 1px var(--green); border-color: var(--green); }
+.shared { margin-top: 14px; color: var(--muted); font-size: 12px; max-width: 860px; }
+
+@media (max-width: 760px) {
+  .win { grid-template-columns: 1fr; height: auto; }
+  .side { border-right: 0; border-bottom: 1px solid var(--line); max-height: 260px; }
+  .term { min-height: 240px; }
+  .notes { grid-template-columns: 1fr; }
+  .rail { flex-direction: column; align-items: stretch; }
+  .railend { align-items: stretch; margin: 0; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Where does Ship it go?</h1>
+  <p class="sub">Three placements for the same action, clickable. Shipping runs a fake sequence (stand-in demo, gate, CI, a flake repair, the merge queue, merged) so you can watch each one carry the in-flight state. A shipped Task leaves the Working filter and shows up under Shipping.</p>
+
+  <div class="tabs" id="tabs"></div>
+  <p class="blurb" id="blurb"></p>
+  <div class="controls"><button data-action="reset">Reset</button><span id="hint"></span></div>
+  <div class="win" id="win"></div>
+
+  <div class="notes" id="notes"></div>
+  <p class="shared">All three: the state lives on the Task, Stop shipping is the undo (and disarms auto-merge), and a shipped Task drops out of the default Working view. These options are about where the button sits, not about what shipping does.</p>
+</div>
+
+<script>
+const VARIANTS = {
+  A: { name: "A · Status, like Linear", tag: "Ship it is a lifecycle state",
+       blurb: "<b>Ship it is a state change.</b> Every Task row's status circle and the state chip in the Task heading open the lifecycle menu: Working, <b>Shipping</b>, Paused, Abandoned. It works the way you mark a Linear issue complete, plus a keyboard shortcut.",
+       hint: "Click the status circle on a row, or the chip in the heading. ⌘⇧S ships the selected Task.",
+       plus: ["One concept: shipping is just a state, next to Paused and Abandoned", "Same control in the sidebar, the heading and the command palette", "Undo means picking Working again"],
+       minus: ["Easy to miss: there's no green call to action", "A state menu hides that Ship it starts agents", "You can't see what will run before you click"] },
+  B: { name: "B · Green on hover", tag: "Appears where your pointer is",
+       blurb: "<b>A green Ship button fades in on hover</b> over any Working row and over the Task heading. One click and the row leaves Working, with a toast that offers Undo (Stop shipping).",
+       hint: "Hover a Working row or the Task heading. Undo in the toast stops shipping.",
+       plus: ["Fastest: ship from the list without opening the Task", "Calm UI: nothing green until you reach for it", "The toast's Undo makes a misclick cheap"],
+       minus: ["Not discoverable without hovering; nothing to tap on iOS", "Easy to ship the wrong row while scanning the list", "No preview of what will run"] },
+  C: { name: "C · End of the Workflow rail", tag: "The Workflow's finish line",
+       blurb: "<b>The Task's Workflow appears as a rail of stages</b> above the Session, with Ship it at its end. Hovering the button highlights each stage an agent will stand in for. While it ships, the rail fills as agents move toward <code>end</code>.",
+       hint: "Hover Ship it to preview the stand-ins, then click. The rail tracks progress.",
+       plus: ["Shows what Ship it means: these stages, run without you", "Progress has a natural home: the rail fills", "Mounts TaskWorkflowHeader, which exists but isn't shown today"],
+       minus: ["Takes a strip of vertical space on every Task", "Only inside the Task: no shipping from the list", "Workflows with many stages get crowded"] },
+};
+
+const STAGES = [
+  { id: "kickoff" }, { id: "review-design", human: true }, { id: "pursue" },
+  { id: "demo", human: true }, { id: "deliver" }, { id: "end" },
+];
+const SHIP_STEPS = [
+  { stage: "demo",    label: "Demo · stand-in agent",           log: "stand-in › demo ran headless: lf ship --help, Shipping filter, Stop shipping" },
+  { stage: "deliver", label: "Gate",                             log: "gate › cargo test, swift test, clippy: passed" },
+  { stage: "deliver", label: "Landing · CI running",            log: "land › PR armed; tests-result waiting on 6 jobs" },
+  { stage: "deliver", label: "Landing · flake re-run, re-armed", log: "land › swift-ui failed on a known flake → re-ran, re-armed" },
+  { stage: "deliver", label: "Landing · merge queue",           log: "land › in merge queue, position 1" },
+  { stage: "end",     label: "Merged",                           log: "land › merged 3f2a91c · Task done" },
+];
+const SEED = [
+  { id: "LOO-561", title: "Ship it: one click lands a Task and follows it through", state: "working", stage: "demo" },
+  { id: "LOO-497", title: "Dashboards: Working tasks as a query", state: "working", stage: "pursue" },
+  { id: "LOO-580", title: "Pi harness: native resume", state: "working", stage: "review-design" },
+  { id: "LOO-573", title: "Paused provider quota warning", state: "paused", stage: "pursue" },
+  { id: "LOO-552", title: "Repository rotation converges on a target", state: "shipping", stage: "deliver", step: 4 },
+  { id: "LOO-540", title: "Quiet terminal: tracing to lf.log", state: "done", stage: "end" },
+];
+
+let variant = VARIANTS[location.hash.slice(1)] ? location.hash.slice(1) : "B", tasks, selected, filter, menu, toast, timers = {};
+function reset() {
+  Object.values(timers).forEach(clearInterval); timers = {};
+  tasks = SEED.map(t => ({ ...t })); selected = "LOO-561"; filter = "working"; menu = null; toast = null;
+}
+reset();
+
+const byId = id => tasks.find(t => t.id === id);
+const inFilter = t => filter === "working" ? (t.state === "working" || t.state === "paused")
+                  : filter === "shipping" ? t.state === "shipping" : t.state === "done";
+const count = f => tasks.filter(t => f === "working" ? (t.state === "working" || t.state === "paused")
+                  : f === "shipping" ? t.state === "shipping" : t.state === "done").length;
+const stateLabel = t => t.state === "shipping" ? "Shipping" : t.state[0].toUpperCase() + t.state.slice(1);
+const progress = t => t.state === "shipping" ? SHIP_STEPS[t.step].label : "";
+
+function icon(t) {
+  const g = "var(--green)", m = "var(--muted)", a = "var(--amber)";
+  if (t.state === "shipping") return `<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="${g}" stroke-opacity=".3" stroke-width="2"/><path class="spin" d="M8 1.5 A6.5 6.5 0 0 1 14.5 8" fill="none" stroke="${g}" stroke-width="2" stroke-linecap="round"/></svg>`;
+  if (t.state === "done") return `<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="${g}"/><path d="M4.8 8.2l2.1 2.1 4.3-4.4" fill="none" stroke="var(--win)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  if (t.state === "paused") return `<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="${m}" stroke-width="1.5"/><path d="M6.5 5.5v5M9.5 5.5v5" stroke="${m}" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+  return `<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="${a}" stroke-width="1.5"/><path d="M8 3.5 A4.5 4.5 0 0 1 8 12.5 Z" fill="${a}"/></svg>`;
+}
+
+function ship(id) {
+  const t = byId(id); if (!t || t.state === "shipping" || t.state === "done") return;
+  t.state = "shipping"; t.step = 0; menu = null;
+  if (variant === "B" || variant === "L") toast = { id, text: `${id} is shipping` };
+  timers[id] = setInterval(() => {
+    const x = byId(id); if (!x || x.state !== "shipping") return clearInterval(timers[id]);
+    if (x.step < SHIP_STEPS.length - 1) x.step++;
+    else { x.state = "done"; x.stage = "end"; clearInterval(timers[id]); }
+    render();
+  }, 2200);
+  render();
+}
+function stop(id) {
+  const t = byId(id); if (!t || t.state !== "shipping") return;
+  clearInterval(timers[id]); t.state = "working"; t.stage = SHIP_STEPS[t.step].stage === "end" ? "deliver" : SHIP_STEPS[t.step].stage; t.step = undefined; menu = null;
+  toast = variant === "B" || variant === "L" ? { text: `${id} is back in Working · auto-merge disarmed` } : null;
+  render();
+}
+function setState(id, s) {
+  if (s === "shipping") return ship(id);
+  const t = byId(id); if (t.state === "shipping") stop(id);
+  t.state = s; menu = null; render();
+}
+
+// ── sidebar ──
+function rowRight(t) {
+  if (variant !== "B") return "";
+  if (t.state === "working") return `<button class="hover-ship" data-action="ship" data-id="${t.id}">Ship</button>`;
+  if (t.state === "shipping") return `<button class="hover-stop" data-action="stop" data-id="${t.id}">Stop</button>`;
+  return "";
+}
+function sidebar() {
+  const list = tasks.filter(inFilter);
+  const f = (k, n) => `<button class="${filter === k ? "on" : ""}" data-action="filter" data-f="${k}">${n}<em>${count(k)}</em></button>`;
+  const ic = t => variant === "A" ? `<button class="st" data-action="menu" data-id="${t.id}" data-at="row" title="Change state">${icon(t)}</button>` : `<span class="st">${icon(t)}</span>`;
+  return `<div class="side"><div class="lights"><i></i><i></i><i></i></div><div class="repo">loopflow</div>
+    <div class="filters">${f("working", "Working")}${f("shipping", "Shipping")}${f("done", "Done")}</div>
+    <div class="rows">${list.map(t => `
+      <div class="row ${t.id === selected ? "sel" : ""}" data-action="select" data-id="${t.id}">
+        ${ic(t)}<div class="txt"><div class="id">${t.id}${t.state === "paused" ? " · paused" : ""}</div><div class="ti">${t.title}</div>
+        ${t.state === "shipping" ? `<div class="pg">${progress(t)}</div>` : ""}</div>${rowRight(t)}
+      </div>`).join("") || `<div class="empty">${filter === "shipping" ? "Nothing shipping." : "No Tasks."}</div>`}</div></div>`;
+}
+
+// ── main ──
+function heading(t) {
+  let right = "";
+  if (variant === "A") {
+    right = `<button class="chip" data-action="menu" data-id="${t.id}" data-at="head"><span class="st">${icon(t)}</span>${stateLabel(t)}${t.state === "shipping" ? ` · <span style="color:var(--muted)">${progress(t)}</span>` : ""}<span class="caret">▾</span></button>`;
+  } else if (variant === "B") {
+    right = `<span class="state">${stateLabel(t)}${t.state === "shipping" ? " · " + progress(t) : ""}</span>` +
+      (t.state === "working" ? `<button class="hover-ship" data-action="ship" data-id="${t.id}">Ship it</button>` :
+       t.state === "shipping" ? `<button class="hover-stop" data-action="stop" data-id="${t.id}">Stop shipping</button>` : "");
+  } else if (variant === "L") {
+    const btn = t.state === "working" ? `<button class="hover-ship" data-action="ship" data-id="${t.id}">Ship it</button>` :
+       t.state === "shipping" ? `<button class="hover-stop" data-action="stop" data-id="${t.id}">Stop</button>` : "";
+    return `<div class="head"><span class="lslot">${btn}</span><span class="id">${t.id}</span><span class="ti">${t.title}</span><span class="state">${stateLabel(t)}${t.state === "shipping" ? " · " + progress(t) : ""}</span></div>`;
+  } else {
+    right = `<span class="state">${stateLabel(t)}</span>`;
+  }
+  return `<div class="head"><span class="id">${t.id}</span><span class="ti">${t.title}</span>${right}</div>`;
+}
+function rail(t) {
+  const cur = t.state === "shipping" ? SHIP_STEPS[t.step].stage : t.stage;
+  const ci = STAGES.findIndex(s => s.id === cur);
+  const shipping = t.state === "shipping";
+  const stages = STAGES.map((s, i) => {
+    let cls = i < ci ? (shipping && i >= t.shipFrom ? "shipdone" : "done") : i === ci ? "current" : "pending";
+    if (t.state === "done") cls = i <= ci ? (i >= (t.shipFrom ?? 99) ? "shipdone" : "done") : cls;
+    if (shipping && i >= ci) cls += i === ci ? " shipping" : " auto";
+    if (t.state === "working" && i >= ci) cls += " ahead";
+    let who = "";
+    if (s.human) who = (shipping || t.state === "done") && i >= (t.shipFrom ?? 99) ? `<span class="who si">stand-in</span>` : `<span class="who h">you</span>`;
+    else who = `<span class="who"></span>`;
+    return `<div class="stage ${cls}"><span class="dot"></span><span class="nm">${s.id}</span>${who}</div>`;
+  }).join("");
+  let end = "";
+  if (t.state === "working") end = `<button class="btn-ship" data-action="ship" data-id="${t.id}">Ship it <span style="opacity:.75">→ end</span></button><small>Agents stand in at ${STAGES.slice(ci).filter(s => s.human).map(s => s.id).join(", ") || "no stages"}, then deliver.</small>`;
+  else if (shipping) end = `<button class="btn-stop" data-action="stop" data-id="${t.id}">Stop shipping</button><small>${progress(t)}</small>`;
+  else if (t.state === "done") end = `<small style="color:var(--green)">Merged · done</small>`;
+  else end = `<small>${stateLabel(t)}</small>`;
+  return `<div class="rail"><div class="stages">${stages}</div><div class="railend">${end}</div></div>`;
+}
+function session(t) {
+  const base = [
+    `<span class="d">── ${t.id} Session · claude ──</span>`,
+    `<span class="you">jack ›</span> how did the last pass go?`,
+    `agent › implement finished; compress and realign passed. Waiting at <b>${t.stage}</b>.`,
+  ];
+  if (t.step !== undefined || t.state === "done") {
+    const upto = t.state === "done" ? SHIP_STEPS.length - 1 : t.step;
+    base.push(`<span class="g">ship › shipping from ${STAGES[t.shipFrom ?? 3]?.id ?? "demo"}; agents stand in, nobody gets asked</span>`);
+    for (let i = 0; i <= upto; i++) base.push(`<span class="g">${SHIP_STEPS[i].log}</span>`);
+  }
+  return `<pre class="term">${base.join("\n")}</pre>`;
+}
+function banner(t) {
+  if (variant !== "A" || t.state !== "shipping") return "";
+  return `<div class="banner"><b>Shipping</b><span class="grow">${progress(t)} · agents stand in for every remaining stage</span><span class="kbd">⌘⇧.</span> stop</div>`;
+}
+function menuHtml() {
+  if (!menu) return "";
+  const t = byId(menu.id);
+  const opt = (s, title, sub, k, cls = "") => `<div class="mi ${cls} ${t.state === s ? "cur" : ""}" data-action="state" data-id="${t.id}" data-s="${s}">
+      <span class="st">${icon({ state: s })}</span><div><b>${title}</b>${sub ? `<small>${sub}</small>` : ""}</div>${k ? `<span class="kbd k">${k}</span>` : ""}</div>`;
+  const items = [
+    opt("working", "Working", "You and agents, stage by stage", ""),
+    t.state === "shipping"
+      ? `<div class="mi" data-action="stop" data-id="${t.id}"><span class="st"></span><div><b>Stop shipping</b><small>Back to Working; disarms auto-merge</small></div><span class="kbd k">⌘⇧.</span></div>`
+      : opt("shipping", "Ship it", "Agents take it from here to merged", "⌘⇧S", "ship"),
+    opt("paused", "Paused", "Hold; nothing runs", ""),
+    "<hr>",
+    opt("done", "Done", "Mark complete without landing", ""),
+  ].join("");
+  return `<div class="menu" style="left:${menu.x}px;top:${menu.y}px">${items}</div>`;
+}
+
+function render() {
+  const t = byId(selected) || tasks[0];
+  document.getElementById("tabs").innerHTML = Object.entries(VARIANTS).map(([k, v]) =>
+    `<button class="tab ${k === variant ? "on" : ""}" data-action="variant" data-v="${k}"><b>${v.name}</b><span>${v.tag}</span></button>`).join("");
+  document.getElementById("blurb").innerHTML = VARIANTS[variant].blurb;
+  document.getElementById("hint").textContent = VARIANTS[variant].hint;
+  document.getElementById("win").className = "win v-" + variant;
+  document.getElementById("win").innerHTML = sidebar() +
+    `<div class="main">${heading(t)}${variant === "C" ? rail(t) : ""}${banner(t)}${session(t)}</div>` +
+    menuHtml() +
+    (toast ? `<div class="toast">${toast.text}${toast.id ? `<button data-action="undo" data-id="${toast.id}">Undo</button>` : ""}</div>` : "");
+  document.getElementById("notes").innerHTML = Object.entries(VARIANTS).map(([k, v]) =>
+    `<div class="note ${k === variant ? "on" : ""}"><h3>${v.name}</h3><ul>${v.plus.map(p => `<li><span class="plus">+</span> ${p}</li>`).join("")}${v.minus.map(p => `<li><span class="minus">−</span> ${p}</li>`).join("")}</ul></div>`).join("");
+}
+
+let toastTimer;
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-action]");
+  if (!el) { if (menu) { menu = null; render(); } return; }
+  const a = el.dataset.action, id = el.dataset.id;
+  if (a !== "menu" && a !== "state" && a !== "stop") menu = null;
+  if (a === "variant") { variant = el.dataset.v; reset(); }
+  else if (a === "reset") reset();
+  else if (a === "filter") filter = el.dataset.f;
+  else if (a === "select") selected = id;
+  else if (a === "ship") { const t = byId(id); t.shipFrom = STAGES.findIndex(s => s.id === t.stage); ship(id); armToast(); return; }
+  else if (a === "stop") { stop(id); armToast(); return; }
+  else if (a === "undo") { stop(id); armToast(); return; }
+  else if (a === "state") { const t = byId(id); if (el.dataset.s === "shipping") t.shipFrom = STAGES.findIndex(s => s.id === t.stage); setState(id, el.dataset.s); return; }
+  else if (a === "menu") {
+    const win = document.getElementById("win").getBoundingClientRect(), r = el.getBoundingClientRect();
+    selected = id;
+    menu = menu && menu.id === id && menu.at === el.dataset.at ? null
+      : { id, at: el.dataset.at, x: Math.min(r.left - win.left, win.width - 300), y: r.bottom - win.top + 6 };
+  }
+  render();
+});
+function armToast() { clearTimeout(toastTimer); if (toast) toastTimer = setTimeout(() => { toast = null; render(); }, 6000); }
+document.addEventListener("keydown", e => {
+  if (variant !== "A" || !(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
+  if (e.key.toLowerCase() === "s") { e.preventDefault(); const t = byId(selected); t.shipFrom = STAGES.findIndex(s => s.id === t.stage); ship(selected); }
+  if (e.key === "." || e.key === ">") { e.preventDefault(); stop(selected); }
+});
+render();
+</script>
+</body>
+</html>

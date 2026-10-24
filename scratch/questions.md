@@ -60,3 +60,16 @@ design rewrite, each reversible before implementation:
 - Jump-bar heading (2026-10-23): a Task whose runtime is absent but planning is terminal reads
   Done/Abandoned from planning; otherwise the heading follows `runtime.status` only, so a Task
   with an owner but still at `start` reads Unstarted (was "Started").
+
+## 2026-10-24 implement pass (assumptions, reversible)
+
+- Post-merge stage = the stage whose route into `end` runs nothing. A merge sends the shipping
+  Task there only if it has not reached that stage on this graph yet, so a fix forward (old PR
+  still current and merged until the next publish) is not pulled back. Cost: a hand-merge of
+  the fix-forward PR mid-demo is not caught early; `deliver` then lands an already-merged PR
+  and arrives at verify. A graph whose only stage is its last (fixture `feature`) now finishes
+  that stage's stand-in after a merge instead of completing at once.
+- At `verify`, Ship it runs a verify stand-in, even when you already checked it; finishing
+  yourself is `lf task complete`. Is a distinct "Done" action at verify wanted?
+- `code` gets verify too, same as `feature`.
+

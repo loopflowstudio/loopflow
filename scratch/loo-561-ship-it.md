@@ -1,8 +1,8 @@
 # LOO-561 · Ship it — plan
 
-Status (2026-10-23, realign after merging main at v0.14.15): design accepted (Jack Heart,
-2026-10-21/22); every accepted slice is built and committed, jump-bar placement included. What's
-left: re-demo of the jump-bar Ship it, and gate (see Remaining). Post-merge verify is on hold.
+Status (2026-10-24): design accepted (Jack Heart, 2026-10-21/22); every accepted slice is built
+and committed, including the 2026-10-24 pass (Workflow bar, ship-restart backoff, post-merge
+verify). What's left: re-demo on the Workflow-bar build, and gate (see Remaining).
 This Task's schema draft is `store/migrations/drafts/ship_it.sql`, the only draft on the branch
 (main's #1655 event rewrite released in `0.14.15.002`).
 
@@ -98,7 +98,7 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
   automate`, the repository cron (`lf cron sync` removes released copies) and
   `tasks.automation_enabled` deleted; Pause holds repair and re-arm; `ops/recovery.rs` runs on
   `task status/list`, `wave status/list/show`, `history`, `monitor`.
-- `lf ship` completes on merge (`ship_complete_if_merged`), backs off blocked stand-ins
+- `lf ship` settles a merge (`ship_settle_merge`: on to verify, else complete), backs off blocked stand-ins
   (`blocked_backoff`, 1→30 min, rechecking Pause/Stop).
 - `ops/task_automation.rs` and `store/sqlite/automation.rs` deleted (63f13b3805): execution blockers live in `ops/task_execution.rs`, repair admission
   (`RepairAttempt`, `RepairReservation`) in `store/sqlite/ci_incidents.rs`, `repository_tasks`
@@ -109,6 +109,29 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
   'customizedWorkflow|taskLifecycleUpdatesOpenSidebar'` ok.
 
 ## Remaining
+
+**Built 2026-10-24 (Jack approved the pass: "yes"), from Re-demo 2 below:**
+- a. `TaskWorkflowBar` (`TaskWorkView.swift`) under the jump bar on `RepoView`: Workflow name,
+  stages + `end` as dots (hover names, click opens stage cells: who, and arrived/here/ahead), the
+  live line (shipping reason, running route + Graph step, "At demo · yours to try"), and
+  `TaskShipControl` always visible. `ShippableTaskHeading` deleted; the jump-bar heading reads
+  only the lifecycle ("Shipping"), so shipping progress no longer rewrites it. Not built: the
+  live line's elapsed time and Session link from the prototype.
+- b. `tasks.ship_restarts` (in the draft): lazy recovery restarts a *failed* ship process no
+  sooner than `repair_backoff(restarts+1)` after it ended; a completed step resets the count;
+  a killed carrier restarts at once. The reason reads the deepest failed child's error
+  (`SqliteStore::failure_cause`): "Ship failed: agent exited with code 1…; retrying in N min".
+- c. Post-merge verify: `feature`/`code` end `deliver → loop: implement / interactive: verify →
+  end`; builtin `verify` skill. `ship_settle_merge` sends a merged shipping Task to the stage
+  whose route into `end` runs nothing, once per graph (no prior move into it); with none it
+  completes. Stand-in repeat is any route back to the same or an earlier stage, so verify's
+  repeat is the fix-forward route (`pursue` → demo → deliver → verify).
+- Check: `cargo test --lib task_ship_` 7/7 and `ops::task::ship` 4/4; `--lib -- workflow graph::
+  builtins task_workflow` ok but `linear_on_demand_graph_steps_acquire_before_spawning` (5 s
+  planning deadline under load); `swift test --filter 'DesktopHeadless|WorkNavigationTests'` 52 ok;
+  clippy/fmt clean. Integration `land_tests::waited_task_landing_completes_at_workflow_end…`
+  (still drives deleted `lf ci watch`) and `cli_discovery::graph_help_validates…` fail; this pass
+  didn't touch either path, but neither was rerun on the earlier HEAD (owner: gate).
 
 1. **Re-demo** on the branch build: Ship it beside the state in the jump bar (built
    2026-10-23), the `loopflow://` world links and `unstarted` world Tasks.
@@ -151,13 +174,12 @@ Settled (2026-10-22):
   comes later and is still unsettled.
 - Sixth concept review (2026-10-23, jump-bar slice): nothing to change. The heading reads one
   lifecycle; a paused shipping Task reads "Shipping · Paused…" and keeps Stop shipping, which
-  matches "paused is a hold". Open items stay Jack's: verify (held), Variant C, and whether
+  matches "paused is a hold". Open items stay Jack's: Variant C, and whether
   checkout work alone reads `working`. None blocks re-demo or gate.
 
-4. **Post-merge `verify`: on hold, not built.** Jack accepted the shape (2026-10-23: "verify
-   sounds good"), then held it in a later steer: "its notable that right now verify often wants
-   to be human, and its very task by task if needed" / "im not exactly sure how to fit that into
-   our model". Deliver and completion-on-merge stay as they are. The sketch below is draft.
+4. **Post-merge `verify`: built 2026-10-24 (see above); the shape below is the reference.** The hold steer of 2026-10-22
+   was the operator's, posted under Jack's name while the shape was in discussion; Jack then
+   accepted the shape on 2026-10-23 ("yea sound good"). Nothing is on hold.
    - Stage: `interactive: verify` after `deliver` (`… → deliver → interactive: verify → end`).
      Jack: "no verify is not a stage only humans can do". A person usually, a stand-in when
      shipping. Whether a Task has anything to verify is per Task ("its very task by task if
@@ -246,4 +268,42 @@ task_execution ok; mixed-runner planning/store failures pass alone (owner: gate)
   'WorkNavigationTests|DesktopHeadless'` 51 ok (2026-10-23, after compress).
 - Not this Task: the jump bar's Machine control shows "Swift.CancellationError" with a ⚠
   (`WorkMachineControl.load()` reports the cancelled `.task(id:)` load). Fixed in this Task at Jack's request (6a066d80a4: `CancellationError` is ignored).
+
+## Re-demo 2 (2026-10-24, jump-bar build, "Loopflow 561" on a fresh lf-world `portfolio`)
+
+- Jack found Ship it in the jump bar and shipped b17275 (at `start` of `code`). The heading then
+  read "Shipping · Ship process exited; it restarts on the next read of this Machine's Tasks"
+  (Jack's screenshot).
+- **Restart hot loop (real bug).** Each stand-in `implement` failed at once: "no eligible managed
+  claude account: a connected managed account is required by this execution boundary" (the world
+  has no managed account). The ship process exited, lazy recovery restarted it on the next read,
+  and the app reads constantly: ~150 stand-in runs in two minutes, about one a second, until the
+  operator ran `lf --task b17275 ship --stop`. Expected: a restart after a failed ship process
+  backs off like a repair (1→30 min), and the Task's reason names the real failure, not
+  "exited; it restarts". Same failure class hit LOO-561's own pursue (Claude account selection
+  errors), so on a real Machine an expired login would spin the same way.
+- **Reason hides the cause.** "Ship process exited" says nothing about the missing account.
+- **CLI form.** `lf ship <issue>` is not a form: the positional is the graph. The Task comes from
+  `--task <issue>` or the checkout. The operator's demo instructions (`wlf ship d5580f`) were
+  wrong. Open: should `lf ship` take an issue (e.g. `lf ship LOO-1`) the way `lf task run` does?
+- Not exercised: shipping past the first stand-in (the fake world cannot run headless agents).
+- **Hover reveal flashes** (Jack: "its not really working with the flashing in the heeader").
+  Likely causes, unconfirmed: the hot loop rewrote the heading's "Shipping · reason" text about
+  once a second, shifting layout under the pointer; and `ShippableTaskHeading` keeps `hovered` in
+  `@State` inside the jump bar, which refreshes with every Work read.
+- **Direction under discussion** (Jack: "i also feel like maybe we doo wnat a separate tool bar
+  for the workflow underneath"): a Workflow bar below the jump bar, holding the stages, the
+  Task's position and Ship it / Stop shipping, visible without hover. This revisits variant C
+  (Workflow rail), which Jack earlier called "eventually". Prototypes in
+  `scratch/workflow-bar.html`.
+- **Workflow bar chosen** (Jack, 2026-10-24: "i think probably dots with some progressive
+  disclosure or click to expand or somethign would work"). Prototype variant 3 in
+  `scratch/workflow-bar.html`. A bar under the jump bar: the Workflow's name, its stages as
+  dots (hover a dot for its name), the live line (the Graph step running now with its time and
+  Session link, or "At demo · yours to try", or the shipping reason including the real failure),
+  and Ship it / Stop shipping at the right end, always visible. Clicking the dots expands a row
+  of stage cells: who does each stage (you / agents / stand-in), and what happened there or will.
+  Operator reading, reversible: the jump bar returns to navigation (crumbs, lifecycle state,
+  Machine); the hover Ship it in `ShippableTaskHeading` is deleted; expanded/collapsed is
+  per-viewer UI state. This supersedes "Variant C later" for this Task.
 

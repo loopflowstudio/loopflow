@@ -149,6 +149,10 @@ Settled (2026-10-22):
   completion"; `lf pr reconcile`, `lf land` and reads settle it.
 - Placement (Jack, variant B): main-pane heading only, hover-revealed. Variant C (Workflow rail)
   comes later and is still unsettled.
+- Sixth concept review (2026-10-23, jump-bar slice): nothing to change. The heading reads one
+  lifecycle; a paused shipping Task reads "Shipping · Paused…" and keeps Stop shipping, which
+  matches "paused is a hold". Open items stay Jack's: verify (held), Variant C, and whether
+  checkout work alone reads `working`. None blocks re-demo or gate.
 
 4. **Post-merge `verify`: on hold, not built.** Jack accepted the shape (2026-10-23: "verify
    sounds good"), then held it in a later steer: "its notable that right now verify often wants

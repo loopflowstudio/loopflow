@@ -615,7 +615,7 @@ pub enum TaskEventKind {
         lf_process_ids: Vec<crate::id::LfProcessId>,
         reason: String,
     },
-    // Append-only events recorded before the Flow → Graph rename keep their bytes.
+    // The rename migration rewrote `task_events`; Project `TaskObserved` copies keep their bytes.
     #[serde(alias = "flow_finished")]
     GraphFinished {
         #[serde(deserialize_with = "crate::id::deserialize_uuid")]

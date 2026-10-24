@@ -1,8 +1,10 @@
 # LOO-561 · Ship it — plan
 
-Status (2026-10-23, implement): design accepted (Jack Heart, 2026-10-21/22); every accepted
-slice is built and committed, vocabulary drift included. What's left: re-demo and gate (see Remaining). Post-merge verify is
-on hold. This Task's schema draft is `store/migrations/drafts/ship_it.sql`, the only draft on the branch.
+Status (2026-10-23, realign after merging main at v0.14.15): design accepted (Jack Heart,
+2026-10-21/22); every accepted slice is built and committed, jump-bar placement included. What's
+left: re-demo of the jump-bar Ship it, and gate (see Remaining). Post-merge verify is on hold.
+This Task's schema draft is `store/migrations/drafts/ship_it.sql`, the only draft on the branch
+(main's #1655 event rewrite released in `0.14.15.002`).
 
 ## Direction from Jack Heart (2026-10-21, design review)
 
@@ -85,7 +87,8 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
   WorkValue `task_shipped_at`) and local `tasks.ship_lf_process_id`; reopen and Stop clear both
   through `task_work::unship_in`. `ShippingSnapshot{shipped_at, state, reason}` with
   `Building|Landing|Repairing|Restarting|Paused` and `ship_control` on `TaskDetailSnapshot`/
-  `RoadmapTask`. `Shipped` move kind deleted. `flow_finished` events read as `GraphFinished`.
+  `RoadmapTask`. `Shipped` move kind deleted. Released `0.14.15.002` (#1655) rewrites `task_events`
+  `flow_finished` rows; the branch's serde alias stays for Project `TaskObserved` copies.
 - Desktop: `TaskShipControl` on the main-pane Task heading (`TaskWorkView.swift`) holds **Ship
   it** (`task-ship`, the only route into `end`) and, while shipping, `state · reason` with **Stop
   shipping**. `ShipNoticeToast` Undo = Stop. `RegistryQuery.shipTask` runs `-b --task X ship`
@@ -147,9 +150,10 @@ Settled (2026-10-22):
 - Placement (Jack, variant B): main-pane heading only, hover-revealed. Variant C (Workflow rail)
   comes later and is still unsettled.
 
-4. **Post-merge `verify` (Jack Heart, accepted 2026-10-23: "yea sound good"). Not built: the
-   2026-10-23 implement pass also received Jack's hold steer ("do not build it in this pass"),
-   so it stays unbuilt until one of them is confirmed (scratch/questions.md).**
+4. **Post-merge `verify`: on hold, not built.** Jack accepted the shape (2026-10-23: "verify
+   sounds good"), then held it in a later steer: "its notable that right now verify often wants
+   to be human, and its very task by task if needed" / "im not exactly sure how to fit that into
+   our model". Deliver and completion-on-merge stay as they are. The sketch below is draft.
    - Stage: `interactive: verify` after `deliver` (`… → deliver → interactive: verify → end`).
      Jack: "no verify is not a stage only humans can do". A person usually, a stand-in when
      shipping. Whether a Task has anything to verify is per Task ("its very task by task if

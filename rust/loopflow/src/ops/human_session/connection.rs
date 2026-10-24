@@ -109,7 +109,14 @@ pub(crate) async fn explain_connect(
         if let super::SessionTarget::Session(id) = target {
             return Ok((None, Some(id.to_string())));
         }
-        let scope = super::connection_scope(store, cwd, target).await?;
+        let Some(scope) = super::checkout_scope(store, cwd, target).await? else {
+            if !fresh {
+                if let Some(id) = super::checkout_conversation(store, cwd).await? {
+                    return Ok((None, Some(id)));
+                }
+            }
+            return Err(super::unassociated_checkout(cwd)?);
+        };
         let session = if fresh {
             None
         } else {

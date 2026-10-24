@@ -496,7 +496,7 @@ fn work_key(repository: &crate::durable::RepositoryId, selector: &str) -> Result
 
 fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
-    use crate::work::selection::{Arrangement, DashboardId, WorkPaneLayout};
+    use crate::work::selection::{ArrangementEdit, DashboardId, WorkPaneLayout};
     if let DesktopCommand::Query { expression, .. } = command {
         crate::work::selection::Selection::parse(expression, None)?;
     }
@@ -586,13 +586,13 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
                 .read_dashboard(&repository, &id)?
                 .ok_or(crate::store::StoreError::NotFound)?;
             // The shared writer validates the order against current membership and decides mode.
-            let arrangement: Arrangement = serde_json::from_reader(std::io::stdin().lock())?;
+            let edit: ArrangementEdit = serde_json::from_reader(std::io::stdin().lock())?;
             serde_json::to_value(store.save_dashboard(
                 &repository,
                 &id,
                 Some(*revision),
                 &reading.saved.selection,
-                &arrangement,
+                &edit,
             )?)?
         }
         DesktopCommand::Slots {

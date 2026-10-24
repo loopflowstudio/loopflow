@@ -62,15 +62,16 @@ public struct RegistryQuery: Sendable {
     }
 
     public func pinDashboard(id: String, pinned: Bool, revision: Int64, repoPath: String) async throws -> Dashboard {
-        try Self.decode(Dashboard.self, from: await run(["desktop", pinned ? "pin" : "unpin", id, "--revision", String(revision), "--json"], repoPath))
+        try Self.decode(Dashboard.self, from: await run(["desktop", pinned ? "pin" : "unpin", id, "--revision", String(revision)], repoPath))
     }
 
     public func renameDashboard(id: String, name: String, revision: Int64, repoPath: String) async throws -> Dashboard {
         try Self.decode(Dashboard.self, from: await run(["desktop", "rename", "query:" + id, name, "--revision", String(revision)], repoPath))
     }
 
-    public func saveDashboardArrangement(id: String, arrangement: WorkArrangement, revision: Int64, repoPath: String) async throws -> Dashboard {
-        let input = String(decoding: try JSONEncoder().encode(arrangement), as: UTF8.self)
+    /// Rust decides the arrangement's mode from the order it receives.
+    public func saveDashboardArrangement(id: String, order: [WorkMemberRef], hidden: [WorkMemberRef], revision: Int64, repoPath: String) async throws -> Dashboard {
+        let input = String(decoding: try JSONEncoder().encode(["order": order, "hidden": hidden]), as: UTF8.self)
         return try Self.decode(Dashboard.self, from: await runWithInput(["desktop", "arrange", id, "--revision", String(revision)], repoPath, input))
     }
 
@@ -98,7 +99,7 @@ public struct RegistryQuery: Sendable {
 
     public func savePaneLayout(_ layout: WorkPaneLayout, repoPath: String) async throws -> WorkPaneLayout {
         let input = String(decoding: try JSONEncoder().encode(layout), as: UTF8.self)
-        return try Self.decode(WorkPaneLayout.self, from: await runWithInput(["desktop", "layout", layout.work.selector, "--save", "--json"], repoPath, input))
+        return try Self.decode(WorkPaneLayout.self, from: await runWithInput(["desktop", "layout", layout.work.selector, "--save"], repoPath, input))
     }
 
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {

@@ -73,3 +73,7 @@ design rewrite, each reversible before implementation:
   yourself is `lf task complete`. Is a distinct "Done" action at verify wanted?
 - `code` gets verify too, same as `feature`.
 
+- Compress (2026-10-24): the replayed hold steer (4a36e3f0, seq 1812) arrived again after
+  d83e02d8a2 built verify. The plan records Jack's later "yea sound good"; that quote isn't in
+  this checkout's prompts, so whether the hold or the accept is current is for realign/Jack.
+  Verify stays built; reverting d83e02d8a2 is the clean undo if the hold stands.

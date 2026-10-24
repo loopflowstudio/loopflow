@@ -407,21 +407,13 @@ fn post_merge_stage(workflow: &Workflow) -> Option<&str> {
         .filter(|stage| workflow.definition.node(stage).is_some())
 }
 
-/// Where a merge sends a shipping Task: to its post-merge stage, once, when it
-/// has not reached that stage on this graph yet; else nowhere. A Task whose
-/// graph has no such stage completes.
-fn merge_target(workflow: Option<&Workflow>) -> Option<Option<&str>> {
-    let Some(workflow) = workflow else {
-        return Some(None);
-    };
-    let Some(stage) = post_merge_stage(workflow) else {
-        return Some(None);
-    };
-    let reached = workflow
+/// Whether the Task has stood at `stage` on its current graph. A merge sends
+/// it to the post-merge stage only once, so a fix forward is not pulled back.
+fn reached(workflow: &Workflow, stage: &str) -> bool {
+    workflow
         .history
         .iter()
-        .any(|step| step.workflow == workflow.definition.name && step.to == stage);
-    (!reached).then_some(Some(stage))
+        .any(|step| step.workflow == workflow.definition.name && step.to == stage)
 }
 
 /// Act on a shipping Task's merged PR, whoever merged it, so no further
@@ -442,9 +434,11 @@ pub fn ship_settle_merge(issue: &str) -> OpsResult<ShipMerge> {
             return Ok(ShipMerge::Open);
         }
         let workflow = store.sqlite.workflow(&task.id).map_err(task_error)?;
-        match merge_target(workflow.as_ref()) {
-            None => return Ok(ShipMerge::Open),
-            Some(Some(stage)) => {
+        if let Some(workflow) = &workflow {
+            if let Some(stage) = post_merge_stage(workflow) {
+                if reached(workflow, stage) {
+                    return Ok(ShipMerge::Open);
+                }
                 store
                     .sqlite
                     .set_workflow_node(
@@ -456,7 +450,6 @@ pub fn ship_settle_merge(issue: &str) -> OpsResult<ShipMerge> {
                     .map_err(task_error)?;
                 return Ok(ShipMerge::Verifying(stage.to_owned()));
             }
-            Some(None) => {}
         }
         if let Some(request) = store
             .sqlite
@@ -742,7 +735,7 @@ mod tests {
             Vec::new(),
         );
         assert_eq!(super::post_merge_stage(&workflow), Some("verify"));
-        assert_eq!(super::merge_target(Some(&workflow)), Some(Some("verify")));
+        assert!(!super::reached(&workflow, "verify"));
         assert_eq!(at("end"), ShipStep::Finished);
         // A stopped edge runs again.
         let stopped = Workflow::new(

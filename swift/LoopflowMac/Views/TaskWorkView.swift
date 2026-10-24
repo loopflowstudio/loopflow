@@ -280,6 +280,8 @@ struct TaskWorkflowBar: View {
         /// You, or a stand-in while shipping; `end` has no one.
         let who: String?
         let note: String
+        /// Where the Task stands now or is headed.
+        var current: Bool { place == .here || place == .going }
     }
 
     var body: some View {
@@ -288,7 +290,7 @@ struct TaskWorkflowBar: View {
                 if let workflow = work.value?.workflow {
                     Text(workflow.name).fontWeight(.semibold).fixedSize()
                         .accessibilityIdentifier("task-workflow-bar-name")
-                    dots(Self.stages(workflow, shipping: task.shipping != nil))
+                    dots(stages)
                 }
                 Text(live)
                     .lineLimit(1).truncationMode(.tail)
@@ -300,8 +302,8 @@ struct TaskWorkflowBar: View {
             }
             .padding(.horizontal, 14)
             .frame(height: 34)
-            if expanded, let workflow = work.value?.workflow {
-                cells(Self.stages(workflow, shipping: task.shipping != nil))
+            if expanded, work.value?.workflow != nil {
+                cells(stages)
             }
         }
         .font(Typography.body(12))
@@ -318,8 +320,7 @@ struct TaskWorkflowBar: View {
                     Circle()
                         .fill(fill(stage.place))
                         .overlay(Circle().strokeBorder(stage.place == .ahead ? palette.borderStrong : .clear))
-                        .frame(width: stage.place == .here || stage.place == .going ? 9 : 7,
-                               height: stage.place == .here || stage.place == .going ? 9 : 7)
+                        .frame(width: stage.current ? 9 : 7, height: stage.current ? 9 : 7)
                         .help(stage.who.map { "\(stage.name) (\($0))" } ?? stage.name)
                 }
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
@@ -346,7 +347,7 @@ struct TaskWorkflowBar: View {
                 .padding(.horizontal, 8).padding(.vertical, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 6).fill(
-                    stage.place == .here || stage.place == .going ? palette.surfaceElement : palette.surface))
+                    stage.current ? palette.surfaceElement : palette.surface))
                 .accessibilityIdentifier("task-workflow-bar-stage-\(stage.name)")
             }
         }
@@ -360,6 +361,10 @@ struct TaskWorkflowBar: View {
         case .going: task.shipping != nil ? palette.success : palette.working
         case .ahead: .clear
         }
+    }
+
+    private var stages: [Stage] {
+        work.value?.workflow.map { Self.stages($0, shipping: task.shipping != nil) } ?? []
     }
 
     /// What is happening now, in one line.

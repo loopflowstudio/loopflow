@@ -132,6 +132,9 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
   clippy/fmt clean. Integration `land_tests::waited_task_landing_completes_at_workflow_end…`
   (still drives deleted `lf ci watch`) and `cli_discovery::graph_help_validates…` fail; this pass
   didn't touch either path, but neither was rerun on the earlier HEAD (owner: gate).
+- Compress (2026-10-24): `merge_target`'s `Option<Option<&str>>` became `reached`; the Workflow
+  bar computes its stages once. `cargo test --lib task_ship_` 7/7 (with `LOOPFLOW_TEST_LF` set:
+  the support crate's compiled-in `CARGO` path is stale here), `ops::task::ship` 4/4, clippy clean, Mac build ok.
 
 1. **Re-demo** on the branch build: Ship it beside the state in the jump bar (built
    2026-10-23), the `loopflow://` world links and `unstarted` world Tasks.

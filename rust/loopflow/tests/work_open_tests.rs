@@ -410,7 +410,7 @@ fn automatic_route_opens_where_the_caller_is() {
             ("CMUX_SOCKET_PATH", "/tmp/cmux.sock"),
         ];
         assert_eq!(route(&cmux)["hosts"], order(&["cmux"]));
-        let inside = route(&[("LF_DESKTOP", "1")]);
+        let inside = route(&[("LF_DESKTOP", "com.loopflow.mac")]);
         assert_eq!(inside["hosts"], order(&[]));
         assert!(
             inside["reason"]

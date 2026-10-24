@@ -10,7 +10,9 @@ struct DashboardSidebar: View {
     @Environment(\.palette) private var palette
     var body: some View {
         // Matches the sidebar stack's spacing, so grouping changes no layout.
-        VStack(alignment: .leading, spacing: 5) { section }.hoverSource(hover)
+        // Hover follows hit testing: the shape makes the section's empty space
+        // and the hidden button count, not just its labels.
+        VStack(alignment: .leading, spacing: 5) { section }.contentShape(Rectangle()).hoverSource(hover)
     }
 
     @ViewBuilder private var section: some View {

@@ -18,7 +18,10 @@ use crate::provider_account::{
     ensure_account_home, match_account, new_account, open_account_store, AccountMatch,
 };
 use crate::provider_auth::Provider;
-use crate::store::{CredentialType, ProviderAccount, ProviderToken, SharedStore};
+use crate::store::rows::now_unix;
+use crate::store::{
+    CredentialState, CredentialType, LongLivedToken, ProviderAccount, ProviderToken, SharedStore,
+};
 
 // Deliberately no Debug: native credential JSON and tokens must never be logged.
 #[derive(Serialize, Deserialize)]
@@ -28,8 +31,11 @@ enum Credential {
         login: String,
         token: String,
     },
+    /// A long-lived subscription token in Claude's credentials file. It cannot
+    /// read its own profile, so the laptop asserts the identity it was minted for.
     Claude {
         login: String,
+        email: String,
         subject: String,
         credential: String,
     },
@@ -63,7 +69,40 @@ pub(super) async fn connect(
     let store = open_account_store().await?;
     let mut verified = "";
     let credential = match provider {
-        Provider::Claude | Provider::Codex => {
+        Provider::Claude => {
+            let email = email.ok_or_else(|| anyhow!("{provider} requires a login email"))?;
+            let account = managed_account(&store, provider, email).await?;
+            let login = account_login(&account);
+            if remote_has(machine, provider, login)? {
+                return Ok(());
+            }
+            let (Some(observed), Some(subject)) = (
+                account.observed_email.clone(),
+                account.observed_subject.clone(),
+            ) else {
+                bail!("Claude account {login} has no verified identity on this laptop; `lf account connect claude {login}` first");
+            };
+            let stored = store
+                .long_lived_token(provider.as_str(), &account.account_id)
+                .await?;
+            let token = match stored {
+                Some(stored) if stored.is_current(now_unix()) => stored,
+                stale => {
+                    if !foreground(batch) {
+                        bail!("Claude account {login} {}; `lf account token claude {login}` mints one in a foreground terminal", token_absence(stale.as_ref()));
+                    }
+                    eprintln!("Minting a long-lived Claude token for {login}; approve once, renew in a year");
+                    super::account::mint_long_lived_token(&store, &account, chrome_profile).await?
+                }
+            };
+            Credential::Claude {
+                login: login.into(),
+                email: observed,
+                subject,
+                credential: long_lived_credentials(&token),
+            }
+        }
+        Provider::Codex => {
             let email = email.ok_or_else(|| anyhow!("{provider} requires a login email"))?;
             let account = managed_account(&store, provider, email).await?;
             let login = account_login(&account);
@@ -76,28 +115,14 @@ pub(super) async fn connect(
                 super::account::fresh_machine_login(&store, provider, &account, chrome_profile)
                     .await?;
             let credential = fs::read_to_string(staging.path().join(credential_file(provider)?))?;
-            match provider {
-                Provider::Claude => Credential::Claude {
-                    login: login.into(),
-                    subject: identity.subject,
-                    credential,
-                },
-                _ => Credential::Codex {
-                    login: login.into(),
-                    subject: identity.subject,
-                    credential,
-                },
+            Credential::Codex {
+                login: login.into(),
+                subject: identity.subject,
+                credential,
             }
         }
         Provider::GitHub => {
-            // gh resolves its own selected token. It is never exported to a child.
-            let output = Command::new("gh")
-                .args(["auth", "token", "--hostname", "github.com"])
-                .output()?;
-            if !output.status.success() {
-                bail!("GitHub is not connected on this laptop");
-            }
-            let token = SecretString::new(String::from_utf8(output.stdout)?.trim().to_string());
+            let token = gh_token()?;
             let login = github_login(token.expose_secret()).await?;
             if email.is_some_and(|expected| !expected.eq_ignore_ascii_case(&login)) {
                 bail!("GitHub login does not match the requested account");
@@ -105,7 +130,6 @@ pub(super) async fn connect(
             if remote_has(machine, provider, &login)? {
                 return Ok(());
             }
-            require_foreground(batch)?;
             Credential::Github {
                 login,
                 token: token.expose_secret().clone(),
@@ -205,6 +229,97 @@ pub(super) async fn connect(
     Ok(())
 }
 
+/// Every Claude account with a long-lived token, so account selection on the
+/// machine falls through an exhausted account as on any other. With none
+/// stored, a foreground run mints one for each connected account; a background
+/// run skips each with a note.
+pub(super) async fn connect_claude_accounts(machine: &Machine, batch: bool) -> Result<()> {
+    let store = open_account_store().await?;
+    let (minted, mut unminted) = claude_accounts_by_token(&store).await?;
+    let chosen = if minted.is_empty() && foreground(batch) {
+        unminted.retain(|(account, _)| account.credential_state == CredentialState::Connected);
+        unminted.into_iter().map(|(account, _)| account).collect()
+    } else {
+        for (account, stale) in &unminted {
+            let login = account_login(account);
+            eprintln!(
+                "Skipping Claude {login}: {} (`lf account token claude {login}`)",
+                token_absence(stale.as_ref())
+            );
+        }
+        minted
+    };
+    if chosen.is_empty() {
+        bail!("no Claude account to install; `lf account connect claude <email>`, then `lf account token claude <email>`");
+    }
+    for account in &chosen {
+        connect(
+            machine,
+            Provider::Claude,
+            Some(account_login(account)),
+            None,
+            batch,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// A background rental pays only when no login needs a person: `gh` holds a
+/// token here and a Claude account holds a long-lived one.
+pub(super) async fn require_unattended_logins(store: &SharedStore) -> Result<()> {
+    gh_token()?;
+    if claude_accounts_by_token(store).await?.0.is_empty() {
+        bail!("no Claude account holds a current long-lived token, and a background run cannot approve one; `lf account token claude <email>` mints it in a foreground terminal");
+    }
+    Ok(())
+}
+
+/// Claude accounts split into those holding a current long-lived token and
+/// those without one, each with its expired token if it has one.
+async fn claude_accounts_by_token(
+    store: &SharedStore,
+) -> Result<(
+    Vec<ProviderAccount>,
+    Vec<(ProviderAccount, Option<LongLivedToken>)>,
+)> {
+    let (mut minted, mut unminted) = (Vec::new(), Vec::new());
+    for account in store
+        .list_provider_accounts(Some(Provider::Claude.as_str()))
+        .await?
+    {
+        let token = store
+            .long_lived_token(Provider::Claude.as_str(), &account.account_id)
+            .await?;
+        match token {
+            Some(token) if token.is_current(now_unix()) => minted.push(account),
+            stale => unminted.push((account, stale)),
+        }
+    }
+    Ok((minted, unminted))
+}
+
+fn token_absence(stale: Option<&LongLivedToken>) -> String {
+    match stale {
+        Some(token) => format!("long-lived token expired {}", token.expires_on()),
+        None => "no long-lived token".into(),
+    }
+}
+
+/// gh resolves its own selected token. It is never exported to a child.
+fn gh_token() -> Result<SecretString> {
+    let output = Command::new("gh")
+        .args(["auth", "token", "--hostname", "github.com"])
+        .stderr(Stdio::null())
+        .output();
+    match output {
+        Ok(output) if output.status.success() => Ok(SecretString::new(
+            String::from_utf8(output.stdout)?.trim().to_string(),
+        )),
+        _ => bail!("GitHub is not connected on this laptop; `gh auth login` first"),
+    }
+}
+
 fn connecting(machine: &Machine, provider: Provider, login: &str) {
     eprintln!(
         "Connecting {} {login} on {}",
@@ -217,14 +332,47 @@ fn machine_name(machine: &Machine) -> &str {
     machine.label.as_deref().unwrap_or(&machine.route)
 }
 
-fn require_foreground(batch: bool) -> Result<()> {
+fn foreground(batch: bool) -> bool {
     use std::io::IsTerminal;
     // SAFETY: querying this process and stdin's foreground process group does not mutate either.
     let foreground = unsafe { libc::tcgetpgrp(libc::STDIN_FILENO) == libc::getpgrp() };
-    if batch || !std::io::stdin().is_terminal() || !foreground {
+    !batch && std::io::stdin().is_terminal() && foreground
+}
+
+fn require_foreground(batch: bool) -> Result<()> {
+    if !foreground(batch) {
         bail!("a missing machine login needs a foreground terminal without --batch; run `lf machine connect <machine> <provider> [email]` there first");
     }
     Ok(())
+}
+
+/// Claude's credentials file holding only the access token: nothing to
+/// refresh, so no machine can rotate another's login. `expiresAt` (ms) is a
+/// year from minting, so every send of one token is byte-identical.
+fn long_lived_credentials(token: &LongLivedToken) -> String {
+    serde_json::json!({
+        "claudeAiOauth": {
+            "accessToken": token.token.expose_secret(),
+            "expiresAt": token.expires_at() * 1000,
+        }
+    })
+    .to_string()
+}
+
+/// The access token of a received Claude credentials file, if it is a
+/// subscription token with nothing to refresh.
+fn long_lived_access_token(credential: &str) -> Result<String> {
+    let json: serde_json::Value =
+        serde_json::from_str(credential).map_err(|_| anyhow!("invalid Claude credential"))?;
+    let node = &json["claudeAiOauth"];
+    if node.get("refreshToken").is_some() {
+        bail!("a Claude credential with a refresh token would rotate another machine's login; refused");
+    }
+    let token = node["accessToken"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Claude credential has no access token"))?;
+    super::account::require_subscription_token(token)?;
+    Ok(token.to_string())
 }
 
 async fn managed_account(
@@ -349,13 +497,18 @@ async fn installed(store: &SharedStore, provider: Provider, login: &str) -> Resu
             if !home.join(credential_file(provider)?).is_file() {
                 return Ok(false);
             }
-            // A transfer may have installed its file but lost the SQLite write.
-            // Recover that same credential before asking for another browser approval.
-            if store
+            let registered = store
                 .get_provider_account(provider.as_str(), &account.account_id)
                 .await?
-                .is_none()
-            {
+                .is_some();
+            // A long-lived token cannot prove its identity here: the laptop
+            // sends it again and `install` finishes the lost SQLite write.
+            if provider == Provider::Claude {
+                return Ok(registered);
+            }
+            // A transfer may have installed its file but lost the SQLite write.
+            // Recover that same credential before asking for another browser approval.
+            if !registered {
                 let _lock = acquire_managed_login_lock(home, provider, &account.account_id)?;
                 let (identity, plan) =
                     super::account::verify_managed_identity(store, provider, &account, home)
@@ -431,9 +584,10 @@ async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
     match credential {
         Credential::Claude {
             login,
+            email,
             subject,
             credential,
-        } => install_managed(store, Provider::Claude, &login, &subject, &credential).await,
+        } => install_long_lived(store, &login, email, subject, &credential).await,
         Credential::Codex {
             login,
             subject,
@@ -721,6 +875,52 @@ async fn install_managed(
         home,
         identity,
         plan,
+    )
+    .await
+}
+
+/// Install a long-lived Claude token under the identity the laptop asserts.
+/// Its token cannot read the profile endpoint, so nothing here probes it.
+async fn install_long_lived(
+    store: &SharedStore,
+    login: &str,
+    email: String,
+    subject: String,
+    credential: &str,
+) -> Result<()> {
+    long_lived_access_token(credential)?;
+    let provider = Provider::Claude;
+    let account = managed_account(store, provider, login).await?;
+    let home = account_home_path(provider, &account.account_id)?;
+    let parent = home.parent().expect("managed account home has a parent");
+    fs::create_dir_all(parent)?;
+    let _lock = acquire_managed_login_lock(&home, provider, &account.account_id)?;
+    let file = credential_file(provider)?;
+    if home.join(file).is_file() {
+        // Only a lost SQLite write after this same token is recoverable.
+        if fs::read_to_string(home.join(file))? != credential {
+            bail!("a different Claude login is already installed for {login}; left unchanged");
+        }
+    } else {
+        let _identity_lock =
+            crate::provider_account::identity::acquire_identity_install_lock(&home)?;
+        let home = ensure_account_home(provider, &account.account_id)?;
+        write_private(&home.join(file), credential.as_bytes())?;
+    }
+    let identity = crate::provider_account::identity::AccountIdentity {
+        email,
+        subject,
+        credential_digest: Some(crate::provider_account::identity::credential_digest(
+            credential,
+        )),
+    };
+    super::account::register_managed_account(
+        store,
+        provider,
+        &account.account_id,
+        home,
+        identity,
+        None,
     )
     .await
 }
@@ -1370,38 +1570,143 @@ esac
         assert!(!error.contains("secret-bytes"));
     }
 
+    fn claude(credential: &str) -> Credential {
+        Credential::Claude {
+            login: "person@example.com".into(),
+            email: "person@example.com".into(),
+            subject: "claude-person".into(),
+            credential: credential.into(),
+        }
+    }
+
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
-    async fn claude_installs_its_native_file_without_keychain_access() {
+    async fn claude_long_lived_token_installs_under_the_asserted_identity_without_a_probe() {
         let _lock = crate::journal::test_env_lock();
         let root = tempfile::tempdir().unwrap();
         let _environment = Environment::isolate(root.path());
-        let (endpoint, server) = identity_server(
-            json!({"account":{"email":"person@example.com","uuid":"claude-person"}}),
-        )
-        .await;
-        std::env::set_var("LF_TEST_CLAUDE_PROFILE_URL", endpoint);
+        // No profile endpoint and no keychain: the token cannot read its profile.
+        std::env::set_var("LF_TEST_CLAUDE_PROFILE_URL", "http://127.0.0.1:1");
         executable(&root.path().join("bin/security"), "#!/bin/sh\nexit 99\n");
         let store = store(root.path()).await;
-        let credential = json!({"claudeAiOauth": {"accessToken":"target-access","refreshToken":"target-refresh","expiresAt":4102444800000i64}}).to_string();
-        install_managed(
-            &store,
-            Provider::Claude,
-            "person@example.com",
-            "claude-person",
-            &credential,
-        )
-        .await
-        .unwrap();
+        let credential = super::long_lived_credentials(&crate::store::LongLivedToken {
+            token: secrecy::SecretString::new("sk-ant-oat01-fixture-token".into()),
+            minted_at: 1_792_000_000,
+        });
+        install(&store, claude(&credential)).await.unwrap();
         let accounts = store.list_provider_accounts(Some("claude")).await.unwrap();
         assert_eq!(accounts.len(), 1);
+        assert_eq!(
+            accounts[0].observed_subject.as_deref(),
+            Some("claude-person")
+        );
+        assert!(crate::provider_account::identity::cached_identity(&accounts[0]).is_some());
         let path = accounts[0].home.as_ref().unwrap().join(".credentials.json");
         assert_eq!(fs::read_to_string(&path).unwrap(), credential);
         assert_eq!(
-            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
         );
-        server.abort();
+        assert!(installed(&store, Provider::Claude, "person@example.com")
+            .await
+            .unwrap());
+        // The same token again only finishes registration; another is refused.
+        install(&store, claude(&credential)).await.unwrap();
+        let other = credential.replace("fixture-token", "other-token");
+        assert!(install(&store, claude(&other)).await.is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), credential);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn long_lived_token_is_stored_encrypted_on_its_account() {
+        use secrecy::ExposeSecret;
+        let _lock = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _environment = Environment::isolate(root.path());
+        let store = store(root.path()).await;
+        let account = super::managed_account(&store, Provider::Claude, "person@example.com")
+            .await
+            .unwrap();
+        let token = secrecy::SecretString::new("sk-ant-oat01-stored-token".into());
+        assert!(!store
+            .set_long_lived_token("claude", &account.account_id, &token, 7)
+            .await
+            .unwrap());
+        store.upsert_provider_account(&account).await.unwrap();
+        assert!(store
+            .set_long_lived_token("claude", &account.account_id, &token, 7)
+            .await
+            .unwrap());
+        let stored = store
+            .long_lived_token("claude", &account.account_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.token.expose_secret(), "sk-ant-oat01-stored-token");
+        assert_eq!(stored.minted_at, 7);
+        let raw = fs::read(root.path().join("loopflow.db")).unwrap();
+        assert!(!raw
+            .windows(b"stored-token".len())
+            .any(|window| window == b"stored-token"));
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn background_rental_needs_gh_and_a_current_long_lived_claude_token() {
+        let _lock = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _environment = Environment::isolate(root.path());
+        std::env::set_var("PATH", root.path().join("bin"));
+        let store = store(root.path()).await;
+        let error = super::require_unattended_logins(&store)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("GitHub is not connected"));
+        executable(&root.path().join("bin/gh"), "#!/bin/sh\necho gh-token\n");
+        let account = super::managed_account(&store, Provider::Claude, "person@example.com")
+            .await
+            .unwrap();
+        store.upsert_provider_account(&account).await.unwrap();
+        let error = super::require_unattended_logins(&store)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("`lf account token claude <email>`"));
+        let token = secrecy::SecretString::new("sk-ant-oat01-stored-token".into());
+        let day = 24 * 60 * 60;
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        store
+            .set_long_lived_token("claude", &account.account_id, &token, now - 366 * day)
+            .await
+            .unwrap();
+        assert!(super::require_unattended_logins(&store).await.is_err());
+        let error = super::connect_claude_accounts(&mini(), true)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("no Claude account to install"));
+        store
+            .set_long_lived_token("claude", &account.account_id, &token, now - day)
+            .await
+            .unwrap();
+        super::require_unattended_logins(&store).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn claude_refuses_api_keys_and_refreshable_logins() {
+        let _lock = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _environment = Environment::isolate(root.path());
+        let store = store(root.path()).await;
+        let api_key = json!({"claudeAiOauth": {"accessToken": "sk-ant-api03-billed"}}).to_string();
+        let error = install(&store, claude(&api_key)).await.unwrap_err();
+        assert!(error.to_string().contains("bills per token"));
+        assert!(!error.to_string().contains("billed"));
+        let refreshable = json!({"claudeAiOauth": {"accessToken": "sk-ant-oat01-x", "refreshToken": "sk-ant-ort01-y"}}).to_string();
+        assert!(install(&store, claude(&refreshable)).await.is_err());
+        assert!(store.list_provider_accounts(None).await.unwrap().is_empty());
     }
 
     #[tokio::test]

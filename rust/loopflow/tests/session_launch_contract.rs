@@ -1202,15 +1202,6 @@ fn contextual_connect_and_resume_use_scope_and_preserve_fresh_history() {
             assert_eq!(prepare(cwd, &command)["id"], id);
         }
     }
-    // An ordinary conversation is not a primary claim for an unassociated checkout.
-    success(
-        &fixture
-            .command()
-            .current_dir(&linked)
-            .args(["-i", ":", "local conversation"])
-            .output()
-            .unwrap(),
-    );
     let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
     let count = || {
         db.query_row("SELECT count(*) FROM agent_sessions", [], |row| {
@@ -1253,6 +1244,30 @@ fn contextual_connect_and_resume_use_scope_and_preserve_fresh_history() {
         assert_eq!(prepare(&linked, &args)["id"], id);
         assert_eq!(prepare(&linked, &[verb, id])["id"], id);
     }
+    // An unassociated checkout continues the conversation last opened there.
+    success(
+        &fixture
+            .command()
+            .current_dir(&linked)
+            .args(["-i", ":", "local conversation"])
+            .output()
+            .unwrap(),
+    );
+    let local = count();
+    // A terminal conversation stays unfinished after its client exits; the
+    // stub provider completes it.
+    let conversation: String = db
+        .query_row(
+            "UPDATE agent_sessions SET completed_at=NULL WHERE cwd=?1 RETURNING id",
+            [linked.canonicalize().unwrap().to_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    for verb in ["connect", "resume"] {
+        assert_eq!(prepare(&linked, &[verb])["id"], conversation);
+    }
+    assert_eq!(count(), local);
+    let before = local;
     let explanation = fixture
         .command()
         .args(["--explain", "--json", "connect", "--fresh"])

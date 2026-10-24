@@ -793,6 +793,11 @@ pub fn dispatch_default_cli() -> Result<()> {
         std::env::set_var("LF_HOME", home);
         return Ok(());
     }
+    // A build with drafts works on its own copy of the shared store; the
+    // installed lf cannot read that copy.
+    if crate::store::copy::selected().is_some() {
+        return Ok(());
+    }
     let current = fs::canonicalize(std::env::current_exe()?)?;
     if is_app_helper(&current) {
         return Ok(());

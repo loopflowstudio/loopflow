@@ -69,8 +69,8 @@ struct LocalWaveAgentLauncherTests {
         for (key, value) in kept where key != "PATH" { #expect(environment[key] == value) }
         #expect(environment["PATH"]?.hasSuffix("/usr/bin:/bin") == true)
         for key in leaked.keys { #expect(environment[key] == nil, "\(key) leaked") }
-        // `lf open` from a Desktop terminal opens in Desktop, not the launcher's host.
-        #expect(environment["LF_DESKTOP"] == "1")
+        // `lf open` and `lf desktop` from a Desktop terminal address this app.
+        #expect(environment["LF_DESKTOP"] == Bundle.main.bundleIdentifier ?? "com.loopflow.mac")
     }
 
 

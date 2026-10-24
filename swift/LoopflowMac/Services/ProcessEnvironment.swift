@@ -58,8 +58,9 @@ enum GUIProcessEnvironment {
                 || launcherTerminalPrefixes.contains(where: key.hasPrefix)) {
             copy.removeValue(forKey: key)
         }
-        // `lf open` from any child opens beside it here, not in the launcher's host.
-        copy["LF_DESKTOP"] = "1"
+        // `lf open` and `lf desktop` from any child address this app, not the
+        // launcher's host or another installed Loopflow.
+        copy["LF_DESKTOP"] = Bundle.main.bundleIdentifier ?? "com.loopflow.mac"
         return copy
     }
 

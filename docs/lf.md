@@ -1038,6 +1038,11 @@ selects one destination. `state --json` includes the
 selected `view` plan, retained occurrences, hidden members and duplicate winners.
 Repository and Wave navigation still opens their ordinary conversations.
 
+`lf desktop` and `lf open` address the Desktop you run in: the app sets
+`LF_DESKTOP` to its bundle identifier on every child, so a Loopflow Dev shell
+reads and steers Dev. Elsewhere they address the installed app; set
+`LF_DESKTOP=com.loopflow.mac.dev` to reach Dev from an ordinary terminal.
+
 `desktop view --plan`, `query`, `pin`/`unpin`, `rename`, `arrange`, `slots`,
 `order` and `layout` work without macOS and print JSON. Plans contain
 shared selection/arrangement intent and current Work evidence, including explicit

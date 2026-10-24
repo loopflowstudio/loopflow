@@ -95,12 +95,18 @@ mod tests {
         // Acquisition attempts and watermarks do not change displayed Work.
         "linear_team_checks",
         "machines",
+        // Copies from rented Machines are read by explicit CLI listings only.
+        "machine_records",
+        // Rental capacity is read by `lf pool`/`lf ondemand`, not workspace surfaces.
+        "ondemands",
+        "pools",
         "provider_account_limits",
         "provider_account_switches",
         "provider_accounts",
         "provider_routes",
         "provider_session_accounts",
         "provider_tokens",
+        "rentals",
         "schema_migrations",
         // Delivery diagnostics are explicit CLI reads, not workspace projections.
         "session_steers",

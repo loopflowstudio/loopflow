@@ -59,7 +59,7 @@ struct TerminalPaneLayoutTests {
         let bounds = CGRect(x: 0, y: 0, width: 500, height: 400)
         let outerPath = try outerStroke.path(in: bounds).strokedPath(outerStroke.strokeStyle())
         for pane in panes {
-            let innerStroke = try pane.overlay().find(ViewType.Shape.self)
+            let innerStroke = try pane.overlay(0).find(ViewType.Shape.self)
             #expect(try innerStroke.strokeStyle().lineWidth == 1)
             let innerPath = try innerStroke.path(in: bounds.insetBy(dx: gap, dy: gap)).strokedPath(innerStroke.strokeStyle())
             // Sample the actual stroked SwiftUI paths at both lower corners,

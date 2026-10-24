@@ -6,8 +6,25 @@ struct TaskRowMetadata: View {
     let status: SessionProgramStatus
     var selected = false
     var slotHint: String?
+    /// The hint shows while ⌘ is held, or while `hover` reports the row hovered.
+    var showsSlotHint = false
+    var hover: HoverFlag?
     var sourceAge: String?
     @Environment(\.palette) private var palette
+
+    /// Hint and age both stay rendered; hover only changes which one is opaque.
+    @ViewBuilder private var trailing: some View {
+        if let slotHint, showsSlotHint || hover == nil {
+            Text(slotHint)
+        } else if let slotHint, let hover {
+            ZStack(alignment: .trailing) {
+                HoverRevealed(flag: hover) { Text(slotHint) }
+                HoverRevealed(flag: hover, whileHovered: false) { Text(sourceAge ?? "") }
+            }
+        } else {
+            Text(sourceAge ?? "")
+        }
+    }
 
     var body: some View {
         HStack(spacing: 5) {
@@ -36,7 +53,7 @@ struct TaskRowMetadata: View {
             Spacer(minLength: 0)
             // Reserve the shortcut glyph's height even when only an age (or nothing) is shown.
             Text("⌘9").hidden().frame(width: 28, alignment: .trailing)
-                .overlay(alignment: .trailing) { Text(slotHint ?? sourceAge ?? "") }
+                .overlay(alignment: .trailing) { trailing }
         }
         .font(Typography.code(10))
         .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)

@@ -142,7 +142,7 @@ struct WorkspacePanesTests {
         #expect(model.selection == workspace.key.reference)
         #expect(model.navigation.selectedSessionId == primary.id)
         #expect(workspace.multiplexer.focusedPane == pane)
-        workspace.hover.paneId = pane.id
+        workspace.stripHover(pane.id).isHovered = true
         let active = try view.inspect().findAll(SessionPaneView.self)
             .first { try $0.actualView().pane.id == pane.id }?.actualView()
         let activeView = try #require(active)

@@ -763,8 +763,26 @@ fn reexec(path: &Path) -> Command {
     command
 }
 
-/// Use the installed CLI for the main Machine; private Homes keep their caller,
-/// and so does a draft build, which works on its own copy of the store.
+/// This executable when it is the lf inside a Desktop app bundle. Desktop and
+/// the CLI it ships with are one build, so a Dev app pairs with its own lf.
+pub(crate) fn desktop_helper() -> Option<PathBuf> {
+    let current = fs::canonicalize(std::env::current_exe().ok()?).ok()?;
+    is_app_helper(&current).then_some(current)
+}
+
+fn is_app_helper(path: &Path) -> bool {
+    let mut ancestors = path.ancestors().skip(1);
+    let names = [ancestors.next(), ancestors.next(), ancestors.next()]
+        .map(|dir| dir.and_then(Path::file_name).and_then(|name| name.to_str()));
+    path.file_name().is_some_and(|name| name == "lf")
+        && names[0] == Some("MacOS")
+        && names[1] == Some("Contents")
+        && names[2].is_some_and(|bundle| bundle.ends_with(".app"))
+}
+
+/// Use the installed CLI for the main Machine. A Desktop helper keeps itself,
+/// private Homes keep their caller, and so does a draft build, which works on
+/// its own copy of the store.
 pub fn dispatch_default_cli() -> Result<()> {
     if crate::store::copy::selected().is_some() {
         return Ok(());
@@ -774,7 +792,15 @@ pub fn dispatch_default_cli() -> Result<()> {
         std::env::set_var("LF_HOME", home);
         return Ok(());
     }
+    // A build with drafts works on its own copy of the shared store; the
+    // installed lf cannot read that copy.
+    if crate::store::copy::selected().is_some() {
+        return Ok(());
+    }
     let current = fs::canonicalize(std::env::current_exe()?)?;
+    if is_app_helper(&current) {
+        return Ok(());
+    }
     std::env::remove_var("LF_BIN");
     let destination = if let Some(cli) = installed_cli(&root()?)? {
         cli.verify()?;
@@ -1438,6 +1464,21 @@ fn sync_directory(path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_the_lf_inside_an_app_bundle_is_a_desktop_helper() {
+        assert!(is_app_helper(Path::new(
+            "/Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf"
+        )));
+        for path in [
+            "/Applications/Loopflow.app/Contents/MacOS/Loopflow",
+            "/Users/jack/.lf/bin/lf",
+            "/repo/target/debug/lf",
+            "/tmp/Contents/MacOS/lf",
+        ] {
+            assert!(!is_app_helper(Path::new(path)), "{path}");
+        }
+    }
+
     use super::*;
 
     fn write_artifact(path: &Path, contents: &str) {

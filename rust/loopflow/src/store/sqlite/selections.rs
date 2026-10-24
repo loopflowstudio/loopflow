@@ -4,9 +4,9 @@ use super::SqliteStore;
 use crate::durable::RepositoryId;
 use crate::store::{StoreError, StoreResult};
 use crate::work::selection::{
-    move_into_place, Arrangement, ArrangementMode, Dashboard, DashboardId, DashboardReading,
-    Selection, SelectionExpression, SelectionId, SelectionResolution, SelectionState,
-    SelectionWork, SlotLayout, WorkWorkspaceKey, WorkWorkspaceKind,
+    move_into_place, Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId,
+    DashboardReading, Selection, SelectionExpression, SelectionId, SelectionResolution,
+    SelectionState, SelectionWork, SlotLayout, WorkWorkspaceKey, WorkWorkspaceKind,
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -478,7 +478,13 @@ impl SqliteStore {
         };
         let resolution = self.resolve_selection(repository, &selection)?;
         arrangement.reconcile(&resolution);
-        self.save_dashboard(repository, id, expected_revision, &selection, &arrangement)
+        self.save_dashboard(
+            repository,
+            id,
+            expected_revision,
+            &selection,
+            &arrangement.to_edit(),
+        )
     }
 
     /// A read composes with the Work observer's pinned snapshot. No acquisition.
@@ -531,7 +537,7 @@ impl SqliteStore {
         id: &DashboardId,
         expected_revision: Option<i64>,
         selection: &Selection,
-        arrangement: &Arrangement,
+        edit: &ArrangementEdit,
     ) -> StoreResult<Dashboard> {
         if id.0.is_empty() {
             return Err(invalid("Dashboard ID must be nonempty"));
@@ -557,17 +563,18 @@ impl SqliteStore {
             .or_else(|| prior.as_ref().map(|saved| saved.arrangement.clone()))
             .unwrap_or_else(|| Arrangement::automatic(&[]));
         expected.reconcile(&resolution);
-        arrangement
-            .validate(&expected.order)
-            .map_err(StoreError::from)?;
         let arrangement = Arrangement {
-            mode: if arrangement.order == expected.order {
+            order: edit.order.clone(),
+            hidden: edit.hidden.clone(),
+            mode: if edit.order == expected.order {
                 expected.mode
             } else {
                 ArrangementMode::Touched
             },
-            ..arrangement.clone()
         };
+        arrangement
+            .validate(&expected.order)
+            .map_err(StoreError::from)?;
         let saved = Dashboard {
             repository: repository.to_string(),
             id: id.clone(),
@@ -694,7 +701,7 @@ impl SqliteStore {
             id,
             Some(expected_revision),
             &reading.saved.selection,
-            &arrangement,
+            &arrangement.to_edit(),
         )
     }
 
@@ -793,7 +800,7 @@ mod tests {
                 &id,
                 Some(first.revision),
                 &first.selection,
-                &arranged,
+                &arranged.to_edit(),
             )
             .unwrap();
         let next = store
@@ -820,7 +827,7 @@ mod tests {
                 &id,
                 Some(next.revision),
                 &next.selection,
-                &next.arrangement
+                &next.arrangement.to_edit()
             )
             .is_err());
         let invalid = Arrangement::automatic(&[]);
@@ -830,7 +837,7 @@ mod tests {
                 &id,
                 Some(restored.revision),
                 &restored.selection,
-                &invalid
+                &invalid.to_edit()
             )
             .is_err());
         assert_eq!(store.revisions().unwrap(), revisions);
@@ -864,7 +871,13 @@ mod tests {
         let mut hidden = saved.arrangement.clone();
         hidden.hide(&b, true).unwrap();
         let hidden = store
-            .save_dashboard(&repo, &id, Some(saved.revision), &saved.selection, &hidden)
+            .save_dashboard(
+                &repo,
+                &id,
+                Some(saved.revision),
+                &saved.selection,
+                &hidden.to_edit(),
+            )
             .unwrap();
         assert_eq!(hidden.arrangement.mode, ArrangementMode::Auto);
         let mut restored = hidden.arrangement.clone();
@@ -875,7 +888,7 @@ mod tests {
                 &id,
                 Some(hidden.revision),
                 &saved.selection,
-                &restored,
+                &restored.to_edit(),
             )
             .unwrap();
         assert_eq!(restored.arrangement.mode, ArrangementMode::Auto);
@@ -1330,7 +1343,7 @@ mod tests {
                 &first.saved.id,
                 Some(first.saved.revision),
                 &first.saved.selection,
-                &hidden,
+                &hidden.to_edit(),
             )
             .unwrap();
         let revisions = store.revisions().unwrap();
@@ -1491,7 +1504,7 @@ mod tests {
                 &id,
                 None,
                 &available,
-                &Arrangement::automatic(&members.members),
+                &Arrangement::automatic(&members.members).to_edit(),
             )
             .unwrap();
         store
@@ -1623,7 +1636,7 @@ mod tests {
                 &id,
                 Some(first.revision),
                 &first.selection,
-                &arrangement,
+                &arrangement.to_edit(),
             )
             .unwrap();
         let second = store
@@ -1701,7 +1714,7 @@ mod tests {
                 &id,
                 None,
                 &selection,
-                &Arrangement::automatic(&result.members),
+                &Arrangement::automatic(&result.members).to_edit(),
             )
             .unwrap();
         let reader = SqliteStore::open_read_only(&path).unwrap();
@@ -1742,7 +1755,7 @@ mod tests {
         let mut arrangement = Arrangement::automatic(&result.members);
         arrangement.hide(&hidden, true).unwrap();
         let first = store
-            .save_dashboard(&repo, &id, None, &selection, &arrangement)
+            .save_dashboard(&repo, &id, None, &selection, &arrangement.to_edit())
             .unwrap();
         // A second connection reads real lfdb bytes, without opening a native surface.
         let reader = SqliteStore::open_read_only(&_dir.path().join("db")).unwrap();
@@ -1751,14 +1764,32 @@ mod tests {
         assert_eq!(loaded.arrangement, arrangement);
         arrangement.order.reverse();
         let saved = store
-            .save_dashboard(&repo, &id, Some(first.revision), &selection, &arrangement)
+            .save_dashboard(
+                &repo,
+                &id,
+                Some(first.revision),
+                &selection,
+                &arrangement.to_edit(),
+            )
             .unwrap();
         assert!(store
-            .save_dashboard(&repo, &id, Some(first.revision), &selection, &arrangement)
+            .save_dashboard(
+                &repo,
+                &id,
+                Some(first.revision),
+                &selection,
+                &arrangement.to_edit()
+            )
             .is_err());
         let incomplete = Arrangement::automatic(&result.members[1..]);
         assert!(store
-            .save_dashboard(&repo, &id, Some(saved.revision), &selection, &incomplete)
+            .save_dashboard(
+                &repo,
+                &id,
+                Some(saved.revision),
+                &selection,
+                &incomplete.to_edit()
+            )
             .is_err());
         assert_eq!(reader.dashboards(&repo).unwrap(), [saved]);
         let mut restored = reader
@@ -1792,7 +1823,7 @@ mod tests {
                 &base_id,
                 None,
                 &base,
-                &Arrangement::automatic(&resolution.members),
+                &Arrangement::automatic(&resolution.members).to_edit(),
             )
             .unwrap();
         let nested = Selection {
@@ -1805,7 +1836,7 @@ mod tests {
         let result = store.resolve_selection(&repo, &nested).unwrap();
         let arrangement = Arrangement::automatic(&result.members);
         store
-            .save_dashboard(&repo, &nested_id, None, &nested, &arrangement)
+            .save_dashboard(&repo, &nested_id, None, &nested, &arrangement.to_edit())
             .unwrap();
         // The named query edit would introduce a cycle through the dependent.
         let cycle = Selection {
@@ -1815,7 +1846,7 @@ mod tests {
             },
         };
         assert!(store
-            .save_dashboard(&repo, &base_id, Some(1), &cycle, &arrangement)
+            .save_dashboard(&repo, &base_id, Some(1), &cycle, &arrangement.to_edit())
             .is_err());
         assert!(store.delete_dashboard(&repo, &base_id, 2).is_err());
         assert_eq!(
@@ -1839,7 +1870,7 @@ mod tests {
                 &base_id,
                 None,
                 &base,
-                &Arrangement::automatic(&resolution.members),
+                &Arrangement::automatic(&resolution.members).to_edit(),
             )
             .unwrap();
         store

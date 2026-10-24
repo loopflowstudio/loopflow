@@ -2,6 +2,7 @@
 // Uses NSViewRepresentable to bridge the Metal-rendered terminal surface.
 
 import SwiftUI
+import Synchronization
 import AppKit
 import OSLog
 import QuartzCore
@@ -428,7 +429,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
     private(set) var copyConfirmation: String?
     private var copyDismissal: Task<Void, Never>?
-    nonisolated(unsafe) var surface: ghostty_surface_t?
+    nonisolated(unsafe) var surface: ghostty_surface_t? {
+        // A new surface may reuse a freed address; it starts with nothing applied.
+        didSet { if surface != oldValue { appliedScale = nil; appliedFeedback = nil } }
+    }
 
     private nonisolated(unsafe) var displayLink: CADisplayLink?
     private var trackingArea: NSTrackingArea?
@@ -453,6 +457,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var lastCommandBlockRefresh: CFTimeInterval = 0
     private var focusRequested = false
     private var inputEnabled = true
+    /// Last values sent to the current surface. SwiftUI calls updateNSView on every
+    /// parent render; unchanged size, scale and feedback must not reach Ghostty.
+    private nonisolated(unsafe) var appliedScale: (surface: ghostty_surface_t, scale: CGFloat)?
+    private nonisolated(unsafe) var appliedFeedback: (surface: ghostty_surface_t, visible: Bool, reduceMotion: Bool)?
     /// Open from a key press until the next display-link draw.
     private var keyToDraw: OSSignpostIntervalState?
 
@@ -875,6 +883,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private func updateContentScale() {
         guard let surface else { return }
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
+        if let applied = appliedScale, applied.surface == surface, applied.scale == scale { return }
+        appliedScale = (surface, scale)
         ghostty_surface_set_content_scale(surface, scale, scale)
     }
 
@@ -887,7 +897,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     func sizeDidChange(_ newSize: CGSize) {
         guard newSize.width > 0, newSize.height > 0 else { return }
-        setFrameSize(newSize)
+        if frame.size != newSize { setFrameSize(newSize) }
         updateContentScale()
     }
 
@@ -1306,7 +1316,11 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         guard let surface else { return }
         let visible = window != nil && !isHiddenOrHasHiddenAncestor
             && window?.occlusionState.contains(.visible) != false
-        ghostty_surface_set_feedback(surface, visible, NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if let applied = appliedFeedback, applied.surface == surface,
+           applied.visible == visible, applied.reduceMotion == reduceMotion { return }
+        appliedFeedback = (surface, visible, reduceMotion)
+        ghostty_surface_set_feedback(surface, visible, reduceMotion)
     }
 
     func performBinding(_ action: String) {
@@ -1709,13 +1723,21 @@ enum LoopflowZshBootstrap {
         """, name: "bash-env")?.path
     }
 
+    /// Files written this process. Shell panes build their command in `body`, so
+    /// installing writes once and later calls only confirm the file survives.
+    private static let installed = Mutex<[String: URL]>([:])
+
     private static func install(contents: String, name: String) -> URL? {
+        if let file = installed.withLock({ $0[name] }), FileManager.default.fileExists(atPath: file.path) {
+            return file
+        }
         let directory = terminalTemporaryDirectory()
             .appendingPathComponent("loopflow-shell", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let file = directory.appendingPathComponent(name)
             try contents.write(to: file, atomically: true, encoding: .utf8)
+            installed.withLock { $0[name] = file }
             return file
         } catch {
             return nil

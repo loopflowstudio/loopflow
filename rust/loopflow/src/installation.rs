@@ -770,14 +770,15 @@ pub(crate) fn desktop_helper() -> Option<PathBuf> {
     is_app_helper(&current).then_some(current)
 }
 
+/// `<App>.app/Contents/MacOS/lf`.
 fn is_app_helper(path: &Path) -> bool {
-    let mut ancestors = path.ancestors().skip(1);
-    let names = [ancestors.next(), ancestors.next(), ancestors.next()]
-        .map(|dir| dir.and_then(Path::file_name).and_then(|name| name.to_str()));
-    path.file_name().is_some_and(|name| name == "lf")
-        && names[0] == Some("MacOS")
-        && names[1] == Some("Contents")
-        && names[2].is_some_and(|bundle| bundle.ends_with(".app"))
+    let tail: Vec<_> = path
+        .iter()
+        .rev()
+        .take(4)
+        .map(|name| name.to_str())
+        .collect();
+    matches!(tail[..], [Some("lf"), Some("MacOS"), Some("Contents"), Some(bundle)] if bundle.ends_with(".app"))
 }
 
 /// Use the installed CLI for the main Machine. A Desktop helper keeps itself,
@@ -1459,6 +1460,8 @@ fn sync_directory(path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn only_the_lf_inside_an_app_bundle_is_a_desktop_helper() {
         assert!(is_app_helper(Path::new(
@@ -1473,8 +1476,6 @@ mod tests {
             assert!(!is_app_helper(Path::new(path)), "{path}");
         }
     }
-
-    use super::*;
 
     fn write_artifact(path: &Path, contents: &str) {
         fs::write(path, contents).unwrap();

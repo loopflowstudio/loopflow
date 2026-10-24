@@ -322,7 +322,7 @@ starts no provider and marks no Task Started; the first input connecting reserve
 From the canonical checkout or the repository's persistent checkout it opens the
 repository primary; Task and persistent Wave checkouts open their own primary.
 `lf resume` is an exact alias, including all flags. An unassociated linked checkout
-requires an explicit target; ordinary `lf` starts a new conversation there.
+continues the conversation last opened there; ordinary `lf` starts a new one.
 
 `lf --repo NAME connect`, `lf connect --wave NAME`, and `lf connect --task ISSUE`
 select an explicit scope. `lf connect SESSION` opens the exact retained conversation.

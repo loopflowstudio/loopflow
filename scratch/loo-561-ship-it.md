@@ -147,37 +147,26 @@ Settled (2026-10-22):
 - Placement (Jack, variant B): main-pane heading only, hover-revealed. Variant C (Workflow rail)
   comes later and is still unsettled.
 
-4. **Post-merge `verify` (Jack Heart, 2026-10-22). ON HOLD — do not build yet.** Jack then
-   added: "its notable that right now verify often wants to be human, and its very task by task
-   if needed" and "im not exactly sure how to fit that into our model". Then, correcting the
-   operator's "human-only stage" reading: "no verify is not a stage only humans can do". So verify
-   is an ordinary `interactive:` stage after `deliver` (a person usually, a stand-in when
-   shipping), and whether a Task has anything to verify is per Task. Jack: "over time i hope to
-   make robots do it almost exclusively / but rigt now they often think they cant". So the
-   `verify` skill's main job is capability: teach the headless routes (branch/main `lf` with
-   `LF_HOME`, lf-world fake worlds, `loopflow-dev.py run-debug --world`, app builds and
-   view/interaction tests, headless Chrome screenshots, the installed binary after release) and
-   treat "can't verify" as a finding to fix, never a hand-back. The shape below is a
-   draft under discussion, not direction. Leave `deliver` and completion-on-merge as they are.
-   Draft: Jack: "verify sounds good. Verify should
-   either close the task OR start a new PR to fix whats found. i have explored both allowing new
-   PRs on a task OR just doing followup tasks. i think allowing multiple PRs on task may be messy
-   but may also adapt better to arbitrary stuff happening". Shape (operator reading, reversible):
-   - `deliver` becomes `gate → land --wait-and-fix → verify`. `verify` is a skill a stand-in runs
-     on main after the merge: the Task's acceptance against the merged result (headless demo of
-     the changed behavior; installed acceptance where the Task names it). Main's own CI on the
-     merge commit is not re-checked; the merge queue already tested the merged result.
-   - Pass: the route reaches `end`, the Task completes. Merge alone no longer completes a
-     shipping Task: the merge check in `lf ship` skips the pre-merge routes and runs what follows
-     `land`, so a hand-merged PR is still verified. A non-shipping Task keeps today's rule.
-   - Findings the Task promised: fix forward in the same Task. Its branch restarts from main, a
-     new PR becomes the current PR and the earlier one stays as delivery history (the existing
-     serial-PR rule in docs/architecture-reference.md "Task delivery algorithm"), then `deliver`
-     runs again. The Task stays `shipping` throughout, with reason "verifying" / "fixing after
-     merge". Findings outside the Task's outcome become a linked follow-up Task (existing
-     "distinct outcome" rule). No revert.
-   - Open: Jack is undecided between multi-PR and follow-up Tasks as the general answer; this
-     uses the serial same-Task path the model already supports. Revisit at demo.
+4. **Post-merge `verify` (Jack Heart, accepted 2026-10-23: "yea sound good"). Not built yet.**
+   - Stage: `interactive: verify` after `deliver` (`… → deliver → interactive: verify → end`).
+     Jack: "no verify is not a stage only humans can do". A person usually, a stand-in when
+     shipping. Whether a Task has anything to verify is per Task ("its very task by task if
+     needed"); whoever is at the stage says so and moves on.
+   - Skill: Jack: "over time i hope to make robots do it almost exclusively / but rigt now they
+     often think they cant". So `verify` teaches the headless routes (branch/main `lf` with its
+     own `LF_HOME`, lf-world fake worlds, `loopflow-dev.py run-debug --world`, app builds and
+     view/interaction tests, headless Chrome screenshots, the installed binary after release),
+     and "can't verify X" is a finding: build the missing route in the fix, or file it as a
+     follow-up Task. Never a hand-back.
+   - Outcome: Jack: "Verify should either close the task OR start a new PR to fix whats found."
+     Pass → `end`, the Task completes. Findings the Task promised → fix forward in the same Task:
+     branch restarts from main, a new current PR, the earlier one kept as delivery history (the
+     existing serial-PR rule), `deliver` again. Findings outside its outcome → linked follow-up
+     Task. No revert. Jack on multi-PR vs follow-up Tasks: "allowing multiple PRs on task may be
+     messy but may also adapt better to arbitrary stuff happening" — revisit after real use.
+   - Operator settlements, reversible: a merge while shipping moves the Task to `verify` instead
+     of completing it (hand-merged PRs still get verified); the auto-shipping rule stays measured
+     to `end`, so a Task with `verify` ahead is not auto-shipping.
 
 ## Done when
 
@@ -225,3 +214,26 @@ The hosted merge-queue run is left to demo.
 
 Check (2026-10-22): clippy/fmt clean; `dto_fixtures` 42 ok; lib pr_landing/chapter/children/waves/
 task_execution ok; mixed-runner planning/store failures pass alone (owner: gate).
+
+## Re-demo (2026-10-23, branch build as separate "Loopflow 561" app on a fresh lf-world `portfolio`)
+
+- Fixed since the last demo: a Task waiting at `demo` reads `working` (was `unstarted`).
+- **Ship it not visible** (Jack: "i dont see the ship it button", on fd380b at `demo`). Cause:
+  `TaskShipControl` is mounted only in `WorkSurfaceView`'s Task detail page. A started Task
+  (has an owner) opens to `WorkspacePanesView` (Session + Files panes, `SessionsView.swift`
+  `workspacePanel`), which has no Task heading, so every Task that can ship hides the control.
+  The "main pane" Jack chose has to be the Session workspace, not the detail page.
+- Not this Task: "Layout not saved: error: root --json requires --context or --explain" banner.
+  Desktop saves pane layout with `lf desktop layout <work> --save --json`; `desktop layout` has
+  no own `--json`, so the root guard rejects it. Same code on origin/main.
+- **Placement corrected** (Jack, 2026-10-23: "I think near where it sys Started though"). Ship it
+  goes in the window's jump bar, beside the Task's state in `TaskHeading` (`WorkNavigator.swift`,
+  the breadcrumb that reads "LOO-… title Started", before the Machine control). It shows for
+  every selected Task, whatever pane layout is open. Hovering the heading fades in the green
+  Ship it next to the state; while shipping the same spot holds Stop shipping, and the Undo
+  toast stays. Delete `TaskShipControl` from `WorkSurfaceView`'s detail page (one place only).
+  That state text still says "Started"/"Unstarted" from the old model; it reads the lifecycle
+  instead: Unstarted, Working, Shipping · reason, Paused, Done, Abandoned.
+- Not this Task: the jump bar's Machine control shows "Swift.CancellationError" with a ⚠
+  (`WorkMachineControl.load()` reports the cancelled `.task(id:)` load). Fixed in this Task at Jack's request (6a066d80a4: `CancellationError` is ignored).
+

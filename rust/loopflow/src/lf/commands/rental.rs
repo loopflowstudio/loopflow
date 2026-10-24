@@ -487,7 +487,6 @@ pub(crate) fn rent(
     Ok((sqlite.rental(&rental.id)?, machine))
 }
 
-/// Wait for an address and the pod's ready marker, then add it as a Machine.
 /// `LF_RENT_LINUX_BIN`: a Linux `lf` the pod runs instead of the published
 /// release, so a development build can rent a pod running its own code.
 fn linux_lf() -> anyhow::Result<Option<std::path::PathBuf>> {
@@ -533,6 +532,7 @@ fn upload_lf(route: &str, binary: &std::path::Path, deadline: Instant) -> anyhow
     }
 }
 
+/// Wait for an address and the pod's ready marker, then add it as a Machine.
 fn attach(
     runtime: &tokio::runtime::Runtime,
     sqlite: &SqliteStore,

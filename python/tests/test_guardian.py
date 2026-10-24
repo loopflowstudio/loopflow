@@ -45,7 +45,13 @@ def _provider(price: str = "0.24", fail_deletes: int = 0, read_fails: bool = Fal
 
 def _run(send, clock: Clock, deadline: datetime, max_usd: str) -> datetime:
     guardian.guard(
-        send, "pod1", deadline, Decimal(max_usd), clock.sleep, lambda: clock.wall, lambda: clock.mono
+        send,
+        "pod1",
+        deadline,
+        Decimal(max_usd),
+        clock.sleep,
+        lambda: clock.wall,
+        lambda: clock.mono,
     )
     return clock.wall
 

@@ -238,6 +238,9 @@ unfinished Task and has not expired; there is no queue. `--rent R` admits
 forwards GitHub and installs every Claude account's long-lived token, clones
 and binds the repository, then hands off. An unanswered create is `unconfirmed` until the inventory shows the name
 (adopt) or the create's window passes (`lost`); it is never resent.
+The pod installs the published `lf`; with `LF_RENT_LINUX_BIN` naming a Linux
+build, boot instead waits for the laptop to upload that binary, so a development
+build rents pods running its own code.
 
 The pod's start command runs the standard-library guardian first
 (`rust/loopflow/src/rental/guardian.py`): it deletes the pod at its deadline,

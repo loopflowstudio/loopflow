@@ -126,10 +126,9 @@ exit 0
 }
 
 fn gh_finite_land_script(log_path: &str, merge_race: bool) -> String {
-    let merge_state = "blocked";
     let checks = support::github_checks_page("$head", &[("fixture-check", "FAILURE", true)]);
     let unarmed = support::github_merge_response(1, "$head", "OPEN", "CLEAN", None);
-    let armed = support::github_merge_response(1, "$head", "OPEN", merge_state, Some("auto"));
+    let armed = support::github_merge_response(1, "$head", "OPEN", "blocked", Some("auto"));
     let merged = support::github_merge_response(1, "$head", "MERGED", "UNKNOWN", None)
         .replace("\"oid\":\"$head\"", "\"oid\":\"merge-head\"");
     format!(
@@ -185,7 +184,7 @@ fi
 if [ "$1" = "api" ]; then
   head="$(git rev-parse HEAD)"
   if [ "{merge_race}" = true ] || {{ [ -n "$LF_TEST_REPAIR_PROOF" ] && [ ! -f "$LF_TEST_REPAIR_PROOF" ]; }}; then
-    echo "{{\"merged\":false,\"state\":\"open\",\"mergeable_state\":\"{merge_state}\",\"draft\":false,\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"
+    echo "{{\"merged\":false,\"state\":\"open\",\"mergeable_state\":\"blocked\",\"draft\":false,\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"
     exit 0
   fi
   echo "{{\"merged\":true,\"state\":\"closed\",\"draft\":false,\"merge_commit_sha\":\"merge-head\",\"merged_at\":\"2026-08-21T00:00:00Z\",\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"

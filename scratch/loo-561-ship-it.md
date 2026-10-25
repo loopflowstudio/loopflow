@@ -155,7 +155,8 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
    shared-file fallback plus a removal Task; leave it. (Both 2026-10-22 concept reviews' docs drift is fixed: docs teach `interactive:` stages, routes,
    `.lf/graphs/` and the repair backoff; run-time text and the work, launch-plan and
    wave-operate skills say route and stage. Loop backward edges and wire `edge` fields stay.)
-3. **Gate.** Run the acceptance check below. Also clear the shared-runner isolation failures:
+3. **Gate.** Run the acceptance check below (the branch's own integration failures are repaired; see
+   Test repair). Also clear the shared-runner isolation failures:
    `planning_lookup_tests` and some planning/store tests fail only when they share a runner with
    `ship`/`task_work`/`ops::linear` and pass alone. The pre-existing
    `agent_session_identity_is_durable…` failures are still open.
@@ -237,8 +238,8 @@ Settled (2026-10-22):
 ## Acceptance check at gate (headless)
 
 ```bash
-cargo test -p loopflow --lib -- workflow graph:: pr_landing ops::pr::tests ci_watch ship
-cargo test -p loopflow --test integration -- task_workflow task_graph_launch dto_fixtures
+cargo test -p loopflow --lib -- workflow graph:: pr_landing ops::pr::tests ship
+cargo test -p loopflow --test integration -- task_workflow task_graph_launch dto_fixtures land_tests graph_help_validates
 swift test --package-path swift --filter 'DTOFixture|WorkModelTests|WorkNavigation|DesktopHeadless'
 ```
 

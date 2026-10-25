@@ -52,3 +52,7 @@ Checks: fmt and clippy `--all-targets -D warnings` clean; lib suites session_eve
 
 - Codex continues one `usage_stream_id` across turns; usage rows key by attempt turn plus stream, never stream alone (LOO-572 clone: +841k tokens misattributed).
 - `processes.completed_at` NULL is not proof of life: the retention prune closes dead PIDs, bounded by boot time, outcome NULL.
+
+## Concept review (headless, 2026-10-24)
+
+No change. Each accepted direction holds in the code: both recorders upsert one usage row per turn at write time, so steady state stays small without the prune, which only compacts legacy rows. Whether a command is recorded is one predicate (`Cli::records_process`) beside the `Commands` enum, and live admission and the prune's argv re-parse both read it. Closing a dead Process uses the existing "exit not observed" convention (`completed_at` set, outcome NULL, as `settle_agent_process` does) instead of adding a second outcome vocabulary. Usage compaction reuses LOO-570's cursor-beside-the-database pattern. Not blocking: the Task's ≤50 MB expectation for `session_events` (now 117 MB) would mean changing LOO-570's settle window or the turn facts, so it belongs in a separate Task if Jack wants it.

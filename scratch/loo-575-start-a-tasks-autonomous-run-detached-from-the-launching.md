@@ -110,6 +110,14 @@ output written before `DetachViewers` reaches viewers before `Detached`.
 `lf task status` text: append `  log: <path>` to a `Graph:` line when
 `logs/graph-<id>.log` exists. JSON is unchanged.
 
+**Next implement (concept review, 2026-10-24):** apply the same `log:` lookup to
+`Process:` lines. A single-skill edge lets go at its Process and prints
+`follow: lf task status <issue>` with a `graph-<process id>.log`, but status
+shows `log:` only beside `Graph:` lines, so the run's own follow command hides
+the log it just named. One lookup over both line kinds; the file name stays
+derived from the LfProcessId (no rename, no DTO field). Extend acceptance test 1
+or add a skill-edge case asserting the `Process:` line carries `log:`.
+
 Desktop: `runTask` runs `["task", "run", issue, graph?]` through the finite
 runner; `resumeInterrupted` runs `["resume", "--all"]` the same way (it already
 returns after starting owners). Delete the starter plumbing (below).
@@ -192,4 +200,7 @@ close the conversation, watch `lf top` / Desktop show the Graph advancing.
 
 - kickoff: no build; evidence from code reading and live `ps` only.
 - compress: `cargo test -p loopflow --lib task_graph_launch_tests` → 28/29, then the two new tests pass after the log-assertion repair; clippy `--all-targets` clean. Gate owns the full suite and Swift.
+- concept-review (2026-10-24): code reading only. Confirmed the handoff is
+  adopted only by a direct child (`Handoff::take` checks `getppid`), so a nested
+  `lf task run` from an agent shell never detaches an enclosing execution's viewers.
 - realign (2026-10-24): `docs/lf-reference.md` was stale for `task run`; regenerated via `UPDATE_CLI_REFERENCE=1 … reference_matches_the_compiled_cli` → pass; `cargo check -p loopflow --bins --lib` + `cargo fmt --check` clean on the uncommitted log-path/status tidy.

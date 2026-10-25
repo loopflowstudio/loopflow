@@ -461,9 +461,11 @@ pub fn release_check(repo: &Path, target_name: Option<&str>) -> OpsResult<Releas
     collect_release_changes(&main_repo, &target)
 }
 
-/// Generate release notes for the given version.
+/// Generate release notes for the given version from origin's default branch,
+/// the base `lf release run` releases.
 ///
-/// Writes RELEASE_NOTES.md. Returns the generated notes content.
+/// Writes RELEASE_NOTES.md into the checkout containing `repo`. Returns the
+/// generated notes content.
 pub fn release_notes(
     repo: &Path,
     version: &str,
@@ -476,6 +478,9 @@ pub fn release_notes(
     }
 
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+    let checkout = crate::repo::discover_repo_root(repo)
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .unwrap_or_else(|| repo.to_path_buf());
 
     let resolved_prev_tag = match prev_tag {
         Some(tag) => Some(tag.to_string()),
@@ -485,12 +490,23 @@ pub fn release_notes(
     let version = normalize_version(version);
 
     progress.status("Collecting release changes...");
-    let changes =
-        collect_changes_between(&main_repo, resolved_prev_tag.as_deref(), "HEAD", &target)?;
+    let default_branch = get_default_branch(&main_repo)?;
+    fetch_inheriting(
+        &main_repo,
+        "origin",
+        &format!("+refs/heads/{default_branch}:refs/remotes/origin/{default_branch}"),
+        &|_| {},
+    )?;
+    let changes = collect_changes_between(
+        &main_repo,
+        resolved_prev_tag.as_deref(),
+        &format!("origin/{default_branch}"),
+        &target,
+    )?;
 
     progress.status("Generating narrative release notes...");
     run_release_notes_stage(
-        &main_repo,
+        &checkout,
         &version,
         resolved_prev_tag.as_deref(),
         &changes.commits,
@@ -500,7 +516,7 @@ pub fn release_notes(
         &|_| {},
     )?;
 
-    let notes = fs::read_to_string(main_repo.join("RELEASE_NOTES.md"))?;
+    let notes = fs::read_to_string(checkout.join("RELEASE_NOTES.md"))?;
     Ok(notes)
 }
 
@@ -960,7 +976,7 @@ pub(crate) fn release_run_with_cron(
         accounting::validate_execution(&home, context, execution)?;
     }
     if let Some(id) = cron_receipt {
-        accounting::record_target(&home, id, &target.name)?;
+        accounting::record_target(&home, &main_repo, id, &target.name)?;
     }
     let mut verification = Vec::new();
     let result: OpsResult<ReleaseRunOutcome> = (|| {
@@ -976,6 +992,7 @@ pub(crate) fn release_run_with_cron(
                     reason,
                     continuation: accounting::overlap_continuation(
                         &home,
+                        &main_repo,
                         cron_receipt.expect("scheduled overlap has receipt"),
                         chrono::Utc::now().timestamp(),
                     )?,
@@ -1030,6 +1047,7 @@ pub(crate) fn release_run_with_cron(
                 }
                 accounting::authorize_replacement(
                     &home,
+                    &main_repo,
                     cron_receipt.expect("saved selection has receipt"),
                     selection,
                     proof,
@@ -1072,6 +1090,7 @@ pub(crate) fn release_run_with_cron(
             )?;
             accounting::settle(
                 &home,
+                &main_repo,
                 id,
                 outcome,
                 &verification,
@@ -1090,22 +1109,12 @@ pub(crate) fn release_run_with_cron(
         )?;
         failure.passed = false;
         verification.push(failure);
-        let outcome = match error {
-            OpsError::ReleaseDeferred {
-                reason,
-                continuation,
-            } => ScheduledReleaseOutcome::Deferred {
-                reason: reason.clone(),
-                continuation: continuation.clone(),
-            },
-            _ => ScheduledReleaseOutcome::Failed {
-                cause: error.to_string(),
-            },
-        };
-        accounting::settle(
+        accounting::settle_error(
             &home,
+            &main_repo,
+            &target.name,
             id,
-            outcome,
+            error,
             &verification,
             chrono::Utc::now().timestamp(),
         )?;
@@ -1377,6 +1386,7 @@ fn release_run_inner(
                         PreparedRelease {
                             pr_number: pr.number,
                             head_sha: head_sha.to_string(),
+                            armed_at: chrono::Utc::now(),
                         },
                         &target,
                         &version,
@@ -1535,6 +1545,7 @@ fn finish_candidate(
         if let Some(id) = cron_receipt {
             accounting::select(
                 &crate::store::lf_home_dir(),
+                repo,
                 id,
                 accounting::ReleaseSelection {
                     tag: candidate.tag.clone(),
@@ -1798,8 +1809,14 @@ fn verify_scheduled_telemetry(
             recovery_receipt: None,
         }
     };
-    let continuation =
-        || accounting::overlap_continuation(home, receipt_id, chrono::Utc::now().timestamp());
+    let continuation = || {
+        accounting::overlap_continuation(
+            home,
+            &context.repo,
+            receipt_id,
+            chrono::Utc::now().timestamp(),
+        )
+    };
     let current = observation
         .current_receipts
         .last()
@@ -1832,7 +1849,7 @@ fn verify_scheduled_telemetry(
                     return Err(OpsError::Message("telemetry installation changed before recovery; inspect and retry at the next configured release firing".into()));
                 }
                 observation.recovery_receipt = Some(receipt.id.clone());
-                accounting::record_telemetry(home, receipt_id, &observation)
+                accounting::record_telemetry(home, &context.repo, receipt_id, &observation)
             },
         );
         if let Err(error) = result {
@@ -1848,7 +1865,7 @@ fn verify_scheduled_telemetry(
             });
         }
     } else if attempt.telemetry.is_none() {
-        accounting::record_telemetry(home, receipt_id, &observation)?;
+        accounting::record_telemetry(home, &context.repo, receipt_id, &observation)?;
     }
     let all_receipts = read_receipts(&root, &context.wave, Some("telemetry-daily"))?;
     let selected = observation
@@ -2494,6 +2511,8 @@ fn expand_publisher_command(repo: &Path, publisher: &[String]) -> Vec<String> {
 struct PreparedRelease {
     pr_number: u64,
     head_sha: String,
+    /// When this run last armed the PR. A person's later dequeue stops the run.
+    armed_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[allow(clippy::too_many_arguments)] // Exact release selection and both held mutation capabilities.
@@ -2600,6 +2619,7 @@ fn prepare_release_in_worktree(
     Ok(PreparedRelease {
         pr_number: pr.number,
         head_sha,
+        armed_at: chrono::Utc::now(),
     })
 }
 
@@ -2631,6 +2651,7 @@ fn finish_release_pr(
             main_repo,
             prepared.pr_number,
             &prepared.head_sha,
+            &mut prepared.armed_at,
             progress,
             lock,
         )? {
@@ -2773,9 +2794,12 @@ fn finish_release_pr(
                 })?;
                 let options = release_land_options(None);
                 let _context = ReleaseWorktreeContext::enter();
-                match crate::ops::pr_landing::reconcile_armed_pr(
+                let reconciled = crate::ops::pr_landing::reconcile_armed_pr(
                     &wt.path, &options, &pr, lock, &lease,
-                ) {
+                );
+                // Repair re-arms through Loopflow; the removals it makes are not a person's.
+                prepared.armed_at = chrono::Utc::now();
+                match reconciled {
                     Ok(landing) => {
                         wait_for_release_repair(&landing)?;
                         if let Some(commit) = landing.merge_commit {
@@ -3687,6 +3711,7 @@ fn wait_for_pr_merge(
     repo: &Path,
     pr_number: u64,
     head_sha: &str,
+    armed_at: &mut chrono::DateTime<chrono::Utc>,
     progress: &impl Progress,
     lock: &ReleaseLock,
 ) -> OpsResult<ReleasePrWait> {
@@ -3732,12 +3757,23 @@ fn wait_for_pr_merge(
         }
 
         if request.is_none() {
+            if let Some(removal) =
+                crate::ops::pr::manual_merge_removal_since(repo, pr_number, *armed_at)?
+            {
+                return Err(OpsError::ManualMergeRemoval {
+                    pr_number,
+                    actor: removal.actor,
+                    at: removal.at,
+                    queued: removal.queued,
+                });
+            }
             progress.status(&format!(
                 "Re-arming release PR #{pr_number} for exact-head auto-merge..."
             ));
             crate::ops::pr::enable_auto_merge(repo, pr_number, None, head_sha, &|command| {
                 lock.inherit(command)
             })?;
+            *armed_at = chrono::Utc::now();
         }
 
         if !matches!(request, Some(crate::ops::pr::MergeRequest::Queued(_)))

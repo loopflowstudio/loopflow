@@ -1906,7 +1906,8 @@ pub enum CronCommand {
         #[arg(short = 'w', long = "wave")]
         wave: String,
         /// Graph or skill name to run
-        #[arg(long = "graph")]
+        // Loaded 0.14.14 jobs pass --flow until reloaded; LOO-574 removes it.
+        #[arg(long = "graph", alias = "flow")]
         graph: String,
         /// Mark a launchd-owned invocation
         #[arg(long, hide = true)]

@@ -98,7 +98,12 @@ def _detect_signing_identity() -> str | None:
     return None
 
 
-def _codesign_app(app_path: Path, identity: str, entitlements: Path | None = None) -> int:
+def _codesign_app(
+    app_path: Path,
+    identity: str,
+    entitlements: Path | None = None,
+    timestamp: bool = True,
+) -> int:
     cmd = [
         "codesign",
         "--force",
@@ -107,8 +112,9 @@ def _codesign_app(app_path: Path, identity: str, entitlements: Path | None = Non
         identity,
         "--options",
         "runtime",
-        "--timestamp",
     ]
+    if timestamp:
+        cmd.append("--timestamp")
     if entitlements and entitlements.exists():
         cmd += ["--entitlements", str(entitlements)]
     cmd.append(str(app_path))
@@ -281,9 +287,31 @@ def _copy_app_executable(build_dir: Path, info_plist: Path, app_macos_dir: Path)
     shutil.copy(source, app_macos_dir / executable)
 
 
-def _verify_app_resource_self_containment(app_path: Path, build_dir: Path) -> None:
-    info_plist = app_path / "Contents" / "Info.plist"
-    executable = app_path / "Contents" / "MacOS" / _bundle_executable(info_plist)
+# A signed app under the shipped bundle id hangs at launch while Loopflow
+# Desktop runs; the check launches a copy under its own id instead.
+RESOURCE_CHECK_BUNDLE_ID = "com.loopflow.mac.release-check"
+
+
+def _resource_check_copy(
+    app_path: Path, destination: Path, identity: str, entitlements: Path
+) -> Path:
+    """Copy the signed app under the check bundle id; the shipped bundle is untouched."""
+    check_app = destination / app_path.name
+    shutil.copytree(app_path, check_app, symlinks=True)
+    info_plist = check_app / "Contents" / "Info.plist"
+    with info_plist.open("rb") as file:
+        info = plistlib.load(file)
+    info["CFBundleIdentifier"] = RESOURCE_CHECK_BUNDLE_ID
+    with info_plist.open("wb") as file:
+        plistlib.dump(info, file)
+    if _codesign_app(check_app, identity, entitlements, timestamp=False) != 0:
+        raise RuntimeError("Could not sign the packaged-app resource-check copy")
+    return check_app / "Contents" / "MacOS" / _bundle_executable(info_plist)
+
+
+def _verify_app_resource_self_containment(
+    app_path: Path, build_dir: Path, identity: str, entitlements: Path
+) -> None:
     resource_bundles = tuple(sorted(build_dir.glob("*.bundle")))
     if not resource_bundles:
         raise RuntimeError(f"No SwiftPM resource bundles found in {build_dir}")
@@ -298,6 +326,8 @@ def _verify_app_resource_self_containment(app_path: Path, build_dir: Path) -> No
     ) as temp:
         holding_dir = Path(temp)
         snapshot = holding_dir / "snapshot.png"
+        (holding_dir / "app").mkdir()
+        executable = _resource_check_copy(app_path, holding_dir / "app", identity, entitlements)
         moved: list[tuple[Path, Path]] = []
         try:
             for bundle in resource_bundles:
@@ -402,7 +432,7 @@ def release() -> int:
         )
         return 1
 
-    _verify_app_resource_self_containment(app_path, build_dir)
+    _verify_app_resource_self_containment(app_path, build_dir, identity, entitlements)
 
     # Create DMG
     dmg_path = dist_dir / f"{app_name}.dmg"

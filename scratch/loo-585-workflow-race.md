@@ -58,8 +58,8 @@ the failing line, not to the class it belongs to.
 - No CI log shows the race directly. Causation comes from the line numbers, the `history`-only diff,
   #1679's diagnosis and the probe reproduction. Unmodified tests never failed locally (0/20).
 - `two_people`'s takeover race is inferred from code; it has not failed in CI.
-- `global_commands.rs` has many bare `task run` calls. The ones checked are `--explain`, refusals or
-  unknown-Task cases that start no Graph. Not every call was audited.
+- Every remaining bare `task run` under `rust/loopflow/tests/` (audited 2026-10-25) is `--explain`, a
+  refusal, an unknown Task, the `end` edge (runs no Graph), or a task_graph_launch test of detaching.
 - Unanswered: whether other commands that went "returns once running" (if any) have the same test
   exposure. Only `task run` was checked.
 
@@ -74,7 +74,7 @@ fixture helper is unnecessary), and AGENTS.md's Rust-tests list names the rule a
 - ci-fix grepping sibling call sites when it diagnoses a race: unmeasured (proof would be a replay of
   #1679's failure) and pulls against ci-fix's narrow mandate. File only if another race repair stops
   at one line.
-- Auditing every bare `task run` in `global_commands.rs`, and other "returns once running" commands:
-  no failure evidence; the AGENTS.md rule covers new callers.
+- Auditing other "returns once running" commands (if any): no failure evidence; the AGENTS.md rule
+  covers new `task run` callers.
 - Not proposed: a test-only delay knob in `task run`. It reshapes production code for tests, and the
   probe already shows the race on demand.

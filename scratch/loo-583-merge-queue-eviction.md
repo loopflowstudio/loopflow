@@ -115,3 +115,12 @@ removed a PR's merge request", under infrastructure, not launched: `--stack-on`
 needs LOO-583's published PR. Launch it with
 `lf task run LOO-584 --stack-on LOO-583` once that PR exists, or bare after it
 lands. Item (4) needs no Task unless Docker readiness recurs.
+
+## Concept review (2026-10-25)
+
+No change. The repair keeps one product contract: a merge request the queue
+dropped is a CI failure for repair; only a person's dequeue or disable withdraws
+intent. Rechecked PR #1676's live timeline: GitHub's eviction leaves no
+`AutoMergeDisabledEvent` behind it, so "latest event is the eviction" holds, and a
+later arm or `merged` removal supersedes it. The one-reader and release-parity
+concepts stay with LOO-584; no open product choice here.

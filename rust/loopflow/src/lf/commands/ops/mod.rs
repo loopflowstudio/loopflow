@@ -1210,6 +1210,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             })?;
             crate::ops::cron::history::disposition(
                 &crate::store::lf_home_dir(),
+                &cron_authority(wave)?.repo,
                 wave,
                 subject,
                 owner,

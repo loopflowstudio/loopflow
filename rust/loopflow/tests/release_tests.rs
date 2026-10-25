@@ -155,6 +155,9 @@ if [ "$1 $2" = "api graphql" ]; then
 {checks}
 JSON
       exit 0 ;;
+    *LoopflowPrMergeRemovals*)
+      echo '{{"data":{{"repository":{{"pullRequest":{{"timelineItems":{{"nodes":[]}}}}}}}}}}'
+      exit 0 ;;
   esac
 fi
 case "$1 $2" in
@@ -409,6 +412,7 @@ fn release_notes_falls_back_when_agent_cli_is_missing() {
         &repo,
         &["commit", "-m", "Make weekly release self-contained"],
     );
+    git(&repo, &["push", "origin", "HEAD"]);
     let sha = git_output(&repo, &["rev-parse", "HEAD"]);
     let pr_list = format!(
         r#"[{{"number":101,"title":"Make weekly release self-contained","body":"Release automation no longer requires a workstation CLI.","additions":42,"deletions":7,"changedFiles":3,"mergeCommit":{{"oid":"{sha}"}}}}]"#
@@ -442,6 +446,41 @@ fn release_notes_falls_back_when_agent_cli_is_missing() {
     // The unreleased dir was promoted to the version dir.
     assert!(!repo.path().join("release/unreleased").exists());
     assert!(repo.path().join("release/v0.9.1/CHANGES.md").exists());
+}
+
+#[test]
+fn release_notes_build_from_origin_into_the_invoking_checkout() {
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.0"]);
+    fs::write(repo.path().join("shipped.txt"), "shipped\n").unwrap();
+    git(&repo, &["add", "shipped.txt"]);
+    git(&repo, &["commit", "-m", "Ship the origin change"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    let shipped = git_output(&repo, &["rev-parse", "HEAD"]);
+    let checkout = repo.create_named_worktree("notes");
+    git(&repo, &["checkout", "-b", "feature"]);
+    fs::write(repo.path().join("feature.txt"), "unreleased\n").unwrap();
+    git(&repo, &["add", "feature.txt"]);
+    git(&repo, &["commit", "-m", "Unreleased feature work"]);
+    let pr_list = format!(
+        r#"[{{"number":7,"title":"Ship the origin change","body":"Shipped.","mergeCommit":{{"oid":"{shipped}"}}}}]"#
+    );
+    let gh_script = write_gh_script(&pr_list);
+    let lf_script = "#!/bin/sh\necho \"'claude' CLI not found.\" >&2\nexit 1\n";
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
+
+    let notes = release_notes(&checkout, "0.9.1", Some("v0.9.0"), None, &NullProgress)
+        .expect("release notes from a linked checkout");
+
+    assert!(notes.contains("Ship the origin change"));
+    assert!(!notes.contains("Unreleased feature work"));
+    assert_eq!(
+        fs::read_to_string(checkout.join("RELEASE_NOTES.md")).unwrap(),
+        notes
+    );
+    assert!(checkout.join("release/v0.9.1/NOTES.md").exists());
+    assert!(!repo.path().join("RELEASE_NOTES.md").exists());
+    assert!(!repo.path().join("release").exists());
 }
 
 #[test]
@@ -514,6 +553,7 @@ fn release_notes_bounds_oversized_pr_bodies_and_queue_metadata() {
     fs::write(repo.path().join("bounded.txt"), "bounded\n").unwrap();
     git(&repo, &["add", "bounded.txt"]);
     git(&repo, &["commit", "-m", "Bound release context"]);
+    git(&repo, &["push", "origin", "HEAD"]);
     let sha = git_output(&repo, &["rev-parse", "HEAD"]);
     let pr_list = serde_json::to_string(&vec![serde_json::json!({
         "number": 202,
@@ -690,6 +730,7 @@ fn release_notes_context_fuses_decisions_with_exact_commits() {
     fs::write(repo.path().join("feature.txt"), "release behavior\n").unwrap();
     git(&repo, &["add", "feature.txt"]);
     git(&repo, &["commit", "-m", "Ship release behavior"]);
+    git(&repo, &["push", "origin", "HEAD"]);
     fs::create_dir_all(repo.path().join("release/unreleased")).unwrap();
     fs::write(
         repo.path().join("release/unreleased/DECISIONS.md"),

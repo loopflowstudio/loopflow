@@ -62,13 +62,49 @@ def _write_test_app(app_path: Path, script: str) -> None:
     app_macos_dir = app_path / "Contents" / "MacOS"
     app_macos_dir.mkdir(parents=True)
     with (app_path / "Contents" / "Info.plist").open("wb") as file:
-        plistlib.dump({"CFBundleExecutable": "Loopflow"}, file)
+        plistlib.dump(
+            {"CFBundleExecutable": "Loopflow", "CFBundleIdentifier": "com.loopflow.mac"}, file
+        )
     executable = app_macos_dir / "Loopflow"
     executable.write_text("#!/bin/sh\nset -eu\n" + script)
     executable.chmod(0o755)
 
 
-def test_resource_check_hides_then_restores_build_resources(tmp_path: Path) -> None:
+@pytest.fixture
+def unsigned_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(release_loopflow, "_codesign_app", lambda *args, **kwargs: 0)
+
+
+def _check(app_path: Path, build_dir: Path) -> None:
+    release_loopflow._verify_app_resource_self_containment(
+        app_path, build_dir, "Developer ID Application: Test", Path("Loopflow.entitlements")
+    )
+
+
+def test_resource_check_launches_a_copy_under_its_own_bundle_id(
+    tmp_path: Path, unsigned_check: None
+) -> None:
+    build_dir = tmp_path / "build"
+    (build_dir / "LoopflowSwift_Loopflow.bundle").mkdir(parents=True)
+    app_path = tmp_path / "Loopflow.app"
+    observed = tmp_path / "launched-Info.plist"
+    _write_test_app(
+        app_path,
+        f'cp "$(dirname "$0")/../Info.plist" {shlex.quote(str(observed))}\n'
+        'printf snapshot > "$LOOPFLOW_UI_TEST_SNAPSHOT_PATH"\n',
+    )
+
+    _check(app_path, build_dir)
+
+    launched = plistlib.loads(observed.read_bytes())
+    shipped = plistlib.loads((app_path / "Contents" / "Info.plist").read_bytes())
+    assert launched["CFBundleIdentifier"] == "com.loopflow.mac.release-check"
+    assert shipped["CFBundleIdentifier"] == "com.loopflow.mac"
+
+
+def test_resource_check_hides_then_restores_build_resources(
+    tmp_path: Path, unsigned_check: None
+) -> None:
     build_dir = tmp_path / "build"
     build_bundle = build_dir / "LoopflowSwift_Loopflow.bundle"
     build_bundle.mkdir(parents=True)
@@ -79,12 +115,12 @@ def test_resource_check_hides_then_restores_build_resources(tmp_path: Path) -> N
         f'test ! -e {quoted_bundle}\nprintf snapshot > "$LOOPFLOW_UI_TEST_SNAPSHOT_PATH"\n',
     )
 
-    release_loopflow._verify_app_resource_self_containment(app_path, build_dir)
+    _check(app_path, build_dir)
 
     assert build_bundle.is_dir()
 
 
-def test_resource_check_rejects_a_build_dependent_app(tmp_path: Path) -> None:
+def test_resource_check_rejects_a_build_dependent_app(tmp_path: Path, unsigned_check: None) -> None:
     build_dir = tmp_path / "build"
     build_bundle = build_dir / "LoopflowSwift_Loopflow.bundle"
     build_bundle.mkdir(parents=True)
@@ -96,12 +132,12 @@ def test_resource_check_rejects_a_build_dependent_app(tmp_path: Path) -> None:
     )
 
     with pytest.raises(RuntimeError, match="failed without SwiftPM build resources"):
-        release_loopflow._verify_app_resource_self_containment(app_path, build_dir)
+        _check(app_path, build_dir)
 
     assert build_bundle.is_dir()
 
 
-def test_resource_check_requires_a_rendered_snapshot(tmp_path: Path) -> None:
+def test_resource_check_requires_a_rendered_snapshot(tmp_path: Path, unsigned_check: None) -> None:
     build_dir = tmp_path / "build"
     build_bundle = build_dir / "LoopflowSwift_Loopflow.bundle"
     build_bundle.mkdir(parents=True)
@@ -109,7 +145,7 @@ def test_resource_check_requires_a_rendered_snapshot(tmp_path: Path) -> None:
     _write_test_app(app_path, "exit 0\n")
 
     with pytest.raises(RuntimeError, match="produced no resource-check snapshot"):
-        release_loopflow._verify_app_resource_self_containment(app_path, build_dir)
+        _check(app_path, build_dir)
 
     assert build_bundle.is_dir()
 

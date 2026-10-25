@@ -187,6 +187,11 @@ idle text is "Scheduled automation is off." There is still one `Interrupt { work
 target }` variant, and no JSON consumer branches on the distinction. Covered by
 `interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_stop`.
 
+Second concept review (2026-10-24, against 8e876baff3): no change. During an
+op step the receipt still reads "stopped Graph X at <op>" while the op finishes;
+the accepted Demo wording and point 3 cover that (the Graph does stop, and
+nothing follows), so it stays.
+
 ## Done when (gate, headless)
 
 From an lf-launched shell, with inherited `LF_*` unset and `< /dev/null`:

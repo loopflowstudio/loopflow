@@ -198,6 +198,9 @@ Settled (2026-10-22):
   lifecycle; a paused shipping Task reads "Shipping · Paused…" and keeps Stop shipping, which
   matches "paused is a hold". Open item stays Jack's: whether checkout work alone reads
   `working`. None blocks re-demo or gate.
+- Eighth concept review (2026-10-24, after "At <stage> · yours" and `routes(_:)`): nothing to
+  change. The header's routes exclude any route into `end`, which hides verify's pass route.
+  That's the open Complete-at-verify question in Remaining 1, and it stays Jack's.
 
 4. **Post-merge `verify`: built 2026-10-24 (see above); the shape below is the reference.** The hold steer of 2026-10-22
    was the operator's, posted under Jack's name while the shape was in discussion; Jack then

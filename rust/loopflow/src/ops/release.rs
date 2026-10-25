@@ -2844,7 +2844,7 @@ fn wait_for_release_repair(landing: &crate::pr_landing::PrLanding) -> OpsResult<
     let runtime = tokio::runtime::Runtime::new()?;
     let store = runtime.block_on(crate::ops::pr_landing::landing_store())?;
     let deadline = Instant::now() + Duration::from_secs(60 * 60);
-    while crate::ops::pr_landing::repair_running(&store, landing)? {
+    while crate::ops::pr_landing::repair_running(&store, &landing.repo, landing.pr_number)? {
         if Instant::now() >= deadline {
             return Err(OpsError::ReleaseDeferred {
                 reason: format!(
@@ -2860,6 +2860,17 @@ fn wait_for_release_repair(landing: &crate::pr_landing::PrLanding) -> OpsResult<
         thread::sleep(Duration::from_millis(100));
     }
     Ok(())
+}
+
+fn release_repair_running(repo: &Path, pr_number: u64) -> OpsResult<bool> {
+    let repo_id = crate::repository::RepoId::discover(repo)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let pr_number = u32::try_from(pr_number).map_err(|_| {
+        OpsError::Message(format!("pull request #{pr_number} exceeds supported range"))
+    })?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    let store = runtime.block_on(crate::ops::pr_landing::landing_store())?;
+    crate::ops::pr_landing::repair_running(&store, repo_id.as_str(), pr_number)
 }
 
 fn fetch_release_branch(
@@ -3757,6 +3768,19 @@ fn wait_for_pr_merge(
         }
 
         if request.is_none() {
+            if release_repair_running(repo, pr_number)? {
+                // A CI repair disarms before it moves the head and re-arms after
+                // it publishes. Its removal is not a person's, and re-arming the
+                // old head would race its push.
+                if attempt.is_multiple_of(6) {
+                    progress.status(&format!(
+                        "Release PR #{pr_number} is paused for an active CI repair..."
+                    ));
+                }
+                attempt += 1;
+                thread::sleep(poll);
+                continue;
+            }
             if let Some(removal) =
                 crate::ops::pr::manual_merge_removal_since(repo, pr_number, *armed_at)?
             {

@@ -27,7 +27,7 @@ use super::error::{OpsError, OpsResult};
 use super::land::LandOptions;
 use super::pr::{
     merge_gate_state, merge_needs_integration, merge_request_removal, observe_pr_merge,
-    MergeGateReading, MergeRequest, MergeRequestRemoval, PrInfo, RepairWindow,
+    ManualRemoval, MergeGateReading, MergeRequest, MergeRequestRemoval, PrInfo, RepairWindow,
 };
 
 #[derive(Debug, serde::Deserialize)]
@@ -64,9 +64,7 @@ pub(crate) enum LandingObservation {
     /// A person removed the PR's merge request.
     Withdrawn {
         head_sha: String,
-        at: chrono::DateTime<chrono::Utc>,
-        actor: Option<String>,
-        queued: bool,
+        removal: ManualRemoval,
     },
     Pending {
         head_sha: String,
@@ -107,29 +105,14 @@ pub(crate) type ObservePr = Arc<dyn Fn(&PrLanding) -> OpsResult<LandingObservati
 pub(crate) type RepairCi = Arc<dyn Fn(&PrLanding, &CiIncident) -> OpsResult<()> + Send + Sync>;
 
 fn observe_github(landing: &PrLanding) -> OpsResult<LandingObservation> {
-    observe_merge(
-        &landing.worktree,
-        &landing.repo,
-        landing.pr_number,
-        &landing.observed_head_sha,
-    )
-}
-
-/// Read one PR and decide it the way landing and release both see it.
-pub(crate) fn observe_merge(
-    worktree: &Path,
-    repo: &str,
-    pr_number: u32,
-    fallback_head: &str,
-) -> OpsResult<LandingObservation> {
-    let number = u64::from(pr_number);
-    let observation = observe_pr_merge(worktree, number)?;
+    let number = u64::from(landing.pr_number);
+    let observation = observe_pr_merge(&landing.worktree, number)?;
     decide_merge(
         observation.pr,
-        fallback_head,
+        &landing.observed_head_sha,
         observation.request,
-        || read_merge_request_removal(worktree, repo, pr_number),
-        |head| merge_gate_state(worktree, number, head),
+        || read_merge_request_removal(&landing.worktree, &landing.repo, landing.pr_number),
+        |head| merge_gate_state(&landing.worktree, number, head),
     )
 }
 
@@ -213,13 +196,8 @@ pub(crate) fn decide_merge(
         Some(MergeRequest::Queued(_)) => return Ok(LandingObservation::Pending { head_sha }),
         Some(_) => None,
         None => match removal()? {
-            MergeRequestRemoval::Manual { at, actor, queued } => {
-                return Ok(LandingObservation::Withdrawn {
-                    head_sha,
-                    at,
-                    actor,
-                    queued,
-                })
+            MergeRequestRemoval::Manual(removal) => {
+                return Ok(LandingObservation::Withdrawn { head_sha, removal })
             }
             MergeRequestRemoval::Merged => return Ok(LandingObservation::Pending { head_sha }),
             MergeRequestRemoval::Evicted { reason, run_url } => {
@@ -1034,12 +1012,10 @@ async fn reconcile_claimed(
                 .map_err(|error| OpsError::Message(error.to_string()))?;
             resume_watching(store, landing, head_sha).await
         }
-        LandingObservation::Withdrawn {
-            at, actor, queued, ..
-        } => {
-            let actor = actor.as_deref().unwrap_or("someone");
+        LandingObservation::Withdrawn { removal, .. } => {
+            let actor = removal.actor.as_deref().unwrap_or("someone");
             let number = landing.pr_number;
-            let removal = if queued {
+            let removed = if removal.queued {
                 format!("{actor} removed #{number} from the merge queue")
             } else {
                 format!("{actor} disabled auto-merge on #{number}")
@@ -1048,8 +1024,8 @@ async fn reconcile_claimed(
                 store,
                 landing,
                 format!(
-                    "{removal} at {}; run lf arm to resume landing",
-                    at.to_rfc3339()
+                    "{removed} at {}; run lf arm to resume landing",
+                    removal.at.to_rfc3339()
                 ),
             )
             .await
@@ -1539,7 +1515,9 @@ mod tests {
         ObservePr, RepairCi,
     };
     use crate::ops::error::{OpsError, OpsResult};
-    use crate::ops::pr::{MergeGateReading, MergeRequest, MergeRequestRemoval, PrInfo};
+    use crate::ops::pr::{
+        ManualRemoval, MergeGateReading, MergeRequest, MergeRequestRemoval, PrInfo,
+    };
     use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::{SharedStore, StorageConfig};
     use crate::work::task::CiCheck;
@@ -1789,9 +1767,11 @@ mod tests {
         let (_directory, store, landing) = fixture().await;
         let script = script(vec![LandingObservation::Withdrawn {
             head_sha: "head".into(),
-            at: "2026-10-22T20:13:13Z".parse().unwrap(),
-            actor: Some("jacklionheart".into()),
-            queued: true,
+            removal: ManualRemoval {
+                at: "2026-10-22T20:13:13Z".parse().unwrap(),
+                actor: Some("jacklionheart".into()),
+                queued: true,
+            },
         }]);
         assert!(check(store.clone(), landing.clone(), &script)
             .await

@@ -2646,7 +2646,7 @@ fn arm_resumed_release(
     let (repo_id, number) = landing_pr(repo, pr_number)?;
     if !matches!(
         crate::ops::pr_landing::read_merge_request_removal(repo, repo_id.as_str(), number)?,
-        crate::ops::pr::MergeRequestRemoval::Manual { .. }
+        crate::ops::pr::MergeRequestRemoval::Manual(_)
             | crate::ops::pr::MergeRequestRemoval::Unknown
     ) {
         return Ok(());
@@ -3750,13 +3750,11 @@ fn release_wait(
             "{} was closed without merging",
             pr.url
         ))),
-        LandingObservation::Withdrawn {
-            at, actor, queued, ..
-        } => Err(OpsError::ManualMergeRemoval {
+        LandingObservation::Withdrawn { removal, .. } => Err(OpsError::ManualMergeRemoval {
             pr_number: pr.number,
-            actor,
-            at,
-            queued,
+            actor: removal.actor,
+            at: removal.at,
+            queued: removal.queued,
         }),
         LandingObservation::Failing { head_sha, .. } => {
             Ok(Some(ReleasePrWait::NeedsRepair(head_sha)))
@@ -5354,7 +5352,9 @@ mod tests {
 
     #[test]
     fn merge_request_removals_decide_landing_and_release_alike() {
-        use crate::ops::pr::{MergeGateReading, MergeRequestRemoval, PrInfo, RepairWindow};
+        use crate::ops::pr::{
+            ManualRemoval, MergeGateReading, MergeRequestRemoval, PrInfo, RepairWindow,
+        };
         use crate::ops::pr_landing::{decide_merge, LandingObservation};
         use crate::work::task::CiCheck;
         use serde_json::json;
@@ -5408,9 +5408,11 @@ mod tests {
         };
         let withdrawn = |time: &str, queued| LandingObservation::Withdrawn {
             head_sha: "head".into(),
-            at: at(time),
-            actor: Some("jacklionheart".into()),
-            queued,
+            removal: ManualRemoval {
+                at: at(time),
+                actor: Some("jacklionheart".into()),
+                queued,
+            },
         };
         let cases = [
             (

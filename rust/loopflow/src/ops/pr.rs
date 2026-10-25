@@ -776,15 +776,19 @@ fn parse_pr_merge(output: &[u8]) -> OpsResult<PrMergeObservation> {
     })
 }
 
+/// A person dequeued a PR or disabled its auto-merge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ManualRemoval {
+    pub at: chrono::DateTime<chrono::Utc>,
+    pub actor: Option<String>,
+    /// Removed from the merge queue rather than taken off auto-merge.
+    pub queued: bool,
+}
+
 /// Why an open PR has no merge request, read from its latest merge-request event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum MergeRequestRemoval {
-    /// A person dequeued the PR or disabled auto-merge.
-    Manual {
-        at: chrono::DateTime<chrono::Utc>,
-        actor: Option<String>,
-        queued: bool,
-    },
+    Manual(ManualRemoval),
     /// A Loopflow CI repair disarmed it while repairing this PR.
     ByLoopflow,
     /// GitHub's queue dropped it; `run_url` is the merge-group run for this entry.
@@ -868,11 +872,11 @@ fn removal_from_events(
     {
         return Ok(MergeRequestRemoval::ByLoopflow);
     }
-    Ok(MergeRequestRemoval::Manual {
+    Ok(MergeRequestRemoval::Manual(ManualRemoval {
         at: latest.created_at,
         actor: latest.actor.as_ref().map(|actor| actor.login.clone()),
         queued: latest.typename == "RemovedFromMergeQueueEvent",
-    })
+    }))
 }
 
 /// The non-successful merge-group run GitHub created for `number` between its

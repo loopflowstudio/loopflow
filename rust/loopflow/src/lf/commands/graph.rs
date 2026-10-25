@@ -210,7 +210,7 @@ pub fn run_for_task(cli: &Cli, task: &Task, graph: &str) -> Result<()> {
     }
 }
 
-/// Where a Task run that let its launcher go keeps a Graph process's output.
+/// Where a Task run that let its launcher go keeps its Graph or skill Process's output.
 pub fn graph_log_path(id: &str) -> std::path::PathBuf {
     crate::store::lf_home_dir()
         .join("logs")

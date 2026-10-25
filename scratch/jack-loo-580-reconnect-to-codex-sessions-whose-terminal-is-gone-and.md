@@ -1,7 +1,7 @@
 # LOO-580: reconnect to Sessions whose terminal is gone
 
 Status: implemented 2026-10-24; realigned 2026-10-24 (no upstream changes to touched files).
-Remaining: gate, ship (Jack: fully automatic, no demo review). Open acceptance gap: the
+Gated 2026-10-24. Remaining: land (Jack: fully automatic, no demo review). Open acceptance gap: the
 Task's "Done when" asks for a real terminal-closed Codex Session reconnected by the branch
 build within seconds, recorded in the PR; only the parts below are proven so far.
 
@@ -17,7 +17,7 @@ reported `active` + "Move here"; observe-attach to that owner answered in 0.49 s
 The branch build runs on a stale Machine copy (`~/.lf/copies/45407719…`, in use by
 another process), so MTG-185 itself could not be connected by the branch build here.
 
-Check: `cargo test -p loopflow --test integration a_task_identifier_connects` + `--lib human_session` (34) pass; clippy clean. Swift build deferred to gate/CI.
+Gate: `cargo fmt --check`, `cargo clippy --all-targets -D warnings` clean; `--lib human_session` 34 pass; integration `a_task_identifier_connects dto documented_commands reference_matches_the_compiled_cli` 49 pass; `scripts/test_desktop.sh --filter 'DTOFixtureTests|SessionAction|…'` 50 pass (app builds). Real Codex reconnect not reproducible headless here (stale Machine copy); left to the PR as a stated limit.
 
 Concept review 2026-10-24: no change. `detached` matches the existing idle-policy term
 (`session.end_detached_after`) and earns its place by changing the one action (Reconnect,

@@ -26,7 +26,8 @@ use crate::work::task::{CiCheck, CiIncident};
 use super::error::{OpsError, OpsResult};
 use super::land::LandOptions;
 use super::pr::{
-    merge_gate_state, merge_needs_integration, observe_pr_merge, MergeRequest, PrInfo,
+    merge_gate_state, merge_needs_integration, merge_queue_eviction, observe_pr_merge,
+    MergeQueueEviction, MergeRequest, PrInfo,
 };
 
 #[derive(Debug, serde::Deserialize)]
@@ -103,7 +104,9 @@ pub(crate) type RepairCi = Arc<dyn Fn(&PrLanding, &CiIncident) -> OpsResult<()> 
 
 fn observe_github(landing: &PrLanding) -> OpsResult<LandingObservation> {
     let observation = observe_pr_merge(&landing.worktree, u64::from(landing.pr_number))?;
-    classify_github_observation(landing, observation.pr, observation.request)
+    classify_github_observation(landing, observation.pr, observation.request, || {
+        merge_queue_eviction(&landing.worktree, u64::from(landing.pr_number))
+    })
 }
 
 fn ci_fix(
@@ -116,6 +119,7 @@ fn classify_github_observation(
     landing: &PrLanding,
     pr: PrInfo,
     request: Option<MergeRequest>,
+    eviction: impl FnOnce() -> OpsResult<Option<MergeQueueEviction>>,
 ) -> OpsResult<LandingObservation> {
     let head_sha = pr
         .head_sha
@@ -139,7 +143,18 @@ fn classify_github_observation(
         _ if matches!(request, Some(MergeRequest::Queued(_))) => {
             Ok(LandingObservation::Pending { head_sha })
         }
-        _ if request.is_none() => Ok(LandingObservation::Unarmed { head_sha }),
+        // The queue drops a PR whose merge group failed and clears its arm.
+        // That is a CI failure for repair, not a person withdrawing intent.
+        _ if request.is_none() => match eviction()? {
+            Some(eviction) => Ok(LandingObservation::Failing {
+                head_sha,
+                failing_checks: vec![CiCheck {
+                    name: merge_queue_check(&eviction.reason),
+                    url: eviction.run_url,
+                }],
+            }),
+            None => Ok(LandingObservation::Unarmed { head_sha }),
+        },
         _ if merge_needs_integration(pr.merge_state.as_deref(), request.as_ref()) => {
             Ok(LandingObservation::Failing {
                 head_sha,
@@ -166,6 +181,11 @@ fn classify_github_observation(
             None => Ok(LandingObservation::Pending { head_sha }),
         },
     }
+}
+
+/// The synthetic check a merge-queue eviction fails, e.g. `merge-queue (failed_checks)`.
+fn merge_queue_check(reason: &str) -> String {
+    format!("merge-queue ({reason})")
 }
 
 fn admit_ci_fix(
@@ -491,7 +511,7 @@ fn process_ci_fix(
         .map_err(|error| OpsError::Message(format!("ci-fix skill not found: {error}")))?
         .content
         .ok_or_else(|| OpsError::Message("ci-fix skill has no content".to_string()))?;
-    let urls = merge_gate_state(
+    let mut urls = merge_gate_state(
         &landing.worktree,
         u64::from(landing.pr_number),
         &incident.failed_head_sha,
@@ -506,6 +526,22 @@ fn process_ci_fix(
             .collect::<std::collections::BTreeMap<_, _>>()
     })
     .unwrap_or_default();
+    // A merge-queue eviction's failure lives on the merge-group run, not the PR head.
+    if incident
+        .failure_set
+        .iter()
+        .any(|name| name.starts_with("merge-queue"))
+    {
+        if let Some(eviction) =
+            merge_queue_eviction(&landing.worktree, u64::from(landing.pr_number))
+                .ok()
+                .flatten()
+        {
+            if let Some(url) = eviction.run_url {
+                urls.insert(merge_queue_check(&eviction.reason), url);
+            }
+        }
+    }
     let checks = incident
         .failure_set
         .iter()
@@ -1444,7 +1480,7 @@ mod tests {
         LandingObservation, ObservePr, RepairCi,
     };
     use crate::ops::error::{OpsError, OpsResult};
-    use crate::ops::pr::{MergeRequest, PrInfo};
+    use crate::ops::pr::{MergeQueueEviction, MergeRequest, PrInfo};
     use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::{SharedStore, StorageConfig};
     use crate::work::task::CiCheck;
@@ -1476,6 +1512,37 @@ mod tests {
         (landing, pr)
     }
 
+    fn no_eviction() -> OpsResult<Option<MergeQueueEviction>> {
+        Ok(None)
+    }
+
+    #[test]
+    fn a_queue_eviction_is_a_failure_for_repair_not_a_revoked_landing() {
+        // PR #1676: the merge group failed on a runner fault, GitHub dropped
+        // the PR from the queue and cleared its arm.
+        let (landing, mut pr) = github_landing_fixture();
+        pr.merge_state = Some("clean".to_string());
+        let run = "https://github.com/loopflowstudio/loopflow/actions/runs/40166998506";
+        let observed = classify_github_observation(&landing, pr, None, || {
+            Ok(Some(MergeQueueEviction {
+                at: chrono::Utc::now(),
+                reason: "failed_checks".to_string(),
+                run_url: Some(run.to_string()),
+            }))
+        })
+        .unwrap();
+        assert_eq!(
+            observed,
+            LandingObservation::Failing {
+                head_sha: "pr-head".to_string(),
+                failing_checks: vec![CiCheck {
+                    name: "merge-queue (failed_checks)".to_string(),
+                    url: Some(run.to_string()),
+                }],
+            }
+        );
+    }
+
     #[test]
     fn queued_landing_waits_for_integration_instead_of_requiring_sync() {
         let (landing, mut pr) = github_landing_fixture();
@@ -1485,6 +1552,7 @@ mod tests {
                 &landing,
                 pr.clone(),
                 Some(MergeRequest::Queued("queue-entry".to_string())),
+                no_eviction,
             )
             .unwrap();
             assert_eq!(
@@ -1499,14 +1567,19 @@ mod tests {
     #[test]
     fn dequeued_landing_resumes_ordinary_integration_and_authorization_checks() {
         let (landing, pr) = github_landing_fixture();
-        let observed =
-            classify_github_observation(&landing, pr.clone(), Some(MergeRequest::Auto)).unwrap();
+        let observed = classify_github_observation(
+            &landing,
+            pr.clone(),
+            Some(MergeRequest::Auto),
+            no_eviction,
+        )
+        .unwrap();
         assert!(
             matches!(observed, LandingObservation::Failing { failing_checks, .. }
             if failing_checks[0].name == "required-integration")
         );
         assert_eq!(
-            classify_github_observation(&landing, pr, None).unwrap(),
+            classify_github_observation(&landing, pr, None, no_eviction).unwrap(),
             LandingObservation::Unarmed {
                 head_sha: "pr-head".to_string()
             }
@@ -1522,7 +1595,8 @@ mod tests {
             classify_github_observation(
                 &landing,
                 pr.clone(),
-                Some(MergeRequest::Queued("queue-entry".to_string()))
+                Some(MergeRequest::Queued("queue-entry".to_string())),
+                no_eviction,
             )
             .unwrap(),
             LandingObservation::Merged {
@@ -1532,7 +1606,7 @@ mod tests {
         );
         pr.state = "closed".to_string();
         assert_eq!(
-            classify_github_observation(&landing, pr, None).unwrap(),
+            classify_github_observation(&landing, pr, None, no_eviction).unwrap(),
             LandingObservation::Closed {
                 head_sha: "pr-head".to_string()
             }

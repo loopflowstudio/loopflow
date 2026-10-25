@@ -132,7 +132,8 @@ are CLI sugar for actions (`zoom` → `pane.zoom`, `run` → `shell.new`). Inven
 | `dashboard.working_tasks` | — | sidebar menu, crumb |
 | `dashboard.enter` | `task` | tile click (only a member of the shown Dashboard) |
 | `pane.focus` | `direction?` | ⌘⌥arrows; with `-b`, that pane |
-| `pane.zoom` / `pane.hide` / `pane.restore` | `on?` | zoom key, close, undo close |
+| `pane.zoom` / `pane.hide` / `pane.restore` | `on?` / — / — | zoom key / — / — |
+| `pane.close` / `pane.reopen` | — | ⌘W (addressed tab) / ⇧⌘T (the Task's last close; `-b` picks only the Task) |
 | `pane.move` / `pane.resize` | `destination, axis` / `toward, ratio` | drag |
 | `pane.send` / `pane.send_key` | `text` / `key` | — |
 | `shell.new` | `command?` | ⌘T |

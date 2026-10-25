@@ -156,7 +156,7 @@ checks; `lf ci watch --status` shows its last poll and what it started.
 ⇧⌘E         show / hide Files
 ⌘⌥←/→/↑/↓   focus the visual neighbor
 ⌘⇧Return    zoom the focused pane
-⌘W / ⌘⇧T    close / restore a pane
+⌘W / ⌘⇧T    close the selected tab / undo close
 ⌘F          find in the focused terminal
 ```
 
@@ -228,6 +228,7 @@ arranged freely by dragging, zoom and hide; Wave and repository workspaces hold
 only the session pane. The session pane shows one conversation and switches when
 another opens. ⌘T adds a shell tab. The browser's tabs are the Task's Files, its
 Graph processes and http(s) pages. ⌘W closes the selected tab, or hides the pane.
+⇧⌘T puts the last closed tab back where it was, its shell still running.
 
 **View → Toggle Files** shows a Task's checkout in the browser pane beside the
 retained terminal. Expand folders to read one page of up to 500 entries;

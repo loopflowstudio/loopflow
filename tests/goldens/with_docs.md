@@ -129,6 +129,9 @@ Make safe executive decisions and keep moving. When required input is missing,
 explain the failure in ordinary output and stop. Existing logs and outcomes are
 sufficient; no extra report, conversation, or notification is required.
 
+The run ends when your turn ends with no background commands running. Stop any
+long-lived background process you started (servers, watchers) before you answer.
+
 For reversible ambiguity, record a material
 assumption in `scratch/questions.md` and proceed with the simpler safe choice.
 

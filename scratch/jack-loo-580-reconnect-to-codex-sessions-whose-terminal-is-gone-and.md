@@ -1,6 +1,9 @@
 # LOO-580: reconnect to Sessions whose terminal is gone
 
-Status: implemented 2026-10-24; remaining: gate, ship (Jack: fully automatic, no demo review).
+Status: implemented 2026-10-24; realigned 2026-10-24 (no upstream changes to touched files).
+Remaining: gate, ship (Jack: fully automatic, no demo review). Open acceptance gap: the
+Task's "Done when" asks for a real terminal-closed Codex Session reconnected by the branch
+build within seconds, recorded in the PR; only the parts below are proven so far.
 
 - `resolve_target` (ops/human_session.rs): a Task identifier where a Session id belongs
   becomes a Task target in `select_connection` and `explain_connect`; exact Session ids win.

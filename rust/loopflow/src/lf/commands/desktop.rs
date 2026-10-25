@@ -133,7 +133,7 @@ pub enum DesktopDestination {
     View {
         selection: crate::work::selection::Selection,
     },
-    /// A Dashboard member entered as full Work; back returns to its Dashboard.
+    /// A tile entered as full Work; back returns to its Dashboard or Wave view.
     Entered {
         from: DesktopBoard,
         work: WorkWorkspaceKey,
@@ -146,6 +146,8 @@ pub enum DesktopDestination {
 pub enum DesktopBoard {
     Dashboard(String),
     WorkingTasks,
+    /// A Wave view, whose Tasks are tiles beside its conversation.
+    Wave(String),
 }
 
 /// Destinations back and forward reach, as the window's chevrons do.
@@ -901,12 +903,23 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
                     ))
                 })?;
             let mut args = args.clone();
+            // `enter` names a tile as `-p` does; Desktop receives its full Work ID.
+            let entered = match args.get("tile").filter(|_| name == "enter") {
+                Some(tile) => {
+                    let work = scope
+                        .entered_tile(window, tile)
+                        .map_err(DesktopError::target)?;
+                    args.insert("tile".into(), work.id.clone());
+                    Some(work.clone())
+                }
+                None => None,
+            };
             let (pane, resolved) = match descriptor.scope {
                 DesktopActionScope::Window => (
                     None,
                     DesktopResolution {
                         window: window.window.clone(),
-                        work: None,
+                        work: entered,
                         pane: None,
                         tab: None,
                         rule: DesktopTargetRule::Window,
@@ -1041,8 +1054,8 @@ impl Verb {
                 action("goto", vec![("index", index.to_string())]),
                 window(target),
             ),
-            DesktopCommand::Enter { task, target } => (
-                action("enter", vec![("task", task.clone())]),
+            DesktopCommand::Enter { tile, target } => (
+                action("enter", vec![("tile", tile.clone())]),
                 window(target),
             ),
             DesktopCommand::Send { text, target } => {
@@ -2101,6 +2114,19 @@ impl<'a> Scope<'a> {
         Ok(tiles[index])
     }
 
+    /// The tile `enter` opens in full; only a view showing tiles has one.
+    fn entered_tile(
+        &self,
+        window: &'a DesktopWindowInspection,
+        selector: &str,
+    ) -> Result<&'a WorkWorkspaceKey> {
+        anyhow::ensure!(
+            Self::shows_board(window),
+            "This window shows no tiles; open a Dashboard or Wave view first. Nothing changed."
+        );
+        self.tile_work(window, selector)
+    }
+
     /// A tile's workspace, for addressing the panes inside it.
     fn tile(
         &self,
@@ -2776,6 +2802,7 @@ impl std::fmt::Display for DesktopBoard {
         match self {
             Self::Dashboard(id) => write!(f, "query:{id}"),
             Self::WorkingTasks => write!(f, "working-tasks"),
+            Self::Wave(id) => write!(f, "wave:{id}"),
         }
     }
 }
@@ -3057,6 +3084,42 @@ mod tests {
             .pane(window, Some("loo-519/browser"), PaneNeed::Any)
             .unwrap();
         assert_eq!(tile.rule, super::DesktopTargetRule::Pane);
+    }
+
+    #[test]
+    fn enter_names_a_tile_as_p_does_on_dashboards_and_wave_views() {
+        let (mut inspection, work) = fixture();
+        let task = inspection.windows[0].workspaces[0].work.clone();
+        let wave = super::WorkWorkspaceKey {
+            kind: super::WorkWorkspaceKind::Wave,
+            id: "systems".into(),
+            ..task.clone()
+        };
+        let window = &mut inspection.windows[0];
+        window.destination = super::DesktopDestination::Work { work: task.clone() };
+        let entered = |inspection: &DesktopInspection, selector: &str| {
+            let scope = scope(inspection, &work, None);
+            let window = scope.window(None).unwrap();
+            scope
+                .entered_tile(window, selector)
+                .map(|work| work.id.clone())
+                .map_err(|error| error.to_string())
+        };
+        // Full Work shows no tiles, so nothing is entered.
+        assert!(entered(&inspection, "1").is_err());
+        let window = &mut inspection.windows[0];
+        window.destination = super::DesktopDestination::Work { work: wave.clone() };
+        window.open_work = vec![wave, task.clone()];
+        // The Wave's own conversation is not a tile: position 1 is its first Task.
+        assert_eq!(entered(&inspection, "1").unwrap(), task.id);
+        assert_eq!(entered(&inspection, "loo-519").unwrap(), task.id);
+        assert!(entered(&inspection, "2")
+            .unwrap_err()
+            .contains("No tile at position 2"));
+        let window = &mut inspection.windows[0];
+        window.destination = super::DesktopDestination::WorkingTasks;
+        window.open_work = vec![task.clone()];
+        assert_eq!(entered(&inspection, "1").unwrap(), task.id);
     }
 
     #[test]

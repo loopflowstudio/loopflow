@@ -770,6 +770,7 @@ final class WorkModel {
         case .workingTasks: return .workingTasks
         case .entered(.saved(let id), let work): return .entered(from: .dashboard(id), work: key(work))
         case .entered(.workingTasks, let work): return .entered(from: .workingTasks, work: key(work))
+        case .entered(.wave(let id), let work): return .entered(from: .wave(id), work: key(work))
         }
     }
 

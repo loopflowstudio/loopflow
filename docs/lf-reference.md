@@ -1229,7 +1229,7 @@ Enter a member of the shown Dashboard as full Work, as a tile click does
 
 | Argument | What it does |
 |---|---|
-| `<task>` | Task on the Dashboard: issue key, name or ID |
+| `<tile>` | Tile on the shown Dashboard or Wave view, as `-p` names it: position, ID, label or ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |

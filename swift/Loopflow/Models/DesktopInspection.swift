@@ -196,7 +196,7 @@ public enum DesktopDestination: Codable, Sendable, Equatable {
     case workingTasks
     /// An unsaved query; the window's `view` carries its plan.
     case view(selection: WorkSelection)
-    /// A Dashboard member entered as full Work; back returns to its Dashboard.
+    /// A tile entered as full Work; back returns to its Dashboard or Wave view.
     case entered(from: DesktopBoard, work: WorkWorkspaceKey)
 
     private enum CodingKeys: String, CodingKey { case kind, work, id, selection, from }
@@ -235,12 +235,13 @@ public enum DesktopDestination: Codable, Sendable, Equatable {
     }
 }
 
-/// `{"dashboard": id}` or `"working_tasks"`, matching Rust's external tagging.
+/// `{"dashboard": id}`, `{"wave": id}` or `"working_tasks"`, matching Rust's external tagging.
 public enum DesktopBoard: Codable, Sendable, Equatable {
     case dashboard(String)
     case workingTasks
+    case wave(String)
 
-    private enum CodingKeys: String, CodingKey { case dashboard }
+    private enum CodingKeys: String, CodingKey { case dashboard, wave }
 
     public init(from decoder: Decoder) throws {
         if let name = try? decoder.singleValueContainer().decode(String.self) {
@@ -249,7 +250,9 @@ public enum DesktopBoard: Codable, Sendable, Equatable {
             }
             self = .workingTasks
         } else {
-            self = .dashboard(try decoder.container(keyedBy: CodingKeys.self).decode(String.self, forKey: .dashboard))
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            if let wave = try values.decodeIfPresent(String.self, forKey: .wave) { self = .wave(wave) }
+            else { self = .dashboard(try values.decode(String.self, forKey: .dashboard)) }
         }
     }
 
@@ -261,6 +264,9 @@ public enum DesktopBoard: Codable, Sendable, Equatable {
         case .workingTasks:
             var value = encoder.singleValueContainer()
             try value.encode("working_tasks")
+        case .wave(let id):
+            var values = encoder.container(keyedBy: CodingKeys.self)
+            try values.encode(id, forKey: .wave)
         }
     }
 }

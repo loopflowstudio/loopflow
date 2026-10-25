@@ -270,24 +270,21 @@ struct DesktopAction {
             context.model.selectWorkingTasksDashboard()
             return nil
         },
-        DesktopAction("enter", "Enter Task", arguments: [.init(name: "task", kind: .string, required: true)]) { context in
+        // lf resolves the tile as `-p` does and sends its full Work ID.
+        DesktopAction("enter", "Enter Tile", arguments: [.init(name: "tile", kind: .string, required: true)]) { context in
             let model = context.model
-            let selector = try context.string("task")
-            guard let plan = model.selectedViewPlan, model.navigation.showsSelection else {
-                throw DesktopTargetError("No Dashboard is shown; open one with lf desktop view. Nothing changed.")
+            let id = try context.string("tile")
+            let shown: (plan: WorkViewPlan, members: [WorkMemberRef])? = switch model.navigation.destination {
+            case .workingTasks: model.selectedViewPlan.map { ($0, model.workingTaskMembers) }
+            case .dashboard, .view: model.selectedViewPlan.map { ($0, $0.projection.visible) }
+            case .work(let work?) where work.kind == .wave: model.wavePlan(work.id).map { ($0, model.waveTiles(work.id)) }
+            case .work, .entered: nil
             }
-            let workingTasks = model.navigation.destination == .workingTasks
-            let members = workingTasks ? model.workingTaskMembers : plan.projection.visible
-            // The durable Work ID, planning ID or issue key, as `-t` labels do.
-            let member = members.first { member in
-                guard member.work.kind == .task else { return false }
-                let task = model.task(id: member.work.id)?.task
-                return [member.work.id, task?.id, task?.task.identifier].contains {
-                    $0?.caseInsensitiveCompare(selector) == .orderedSame
-                }
+            guard let shown else { throw DesktopTargetError("This window shows no tiles. Nothing changed.") }
+            guard let member = shown.members.first(where: { $0.work.id == id }) else {
+                throw DesktopTargetError("\(id) is not a tile here. Nothing changed.")
             }
-            guard let member else { throw DesktopTargetError("\(selector) is not shown on this Dashboard. Nothing changed.") }
-            model.enterTile(member, plan: plan, workingTasks: workingTasks, origin: nil)
+            model.enterTile(member, plan: shown.plan, workingTasks: model.navigation.destination == .workingTasks, origin: nil)
             return nil
         },
     ]

@@ -271,10 +271,11 @@ final class WorkNavigation {
         /// One Dashboard member shown as full Work; the trail returns through its Dashboard.
         case entered(from: Board, work: WorkReference)
     }
-    /// A Dashboard a member can be entered from: a saved one or Working Tasks.
+    /// A view a tile can be entered from: a saved Dashboard, Working Tasks or a Wave view.
     enum Board: Equatable {
         case saved(String)
         case workingTasks
+        case wave(String)
     }
     static let workingTasksTitle = "Working Tasks"
     var destination: Destination = .work(nil)

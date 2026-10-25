@@ -132,19 +132,22 @@ struct DesktopPaneControlTests {
         let a = WorkWorkspaceKey(repository: repository, kind: .task, id: "a")
         let b = WorkWorkspaceKey(repository: repository, kind: .task, id: "b")
         let members = [a, b].map { WorkMemberRef(source: ["root"], work: $0) }
-        func plan(dashboard: String?, expression: WorkSelection.Expression) -> WorkViewPlan {
+        func plan(dashboard: String?, expression: WorkSelection.Expression, also: [WorkWorkspaceKey] = []) -> WorkViewPlan {
             WorkViewPlan(name: dashboard, pinned: false, dashboardID: dashboard, repository: repository,
                 observedAt: 0, selection: WorkSelection(id: "root", expression: expression), savedRevision: dashboard == nil ? nil : 1,
                 resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
                 arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
                 projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
-                contents: [a, b].map { fixtureViewContent(work: $0, title: $0.id) })
+                contents: ([a, b] + also).map { fixtureViewContent(work: $0, title: $0.id) })
         }
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No execution allowed") }, repoPath: "/repo")
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         model.bindWorkspaces(registry, repository: repository)
+        let wave = "33333333-3333-3333-3333-333333333333"
+        let waveKey = WorkWorkspaceKey(repository: repository, kind: .wave, id: wave)
         model.applySelectionPlans([plan(dashboard: "review", expression: .filter(.state(.open))),
-                                   plan(dashboard: nil, expression: .repository)], reason: "")
+                                   plan(dashboard: nil, expression: .repository, also: [waveKey]),
+                                   plan(dashboard: nil, expression: .wave(wave))], reason: "")
         let router = WorkLinkRouter()
         let window = UUID()
         router.register(window, repository: repository, focus: {},
@@ -160,15 +163,15 @@ struct DesktopPaneControlTests {
             return receipt
         }
         model.selectDashboard("review")
-        #expect(throws: DesktopTargetError.self) { try perform("enter", ["task": "absent"]) }
+        #expect(throws: DesktopTargetError.self) { try perform("enter", ["tile": "absent"]) }
         #expect(model.navigation.destination == .dashboard("review"))
-        #expect(try perform("enter", ["task": "b"]).destination == .entered(from: .dashboard("review"), work: b))
+        #expect(try perform("enter", ["tile": "b"]).destination == .entered(from: .dashboard("review"), work: b))
         let back = try perform("back")
         #expect(back.destination == .dashboard(id: "review"))
         #expect(back.history.forward == 1)
         #expect(try perform("forward").destination == .entered(from: .dashboard("review"), work: b))
         #expect(try perform("working-tasks").destination == .workingTasks)
-        #expect(try perform("enter", ["task": "A"]).destination == .entered(from: .workingTasks, work: a))
+        #expect(try perform("enter", ["tile": "a"]).destination == .entered(from: .workingTasks, work: a))
         #expect(try perform("goto", ["index": "2"]).destination == .work(b))
         #expect(throws: DesktopTargetError.self) { try perform("goto", ["index": "3"]) }
         #expect(throws: DesktopArgumentError.self) { try perform("goto", ["index": "two"]) }
@@ -177,6 +180,11 @@ struct DesktopPaneControlTests {
         #expect(throws: DesktopArgumentError.self) { try perform("navigate.sideways") }
         #expect(try perform("next").destination == .work(a))
         #expect(try perform("previous").destination == .work(b))
+        // A Wave view's Tasks are tiles too; back returns to the Wave.
+        model.select(.wave(id: wave))
+        #expect(try perform("enter", ["tile": "b"]).destination == .entered(from: .wave(wave), work: b))
+        #expect(try perform("back").destination == .work(waveKey))
+        #expect(throws: DesktopTargetError.self) { try perform("enter", ["tile": "absent"]) }
         let state = try #require(router.inspect().windows.first)
         #expect(state.list.map(\.position) == [1, 2])
         #expect(state.list.map(\.work) == [a, b])

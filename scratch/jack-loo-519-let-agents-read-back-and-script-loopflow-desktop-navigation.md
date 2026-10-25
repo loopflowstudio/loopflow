@@ -1,6 +1,6 @@
 # LOO-519 — Agents read back and script Desktop navigation
 
-Status: **v2 implemented; `enter` tile addressing, then the Dev demo** (implement, 2026-10-25). Jack Heart's concept review (2026-10-24) set the scope: **A**, a
+Status: **v2 implemented, including `enter` tile addressing; the Dev demo remains** (implement, 2026-10-25). Jack Heart's concept review (2026-10-24) set the scope: **A**, a
 Rex-aligned `lf desktop` CLI, plus **B**, designated session/shell/browser panes.
 Jack's v2 direction (2026-10-25, concept review of PR #1677) replaced the Apple-event
 transport and the `-t`/`-b`/`do` surface; this plan describes v2 only. v1 text lives
@@ -119,22 +119,19 @@ tile's doubled border. Exact flag spellings follow the compiled CLI.
 
 ## Concept review, 2026-10-25 (Graph, after slice 7)
 
-- **`enter` takes a tile, in `-p` grammar, on every tiled view.** Implied by the
-  accepted "`-p` addresses parts of every view" and Rex order. Today `enter TASK`
-  has its own Swift resolver (`DesktopActions.swift` "enter": work ID, planning ID
-  or issue key only, a comment still citing the deleted `-t`), so `enter 3` fails
-  while `-p 3` names that tile. It also reads only `selectedViewPlan`, so on a Wave
-  view, where clicking a tile enters it, `lf desktop enter` exits "No Dashboard is
-  shown", leaving a person's gesture without a command. Next: `enter TILE` takes a
-  lone tile part (position, ID, label, suffix), resolved by the same tile resolver
-  as `-p`, and enters on Dashboard, Working Tasks and Wave views alike. The receipt's
-  `destination: entered {from, work}` names the Wave when that's where it came from.
-  No open product choice.
+- **`enter` takes a tile, in `-p` grammar, on every tiled view.** Built
+  (implement, 2026-10-25): lf resolves `enter TILE` with the `-p` tile resolver
+  (`Scope::entered_tile` → `tile_work`: full ID, label, 1-based position, ID
+  suffix) on Dashboard, Working Tasks and Wave views, and sends Desktop the full
+  Work ID; elsewhere it exits 3 and changes nothing. The bespoke Swift resolver is
+  gone. `DesktopBoard`/`WorkNavigation.Board` gained `wave(id)`, so a Wave tile
+  click and `enter` both produce `entered {from: {wave: ID}, work}`, the trail
+  shows the Wave, and back returns to it (a Wave tile click used to plain-select
+  the Task).
 
 ## Remaining
 
-1. **`enter` resolves tiles like `-p`** and works on Wave views (above).
-2. **Demo on Dev** (Jack).
+1. **Demo on Dev** (Jack).
 
 ## Done when
 
@@ -159,9 +156,9 @@ reference_matches_the_compiled_cli`; `cargo clippy --all-targets -- -D warnings`
 `scripts/test_desktop.sh --filter 'DesktopServerTests|DesktopPaneControlTests|DTOFixtureTests|WorkNavigationTests|WorkspaceRetentionTests|DashboardWorkspaceTests|WorkDestinationTests'`.
 Demo/review (Jack): Dev targeting, inline conversation, doubled frame, pane feel.
 
-Last check (2026-10-25, compress slice 7): `--lib commands::desktop selection
-resizing_two_slots` 74 pass; integration filters 39 pass (reference regenerated);
-clippy clean; Swift filter above 188 pass.
+Last check (2026-10-25, implement `enter` tiles): `--lib commands::desktop` 12 pass,
+`--lib selection` 63 pass; reference regenerated; clippy clean; Swift
+`DesktopServerTests|DesktopPaneControlTests|WorkNavigationTests|DashboardWorkspaceTests|DTOFixtureTests` 127 pass.
 
 ## Exclusions
 

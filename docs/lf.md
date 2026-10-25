@@ -1095,7 +1095,7 @@ lf desktop actions                            # every verb, its arguments and de
 lf desktop goto 2                             # what ⌘2 does
 lf desktop back                               # ⌘[
 lf desktop working-tasks                      # the default Dashboard
-lf desktop enter LOO-519                      # a tile click
+lf desktop enter 3                            # click the third tile; enter takes -p tile names
 lf desktop state --json | jq '.windows[0] | {destination, history}'
 lf desktop events --json                      # one line per change; the first is every window
 ```

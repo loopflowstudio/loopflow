@@ -344,7 +344,10 @@ extension AnyTransition {
 
 extension WorkModel {
     func enterTile(_ member: WorkMemberRef, plan: WorkViewPlan, workingTasks: Bool, origin: CGRect?) {
-        let board: WorkNavigation.Board? = plan.dashboardID.map { .saved($0) } ?? (workingTasks ? .workingTasks : nil)
+        let board: WorkNavigation.Board? = if let id = plan.dashboardID { .saved(id) }
+            else if workingTasks { .workingTasks }
+            else if case .wave(let id) = plan.selection.expression { .wave(id) }
+            else { nil }
         guard let board, let work = member.work.reference else { return select(member.work.reference) }
         navigation.zoomOrigin = origin
         withAnimation(FocusSizing.animation) { enter(work, from: board) }

@@ -68,11 +68,11 @@
     },
     {
       "name": "enter",
-      "title": "Enter Task",
+      "title": "Enter Tile",
       "scope": "window",
       "arguments": [
         {
-          "name": "task",
+          "name": "tile",
           "kind": "string",
           "required": true
         }

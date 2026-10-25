@@ -774,8 +774,8 @@ pub enum DesktopCommand {
     },
     /// Enter a member of the shown Dashboard as full Work, as a tile click does
     Enter {
-        /// Task on the Dashboard: issue key, name or ID
-        task: String,
+        /// Tile on the shown Dashboard or Wave view, as `-p` names it: position, ID, label or ID suffix
+        tile: String,
         #[command(flatten)]
         target: DesktopWindowArgs,
     },

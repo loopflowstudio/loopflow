@@ -14,12 +14,15 @@ use crate::graph::ConcreteSkill;
 use crate::graph::ConcreteStep;
 use crate::graph::ConcreteXor;
 use crate::graph::GraphDefinition;
+use crate::id::LfProcessId;
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
 use crate::lf::{Cli, Commands, PrCommand};
 use crate::ops::graph_process;
 use crate::ops::WorkBinding;
+use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
+use crate::work::task::Task;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use clap::Parser;
@@ -113,7 +116,11 @@ const TASK_RUN_ATTEMPTS: u32 = 3;
 /// own GraphProcess beneath this process; a single skill remains a skill launch. A Graph held for a person or a watcher, an interrupted
 /// one, and a launch refused before any Graph started are returned as they
 /// ended.
-pub fn run_for_task(cli: &Cli, issue: &str, graph: &str, checkout: &Path) -> Result<()> {
+///
+/// A bare run inside its execution owner lets its launcher go once the first
+/// attempt has registered, and carries on with its output in that attempt's log.
+pub fn run_for_task(cli: &Cli, task: &Task, graph: &str) -> Result<()> {
+    let checkout = task.worktree()?;
     let owner = match resolve_definition(checkout, graph, None)? {
         Target::Graph(_) => "graph",
         Target::Skill(_) => "skill",
@@ -121,7 +128,7 @@ pub fn run_for_task(cli: &Cli, issue: &str, graph: &str, checkout: &Path) -> Res
             unreachable!("named definitions are skills or Graphs")
         }
     };
-    let args = task_run_args(cli, issue, owner, graph);
+    let args = task_run_args(cli, task.id.as_str(), owner, graph);
     let lf = crate::os_process::resolve_lf_binary()?;
     let store = block_on(open_graph_store())?;
     let store = &store.sqlite;
@@ -135,17 +142,51 @@ pub fn run_for_task(cli: &Cli, issue: &str, graph: &str, checkout: &Path) -> Res
             crate::platform::kill_process(pid);
         }
     });
+    let letting_go = !cli.batch && !cli.interactive && crate::transport::current().is_some();
+    let mut released = false;
     let mut attempt = 1;
     loop {
         let mark = store.process_mark()?;
         let mut command = std::process::Command::new(&lf);
         command.args(&args).current_dir(checkout);
         crate::transport::configure_child(&mut command);
-        let output = crate::terminal_output::TerminalOutput::for_child(&mut command)?;
+        let log = letting_go
+            .then(|| PendingLog::open(&process, attempt))
+            .transpose()?;
+        let output = match &log {
+            Some(log) => {
+                log.configure_child(&mut command)?;
+                None
+            }
+            None => crate::terminal_output::TerminalOutput::for_child(&mut command)?,
+        };
         let mut child = command
             .spawn()
             .context("could not start the Task's Graph")?;
         ATTEMPT_PID.store(child.id(), std::sync::atomic::Ordering::Release);
+        if let Some(mut log) = log {
+            match registration(store, &process, mark, owner, &mut child)? {
+                Some(registered) => {
+                    log.settle(&registered)?;
+                    if !released {
+                        let noun = if owner == "graph" {
+                            "Graph process"
+                        } else {
+                            "Process"
+                        };
+                        println!(
+                            "{} · {graph} running as {noun} {registered}\n  follow: lf task status {}\n  log:    {}",
+                            task.identifier,
+                            task.identifier,
+                            log.path.display()
+                        );
+                        release_launcher(&log.file)?;
+                        released = true;
+                    }
+                }
+                None => log.replay(),
+            }
+        }
         let status = child.wait();
         drop(output);
         ATTEMPT_PID.store(0, std::sync::atomic::Ordering::Release);
@@ -154,10 +195,7 @@ pub fn run_for_task(cli: &Cli, issue: &str, graph: &str, checkout: &Path) -> Res
             return Ok(());
         }
         // Only a Graph process that failed is started again.
-        let failed = status.code() == Some(1)
-            && store
-                .child_process_after(&process, mark)?
-                .is_some_and(|child| matches!(store.graph_process(child.as_str()), Ok(Some(_))));
+        let failed = status.code() == Some(1) && attempt_graph(store, &process, mark)?.is_some();
         if failed {
             if let Some(stash) = crate::ops::checkout::retained_edits(checkout)? {
                 eprintln!(
@@ -178,6 +216,112 @@ pub fn run_for_task(cli: &Cli, issue: &str, graph: &str, checkout: &Path) -> Res
         );
         attempt += 1;
     }
+}
+
+/// Where a Task run that let its launcher go keeps its Graph or skill Process's output.
+pub fn graph_log_path(id: &str) -> std::path::PathBuf {
+    crate::store::lf_home_dir()
+        .join("logs")
+        .join(format!("graph-{id}.log"))
+}
+
+/// The attempt's output until it registers; it then becomes that Process's log.
+#[derive(Debug)]
+struct PendingLog {
+    file: std::fs::File,
+    path: std::path::PathBuf,
+}
+
+impl PendingLog {
+    fn open(process: &LfProcessId, attempt: u32) -> Result<Self> {
+        use std::os::unix::fs::OpenOptionsExt;
+        let path = graph_log_path(&format!("pending-{process}-{attempt}"));
+        std::fs::create_dir_all(path.parent().expect("graph logs live in a directory"))?;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .read(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&path)
+            .with_context(|| format!("could not open the Graph log {}", path.display()))?;
+        Ok(Self { file, path })
+    }
+
+    fn configure_child(&self, command: &mut std::process::Command) -> Result<()> {
+        command
+            .stdin(std::process::Stdio::null())
+            .stdout(self.file.try_clone()?)
+            .stderr(self.file.try_clone()?);
+        Ok(())
+    }
+
+    /// Name the log for the registered Process; open descriptors follow the rename.
+    fn settle(&mut self, registered: &LfProcessId) -> Result<()> {
+        let path = graph_log_path(registered.as_str());
+        std::fs::rename(&self.path, &path)
+            .with_context(|| format!("could not name the Graph log {}", path.display()))?;
+        self.path = path;
+        Ok(())
+    }
+
+    /// An attempt that ended before registering tells its launcher why.
+    fn replay(mut self) {
+        use std::io::{Read, Seek, Write};
+        let mut bytes = Vec::new();
+        if self.file.rewind().is_ok() && self.file.read_to_end(&mut bytes).is_ok() {
+            let _ = std::io::stderr().write_all(&bytes);
+        }
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// The attempt's child once it has recorded a GraphProcess.
+fn attempt_graph(
+    store: &SqliteStore,
+    process: &LfProcessId,
+    mark: i64,
+) -> Result<Option<LfProcessId>> {
+    Ok(store
+        .child_process_after(process, mark)?
+        .filter(|child| matches!(store.graph_process(child.as_str()), Ok(Some(_)))))
+}
+
+/// Wait until the attempt registers — a Graph its GraphProcess, a skill its
+/// Process — or ends first. No deadline: the child's own exit bounds it.
+fn registration(
+    store: &SqliteStore,
+    process: &LfProcessId,
+    mark: i64,
+    owner: &str,
+    child: &mut std::process::Child,
+) -> Result<Option<LfProcessId>> {
+    loop {
+        let registered = if owner == "graph" {
+            attempt_graph(store, process, mark)?
+        } else {
+            store.child_process_after(process, mark)?
+        };
+        if registered.is_some() {
+            return Ok(registered);
+        }
+        if child.try_wait()?.is_some() {
+            return Ok(None);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// Hand the launcher its last lines, end its view, and keep this run's own
+/// output in the log from here on.
+fn release_launcher(log: &std::fs::File) -> Result<()> {
+    use std::io::Write;
+    std::io::stdout().flush()?;
+    std::io::stderr().flush()?;
+    crate::transport::detach_viewers()?;
+    crate::terminal_output::redirect(log, 1)?;
+    crate::terminal_output::redirect(log, 2)?;
+    Ok(())
 }
 
 /// The Graph child a Task run starts.

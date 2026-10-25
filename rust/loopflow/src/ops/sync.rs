@@ -184,7 +184,7 @@ pub fn sync_with_recovery(
 pub fn sync_with_plan(
     repo: &Path,
     options: &SyncOptions,
-    plan: SyncPlan,
+    plan: &SyncPlan,
     progress: &impl Progress,
 ) -> OpsResult<SyncVerification> {
     start_owned_sync(repo, options, Some(plan), false, progress)
@@ -259,17 +259,19 @@ pub fn recover_sync(
 fn start_owned_sync(
     repo: &Path,
     options: &SyncOptions,
-    plan: Option<SyncPlan>,
+    plan: Option<&SyncPlan>,
     require_changes: bool,
     progress: &impl Progress,
 ) -> OpsResult<SyncVerification> {
     let mut operation = begin_sync_operation(repo, &options.onto)?;
     let tracked_dirty = tracked_dirty_state(repo)?;
+    let planned;
     let plan = match plan {
         Some(plan) => plan,
         None => {
             fetch_target(repo, &options.onto)?;
-            plan_sync(repo, Some(&options.onto), options.fork_base.clone())?
+            planned = plan_sync(repo, Some(&options.onto), options.fork_base.clone())?;
+            &planned
         }
     };
     let target_sha = rev_parse(repo, &options.onto)?;
@@ -285,7 +287,7 @@ fn start_owned_sync(
     validate_fork_base(repo, options.fork_base.as_deref())?;
 
     if matches!(plan.strategy, SyncStrategy::ResetToBase) {
-        reset_to_base(repo, &plan, progress)?;
+        reset_to_base(repo, plan, progress)?;
         return finish_sync(repo, operation, &expected, options.push);
     }
     if matches!(plan.strategy, SyncStrategy::Noop) {

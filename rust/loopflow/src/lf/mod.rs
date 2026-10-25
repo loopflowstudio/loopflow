@@ -1345,7 +1345,8 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Place a Task's worktree, then run a Graph there like `lf --task ISSUE graph GRAPH`
+    /// Place a Task's worktree, then start a Graph there like `lf --task ISSUE graph GRAPH`;
+    /// returns once it runs (`-b` waits for its end)
     Run {
         issue: Option<String>,
         /// The edge's Graph, or a workflow to take up; the Task's only edge or its

@@ -472,7 +472,7 @@ final class SessionsWorkspaceRegistry {
             guard other.repository == target.repository, other.window == target.window,
                   other.work == target.work,
                   other.pane != target.pane else {
-                throw RegistryQueryError("Choose two distinct panes in the same retained workspace; no pane was changed.")
+                throw DesktopTargetError("Choose two distinct panes in the same retained workspace; no pane was changed.")
             }
             _ = try retainedPane(for: other)
         }
@@ -533,7 +533,7 @@ final class SessionsWorkspaceRegistry {
             store.updateRatio(between: target.pane, and: toward.pane, ratio: ratio)
         case .zoom(let enabled): store.setZoom(target.pane, enabled: enabled)
         }
-        guard let result else { throw RegistryQueryError("The addressed pane disappeared; inspect Desktop before retrying.") }
+        guard let result else { throw DesktopTargetError("The addressed pane disappeared; inspect Desktop before retrying.") }
         return (result.id, resultTab ?? result.content.selectedShell?.id)
     }
 
@@ -541,17 +541,17 @@ final class SessionsWorkspaceRegistry {
         guard target.repository == target.work.repository,
               let workspace = workspaces[target.work],
               let pane = workspace.multiplexer.layout.pane(for: target.pane) else {
-            throw RegistryQueryError("The pane content was removed or replaced. Inspect Desktop again; no pane was changed.")
+            throw DesktopTargetError("The pane content was removed or replaced. Inspect Desktop again; no pane was changed.")
         }
         if let id = target.tab {
             guard case .shell(let tabs, _) = pane.content,
                   let tab = tabs.first(where: { $0.id == id && $0.incarnation == target.incarnation }) else {
-                throw RegistryQueryError("The shell tab was removed or replaced; no input was sent.")
+                throw DesktopTargetError("The shell tab was removed or replaced; no input was sent.")
             }
             return (workspace, pane, tab.terminal)
         }
         guard pane.incarnation == target.incarnation else {
-            throw RegistryQueryError("The pane content was replaced; inspect Desktop again.")
+            throw DesktopTargetError("The pane content was replaced; inspect Desktop again.")
         }
         // A Shell tool target grants arrangement authority, not input to whichever
         // tab happens to be selected. Terminal requests must capture a tab.

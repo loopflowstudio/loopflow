@@ -30,8 +30,8 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
     public let repository: String
     public let window: String
     public let path: String?
-    public let selectionKind: String?
-    public let selectionId: String?
+    public let destination: DesktopDestination
+    public let history: DesktopHistory
     public let reading: String
     public let reason: String?
     public let task: DesktopTaskInspection?
@@ -43,20 +43,184 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
     public let openWork: [WorkWorkspaceKey]
     public let opening: DesktopOpening?
 
-    public init(repository: String, window: String, path: String?, selectionKind: String?, selectionId: String?,
+    public init(repository: String, window: String, path: String?, destination: DesktopDestination, history: DesktopHistory,
                 reading: String, reason: String?, task: DesktopTaskInspection?,
                 session: DesktopSessionInspection?, supportedOperations: [String], workspaces: [DesktopWorkspaceInspection], openWork: [WorkWorkspaceKey], view: WorkViewPlan?, opening: DesktopOpening?) {
         self.repository = repository; self.window = window; self.path = path
-        self.selectionKind = selectionKind; self.selectionId = selectionId
+        self.destination = destination; self.history = history
         self.reading = reading; self.reason = reason; self.task = task
         self.session = session; self.supportedOperations = supportedOperations; self.workspaces = workspaces; self.openWork = openWork; self.view = view; self.opening = opening
     }
     enum CodingKeys: String, CodingKey {
-        case repository, window, path, reading, reason, task, session, workspaces, view, opening
+        case repository, window, path, destination, history, reading, reason, task, session, workspaces, view, opening
         case openWork = "open_work"
-        case selectionKind = "selection_kind", selectionId = "selection_id"
         case supportedOperations = "supported_operations"
     }
+}
+
+/// What a window shows, as its sidebar, crumbs and tile clicks select it.
+public enum DesktopDestination: Codable, Sendable, Equatable {
+    /// Full Work; the repository conversation has a `repository` key.
+    case work(WorkWorkspaceKey)
+    case dashboard(id: String)
+    case workingTasks
+    /// An unsaved query; the window's `view` carries its plan.
+    case view(selection: WorkSelection)
+    /// A Dashboard member entered as full Work; back returns to its Dashboard.
+    case zoomed(from: DesktopBoard, work: WorkWorkspaceKey)
+
+    private enum CodingKeys: String, CodingKey { case kind, work, id, selection, from }
+    private enum Kind: String, Codable { case work, dashboard, view, zoomed; case workingTasks = "working_tasks" }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(Kind.self, forKey: .kind) {
+        case .work: self = .work(try values.decode(WorkWorkspaceKey.self, forKey: .work))
+        case .dashboard: self = .dashboard(id: try values.decode(String.self, forKey: .id))
+        case .workingTasks: self = .workingTasks
+        case .view: self = .view(selection: try values.decode(WorkSelection.self, forKey: .selection))
+        case .zoomed: self = .zoomed(from: try values.decode(DesktopBoard.self, forKey: .from),
+                                     work: try values.decode(WorkWorkspaceKey.self, forKey: .work))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .work(let work):
+            try values.encode(Kind.work, forKey: .kind)
+            try values.encode(work, forKey: .work)
+        case .dashboard(let id):
+            try values.encode(Kind.dashboard, forKey: .kind)
+            try values.encode(id, forKey: .id)
+        case .workingTasks: try values.encode(Kind.workingTasks, forKey: .kind)
+        case .view(let selection):
+            try values.encode(Kind.view, forKey: .kind)
+            try values.encode(selection, forKey: .selection)
+        case .zoomed(let from, let work):
+            try values.encode(Kind.zoomed, forKey: .kind)
+            try values.encode(from, forKey: .from)
+            try values.encode(work, forKey: .work)
+        }
+    }
+}
+
+/// `{"dashboard": id}` or `"working_tasks"`, matching Rust's external tagging.
+public enum DesktopBoard: Codable, Sendable, Equatable {
+    case dashboard(String)
+    case workingTasks
+
+    private enum CodingKeys: String, CodingKey { case dashboard }
+
+    public init(from decoder: Decoder) throws {
+        if let name = try? decoder.singleValueContainer().decode(String.self) {
+            guard name == "working_tasks" else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unknown board \(name)"))
+            }
+            self = .workingTasks
+        } else {
+            self = .dashboard(try decoder.container(keyedBy: CodingKeys.self).decode(String.self, forKey: .dashboard))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        switch self {
+        case .dashboard(let id):
+            var values = encoder.container(keyedBy: CodingKeys.self)
+            try values.encode(id, forKey: .dashboard)
+        case .workingTasks:
+            var value = encoder.singleValueContainer()
+            try value.encode("working_tasks")
+        }
+    }
+}
+
+/// Destinations back and forward reach, as the window's chevrons do.
+public struct DesktopHistory: Codable, Sendable, Equatable {
+    public let back: Int
+    public let forward: Int
+    public init(back: Int, forward: Int) { self.back = back; self.forward = forward }
+}
+
+/// Window navigation through the selection the window's own controls use.
+public struct DesktopNavigationCommand: Codable, Sendable, Equatable {
+    public let repository: String
+    public let window: String
+    public let action: DesktopNavigationAction
+
+    public init(repository: String, window: String, action: DesktopNavigationAction) {
+        self.repository = repository; self.window = window; self.action = action
+    }
+}
+
+public enum DesktopNavigationAction: Codable, Sendable, Equatable {
+    case workingTasks, back, forward, next, previous
+    /// Enter a member of the shown Dashboard as full Work, as a tile click does.
+    case enter(work: WorkWorkspaceKey)
+    /// A Working Task by its 1-based slot, as ⌘1–9 select it.
+    case slot(Int)
+
+    private enum CodingKeys: String, CodingKey { case kind, work, slot }
+    private enum Kind: String, Codable { case enter, back, forward, slot, next, previous; case workingTasks = "working_tasks" }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(Kind.self, forKey: .kind) {
+        case .workingTasks: self = .workingTasks
+        case .enter: self = .enter(work: try values.decode(WorkWorkspaceKey.self, forKey: .work))
+        case .back: self = .back
+        case .forward: self = .forward
+        case .slot: self = .slot(try values.decode(Int.self, forKey: .slot))
+        case .next: self = .next
+        case .previous: self = .previous
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        let kind: Kind
+        switch self {
+        case .workingTasks: kind = .workingTasks
+        case .enter(let work):
+            kind = .enter
+            try values.encode(work, forKey: .work)
+        case .back: kind = .back
+        case .forward: kind = .forward
+        case .slot(let slot):
+            kind = .slot
+            try values.encode(slot, forKey: .slot)
+        case .next: kind = .next
+        case .previous: kind = .previous
+        }
+        try values.encode(kind, forKey: .kind)
+    }
+}
+
+/// The destination after navigating; a following inspection reports the same.
+public struct DesktopNavigationReceipt: Codable, Sendable, Equatable {
+    public let repository: String
+    public let window: String
+    public let destination: DesktopDestination
+    public let history: DesktopHistory
+    public let observedAt: Int64
+
+    public init(repository: String, window: String, destination: DesktopDestination, history: DesktopHistory, observedAt: Int64) {
+        self.repository = repository; self.window = window; self.destination = destination
+        self.history = history; self.observedAt = observedAt
+    }
+    enum CodingKeys: String, CodingKey {
+        case repository, window, destination, history
+        case observedAt = "observed_at"
+    }
+}
+
+/// A stale or missing target: nothing changed. Apple events report it with
+/// `scriptErrorNumber`, which `lf desktop` maps to exit status 3.
+public struct DesktopTargetError: LocalizedError, Sendable {
+    public static let scriptErrorNumber = 1003
+    public let message: String
+    public init(_ message: String) { self.message = message }
+    public var errorDescription: String? { message }
 }
 
 /// Source readings are separate from the UI snapshot time and from each other.

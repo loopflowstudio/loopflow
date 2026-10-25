@@ -32,11 +32,11 @@ struct DesktopPaneControlTests {
         registry.open(key, title: "Repository", location: nil)
         router.register(UUID(), repository: scene.id, focus: {}, inspect: { repository, window in
             DesktopWindowInspection(repository: repository, window: window.uuidString, path: scene.path,
-                selectionKind: "repository", selectionId: repository, reading: "current", reason: nil,
+                destination: .work(WorkWorkspaceKey(repository: repository, kind: .repository, id: repository)), history: DesktopHistory(back: 0, forward: 0), reading: "current", reason: nil,
                 task: nil, session: nil, supportedOperations: ["state"], workspaces: registry.inspect(),
                 openWork: registry.openWork, view: nil, opening: nil)
         }, controlPane: { _ in throw RegistryQueryError("No mutation expected") },
-        readText: { _ in throw RegistryQueryError("No terminal expected") }, receive: { _ in })
+        readText: { _ in throw RegistryQueryError("No terminal expected") }, navigate: { _ in }, receive: { _ in })
         let window = try #require(router.inspect().windows.first)
         #expect(window.repository == plan)
         #expect(window.openWork == [key])
@@ -118,10 +118,63 @@ struct DesktopPaneControlTests {
         router.register(window, repository: repository, focus: {},
             inspect: { repository, incarnation in
                 DesktopWindowInspection(repository: repository, window: incarnation.uuidString, path: "/repo",
-                    selectionKind: nil, selectionId: nil, reading: "unavailable", reason: "Offline",
+                    destination: .work(WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")), history: DesktopHistory(back: 0, forward: 0), reading: "unavailable", reason: "Offline",
                     task: nil, session: nil, supportedOperations: ["state", "hide", "restore", "focus", "move", "resize", "zoom"],
                     workspaces: registry.inspect(), openWork: registry.openWork, view: nil, opening: nil)
-            }, controlPane: { try registry.controlPane($0, model: model) }, readText: { try registry.readText($0) }) { _ in }
+            }, controlPane: { try registry.controlPane($0, model: model) }, readText: { try registry.readText($0) }, navigate: { _ in }) { _ in }
+    }
+
+    @Test("Navigation selects as the window's controls do; receipts match the next reading")
+    func navigationRoundTripsThroughInspection() throws {
+        let a = WorkWorkspaceKey(repository: repository, kind: .task, id: "a")
+        let b = WorkWorkspaceKey(repository: repository, kind: .task, id: "b")
+        let members = [a, b].map { WorkMemberRef(source: ["root"], work: $0) }
+        func plan(dashboard: String?, expression: WorkSelection.Expression) -> WorkViewPlan {
+            WorkViewPlan(name: dashboard, pinned: false, dashboardID: dashboard, repository: repository,
+                observedAt: 0, selection: WorkSelection(id: "root", expression: expression), savedRevision: dashboard == nil ? nil : 1,
+                resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
+                arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
+                projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
+                contents: [a, b].map { fixtureViewContent(work: $0, title: $0.id) })
+        }
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No execution allowed") }, repoPath: "/repo")
+        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
+        model.bindWorkspaces(registry, repository: repository)
+        model.applySelectionPlans([plan(dashboard: "review", expression: .filter(.state(.open))),
+                                   plan(dashboard: nil, expression: .repository)], reason: "")
+        let router = WorkLinkRouter()
+        let window = UUID()
+        router.register(window, repository: repository, focus: {},
+            inspect: { model.inspectDesktop(repository: $0, window: $1, workspaces: registry) },
+            controlPane: { _ in throw RegistryQueryError("No pane control expected") },
+            readText: { _ in throw RegistryQueryError("No terminal expected") },
+            navigate: { try model.navigate($0) }) { _ in }
+        func navigate(_ action: DesktopNavigationAction) throws -> DesktopNavigationReceipt {
+            let receipt = try router.navigate(DesktopNavigationCommand(repository: repository, window: window.uuidString, action: action))
+            let state = try #require(router.inspect().windows.first)
+            #expect(receipt.destination == state.destination)
+            #expect(receipt.history == state.history)
+            return receipt
+        }
+        model.selectDashboard("review")
+        #expect(throws: DesktopTargetError.self) {
+            try navigate(.enter(work: WorkWorkspaceKey(repository: repository, kind: .task, id: "absent")))
+        }
+        #expect(model.navigation.destination == .dashboard("review"))
+        #expect(try navigate(.enter(work: b)).destination == .zoomed(from: .dashboard("review"), work: b))
+        let back = try navigate(.back)
+        #expect(back.destination == .dashboard(id: "review"))
+        #expect(back.history.forward == 1)
+        #expect(try navigate(.forward).destination == .zoomed(from: .dashboard("review"), work: b))
+        #expect(try navigate(.workingTasks).destination == .workingTasks)
+        #expect(try navigate(.enter(work: a)).destination == .zoomed(from: .workingTasks, work: a))
+        #expect(try navigate(.slot(2)).destination == .work(b))
+        #expect(throws: DesktopTargetError.self) { try navigate(.slot(3)) }
+        #expect(try navigate(.next).destination == .work(a))
+        #expect(try navigate(.previous).destination == .work(b))
+        #expect(throws: DesktopTargetError.self) {
+            try router.navigate(DesktopNavigationCommand(repository: repository, window: UUID().uuidString, action: .back))
+        }
     }
 
     private func target(_ pane: PaneState, window: UUID, machine: String = "machine-a") -> DesktopPaneTarget {
@@ -147,7 +200,7 @@ struct DesktopPaneControlTests {
         let stale = target(pane, window: window)
         _ = try router.controlPane(.init(target: stale, action: .hide))
         workspace.multiplexer.updateSessionLocation("conversation", location: identity)
-        #expect(throws: RegistryQueryError.self) {
+        #expect(throws: DesktopTargetError.self) {
             try router.controlPane(.init(target: stale, action: .hide))
         }
         let split = try #require(try workspace.newShell())
@@ -253,10 +306,10 @@ struct DesktopPaneControlTests {
         }
         store.load(sessionId: "replacement", location: identity)
         let before = store.layout
-        #expect(throws: RegistryQueryError.self) { try router.readText(request) }
+        #expect(throws: DesktopTargetError.self) { try router.readText(request) }
         let current = DesktopTextRequest(target: target(store.focusedPane, window: window), surface: "surface", region: .screen, maxBytes: 16)
         register(router, window: UUID(), registry: registry)
-        #expect(throws: RegistryQueryError.self) { try router.readText(current) }
+        #expect(throws: DesktopTargetError.self) { try router.readText(current) }
         #expect(store.layout == before)
     }
 
@@ -618,7 +671,7 @@ struct DesktopPaneControlTests {
             .move(destination: peer, axis: .vertical), .resize(toward: peer, ratio: 0.6), .zoom(enabled: true), .shell, .files(task: "task"), .graphLog(task: "task"),
             .text(surface: "stale", text: "draft"), .key(surface: "stale", key: .enter)]
         for action in actions {
-            #expect(throws: RegistryQueryError.self) { try router.controlPane(.init(target: old, action: action)) }
+            #expect(throws: DesktopTargetError.self) { try router.controlPane(.init(target: old, action: action)) }
             #expect(store.layout == before)
             #expect(store.focusedPaneId == focus)
             #expect(store.zoomedPaneId == nil)
@@ -643,7 +696,7 @@ struct DesktopPaneControlTests {
                             target(store.focusedPane, window: window, machine: "peer")] {
             for action in [DesktopPaneAction.move(destination: destination, axis: .vertical),
                            .resize(toward: destination, ratio: 0.6)] {
-                #expect(throws: RegistryQueryError.self) { try router.controlPane(.init(target: shell, action: action)) }
+                #expect(throws: DesktopTargetError.self) { try router.controlPane(.init(target: shell, action: action)) }
                 #expect(store.layout == before)
                 #expect(store.focusedPaneId == peer.pane)
             }
@@ -680,7 +733,7 @@ struct DesktopPaneControlTests {
         store.load(sessionId: "a", location: identity)
         #expect(store.focusedPane.id == old.pane)
         #expect(store.focusedPane.incarnation != old.incarnation)
-        #expect(throws: RegistryQueryError.self) {
+        #expect(throws: DesktopTargetError.self) {
             try router.controlPane(DesktopPaneCommand(target: old, action: .hide))
         }
         #expect(store.collapsedPaneIds.isEmpty)
@@ -696,7 +749,7 @@ struct DesktopPaneControlTests {
         store.undoClose()
         #expect(store.focusedPane.content.selectedShell?.id == shell.content.selectedShell?.id)
         #expect(store.focusedPane.content.selectedShell?.command == nil)
-        #expect(throws: RegistryQueryError.self) {
+        #expect(throws: DesktopTargetError.self) {
             try router.controlPane(DesktopPaneCommand(target: target(shell, window: window), action: .hide))
         }
         #expect(store.collapsedPaneIds.isEmpty)
@@ -708,20 +761,20 @@ struct DesktopPaneControlTests {
         store.newShell(location: identity)
         let pane = store.focusedPane
         register(router, window: old, registry: registry)
-        #expect(throws: RegistryQueryError.self) {
+        #expect(throws: DesktopTargetError.self) {
             try router.controlPane(DesktopPaneCommand(target: target(pane, window: old, machine: "machine-b"), action: .hide))
         }
         #expect(registry.keys == [workKey])
         register(router, window: replacement, registry: registry)
         router.remove(old, repository: repository)
-        #expect(throws: RegistryQueryError.self) {
+        #expect(throws: DesktopTargetError.self) {
             try router.controlPane(DesktopPaneCommand(target: target(pane, window: old), action: .hide))
         }
         #expect(store.collapsedPaneIds.isEmpty)
         _ = try router.controlPane(DesktopPaneCommand(target: target(pane, window: replacement), action: .hide))
         #expect(store.collapsedPaneIds == [pane.id])
         router.remove(replacement, repository: repository)
-        #expect(throws: RegistryQueryError.self) {
+        #expect(throws: DesktopTargetError.self) {
             try router.controlPane(DesktopPaneCommand(target: target(pane, window: replacement), action: .restore))
         }
         #expect(store.collapsedPaneIds == [pane.id])

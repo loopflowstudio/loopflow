@@ -113,16 +113,18 @@ struct WorkLinkReceiver: NSViewRepresentable {
     let inspect: (String, UUID) -> DesktopWindowInspection
     let controlPane: (DesktopPaneCommand) throws -> (pane: String, tab: String?)
     let readText: (DesktopTextRequest) throws -> DesktopTextReading
+    let navigate: (DesktopNavigationAction) throws -> Void
     let receive: (LinkedWork) async -> Void
 
     func makeNSView(context: Context) -> Receiver {
-        Receiver(router: router, repository: repository, openingRequests: openingRequests, inspect: inspect, controlPane: controlPane, readText: readText, receive: receive)
+        Receiver(router: router, repository: repository, openingRequests: openingRequests, inspect: inspect, controlPane: controlPane, readText: readText, navigate: navigate, receive: receive)
     }
     func updateNSView(_ view: Receiver, context: Context) {
         view.receive = receive
         view.inspect = inspect
         view.controlPane = controlPane
         view.readText = readText
+        view.navigate = navigate
     }
     static func dismantleNSView(_ view: Receiver, coordinator: ()) {
         view.router.remove(view.id, repository: view.repository)
@@ -136,11 +138,13 @@ struct WorkLinkReceiver: NSViewRepresentable {
         var inspect: (String, UUID) -> DesktopWindowInspection
         var controlPane: (DesktopPaneCommand) throws -> (pane: String, tab: String?)
         var readText: (DesktopTextRequest) throws -> DesktopTextReading
+        var navigate: (DesktopNavigationAction) throws -> Void
         var receive: (LinkedWork) async -> Void
 
         init(router: WorkLinkRouter, repository: String, openingRequests: Set<UUID>, inspect: @escaping (String, UUID) -> DesktopWindowInspection,
              controlPane: @escaping (DesktopPaneCommand) throws -> (pane: String, tab: String?),
              readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
+             navigate: @escaping (DesktopNavigationAction) throws -> Void,
              receive: @escaping (LinkedWork) async -> Void) {
             self.router = router
             self.repository = repository
@@ -149,6 +153,7 @@ struct WorkLinkReceiver: NSViewRepresentable {
             self.inspect = inspect
             self.controlPane = controlPane
             self.readText = readText
+            self.navigate = navigate
             super.init(frame: .zero)
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
@@ -158,11 +163,14 @@ struct WorkLinkReceiver: NSViewRepresentable {
                 router.register(id, repository: repository, openingRequests: openingRequests, focus: { [weak window] in
                     window?.makeKeyAndOrderFront(nil)
                 }, inspect: inspect, controlPane: { [weak self] request in
-                    guard let self else { throw RegistryQueryError("The repository window is unavailable.") }
+                    guard let self else { throw DesktopTargetError("The repository window is unavailable.") }
                     return try self.controlPane(request)
                 }, readText: { [weak self] request in
-                    guard let self else { throw RegistryQueryError("The repository window is unavailable.") }
+                    guard let self else { throw DesktopTargetError("The repository window is unavailable.") }
                     return try self.readText(request)
+                }, navigate: { [weak self] action in
+                    guard let self else { throw DesktopTargetError("The repository window is unavailable.") }
+                    try self.navigate(action)
                 }) { [weak self] link in
                     await self?.receive(link)
                 }

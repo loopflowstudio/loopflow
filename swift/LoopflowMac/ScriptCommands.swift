@@ -27,6 +27,15 @@ class ControlPaneCommand: NSScriptCommand {
     }
 }
 
+/// Window navigation through the selection the window's own controls use.
+class NavigateDesktopCommand: NSScriptCommand {
+    override func performDefaultImplementation() -> Any? {
+        desktopReply { json in
+            try WorkLinkRouter.shared.navigate(Self.decodeRequest(DesktopNavigationCommand.self, from: json))
+        }
+    }
+}
+
 class ReadTerminalTextCommand: NSScriptCommand {
     override func performDefaultImplementation() -> Any? {
         desktopReply { json in
@@ -55,7 +64,8 @@ private extension NSScriptCommand {
         do {
             return try MainActor.assumeIsolated(operation)
         } catch {
-            scriptErrorNumber = NSInternalScriptError
+            // `lf desktop` reads the number, never the message, to choose its exit status.
+            scriptErrorNumber = error is DesktopTargetError ? DesktopTargetError.scriptErrorNumber : NSInternalScriptError
             scriptErrorString = error.localizedDescription
             return nil
         }

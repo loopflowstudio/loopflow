@@ -1055,7 +1055,7 @@ Show a Work selection, or derive a passive plan for external hosts
 
 | Argument | What it does |
 |---|---|
-| `<expression>` | wave/task/query/kind/state expression; omitted uses the repository default |
+| `<expression>` | wave/task/query/kind/state expression, or `working-tasks`; omitted uses the repository default |
 | `--plan` | Print the derived plan as JSON without opening Desktop or starting a provider Default: false. |
 | `--json` | Print the opening receipt as JSON Default: false. |
 | `--help / -h` | Print help |
@@ -1270,6 +1270,62 @@ Zoom an exact retained pane without changing selection; --off unzooms it
 |---|---|
 | `--pane` | pane |
 | `--off` | off Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop enter
+
+Enter a member of the shown Dashboard as full Work, as clicking its tile does
+
+| Argument | What it does |
+|---|---|
+| `<work>` | repository, task:<issue> or wave:<name> |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop back
+
+Go back to the previous destination, as ⌘[ does
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop forward
+
+Go forward again, as ⌘] does
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop slot
+
+Select a Working Task by its sidebar position, as ⌘1–9 do
+
+| Argument | What it does |
+|---|---|
+| `<slot>` | slot |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop next
+
+Select the next Working Task, as ⌃⇥ does
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop previous
+
+Select the previous Working Task, as ⌃⇧⇥ does
+
+| Argument | What it does |
+|---|---|
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

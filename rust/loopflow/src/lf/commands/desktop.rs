@@ -19,8 +19,8 @@ pub struct DesktopWindowInspection {
     pub repository: String,
     pub window: String,
     pub path: Option<String>,
-    pub selection_kind: Option<String>,
-    pub selection_id: Option<String>,
+    pub destination: DesktopDestination,
+    pub history: DesktopHistory,
     pub reading: String,
     pub reason: Option<String>,
     pub task: Option<DesktopTaskInspection>,
@@ -32,6 +32,45 @@ pub struct DesktopWindowInspection {
     pub open_work: Vec<WorkWorkspaceKey>,
     pub view: Option<crate::work::selection::ViewPlan>,
     pub opening: Option<DesktopOpening>,
+}
+
+/// What the window shows, as the sidebar, crumbs and tile clicks select it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DesktopDestination {
+    /// Full Work; the repository conversation has a `repository` key.
+    Work {
+        work: WorkWorkspaceKey,
+    },
+    Dashboard {
+        id: String,
+    },
+    WorkingTasks,
+    /// An unsaved query; the window's `view` carries its plan.
+    View {
+        selection: crate::work::selection::Selection,
+    },
+    /// A Dashboard member entered as full Work; back returns to its Dashboard.
+    Zoomed {
+        from: DesktopBoard,
+        work: WorkWorkspaceKey,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DesktopBoard {
+    Dashboard(String),
+    WorkingTasks,
+}
+
+/// Destinations back and forward reach, as the window's chevrons do.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DesktopHistory {
+    pub back: u32,
+    pub forward: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -187,6 +226,43 @@ pub enum DesktopSplitAxis {
     Vertical,
 }
 
+/// Window navigation runs through the same selection the window's own controls use.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DesktopNavigationCommand {
+    pub repository: String,
+    pub window: String,
+    pub action: DesktopNavigationAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DesktopNavigationAction {
+    WorkingTasks,
+    /// Enter a member of the shown Dashboard as full Work, as a tile click does.
+    Enter {
+        work: WorkWorkspaceKey,
+    },
+    Back,
+    Forward,
+    /// A Working Task by its 1-based slot, as ⌘1–9 select it.
+    Slot {
+        slot: u8,
+    },
+    Next,
+    Previous,
+}
+
+/// The destination after navigating; a following `state` reports the same.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DesktopNavigationReceipt {
+    pub repository: String,
+    pub window: String,
+    pub destination: DesktopDestination,
+    pub history: DesktopHistory,
+    pub observed_at: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopTextRequest {
     pub target: DesktopPaneTarget,
@@ -233,31 +309,70 @@ pub enum DesktopTextUnavailable {
 // Raw event spelling avoids loading an installed scripting dictionary during
 // compilation. Checking running state precedes the tell: inspection never opens
 // an app or an unrelated workspace. No caller-controlled text enters the script.
+// An app that is not running raises -600, as an event to a quit app does.
 const DESKTOP_EVENT: &str = r#"
 on run argv
     set bundle to item 1 of argv
+    set eventKind to item 2 of argv
     try
         set appRunning to application id bundle is running
     on error
         set appRunning to false
     end try
     if not appRunning then
-        error "Loopflow Desktop (" & bundle & ") is not running. Open it with lf open, or inspect Work with lf task status <task>."
+        error "Loopflow Desktop (" & bundle & ") is not running. Open it with lf open, or inspect Work with lf task status <task>." number -600
     end if
     with timeout of 5 seconds
-        if (count of argv) is 1 then
+        if eventKind is "inspect" then
             tell application id bundle to return «event CNRTinsp»
+        else if eventKind is "text" then
+            tell application id bundle to return «event CNRTtext» (item 3 of argv)
+        else if eventKind is "navigate" then
+            tell application id bundle to return «event CNRTnavg» (item 3 of argv)
         else
-            set request to item 2 of argv
-            if (count of argv) is 3 then
-                tell application id bundle to return «event CNRTtext» request
-            else
-                tell application id bundle to return «event CNRTpane» request
-            end if
+            tell application id bundle to return «event CNRTpane» (item 3 of argv)
         end if
     end timeout
 end run
 "#;
+
+/// Desktop's script error number for a stale or missing target; mirrored in
+/// `ScriptCommands.swift`.
+const TARGET_SCRIPT_ERROR: i32 = 1003;
+
+/// Failures a caller can act on by status; everything else exits 1.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum DesktopError {
+    /// Missing, ambiguous or replaced Work, window or pane. Nothing changed.
+    #[error("{0}")]
+    Target(String),
+    /// Not running, not macOS, or Automation consent pending or denied.
+    #[error("{0}")]
+    Unreachable(String),
+}
+
+impl DesktopError {
+    fn target(error: anyhow::Error) -> anyhow::Error {
+        Self::Target(format!("{error:#}")).into()
+    }
+
+    fn exit_status(&self) -> u8 {
+        match self {
+            Self::Target(_) => 3,
+            Self::Unreachable(_) => 4,
+        }
+    }
+}
+
+/// One Apple event and its JSON request.
+#[derive(Debug, Clone, Copy)]
+enum DesktopEvent<'a> {
+    Inspect,
+    Pane(&'a str),
+    Text(&'a str),
+    Navigate(&'a str),
+}
 
 /// Output schemas are generated from the same DTOs that decode Desktop and opening replies.
 /// Serialization context keeps nullable fields present, matching emitted JSON.
@@ -285,13 +400,16 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         ["desktop", "read"] => Some(schema::<DesktopTextReading>()),
         ["desktop", "text" | "key" | "hide" | "restore" | "focus" | "shell" | "files" | "graph-log"
         | "move" | "resize" | "zoom"] => Some(schema::<DesktopPaneReceipt>()),
+        ["desktop", "enter" | "back" | "forward" | "slot" | "next" | "previous"] => {
+            Some(schema::<DesktopNavigationReceipt>())
+        }
         _ => None,
     }
 }
 
 pub fn require_supported() -> Result<()> {
     if !cfg!(target_os = "macos") {
-        bail!("Loopflow Desktop launching and control require macOS; use `lf task status <task>` or `lf --task <task>` in this terminal instead");
+        return Err(DesktopError::Unreachable("Loopflow Desktop launching and control require macOS; use `lf task status <task>` or `lf --task <task>` in this terminal instead".into()).into());
     }
 
     Ok(())
@@ -313,12 +431,14 @@ pub enum DesktopOpeningStatus {
     Failed,
 }
 
-/// A passive plan or the acceptance receipt for opening its native destination.
+/// A passive plan, the acceptance receipt for opening its native destination,
+/// or the navigation receipt for `working-tasks`.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
 enum DesktopViewResult<'a> {
     Plan(&'a crate::work::selection::ViewPlan),
     Opening(&'a DesktopOpening),
+    Navigation(&'a DesktopNavigationReceipt),
 }
 
 /// The repository's Task order after a move, or the Dashboard edited with --query.
@@ -358,7 +478,9 @@ fn open_url(mut url: reqwest::Url, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn selection_failure(error: anyhow::Error) -> anyhow::Error {
+/// One exit status for every `lf desktop` command: 2 bad arguments, 3 missing or
+/// ambiguous target, 4 Desktop unreachable, otherwise 1. Clap exits 2 and Ctrl-C 130.
+fn exit_status(error: anyhow::Error) -> anyhow::Error {
     use crate::work::selection::SelectionError;
     let selection = error
         .chain()
@@ -370,18 +492,21 @@ fn selection_failure(error: anyhow::Error) -> anyhow::Error {
     let code = match selection {
         Some(SelectionError::Ambiguous(_)) => Some(3),
         Some(SelectionError::Query(_)) => Some(2),
-        _ if error.downcast_ref::<serde_json::Error>().is_some() => Some(2),
-        _ if matches!(
-            error.downcast_ref::<crate::store::StoreError>(),
-            Some(crate::store::StoreError::NotFound)
-        ) =>
-        {
-            Some(3)
-        }
-        _ => None,
+        _ => error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<DesktopError>())
+            .map(DesktopError::exit_status)
+            .or_else(|| error.downcast_ref::<serde_json::Error>().map(|_| 2))
+            .or_else(|| {
+                matches!(
+                    error.downcast_ref::<crate::store::StoreError>(),
+                    Some(crate::store::StoreError::NotFound)
+                )
+                .then_some(3)
+            }),
     };
     if let Some(code) = code {
-        eprintln!("Error: {error}");
+        eprintln!("Error: {error:#}");
         crate::process::CommandExit(code).into()
     } else {
         error
@@ -657,8 +782,12 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
 }
 
 pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
+    dispatch(cli, command).map_err(exit_status)
+}
+
+fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
-    match command {
+    let navigation = match command {
         DesktopCommand::Query { .. }
         | DesktopCommand::Pin { .. }
         | DesktopCommand::Unpin { .. }
@@ -666,17 +795,47 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
         | DesktopCommand::Arrange { .. }
         | DesktopCommand::Slots { .. }
         | DesktopCommand::Order { .. }
-        | DesktopCommand::Layout { .. } => {
-            return saved_intent(cli, command).map_err(selection_failure)
-        }
+        | DesktopCommand::Layout { .. } => return saved_intent(cli, command),
         DesktopCommand::View {
             expression,
             plan,
             json,
         } => {
-            return view_plan(cli, expression.as_deref(), *plan, *json || cli.json)
-                .map_err(selection_failure)
+            if expression.as_deref() != Some(WORKING_TASKS) {
+                return view_plan(cli, expression.as_deref(), *plan, *json || cli.json);
+            }
+            // Working Tasks is the repository plan shown as its default Dashboard.
+            if *plan {
+                return view_plan(cli, None, true, true);
+            }
+            Some((DesktopNavigationAction::WorkingTasks, json))
         }
+        DesktopCommand::Enter { work, json } => Some((
+            DesktopNavigationAction::Enter {
+                work: entered_work(cli, work)?,
+            },
+            json,
+        )),
+        DesktopCommand::Back { json } => Some((DesktopNavigationAction::Back, json)),
+        DesktopCommand::Forward { json } => Some((DesktopNavigationAction::Forward, json)),
+        DesktopCommand::Slot { slot, json } => {
+            Some((DesktopNavigationAction::Slot { slot: *slot }, json))
+        }
+        DesktopCommand::Next { json } => Some((DesktopNavigationAction::Next, json)),
+        DesktopCommand::Previous { json } => Some((DesktopNavigationAction::Previous, json)),
+        _ => None,
+    };
+    // Arguments are checked before Desktop is contacted.
+    match command {
+        DesktopCommand::Text { text, .. } => validate_literal_text(text)?,
+        DesktopCommand::Read { max_bytes, .. } => anyhow::ensure!(
+            (1..=1_048_576).contains(max_bytes),
+            "Text byte limit must be between 1 and 1048576"
+        ),
+        DesktopCommand::Resize { ratio, .. } => anyhow::ensure!(
+            ratio.is_finite() && (0.1..=0.9).contains(ratio),
+            "Split ratio must be between 0.1 and 0.9"
+        ),
         _ => {}
     }
     require_supported()?;
@@ -686,10 +845,58 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
     // Work selects the repository/checkout. One live reading supplies every
     // lifetime token; dispatch never reinterprets this request using later focus.
     let resolution = super::open::selected_context(cli, None)?;
-    let inspection: DesktopInspection = serde_json::from_slice(&contact(None, false)?)
+    let inspection: DesktopInspection = serde_json::from_slice(&contact(DesktopEvent::Inspect)?)
         .context("Desktop returned an invalid reading")?;
-    let caller = crate::session_record::current_terminal_id();
-    let selected = inspection.resolve_pane(&resolution, command, caller.as_deref())?;
+    if let Some((action, json)) = navigation {
+        let window = inspection
+            .window(&resolution)
+            .map_err(DesktopError::target)?;
+        return navigate(
+            DesktopNavigationCommand {
+                repository: window.repository.clone(),
+                window: window.window.clone(),
+                action,
+            },
+            *json || cli.json,
+        );
+    }
+    let caller = DesktopCaller {
+        terminal: crate::session_record::current_terminal_id(),
+        session: crate::journal::agent_caller().map(|caller| caller.session_id.as_str().to_owned()),
+    };
+    let (request, json) =
+        pane_request(&inspection, &resolution, command, &caller).map_err(DesktopError::target)?;
+    let output = match request {
+        PaneRequest::Read(request) => return read_text(request, json || cli.json),
+        PaneRequest::Control(request) => {
+            contact(DesktopEvent::Pane(&serde_json::to_string(&request)?))?
+        }
+    };
+    let receipt: DesktopPaneReceipt = serde_json::from_slice(&output)
+        .context("Desktop returned an invalid receipt; inspect before retrying")?;
+    if json || cli.json {
+        println!("{}", serde_json::to_string_pretty(&receipt)?);
+    } else {
+        println!("{}", receipt.pane);
+    }
+    Ok(())
+}
+
+enum PaneRequest {
+    Control(DesktopPaneCommand),
+    Read(DesktopTextRequest),
+}
+
+/// Captures the exact pane request from one reading. Every failure here is a
+/// missing, ambiguous or replaced target, so nothing was changed.
+fn pane_request(
+    inspection: &DesktopInspection,
+    resolution: &crate::ops::context::ContextExplanation,
+    command: &crate::lf::DesktopCommand,
+    caller: &DesktopCaller,
+) -> Result<(PaneRequest, bool)> {
+    use crate::lf::DesktopCommand;
+    let selected = inspection.resolve_pane(resolution, command, caller)?;
     let target = selected.target()?;
     let (action, json) = match command {
         DesktopCommand::Pin { .. }
@@ -701,17 +908,22 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
         | DesktopCommand::Layout { .. }
         | DesktopCommand::View { .. }
         | DesktopCommand::Query { .. }
-        | DesktopCommand::State { .. } => unreachable!("handled above"),
-        DesktopCommand::Text { text, json, .. } => {
-            validate_literal_text(text)?;
-            (
-                DesktopPaneAction::Text {
-                    surface: selected.surface()?,
-                    text: text.clone(),
-                },
-                json,
-            )
+        | DesktopCommand::Enter { .. }
+        | DesktopCommand::Back { .. }
+        | DesktopCommand::Forward { .. }
+        | DesktopCommand::Slot { .. }
+        | DesktopCommand::Next { .. }
+        | DesktopCommand::Previous { .. }
+        | DesktopCommand::State { .. } => {
+            unreachable!("resolve_pane refuses commands without a pane")
         }
+        DesktopCommand::Text { text, json, .. } => (
+            DesktopPaneAction::Text {
+                surface: selected.surface()?,
+                text: text.clone(),
+            },
+            json,
+        ),
         DesktopCommand::Key { key, json, .. } => (
             DesktopPaneAction::Key {
                 surface: selected.surface()?,
@@ -725,19 +937,15 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
             json,
             ..
         } => {
-            anyhow::ensure!(
-                (1..=1_048_576).contains(max_bytes),
-                "Text byte limit must be between 1 and 1048576"
-            );
-            return read_text(
-                DesktopTextRequest {
+            return Ok((
+                PaneRequest::Read(DesktopTextRequest {
                     target,
                     surface: selected.surface()?,
                     region: *region,
                     max_bytes: *max_bytes,
-                },
-                *json || cli.json,
-            );
+                }),
+                *json,
+            ))
         }
         DesktopCommand::Hide { json, .. } => (DesktopPaneAction::Hide, json),
         DesktopCommand::Restore { json, .. } => (DesktopPaneAction::Restore, json),
@@ -772,36 +980,68 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
             ratio,
             json,
             ..
-        } => {
-            anyhow::ensure!(
-                ratio.is_finite() && (0.1..=0.9).contains(ratio),
-                "Split ratio must be between 0.1 and 0.9"
-            );
-            (
-                DesktopPaneAction::Resize {
-                    toward: selected.peer(toward)?.target()?,
-                    ratio: *ratio,
-                },
-                json,
-            )
-        }
+        } => (
+            DesktopPaneAction::Resize {
+                toward: selected.peer(toward)?.target()?,
+                ratio: *ratio,
+            },
+            json,
+        ),
         DesktopCommand::Zoom { off, json, .. } => (DesktopPaneAction::Zoom { enabled: !off }, json),
     };
-    let output = contact(
-        Some(&serde_json::to_string(&DesktopPaneCommand {
-            target,
-            action,
-        })?),
-        false,
-    )?;
-    let receipt: DesktopPaneReceipt = serde_json::from_slice(&output)
+    Ok((
+        PaneRequest::Control(DesktopPaneCommand { target, action }),
+        *json,
+    ))
+}
+
+/// The `lf desktop view` name for the default Dashboard.
+const WORKING_TASKS: &str = "working-tasks";
+
+/// `task:<issue>` and `wave:<name>` resolve to durable Work, as `--task`/`--wave` do.
+fn entered_work(cli: &crate::lf::Cli, selector: &str) -> Result<WorkWorkspaceKey> {
+    let store = crate::store::read_existing_registry()?
+        .ok_or(crate::store::StoreError::NotFound)
+        .context("Work registry is unavailable")?;
+    let repository = selection_repository(cli, &store.sqlite)?;
+    let key = work_key(&repository, selector)?;
+    let resolution = match key.kind {
+        WorkWorkspaceKind::Repository => return Ok(key),
+        WorkWorkspaceKind::Task => super::context::explain(None, Some(&key.id), None, None)?.task,
+        WorkWorkspaceKind::Wave => super::context::explain(Some(&key.id), None, None, None)?.wave,
+    };
+    let id = bound(&resolution, selector).map_err(DesktopError::target)?;
+    Ok(WorkWorkspaceKey {
+        id: id.into(),
+        ..key
+    })
+}
+
+fn navigate(request: DesktopNavigationCommand, json: bool) -> Result<()> {
+    // `view working-tasks` reports through the `view` result schema.
+    let working_tasks = matches!(request.action, DesktopNavigationAction::WorkingTasks);
+    let output = contact(DesktopEvent::Navigate(&serde_json::to_string(&request)?))?;
+    let receipt: DesktopNavigationReceipt = serde_json::from_slice(&output)
         .context("Desktop returned an invalid receipt; inspect before retrying")?;
-    if *json || cli.json {
+    if json && working_tasks {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&DesktopViewResult::Navigation(&receipt))?
+        );
+    } else if json {
         println!("{}", serde_json::to_string_pretty(&receipt)?);
     } else {
-        println!("{}", receipt.pane);
+        println!("{}", receipt.destination);
     }
     Ok(())
+}
+
+/// Who issued a pane command: a verified Desktop terminal, or an agent whose
+/// Session a pane shows. Either selects its own pane when `--pane` is omitted.
+#[derive(Debug, Default)]
+struct DesktopCaller {
+    terminal: Option<String>,
+    session: Option<String>,
 }
 
 fn bound<'a>(fact: &'a crate::ops::context::ContextFact, name: &str) -> Result<&'a str> {
@@ -818,11 +1058,31 @@ fn bound<'a>(fact: &'a crate::ops::context::ContextFact, name: &str) -> Result<&
 }
 
 impl DesktopInspection {
+    /// The one open window for the selected Work's repository.
+    fn window(
+        &self,
+        work: &crate::ops::context::ContextExplanation,
+    ) -> Result<&DesktopWindowInspection> {
+        let repository = bound(&work.repository, "Repository identity")?;
+        let windows = self
+            .windows
+            .iter()
+            .filter(|window| window.repository == repository)
+            .collect::<Vec<_>>();
+        match windows.as_slice() {
+            [window] => Ok(window),
+            _ => bail!(
+                "Expected one open window for repository {repository}; found {}. Nothing was changed.",
+                windows.len()
+            ),
+        }
+    }
+
     fn resolve_pane(
         &self,
         work: &crate::ops::context::ContextExplanation,
         command: &crate::lf::DesktopCommand,
-        caller: Option<&str>,
+        caller: &DesktopCaller,
     ) -> Result<ResolvedPane<'_>> {
         use crate::lf::DesktopCommand;
         use crate::ops::context::ContextFact;
@@ -850,22 +1110,18 @@ impl DesktopInspection {
             | DesktopCommand::Layout { .. }
             | DesktopCommand::View { .. }
             | DesktopCommand::Query { .. }
+            | DesktopCommand::Enter { .. }
+            | DesktopCommand::Back { .. }
+            | DesktopCommand::Forward { .. }
+            | DesktopCommand::Slot { .. }
+            | DesktopCommand::Next { .. }
+            | DesktopCommand::Previous { .. }
             | DesktopCommand::State { .. } => {
                 bail!("This command does not address a pane")
             }
         };
-        let repository = bound(&work.repository, "Repository identity")?;
-        let windows = self
-            .windows
-            .iter()
-            .filter(|window| window.repository == repository)
-            .collect::<Vec<_>>();
-        anyhow::ensure!(
-            windows.len() == 1,
-            "Expected one open window for repository {repository}; found {}. No pane was changed.",
-            windows.len()
-        );
-        let window = windows[0];
+        let window = self.window(work)?;
+        let repository = window.repository.as_str();
         let subject = match (&work.task, &work.wave) {
             (ContextFact::Bound { value, .. }, _) => Some((WorkWorkspaceKind::Task, value)),
             (ContextFact::Unbound, ContextFact::Bound { value, .. }) => {
@@ -951,7 +1207,7 @@ impl DesktopInspection {
             }
         }
         if pane.is_none() {
-            if let Some(caller) = caller {
+            if let Some(caller) = caller.terminal.as_deref() {
                 let own = candidates.iter().filter(|candidate| {
                     let location = candidate.tab.map_or(&candidate.leaf.location, |tab| &tab.location);
                     matches!((&work.machine, location), (ContextFact::Bound { value, .. }, Some(location)) if value == &location.machine_id)
@@ -959,6 +1215,30 @@ impl DesktopInspection {
                 }).collect::<Vec<_>>();
                 if let [candidate] = own.as_slice() {
                     return Ok(**candidate);
+                }
+            }
+            // An agent's own pane shows its Session. Showing it twice is ambiguous;
+            // focus never chooses between them.
+            if let Some(session) = caller.session.as_deref() {
+                let own = candidates
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.tab.is_none()
+                            && candidate.leaf.content.as_deref() == Some("session")
+                            && candidate.leaf.subject.as_deref() == Some(session)
+                    })
+                    .collect::<Vec<_>>();
+                match own.as_slice() {
+                    [candidate] => return Ok(**candidate),
+                    [] => {}
+                    _ => bail!(
+                        "Session {session} is shown in {} panes: {}. Choose --pane; no pane was changed.",
+                        own.len(),
+                        own.iter()
+                            .filter_map(|candidate| candidate.leaf.pane.as_deref())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
                 }
             }
         }
@@ -1059,7 +1339,7 @@ impl DesktopLayoutInspection {
 /// fall back to an unbounded clipboard read.
 fn read_text(request: DesktopTextRequest, json: bool) -> Result<()> {
     let encoded = serde_json::to_string(&request)?;
-    let output = contact(Some(&encoded), true)?;
+    let output = contact(DesktopEvent::Text(&encoded))?;
     let reading: DesktopTextReading = serde_json::from_slice(&output)
         .context("Desktop returned an invalid terminal text reading")?;
     if reading.request != request {
@@ -1092,24 +1372,60 @@ fn validate_literal_text(text: &str) -> Result<()> {
     Ok(())
 }
 
-fn contact(request: Option<&str>, text_read: bool) -> Result<Vec<u8>> {
+fn contact(event: DesktopEvent) -> Result<Vec<u8>> {
+    let (kind, request) = match event {
+        DesktopEvent::Inspect => ("inspect", None),
+        DesktopEvent::Pane(request) => ("pane", Some(request)),
+        DesktopEvent::Text(request) => ("text", Some(request)),
+        DesktopEvent::Navigate(request) => ("navigate", Some(request)),
+    };
     let output = std::process::Command::new("/usr/bin/osascript")
         .args(["-e", DESKTOP_EVENT, "--"])
         .arg(super::open::desktop_bundle())
+        .arg(kind)
         .args(request)
-        .args(text_read.then_some("text"))
         .output()
         .context("contact Loopflow Desktop via macOS automation")?;
     if !output.status.success() {
-        // A lost reply does not prove the command had no effect. In particular,
-        // repeating shell creation allocates another tab; inspect before retrying.
-        bail!("Desktop request failed: {}. Inspect again before retrying; `lf task status <task>` remains available in this terminal.", String::from_utf8_lossy(&output.stderr).trim());
+        return Err(contact_failure(&String::from_utf8_lossy(&output.stderr)));
     }
     Ok(output.stdout)
 }
 
+/// osascript reports `NN:NN: execution error: <message> (<number>)`; the number,
+/// never the message, decides the status.
+fn contact_failure(stderr: &str) -> anyhow::Error {
+    let stderr = stderr.trim();
+    let (message, number) = stderr
+        .strip_suffix(')')
+        .and_then(|rest| rest.rsplit_once(" ("))
+        .and_then(|(message, number)| Some((message, number.parse::<i32>().ok()?)))
+        .unwrap_or((stderr, 0));
+    let message = message
+        .split_once("execution error: ")
+        .map_or(message, |(_, message)| message);
+    let consent =
+        "Allow Automation for Loopflow in System Settings › Privacy & Security › Automation";
+    match number {
+        TARGET_SCRIPT_ERROR => DesktopError::Target(message.into()).into(),
+        // Not running, or quit mid-request.
+        -600 | -609 => DesktopError::Unreachable(message.into()).into(),
+        -1712 => DesktopError::Unreachable(format!(
+            "Desktop did not answer within 5 seconds; an Automation consent prompt may be waiting. {consent}, then inspect again before retrying."
+        ))
+        .into(),
+        -1743 | -1744 => DesktopError::Unreachable(format!(
+            "This terminal may not control Loopflow Desktop. {consent}."
+        ))
+        .into(),
+        // A lost reply does not prove the command had no effect. In particular,
+        // repeating shell creation allocates another tab; inspect before retrying.
+        _ => anyhow::anyhow!("Desktop request failed: {stderr}. Inspect again before retrying; `lf task status <task>` remains available in this terminal."),
+    }
+}
+
 fn inspect(json: bool) -> Result<()> {
-    let output = contact(None, false)?;
+    let output = contact(DesktopEvent::Inspect)?;
     let reading: DesktopInspection = serde_json::from_slice(&output)
         .context("Desktop returned an invalid reading; inspect again before retrying")?;
     if json {
@@ -1144,9 +1460,10 @@ impl DesktopInspection {
                 window.repository, window.window, window.reading
             ));
             lines.push(format!(
-                "  Work: {} {} · Session: {}",
-                window.selection_kind.as_deref().unwrap_or("unbound"),
-                window.selection_id.as_deref().unwrap_or(""),
+                "  Showing: {} · back {} · forward {} · Session: {}",
+                window.destination,
+                window.history.back,
+                window.history.forward,
                 window
                     .session
                     .as_ref()
@@ -1241,6 +1558,32 @@ impl DesktopInspection {
     }
 }
 
+impl std::fmt::Display for DesktopDestination {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let selector = |work: &WorkWorkspaceKey| match work.kind {
+            WorkWorkspaceKind::Repository => "repository".to_owned(),
+            WorkWorkspaceKind::Task => format!("task:{}", work.id),
+            WorkWorkspaceKind::Wave => format!("wave:{}", work.id),
+        };
+        match self {
+            Self::Work { work } => write!(f, "{}", selector(work)),
+            Self::Dashboard { id } => write!(f, "query:{id}"),
+            Self::WorkingTasks => write!(f, "{WORKING_TASKS}"),
+            Self::View { .. } => write!(f, "unsaved view"),
+            Self::Zoomed { from, work } => write!(f, "{} entered from {from}", selector(work)),
+        }
+    }
+}
+
+impl std::fmt::Display for DesktopBoard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Dashboard(id) => write!(f, "query:{id}"),
+            Self::WorkingTasks => write!(f, "{WORKING_TASKS}"),
+        }
+    }
+}
+
 impl DesktopLayoutInspection {
     fn render(&self, indent: usize, lines: &mut Vec<String>) {
         if let Some(pane) = &self.pane {
@@ -1281,7 +1624,7 @@ impl DesktopTextUnavailable {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_literal_text;
+    use super::{validate_literal_text, DesktopCaller, DesktopError};
     use crate::ops::context::{ContextExplanation, ContextFact};
 
     fn pane_fixture() -> (super::DesktopInspection, ContextExplanation) {
@@ -1317,7 +1660,9 @@ mod tests {
             text: "draft".into(),
             json: true,
         };
-        let selected = inspection.resolve_pane(&work, &text, None).unwrap();
+        let selected = inspection
+            .resolve_pane(&work, &text, &DesktopCaller::default())
+            .unwrap();
         let target = selected.target().unwrap();
         let surface = selected.surface().unwrap();
         assert_eq!(target.pane, "session-pane");
@@ -1330,7 +1675,7 @@ mod tests {
         workspace.layout.children.push(other);
         workspace.focused_pane = "second-terminal".into();
         let error = inspection
-            .resolve_pane(&work, &text, None)
+            .resolve_pane(&work, &text, &DesktopCaller::default())
             .unwrap_err()
             .to_string();
         assert!(
@@ -1344,7 +1689,9 @@ mod tests {
             text: "draft".into(),
             json: false,
         };
-        let explicit_selection = inspection.resolve_pane(&work, &explicit, None).unwrap();
+        let explicit_selection = inspection
+            .resolve_pane(&work, &explicit, &DesktopCaller::default())
+            .unwrap();
         assert_eq!(explicit_selection.target().unwrap(), target);
         assert_eq!(explicit_selection.surface().unwrap(), surface);
         // The already resolved transport request retains the old lifetime, not
@@ -1353,10 +1700,92 @@ mod tests {
             Some("replacement".into());
         inspection.windows[0].workspaces[0].layout.children[0].surface =
             Some("replacement-surface".into());
-        let replacement = inspection.resolve_pane(&work, &explicit, None).unwrap();
+        let replacement = inspection
+            .resolve_pane(&work, &explicit, &DesktopCaller::default())
+            .unwrap();
         assert_ne!(replacement.target().unwrap(), target);
         assert_ne!(replacement.surface().unwrap(), surface);
         assert_eq!(target.incarnation, "occurrence-session-pane");
+    }
+
+    fn terminal(id: &str) -> DesktopCaller {
+        DesktopCaller {
+            terminal: Some(id.into()),
+            session: None,
+        }
+    }
+
+    #[test]
+    fn an_agent_selects_the_pane_showing_its_session_and_refuses_two() {
+        use crate::lf::DesktopCommand;
+        let (mut inspection, work) = pane_fixture();
+        let zoom = DesktopCommand::Zoom {
+            pane: None,
+            off: false,
+            json: false,
+        };
+        let agent = DesktopCaller {
+            terminal: None,
+            session: Some("session-one".into()),
+        };
+        // Two panes are eligible; the caller's Session picks its own.
+        assert!(inspection
+            .resolve_pane(&work, &zoom, &DesktopCaller::default())
+            .is_err());
+        let own = inspection.resolve_pane(&work, &zoom, &agent).unwrap();
+        assert_eq!(own.target().unwrap().pane, "session-pane");
+        let workspace = &mut inspection.windows[0].workspaces[0];
+        let mut twice = workspace.layout.children[0].clone();
+        twice.pane = Some("session-again".into());
+        workspace.layout.children.push(twice);
+        workspace.focused_pane = "session-again".into();
+        let error = inspection.resolve_pane(&work, &zoom, &agent).unwrap_err();
+        assert!(
+            error.to_string().contains("session-pane, session-again"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn desktop_failures_take_their_status_from_the_script_error_number() {
+        let status = |stderr: &str| {
+            let error = super::contact_failure(stderr);
+            error
+                .downcast_ref::<DesktopError>()
+                .map(|error| (error.exit_status(), error.to_string()))
+        };
+        let (code, message) = status("88:188: execution error: Loopflow Desktop (com.loopflow.mac.dev) is not running. (-600)\n").unwrap();
+        assert_eq!(code, 4);
+        assert!(
+            message.starts_with("Loopflow Desktop (com.loopflow.mac.dev)"),
+            "{message}"
+        );
+        let (code, message) = status(
+            "12:40: execution error: Loopflow Dev got an error: AppleEvent timed out. (-1712)",
+        )
+        .unwrap();
+        assert_eq!(code, 4);
+        assert!(
+            message.contains("Privacy & Security › Automation"),
+            "{message}"
+        );
+        assert_eq!(
+            status(
+                "1:2: execution error: Not authorized to send Apple events to Loopflow. (-1743)"
+            )
+            .unwrap()
+            .0,
+            4
+        );
+        let (code, message) = status("1:2: execution error: Loopflow got an error: The pane content was replaced; inspect Desktop again. (1003)").unwrap();
+        assert_eq!(code, 3);
+        assert!(message.ends_with("inspect Desktop again."), "{message}");
+        // Other failures, including a message that only mentions a number, stay 1.
+        assert!(status(
+            "1:2: execution error: Loopflow got an error: decoding failed (1003 bytes) (-10000)"
+        )
+        .is_none());
+        assert!(status("osascript crashed").is_none());
     }
 
     #[test]
@@ -1384,11 +1813,11 @@ mod tests {
             json: true,
         };
         let selected = inspection
-            .resolve_pane(&work, &text, Some("native-surface-incarnation"))
+            .resolve_pane(&work, &text, &terminal("native-surface-incarnation"))
             .unwrap();
         assert_eq!(selected.target().unwrap().pane, "session-pane");
         let selected = inspection
-            .resolve_pane(&work, &text, Some("caller-shell"))
+            .resolve_pane(&work, &text, &terminal("caller-shell"))
             .unwrap();
         assert_eq!(selected.target().unwrap().pane, "caller-shell");
         let explicit = DesktopCommand::Text {
@@ -1398,7 +1827,7 @@ mod tests {
         };
         assert_eq!(
             inspection
-                .resolve_pane(&work, &explicit, Some("caller-shell"))
+                .resolve_pane(&work, &explicit, &terminal("caller-shell"))
                 .unwrap()
                 .target()
                 .unwrap()
@@ -1408,14 +1837,14 @@ mod tests {
         // A marker from another Machine or a replaced Session cannot resolve
         // ambiguous panes, even when one of them has focus.
         assert!(inspection
-            .resolve_pane(&work, &text, Some("old-surface"))
+            .resolve_pane(&work, &text, &terminal("old-surface"))
             .is_err());
         work.machine = crate::ops::context::ContextFact::Bound {
             value: "other-machine".into(),
             source: "observer".into(),
         };
         assert!(inspection
-            .resolve_pane(&work, &text, Some("caller-shell"))
+            .resolve_pane(&work, &text, &terminal("caller-shell"))
             .is_err());
     }
 
@@ -1440,7 +1869,9 @@ mod tests {
             text: "draft".into(),
             json: true,
         };
-        let selected = inspection.resolve_pane(&work, &command, None).unwrap();
+        let selected = inspection
+            .resolve_pane(&work, &command, &DesktopCaller::default())
+            .unwrap();
         assert_eq!(selected.target().unwrap().tab.as_deref(), Some("first"));
         assert_eq!(selected.target().unwrap().incarnation, "first-occurrence");
         assert_eq!(selected.surface().unwrap(), "first-surface");
@@ -1448,9 +1879,13 @@ mod tests {
             pane: None,
             json: true,
         };
-        assert!(inspection.resolve_pane(&work, &create, None).is_ok());
+        assert!(inspection
+            .resolve_pane(&work, &create, &DesktopCaller::default())
+            .is_ok());
         work.task = ContextFact::Unbound;
-        assert!(inspection.resolve_pane(&work, &create, None).is_err());
+        assert!(inspection
+            .resolve_pane(&work, &create, &DesktopCaller::default())
+            .is_err());
     }
 
     #[test]
@@ -1462,7 +1897,7 @@ mod tests {
             json: false,
         };
         assert!(inspection
-            .resolve_pane(&work, &focus, None)
+            .resolve_pane(&work, &focus, &DesktopCaller::default())
             .unwrap_err()
             .to_string()
             .contains("Multiple eligible"));
@@ -1471,7 +1906,7 @@ mod tests {
             json: false,
         };
         assert!(inspection
-            .resolve_pane(&work, &missing, None)
+            .resolve_pane(&work, &missing, &DesktopCaller::default())
             .unwrap_err()
             .to_string()
             .contains("No eligible pane"));
@@ -1480,14 +1915,16 @@ mod tests {
             text: "no input".into(),
             json: false,
         };
-        assert!(inspection.resolve_pane(&work, &files, None).is_err());
+        assert!(inspection
+            .resolve_pane(&work, &files, &DesktopCaller::default())
+            .is_err());
         let restore = DesktopCommand::Restore {
             pane: None,
             json: false,
         };
         assert_eq!(
             inspection
-                .resolve_pane(&work, &restore, None)
+                .resolve_pane(&work, &restore, &DesktopCaller::default())
                 .unwrap()
                 .target()
                 .unwrap()
@@ -1498,11 +1935,15 @@ mod tests {
         work.checkout = ContextFact::Unavailable {
             reason: "owner offline".into(),
         };
-        assert!(inspection.resolve_pane(&work, &restore, None).is_ok());
+        assert!(inspection
+            .resolve_pane(&work, &restore, &DesktopCaller::default())
+            .is_ok());
         work.task = ContextFact::Unavailable {
             reason: "Task identity unavailable".into(),
         };
-        assert!(inspection.resolve_pane(&work, &restore, None).is_err());
+        assert!(inspection
+            .resolve_pane(&work, &restore, &DesktopCaller::default())
+            .is_err());
     }
 
     #[test]
@@ -1519,7 +1960,9 @@ mod tests {
             axis: super::DesktopSplitAxis::Vertical,
             json: false,
         };
-        let selected = inspection.resolve_pane(&work, &command, None).unwrap();
+        let selected = inspection
+            .resolve_pane(&work, &command, &DesktopCaller::default())
+            .unwrap();
         let target = selected.target().unwrap();
         assert_eq!(target.pane, "session-pane");
         let destination = selected.peer("files-pane").unwrap().target().unwrap();

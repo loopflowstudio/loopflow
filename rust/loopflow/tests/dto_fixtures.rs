@@ -1157,6 +1157,35 @@ fn desktop_pane_receipt_returns_the_affected_identity() {
 }
 
 #[test]
+fn desktop_navigation_names_its_window_and_reports_the_destination() {
+    use loopflow::lf::commands::desktop::{
+        DesktopNavigationAction, DesktopNavigationCommand, DesktopNavigationReceipt,
+    };
+    let json = include_str!("../../../tests/fixtures/dto/desktop_navigation.json");
+    let value: serde_json::Value = serde_json::from_str(json).unwrap();
+    let commands: Vec<DesktopNavigationCommand> =
+        serde_json::from_value(value["commands"].clone()).unwrap();
+    assert_eq!(
+        commands[4].action,
+        DesktopNavigationAction::Slot { slot: 2 }
+    );
+    assert_eq!(serde_json::to_value(&commands).unwrap(), value["commands"]);
+    for field in ["repository", "window", "action"] {
+        let mut missing = value["commands"][1].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<DesktopNavigationCommand>(missing).is_err());
+    }
+    let receipt: DesktopNavigationReceipt =
+        serde_json::from_value(value["receipt"].clone()).unwrap();
+    assert_eq!(serde_json::to_value(&receipt).unwrap(), value["receipt"]);
+    for field in ["destination", "history", "observed_at"] {
+        let mut missing = value["receipt"].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<DesktopNavigationReceipt>(missing).is_err());
+    }
+}
+
+#[test]
 fn paused_task_state_is_unfinished() {
     let state: TaskState =
         serde_json::from_str(include_str!("../../../tests/fixtures/dto/task_paused.json")).unwrap();
@@ -1184,6 +1213,14 @@ fn desktop_state_retains_outer_and_inner_layouts() {
     ))
     .unwrap();
     let window = &reading.windows[0];
+    assert_eq!(
+        window.destination,
+        loopflow::lf::commands::desktop::DesktopDestination::Zoomed {
+            from: loopflow::lf::commands::desktop::DesktopBoard::Dashboard("attention".into()),
+            work: window.workspaces[0].work.clone(),
+        }
+    );
+    assert_eq!(window.history.back, 1);
     assert_eq!(window.open_work, [window.workspaces[0].work.clone()]);
     assert_eq!(window.workspaces[0].layout.ratio, Some(0.6));
     assert_eq!(window.workspaces[0].hidden_panes, ["files-pane"]);

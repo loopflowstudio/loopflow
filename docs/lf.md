@@ -1031,6 +1031,28 @@ permission to start. Process checkout resolution describes current Work at that
 location, not historical usage attribution. Ordinary `lf context` still reads
 prompt budgets.
 
+Navigate a window as its sidebar, crumbs and tiles do:
+
+```sh
+lf desktop view working-tasks                 # the default Dashboard
+lf desktop enter task:LOO-519                 # a tile fills the window
+lf desktop back                               # ⌘[; forward is ⌘]
+lf desktop slot 2                             # ⌘2; next/previous are ⌃⇥/⌃⇧⇥
+lf desktop state --json | jq '.windows[0] | {destination, history}'
+```
+
+`state` reports each window's `destination` (`work`, `dashboard`, `working_tasks`,
+`view` or `zoomed` with the Dashboard it was entered `from`) and `history` counts.
+A navigation receipt carries the destination the next `state` reports. `enter`
+requires a member of the shown Dashboard; empty history, an absent slot or no
+Working Tasks change nothing and exit 3.
+
+Every `lf desktop` command exits 0 on success, 1 on other failures, 2 for bad
+arguments or a malformed expression, 3 for missing or ambiguous Work, window or
+pane (nothing changed), 4 when Desktop is unreachable (not running, not macOS,
+or an Automation consent prompt pending or denied in System Settings › Privacy &
+Security › Automation) and 130 when interrupted.
+
 `desktop view EXPRESSION` opens the shared query results as a Dashboard in the Mac
 app, including unsaved queries. Save the Dashboard to name, pin and arrange it.
 Only Dashboard query results compose Tasks side by side; ordinary navigation
@@ -1104,10 +1126,11 @@ lf --task LOO-427 desktop restore --pane "$pane"
 ```
 
 Without `--pane`, a command issued on a verified Desktop terminal's original
-PTY selects that terminal within the chosen Work. Explicit `--pane` wins.
-Otherwise one eligible pane is selected; ambiguity lists choices and changes
-nothing. Redirected stdin, agent tool subprocesses without that PTY, and markers
-inherited across SSH do not establish caller identity: use `--pane` when needed.
+PTY selects that terminal within the chosen Work, and an agent selects the pane
+showing its own Session. Explicit `--pane` wins. A Session shown in two panes is
+ambiguous; focus never chooses. Otherwise one eligible pane is selected; ambiguity
+lists choices and changes nothing. Redirected stdin and markers inherited across
+SSH do not establish caller identity.
 Terminal targeting never follows current focus. Use `--pane shell:ID` or the raw shell ID
 to address a retained shell, including a background tab. State lists ordered `tabs`
 and `selected_tab` on each Shell pane. Text/key/read require an existing terminal surface. Restore without a pane

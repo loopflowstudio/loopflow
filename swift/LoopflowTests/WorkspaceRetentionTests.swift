@@ -50,7 +50,7 @@ struct WorkspaceRetentionTests {
                     inspect: { repository, incarnation in
                         model.inspectDesktop(repository: repository, window: incarnation, workspaces: registry)
                     }, controlPane: { try registry.controlPane($0, model: model) },
-                    readText: { try registry.readText($0) }) { url in
+                    readText: { try registry.readText($0) }, navigate: { _ in }) { url in
                         received.append(url)
                         delivered.continuation.yield(url)
                     }

@@ -514,6 +514,9 @@ pub enum Commands {
     /// Open Work's conversation in Desktop, this cmux/Herdr host or a terminal
     Open(commands::open::OpenArgs),
     /// Select Work and control Loopflow Desktop panes
+    #[command(
+        after_help = "Exit status: 0 success, 1 failure, 2 bad arguments or expression, 3 missing or ambiguous Work, window or pane (nothing changed), 4 Desktop unreachable (not running, not macOS, or Automation consent pending or denied), 130 interrupted."
+    )]
     Desktop {
         #[command(subcommand)]
         cmd: DesktopCommand,
@@ -608,7 +611,7 @@ pub enum Commands {
 pub enum DesktopCommand {
     /// Show a Work selection, or derive a passive plan for external hosts
     View {
-        /// wave/task/query/kind/state expression; omitted uses the repository default
+        /// wave/task/query/kind/state expression, or `working-tasks`; omitted uses the repository default
         expression: Option<String>,
         /// Print the derived plan as JSON without opening Desktop or starting a provider
         #[arg(long)]
@@ -793,6 +796,40 @@ pub enum DesktopCommand {
         pane: Option<String>,
         #[arg(long)]
         off: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Enter a member of the shown Dashboard as full Work, as clicking its tile does
+    Enter {
+        /// repository, task:<issue> or wave:<name>
+        work: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Go back to the previous destination, as ⌘[ does
+    Back {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Go forward again, as ⌘] does
+    Forward {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Select a Working Task by its sidebar position, as ⌘1–9 do
+    Slot {
+        #[arg(value_parser = clap::value_parser!(u8).range(1..=9))]
+        slot: u8,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Select the next Working Task, as ⌃⇥ does
+    Next {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Select the previous Working Task, as ⌃⇧⇥ does
+    Previous {
         #[arg(long)]
         json: bool,
     },

@@ -464,7 +464,7 @@ struct WorkDestinationTests {
             #expect(companion.document("remote-draft.txt").editor.string == "retained peer draft")
             remote.multiplexer.replace(targetPane.id, with: .session(id: "replacement"))
             let unchanged = remote.multiplexer.layout
-            #expect(throws: RegistryQueryError.self) {
+            #expect(throws: DesktopTargetError.self) {
                 try registry.controlPane(.init(target: target, action: .shell), model: model)
             }
             #expect(remote.multiplexer.layout == unchanged)
@@ -1209,7 +1209,7 @@ struct WorkDestinationTests {
         let window = UUID()
         var received: [LinkedWork] = []
         router.register(window, repository: workspace.id, focus: {}, inspect: windowInspection,
-            controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { url in
+            controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }, navigate: { _ in }) { url in
             received.append(url)
         }
         for machine in ["local-owner", "peer-owner"] {
@@ -1234,7 +1234,7 @@ struct WorkDestinationTests {
         var raised = 0
         var received: [String] = []
         router.register(UUID(), repository: workspace.id, focus: { raised += 1 }, inspect: windowInspection,
-            controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { link in
+            controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }, navigate: { _ in }) { link in
             if case .task(let task) = link { received.append(task.issue) }
         }
         // The first read outlasts the second address's arrival.
@@ -1267,7 +1267,7 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings.first?.status == .opening)
         let id = UUID()
         router.register(id, repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
-                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }, navigate: { _ in }) { _ in }
         #expect(router.inspect().openings.first?.status == .usable)
         _ = try await router.openRepository(path: repositoryFixturePath(), link: nil, query: query) { _ in
             Issue.record("An open repository must reuse its window")
@@ -1297,10 +1297,10 @@ struct WorkDestinationTests {
         }
         #expect(router.inspect().openings.first?.status == .opening)
         router.register(UUID(), repository: "old-plan", focus: {}, inspect: windowInspection,
-                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }, navigate: { _ in }) { _ in }
         #expect(router.inspect().openings.first?.status == .opening)
         router.register(UUID(), repository: current.id, openingRequests: router.workspaceRequests(current.id), focus: {}, inspect: windowInspection,
-                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }, navigate: { _ in }) { _ in }
         #expect(router.inspect().openings.first?.status == .usable)
     }
 
@@ -1330,12 +1330,12 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings.first?.status == .opening)
         let stale = UUID()
         router.register(stale, repository: workspace.id, openingRequests: oldRequests, focus: {}, inspect: windowInspection,
-                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }, navigate: { _ in }) { _ in }
         #expect(router.inspect().openings.first?.status == .opening)
         router.remove(stale, repository: workspace.id)
         _ = try await router.resolveWorkspace(workspace, query: query)
         router.register(UUID(), repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
-                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }, navigate: { _ in }) { _ in }
         #expect(router.inspect().openings.first?.status == .usable)
     }
 
@@ -1350,7 +1350,7 @@ struct WorkDestinationTests {
         let current = router.workspaceRequests(workspace.id)
         let id = UUID()
         router.register(id, repository: workspace.id, openingRequests: validated, focus: {}, inspect: windowInspection,
-                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }, navigate: { _ in }) { _ in }
         #expect(router.inspect().openings.first?.status == .opening)
         router.confirmRegisteredWorkspace(workspace.id, requests: validated)
         #expect(router.inspect().openings.first?.status == .opening)
@@ -1371,7 +1371,7 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings.first?.status == .failed)
         let receipt = router.inspect().openings
         router.register(UUID(), repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
-                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }, navigate: { _ in }) { _ in }
         #expect(router.inspect().openings == receipt)
     }
 
@@ -1408,7 +1408,7 @@ struct WorkDestinationTests {
             inspect: { repository, incarnation in
                 model.inspectDesktop(repository: repository, window: incarnation, workspaces: registry)
             }, controlPane: { try registry.controlPane($0, model: model) },
-            readText: { try registry.readText($0) }) { url in
+            readText: { try registry.readText($0) }, navigate: { _ in }) { url in
                 received.append(url)
                 if url == deliveredFirst { await barrier.wait("delivery") }
             }
@@ -1438,7 +1438,7 @@ struct WorkDestinationTests {
         #expect(document.editor.selectedRange() == NSRange(location: 2, length: 4))
         let stale = DesktopPaneTarget(repository: "old-plan", window: window.uuidString,
             work: oldKey, pane: pane.id, incarnation: pane.incarnation, tab: nil)
-        #expect(throws: RegistryQueryError.self) {
+        #expect(throws: DesktopTargetError.self) {
             try router.controlPane(.init(target: stale, action: .hide))
         }
         let current = DesktopPaneTarget(repository: "plan", window: report.windows[0].window,
@@ -1454,10 +1454,10 @@ struct WorkDestinationTests {
             #"{"id":"old-plan","locators":["old-plan","plan"]}"#
         }) { _ in Issue.record("Binding back must also reuse the window") }
         #expect(router.inspect().windows.first?.repository == "old-plan")
-        #expect(throws: RegistryQueryError.self) {
+        #expect(throws: DesktopTargetError.self) {
             try router.controlPane(.init(target: stale, action: .hide))
         }
-        #expect(throws: RegistryQueryError.self) {
+        #expect(throws: DesktopTargetError.self) {
             try router.controlPane(.init(target: current, action: .hide))
         }
         router.remove(window, repository: scene.id)
@@ -1493,7 +1493,7 @@ struct WorkDestinationTests {
         let window = UUID()
         router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id), focus: {},
             inspect: windowInspection, controlPane: { ($0.target.pane, $0.target.tab) },
-            readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+            readText: { _ in throw RegistryQueryError("No terminal") }, navigate: { _ in }) { _ in }
         #expect(router.inspect().windows.map(\.repository) == ["plan"])
         #expect(router.inspect().openings.first?.status == .usable)
         _ = try await router.openRepository(path: path, link: nil, query: after) { _ in
@@ -1512,7 +1512,7 @@ struct WorkDestinationTests {
         let window = UUID()
         if registered {
             router.register(window, repository: scene.id, focus: {}, inspect: windowInspection,
-                controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }, navigate: { _ in }) { _ in }
         }
         let validation = Task {
             try await router.resolveWorkspace(RepositoryWorkspace(id: "plan", path: path), query: RegistryQuery { _, _ in
@@ -1528,7 +1528,7 @@ struct WorkDestinationTests {
         #expect(try await validation.value == scene)
         if !registered {
             router.register(window, repository: scene.id, focus: {}, inspect: windowInspection,
-                controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }, navigate: { _ in }) { _ in }
         }
         #expect(router.inspect().windows.map(\.repository) == ["old-plan"])
         #expect(router.inspect().windows.first?.window == (reboundWindow ?? window.uuidString))
@@ -1551,7 +1551,7 @@ struct WorkDestinationTests {
         let register: (RepositoryWorkspace) -> Void = { scene in
             router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id),
                 focus: {}, inspect: windowInspection,
-                controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { received.append($0) }
+                controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }, navigate: { _ in }) { received.append($0) }
         }
         if alreadyOpen {
             _ = try await router.openRepository(path: path, link: nil,
@@ -1603,7 +1603,7 @@ struct WorkDestinationTests {
         let workspace = try await router.openRepository(path: before.path, link: nil, query: query) { _ in }
         let window = UUID()
         router.register(window, repository: workspace.id, focus: {}, inspect: windowInspection,
-            controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+            controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }, navigate: { _ in }) { _ in }
         let registry = SessionsWorkspaceRegistry(localMachineId: "local")
         let store = registry.sessionStore(repository: workspace.id, repoPath: before.path, query: query)
         try FileManager.default.moveItem(at: before, to: after)
@@ -1631,7 +1631,7 @@ struct WorkDestinationTests {
 
     private func windowInspection(_ repository: String, _ id: UUID) -> DesktopWindowInspection {
         DesktopWindowInspection(repository: repository, window: id.uuidString, path: nil,
-            selectionKind: nil, selectionId: nil, reading: "loading", reason: nil,
+            destination: .work(WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")), history: DesktopHistory(back: 0, forward: 0), reading: "loading", reason: nil,
             task: nil, session: nil, supportedOperations: ["state"], workspaces: [], openWork: [], view: nil, opening: nil)
     }
 
@@ -1639,9 +1639,9 @@ struct WorkDestinationTests {
         let router = WorkLinkRouter()
         let first = UUID(), replacement = UUID()
         var focused = false
-        router.register(first, repository: "plan", focus: { focused = true }, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in }
+        router.register(first, repository: "plan", focus: { focused = true }, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }, navigate: { _ in }) { _ in }
         #expect(router.inspect().windows.map(\.window) == [first.uuidString])
-        router.register(replacement, repository: "plan", focus: { focused = true }, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in }
+        router.register(replacement, repository: "plan", focus: { focused = true }, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }, navigate: { _ in }) { _ in }
         router.remove(first, repository: "plan")
         #expect(router.inspect().windows.map(\.window) == [replacement.uuidString])
         router.remove(replacement, repository: "plan")
@@ -1659,11 +1659,11 @@ struct WorkDestinationTests {
         #expect(!router.deliver(a2, repository: "plan-a"))
         var first: [LinkedWork] = []
         var second: [LinkedWork] = []
-        router.register(UUID(), repository: "plan-b", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { second.append($0) }
+        router.register(UUID(), repository: "plan-b", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }, navigate: { _ in }) { second.append($0) }
         while second.isEmpty { await Task.yield() }
         #expect(second == [b])
         #expect(first.isEmpty)
-        router.register(UUID(), repository: "plan-a", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { first.append($0) }
+        router.register(UUID(), repository: "plan-a", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }, navigate: { _ in }) { first.append($0) }
         while first.count < 2 { await Task.yield() }
         #expect(first == [a, a2])
         #expect(second == [b])
@@ -1678,8 +1678,8 @@ struct WorkDestinationTests {
         var focused: [String] = []
         var received: [LinkedWork] = []
         let url = LinkedWork.task(TaskLink(issue: "A", repo: nil))
-        router.register(UUID(), repository: a.id, focus: { focused.append("retained") }, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { received.append($0) }
-        router.register(UUID(), repository: "other", focus: { focused.append("other") }, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in
+        router.register(UUID(), repository: a.id, focus: { focused.append("retained") }, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }, navigate: { _ in }) { received.append($0) }
+        router.register(UUID(), repository: "other", focus: { focused.append("other") }, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }, navigate: { _ in }) { _ in
             Issue.record("A repository must never receive another repository's link")
         }
         #expect(router.deliver(url, repository: b.id))
@@ -1692,9 +1692,9 @@ struct WorkDestinationTests {
     @Test func lateWindowRemovalDoesNotRemoveItsReplacement() async throws {
         let router = WorkLinkRouter()
         let old = UUID(), replacement = UUID()
-        router.register(old, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in }
+        router.register(old, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }, navigate: { _ in }) { _ in }
         var received: [LinkedWork] = []
-        router.register(replacement, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { received.append($0) }
+        router.register(replacement, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }, navigate: { _ in }) { received.append($0) }
         router.remove(old, repository: "plan")
         let url = LinkedWork.task(TaskLink(issue: "A", repo: nil))
         #expect(router.deliver(url, repository: "plan"))
@@ -1713,7 +1713,7 @@ struct WorkDestinationTests {
         let old = UUID(), replacement = UUID()
         let barrier = LinkedDestinationBarrier()
         var delivered: [LinkedWork] = []
-        router.register(old, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { link in
+        router.register(old, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }, navigate: { _ in }) { link in
             await barrier.wait("first")
             guard !Task.isCancelled else { return }
             delivered.append(link)
@@ -1724,11 +1724,11 @@ struct WorkDestinationTests {
         #expect(delivered.isEmpty)
         router.remove(old, repository: "plan")
         #expect(!router.deliver(third, repository: "plan"))
-        router.register(replacement, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { delivered.append($0) }
+        router.register(replacement, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }, navigate: { _ in }) { delivered.append($0) }
         router.remove(old, repository: "plan")
 
         // A slow repository never blocks another repository's opening.
-        router.register(UUID(), repository: "other", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { delivered.append($0) }
+        router.register(UUID(), repository: "other", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }, navigate: { _ in }) { delivered.append($0) }
         router.deliver(other, repository: "other")
         while delivered.count < 4 { await Task.yield() }
         #expect(delivered.filter { $0 != other } == [first, second, third])
@@ -1745,11 +1745,11 @@ struct WorkDestinationTests {
         let second = LinkedWork.task(TaskLink(issue: "second", repo: nil))
         let barrier = LinkedDestinationBarrier()
         var delivered: [LinkedWork] = []
-        router.register(id, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in await barrier.wait("old") }
+        router.register(id, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }, navigate: { _ in }) { _ in await barrier.wait("old") }
         router.deliver(first, repository: "plan")
         while !(await barrier.contains("old")) { await Task.yield() }
         router.remove(id, repository: "plan")
-        router.register(id, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { link in
+        router.register(id, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }, navigate: { _ in }) { link in
             if link == first { await barrier.wait("new") }
             delivered.append(link)
         }

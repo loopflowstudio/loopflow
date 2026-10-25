@@ -233,6 +233,22 @@ struct DTOFixtureTests {
         #expect(try JSONDecoder().decode(DesktopPaneReceipt.self, from: JSONEncoder().encode(receipt)) == receipt)
     }
 
+    @Test func desktopNavigationRoundTripsEveryAction() throws {
+        let data = try loadFixtureData("desktop_navigation.json")
+        let wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let commandsData = try JSONSerialization.data(withJSONObject: try #require(wire["commands"]))
+        let commands = try JSONDecoder().decode([DesktopNavigationCommand].self, from: commandsData)
+        #expect(commands[4].action == .slot(2))
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(commands)) as? NSArray)
+        #expect(encoded == (wire["commands"] as? NSArray))
+        let receiptData = try JSONSerialization.data(withJSONObject: try #require(wire["receipt"]))
+        let receipt = try JSONDecoder().decode(DesktopNavigationReceipt.self, from: receiptData)
+        guard case .enter(let work) = commands[1].action else { Issue.record("Expected enter"); return }
+        #expect(receipt.destination == .zoomed(from: .workingTasks, work: work))
+        let reencoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(receipt)) as? NSDictionary)
+        #expect(reencoded == (wire["receipt"] as? NSDictionary))
+    }
+
     @Test func desktopInspectionRetainsUnavailableWorkAndExactPanes() throws {
         let data = try loadFixtureData("desktop_inspection.json")
         let report = try JSONDecoder().decode(DesktopInspection.self, from: data)
@@ -244,6 +260,9 @@ struct DTOFixtureTests {
             try JSONDecoder().decode(DesktopInspection.self, from: JSONSerialization.data(withJSONObject: missingOpenings))
         }
         let window = try #require(report.windows.first)
+        #expect(window.destination == .zoomed(from: .dashboard("attention"), work: try #require(window.workspaces.first).work))
+        #expect(window.history == DesktopHistory(back: 1, forward: 0))
+        #expect(report.windows[1].destination == .workingTasks)
         #expect(window.reading == "unavailable")
         #expect(window.openWork == [try #require(window.workspaces.first).work])
         #expect(window.task?.actions == nil)

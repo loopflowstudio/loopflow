@@ -44,6 +44,7 @@ final class WorkLinkRouter {
         let inspect: (String, UUID) -> DesktopWindowInspection
         let controlPane: (DesktopPaneCommand) throws -> (pane: String, tab: String?)
         let readText: (DesktopTextRequest) throws -> DesktopTextReading
+        let navigate: (DesktopNavigationAction) throws -> Void
     }
     private struct RepositoryOpening {
         let id: UUID
@@ -95,13 +96,14 @@ final class WorkLinkRouter {
                   inspect: @escaping (String, UUID) -> DesktopWindowInspection,
                   controlPane: @escaping (DesktopPaneCommand) throws -> (pane: String, tab: String?),
                   readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
+                  navigate: @escaping (DesktopNavigationAction) throws -> Void,
                   receive: @escaping (LinkedWork) async -> Void) {
         let previous = targets[repository]
         if previous?.registration != incarnation {
             delivering.removeValue(forKey: repository)?.task.cancel()
         }
         let token = previous.flatMap { $0.registration == incarnation ? $0.incarnation : nil } ?? incarnation
-        targets[repository] = Target(registration: incarnation, incarnation: token, focus: focus, receive: receive, inspect: inspect, controlPane: controlPane, readText: readText)
+        targets[repository] = Target(registration: incarnation, incarnation: token, focus: focus, receive: receive, inspect: inspect, controlPane: controlPane, readText: readText, navigate: navigate)
         confirmRegisteredWorkspace(repository, requests: openingRequests)
         deliverPending(repository)
     }
@@ -281,10 +283,23 @@ final class WorkLinkRouter {
         return try receiver(for: request.target).readText(request)
     }
 
+    /// Navigate the addressed window and read its destination in the same turn.
+    func navigate(_ request: DesktopNavigationCommand) throws -> DesktopNavigationReceipt {
+        let receiver = try receiver(repository: request.repository, window: request.window)
+        try receiver.navigate(request.action)
+        let window = receiver.inspect(request.repository, receiver.incarnation)
+        return DesktopNavigationReceipt(repository: request.repository, window: request.window,
+            destination: window.destination, history: window.history, observedAt: Int64(Date().timeIntervalSince1970))
+    }
+
     private func receiver(for target: DesktopPaneTarget) throws -> Target {
-        guard let scene = scene(for: target.repository), let receiver = targets[scene],
-              receiver.incarnation.uuidString == target.window else {
-            throw RegistryQueryError("The repository window was closed or replaced. Inspect Desktop again; no pane was changed.")
+        try receiver(repository: target.repository, window: target.window)
+    }
+
+    private func receiver(repository: String, window: String) throws -> Target {
+        guard let scene = scene(for: repository), let receiver = targets[scene],
+              receiver.incarnation.uuidString == window else {
+            throw DesktopTargetError("The repository window was closed or replaced. Inspect Desktop again; nothing was changed.")
         }
         return receiver
     }

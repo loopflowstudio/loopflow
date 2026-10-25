@@ -170,6 +170,7 @@ When editing `*.rs` files:
 - Avoid `use super::*` in submodules; use explicit imports so dependencies between modules are visible
 - Derive `Debug` on all public types; add `Clone`, `PartialEq`, `Default` where sensible
 - Canonicalize Clap command aliases in shared navigation so help, remote routing and execution resolve the same owner.
+- `lf help <path>` renders Clap's short help; text it must show (exit statuses, caveats) goes in `after_help`, not a second doc-comment paragraph.
 - Give nested global Clap flags a distinct argument `id` when a root flag shares their name; otherwise their values can propagate into the root command.
 - Use `thiserror` for library error types callers need to match on
 - Use `expect("why this is safe")` over `unwrap()` outside tests

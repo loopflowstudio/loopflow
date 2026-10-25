@@ -12,8 +12,21 @@
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
       "path": "/repo",
-      "selection_kind": "task",
-      "selection_id": "task_44444444444444444444444444444444",
+      "destination": {
+        "kind": "zoomed",
+        "from": {
+          "dashboard": "attention"
+        },
+        "work": {
+          "repository": "repo_22222222222222222222222222222222",
+          "kind": "task",
+          "id": "task_44444444444444444444444444444444"
+        }
+      },
+      "history": {
+        "back": 1,
+        "forward": 0
+      },
       "reading": "unavailable",
       "reason": "Registry read failed; retained views remain available",
       "supported_operations": [
@@ -132,8 +145,13 @@
       "repository": "repo_other",
       "window": "other-window",
       "path": "/repo",
-      "selection_kind": "task",
-      "selection_id": "task_44444444444444444444444444444444",
+      "destination": {
+        "kind": "working_tasks"
+      },
+      "history": {
+        "back": 0,
+        "forward": 2
+      },
       "reading": "current",
       "reason": null,
       "supported_operations": [

@@ -1194,9 +1194,10 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
     );
     let view = describe_command(&["desktop".into(), "view".into()], false).unwrap();
     let schema = &view["definition"]["result_schema"];
-    assert_eq!(schema["anyOf"].as_array().unwrap().len(), 2);
+    assert_eq!(schema["anyOf"].as_array().unwrap().len(), 3);
     assert!(schema["$defs"]["ViewPlan"].is_object());
     assert!(schema["$defs"]["DesktopOpening"].is_object());
+    assert!(schema["$defs"]["DesktopNavigationReceipt"].is_object());
     let read = describe_command(&["desktop".into(), "read".into()], false).unwrap();
     let region = read["definition"]["arguments"]
         .as_array()

@@ -90,7 +90,8 @@ struct RepoView: View {
                 WorkLinkReceiver(router: taskLinks, repository: repository, openingRequests: openingRequests, inspect: { repository, incarnation in
                     model.inspectDesktop(repository: repository, window: incarnation, workspaces: sessionWorkspaces)
                 }, controlPane: { try sessionWorkspaces.controlPane($0, model: model) },
-                   readText: { try sessionWorkspaces.readText($0) }) { link in
+                   readText: { try sessionWorkspaces.readText($0) },
+                   navigate: { try model.navigate($0) }) { link in
                     if sessionWorkspaces.localMachineId == nil { await sessionWorkspaces.refreshMachine(query: query) }
                     if let machine = sessionWorkspaces.localMachineId {
                         model.confirmMachine(machine)

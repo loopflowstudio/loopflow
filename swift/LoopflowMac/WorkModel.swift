@@ -738,11 +738,65 @@ final class WorkModel {
         case .failed: reading = "unavailable"
         }
         return DesktopWindowInspection(repository: repository, window: window.uuidString,
-            path: repoPath, selectionKind: navigation.showsSelection ? "dashboard" : workspaces.selectedWork?.kind.rawValue,
-            selectionId: navigation.showsSelection ? navigation.dashboardID : workspaces.selectedWork?.id,
+            path: repoPath, destination: desktopDestination(repository: repository), history: desktopHistory,
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
-            supportedOperations: ["state", "view", "query", "arrange", "layout", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files", "graph-log", "read", "text", "key"], workspaces: workspaces.inspect(), openWork: workspaces.openWork, view: selectedViewPlan, opening: selectionOpening ?? taskOpening)
+            supportedOperations: ["state", "view", "query", "arrange", "layout", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files", "graph-log", "read", "text", "key", "enter", "back", "forward", "slot", "next", "previous"], workspaces: workspaces.inspect(), openWork: workspaces.openWork, view: selectedViewPlan, opening: selectionOpening ?? taskOpening)
+    }
+
+    /// The window's destination with durable Work keys, as `lf desktop state` reports it.
+    func desktopDestination(repository: String) -> DesktopDestination {
+        func key(_ work: WorkReference?) -> WorkWorkspaceKey {
+            let repository = workspaceRepository ?? repository
+            guard let work else { return WorkWorkspaceKey(repository: repository, kind: .repository, id: repository) }
+            return work.kind == .task
+                ? WorkWorkspaceKey(repository: repository, kind: .task, id: task(id: work.id)?.task.id ?? work.id)
+                : WorkWorkspaceKey(repository: repository, kind: .wave, id: work.id)
+        }
+        switch navigation.destination {
+        case .work(let work): return .work(key(work))
+        case .dashboard(let id): return .dashboard(id: id)
+        case .view(let plan): return .view(selection: plan.selection)
+        case .workingTasks: return .workingTasks
+        case .zoomed(.saved(let id), let work): return .zoomed(from: .dashboard(id), work: key(work))
+        case .zoomed(.workingTasks, let work): return .zoomed(from: .workingTasks, work: key(work))
+        }
+    }
+
+    var desktopHistory: DesktopHistory {
+        DesktopHistory(back: navigation.backStack.count, forward: navigation.forwardStack.count)
+    }
+
+    /// Script navigation calls what the window's own controls call. A request
+    /// that names nothing to select throws and changes nothing.
+    func navigate(_ action: DesktopNavigationAction) throws {
+        switch action {
+        case .workingTasks: selectWorkingTasksDashboard()
+        case .enter(let work):
+            guard let plan = selectedViewPlan, navigation.showsSelection else {
+                throw DesktopTargetError("No Dashboard is shown; open one with lf desktop view. Nothing changed.")
+            }
+            let isWorkingTasks = navigation.destination == .workingTasks
+            let members = isWorkingTasks ? workingTaskMembers : plan.projection.visible
+            guard let member = members.first(where: { $0.work.kind == work.kind && $0.work.id == work.id }) else {
+                throw DesktopTargetError("\(work.selector) is not shown on this Dashboard. Nothing changed.")
+            }
+            zoomTile(member, plan: plan, workingTasks: isWorkingTasks, origin: nil)
+        case .back:
+            guard !navigation.backStack.isEmpty else { throw DesktopTargetError("Nothing to go back to. Nothing changed.") }
+            goBack()
+        case .forward:
+            guard !navigation.forwardStack.isEmpty else { throw DesktopTargetError("Nothing to go forward to. Nothing changed.") }
+            goForward()
+        case .slot(let slot):
+            guard workingTaskIDs.indices.contains(slot - 1) else {
+                throw DesktopTargetError("Working Tasks has no slot \(slot); it has \(workingTaskIDs.count). Nothing changed.")
+            }
+            selectWorkingTask(slot: slot - 1)
+        case .next, .previous:
+            guard !workingTaskIDs.isEmpty else { throw DesktopTargetError("There are no Working Tasks. Nothing changed.") }
+            cycleWorkingTask(action == .next ? 1 : -1)
+        }
     }
 
     private func inspectSelectedTask() -> DesktopTaskInspection? {

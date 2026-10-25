@@ -212,7 +212,7 @@ struct DashboardTile: View {
         let arrangeable = plan.dashboardID != nil
         return VStack(spacing: 0) {
             HStack(spacing: Spacing.sm) {
-                Button { zoom() } label: {
+                Button { enter() } label: {
                     if let task { TaskHeading(task: task.task) }
                     else { Text(content?.title ?? member.work.id).lineLimit(1) }
                 }.buttonStyle(.plain)
@@ -222,7 +222,7 @@ struct DashboardTile: View {
                         label: { Image(systemName: "ellipsis") }
                         .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
                 }
-                Button { zoom() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                Button { enter() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
                     .help("Open this Work in full")
                 if arrangeable {
                     Button { model.hideInDashboard(plan, hidden: plan.arrangement.hidden + [member]) } label: { Image(systemName: "eye.slash") }
@@ -277,7 +277,7 @@ struct DashboardTile: View {
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ZoomFromTile.space)) } action: { frame.rect = $0 }
     }
 
-    private func zoom() {
+    private func enter() {
         model.enterTile(member, plan: plan, workingTasks: workingTasks, origin: frame.rect)
     }
 }

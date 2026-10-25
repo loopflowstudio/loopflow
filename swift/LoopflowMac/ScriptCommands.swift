@@ -18,20 +18,12 @@ class InspectDesktopCommand: NSScriptCommand {
     }
 }
 
-/// The direct parameter is data, not an evaluated script or a focus selector.
-class ControlPaneCommand: NSScriptCommand {
+/// Every gesture through the action registry. The direct parameter is data,
+/// not an evaluated script or a focus selector.
+class PerformDesktopActionCommand: NSScriptCommand {
     override func performDefaultImplementation() -> Any? {
         desktopReply { json in
-            try WorkLinkRouter.shared.controlPane(Self.decodeRequest(DesktopPaneCommand.self, from: json))
-        }
-    }
-}
-
-/// Window navigation through the selection the window's own controls use.
-class NavigateDesktopCommand: NSScriptCommand {
-    override func performDefaultImplementation() -> Any? {
-        desktopReply { json in
-            try WorkLinkRouter.shared.navigate(Self.decodeRequest(DesktopNavigationCommand.self, from: json))
+            try WorkLinkRouter.shared.perform(Self.decodeRequest(DesktopActionRequest.self, from: json))
         }
     }
 }
@@ -47,9 +39,10 @@ class ReadTerminalTextCommand: NSScriptCommand {
 private extension NSScriptCommand {
     static func decodeRequest<Request: Decodable>(_ type: Request.Type, from json: String?) throws -> Request {
         guard let json else {
-            throw RegistryQueryError("Expected a JSON Desktop request.")
+            throw DesktopArgumentError("Expected a JSON Desktop request.")
         }
-        return try JSONDecoder().decode(type, from: Data(json.utf8))
+        do { return try JSONDecoder().decode(type, from: Data(json.utf8)) }
+        catch { throw DesktopArgumentError("Desktop could not read the request: \(error.localizedDescription)") }
     }
 
     /// Resolve and encode in one MainActor turn. Failed replies grant no replay.
@@ -65,7 +58,11 @@ private extension NSScriptCommand {
             return try MainActor.assumeIsolated(operation)
         } catch {
             // `lf desktop` reads the number, never the message, to choose its exit status.
-            scriptErrorNumber = error is DesktopTargetError ? DesktopTargetError.scriptErrorNumber : NSInternalScriptError
+            scriptErrorNumber = switch error {
+            case is DesktopTargetError: DesktopTargetError.scriptErrorNumber
+            case is DesktopArgumentError: DesktopArgumentError.scriptErrorNumber
+            default: NSInternalScriptError
+            }
             scriptErrorString = error.localizedDescription
             return nil
         }

@@ -268,7 +268,7 @@ struct DashboardWorkspaceTests {
         let window = UUID()
         let target = DesktopPaneTarget(repository: "repo", window: window.uuidString, work: b,
             pane: pane.id, incarnation: pane.incarnation, tab: nil)
-        _ = try registry.controlPane(.init(target: target, action: .focus), model: model)
+        _ = try DesktopAction.perform(DesktopActionRequest("pane.focus", at: target), model: model, workspaces: registry)
         let state = model.inspectDesktop(repository: "repo", window: window, workspaces: registry)
         #expect(state.destination == .dashboard(id: "review"))
         #expect(state.view == plan)
@@ -334,7 +334,7 @@ struct DashboardWorkspaceTests {
         source.multiplexer.newShell(command: ["never-launch"], location: location)
         let oldShell = try #require(source.multiplexer.focusedPane.content.selectedShell)
         source.multiplexer.newShell(command: ["never-launch"], location: location)
-        source.toggleFiles()
+        source.toggleBrowser()
         let originalFiles = source.files(issue: source.key.id, cwd: "/task")
         originalFiles.selection = "old.txt"
         originalFiles.selection = "second.txt"
@@ -352,7 +352,7 @@ struct DashboardWorkspaceTests {
         await server.waitForRead()
         workspace.multiplexer.newShell(command: ["new-shell"], location: location)
         let fresh = try #require(workspace.multiplexer.focusedPane.content.selectedShell)
-        workspace.toggleFiles()
+        workspace.toggleBrowser()
         let files = workspace.files(issue: workspace.key.id, cwd: "/task")
         files.selection = "new.txt"
         let document = files.document("new.txt")

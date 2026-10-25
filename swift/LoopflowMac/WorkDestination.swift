@@ -111,20 +111,18 @@ struct WorkLinkReceiver: NSViewRepresentable {
     let repository: String
     let openingRequests: Set<UUID>
     let inspect: (String, UUID) -> DesktopWindowInspection
-    let controlPane: (DesktopPaneCommand) throws -> (pane: String, tab: String?)
+    let perform: (DesktopActionRequest) throws -> DesktopActionOutcome
     let readText: (DesktopTextRequest) throws -> DesktopTextReading
-    let navigate: (DesktopNavigationAction) throws -> Void
     let receive: (LinkedWork) async -> Void
 
     func makeNSView(context: Context) -> Receiver {
-        Receiver(router: router, repository: repository, openingRequests: openingRequests, inspect: inspect, controlPane: controlPane, readText: readText, navigate: navigate, receive: receive)
+        Receiver(router: router, repository: repository, openingRequests: openingRequests, inspect: inspect, perform: perform, readText: readText, receive: receive)
     }
     func updateNSView(_ view: Receiver, context: Context) {
         view.receive = receive
         view.inspect = inspect
-        view.controlPane = controlPane
+        view.perform = perform
         view.readText = readText
-        view.navigate = navigate
     }
     static func dismantleNSView(_ view: Receiver, coordinator: ()) {
         view.router.remove(view.id, repository: view.repository)
@@ -136,24 +134,21 @@ struct WorkLinkReceiver: NSViewRepresentable {
         let repository: String
         let openingRequests: Set<UUID>
         var inspect: (String, UUID) -> DesktopWindowInspection
-        var controlPane: (DesktopPaneCommand) throws -> (pane: String, tab: String?)
+        var perform: (DesktopActionRequest) throws -> DesktopActionOutcome
         var readText: (DesktopTextRequest) throws -> DesktopTextReading
-        var navigate: (DesktopNavigationAction) throws -> Void
         var receive: (LinkedWork) async -> Void
 
         init(router: WorkLinkRouter, repository: String, openingRequests: Set<UUID>, inspect: @escaping (String, UUID) -> DesktopWindowInspection,
-             controlPane: @escaping (DesktopPaneCommand) throws -> (pane: String, tab: String?),
+             perform: @escaping (DesktopActionRequest) throws -> DesktopActionOutcome,
              readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
-             navigate: @escaping (DesktopNavigationAction) throws -> Void,
              receive: @escaping (LinkedWork) async -> Void) {
             self.router = router
             self.repository = repository
             self.openingRequests = openingRequests
             self.receive = receive
             self.inspect = inspect
-            self.controlPane = controlPane
+            self.perform = perform
             self.readText = readText
-            self.navigate = navigate
             super.init(frame: .zero)
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
@@ -162,15 +157,12 @@ struct WorkLinkReceiver: NSViewRepresentable {
             if let window {
                 router.register(id, repository: repository, openingRequests: openingRequests, focus: { [weak window] in
                     window?.makeKeyAndOrderFront(nil)
-                }, inspect: inspect, controlPane: { [weak self] request in
+                }, inspect: inspect, perform: { [weak self] request in
                     guard let self else { throw DesktopTargetError("The repository window is unavailable.") }
-                    return try self.controlPane(request)
+                    return try self.perform(request)
                 }, readText: { [weak self] request in
                     guard let self else { throw DesktopTargetError("The repository window is unavailable.") }
                     return try self.readText(request)
-                }, navigate: { [weak self] action in
-                    guard let self else { throw DesktopTargetError("The repository window is unavailable.") }
-                    try self.navigate(action)
                 }) { [weak self] link in
                     await self?.receive(link)
                 }

@@ -738,7 +738,18 @@ final class WorkModel {
             path: repoPath, destination: desktopDestination(repository: repository), history: desktopHistory,
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
-            supportedOperations: ["state", "view", "query", "arrange", "layout", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files", "graph-log", "read", "text", "key", "enter", "back", "forward", "slot", "next", "previous"], workspaces: workspaces.inspect(), openWork: workspaces.openWork, view: selectedViewPlan, opening: selectionOpening ?? taskOpening)
+            list: desktopList(repository: workspaceRepository ?? repository),
+            actions: DesktopAction.all.map(\.descriptor), workspaces: workspaces.inspect(), openWork: workspaces.openWork, view: selectedViewPlan, opening: selectionOpening ?? taskOpening)
+    }
+
+    /// The Working Tasks ⌘1–9 select, in that order.
+    func desktopList(repository: String) -> [DesktopListEntry] {
+        workingTaskIDs.enumerated().map { index, id in
+            let task = task(id: id)?.task
+            return DesktopListEntry(position: index + 1,
+                work: WorkWorkspaceKey(repository: repository, kind: .task, id: task?.id ?? id),
+                identifier: task?.task.identifier, title: task?.task.name ?? id)
+        }
     }
 
     /// The window's destination with durable Work keys, as `lf desktop state` reports it.
@@ -762,38 +773,6 @@ final class WorkModel {
 
     var desktopHistory: DesktopHistory {
         DesktopHistory(back: navigation.backStack.count, forward: navigation.forwardStack.count)
-    }
-
-    /// Script navigation calls what the window's own controls call. A request
-    /// that names nothing to select throws and changes nothing.
-    func navigate(_ action: DesktopNavigationAction) throws {
-        switch action {
-        case .workingTasks: selectWorkingTasksDashboard()
-        case .enter(let work):
-            guard let plan = selectedViewPlan, navigation.showsSelection else {
-                throw DesktopTargetError("No Dashboard is shown; open one with lf desktop view. Nothing changed.")
-            }
-            let isWorkingTasks = navigation.destination == .workingTasks
-            let members = isWorkingTasks ? workingTaskMembers : plan.projection.visible
-            guard let member = members.first(where: { $0.work.kind == work.kind && $0.work.id == work.id }) else {
-                throw DesktopTargetError("\(work.selector) is not shown on this Dashboard. Nothing changed.")
-            }
-            zoomTile(member, plan: plan, workingTasks: isWorkingTasks, origin: nil)
-        case .back:
-            guard !navigation.backStack.isEmpty else { throw DesktopTargetError("Nothing to go back to. Nothing changed.") }
-            goBack()
-        case .forward:
-            guard !navigation.forwardStack.isEmpty else { throw DesktopTargetError("Nothing to go forward to. Nothing changed.") }
-            goForward()
-        case .slot(let slot):
-            guard workingTaskIDs.indices.contains(slot - 1) else {
-                throw DesktopTargetError("Working Tasks has no slot \(slot); it has \(workingTaskIDs.count). Nothing changed.")
-            }
-            selectWorkingTask(slot: slot - 1)
-        case .next, .previous:
-            guard !workingTaskIDs.isEmpty else { throw DesktopTargetError("There are no Working Tasks. Nothing changed.") }
-            cycleWorkingTask(action == .next ? 1 : -1)
-        }
     }
 
     private func inspectSelectedTask() -> DesktopTaskInspection? {
@@ -1738,19 +1717,6 @@ final class WorkModel {
     func openPrimaryConversation(in workspace: SessionsWorkspace, wave: String?, store: SessionsStore) async {
         guard let workspaceRegistry else { return }
         await workspace.openPrimaryConversation(wave: wave, store: store, registry: workspaceRegistry)
-    }
-
-    func selectWorkingTask(slot: Int) {
-        guard workingTaskIDs.indices.contains(slot) else { return }
-        select(.task(id: workingTaskIDs[slot]))
-    }
-
-    func cycleWorkingTask(_ offset: Int) {
-        let ids = workingTaskIDs
-        guard !ids.isEmpty else { return }
-        let index = ids.firstIndex { isSelected(.task(id: $0)) }
-        let next = index.map { ($0 + offset + ids.count) % ids.count } ?? (offset > 0 ? 0 : ids.count - 1)
-        select(.task(id: ids[next]))
     }
 
     func goBack() {

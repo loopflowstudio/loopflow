@@ -191,62 +191,28 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test func paneCommandRequiresEveryTargetComponent() throws {
-        let data = try loadFixtureData("desktop_pane_commands.json")
-        let requests = try JSONDecoder().decode([DesktopPaneCommand].self, from: data)
-        let original = try #require(JSONSerialization.jsonObject(with: data) as? NSArray)
-        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(requests)) as? NSArray)
-        #expect(original == encoded)
-        for request in requests {
-            let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
-            let action = try #require(wire["action"] as? [String: Any])
-            for field in action.keys {
-                var missing = wire, payload = action
-                payload.removeValue(forKey: field)
-                missing["action"] = payload
-                #expect(throws: DecodingError.self) {
-                    try JSONDecoder().decode(DesktopPaneCommand.self, from: JSONSerialization.data(withJSONObject: missing))
-                }
-            }
-        }
-        let request = try #require(requests.first)
-        #expect(request.action == .hide)
-        #expect(request.target.incarnation == "occurrence-session-pane")
-        #expect(try JSONDecoder().decode(DesktopPaneCommand.self, from: JSONEncoder().encode(request)) == request)
-        let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
-        for field in ["repository", "window", "work", "pane", "incarnation"] {
-            var missing = wire
-            var target = try #require(missing["target"] as? [String: Any])
-            target.removeValue(forKey: field)
-            missing["target"] = target
-            #expect(throws: DecodingError.self) {
-                try JSONDecoder().decode(DesktopPaneCommand.self, from: JSONSerialization.data(withJSONObject: missing))
-            }
-        }
-    }
-
-    @Test func desktopPaneReceiptIdentifiesTheAffectedPane() throws {
-        let data = try loadFixtureData("desktop_pane_receipt.json")
-        let receipt = try JSONDecoder().decode(DesktopPaneReceipt.self, from: data)
-        #expect(receipt.pane == "created-pane")
-        #expect(receipt.work.kind == .task)
-        #expect(try JSONDecoder().decode(DesktopPaneReceipt.self, from: JSONEncoder().encode(receipt)) == receipt)
-    }
-
-    @Test func desktopNavigationRoundTripsEveryAction() throws {
-        let data = try loadFixtureData("desktop_navigation.json")
+    @Test func desktopActionRequestsAndReceiptRoundTrip() throws {
+        let data = try loadFixtureData("desktop_action.json")
         let wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let commandsData = try JSONSerialization.data(withJSONObject: try #require(wire["commands"]))
-        let commands = try JSONDecoder().decode([DesktopNavigationCommand].self, from: commandsData)
-        #expect(commands[4].action == .slot(2))
-        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(commands)) as? NSArray)
-        #expect(encoded == (wire["commands"] as? NSArray))
+        let requestsData = try JSONSerialization.data(withJSONObject: try #require(wire["requests"]))
+        let requests = try JSONDecoder().decode([DesktopActionRequest].self, from: requestsData)
+        #expect(requests[0].action == "task.goto")
+        #expect(requests[0].pane == nil)
+        #expect(requests[2].pane?.tab == "shell-tab")
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(requests)) as? NSArray)
+        #expect(encoded == (wire["requests"] as? NSArray))
+        let request = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(requests[2])) as? [String: Any])
+        for field in ["repository", "window", "action", "args"] {
+            var missing = request
+            missing.removeValue(forKey: field)
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(DesktopActionRequest.self, from: JSONSerialization.data(withJSONObject: missing))
+            }
+        }
         let receiptData = try JSONSerialization.data(withJSONObject: try #require(wire["receipt"]))
-        let receipt = try JSONDecoder().decode(DesktopNavigationReceipt.self, from: receiptData)
-        guard case .enter(let work) = commands[1].action else { Issue.record("Expected enter"); return }
-        #expect(receipt.destination == .zoomed(from: .workingTasks, work: work))
-        let reencoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(receipt)) as? NSDictionary)
-        #expect(reencoded == (wire["receipt"] as? NSDictionary))
+        let receipt = try JSONDecoder().decode(DesktopActionReceipt.self, from: receiptData)
+        #expect(receipt.workspace?.layout.children.last?.children.last?.tabs.last?.url == "http://localhost:5173")
+        #expect(try JSONDecoder().decode(DesktopActionReceipt.self, from: JSONEncoder().encode(receipt)) == receipt)
     }
 
     @Test func desktopInspectionRetainsUnavailableWorkAndExactPanes() throws {
@@ -278,6 +244,8 @@ struct DTOFixtureTests {
         #expect(window.workspaces.first?.layout.children.first?.subject == "session-one")
         #expect(window.workspaces.first?.layout.children.first?.surface == "native-surface-incarnation")
         #expect(window.workspaces.first?.layout.children.last?.surface == nil)
+        #expect(window.list.first?.identifier == "LOO-519")
+        #expect(window.actions.map(\.name) == ["navigate.back", "navigate.forward"])
         #expect(try JSONDecoder().decode(DesktopInspection.self, from: JSONEncoder().encode(report)) == report)
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var windows = try #require(wire["windows"] as? [[String: Any]])

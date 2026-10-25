@@ -302,8 +302,8 @@ struct TaskGraphTests {
         // Files remains the same tool when hidden and shown through the View command.
         let workspace = try #require(registry.retained(key))
         let filesPane = try #require(workspace.multiplexer.browserPane)
-        workspace.toggleFiles()
-        workspace.toggleFiles()
+        workspace.toggleBrowser()
+        workspace.toggleBrowser()
         try await settle()
         #expect(panes.focusedPane == filesPane)
         panes.close(panes.focusedPaneId)

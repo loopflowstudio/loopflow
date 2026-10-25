@@ -214,14 +214,17 @@ struct WorkNavigationTests {
         }
         #expect(WorkNavigationShortcut(characters: "\u{1b}", modifiers: []) == nil)
         #expect(WorkNavigationShortcut(characters: "c", modifiers: .command) == nil)
-        #expect(WorkNavigationShortcut(characters: "1", modifiers: .command) == .task(0))
-        #expect(WorkNavigationShortcut(characters: "9", modifiers: .command) == .task(8))
-        #expect(WorkNavigationShortcut(characters: "0", modifiers: .command) == nil)
-        #expect(WorkNavigationShortcut(characters: "1", modifiers: [.command, .option]) == nil)
-        #expect(WorkNavigationShortcut(characters: "\t", modifiers: .control) == .adjacent(1))
-        #expect(WorkNavigationShortcut(characters: "\t", modifiers: [.control, .shift]) == .adjacent(-1))
-        #expect(WorkNavigationShortcut(characters: "\t", modifiers: []) == nil)
         #expect(WorkNavigationShortcut(characters: "s", modifiers: [.control, .command]) == nil)
+        func action(_ characters: String, _ modifiers: NSEvent.ModifierFlags) -> String? {
+            DesktopAction.binding(characters: characters, modifiers: modifiers).map { "\($0.0.name) \($0.1)" }
+        }
+        #expect(action("1", .command) == "task.goto [\"index\": \"1\"]")
+        #expect(action("9", [.command, .capsLock]) == "task.goto [\"index\": \"9\"]")
+        #expect(action("0", .command) == nil)
+        #expect(action("1", [.command, .option]) == nil)
+        #expect(action("\t", .control) == "task.next [:]")
+        #expect(action("\u{19}", [.control, .shift]) == "task.previous [:]")
+        #expect(action("\t", []) == nil)
     }
 
     @Test("Repository view reconstruction keeps the Session store's resolved location")

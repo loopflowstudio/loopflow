@@ -36,7 +36,10 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
     public let reason: String?
     public let task: DesktopTaskInspection?
     public let session: DesktopSessionInspection?
-    public let supportedOperations: [String]
+    /// The sidebar's Tasks in ⌘1–9 order.
+    public let list: [DesktopListEntry]
+    /// Every gesture `perform desktop action` accepts.
+    public let actions: [DesktopActionDescriptor]
     public let workspaces: [DesktopWorkspaceInspection]
     public let view: WorkViewPlan?
     /// Work shown in this window, in slot fill order.
@@ -45,16 +48,117 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
 
     public init(repository: String, window: String, path: String?, destination: DesktopDestination, history: DesktopHistory,
                 reading: String, reason: String?, task: DesktopTaskInspection?,
-                session: DesktopSessionInspection?, supportedOperations: [String], workspaces: [DesktopWorkspaceInspection], openWork: [WorkWorkspaceKey], view: WorkViewPlan?, opening: DesktopOpening?) {
+                session: DesktopSessionInspection?, list: [DesktopListEntry], actions: [DesktopActionDescriptor],
+                workspaces: [DesktopWorkspaceInspection], openWork: [WorkWorkspaceKey], view: WorkViewPlan?, opening: DesktopOpening?) {
         self.repository = repository; self.window = window; self.path = path
         self.destination = destination; self.history = history
         self.reading = reading; self.reason = reason; self.task = task
-        self.session = session; self.supportedOperations = supportedOperations; self.workspaces = workspaces; self.openWork = openWork; self.view = view; self.opening = opening
+        self.session = session; self.list = list; self.actions = actions; self.workspaces = workspaces; self.openWork = openWork; self.view = view; self.opening = opening
     }
     enum CodingKeys: String, CodingKey {
-        case repository, window, path, destination, history, reading, reason, task, session, workspaces, view, opening
+        case repository, window, path, destination, history, reading, reason, task, session, list, actions, workspaces, view, opening
         case openWork = "open_work"
-        case supportedOperations = "supported_operations"
+    }
+}
+
+/// One sidebar Task; `position` is what ⌘n and `lf desktop -t n` select.
+public struct DesktopListEntry: Codable, Sendable, Equatable {
+    public let position: Int
+    public let work: WorkWorkspaceKey
+    public let identifier: String?
+    public let title: String
+
+    public init(position: Int, work: WorkWorkspaceKey, identifier: String?, title: String) {
+        self.position = position; self.work = work; self.identifier = identifier; self.title = title
+    }
+}
+
+/// A registry action as scripts discover it: name, arguments and default keys.
+public struct DesktopActionDescriptor: Codable, Sendable, Equatable {
+    public let name: String
+    public let title: String
+    /// `window` actions need no pane; `pane` actions address one (the focused pane for keys).
+    public let scope: DesktopActionScope
+    public let arguments: [DesktopActionArgument]
+    /// Display spellings of the default key bindings, such as `⌘[`.
+    public let keys: [String]
+
+    public init(name: String, title: String, scope: DesktopActionScope, arguments: [DesktopActionArgument], keys: [String]) {
+        self.name = name; self.title = title; self.scope = scope; self.arguments = arguments; self.keys = keys
+    }
+}
+
+public enum DesktopActionScope: String, Codable, Sendable { case window, pane }
+
+public struct DesktopActionArgument: Codable, Sendable, Equatable {
+    public enum Kind: String, Codable, Sendable { case string, integer, boolean, url, pane, axis, direction, ratio, key }
+    public let name: String
+    public let kind: Kind
+    public let required: Bool
+
+    public init(name: String, kind: Kind, required: Bool) {
+        self.name = name; self.kind = kind; self.required = required
+    }
+}
+
+/// One gesture for an exact window, and for pane actions an exact pane.
+/// Arguments are the `k=v` strings `lf desktop do` passes; the registry parses them.
+public struct DesktopActionRequest: Codable, Sendable, Equatable {
+    public let repository: String
+    public let window: String
+    public let pane: DesktopPaneTarget?
+    public let action: String
+    public let args: [String: String]
+
+    public init(repository: String, window: String, pane: DesktopPaneTarget?, action: String, args: [String: String]) {
+        self.repository = repository; self.window = window; self.pane = pane; self.action = action; self.args = args
+    }
+    enum CodingKeys: String, CodingKey { case repository, window, pane, action, args }
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(repository, forKey: .repository)
+        try values.encode(window, forKey: .window)
+        try values.encode(pane, forKey: .pane)
+        try values.encode(action, forKey: .action)
+        try values.encode(args, forKey: .args)
+    }
+}
+
+/// What the window reads after the action, as the next `inspect desktop` reports it.
+/// This acknowledges the view change, not terminal or provider readiness.
+public struct DesktopActionReceipt: Codable, Sendable, Equatable {
+    public let repository: String
+    public let window: String
+    public let action: String
+    public let destination: DesktopDestination
+    public let history: DesktopHistory
+    /// The affected pane and tab, including a newly added shell tab.
+    public let pane: String?
+    public let tab: String?
+    public let workspace: DesktopWorkspaceInspection?
+    public let observedAt: Int64
+
+    public init(repository: String, window: String, action: String, destination: DesktopDestination, history: DesktopHistory,
+                pane: String?, tab: String?, workspace: DesktopWorkspaceInspection?, observedAt: Int64) {
+        self.repository = repository; self.window = window; self.action = action
+        self.destination = destination; self.history = history
+        self.pane = pane; self.tab = tab; self.workspace = workspace; self.observedAt = observedAt
+    }
+    enum CodingKeys: String, CodingKey {
+        case repository, window, action, destination, history, pane, tab, workspace
+        case observedAt = "observed_at"
+    }
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(repository, forKey: .repository)
+        try values.encode(window, forKey: .window)
+        try values.encode(action, forKey: .action)
+        try values.encode(destination, forKey: .destination)
+        try values.encode(history, forKey: .history)
+        try values.encode(pane, forKey: .pane)
+        try values.encode(tab, forKey: .tab)
+        try values.encode(workspace, forKey: .workspace)
+        try values.encode(observedAt, forKey: .observedAt)
     }
 }
 
@@ -142,82 +246,19 @@ public struct DesktopHistory: Codable, Sendable, Equatable {
     public init(back: Int, forward: Int) { self.back = back; self.forward = forward }
 }
 
-/// Window navigation through the selection the window's own controls use.
-public struct DesktopNavigationCommand: Codable, Sendable, Equatable {
-    public let repository: String
-    public let window: String
-    public let action: DesktopNavigationAction
-
-    public init(repository: String, window: String, action: DesktopNavigationAction) {
-        self.repository = repository; self.window = window; self.action = action
-    }
-}
-
-public enum DesktopNavigationAction: Codable, Sendable, Equatable {
-    case workingTasks, back, forward, next, previous
-    /// Enter a member of the shown Dashboard as full Work, as a tile click does.
-    case enter(work: WorkWorkspaceKey)
-    /// A Working Task by its 1-based slot, as ⌘1–9 select it.
-    case slot(Int)
-
-    private enum CodingKeys: String, CodingKey { case kind, work, slot }
-    private enum Kind: String, Codable { case enter, back, forward, slot, next, previous; case workingTasks = "working_tasks" }
-
-    public init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        switch try values.decode(Kind.self, forKey: .kind) {
-        case .workingTasks: self = .workingTasks
-        case .enter: self = .enter(work: try values.decode(WorkWorkspaceKey.self, forKey: .work))
-        case .back: self = .back
-        case .forward: self = .forward
-        case .slot: self = .slot(try values.decode(Int.self, forKey: .slot))
-        case .next: self = .next
-        case .previous: self = .previous
-        }
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var values = encoder.container(keyedBy: CodingKeys.self)
-        let kind: Kind
-        switch self {
-        case .workingTasks: kind = .workingTasks
-        case .enter(let work):
-            kind = .enter
-            try values.encode(work, forKey: .work)
-        case .back: kind = .back
-        case .forward: kind = .forward
-        case .slot(let slot):
-            kind = .slot
-            try values.encode(slot, forKey: .slot)
-        case .next: kind = .next
-        case .previous: kind = .previous
-        }
-        try values.encode(kind, forKey: .kind)
-    }
-}
-
-/// The destination after navigating; a following inspection reports the same.
-public struct DesktopNavigationReceipt: Codable, Sendable, Equatable {
-    public let repository: String
-    public let window: String
-    public let destination: DesktopDestination
-    public let history: DesktopHistory
-    public let observedAt: Int64
-
-    public init(repository: String, window: String, destination: DesktopDestination, history: DesktopHistory, observedAt: Int64) {
-        self.repository = repository; self.window = window; self.destination = destination
-        self.history = history; self.observedAt = observedAt
-    }
-    enum CodingKeys: String, CodingKey {
-        case repository, window, destination, history
-        case observedAt = "observed_at"
-    }
-}
-
 /// A stale or missing target: nothing changed. Apple events report it with
 /// `scriptErrorNumber`, which `lf desktop` maps to exit status 3.
 public struct DesktopTargetError: LocalizedError, Sendable {
     public static let scriptErrorNumber = 1003
+    public let message: String
+    public init(_ message: String) { self.message = message }
+    public var errorDescription: String? { message }
+}
+
+/// An unknown action or a bad action argument: nothing changed. Apple events
+/// report it with `scriptErrorNumber`, which `lf desktop` maps to exit status 2.
+public struct DesktopArgumentError: LocalizedError, Sendable {
+    public static let scriptErrorNumber = 1002
     public let message: String
     public init(_ message: String) { self.message = message }
     public var errorDescription: String? { message }
@@ -291,24 +332,46 @@ public struct DesktopWorkspaceInspection: Codable, Sendable, Equatable {
 
 /// Children retain first/second order; a pane has no children. Values are copied
 /// from MultiplexerStore at inspection, never written back as layout authority.
-public struct DesktopShellInspection: Codable, Sendable, Equatable {
+/// A shell tab carries its own occurrence and surface; a browser tab shares its pane's.
+public struct DesktopTabInspection: Codable, Sendable, Equatable {
+    public enum Kind: String, Codable, Sendable { case shell, files; case graphLog = "graph_log"; case url }
     public let id: String
+    public let kind: Kind
+    public let title: String
     public let incarnation: String
     public let surface: String?
     public let location: WorkspaceIdentity?
+    public let url: String?
+
+    public init(id: String, kind: Kind, title: String, incarnation: String, surface: String?, location: WorkspaceIdentity?, url: String?) {
+        self.id = id; self.kind = kind; self.title = title; self.incarnation = incarnation
+        self.surface = surface; self.location = location; self.url = url
+    }
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(kind, forKey: .kind)
+        try values.encode(title, forKey: .title)
+        try values.encode(incarnation, forKey: .incarnation)
+        try values.encode(surface, forKey: .surface)
+        try values.encode(location, forKey: .location)
+        try values.encode(url, forKey: .url)
+    }
+    enum CodingKeys: String, CodingKey { case id, kind, title, incarnation, surface, location, url }
 }
 
 public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
     public let pane: String?
     public let incarnation: String?
     public let surface: String?
+    /// The designated kind: `session`, `shell` or `browser`.
     public let content: String?
     public let subject: String?
     public let axis: String?
     public let ratio: Double?
     public let children: [DesktopLayoutInspection]
     public let location: WorkspaceIdentity?
-    public let tabs: [DesktopShellInspection]
+    public let tabs: [DesktopTabInspection]
     public let selectedTab: String?
 
     enum CodingKeys: String, CodingKey {
@@ -319,13 +382,29 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
     public init(_ layout: LayoutNode, surface: (PaneContent) -> String?) {
         switch layout {
         case .leaf(let state):
-            if case .shell(let shells, let selected) = state.content {
+            switch state.content {
+            case .shell(let shells, let selected):
                 tabs = shells.map { tab in
                     let content = PaneContent.shell(tabs: [tab], selected: tab.id)
-                    return DesktopShellInspection(id: tab.id, incarnation: tab.incarnation, surface: surface(content), location: tab.location)
+                    return DesktopTabInspection(id: tab.id, kind: .shell, title: tab.command?.joined(separator: " ") ?? "Shell", incarnation: tab.incarnation,
+                        surface: surface(content), location: tab.location, url: nil)
                 }
                 selectedTab = selected
-            } else { tabs = []; selectedTab = nil }
+            case .browser(_, let pages, let selected, _, _):
+                tabs = pages.map { page in
+                    let kind: DesktopTabInspection.Kind
+                    let url: String?
+                    switch page {
+                    case .files: kind = .files; url = nil
+                    case .graphLog: kind = .graphLog; url = nil
+                    case .url(_, let address): kind = .url; url = address.absoluteString
+                    }
+                    return DesktopTabInspection(id: page.id, kind: kind, title: page.title, incarnation: state.incarnation,
+                        surface: nil, location: state.content.location, url: url)
+                }
+                selectedTab = selected
+            case .session: tabs = []; selectedTab = nil
+            }
             location = state.content.location
             pane = state.id; incarnation = state.incarnation; self.surface = surface(state.content); axis = nil; ratio = nil; children = []
             switch state.content {
@@ -367,107 +446,6 @@ public struct DesktopPaneTarget: Codable, Sendable, Equatable {
         try values.encode(pane, forKey: .pane)
         try values.encode(incarnation, forKey: .incarnation)
         try values.encode(tab, forKey: .tab)
-    }
-}
-
-/// The affected pane, including a newly allocated or reused companion. This
-/// acknowledges the view operation, not terminal or provider readiness.
-public struct DesktopPaneReceipt: Codable, Sendable, Equatable {
-    public let repository: String
-    public let window: String
-    public let work: WorkWorkspaceKey
-    public let pane: String
-    public let observedAt: Int64
-    public let tab: String?
-
-    public init(target: DesktopPaneTarget, pane: String, tab: String?, observedAt: Int64) {
-        repository = target.repository; window = target.window
-        work = target.work
-        self.pane = pane; self.tab = tab; self.observedAt = observedAt
-    }
-    enum CodingKeys: String, CodingKey {
-        case repository, window, work, pane, tab
-        case observedAt = "observed_at"
-    }
-}
-
-public struct DesktopPaneCommand: Codable, Sendable, Equatable {
-    public let target: DesktopPaneTarget
-    public let action: DesktopPaneAction
-
-    public init(target: DesktopPaneTarget, action: DesktopPaneAction) {
-        self.target = target; self.action = action
-    }
-}
-
-public enum DesktopPaneAction: Codable, Sendable, Equatable {
-    case hide, restore, focus, shell
-    case text(surface: String, text: String)
-    case key(surface: String, key: DesktopKey)
-    case files(task: String), graphLog(task: String)
-    case move(destination: DesktopPaneTarget, axis: SplitAxis)
-    case resize(toward: DesktopPaneTarget, ratio: Double)
-    case zoom(enabled: Bool)
-
-    enum CodingKeys: String, CodingKey { case kind, axis, destination, toward, ratio, enabled, task, surface, text, key }
-    private enum Kind: String, Codable { case hide, restore, focus, move, resize, zoom, shell, files, text, key; case graphLog = "graph_log" }
-
-    public init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        switch try values.decode(Kind.self, forKey: .kind) {
-        case .text: self = .text(surface: try values.decode(String.self, forKey: .surface),
-                                 text: try values.decode(String.self, forKey: .text))
-        case .key: self = .key(surface: try values.decode(String.self, forKey: .surface),
-                               key: try values.decode(DesktopKey.self, forKey: .key))
-        case .hide: self = .hide
-        case .restore: self = .restore
-        case .focus: self = .focus
-        case .shell: self = .shell
-        case .files: self = .files(task: try values.decode(String.self, forKey: .task))
-        case .graphLog: self = .graphLog(task: try values.decode(String.self, forKey: .task))
-        case .move: self = .move(destination: try values.decode(DesktopPaneTarget.self, forKey: .destination),
-                                axis: try values.decode(SplitAxis.self, forKey: .axis))
-        case .resize: self = .resize(toward: try values.decode(DesktopPaneTarget.self, forKey: .toward),
-                                    ratio: try values.decode(Double.self, forKey: .ratio))
-        case .zoom: self = .zoom(enabled: try values.decode(Bool.self, forKey: .enabled))
-        }
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var values = encoder.container(keyedBy: CodingKeys.self)
-        let kind: Kind
-        switch self {
-        case .text(let surface, let text):
-            kind = .text
-            try values.encode(surface, forKey: .surface)
-            try values.encode(text, forKey: .text)
-        case .key(let surface, let key):
-            kind = .key
-            try values.encode(surface, forKey: .surface)
-            try values.encode(key, forKey: .key)
-        case .hide: kind = .hide
-        case .restore: kind = .restore
-        case .focus: kind = .focus
-        case .shell: kind = .shell
-        case .files(let task):
-            kind = .files
-            try values.encode(task, forKey: .task)
-        case .graphLog(let task):
-            kind = .graphLog
-            try values.encode(task, forKey: .task)
-        case .move(let destination, let axis):
-            kind = .move
-            try values.encode(destination, forKey: .destination)
-            try values.encode(axis, forKey: .axis)
-        case .resize(let toward, let ratio):
-            kind = .resize
-            try values.encode(toward, forKey: .toward)
-            try values.encode(ratio, forKey: .ratio)
-        case .zoom(let enabled):
-            kind = .zoom
-            try values.encode(enabled, forKey: .enabled)
-        }
-        try values.encode(kind, forKey: .kind)
     }
 }
 

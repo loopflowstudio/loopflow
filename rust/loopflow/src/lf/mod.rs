@@ -552,7 +552,7 @@ pub enum Commands {
     Open(commands::open::OpenArgs),
     /// Select Work and control Loopflow Desktop panes
     #[command(
-        after_help = "Exit status: 0 success, 1 failure, 2 bad arguments or expression, 3 missing or ambiguous Work, window or pane (nothing changed), 4 Desktop unreachable (not running, not macOS, or Automation consent pending or denied), 130 interrupted."
+        after_help = "Targets: -t Task, -b pane, --window window; each resolves by full ID, case-insensitive label, 1-based position, then ID suffix. Without them a command acts on the terminal it runs in.\n\nExit status: 0 success, 1 failure, 2 bad arguments, expression, unknown action or action arguments, 3 missing or ambiguous Task, window, pane or tab (nothing changed), 4 Desktop unreachable (not running, not macOS, or Automation consent pending or denied), 130 interrupted."
     )]
     Desktop {
         #[command(subcommand)]
@@ -648,7 +648,7 @@ pub enum Commands {
 pub enum DesktopCommand {
     /// Show a Work selection, or derive a passive plan for external hosts
     View {
-        /// wave/task/query/kind/state expression, or `working-tasks`; omitted uses the repository default
+        /// wave/task/query/kind/state expression; omitted uses the repository default
         expression: Option<String>,
         /// Print the derived plan as JSON without opening Desktop or starting a provider
         #[arg(long)]
@@ -733,140 +733,11 @@ pub enum DesktopCommand {
         save: bool,
     },
 
-    /// Insert literal text at an exact surface's cursor; never submits or clears a draft
-    Text {
-        #[arg(long)]
-        pane: Option<String>,
-        /// Unicode text without control characters (use key for Enter/Tab)
-        text: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Send one explicit key to an exact retained surface, without following focus
-    Key {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(value_enum)]
-        key: commands::desktop::DesktopKey,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Read bounded text from an exact retained surface, without following focus
-    Read {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long, value_enum)]
-        region: commands::desktop::DesktopTextRegion,
-        #[arg(long, default_value_t = 65536)]
-        max_bytes: usize,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Hide an exact retained pane without closing its Session or process
-    Hide {
-        /// Pane ID; defaults to this terminal when verified, otherwise one eligible pane
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Restore an exact hidden pane without selecting Work or acquiring a client
-    Restore {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Focus an exact pane, opening its retained workspace when needed
-    Focus {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Add and select a shell tab at the Task’s recorded location
-    Shell {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show the recorded Task's files beside an exact pane, retaining drafts
-    Files {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show the recorded Task's Graph processes beside an exact pane
-    GraphLog {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Move a retained pane after another pane in the same workspace
-    Move {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        destination: String,
-        #[arg(long, value_enum)]
-        axis: commands::desktop::DesktopSplitAxis,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Resize the divider between two exact panes; ratio is the target side's share
-    Resize {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        toward: String,
-        #[arg(long)]
-        ratio: f64,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Zoom an exact retained pane without changing selection; --off unzooms it
-    Zoom {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        off: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Enter a member of the shown Dashboard as full Work, as clicking its tile does
-    Enter {
-        /// repository, task:<issue> or wave:<name>
-        work: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Go back to the previous destination, as ⌘[ does
-    Back {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Go forward again, as ⌘] does
-    Forward {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Select a Working Task by its sidebar position, as ⌘1–9 do
-    Slot {
-        #[arg(value_parser = clap::value_parser!(u8).range(1..=9))]
-        slot: u8,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Select the next Working Task, as ⌃⇥ does
-    Next {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Select the previous Working Task, as ⌃⇧⇥ does
-    Previous {
+    /// List the window's Tasks by position (as ⌘1–9 select them) and each Task's panes
+    Ls {
+        /// Desktop window: ID, position or ID suffix (default: this terminal's window)
+        #[arg(long, value_name = "WINDOW")]
+        window: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -875,6 +746,116 @@ pub enum DesktopCommand {
         #[arg(long)]
         json: bool,
     },
+    /// List the actions `do` performs, with their arguments and default keys
+    Actions {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Perform an action as its key or menu item does: `do task.goto index=2`
+    Do {
+        /// Action name from `lf desktop actions`
+        action: String,
+        /// Action arguments as key=value
+        args: Vec<String>,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Insert literal text at a terminal's cursor (stdin when omitted); never submits
+    Send {
+        /// Unicode text without control characters (use send-key for Enter/Tab)
+        text: Option<String>,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Send one key to a terminal, without following focus
+    SendKey {
+        #[arg(value_enum)]
+        key: commands::desktop::DesktopKey,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Print a terminal's text, without following focus
+    Capture {
+        #[arg(long, value_enum, default_value = "screen")]
+        region: commands::desktop::DesktopTextRegion,
+        /// Drop trailing spaces and blank lines
+        #[arg(long)]
+        trim: bool,
+        #[arg(long, default_value_t = 65536)]
+        max_bytes: usize,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Add a shell tab at the Task's recorded location, optionally running CMD; focus stays put
+    Run {
+        /// Command and arguments after `--`
+        #[arg(last = true)]
+        command: Vec<String>,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Zoom a pane without changing selection; bare toggles
+    Zoom {
+        #[arg(long, conflicts_with = "off")]
+        on: bool,
+        #[arg(long)]
+        off: bool,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Focus a pane, opening its retained workspace when needed
+    Focus {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Hide a pane without closing its Session or process
+    Hide {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Show a hidden pane without selecting Work or acquiring a client
+    Restore {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Move a pane beside another pane of the same Task
+    Move {
+        /// Pane to place it beside, as for -b
+        #[arg(long)]
+        destination: String,
+        #[arg(long, value_enum)]
+        axis: commands::desktop::DesktopSplitAxis,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Resize the divider between two panes; ratio is the addressed pane's share
+    Resize {
+        /// The other pane, as for -b
+        #[arg(long)]
+        toward: String,
+        #[arg(long)]
+        ratio: f64,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+}
+
+/// Which Desktop window, Task and pane a command acts on. Each resolves by full
+/// ID, case-insensitive label, 1-based position, then ID suffix (4+ characters).
+/// Without flags a command acts on the terminal it runs in (`LF_TERMINAL_ID`).
+#[derive(Args, Debug, Clone, Default)]
+pub struct DesktopTargetArgs {
+    /// Task: issue key, name, sidebar position (⌘N) or ID suffix
+    #[arg(short = 't', long = "task", value_name = "TASK")]
+    pub task: Option<String>,
+    /// Pane: session, shell, browser, shell:N or browser:N for a tab, position, or ID
+    #[arg(short = 'b', long = "block", value_name = "PANE")]
+    pub block: Option<String>,
+    /// Desktop window: ID, position or ID suffix
+    #[arg(long, value_name = "WINDOW")]
+    pub window: Option<String>,
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Subcommand, Debug)]

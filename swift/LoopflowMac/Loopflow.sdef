@@ -6,15 +6,10 @@
             <cocoa class="LoopflowMac.InspectDesktopCommand"/>
             <result type="text" description="JSON reading of retained windows and panes"/>
         </command>
-        <command name="control pane" code="CNRTpane" description="Arrange or send explicit input to an exact retained pane">
-            <cocoa class="LoopflowMac.ControlPaneCommand"/>
-            <direct-parameter type="text" description="JSON exact target and pane action"/>
-            <result type="text" description="JSON reading after the action"/>
-        </command>
-        <command name="navigate desktop" code="CNRTnavg" description="Navigate an exact window as its sidebar, crumbs and tiles do">
-            <cocoa class="LoopflowMac.NavigateDesktopCommand"/>
-            <direct-parameter type="text" description="JSON exact window and navigation action"/>
-            <result type="text" description="JSON destination after navigating"/>
+        <command name="perform desktop action" code="CNRTactn" description="Perform a registry action in an exact window, as its keys and menus do">
+            <cocoa class="LoopflowMac.PerformDesktopActionCommand"/>
+            <direct-parameter type="text" description="JSON exact window, optional exact pane, action name and arguments"/>
+            <result type="text" description="JSON destination and affected pane after the action"/>
         </command>
         <command name="read terminal text" code="CNRTtext" description="Read an exact retained terminal surface without acquiring a client">
             <cocoa class="LoopflowMac.ReadTerminalTextCommand"/>

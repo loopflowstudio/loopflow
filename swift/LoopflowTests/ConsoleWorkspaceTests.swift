@@ -18,8 +18,8 @@ struct ConsoleWorkspaceTests {
         let second = try #require(store.focusedPane.content.selectedShell)
         let shell = store.focusedPane
         #expect(first.id != second.id)
-        #expect(store.layout.allPanes.count == 2)
-        workspace.toggleFiles()
+        #expect(store.layout.allPanes.count == 3)
+        workspace.toggleBrowser()
         let files = workspace.files(issue: "TASK", cwd: "/task")
         files.selection = "a.txt"
         let document = files.document("a.txt")
@@ -29,7 +29,7 @@ struct ConsoleWorkspaceTests {
         let layout = store.layout
         for _ in 0..<2 {
             try workspace.toggleShell()
-            workspace.toggleFiles()
+            workspace.toggleBrowser()
         }
         #expect(store.layout == layout)
         #expect(store.collapsedPaneIds.isEmpty)
@@ -48,7 +48,7 @@ struct ConsoleWorkspaceTests {
         let workspace = SessionsWorkspace(key: .init(repository: "repo", kind: kind, id: "scope"),
             title: "Scope", location: fixtureWorkspace("/repo"), localMachineId: fixtureMachineId)
         let before = workspace.multiplexer.layout
-        workspace.toggleFiles()
+        workspace.toggleBrowser()
         try workspace.toggleShell()
         #expect(throws: RegistryQueryError.self) { try workspace.newShell() }
         #expect(workspace.multiplexer.layout == before)

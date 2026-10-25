@@ -42,9 +42,8 @@ final class WorkLinkRouter {
         let focus: () -> Void
         let receive: (LinkedWork) async -> Void
         let inspect: (String, UUID) -> DesktopWindowInspection
-        let controlPane: (DesktopPaneCommand) throws -> (pane: String, tab: String?)
+        let perform: (DesktopActionRequest) throws -> DesktopActionOutcome
         let readText: (DesktopTextRequest) throws -> DesktopTextReading
-        let navigate: (DesktopNavigationAction) throws -> Void
     }
     private struct RepositoryOpening {
         let id: UUID
@@ -94,16 +93,15 @@ final class WorkLinkRouter {
     func register(_ incarnation: UUID, repository: String, openingRequests: Set<UUID> = [],
                   focus: @escaping () -> Void,
                   inspect: @escaping (String, UUID) -> DesktopWindowInspection,
-                  controlPane: @escaping (DesktopPaneCommand) throws -> (pane: String, tab: String?),
+                  perform: @escaping (DesktopActionRequest) throws -> DesktopActionOutcome,
                   readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
-                  navigate: @escaping (DesktopNavigationAction) throws -> Void,
                   receive: @escaping (LinkedWork) async -> Void) {
         let previous = targets[repository]
         if previous?.registration != incarnation {
             delivering.removeValue(forKey: repository)?.task.cancel()
         }
         let token = previous.flatMap { $0.registration == incarnation ? $0.incarnation : nil } ?? incarnation
-        targets[repository] = Target(registration: incarnation, incarnation: token, focus: focus, receive: receive, inspect: inspect, controlPane: controlPane, readText: readText, navigate: navigate)
+        targets[repository] = Target(registration: incarnation, incarnation: token, focus: focus, receive: receive, inspect: inspect, perform: perform, readText: readText)
         confirmRegisteredWorkspace(repository, requests: openingRequests)
         deliverPending(repository)
     }
@@ -267,12 +265,21 @@ final class WorkLinkRouter {
         })
     }
 
-    /// Validation and mutation stay in this MainActor turn; no focus fallback.
+    /// Validation, mutation and the following reading stay in this MainActor
+    /// turn, so the receipt is what the next inspection reports. No focus fallback.
     @discardableResult
-    func controlPane(_ request: DesktopPaneCommand) throws -> DesktopPaneReceipt {
-        let receiver = try receiver(for: request.target)
-        let pane = try receiver.controlPane(request)
-        return DesktopPaneReceipt(target: request.target, pane: pane.pane, tab: pane.tab, observedAt: Int64(Date().timeIntervalSince1970))
+    func perform(_ request: DesktopActionRequest) throws -> DesktopActionReceipt {
+        if let pane = request.pane, pane.repository != request.repository || pane.window != request.window {
+            throw DesktopTargetError("The pane belongs to another window; nothing changed.")
+        }
+        let receiver = try receiver(repository: request.repository, window: request.window)
+        let outcome = try receiver.perform(request)
+        let window = receiver.inspect(request.repository, receiver.incarnation)
+        let work = request.pane?.work
+        return DesktopActionReceipt(repository: request.repository, window: request.window, action: request.action,
+            destination: window.destination, history: window.history, pane: outcome.pane, tab: outcome.tab,
+            workspace: work.flatMap { work in window.workspaces.first { $0.work == work } },
+            observedAt: Int64(Date().timeIntervalSince1970))
     }
 
     /// Resolve and read synchronously; no client acquisition or focus fallback.
@@ -281,15 +288,6 @@ final class WorkLinkRouter {
             throw RegistryQueryError("Text byte limit must be between 1 and 1048576.")
         }
         return try receiver(for: request.target).readText(request)
-    }
-
-    /// Navigate the addressed window and read its destination in the same turn.
-    func navigate(_ request: DesktopNavigationCommand) throws -> DesktopNavigationReceipt {
-        let receiver = try receiver(repository: request.repository, window: request.window)
-        try receiver.navigate(request.action)
-        let window = receiver.inspect(request.repository, receiver.incarnation)
-        return DesktopNavigationReceipt(repository: request.repository, window: request.window,
-            destination: window.destination, history: window.history, observedAt: Int64(Date().timeIntervalSince1970))
     }
 
     private func receiver(for target: DesktopPaneTarget) throws -> Target {

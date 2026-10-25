@@ -32,9 +32,9 @@ struct WorkspacePanesTests {
             title: "Task A", location: location, localMachineId: location.machineId)
         let sessions = workspace.sessionStore(repoPath: location.worktree, query: query)
         try workspace.toggleShell()
-        workspace.toggleFiles()
+        workspace.toggleBrowser()
         try workspace.toggleShell()
-        workspace.toggleFiles()
+        workspace.toggleBrowser()
         let store = workspace.multiplexer
         #expect(store.visibleLayout?.allPanes.map(\.id) == ["session"])
         #expect(store.shellPane?.content.selectedShell != nil)

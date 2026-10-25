@@ -844,38 +844,42 @@ never prepare another checkout. The CLI transports native Session argv over SSH,
 keeping the owner's data directory and explicit takeover behavior. Local panes and
 drafts remain retained; no remote planning tree or execution record is imported.
 
-`lf --task LOO-427 desktop hide --pane "$pane"` and `lf --task LOO-427 desktop restore --pane "$pane"`
-change retained pane visibility. Focus, move, resize and zoom use that same
-exact-target path through the registry and multiplexer; see the
-[CLI examples](../docs/lf.md#desktop-navigation). `--repo`/`--task` select Work;
-`--pane` selects a pane ID from inspection or a creation receipt. Without it,
-the verified caller terminal wins within selected Work, otherwise one eligible
-pane is required; ambiguity lists choices and does nothing. Surface/window/content tokens are internal.
-Move retains the pane itself,
-including its content occurrence and surface key; it never closes/reopens a client.
-Shell creation adds and selects a tab at the Task's recorded location. Each tab
-retains its location through arrangement and Close/Undo; restored intent does not
-restart a process. Session panes capture their recorded location; changed readings invalidate old pane targets without changing focus. Unknown locations never open a local replacement. Arrangement preserves selection except explicit focus;
-zoom does not redirect input to an unselected pane. Window/content replacement
-rejects stale targets, including the second target of a move or resize. Mutation replies
-identify the affected pane directly; shell creation also returns its new `tab`.
-They are not native-rendering proof. `--pane shell:ID` targets an exact shell even
-when another tab is selected. Files and Graph-log select browser tabs without
-changing focus or zoom; the named Task's recorded checkout must match. Remote shells run on the recorded execution Machine; changed or missing checkouts
-refuse launch without opening a local shell. Disconnects never replay shell commands.
+Every Desktop gesture is a `DesktopAction` in `LoopflowMac/DesktopActions.swift`:
+name, title, arguments, default keys and `perform`. `DesktopActionMonitor`, the
+View and File menus, the Keyboard Shortcuts window and the `perform desktop
+action` Apple event (`CNRTactn`) look actions up there; nothing else mutates
+navigation or panes. Keys and menus act on the shown workspace's focused pane;
+the Apple event names an exact window and pane, and `lf desktop` resolves those
+from one inspection (see the [CLI examples](../docs/lf.md#desktop-navigation)).
+An unknown action or bad argument throws `DesktopArgumentError` (script error
+1002, exit 2); a stale or missing target throws `DesktopTargetError` (1003, exit
+3). The receipt carries the window's destination and the affected workspace in
+the same MainActor turn, so it equals the next inspection.
 
-`lf --task LOO-427 desktop read --pane "$pane" --region selection --json`
-validates the retained pane and native surface without following focus or retiring
-an exited surface. Missing surfaces and nonterminal panes are explicit unavailable
-results, not empty text. The verified lf3 reader writes directly into the requested
-byte bound; Swift copies only that UTF-8 prefix. `screen` reads the viewport,
+Move retains the pane itself, including its content occurrence and surface key;
+it never closes/reopens a client. `shell.new` adds and selects a tab at the
+Task's recorded location without moving focus (⌘T passes `focus=true`). Each tab
+retains its location through arrangement and Close/Undo; restored intent does not
+restart a process. Session panes capture their recorded location; changed
+readings invalidate old pane targets without changing focus. Unknown locations
+never open a local replacement. Window/content replacement rejects stale
+targets. `browser.files`, `browser.graph_log` and `browser.open` select browser
+tabs without changing focus or zoom. Remote shells run on the recorded execution
+Machine; changed or missing checkouts refuse launch without opening a local
+shell. Disconnects never replay shell commands.
+
+`lf desktop capture -b shell:1 --region selection --json` validates the retained
+pane and native surface without following focus or retiring an exited surface.
+Missing surfaces and nonterminal panes are explicit unavailable results, not
+empty text. The verified lf3 reader writes directly into the requested byte
+bound; Swift copies only that UTF-8 prefix. `screen` reads the viewport,
 `scrollback` the retained screen history, and `selection` the current text or
 command block (empty when nothing is selected). No unbounded extraction is used.
 Mounted extraction/draft acceptance and cross-machine composition remain unproved.
 
 ```sh
-lf --task LOO-427 desktop text --pane "$pane" -- 'add to the draft'
-lf --task LOO-427 desktop key --pane "$pane" enter
+lf desktop send -b session 'add to the draft'
+lf desktop send-key -b session enter
 ```
 
 Text preserves the draft and inserts at its cursor; Enter is separate. Control

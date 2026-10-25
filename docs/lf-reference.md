@@ -1055,7 +1055,7 @@ Show a Work selection, or derive a passive plan for external hosts
 
 | Argument | What it does |
 |---|---|
-| `<expression>` | wave/task/query/kind/state expression, or `working-tasks`; omitted uses the repository default |
+| `<expression>` | wave/task/query/kind/state expression; omitted uses the repository default |
 | `--plan` | Print the derived plan as JSON without opening Desktop or starting a provider Default: false. |
 | `--json` | Print the opening receipt as JSON Default: false. |
 | `--help / -h` | Print help |
@@ -1144,188 +1144,13 @@ Read portable pane intent as JSON, or save a complete revision-checked record fr
 | `--save` | Replace the record from JSON on stdin instead of reading it Default: false. |
 | `--help / -h` | Print help |
 
-## lf desktop text
+## lf desktop ls
 
-Insert literal text at an exact surface's cursor; never submits or clears a draft
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `<text>` | Unicode text without control characters (use key for Enter/Tab) |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop key
-
-Send one explicit key to an exact retained surface, without following focus
+List the window's Tasks by position (as ⌘1–9 select them) and each Task's panes
 
 | Argument | What it does |
 |---|---|
-| `--pane` | pane |
-| `<key>` | key |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop read
-
-Read bounded text from an exact retained surface, without following focus
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--region` | region |
-| `--max-bytes` | max bytes Default: 65536. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop hide
-
-Hide an exact retained pane without closing its Session or process
-
-| Argument | What it does |
-|---|---|
-| `--pane` | Pane ID; defaults to this terminal when verified, otherwise one eligible pane |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop restore
-
-Restore an exact hidden pane without selecting Work or acquiring a client
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop focus
-
-Focus an exact pane, opening its retained workspace when needed
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop shell
-
-Add and select a shell tab at the Task’s recorded location
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop files
-
-Show the recorded Task's files beside an exact pane, retaining drafts
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop graph-log
-
-Show the recorded Task's Graph processes beside an exact pane
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop move
-
-Move a retained pane after another pane in the same workspace
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--destination` | destination |
-| `--axis` | axis |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop resize
-
-Resize the divider between two exact panes; ratio is the target side's share
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--toward` | toward |
-| `--ratio` | ratio |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop zoom
-
-Zoom an exact retained pane without changing selection; --off unzooms it
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--off` | off Default: false. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop enter
-
-Enter a member of the shown Dashboard as full Work, as clicking its tile does
-
-| Argument | What it does |
-|---|---|
-| `<work>` | repository, task:<issue> or wave:<name> |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop back
-
-Go back to the previous destination, as ⌘[ does
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop forward
-
-Go forward again, as ⌘] does
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop slot
-
-Select a Working Task by its sidebar position, as ⌘1–9 do
-
-| Argument | What it does |
-|---|---|
-| `<slot>` | slot |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop next
-
-Select the next Working Task, as ⌃⇥ does
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop previous
-
-Select the previous Working Task, as ⌃⇧⇥ does
-
-| Argument | What it does |
-|---|---|
+| `--window` | Desktop window: ID, position or ID suffix (default: this terminal's window) |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1335,6 +1160,161 @@ Read actual windows and panes without launching, focusing, or acquiring clients
 
 | Argument | What it does |
 |---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop actions
+
+List the actions `do` performs, with their arguments and default keys
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop do
+
+Perform an action as its key or menu item does: `do task.goto index=2`
+
+| Argument | What it does |
+|---|---|
+| `<action>` | Action name from `lf desktop actions` |
+| `<args>` | Action arguments as key=value |
+| `--task / -t` | Task: issue key, name, sidebar position (⌘N) or ID suffix |
+| `--block / -b` | Pane: session, shell, browser, shell:N or browser:N for a tab, position, or ID |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop send
+
+Insert literal text at a terminal's cursor (stdin when omitted); never submits
+
+| Argument | What it does |
+|---|---|
+| `<text>` | Unicode text without control characters (use send-key for Enter/Tab) |
+| `--task / -t` | Task: issue key, name, sidebar position (⌘N) or ID suffix |
+| `--block / -b` | Pane: session, shell, browser, shell:N or browser:N for a tab, position, or ID |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop send-key
+
+Send one key to a terminal, without following focus
+
+| Argument | What it does |
+|---|---|
+| `<key>` | key |
+| `--task / -t` | Task: issue key, name, sidebar position (⌘N) or ID suffix |
+| `--block / -b` | Pane: session, shell, browser, shell:N or browser:N for a tab, position, or ID |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop capture
+
+Print a terminal's text, without following focus
+
+| Argument | What it does |
+|---|---|
+| `--region` | region Default: screen. |
+| `--trim` | Drop trailing spaces and blank lines Default: false. |
+| `--max-bytes` | max bytes Default: 65536. |
+| `--task / -t` | Task: issue key, name, sidebar position (⌘N) or ID suffix |
+| `--block / -b` | Pane: session, shell, browser, shell:N or browser:N for a tab, position, or ID |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop run
+
+Add a shell tab at the Task's recorded location, optionally running CMD; focus stays put
+
+| Argument | What it does |
+|---|---|
+| `<command>` | Command and arguments after `--` |
+| `--task / -t` | Task: issue key, name, sidebar position (⌘N) or ID suffix |
+| `--block / -b` | Pane: session, shell, browser, shell:N or browser:N for a tab, position, or ID |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop zoom
+
+Zoom a pane without changing selection; bare toggles
+
+| Argument | What it does |
+|---|---|
+| `--on` | on Default: false. |
+| `--off` | off Default: false. |
+| `--task / -t` | Task: issue key, name, sidebar position (⌘N) or ID suffix |
+| `--block / -b` | Pane: session, shell, browser, shell:N or browser:N for a tab, position, or ID |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop focus
+
+Focus a pane, opening its retained workspace when needed
+
+| Argument | What it does |
+|---|---|
+| `--task / -t` | Task: issue key, name, sidebar position (⌘N) or ID suffix |
+| `--block / -b` | Pane: session, shell, browser, shell:N or browser:N for a tab, position, or ID |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop hide
+
+Hide a pane without closing its Session or process
+
+| Argument | What it does |
+|---|---|
+| `--task / -t` | Task: issue key, name, sidebar position (⌘N) or ID suffix |
+| `--block / -b` | Pane: session, shell, browser, shell:N or browser:N for a tab, position, or ID |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop restore
+
+Show a hidden pane without selecting Work or acquiring a client
+
+| Argument | What it does |
+|---|---|
+| `--task / -t` | Task: issue key, name, sidebar position (⌘N) or ID suffix |
+| `--block / -b` | Pane: session, shell, browser, shell:N or browser:N for a tab, position, or ID |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop move
+
+Move a pane beside another pane of the same Task
+
+| Argument | What it does |
+|---|---|
+| `--destination` | Pane to place it beside, as for -b |
+| `--axis` | axis |
+| `--task / -t` | Task: issue key, name, sidebar position (⌘N) or ID suffix |
+| `--block / -b` | Pane: session, shell, browser, shell:N or browser:N for a tab, position, or ID |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop resize
+
+Resize the divider between two panes; ratio is the addressed pane's share
+
+| Argument | What it does |
+|---|---|
+| `--toward` | The other pane, as for -b |
+| `--ratio` | ratio |
+| `--task / -t` | Task: issue key, name, sidebar position (⌘N) or ID suffix |
+| `--block / -b` | Pane: session, shell, browser, shell:N or browser:N for a tab, position, or ID |
+| `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

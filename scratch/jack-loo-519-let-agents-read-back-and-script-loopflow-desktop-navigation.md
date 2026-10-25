@@ -202,6 +202,8 @@ exits 1 naming the fix: update Desktop.
 
 ## Delete — do not maintain
 
+Done in slices 2–3 except where noted; kept here for review.
+
 - `PaneContent.empty/.files/.graphLog`, `PaneIntent::Empty/Files/Log` and free
   split creation (`newTerminal` as a split; `.empty` handling in views).
 - `SessionsShortcut` and its handler (`SessionsView.swift`); the
@@ -211,7 +213,8 @@ exits 1 naming the fix: update Desktop.
 - CLI: `text`, `key`, `read`, `shell`, `files`, `graph-log`, `enter`, `back`,
   `forward`, `slot`, `next`, `previous`, the `working-tasks` view expression, `--pane`.
 - `supported_operations`; `selection_kind`/`selection_id` (already gone in the diff).
-- `tests/fixtures/dto/desktop_navigation.json` (→ `desktop_action.json`).
+- `tests/fixtures/dto/desktop_navigation.json`, `desktop_pane_commands.json`, `desktop_pane_receipt.json` (→ `desktop_action.json`).
+- `WorkNavigationShortcut.task/.adjacent` (keys moved to the registry).
 - `docs/lf.md` sections teaching `--pane`, the nav verbs, and Files/Graph log panes.
 
 ## Forbidden outcomes
@@ -251,13 +254,26 @@ One PR; deepest deletion first.
    Opening a conversation switches the session pane in place. `BrowserPageView`
    is a bare `WKWebView`. Still open here: browser back/reload controls; the
    current `desktop shell` verb already keeps focus (as `run` will).
-2. **Action registry.** `DesktopAction` with perform; shortcut monitor, menus
-   and Keyboard Shortcuts window bound to it; `perform desktop action` event;
-   delete `CNRTpane`, `CNRTnavg`, `SessionsShortcut`. Swift
-   `DesktopPaneControlTests`: each action changes the model as its key does.
-3. **CLI.** Rex verbs, `-t/-b/--window` resolution, `ls`, `actions`, `do`, `run`,
-   caller trust, classifier with 2/3/4 from Swift numbers; docs, `lf help`
-   `after_help`, regenerated reference.
+2. **Action registry — implemented 2026-10-24.** `LoopflowMac/DesktopActions.swift`
+   holds every action (name, title, scope, args, default `DesktopKeyBinding`s,
+   `available`, `perform`); `DesktopActionMonitor`, View/File menus, Keyboard
+   Shortcuts and `PerformDesktopActionCommand` (`CNRTactn`) call it.
+   `WorkModel.navigate`/`selectWorkingTask`/`cycleWorkingTask` bodies moved into
+   `navigate.*`/`task.*`/`dashboard.*`; `WorkNavigationShortcut` keeps only ⌘K/⌘\.
+   `DesktopArgumentError` → 1002. Added beyond the inventory: `pane.close` (⌘W:
+   selected tab, last tab hides) and `pane.reopen` (⇧⌘T: undo close); `pane.restore`
+   shows the addressed hidden pane. Tabs inspect as `DesktopTabInspection` (shell and
+   browser). `DesktopPaneControlTests.everyKeyBindingMatchesItsAppleEvent` performs
+   each binding by key and by event on twin fixtures and compares the results.
+3. **CLI — implemented 2026-10-24.** `ls`, `state`, `actions`, `do`, `send`,
+   `send-key`, `capture [--trim]`, `run [-- CMD]`, `zoom [--on|--off]`, `focus`,
+   `hide`, `restore`, `move`, `resize`, all with `DesktopTargetArgs` (`-t`, `-b`,
+   `--window`, `--json`). `Scope` resolves window → workspace → pane in Rex order
+   (`resolve`); `LF_TERMINAL_ID` is read directly. `DesktopError::Argument` (2) and
+   `-1708` → "update Desktop". `VERB_ACTIONS` maps verbs to actions; a unit test
+   checks each is in the fixture. Docs (`docs/lf.md`, `swift/README.md`,
+   architecture reference) rewritten; reference regenerated.
+   Still open: browser back/reload controls (slice 1 carry-over).
 4. **Demo on Dev** (Jack).
 
 ## Done when
@@ -312,4 +328,4 @@ the doubled frame unless Jack picks a fix in the demo.
 - **`WKWebView` on macOS 15** needs no deployment-target change; SwiftUI
   `WebView` would need 26 and is not used.
 
-Check results (2026-10-24, compress): `cargo test --lib designated_panes selection_ commands::desktop` pass, Swift focused suites 206 pass, clippy clean; Rust integration (`cli_discovery`, `dto_fixtures`, fixture-CLI `work_watch`, which failed locally building `aes-gcm`) deferred to gate.
+Check results (2026-10-24, implement slices 2–3): `cargo test --lib commands::desktop selection_ designated_panes` 50 pass; integration `dto_fixtures::desktop cli_discovery::desktop structured_help reference_matches` pass; clippy clean; Swift 14 focused suites, 242 pass. Full Rust integration (`work_watch` etc.) deferred to gate.

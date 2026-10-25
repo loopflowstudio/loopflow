@@ -37,3 +37,22 @@ them in the demo. Each is reversible before landing.
   never torn down).
 - **New layouts use pane IDs `session`, `shell`, `browser`.** Migrated layouts
   keep their stored IDs; `-b session` resolves by kind either way.
+- **Action request has no `task` field (implement, 2026-10-24).** Every Work-scoped
+  action addresses a pane, and `DesktopPaneTarget` already carries the Work.
+- **⌘W and ⇧⌘T are their own actions.** `pane.close` closes the selected tab (last
+  tab hides the pane); `pane.reopen` undoes the last close. `pane.hide`/`pane.restore`
+  act on the addressed pane only, so scripts never undo something else.
+- **⇧⌘E is `browser.toggle`.** It shows or hides the browser pane (opening Files
+  when it has no tab), replacing "Toggle Files" now that Files is a browser tab.
+- **Root `--task`/`--wave` outrank the caller's own pane.** The plan listed the
+  caller first; an explicit root flag from a Desktop shell should win. `-t` wins
+  over both.
+- **Window positions use inspection order, not frontmost.** The inspection has no
+  z-order yet; `ls` with several windows and no caller exits 3 asking for
+  `--window`. Frontmost ordering is a Swift change in `WorkLinkRouter.inspect`.
+- **`run -- CMD` runs through `/bin/sh -c`** with the argv shell-quoted by lf.
+- **Crumb chevrons and the sidebar's Working Tasks item still call `WorkModel`
+  directly** (`goBack`, `selectWorkingTasksDashboard`); the registry's handlers call
+  the same functions. Routing chrome clicks through the registry is optional.
+- **Proposed Wave memory edit (not applied):** `.lf/wave/product/MEMORY.md:138`
+  still describes `--pane` and verified caller-terminal inference.

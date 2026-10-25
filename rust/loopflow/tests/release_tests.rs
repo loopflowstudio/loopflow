@@ -261,6 +261,9 @@ if [ "$1 $2" = "api graphql" ]; then
 {checks}
 JSON
       exit 0 ;;
+    *LoopflowPrMergeRequestEvents*)
+      echo '{{"data":{{"repository":{{"pullRequest":{{"timelineItems":{{"nodes":[]}}}}}}}}}}'
+      exit 0 ;;
   esac
 fi
 case "$1 $2" in
@@ -279,8 +282,9 @@ case "$1 $2" in
       cat <<JSON
 {merged}
 JSON
-    elif [ ! -f "$seen" ]; then
-      touch "$seen"
+    elif [ ! -f "$seen" ] || [ "$(cat "$seen")" = "$release_head" ]; then
+      # The published release head conflicts until a rebuild replaces it.
+      printf '%s' "$release_head" > "$seen"
       cat <<JSON
 {dirty}
 JSON
@@ -299,7 +303,8 @@ JSON
   'pr merge')
     release_head="$(git ls-remote origin "refs/heads/$release_branch" | cut -f1)"
     main_head="$(git ls-remote origin "refs/heads/$main_branch" | cut -f1)"
-    if git merge-base --is-ancestor "$main_head" "$release_head"; then
+    if [ "$(cat "$seen" 2>/dev/null)" != "$release_head" ] \
+      && git merge-base --is-ancestor "$main_head" "$release_head"; then
       touch "$integrated"
     fi
     exit 0;;

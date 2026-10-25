@@ -33,16 +33,13 @@ struct TaskWorkflowHeader: View {
                         .lineLimit(1)
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-workflow-position")
-                    // Routes into `end` are Ship it, in the Workflow bar.
-                    ForEach(workflow.outgoing, id: \.self) { index in
-                        if workflow.edges.indices.contains(index), workflow.edges[index].to != "end" {
-                            let edge = workflow.edges[index]
-                            Button(edge.name) { Task { await model.startTask(edge.name, task: task) } }
-                                .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
-                                .disabled(unavailable != nil)
-                                .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.name)")
-                                .accessibilityIdentifier("task-workflow-action-\(index)")
-                        }
+                    ForEach(routes(workflow), id: \.self) { index in
+                        let edge = workflow.edges[index]
+                        Button(edge.name) { Task { await model.startTask(edge.name, task: task) } }
+                            .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
+                            .disabled(unavailable != nil)
+                            .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.name)")
+                            .accessibilityIdentifier("task-workflow-action-\(index)")
                     }
                     Spacer(minLength: 0)
                     // Put the Task at a node without running anything.
@@ -125,8 +122,7 @@ struct TaskWorkflowHeader: View {
                 if let workflow = work.value?.workflow {
                     WorkflowDiagram(
                         nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
-                        // Ship it is the one way into `end`.
-                        choices: workflow.outgoing.filter { workflow.edges.indices.contains($0) && workflow.edges[$0].to != "end" },
+                        choices: routes(workflow),
                         unavailable: unavailable, fits: true,
                         hint: { "lf task run \(task.task.identifier) \($0.name) · to \($0.to)" },
                         choose: { edge in Task { await model.startTask(edge.name, task: task) } })
@@ -197,6 +193,12 @@ struct TaskWorkflowHeader: View {
         .onChange(of: task.id) { _, id in
             if work.value != nil { Perf.endAfterCommit(Perf.workflowReady, id: id) }
         }
+    }
+
+    /// The routes a person can start here. Ship it, in the Workflow bar, is
+    /// the one way into `end`.
+    private func routes(_ workflow: Workflow) -> [Int] {
+        workflow.outgoing.filter { workflow.edges.indices.contains($0) && workflow.edges[$0].to != "end" }
     }
 
     private func positionLabel(_ workflow: Workflow) -> String {
@@ -415,7 +417,7 @@ struct TaskWorkflowBar: View {
     }
 }
 
-/// What the last Ship it or Stop shipping on the heading did, shown briefly.
+/// What the last Ship it or Stop shipping did, shown briefly.
 struct ShipNotice: Equatable {
     let id = UUID()
     let taskID: String
@@ -461,8 +463,8 @@ struct ShipNoticeToast: View {
     }
 }
 
-/// The window's ship toast, shown for six seconds after the heading's Ship it
-/// or Stop shipping; its Undo is Stop shipping.
+/// The window's ship toast, shown for six seconds after Ship it or Stop
+/// shipping; its Undo is Stop shipping.
 struct ShipNoticeOverlay: View {
     let model: WorkModel
 

@@ -119,7 +119,8 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
 **Built 2026-10-24 (Jack approved the pass: "yes"), from Re-demo 2 below:**
 - a. `TaskWorkflowBar` (`TaskWorkView.swift`) under the jump bar on `RepoView`: Workflow name,
   stages + `end` as dots (hover names, click opens stage cells: who, and arrived/here/ahead), the
-  live line (shipping reason, running route + Graph step, "At demo · yours"), and
+  live line (shipping reason, running route + Graph step, "At <stage> · yours" — seventh
+  concept review: "try" was demo's word), and
   `TaskShipControl` always visible. `ShippableTaskHeading` deleted; the jump-bar heading reads
   only the lifecycle ("Shipping"), so shipping progress no longer rewrites it. Not built: the
   live line's elapsed time and Session link from the prototype.
@@ -143,12 +144,10 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
   work, read via `task status` (lazy recovery), then released. GitHub fixtures carry
   `timelineItems`. Check: `land_tests` 30/30, `graph_help_validates` ok.
 - Compress (2026-10-24): `merge_target`'s `Option<Option<&str>>` became `reached`; the Workflow
-  bar computes its stages once. `cargo test --lib task_ship_` 7/7 (with `LOOPFLOW_TEST_LF` set:
+  bar computes its stages once; the Workflow header's routes-not-into-`end` filter is one
+  `routes(_:)`. `swift test --filter 'DesktopHeadless|WorkNavigationTests'` 53 ok. `cargo test --lib task_ship_` 7/7 (with `LOOPFLOW_TEST_LF` set:
   the support crate's compiled-in `CARGO` path is stale here), `ops::task::ship` 4/4, clippy clean, Mac build ok.
 
-0. **Built (seventh concept review, 2026-10-24):** the live line reads "At <stage> · yours"
-   (`TaskWorkflowBar.live`); "try" was demo's word. Check: `swift test --filter
-   'DesktopHeadless|WorkNavigationTests'` 53 ok.
 1. **Re-demo** on the branch build: the Workflow bar (dots, click-to-expand stage cells, live
    line, Ship it / Stop shipping), a failed stand-in that backs off and names its cause instead
    of the hot loop, the `loopflow://` world links and `unstarted` world Tasks. Open for Jack at

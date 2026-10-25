@@ -282,16 +282,12 @@ One PR; deepest deletion first.
    it. `browser.back`/`browser.forward`/`browser.reload` act on the addressed web
    tab; only reload has a key (⌘R) because ⌘[/⌘] are `navigate.*`. No verb maps to
    them, so `VERB_ACTIONS` is unchanged.
-4. **One meaning for zoom — implemented 2026-10-24.** The same `state` reply
-   says `destination: zoomed` for a Dashboard member entered as full Work and
-   `zoomed: true` for a pane filling its Task (`pane.zoom`, Rex's `zoom`). An agent
-   reading the oracle cannot tell them apart by name. Rename the destination to
-   `entered {from, work}`, matching `dashboard.enter` and the text `ls` already
-   prints ("entered from"): Rust `DesktopDestination::Zoomed`, Swift
-   `DesktopDestination`/`WorkDestination.zoomed`, the inspection fixture and its
-   tests. Zoom then means only the pane. Done: wire kind `entered`;
-   `WorkModel.enter(_:from:)`/`enterTile` replace `zoom(into:)`/`zoomTile`; the
-   tile-growth transition (`ZoomFromTile`, `zoomOrigin`) keeps its visual name.
+4. **One meaning for zoom — implemented 2026-10-24.** A Dashboard member entered
+   as full Work reads `destination: entered {from, work}` (wire kind `entered`),
+   matching `dashboard.enter` and `ls`'s "entered from"; `zoomed` now means only a
+   pane filling its Task (`pane.zoom`, Rex's `zoom`). `WorkModel.enter(_:from:)`/
+   `enterTile` replaced `zoom(into:)`/`zoomTile`; the tile-growth transition
+   (`ZoomFromTile`, `zoomOrigin`) keeps its visual name.
 5. **Demo on Dev** (Jack).
 
 ## Done when

@@ -29,6 +29,7 @@ mod graph_inventory;
 mod linear_migration_tests;
 
 mod linear_team_checks;
+mod machine_records;
 mod metrics;
 pub(crate) mod planning_changes;
 pub(crate) mod planning_export;
@@ -43,7 +44,9 @@ pub(crate) mod project_content;
 mod project_rotation;
 pub(crate) mod project_selection;
 mod project_transitions;
+mod rentals;
 mod repositories;
+pub(crate) mod retention;
 mod revisions;
 mod scope_defaults;
 mod selections;
@@ -1201,6 +1204,63 @@ impl SqliteStore {
         Ok(accounts)
     }
 
+    /// Store a long-lived token on an existing account. False when no such account.
+    pub fn set_long_lived_token(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        token: &str,
+        minted_at: i64,
+    ) -> StoreResult<bool> {
+        let encrypted = token_crypto::encrypt_token(token).map_err(|error| {
+            StoreError::InvalidData(format!(
+                "failed to encrypt long-lived token for account '{account_id}': {error}"
+            ))
+        })?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE provider_accounts
+             SET long_lived_token = ?3, long_lived_token_minted_at = ?4, updated_at = ?5
+             WHERE provider = ?1 AND account_id = ?2",
+            params![
+                provider,
+                account_id.as_str(),
+                encrypted,
+                minted_at,
+                now_unix()
+            ],
+        )?;
+        Ok(changed == 1)
+    }
+
+    pub fn long_lived_token(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<Option<super::LongLivedToken>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row: Option<(Option<String>, Option<i64>)> = conn
+            .query_row(
+                "SELECT long_lived_token, long_lived_token_minted_at FROM provider_accounts
+                 WHERE provider = ?1 AND account_id = ?2",
+                params![provider, account_id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((Some(encrypted), Some(minted_at))) = row else {
+            return Ok(None);
+        };
+        let token = token_crypto::decrypt_token(&encrypted).map_err(|error| {
+            StoreError::InvalidData(format!(
+                "failed to decrypt long-lived token for account '{account_id}': {error}"
+            ))
+        })?;
+        Ok(Some(super::LongLivedToken {
+            token: secrecy::SecretString::new(token),
+            minted_at,
+        }))
+    }
+
     pub fn update_provider_account_lifecycle(&self, account: &ProviderAccount) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let changed = conn.execute(
@@ -2074,14 +2134,15 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
-                via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
+                via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
              ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
                 outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
              WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
             params![process.id,process.trace_id,process.parent_lf_process_id,process.command,process.repo,process.cwd,
                 process.started_at,process.via_agent,process.caller_session_id,process.caller_agent_process_id,
-                process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid],
+                process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid,
+                process.os_started_at],
         )?;
         Ok(())
     }

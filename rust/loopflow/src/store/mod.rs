@@ -596,6 +596,36 @@ impl Store {
         .await
     }
 
+    pub async fn set_long_lived_token(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        token: &secrecy::SecretString,
+        minted_at: i64,
+    ) -> StoreResult<bool> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        let token = token.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            use secrecy::ExposeSecret;
+            store.set_long_lived_token(&provider, &account_id, token.expose_secret(), minted_at)
+        })
+        .await
+    }
+
+    pub async fn long_lived_token(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<Option<LongLivedToken>> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.long_lived_token(&provider, &account_id)
+        })
+        .await
+    }
+
     pub async fn list_provider_accounts(
         &self,
         provider: Option<&str>,
@@ -910,6 +940,34 @@ pub(crate) enum ProviderTokenReplacement {
     Replaced,
     Changed(ProviderToken),
     Missing,
+}
+
+/// A subscription token for machines that cannot refresh a login: Claude's
+/// `setup-token`, approved once and valid about a year.
+#[derive(Debug, Clone)]
+pub struct LongLivedToken {
+    pub token: secrecy::SecretString,
+    pub minted_at: i64,
+}
+
+impl LongLivedToken {
+    /// Anthropic honors a `setup-token` for a year. A token supplied by hand
+    /// is dated from when lf stored it, since lf cannot read its mint date.
+    const LIFETIME_SECONDS: i64 = 365 * 24 * 60 * 60;
+
+    pub fn expires_at(&self) -> i64 {
+        self.minted_at + Self::LIFETIME_SECONDS
+    }
+
+    pub fn expires_on(&self) -> time::Date {
+        time::OffsetDateTime::from_unix_timestamp(self.expires_at())
+            .expect("a year after a stored unix time is representable")
+            .date()
+    }
+
+    pub fn is_current(&self, now: i64) -> bool {
+        now < self.expires_at()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -589,5 +589,13 @@ mod tests {
         );
         assert!(!stored.contains("\"flow\""), "{stored}");
         drop(conn);
+        let events = store.task_events_after(&task, 0).unwrap();
+        assert!(
+            events.iter().any(|event| matches!(
+                &event.kind,
+                crate::work::task::TaskEventKind::GraphFinished { graph, .. } if graph == "pursue"
+            )),
+            "{events:?}"
+        );
     }
 }

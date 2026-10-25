@@ -587,9 +587,9 @@ explicit client closes stay quiet. These observations never settle a turn.
 
 `lf connect` opens the repository, Wave or Task's ongoing conversation for this
 checkout, creating one when absent. `resume` is an exact alias. Explicit `--repo`,
-`--wave`, `--task`, or a Session ID overrides the checkout's scope. Unassociated
-linked checkouts require an explicit target; ordinary `lf` starts a conversation
-there. First creation uses the matching scope's session skill, including its
+`--wave`, `--task`, or a Session ID overrides the checkout's scope. An unassociated
+linked checkout continues the conversation last opened there; ordinary `lf`
+starts a new one. First creation uses the matching scope's session skill, including its
 operating instructions. Reopening keeps those instructions and native history.
 
 `connect --fresh` selects a new primary in the same scope and checkout. The previous
@@ -1037,6 +1037,11 @@ Only Dashboard query results compose Tasks side by side; ordinary navigation
 selects one destination. `state --json` includes the
 selected `view` plan, retained occurrences, hidden members and duplicate winners.
 Repository and Wave navigation still opens their ordinary conversations.
+
+`lf desktop` and `lf open` address the Desktop you run in: the app sets
+`LF_DESKTOP` to its bundle identifier on every child, so a Loopflow Dev shell
+reads and steers Dev. Elsewhere they address the installed app; set
+`LF_DESKTOP=com.loopflow.mac.dev` to reach Dev from an ordinary terminal.
 
 `desktop view --plan`, `query`, `pin`/`unpin`, `rename`, `arrange`, `slots`,
 `order` and `layout` work without macOS and print JSON. Plans contain

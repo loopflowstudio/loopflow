@@ -1337,12 +1337,32 @@ fn release_run_inner(
             commit
         } else if let Some(pr) = existing_pr {
             match pr.state.as_str() {
-                "MERGED" => pr.merge_commit.map(|commit| commit.oid).ok_or_else(|| {
-                    OpsError::Message(format!(
-                        "release PR #{} is merged but its merge commit is unavailable",
-                        pr.number
-                    ))
-                })?,
+                "MERGED" => {
+                    let release_commit =
+                        pr.merge_commit.map(|commit| commit.oid).ok_or_else(|| {
+                            OpsError::Message(format!(
+                                "release PR #{} is merged but its merge commit is unavailable",
+                                pr.number
+                            ))
+                        })?;
+                    // No candidate was built yet, so the version is unspent: corrections
+                    // merged after the release PR ship under the same version.
+                    let main_ref = format!("origin/{default_branch}");
+                    let current_main = run_stdout(&main_repo, "git", &["rev-parse", &main_ref])?;
+                    // A minor publishes its patch's exact snapshot, never a later main.
+                    if minor.is_none()
+                        && current_main != release_commit
+                        && is_ancestor(&main_repo, &release_commit, &current_main)
+                    {
+                        progress.status(&format!(
+                            "Release PR #{} merged at {release_commit}; building {main_ref} at {current_main} with the fixes merged since...",
+                            pr.number
+                        ));
+                        current_main
+                    } else {
+                        release_commit
+                    }
+                }
                 "OPEN" => {
                     let head_sha = pr.head_ref_oid.as_deref().ok_or_else(|| {
                         OpsError::Message(format!(
@@ -3471,6 +3491,28 @@ fn promote_unreleased_dir(repo: &Path, version: &str) -> OpsResult<()> {
         let entry = entry?;
         let dest = target.join(entry.file_name());
         if dest.exists() {
+            let incoming = fs::read_to_string(entry.path())?;
+            let existing = fs::read_to_string(&dest)?;
+            if incoming == existing {
+                fs::remove_file(entry.path())?;
+                continue;
+            }
+            // A repair cut under the same version adds its own compatibility lines.
+            if entry.file_name() == "BREAKING.md" {
+                let mut merged = existing.clone();
+                for line in incoming.lines() {
+                    if !existing.lines().any(|known| known == line) {
+                        if !merged.is_empty() && !merged.ends_with('\n') {
+                            merged.push('\n');
+                        }
+                        merged.push_str(line);
+                        merged.push('\n');
+                    }
+                }
+                write_atomic(&dest, merged.as_bytes())?;
+                fs::remove_file(entry.path())?;
+                continue;
+            }
             return Err(OpsError::Message(format!(
                 "cannot promote {}: {} already exists",
                 entry.path().display(),
@@ -5202,6 +5244,14 @@ fn run_release_hooks(
     Ok(())
 }
 
+fn is_ancestor(repo: &Path, ancestor: &str, descendant: &str) -> bool {
+    Command::new("git")
+        .args(["merge-base", "--is-ancestor", ancestor, descendant])
+        .current_dir(repo)
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 fn run_stdout(repo: &Path, command: &str, args: &[&str]) -> OpsResult<String> {
     let mut cmd = Command::new(command);
     cmd.args(args).current_dir(repo);
@@ -5873,6 +5923,30 @@ version = "2.0.0"
         assert_eq!(
             fs::read_to_string(version_dir.join("NOTES.md")).unwrap(),
             "backfilled notes",
+        );
+    }
+
+    #[test]
+    fn promote_unreleased_appends_a_repair_cuts_breaking_lines() {
+        let tmp = tempfile::tempdir().unwrap();
+        let unreleased = tmp.path().join("release").join("unreleased");
+        fs::create_dir_all(&unreleased).unwrap();
+        fs::write(
+            unreleased.join("BREAKING.md"),
+            "floor raised by b\nfloor raised by a\n",
+        )
+        .unwrap();
+
+        let version_dir = tmp.path().join("release").join("v0.9.10");
+        fs::create_dir_all(&version_dir).unwrap();
+        fs::write(version_dir.join("BREAKING.md"), "floor raised by a\n").unwrap();
+
+        promote_unreleased_dir(tmp.path(), "0.9.10").unwrap();
+
+        assert!(!unreleased.exists());
+        assert_eq!(
+            fs::read_to_string(version_dir.join("BREAKING.md")).unwrap(),
+            "floor raised by a\nfloor raised by b\n",
         );
     }
 

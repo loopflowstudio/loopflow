@@ -281,7 +281,7 @@ fn nonblocking(fd: RawFd) -> io::Result<()> {
     Ok(())
 }
 
-fn terminal_pair() -> io::Result<(File, File)> {
+pub(crate) fn terminal_pair() -> io::Result<(File, File)> {
     let mut master = -1;
     let mut slave = -1;
     let mut size = libc::winsize {
@@ -322,7 +322,7 @@ fn dimensions(rows: u16, cols: u16) -> (u16, u16) {
     )
 }
 
-fn resize(fd: RawFd, rows: u16, cols: u16) -> io::Result<()> {
+pub(crate) fn resize(fd: RawFd, rows: u16, cols: u16) -> io::Result<()> {
     let size = libc::winsize {
         ws_row: rows,
         ws_col: cols,

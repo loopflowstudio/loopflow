@@ -209,6 +209,43 @@ impl Cli {
         }
     }
 
+    /// Whether this invocation becomes a Process row. Provider hooks run once
+    /// per agent turn and Desktop polls once per refresh; nothing references
+    /// them, so recording each would make them most of the store. Previews,
+    /// planning and location reads, and hooks an earlier lf left behind are
+    /// effect-free reads too.
+    pub fn records_process(&self) -> bool {
+        if self.context || self.explain {
+            return false;
+        }
+        match &self.command {
+            Some(Commands::ContextBlock { .. }) => false,
+            Some(Commands::External(parts)) => !parts[0].starts_with("__"),
+            Some(Commands::Task { cmd }) => !matches!(
+                cmd,
+                TaskCommand::File { .. }
+                    | TaskCommand::Files { .. }
+                    | TaskCommand::Diff { .. }
+                    | TaskCommand::Location { .. }
+                    | TaskCommand::WatchFiles { .. }
+            ),
+            Some(Commands::Wave { cmd }) => !matches!(
+                cmd,
+                WaveCommand::Show { .. }
+                    | WaveCommand::Workflow {
+                        cmd: WaveWorkflowCommand::List { .. }
+                            | WaveWorkflowCommand::Show { .. }
+                            | WaveWorkflowCommand::Source { .. }
+                    }
+            ),
+            Some(Commands::Desktop { cmd }) => !matches!(
+                cmd,
+                DesktopCommand::View { .. } | DesktopCommand::Layout { save: false, .. }
+            ),
+            _ => true,
+        }
+    }
+
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(mut self) -> Result<Self, clap::Error> {
@@ -522,6 +559,16 @@ pub enum Commands {
     Machine {
         #[command(subcommand)]
         cmd: MachineCommand,
+    },
+    /// Group machines you own; a pool takes new work only on a free machine
+    Pool {
+        #[command(subcommand)]
+        cmd: PoolCommand,
+    },
+    /// Rent machines from a provider within a limit and an hourly price
+    Ondemand {
+        #[command(subcommand)]
+        cmd: OndemandCommand,
     },
     /// Bridge new Discord messages to finite Wave Sessions
     Discord {
@@ -1314,6 +1361,15 @@ pub enum TaskCommand {
         /// Direction for this run, published to the Task
         #[arg(long)]
         reason: Option<String>,
+        /// Run on a free machine you own in this pool
+        #[arg(long)]
+        pool: Option<String>,
+        /// Rent a machine from this on-demand (after `--pool`, only when none is free)
+        #[arg(long)]
+        rent: Option<String>,
+        /// Print where it would run and the most it could cost; run nothing
+        #[arg(long)]
+        quote: bool,
     },
     /// Complete a Task without moving its Workflow
     Complete {
@@ -2129,6 +2185,15 @@ pub enum MachineCommand {
         target: String,
         #[arg(long)]
         label: Option<String>,
+        /// The pool of machines you own it joins
+        #[arg(long)]
+        pool: Option<String>,
+        /// What it cost you, committed when added
+        #[arg(long, value_name = "USD")]
+        cost_usd: Option<crate::rental::Usd>,
+        /// After this RFC 3339 time it takes no new work
+        #[arg(long, value_name = "RFC3339")]
+        expires_at: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -2175,6 +2240,90 @@ pub enum MachineCommand {
     Rename { label: String, name: String },
     /// Forget a connection without touching remote work
     Remove { label: String },
+    /// Give a rented machine back now: copy its records, then delete it
+    End {
+        label: String,
+        /// Delete even though it holds unpushed work, which is lost
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PoolCommand {
+    /// Name a pool of machines you own
+    Add { name: String },
+    /// Each pool's machines, cost, expiry and what they hold
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Take no new work; what the pool holds stays
+    Off { name: String },
+    /// Take new work again
+    On { name: String },
+    /// Forget a pool; its machines stay added
+    Remove { name: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum OndemandCommand {
+    /// Name what to rent and the most it may cost
+    Add {
+        name: String,
+        #[arg(long, value_enum)]
+        provider: crate::rental::Provider,
+        /// A GPU type; without one, the cheapest CPU pod covering vCPUs and memory
+        #[arg(long)]
+        gpu: Option<String>,
+        #[arg(long)]
+        vcpus: u32,
+        #[arg(long)]
+        memory_gb: u32,
+        #[arg(long)]
+        disk_gb: Option<u32>,
+        /// Image, pinned by digest when added (default: RunPod's stock Ubuntu)
+        #[arg(long)]
+        image: Option<String>,
+        /// A data center (US-IL-1) or a region prefix (US); rents where it is in stock
+        #[arg(long)]
+        data_center: Option<String>,
+        /// Hard deadline for each machine it rents
+        #[arg(long, default_value_t = crate::rental::DEFAULT_HOURS)]
+        hours: f64,
+        /// Machines rented at once
+        #[arg(long)]
+        max: u32,
+        /// Above this hourly price nothing is rented
+        #[arg(long, value_name = "USD")]
+        max_usd_per_hour: crate::rental::Usd,
+    },
+    /// Templates, budgets and the machines each has rented
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// What it would rent now and at what price; rents nothing
+    Availability {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Change how many machines it rents at once; current machines stay
+    Max { name: String, max: u32 },
+    /// Rent a machine by hand; it lasts until its hours, its cap or `lf machine end`
+    Rent {
+        name: String,
+        #[arg(long)]
+        hours: Option<f64>,
+        /// Spend at most this much on it
+        #[arg(long, value_name = "USD")]
+        max_usd: Option<crate::rental::Usd>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Forget it; its rentals' history stays
+    Remove { name: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2234,6 +2383,17 @@ pub enum AccountCommand {
         chrome_profile: Vec<String>,
         #[arg(long)]
         clear_chrome_profiles: bool,
+    },
+    /// Store a long-lived Claude token for rented machines: mint it with
+    /// `claude setup-token` in the account's Chrome profile, or read one minted
+    /// by hand from --file (`-` for stdin)
+    Token {
+        provider: String,
+        email: String,
+        #[arg(long)]
+        file: Option<PathBuf>,
+        #[arg(long, conflicts_with = "file")]
+        chrome_profile: Option<String>,
     },
     /// Spend one banked Codex reset for this named login
     RedeemReset {

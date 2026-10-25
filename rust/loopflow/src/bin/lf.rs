@@ -942,6 +942,10 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     .errors
                     .push(format!("AgentProcess settlement: {error}")),
             }
+            // Rented machines whose work drained, or whose soft deadline came, go back.
+            if let Err(error) = loopflow::lf::commands::rental::check() {
+                result.errors.push(format!("Rentals: {error:#}"));
+            }
             if *json {
                 println!("{}", serde_json::to_string(&result)?);
             }
@@ -1078,6 +1082,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     }
                     if let Some(ownership) = &status.ownership {
                         println!("{}", loopflow::ops::task_ownership::render(ownership));
+                    }
+                    for session in loopflow::ops::task::task_copied_sessions(&task.id)? {
+                        println!(
+                            "Session {} from {}: {}",
+                            session.id,
+                            session.origin_name(),
+                            session.title
+                        );
                     }
                 } else {
                     println!("No saved Task; retained observations are not Work.");
@@ -1523,7 +1535,7 @@ fn run() -> anyhow::Result<()> {
                     cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
                 })
             );
-        if preview {
+        if !cli.records_process() {
             journal::mark_effect_free_read();
         }
         // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
@@ -1562,6 +1574,9 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
+    if !cli.records_process() {
+        journal::mark_effect_free_read();
+    }
     // Provider hooks keep the callbacks their launching lf wrote. A removed
     // one must not fail: Claude treats exit 2 at Stop as "keep working".
     if let Some(Commands::External(parts)) = &cli.command {
@@ -1631,9 +1646,6 @@ fn run() -> anyhow::Result<()> {
         })
     );
     let desktop_read = desktop_intent_read(&cli);
-    if cli.context || cli.explain || planning_read || location_read || desktop_read {
-        journal::mark_effect_free_read();
-    }
     init_tracing(cli.verbose);
     validate_desktop_platform(&cli)?;
     let _selected_repo_cwd = cli
@@ -2274,6 +2286,36 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             }
         });
     }
+    // Placement chooses or rents the Machine and hands the Task to it; the
+    // ordinary dispatch below then forwards the run to its new owner.
+    if let Some(Commands::Task {
+        cmd:
+            TaskCommand::Run {
+                issue,
+                pool,
+                rent,
+                quote,
+                ..
+            },
+    }) = &cli.command
+    {
+        if pool.is_some() || rent.is_some() || *quote {
+            let issue = issue
+                .as_deref()
+                .or(cli.task.as_deref())
+                .context("No Task selected")?;
+            let directory = loopflow::repo::working_directory()?;
+            let repo = selected_task_repository(&cli, &directory, Some(issue))?;
+            let placement = loopflow::lf::commands::rental::Placement {
+                pool: pool.as_deref(),
+                rent: rent.as_deref(),
+                quote: *quote,
+            };
+            if loopflow::lf::commands::rental::place(&repo, issue, &placement, cli.batch)? {
+                return Ok(());
+            }
+        }
+    }
     if loopflow::lf::commands::work_route::dispatch(&cli, args)? {
         return Ok(());
     }
@@ -2330,6 +2372,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 stack_on,
                 directive,
                 reason,
+                ..
             },
     }) = &cli.command
     {
@@ -2535,6 +2578,10 @@ fn execute_command(
             loopflow::lf::commands::machine_use::run(repo, cmd)
         }),
         Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
+        Some(Commands::Pool { cmd }) => loopflow::lf::commands::rental::run_pool(cmd),
+        Some(Commands::Ondemand { cmd }) => {
+            loopflow::lf::commands::rental::run_ondemand(cmd, cli.batch)
+        }
         Some(Commands::Self_ {
             cmd:
                 loopflow::lf::SelfCommand::SyncSkills {

@@ -16,6 +16,7 @@
       "routing": "automatic",
       "cooldown_until": null,
       "expires_at": null,
+      "long_lived_token_expires_at": 1810000000,
       "windows": [
         {
           "provider": "claude",
@@ -59,6 +60,7 @@
       "routing": "automatic",
       "cooldown_until": null,
       "expires_at": null,
+      "long_lived_token_expires_at": null,
       "windows": [],
       "verified_windows": [],
       "reset_credits": {
@@ -92,6 +94,7 @@
       "routing": "automatic",
       "cooldown_until": null,
       "expires_at": null,
+      "long_lived_token_expires_at": 1790000000,
       "windows": [],
       "verified_windows": [],
       "reset_credits": null
@@ -112,6 +115,7 @@
       "routing": "automatic",
       "cooldown_until": null,
       "expires_at": null,
+      "long_lived_token_expires_at": null,
       "windows": [],
       "verified_windows": [],
       "reset_credits": null
@@ -132,6 +136,7 @@
       "routing": "explicit_only",
       "cooldown_until": 1800000300,
       "expires_at": null,
+      "long_lived_token_expires_at": null,
       "windows": [
         {
           "provider": "claude",
@@ -163,6 +168,7 @@
       "routing": null,
       "cooldown_until": null,
       "expires_at": 1790000000,
+      "long_lived_token_expires_at": null,
       "windows": [],
       "verified_windows": [],
       "reset_credits": null
@@ -183,6 +189,7 @@
       "routing": null,
       "cooldown_until": null,
       "expires_at": null,
+      "long_lived_token_expires_at": null,
       "windows": [],
       "verified_windows": [],
       "reset_credits": null

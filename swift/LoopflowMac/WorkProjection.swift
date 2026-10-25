@@ -269,7 +269,12 @@ final class WorkNavigation {
         /// The default Dashboard: the Working Tasks plan as a grid of slots.
         case workingTasks
         /// One Dashboard member shown as full Work; the trail returns through its Dashboard.
-        case zoomed(dashboard: String, work: WorkReference)
+        case zoomed(from: Board, work: WorkReference)
+    }
+    /// A Dashboard a member can be zoomed from: a saved one or Working Tasks.
+    enum Board: Equatable {
+        case saved(String)
+        case workingTasks
     }
     static let workingTasksTitle = "Working Tasks"
     var destination: Destination = .work(nil)
@@ -293,12 +298,17 @@ final class WorkNavigation {
         if case .dashboard(let id) = destination { return id }; return nil
     }
     /// The Dashboard the breadcrumb passes through, shown or zoomed from.
-    var trailDashboardID: String? {
+    var trailBoard: Board? {
         switch destination {
-        case .dashboard(let id), .zoomed(let id, _): id
-        case .work, .view, .workingTasks: nil
+        case .dashboard(let id): .saved(id)
+        case .workingTasks: .workingTasks
+        case .zoomed(let board, _): board
+        case .work, .view: nil
         }
     }
+    /// Where the zoomed member's tile sat, in `ZoomFromTile.space`; read once
+    /// by the transition that grows the full Work out of it.
+    @ObservationIgnored var zoomOrigin: CGRect?
     /// Repository-local visits; nil names the repository conversation.
     var backStack: [Destination] = []
     var forwardStack: [Destination] = []
@@ -310,7 +320,9 @@ final class WorkNavigation {
         showsNavigator.toggle()
     }
     var sidebarWidth: CGFloat = 240
-    var sidebarScrollOffset: CGFloat = 0
+    /// Restores the sidebar when it is rebuilt. Written every scrolled frame, so
+    /// unobserved: tracking it re-rendered every sidebar row per frame.
+    @ObservationIgnored var sidebarScrollOffset: CGFloat = 0
 
     func resizeSidebar(_ width: CGFloat, availableWidth: CGFloat) {
         sidebarWidth = min(600, max(240, min(width, availableWidth - 360)))

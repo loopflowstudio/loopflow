@@ -111,6 +111,14 @@ struct LoopflowApp: App {
                 }
             }
 
+            if RenderFlash.available {
+                CommandMenu("Debug") {
+                    Toggle("Flash Re-renders", isOn: Binding(
+                        get: { RenderFlash.shared.enabled }, set: { RenderFlash.shared.setEnabled($0) }))
+                        .keyboardShortcut("r", modifiers: [.command, .option, .control])
+                }
+            }
+
             CommandMenu("Go") {
                 Button("Portfolio") {
                     openWindow(id: "portfolio")

@@ -639,6 +639,18 @@ Edit account configuration or remembered browser choices
 | `--clear-chrome-profiles` | clear chrome profiles Default: false. |
 | `--help / -h` | Print help |
 
+## lf account token
+
+Store a long-lived Claude token for rented machines: mint it with `claude setup-token` in the account's Chrome profile, or read one minted by hand from --file (`-` for stdin)
+
+| Argument | What it does |
+|---|---|
+| `<provider>` | provider |
+| `<email>` | email |
+| `--file` | file |
+| `--chrome-profile` | chrome profile |
+| `--help / -h` | Print help |
+
 ## lf account redeem-reset
 
 Spend one banked Codex reset for this named login
@@ -1360,6 +1372,9 @@ Discover a remote machine and save its SSH destination
 |---|---|
 | `<target>` | target |
 | `--label` | label |
+| `--pool` | The pool of machines you own it joins |
+| `--cost-usd` | What it cost you, committed when added |
+| `--expires-at` | After this RFC 3339 time it takes no new work |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1415,6 +1430,146 @@ Forget a connection without touching remote work
 | Argument | What it does |
 |---|---|
 | `<label>` | label |
+| `--help / -h` | Print help |
+
+## lf machine end
+
+Give a rented machine back now: copy its records, then delete it
+
+| Argument | What it does |
+|---|---|
+| `<label>` | label |
+| `--force` | Delete even though it holds unpushed work, which is lost Default: false. |
+| `--help / -h` | Print help |
+
+## lf pool
+
+Group machines you own; a pool takes new work only on a free machine
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf pool add
+
+Name a pool of machines you own
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf pool list
+
+Each pool's machines, cost, expiry and what they hold
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf pool off
+
+Take no new work; what the pool holds stays
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf pool on
+
+Take new work again
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf pool remove
+
+Forget a pool; its machines stay added
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf ondemand
+
+Rent machines from a provider within a limit and an hourly price
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf ondemand add
+
+Name what to rent and the most it may cost
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--provider` | provider |
+| `--gpu` | A GPU type; without one, the cheapest CPU pod covering vCPUs and memory |
+| `--vcpus` | vcpus |
+| `--memory-gb` | memory gb |
+| `--disk-gb` | disk gb |
+| `--image` | Image, pinned by digest when added (default: RunPod's stock Ubuntu) |
+| `--data-center` | A data center (US-IL-1) or a region prefix (US); rents where it is in stock |
+| `--hours` | Hard deadline for each machine it rents Default: 4. |
+| `--max` | Machines rented at once |
+| `--max-usd-per-hour` | Above this hourly price nothing is rented |
+| `--help / -h` | Print help |
+
+## lf ondemand list
+
+Templates, budgets and the machines each has rented
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf ondemand availability
+
+What it would rent now and at what price; rents nothing
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf ondemand max
+
+Change how many machines it rents at once; current machines stay
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `<max>` | max |
+| `--help / -h` | Print help |
+
+## lf ondemand rent
+
+Rent a machine by hand; it lasts until its hours, its cap or `lf machine end`
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--hours` | hours |
+| `--max-usd` | Spend at most this much on it |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf ondemand remove
+
+Forget it; its rentals' history stays
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
 | `--help / -h` | Print help |
 
 ## lf discord
@@ -1850,6 +2005,9 @@ Place a Task's worktree, then run a Graph there like `lf --task ISSUE graph GRAP
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
 | `--reason` | Direction for this run, published to the Task |
+| `--pool` | Run on a free machine you own in this pool |
+| `--rent` | Rent a machine from this on-demand (after `--pool`, only when none is free) |
+| `--quote` | Print where it would run and the most it could cost; run nothing Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task complete
@@ -2192,6 +2350,15 @@ Launch a new execution from an immutable captured provider request
 | Argument | What it does |
 |---|---|
 | `<run>` | Captured input identity or an unambiguous displayed prefix |
+| `--help / -h` | Print help |
+
+## lf history export
+
+Write this Machine's Sessions, Processes and captures as JSON lines, for the Machine that copies them before giving this one back
+
+| Argument | What it does |
+|---|---|
+| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start |
 | `--help / -h` | Print help |
 
 ## lf graph

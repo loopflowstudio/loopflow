@@ -48,7 +48,10 @@ probe duplicates that check. Launch retains its sender probe and credential
 preparation. `--context`/`--explain` skip both, and neither side admits a Process.
 Names and paths resolve at the destination. Missing or changed identity fails without
 initialization, repair or local fallback. `lf machine connect mini <provider> [email]` installs a separate
-login through SSH stdin; account-selected launches connect missing logins in the
+login through SSH stdin. Claude's is the account's long-lived subscription token
+(`lf account token claude <email>`, minted on first use in a foreground run):
+it cannot refresh, so no machine rotates another's login, and it cannot read
+its profile, so the receiving machine registers the identity the sender asserts; account-selected launches connect missing logins in the
 foreground. See [subscriptions](../subscriptions.md#use-subscriptions-over-ssh).
 
 Remove forgets the connection without contacting the remote. Historical machine
@@ -218,6 +221,45 @@ when ownership changes; no process or checkout is moved. Status, file access
 and checkout-based Session/Process membership use that location. Unknown historical
 Machines stay unknown, and file access cannot treat their paths as local. Explicit
 Session bindings retain membership independently of checkout location.
+
+## Own and rent Machines
+
+A **pool** names machines you own (`machines.pool`, with `cost_usd` and
+`expires_at`); it knows no provider. An **on-demand** (`ondemands`) is a provider
+template and a budget: machines at once and the most per hour. They share one
+namespace. A **rental** (`rentals`, `rent_…` ids) is one paid window: hardware,
+price, cap, deadline, state and billed cost, separate from the Machine it
+becomes once reachable. Task execution never learns a Machine is rented.
+
+`lf task run --pool P` hands the Task to the first machine in P that holds no
+unfinished Task and has not expired; there is no queue. `--rent R` admits
+(limit, stock, price), writes the rental as `requested` with its provider name
+`lf-<id>` before the create, creates once, waits for SSH, adds the Machine,
+forwards GitHub and installs every Claude account's long-lived token, clones
+and binds the repository, then hands off. An unanswered create is `unconfirmed` until the inventory shows the name
+(adopt) or the create's window passes (`lost`); it is never resent.
+The pod installs the published `lf`; with `LF_RENT_LINUX_BIN` naming a Linux
+build, boot instead waits for the laptop to upload that binary, so a development
+build rents pods running its own code.
+
+The pod's start command runs the standard-library guardian first
+(`rust/loopflow/src/rental/guardian.py`): it deletes the pod at its deadline,
+or sooner when its cap runs out at the charged price, with the pod-scoped key.
+The laptop gives back by drain (Task rentals), soft deadline (15 minutes
+before the hard one) or `lf machine end`; any of them refuses while the pod
+holds uncommitted or unpushed work. Owned machines are never deleted.
+
+Before it deletes, the laptop pulls `lf history export --since <rental start>`:
+the worker's Process, Session, session-event and Graph rows as JSON lines, origin
+first, plus capture files. They land in `machine_records` keyed by origin and
+row, and captures under `~/.lf/machines/<origin>/runs`, never in this Machine's
+own tables, so no reconciler, attachment or Task judgment acts on a copy. An
+export from any Machine but the one expected is refused; a failed copy deletes
+nothing. `lf session list` and `lf task status` name copies "from <machine>"
+after the pod is gone, and `lf history show <session>` opens one. The give-back
+pass runs at the end of a forwarded `lf task run` for its rented Machine and in
+the scheduled `lf task reconcile` for every rental; `lf ondemand list` only
+refreshes provider state and never ends a machine.
 
 ## Process topology
 

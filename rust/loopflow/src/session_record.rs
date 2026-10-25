@@ -23,7 +23,7 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::chat::types::{ConversationEvent, ItemDelta, TurnUsage};
+use crate::chat::types::{ConversationEvent, TurnUsage};
 use crate::naming::generated_session_title;
 use crate::store::{StoreError, StoreResult};
 
@@ -446,137 +446,228 @@ impl SessionHistory {
     }
 }
 
-/// The part of one capture's event stream that SQLite history has yet to keep.
+/// A gap between consecutive provider events long enough to count as a silence.
+pub(crate) const SILENCE_SECONDS: i64 = 600;
+
+/// What SQLite history keeps of one capture's stream. `events.jsonl` holds
+/// every event verbatim; history keeps the facts its readers use: attempts,
+/// accounts, provider sessions, usage, how each turn ended, and each silence
+/// longer than [`SILENCE_SECONDS`]. Provider text already lives in the
+/// provider's own transcript.
 ///
-/// `events.jsonl` holds every provider increment verbatim. History keeps what
-/// the increments add up to: a run of deltas becomes one event at the first
-/// delta's position, a Turn's cumulative diff is kept once, and the raw
-/// notification behind each increment stays in the file alone. Storing one row
-/// per streamed token made increments two thirds of all history rows.
-/// A process that dies mid-run leaves that run in the file only.
+/// A usage stream is cumulative, so history keeps one row per stream and turn
+/// at its first event's position; the store merges each later observation in.
 #[derive(Debug, Default)]
-struct StreamedHistory {
-    run: Option<EventEnvelope>,
-    diff: Option<EventEnvelope>,
+struct RetainedHistory {
+    previous: Option<OffsetDateTime>,
+    usage_streams: HashMap<String, u64>,
 }
 
-impl StreamedHistory {
-    /// The events history keeps now that `event` has arrived. Readers order
-    /// history by capture position, so a held event may be kept late.
-    fn admit(&mut self, event: EventEnvelope) -> Vec<EventEnvelope> {
-        let conversation = match &event.event {
-            CaptureEvent::ProviderOutput { stream, line }
-                if stream == "notification" && is_provider_increment(line) =>
-            {
-                return Vec::new();
-            }
-            CaptureEvent::Conversation { event } => Some(&**event),
-            _ => None,
+impl RetainedHistory {
+    /// The observations `event` adds, as `(source, evidence)` at its time.
+    fn admit(&mut self, event: &EventEnvelope) -> Vec<(String, serde_json::Value)> {
+        let at = event.observed_at;
+        let silence = self
+            .previous
+            .replace(at)
+            .filter(|since| (at - *since).whole_seconds() > SILENCE_SECONDS)
+            .map(|since| {
+                (
+                    format!("silence:{}", event.seq),
+                    serde_json::json!({"since": since.unix_timestamp(), "observed_at": at.unix_timestamp()}),
+                )
+            });
+        let position = match &event.event {
+            CaptureEvent::Usage {
+                provider,
+                attempt_key,
+                turn_key,
+                usage_stream_id,
+                ..
+            } => *self
+                .usage_streams
+                .entry(identity([provider, attempt_key, turn_key, usage_stream_id]))
+                .or_insert(event.seq),
+            _ => event.seq,
         };
-        match conversation {
-            Some(ConversationEvent::DiffUpdated { turn_id, .. }) => {
-                let earlier_turn = self
-                    .diff
-                    .take()
-                    .filter(|held| diff_turn(held) != Some(turn_id));
-                self.diff = Some(event);
-                earlier_turn.into_iter().collect()
-            }
-            Some(
-                increment @ (ConversationEvent::TextDelta { .. }
-                | ConversationEvent::ReasoningDelta { .. }
-                | ConversationEvent::ItemUpdated { .. }),
-            ) => {
-                if self
-                    .run
-                    .as_mut()
-                    .is_some_and(|run| extend_run(run, increment))
-                {
-                    return Vec::new();
+        let fact = retained_in_history(&event.event)
+            .then(|| (format!("events.jsonl:{position}"), serde_json::json!(event)));
+        silence.into_iter().chain(fact).collect()
+    }
+}
+
+/// What one retained usage row measures: a provider's stream within one
+/// attempt's turn. A provider can continue one stream across turns.
+pub(crate) fn usage_identity(evidence: &serde_json::Value) -> Option<String> {
+    (evidence["type"] == "usage").then(|| {
+        identity(
+            ["provider", "attempt_key", "turn_key", "usage_stream_id"]
+                .map(|field| evidence[field].as_str().unwrap_or_default()),
+        )
+    })
+}
+
+fn identity(parts: [&str; 4]) -> String {
+    parts.join("\u{0}")
+}
+
+/// Merge a later observation of one usage stream into the retained one, as
+/// `{input_id, source, evidence}` observations. The reducer reads each stream's
+/// counters as their maximum, so the merged row keeps exactly what every
+/// observation added. `None` when either is not usage of the same
+/// [`usage_identity`].
+pub(crate) fn merge_usage_observation(
+    saved: &serde_json::Value,
+    later: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let read = |observation: &serde_json::Value| {
+        serde_json::from_value::<EventEnvelope>(observation["evidence"].clone()).ok()
+    };
+    let identity = usage_identity(&saved["evidence"])?;
+    if usage_identity(&later["evidence"])? != identity {
+        return None;
+    }
+    let (mut kept, next) = (read(saved)?, read(later)?);
+    let (
+        CaptureEvent::Usage {
+            model,
+            observation_seq,
+            start_known,
+            final_receipt,
+            usage,
+            ..
+        },
+        CaptureEvent::Usage {
+            model: next_model,
+            observation_seq: next_seq,
+            start_known: next_start_known,
+            final_receipt: next_final,
+            usage: next_usage,
+            ..
+        },
+    ) = (&mut kept.event, next.event)
+    else {
+        return None;
+    };
+    let max = |kept: &mut Option<u64>, next: Option<u64>| *kept = (*kept).max(next);
+    max(&mut usage.input_tokens, next_usage.input_tokens);
+    max(&mut usage.output_tokens, next_usage.output_tokens);
+    max(&mut usage.total_input_tokens, next_usage.total_input_tokens);
+    max(&mut usage.peak_input_tokens, next_usage.peak_input_tokens);
+    max(
+        &mut usage.context_window_tokens,
+        next_usage.context_window_tokens,
+    );
+    max(&mut usage.reasoning_tokens, next_usage.reasoning_tokens);
+    max(&mut usage.cache_read_tokens, next_usage.cache_read_tokens);
+    max(&mut usage.cache_write_tokens, next_usage.cache_write_tokens);
+    usage.cost_usd = match (usage.cost_usd, next_usage.cost_usd) {
+        (Some(kept), Some(next)) => Some(kept.max(next)),
+        (kept, next) => kept.or(next),
+    };
+    if next_usage.model.is_some() {
+        usage.model = next_usage.model;
+    }
+    if next_model.is_some() {
+        *model = next_model;
+    }
+    *observation_seq = (*observation_seq).max(next_seq);
+    *start_known &= next_start_known;
+    *final_receipt |= next_final;
+    kept.observed_at = kept.observed_at.max(next.observed_at);
+    let mut merged = saved.clone();
+    merged["evidence"] = serde_json::json!(kept);
+    Some(merged)
+}
+
+/// The key of a native usage receipt within its turn. OpenCode reports one
+/// counter per assistant message; every other provider one per turn.
+pub(crate) fn native_usage_key(payload: &serde_json::Value) -> String {
+    match payload["provider"].as_str() {
+        Some("opencode") => payload["message"]["id"].as_str().unwrap_or_default().into(),
+        _ => String::new(),
+    }
+}
+
+/// The key of native usage receipts that arrived after the thread's next turn
+/// began at `started`.
+pub(crate) fn late_usage_key(key: &str, started: i64) -> String {
+    format!("{key}:after:{started}")
+}
+
+/// Merge a later native usage receipt into the retained one. Codex reports
+/// thread-cumulative `total` and the latest request as `last`: the turn keeps
+/// its first receipt's baseline (`total - last`), the largest total of each
+/// counter, whether any counter ever went backwards, and its largest request.
+/// Other providers report the turn's or message's own cumulative counter.
+pub(crate) fn merge_native_usage(
+    saved: &serde_json::Value,
+    later: &serde_json::Value,
+) -> serde_json::Value {
+    let mut merged = later.clone();
+    if later.get("total").is_some() {
+        merged["baseline"] = native_baseline(saved);
+        merged["peakInputTokens"] = native_peak(saved).max(native_peak(later)).into();
+        let mut regressed = saved["regressed"] == true;
+        if let Some(totals) = merged["total"].as_object_mut() {
+            for (key, total) in totals {
+                if let Some(saved) = saved["total"][key.as_str()].as_u64() {
+                    regressed |= total.as_u64().is_some_and(|later| later < saved);
+                    *total = total
+                        .as_u64()
+                        .map_or(saved, |later| later.max(saved))
+                        .into();
                 }
-                self.run.replace(event).into_iter().collect()
             }
-            Some(ConversationEvent::TurnCompleted { .. }) => {
-                let mut kept = self.settle();
-                kept.push(event);
-                kept
-            }
-            _ => self.run.take().into_iter().chain([event]).collect(),
+        }
+        if regressed {
+            merged["regressed"] = true.into();
         }
     }
-
-    /// Everything still held.
-    fn settle(&mut self) -> Vec<EventEnvelope> {
-        self.run
-            .take()
-            .into_iter()
-            .chain(self.diff.take())
-            .collect()
+    if saved["final"] == true {
+        merged["final"] = true.into();
     }
+    merged
 }
 
-fn diff_turn(held: &EventEnvelope) -> Option<&String> {
-    match &held.event {
-        CaptureEvent::Conversation { event } => match &**event {
-            ConversationEvent::DiffUpdated { turn_id, .. } => Some(turn_id),
-            _ => None,
-        },
-        _ => None,
+/// Codex counters before the turn's first request.
+fn native_baseline(receipt: &serde_json::Value) -> serde_json::Value {
+    if receipt["baseline"].is_object() {
+        return receipt["baseline"].clone();
     }
+    let total = receipt["total"].as_object().into_iter().flatten();
+    total
+        .filter_map(|(key, value)| {
+            let before = value
+                .as_u64()?
+                .checked_sub(receipt["last"][key].as_u64()?)?;
+            Some((key.clone(), serde_json::json!(before)))
+        })
+        .collect::<serde_json::Map<_, _>>()
+        .into()
 }
 
-fn extend_run(run: &mut EventEnvelope, increment: &ConversationEvent) -> bool {
-    let CaptureEvent::Conversation { event } = &mut run.event else {
-        return false;
-    };
-    match (&mut **event, increment) {
-        (
-            ConversationEvent::TextDelta { turn_id, content },
-            ConversationEvent::TextDelta {
-                turn_id: turn,
-                content: more,
-            },
-        )
-        | (
-            ConversationEvent::ReasoningDelta { turn_id, content },
-            ConversationEvent::ReasoningDelta {
-                turn_id: turn,
-                content: more,
-            },
-        ) if turn_id == turn => content.push_str(more),
-        (
-            ConversationEvent::ItemUpdated {
-                turn_id,
-                item_id,
-                data,
-            },
-            ConversationEvent::ItemUpdated {
-                turn_id: turn,
-                item_id: item,
-                data: more,
-            },
-        ) if turn_id == turn && item_id == item => match (data, more) {
-            (ItemDelta::Output { content }, ItemDelta::Output { content: more })
-            | (ItemDelta::PlanText { content }, ItemDelta::PlanText { content: more }) => {
-                content.push_str(more)
-            }
-            _ => return false,
-        },
-        _ => return false,
-    }
-    true
+/// The largest single Codex request in the turn.
+fn native_peak(receipt: &serde_json::Value) -> Option<u64> {
+    receipt["peakInputTokens"]
+        .as_u64()
+        .or(receipt["last"]["inputTokens"].as_u64())
 }
 
-/// A provider notification that only adds to, or restates, a later complete one:
-/// `…/delta`, `…Delta`, `…_delta` and the cumulative Turn diff.
-fn is_provider_increment(line: &str) -> bool {
-    #[derive(Deserialize)]
-    struct Notification {
-        method: String,
+/// The store's retention prune applies the same rule to earlier captures.
+fn retained_in_history(event: &CaptureEvent) -> bool {
+    match event {
+        CaptureEvent::ProviderAttemptStarted { .. }
+        | CaptureEvent::ProviderAttemptFinished { .. }
+        | CaptureEvent::ProviderAccountSelected { .. }
+        | CaptureEvent::ProviderSessionObserved { .. }
+        | CaptureEvent::Usage { .. } => true,
+        CaptureEvent::Conversation { event } => matches!(
+            **event,
+            ConversationEvent::TurnCompleted { .. } | ConversationEvent::Error { .. }
+        ),
+        _ => false,
     }
-    serde_json::from_str::<Notification>(line).is_ok_and(|notification| {
-        notification.method.ends_with("elta") || notification.method == "turn/diff/updated"
-    })
 }
 
 #[derive(Debug)]
@@ -625,23 +716,24 @@ impl SessionRecorder {
                         payload: serde_json::json!({"input_id": writer_artifact_key, "source": source, "evidence": evidence}),
                     }).map_err(std::io::Error::other)
                 };
-                if let Err(error) = observe("manifest.json".into(), manifest.created_at, serde_json::json!(manifest)) {
+                // Replay reads the prompt from the capture's own manifest file.
+                let retained = SessionCaptureManifest { process: None, ..manifest };
+                if let Err(error) = observe("manifest.json".into(), retained.created_at, serde_json::json!(retained)) {
                     tracing::warn!(%error, "Session capture observation unavailable");
                 }
-                let retain = |events: Vec<EventEnvelope>| {
-                    events.into_iter().try_for_each(|event| {
-                        observe(format!("events.jsonl:{}", event.seq), event.observed_at, serde_json::json!(event))
+                let mut retained = RetainedHistory::default();
+                let mut retain = |event: &EventEnvelope| {
+                    retained.admit(event).into_iter().try_for_each(|(source, evidence)| {
+                        observe(source, event.observed_at, evidence)
                     })
                 };
-                let mut streamed = StreamedHistory::default();
                 while let Ok(message) = receiver.recv() {
                     let result = match message {
                         RecorderMessage::Event(event) => {
-                            let result = append_json_line(&writer_dir.join("events.jsonl"), &event);
-                            result.and(retain(streamed.admit(event)))
+                            append_json_line(&writer_dir.join("events.jsonl"), &event).and(retain(&event))
                         }
                         RecorderMessage::Drain(acknowledge) => {
-                            let result = retain(streamed.settle()).and(sync_telemetry(&writer_dir));
+                            let result = sync_telemetry(&writer_dir);
                             let _ = acknowledge.send(());
                             result
                         }
@@ -658,9 +750,6 @@ impl SessionRecorder {
                             tracing::debug!(%error, artifact_key = %writer_artifact_key, "Session recorder telemetry write failed");
                         }
                     }
-                }
-                if let Err(error) = retain(streamed.settle()) {
-                    tracing::debug!(%error, artifact_key = %writer_artifact_key, "Session recorder telemetry write failed");
                 }
             });
         match thread {
@@ -939,15 +1028,8 @@ fn recover_native_usage(
                     .max()
             })
         };
-        let baseline = |key: &str| {
-            prior_total(key).or_else(|| {
-                field(&first.payload, "total", key)?.checked_sub(field(
-                    &first.payload,
-                    "last",
-                    key,
-                )?)
-            })
-        };
+        let baseline =
+            |key: &str| prior_total(key).or_else(|| native_baseline(&first.payload)[key].as_u64());
         let known = start.is_some()
             && [
                 "inputTokens",
@@ -967,6 +1049,9 @@ fn recover_native_usage(
                 gaps += 1;
                 continue;
             };
+            if last.payload["regressed"] == true {
+                gaps += 1;
+            }
             let delta = |key: &str| field(&last.payload, "total", key)?.checked_sub(baseline(key)?);
             let gross = delta("inputTokens");
             let cached = delta("cachedInputTokens");
@@ -976,7 +1061,7 @@ fn recover_native_usage(
                     .and_then(|(gross, cached)| gross.checked_sub(cached)),
                 output_tokens: delta("outputTokens"),
                 total_input_tokens: gross,
-                peak_input_tokens: field(&last.payload, "last", "inputTokens"),
+                peak_input_tokens: native_peak(&last.payload),
                 context_window_tokens: last.payload["modelContextWindow"].as_u64(),
                 reasoning_tokens: delta("reasoningOutputTokens"),
                 cache_read_tokens: cached,
@@ -3093,11 +3178,13 @@ mod tests {
     use std::io::Write;
 
     use super::{
-        read_provider_session, AgentProcessRequest, CaptureHandle, SessionCaptureManifest,
-        SessionCaptureSpec, SubjectAttribution, TerminalReceipt,
+        read_provider_session, AgentProcessRequest, CaptureEvent, CaptureHandle, EventEnvelope,
+        RetainedHistory, SessionCaptureManifest, SessionCaptureSpec, SubjectAttribution,
+        TerminalReceipt, SCHEMA_VERSION,
     };
     use crate::agent::AgentConfig;
     use crate::chat::types::{ConversationEvent, TurnUsage};
+    use time::OffsetDateTime;
 
     #[test]
     fn pi_usage_recovery_finishes_the_existing_counter_without_double_counting() {
@@ -3852,7 +3939,7 @@ mod tests {
     }
 
     #[test]
-    fn history_keeps_what_streamed_increments_add_up_to() {
+    fn history_keeps_facts_and_the_file_keeps_the_stream() {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         let turn = || "turn-1".to_string();
@@ -3890,6 +3977,7 @@ mod tests {
         assert_eq!(file.matches("item/agentMessage/delta").count(), 4);
         assert_eq!(file.matches("\"type\":\"text_delta\"").count(), 4);
         assert_eq!(file.matches("\"type\":\"diff_updated\"").count(), 2);
+        assert_eq!(file.matches("item/completed").count(), 1);
 
         let history = super::row_store(&capture.artifact_dir())
             .unwrap()
@@ -3897,31 +3985,116 @@ mod tests {
             .unwrap();
         let kept: Vec<_> = history
             .iter()
-            .filter(|event| event["type"] == "conversation" || event["type"] == "provider_output")
-            .map(|event| {
-                let detail = &event["event"];
-                match event["type"].as_str().unwrap() {
-                    "provider_output" => event["line"].as_str().unwrap().to_string(),
-                    _ => format!(
-                        "{}:{}",
-                        detail["type"].as_str().unwrap(),
-                        detail["content"]
-                            .as_str()
-                            .or(detail["diff"].as_str())
-                            .unwrap_or_default()
-                    ),
-                }
+            .map(|event| match event["type"].as_str().unwrap() {
+                "conversation" => event["event"]["type"].as_str().unwrap().to_string(),
+                other => other.to_string(),
             })
             .collect();
+        assert_eq!(kept, ["turn_completed"]);
+    }
+
+    #[test]
+    fn history_records_a_long_gap_as_a_silence() {
+        let at =
+            |seconds: i64| OffsetDateTime::from_unix_timestamp(1_790_000_000 + seconds).unwrap();
+        let envelope = |seq, seconds, event| EventEnvelope {
+            schema_version: SCHEMA_VERSION,
+            seq,
+            observed_at: at(seconds),
+            event,
+        };
+        let text = || CaptureEvent::Text {
+            text: "thinking".into(),
+        };
+        let finished = CaptureEvent::ProviderAttemptFinished {
+            attempt_key: "attempt".into(),
+            outcome: "completed".into(),
+        };
+        let mut history = RetainedHistory::default();
+        let sources: Vec<_> = [
+            envelope(0, 0, text()),
+            envelope(1, 100, text()),
+            envelope(2, 800, finished),
+        ]
+        .iter()
+        .flat_map(|event| history.admit(event))
+        .collect();
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].0, "silence:2");
         assert_eq!(
-            kept,
-            [
-                "turn_started:",
-                "text_delta:streamed one token at a time",
-                "diff_updated:first\nsecond",
-                r#"{"method":"item/completed","params":{}}"#,
-                "turn_completed:",
-            ]
+            sources[0].1,
+            serde_json::json!({"since": 1_790_000_100, "observed_at": 1_790_000_800})
+        );
+        assert_eq!(sources[1].0, "events.jsonl:2");
+    }
+
+    #[test]
+    fn history_keeps_one_row_per_usage_stream_with_what_every_observation_added() {
+        let home = tempfile::tempdir().unwrap();
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("store.db"))
+                .unwrap();
+        let input = super::new_artifact_key();
+        let session = store.test_session("conversation", &input);
+        let usage = |seq: u64, total: u64, peak: u64| EventEnvelope {
+            schema_version: SCHEMA_VERSION,
+            seq,
+            observed_at: OffsetDateTime::from_unix_timestamp(1_790_000_000 + seq as i64).unwrap(),
+            event: CaptureEvent::Usage {
+                usage_stream_id: "stream".into(),
+                provider: "claude".into(),
+                model: None,
+                attempt_key: "attempt".into(),
+                turn_key: "turn".into(),
+                observation_seq: seq,
+                counter_kind: "cumulative".into(),
+                start_known: true,
+                final_receipt: seq == 6,
+                usage: Box::new(TurnUsage {
+                    total_input_tokens: Some(total),
+                    output_tokens: Some(total / 10),
+                    peak_input_tokens: Some(peak),
+                    ..TurnUsage::default()
+                }),
+            },
+        };
+        let mut history = RetainedHistory::default();
+        // The middle request is the turn's largest; the last carries its totals.
+        for event in [usage(2, 100, 100), usage(4, 400, 300), usage(6, 500, 100)] {
+            for (source, evidence) in history.admit(&event) {
+                assert_eq!(source, "events.jsonl:2");
+                store
+                    .retain_session_observation(
+                        &session,
+                        &crate::session::SessionObservation {
+                            artifact_key: input.clone(),
+                            source: source.clone(),
+                            observed_at: 1,
+                            task_id: None,
+                            wave_id: None,
+                            payload: serde_json::json!({"input_id":input,"source":source,"evidence":evidence}),
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+        assert_eq!(store.input_events(&input).unwrap().len(), 1);
+        // A provider can continue the stream into the next turn: that turn keeps its own row.
+        let mut next_turn = usage(8, 600, 100);
+        if let CaptureEvent::Usage { turn_key, .. } = &mut next_turn.event {
+            *turn_key = "next".into();
+        }
+        assert_eq!(history.admit(&next_turn)[0].0, "events.jsonl:8");
+        let usage = store.input_history(&input).unwrap().usage;
+        assert_eq!(
+            (
+                usage.streams,
+                usage.final_streams,
+                usage.total_input_tokens,
+                usage.output_tokens,
+                usage.peak_input_tokens
+            ),
+            (1, 1, Some(500), Some(50), Some(300))
         );
     }
 

@@ -235,18 +235,24 @@ pub enum DesktopTextUnavailable {
 // an app or an unrelated workspace. No caller-controlled text enters the script.
 const DESKTOP_EVENT: &str = r#"
 on run argv
-    if application id "com.loopflow.mac" is not running then
-        error "Loopflow Desktop is not running. Open it with lf open, or inspect Work with lf task status <task>."
+    set bundle to item 1 of argv
+    try
+        set appRunning to application id bundle is running
+    on error
+        set appRunning to false
+    end try
+    if not appRunning then
+        error "Loopflow Desktop (" & bundle & ") is not running. Open it with lf open, or inspect Work with lf task status <task>."
     end if
     with timeout of 5 seconds
-        if (count of argv) is 0 then
-            tell application id "com.loopflow.mac" to return «event CNRTinsp»
+        if (count of argv) is 1 then
+            tell application id bundle to return «event CNRTinsp»
         else
-            set request to item 1 of argv
-            if (count of argv) is 2 then
-                tell application id "com.loopflow.mac" to return «event CNRTtext» request
+            set request to item 2 of argv
+            if (count of argv) is 3 then
+                tell application id bundle to return «event CNRTtext» request
             else
-                tell application id "com.loopflow.mac" to return «event CNRTpane» request
+                tell application id bundle to return «event CNRTpane» request
             end if
         end if
     end timeout
@@ -328,7 +334,9 @@ fn open_url(mut url: reqwest::Url, json: bool) -> Result<()> {
     let query = url.query().map(|query| query.replace('+', "%20"));
     url.set_query(query.as_deref());
     let status = std::process::Command::new("open")
-        .args(["-b", super::open::DESKTOP_BUNDLE, url.as_str()])
+        .arg("-b")
+        .arg(super::open::desktop_bundle())
+        .arg(url.as_str())
         .status()
         .context("launch Loopflow.app with the macOS `open` command")?;
     if !status.success() {
@@ -496,7 +504,7 @@ fn work_key(repository: &crate::durable::RepositoryId, selector: &str) -> Result
 
 fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
-    use crate::work::selection::{Arrangement, DashboardId, WorkPaneLayout};
+    use crate::work::selection::{ArrangementEdit, DashboardId, WorkPaneLayout};
     if let DesktopCommand::Query { expression, .. } = command {
         crate::work::selection::Selection::parse(expression, None)?;
     }
@@ -586,13 +594,13 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
                 .read_dashboard(&repository, &id)?
                 .ok_or(crate::store::StoreError::NotFound)?;
             // The shared writer validates the order against current membership and decides mode.
-            let arrangement: Arrangement = serde_json::from_reader(std::io::stdin().lock())?;
+            let edit: ArrangementEdit = serde_json::from_reader(std::io::stdin().lock())?;
             serde_json::to_value(store.save_dashboard(
                 &repository,
                 &id,
                 Some(*revision),
                 &reading.saved.selection,
-                &arrangement,
+                &edit,
             )?)?
         }
         DesktopCommand::Slots {
@@ -1087,6 +1095,7 @@ fn validate_literal_text(text: &str) -> Result<()> {
 fn contact(request: Option<&str>, text_read: bool) -> Result<Vec<u8>> {
     let output = std::process::Command::new("/usr/bin/osascript")
         .args(["-e", DESKTOP_EVENT, "--"])
+        .arg(super::open::desktop_bundle())
         .args(request)
         .args(text_read.then_some("text"))
         .output()

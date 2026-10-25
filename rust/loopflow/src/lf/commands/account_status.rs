@@ -63,6 +63,8 @@ struct AccountRow {
     routing: Option<String>,
     cooldown_until: Option<i64>,
     expires_at: Option<i64>,
+    /// When the long-lived token lf machine connect installs stops working.
+    long_lived_token_expires_at: Option<i64>,
     windows: Vec<AccountLimitRow>,
     verified_windows: Vec<String>,
     reset_credits: Option<crate::subscription::RateLimitResetCredits>,
@@ -271,6 +273,7 @@ async fn local_rows(
             routing: None,
             cooldown_until: None,
             expires_at: snapshot.and_then(|s| s.expires_at),
+            long_lived_token_expires_at: None,
             windows: vec![],
             verified_windows: vec![],
             reset_credits: None,
@@ -452,6 +455,9 @@ async fn managed_rows(
                     .max_by_key(|w| w.observed_at)
                     .and_then(|w| w.plan.clone())
             });
+        let long_lived_token = store
+            .long_lived_token(&account.provider, &account.account_id)
+            .await?;
         rows.push(AccountRow {
             provider,
             account_id: Some(account.account_id.clone()),
@@ -479,6 +485,7 @@ async fn managed_rows(
             ),
             cooldown_until: account.cooldown_until,
             expires_at: None,
+            long_lived_token_expires_at: long_lived_token.map(|token| token.expires_at()),
             windows,
             reset_credits: live_usage
                 .as_ref()
@@ -573,6 +580,10 @@ fn render(report: &AccountReport, width: usize, now: i64) -> String {
             }
             if !policy.is_empty() {
                 lines.push(format!("  routing: {}", policy.join(" · ")));
+            }
+            if let Some(expires) = row.long_lived_token_expires_at {
+                let state = if expires > now { "until" } else { "expired" };
+                lines.push(format!("  long-lived token {state} {}", date(expires)));
             }
             if let Some(reason) = &row.diagnostic {
                 lines.push(format!("  {reason}"));
@@ -707,6 +718,12 @@ fn render(report: &AccountReport, width: usize, now: i64) -> String {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n"
+}
+
+fn date(seconds: i64) -> String {
+    OffsetDateTime::from_unix_timestamp(seconds)
+        .map(|moment| moment.date().to_string())
+        .unwrap_or_else(|_| "unknown".into())
 }
 
 fn timestamp(seconds: i64) -> String {
@@ -994,6 +1011,8 @@ mod tests {
                 "claude / personal · choice 2",
                 "linear / local credentials · choice 1",
                 "Spare · Profile 9 · not signed in",
+                "long-lived token until 2027-05-11",
+                "long-lived token expired 2026-09-21",
             ] {
                 assert!(
                     text.replace("\n    ", "").contains(evidence),

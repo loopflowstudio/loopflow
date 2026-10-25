@@ -4433,27 +4433,25 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         .map_err(task_error)?
         .pop()
         .filter(|graph| {
-            !matches!(
-                crate::journal::process_evidence(&store.sqlite, graph.id()),
-                ProcessIdentityEvidence::Dead
-            )
+            crate::journal::process_evidence(&store.sqlite, graph.id())
+                != ProcessIdentityEvidence::Dead
         });
-    let name = graph
-        .as_ref()
-        .map(|graph| graph.name.clone())
-        .unwrap_or_default();
-    let (execution, _) = crate::ops::task_execution::execution_of_latest_graph(store, graph)
-        .await
-        .map_err(task_error)?;
-    let step = execution.step.unwrap_or_default();
-    let position = match execution.state {
-        TaskExecutionState::Running | TaskExecutionState::Stalled => Some(format!("at {step}")),
-        TaskExecutionState::Starting => Some(format!("between steps after {step}")),
-        TaskExecutionState::Unknown => Some(format!("at {step} (liveness unknown)")),
-        TaskExecutionState::Idle | TaskExecutionState::Blocked => None,
-    };
-    if let Some(position) = position {
-        return Ok(Some(format!("stopped Graph {name} {position}")));
+    if let Some(graph) = graph {
+        let name = graph.name.clone();
+        let (execution, _) =
+            crate::ops::task_execution::execution_of_latest_graph(store, Some(graph))
+                .await
+                .map_err(task_error)?;
+        let step = execution.step.unwrap_or_default();
+        let position = match execution.state {
+            TaskExecutionState::Running | TaskExecutionState::Stalled => Some(format!("at {step}")),
+            TaskExecutionState::Starting => Some(format!("between steps after {step}")),
+            TaskExecutionState::Unknown => Some(format!("at {step} (liveness unknown)")),
+            TaskExecutionState::Idle | TaskExecutionState::Blocked => None,
+        };
+        if let Some(position) = position {
+            return Ok(Some(format!("stopped Graph {name} {position}")));
+        }
     }
     let processes = store
         .sqlite

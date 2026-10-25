@@ -209,3 +209,4 @@ From an lf-launched shell, with inherited `LF_*` unset and `< /dev/null`:
 - Regenerate the reference with `UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration reference_matches_the_compiled_cli < /dev/null`.
 
 Check result (kickoff, after restoring onto #1675/#1676 as 5a1c2cfa7d): build clean; `--lib interrupt` 17 ok, `--lib task_graph_launch` 34 ok, `--test integration task_github_cache` 3 ok, reference test ok; clippy/fmt clean. Full suites deferred to gate.
+Compress: `live_execution` reads the Graph only when its process isn't dead (no empty-name default); `cargo test --lib interrupt` 17 ok, clippy clean.

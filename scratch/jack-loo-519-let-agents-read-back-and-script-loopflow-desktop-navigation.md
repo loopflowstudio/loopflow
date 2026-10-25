@@ -222,15 +222,17 @@ Graph log as panes again; keeping `--pane` beside `-b`; target resolution that
 falls back to focus; exit codes chosen by matching message text; a layout reader
 that accepts both shapes.
 
-## Evidence from the stopped pursue (uncommitted)
+## Carried from the stopped pursue (committed in 56ffb2c6f3)
 
-Keep: `DesktopError` (Target 3 / Unreachable 4) and osascript code mapping;
+In place: `DesktopError` (Target 3 / Unreachable 4) and osascript code mapping;
 Swift `DesktopTargetError` → 1003; `destination`/`history` in state, Rust/Swift
 DTOs and fixture; `after_help` exit text and the AGENTS.md rule; navigation
-handler bodies in `WorkModel` (they become `navigate.*`, `task.*`,
-`dashboard.*` handlers); `WorkDestination`/workspace test updates.
-Rework: `CNRTnavg` → generic action event; docs navigation section.
-Delete: the nav verbs, `view working-tasks` (agent `LF_AGENT_CALLER` inference is gone).
+handler bodies in `WorkModel`; `WorkDestination`/workspace test updates. Agent
+`LF_AGENT_CALLER` Session inference is deleted (e5ff80c882).
+Still to do in slices 2–3: those `WorkModel` bodies become `navigate.*`,
+`task.*`, `dashboard.*` action handlers; `CNRTnavg` folds into the generic action
+event; the nav verbs (`enter`, `back`, `forward`, `slot`, `next`, `previous`) and
+`view working-tasks` go; the docs navigation section is rewritten.
 `.lf/wave/product/MEMORY.md` was compressed by that run; left as is.
 
 ## Slices
@@ -304,12 +306,10 @@ the doubled frame unless Jack picks a fix in the demo.
   release, per the migration-compat practice.
 - **Trusting `LF_TERMINAL_ID`** lets an inherited marker target a pane; the
   blast radius is one Desktop pane of the same user, and a gone pane exits 3.
+- **Dev Automation consent**: LOO-568's headless check reached Dev but got
+  "AppleEvent timed out", likely consent pending (-1712 → exit 4). The demo
+  grants consent first; until then Dev targeting is unproven.
 - **`WKWebView` on macOS 15** needs no deployment-target change; SwiftUI
   `WebView` would need 26 and is not used.
 
-Check results: `cargo test -p loopflow --lib selection` and `designated_panes` pass
-(one unrelated `task_graph_launch_tests` failure under inherited LF_* env); Swift
-focused suites (Multiplexer*, DesktopPaneControl, ToolTab, WorkDestination,
-Dashboard/Worktree/WorkspacePanes, TaskFiles, WorkSelection, DTOFixture) pass;
-`cargo clippy -p loopflow --all-targets -D warnings` clean; Rust integration suite (`cli_discovery`, `dto_fixtures`) left to gate.
-Compress (2026-10-24): `cargo test --lib designated_panes selection_ commands::desktop` pass; Swift focused suites 206 pass; clippy clean. Fixture-CLI work_watch tests failed locally building `aes-gcm` (registry), left to gate.
+Check results (2026-10-24, compress): `cargo test --lib designated_panes selection_ commands::desktop` pass, Swift focused suites 206 pass, clippy clean; Rust integration (`cli_discovery`, `dto_fixtures`, fixture-CLI `work_watch`, which failed locally building `aes-gcm`) deferred to gate.

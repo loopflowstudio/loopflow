@@ -17,11 +17,12 @@ implementation choice to revisit in demo, not Jack's acceptance. Details are in
 
 Assumptions made during implement (2026-10-24):
 
-6. **WebKit without raising the target.** The deployment target is still
-   macOS 15 and CI's `swift-test` runs on `macos-15`, so HTML renders through
-   `WKWebView` in an `NSViewRepresentable` instead of SwiftUI's macOS 26
-   `WebView`. Raising the target would also move CI runners; that belongs in
-   its own change.
+6. ~~WebKit without raising the target~~: superseded 2026-10-24. Jack: "Let's
+   do macOS 26 webView, and stop supporting macOS15 if possible." The Desktop
+   app now requires macOS 26 (Package.swift, project.yml, Info.plist), renders
+   HTML through SwiftUI `WebView`/`WebPage`, and `swift-test`/`loopflow-ui-test`
+   run on `macos-26`. The CLI still builds and is tested on macOS 15
+   (`macos-process-test`, `native-packages`); dropping it there is a separate call.
 7. **Read mode for other files.** Read renders `.md` and `.html` anywhere in
    the checkout; other files in Read show the existing text editor. Changed-file
    rows still open in Diff.

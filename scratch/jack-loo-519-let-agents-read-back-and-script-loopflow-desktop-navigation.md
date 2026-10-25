@@ -288,7 +288,33 @@ One PR; deepest deletion first.
    pane filling its Task (`pane.zoom`, Rex's `zoom`). `WorkModel.enter(_:from:)`/
    `enterTile` replaced `zoom(into:)`/`zoomTile`; the tile-growth transition
    (`ZoomFromTile`, `zoomOrigin`) keeps its visual name.
-5. **Demo on Dev** (Jack).
+5. **Close and reopen act on what they name — next implement (concept review
+   2026-10-24).** The accepted rule is "⌘W closes the selected tab, the last tab hides
+   the pane; Undo shows the same occurrence again because the shell is never torn
+   down." The implementation diverges in three ways:
+   - `closeShell`/`closeBrowserTab` clear `closedState`, and `closePane` releases the
+     shell's surface. So after a person presses ⌘W on a shell or browser tab, ⇧⌘T is
+     unavailable and the shell is already gone. Only a session-pane hide is undoable.
+     `undoCloseShowsTheSameOccurrence` calls `store.close` directly and never goes
+     through the ⌘W path.
+   - `pane.close` ignores `context.tab`: `do pane.close -b shell:2` closes the *selected*
+     tab, which breaks "act on the addressed target only."
+   - `ClosedState` snapshots the whole layout. That made sense when close removed a
+     pane from a free split tree. Now hiding never changes the tree, so the snapshot
+     just restores state that may have gone stale.
+
+   Direction: ⌘W (`pane.close`) closes the addressed tab (`-b shell:2` → tab 2; a bare
+   pane → its selected tab). A session pane, or a pane with no tabs, hides. The
+   workspace keeps one `lastClosed` record, `pane(id) | shellTab(tab, index) |
+   browserTab(tab, index)`, in place of `ClosedState`. A closed shell tab keeps its
+   surface, and its process, until another close replaces the record or the workspace
+   is released; a release then frees it. A browser tab keeps its `BrowserPages` view.
+   `pane.reopen` (⇧⌘T, title "Undo Close") puts that tab back at its index and
+   selects it, or shows the pane again. Precedent: iTerm2's Undo Close keeps the
+   session alive. Proof: in `DesktopPaneControlTests`, ⌘W then ⇧⌘T on a shell tab
+   (sent by key and by event) returns the same tab ID and surface token, and
+   `pane.close -b shell:2` with tab 1 selected leaves tab 1.
+6. **Demo on Dev** (Jack).
 
 ## Done when
 

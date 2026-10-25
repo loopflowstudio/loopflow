@@ -209,19 +209,13 @@ final class SessionsWorkspace {
     /// another close replaces it.
     func closePane(_ paneId: String, tab: String? = nil) {
         guard let pane = multiplexer.layout.pane(for: paneId) else { return }
+        let id = tab ?? pane.content.selectedTabID
         let replaced: ClosedOccurrence?
-        switch pane.content {
-        case .shell(let tabs, let selected):
-            guard let id = tab ?? selected, tabs.contains(where: { $0.id == id }) else {
-                replaced = multiplexer.close(paneId); break
-            }
+        if case .shell(let tabs, _) = pane.content, let id, tabs.contains(where: { $0.id == id }) {
             replaced = multiplexer.closeShell(id)
-        case .browser(_, let tabs, let selected, _, _):
-            guard let id = tab ?? selected, tabs.contains(where: { $0.id == id }) else {
-                replaced = multiplexer.close(paneId); break
-            }
+        } else if case .browser(_, let tabs, _, _, _) = pane.content, let id, tabs.contains(where: { $0.id == id }) {
             replaced = multiplexer.closeBrowserTab(id)
-        case .session:
+        } else {
             replaced = multiplexer.close(paneId)
         }
         switch replaced {
@@ -375,10 +369,7 @@ final class SessionsWorkspace {
                       case .shell(let tabId, _) = terminal else { return }
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    var closed: ShellTab?
-                    if case .shellTab(let tab, _) = self.multiplexer.lastClosed, tab.id == tabId { closed = tab }
-                    guard (self.multiplexer.shell(tabId) ?? closed)?.location?.machineId == terminal.machineId else { return }
-                    self.multiplexer.removeShell(tabId)
+                    self.multiplexer.removeExitedShell(tabId, machineId: terminal.machineId)
                 }
             }
     }

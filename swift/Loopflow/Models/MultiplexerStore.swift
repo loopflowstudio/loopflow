@@ -215,13 +215,20 @@ public final class MultiplexerStore {
     public func closeShell(_ id: String) -> ClosedOccurrence? {
         guard let pane = shellPane, case .shell(let tabs, _) = pane.content,
               let index = tabs.firstIndex(where: { $0.id == id }) else { return nil }
-        removeShell(id)
+        _removeShell(id)
         return _record(.shellTab(tabs[index], index: index))
     }
 
-    /// Drop a shell tab whose process exited. Nothing is left to undo.
-    public func removeShell(_ id: String) {
-        if case .shellTab(let tab, _) = lastClosed, tab.id == id { lastClosed = nil }
+    /// Drop a shell tab whose process on `machineId` exited, open or kept for Undo.
+    public func removeExitedShell(_ id: String, machineId: String) {
+        if case .shellTab(let tab, _) = lastClosed, tab.id == id, tab.location?.machineId == machineId {
+            lastClosed = nil
+        }
+        guard shell(id)?.location?.machineId == machineId else { return }
+        _removeShell(id)
+    }
+
+    private func _removeShell(_ id: String) {
         guard let pane = shellPane, case .shell(let tabs, let selected) = pane.content,
               let (remaining, next) = Self._closing(id, in: tabs, selected: selected) else { return }
         layout = layout.updatingShellTabs(of: pane.id, tabs: remaining, selected: next)

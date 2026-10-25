@@ -295,7 +295,7 @@ One PR; deepest deletion first.
    replaced the `ClosedState` layout snapshot; only another close replaces it, and
    the close methods return the replaced record so `SessionsWorkspace.closePane`
    frees its shell surface or `BrowserPages` view. A shell that exits goes through
-   `removeShell`, which also drops a matching undo record. `pane.reopen` ("Undo
+   `removeExitedShell`, which also drops a matching undo record. `pane.reopen` ("Undo
    Close", ⇧⌘T) reinserts the tab at its index and selects it, or shows the pane;
    it no longer restores zoom. Proof in `DesktopPaneControlTests`:
    `undoCloseReturnsTheClosedShellTab` (key and event; same tab ID and pooled view —

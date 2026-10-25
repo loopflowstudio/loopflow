@@ -656,16 +656,14 @@ fn print_task_snapshot(
         }
         for graph in &snapshot.work.graph_processes {
             let log = loopflow::lf::commands::graph::graph_log_path(&graph.summary.id);
+            let log = if log.exists() {
+                format!("  log: {}", log.display())
+            } else {
+                String::new()
+            };
             println!(
-                "  Graph: {}  {}  {:?}{}",
-                graph.summary.id,
-                graph.summary.name,
-                graph.summary.state,
-                if log.exists() {
-                    format!("  log: {}", log.display())
-                } else {
-                    String::new()
-                },
+                "  Graph: {}  {}  {:?}{log}",
+                graph.summary.id, graph.summary.name, graph.summary.state,
             );
         }
         for process in &snapshot.work.processes {

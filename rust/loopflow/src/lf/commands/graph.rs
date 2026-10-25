@@ -227,9 +227,8 @@ struct PendingLog {
 impl PendingLog {
     fn open(process: &LfProcessId, attempt: u32) -> Result<Self> {
         use std::os::unix::fs::OpenOptionsExt;
-        let directory = crate::store::lf_home_dir().join("logs");
-        std::fs::create_dir_all(&directory)?;
-        let path = directory.join(format!("graph-pending-{process}-{attempt}.log"));
+        let path = graph_log_path(&format!("pending-{process}-{attempt}"));
+        std::fs::create_dir_all(path.parent().expect("graph logs live in a directory"))?;
         let file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)

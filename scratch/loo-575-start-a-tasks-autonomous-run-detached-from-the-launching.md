@@ -192,3 +192,4 @@ close the conversation, watch `lf top` / Desktop show the Graph advancing.
 
 - kickoff: no build; evidence from code reading and live `ps` only.
 - compress: `cargo test -p loopflow --lib task_graph_launch_tests` → 28/29, then the two new tests pass after the log-assertion repair; clippy `--all-targets` clean. Gate owns the full suite and Swift.
+- realign (2026-10-24): `docs/lf-reference.md` was stale for `task run`; regenerated via `UPDATE_CLI_REFERENCE=1 … reference_matches_the_compiled_cli` → pass; `cargo check -p loopflow --bins --lib` + `cargo fmt --check` clean on the uncommitted log-path/status tidy.

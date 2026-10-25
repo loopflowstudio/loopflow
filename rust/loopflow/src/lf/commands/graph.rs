@@ -756,17 +756,21 @@ impl RunningGraph<'_> {
             })?;
         let status = status.context("could not execute Graph step")?;
         // An interrupt during an operation takes effect once it has finished.
-        if signalled || status.code() == Some(130) || self.interrupted() {
+        if signalled || self.interrupted() {
             eprintln!("Graph {} interrupted at {label}.", self.graph);
             return Ok((StepExit::Interrupted, step));
         }
         match status.code() {
             Some(0) => Ok((StepExit::Finished, step)),
-            Some(3) => Ok((StepExit::Held, step)),
+            // A turn someone else interrupted, such as a native takeover, is held.
+            Some(3 | 130) => Ok((StepExit::Held, step)),
             _ => {
-                // The step's own conversation says why its turn failed.
+                // The step's own conversation says how its turn ended.
                 for envelope in self.turn_events(step.as_ref())?.iter().rev() {
                     let event = &envelope["event"];
+                    if event["type"] == "turn_completed" && event["status"] == "interrupted" {
+                        return Ok((StepExit::Held, step));
+                    }
                     if event["type"] == "error" {
                         anyhow::bail!(
                             "{label}: {}: {}",

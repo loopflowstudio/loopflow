@@ -705,7 +705,8 @@ impl Watcher {
             );
         }
         let running = |store: &SharedStore| {
-            super::pr_landing::repair_running(store, landing).unwrap_or(false)
+            super::pr_landing::repair_running(store, &landing.repo, landing.pr_number)
+                .unwrap_or(false)
         };
         if running(store) {
             return (true, Some("ci-fix running".to_string()));

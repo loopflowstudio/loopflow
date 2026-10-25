@@ -815,6 +815,9 @@ fn apply_set(
         migration_preflight(conn, migration, guards)?;
         conn.execute_batch(migration.sql)?;
         seed_peer_planning(conn, migration.sql)?;
+        if migration_contains(migration, "designated_panes") {
+            super::sqlite::selections::convert_released_layouts(conn)?;
+        }
         backfill_known_checksums(conn, set)?;
         insert_applied_migration(conn, migration, &parent_history)?;
     }
@@ -3316,6 +3319,65 @@ mod tests {
             "SELECT t.worktree,p.cwd FROM relocated_task_processes r JOIN tasks t ON t.id=r.task_id JOIN processes p ON p.id=r.process_id", [],
             |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
         assert_eq!(addresses, ("/before/task".into(), "/before/task".into()));
+    }
+
+    #[test]
+    fn designated_panes_convert_released_free_trees_and_keep_drafts() {
+        use crate::work::selection::{BrowserTab, PaneIntent, PaneTree, WorkPaneLayout};
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "designated_panes");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/pane_layouts_released.sql"
+        ))
+        .unwrap();
+        conn.execute_batch(&current_draft_sql("designated_panes"))
+            .unwrap();
+        crate::store::sqlite::selections::convert_released_layouts(&conn).unwrap();
+        let layout = |work: &str| -> WorkPaneLayout {
+            let json: String = conn
+                .query_row(
+                    "SELECT layout_json FROM work_pane_layouts WHERE work_id=?1",
+                    [work],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            serde_json::from_str(&json).unwrap()
+        };
+
+        let task = layout("task_22222222222222222222222222222222");
+        task.validate().unwrap();
+        let panes: Vec<_> = task.tree.panes().iter().map(|(id, _)| id.to_string()).collect();
+        assert_eq!(panes, ["pane-0", "pane-1", "pane-2"]);
+        let Some(PaneIntent::Browser { tabs, selected, location }) = task.tree.pane("pane-2") else {
+            panic!("Files becomes the browser pane at its own place")
+        };
+        assert!(location.is_some());
+        assert!(matches!(&tabs[..], [BrowserTab::Files { tabs: files, .. }, BrowserTab::GraphLog { .. }] if files.len() == 2));
+        assert_eq!(selected.as_deref(), Some("files"));
+        assert_eq!(
+            (task.focused.as_deref(), task.zoomed.as_deref()),
+            (Some("pane-1"), Some("pane-2"))
+        );
+        assert!(task.hidden.is_empty());
+        assert_eq!(task.drafts[0].text, "unsaved edits");
+
+        let wave = layout("11111111-1111-1111-1111-111111111111");
+        wave.validate().unwrap();
+        assert!(matches!(
+            &wave.tree,
+            PaneTree::Pane { id, content: PaneIntent::Session { session_id: Some(session), .. } }
+                if id == "first" && session == "wave-first"
+        ));
+        assert_eq!(wave.focused, None);
+        assert_eq!(wave.revision, 4);
+
+        let conversation = layout("task_33333333333333333333333333333333");
+        conversation.validate().unwrap();
+        assert_eq!(
+            conversation.hidden.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["browser", "shell"]
+        );
+        assert_eq!(conversation.zoomed.as_deref(), Some("only"));
     }
 
     #[test]

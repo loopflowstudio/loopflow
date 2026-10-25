@@ -329,11 +329,9 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
             location = state.content.location
             pane = state.id; incarnation = state.incarnation; self.surface = surface(state.content); axis = nil; ratio = nil; children = []
             switch state.content {
-            case .empty: content = "empty"; subject = nil
             case .shell: content = "shell"; subject = nil
             case .session(let id, _, _): content = "session"; subject = id
-            case .files(let id, _, _): content = "files"; subject = id
-            case .graphLog(let id, _, _): content = "graph_log"; subject = id
+            case .browser(let id, _, _, _, _): content = "browser"; subject = id
             }
         case .split(let splitAxis, let first, let second, let splitRatio):
             tabs = []; selectedTab = nil

@@ -217,7 +217,7 @@ final class WorkModel {
     func revealPrimaryConversation() {
         guard let registry = workspaceRegistry, let key = registry.selectedWork,
               key.kind != .task, let workspace = registry.retained(key),
-              workspace.multiplexer.focusedPane.content == .empty,
+              workspace.multiplexer.sessionPane?.sessionId == nil,
               let record = sessions.value?.first(where: {
                   key.kind == .repository ? $0.primaryScope == "repository"
                       : $0.primaryScope == "wave" && $0.waveId == key.id
@@ -563,7 +563,9 @@ final class WorkModel {
         if let sessionPane { panes.append(sessionPane) }
         if destination.showsChanges,
            let pane = layout.allPanes.first(where: {
-               if case .files(let task, _, _) = $0.content { return task == destination.task.id }
+               if case .browser(let task, let tabs, _, _, _) = $0.content {
+                   return task == destination.task.id && tabs.contains(.files)
+               }
                return false
            }) { panes.append(pane) }
         guard panes.count == (destination.showsChanges ? 2 : 1) else {
@@ -2540,8 +2542,8 @@ extension WorkModel {
         for content in plan.contents where open.contains(content.work) {
             let entry = registry.workspace(for: content.work, title: content.title,
                 location: content.location.map { WorkspaceIdentity(machineId: $0.machineID, worktree: $0.cwd) })
-            if let primary = content.primarySession, entry.multiplexer.pane(forSessionId: primary) == nil {
-                entry.multiplexer.show(.session(id: primary, location: entry.location), focus: false)
+            if let primary = content.primarySession, entry.multiplexer.sessionPane?.sessionId == nil {
+                entry.multiplexer.load(sessionId: primary, location: entry.location, focus: false)
             }
             entry.startPersistence(query: query, repoPath: repoPath)
         }

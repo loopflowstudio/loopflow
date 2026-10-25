@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 pub struct WorkPaneLayout {
     pub work: WorkWorkspaceKey,
     pub revision: i64,
-    pub tree: Option<PaneTree>,
+    pub tree: PaneTree,
     pub focused: Option<String>,
     pub zoomed: Option<String>,
     pub hidden: BTreeSet<String>,
@@ -30,27 +30,70 @@ pub enum PaneTree {
     },
 }
 
+/// A Task workspace holds exactly one of each designated pane; Wave and repository
+/// workspaces hold only the session pane. Arrangement is free; membership is not.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-#[non_exhaustive]
 pub enum PaneIntent {
-    Empty,
+    /// One conversation at a time; none shows the start state.
     Session {
-        session_id: String,
+        session_id: Option<String>,
         location: Option<ViewLocation>,
     },
     Shell {
         tabs: Vec<ShellTab>,
-        selected: String,
+        selected: Option<String>,
     },
-    Files {
+    Browser {
         location: Option<ViewLocation>,
+        tabs: Vec<BrowserTab>,
+        selected: Option<String>,
+    },
+}
+
+impl PaneIntent {
+    pub fn kind(&self) -> PaneKind {
+        match self {
+            Self::Session { .. } => PaneKind::Session,
+            Self::Shell { .. } => PaneKind::Shell,
+            Self::Browser { .. } => PaneKind::Browser,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaneKind {
+    Session,
+    Shell,
+    Browser,
+}
+
+/// A browser tab: the Task's Files view (with its own document tabs), its Graph
+/// process log, or a web page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum BrowserTab {
+    Files {
+        id: String,
         tabs: Vec<FileTab>,
         selected: Option<String>,
     },
-    Log {
-        location: Option<ViewLocation>,
+    GraphLog {
+        id: String,
     },
+    Url {
+        id: String,
+        url: String,
+    },
+}
+
+impl BrowserTab {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Files { id, .. } | Self::GraphLog { id } | Self::Url { id, .. } => id,
+        }
+    }
 }
 
 /// A retained shell identity, independent of its tool pane and current selection.
@@ -91,105 +134,123 @@ impl PaneTree {
     }
 }
 
+impl PaneTree {
+    pub fn panes(&self) -> Vec<(&str, &PaneIntent)> {
+        match self {
+            Self::Pane { id, content } => vec![(id.as_str(), content)],
+            Self::Split { first, second, .. } => {
+                let mut panes = first.panes();
+                panes.extend(second.panes());
+                panes
+            }
+        }
+    }
+
+    fn validate_ratios(&self) -> Result<(), String> {
+        if let Self::Split {
+            ratio,
+            first,
+            second,
+            ..
+        } = self
+        {
+            if !ratio.is_finite() || !(0.1..=0.9).contains(ratio) {
+                return Err("split ratio must be between 0.1 and 0.9".into());
+            }
+            first.validate_ratios()?;
+            second.validate_ratios()?;
+        }
+        Ok(())
+    }
+}
+
 impl WorkPaneLayout {
     pub fn validate(&self) -> Result<(), String> {
-        fn visit<'a>(
-            tree: &'a PaneTree,
-            ids: &mut BTreeSet<&'a str>,
-            tabs_seen: &mut BTreeSet<&'a str>,
-            tools: &mut BTreeSet<&'static str>,
-            task: bool,
-        ) -> Result<(), String> {
-            match tree {
-                PaneTree::Pane { id, content } => {
-                    if id.is_empty() || !ids.insert(id.as_str()) {
-                        return Err("pane IDs must be nonempty and unique".into());
+        self.tree.validate_ratios()?;
+        let panes = self.tree.panes();
+        let mut ids = BTreeSet::new();
+        let mut tabs_seen = BTreeSet::new();
+        let mut kinds = Vec::new();
+        for (id, content) in &panes {
+            if id.is_empty() || !ids.insert(*id) {
+                return Err("pane IDs must be nonempty and unique".into());
+            }
+            kinds.push(content.kind());
+            match content {
+                PaneIntent::Session {
+                    session_id,
+                    location,
+                } => {
+                    if session_id.as_deref() == Some("") {
+                        return Err("Session ID must be nonempty".into());
                     }
-                    match content {
-                        PaneIntent::Session {
-                            session_id,
-                            location,
-                        } => {
-                            if session_id.is_empty() {
-                                return Err("Session ID must be nonempty".into());
-                            }
-                            if let Some(location) = location {
-                                validate_location(location)?;
-                            }
-                        }
-                        PaneIntent::Shell { tabs, selected } => {
-                            if !task || !tools.insert("shell") {
-                                return Err(
-                                    "shells require one Shell pane in a Task workspace".into()
-                                );
-                            }
-                            validate_tabs(
-                                tabs.iter().map(|tab| tab.id.as_str()),
-                                Some(selected),
-                                tabs_seen,
-                            )?;
-                            for tab in tabs {
-                                if let Some(location) = &tab.location {
-                                    validate_location(location)?;
-                                }
-                            }
-                        }
-                        PaneIntent::Files {
-                            location,
-                            tabs,
-                            selected,
-                        } => {
-                            if !task || !tools.insert("files") {
-                                return Err(
-                                    "files require one Files pane in a Task workspace".into()
-                                );
-                            }
-                            validate_tabs(
-                                tabs.iter().map(|tab| tab.id.as_str()),
-                                selected.as_deref(),
-                                tabs_seen,
-                            )?;
-                            if let Some(location) = location {
-                                validate_location(location)?;
-                            }
-                            let mut documents = BTreeSet::new();
-                            for tab in tabs {
-                                validate_path(&tab.path)?;
-                                if !documents.insert(&tab.path) {
-                                    return Err("a document can have only one file tab".into());
-                                }
-                            }
-                        }
-                        PaneIntent::Log {
-                            location: Some(location),
-                        } => validate_location(location)?,
-                        PaneIntent::Empty | PaneIntent::Log { location: None } => {}
+                    if let Some(location) = location {
+                        validate_location(location)?;
                     }
                 }
-                PaneTree::Split {
-                    ratio,
-                    first,
-                    second,
-                    ..
-                } => {
-                    if !ratio.is_finite() || !(0.1..=0.9).contains(ratio) {
-                        return Err("split ratio must be between 0.1 and 0.9".into());
+                PaneIntent::Shell { tabs, selected } => {
+                    validate_tabs(
+                        tabs.iter().map(|tab| tab.id.as_str()),
+                        selected.as_deref(),
+                        &mut tabs_seen,
+                    )?;
+                    for tab in tabs {
+                        if let Some(location) = &tab.location {
+                            validate_location(location)?;
+                        }
                     }
-                    visit(first, ids, tabs_seen, tools, task)?;
-                    visit(second, ids, tabs_seen, tools, task)?;
+                }
+                PaneIntent::Browser {
+                    location,
+                    tabs,
+                    selected,
+                } => {
+                    if let Some(location) = location {
+                        validate_location(location)?;
+                    }
+                    validate_tabs(
+                        tabs.iter().map(BrowserTab::id),
+                        selected.as_deref(),
+                        &mut tabs_seen,
+                    )?;
+                    let mut singletons = BTreeSet::new();
+                    for tab in tabs {
+                        match tab {
+                            BrowserTab::Files { tabs, selected, .. } => {
+                                if !singletons.insert("files") {
+                                    return Err("a browser holds one Files tab".into());
+                                }
+                                validate_tabs(
+                                    tabs.iter().map(|tab| tab.id.as_str()),
+                                    selected.as_deref(),
+                                    &mut tabs_seen,
+                                )?;
+                                let mut documents = BTreeSet::new();
+                                for tab in tabs {
+                                    validate_path(&tab.path)?;
+                                    if !documents.insert(&tab.path) {
+                                        return Err("a document can have only one file tab".into());
+                                    }
+                                }
+                            }
+                            BrowserTab::GraphLog { .. } => {
+                                if !singletons.insert("graph_log") {
+                                    return Err("a browser holds one Graph log tab".into());
+                                }
+                            }
+                            BrowserTab::Url { url, .. } => validate_url(url)?,
+                        }
+                    }
                 }
             }
-            Ok(())
         }
-        let mut ids = BTreeSet::new();
-        if let Some(tree) = &self.tree {
-            visit(
-                tree,
-                &mut ids,
-                &mut BTreeSet::new(),
-                &mut BTreeSet::new(),
-                self.work.kind == WorkWorkspaceKind::Task,
-            )?;
+        kinds.sort();
+        let expected: &[PaneKind] = match self.work.kind {
+            WorkWorkspaceKind::Task => &[PaneKind::Session, PaneKind::Shell, PaneKind::Browser],
+            WorkWorkspaceKind::Wave | WorkWorkspaceKind::Repository => &[PaneKind::Session],
+        };
+        if kinds != expected {
+            return Err("a Task workspace holds one session, shell and browser pane; Wave and repository workspaces hold one session pane".into());
         }
         if self.hidden.iter().any(|id| !ids.contains(id.as_str()))
             || self
@@ -213,6 +274,18 @@ impl WorkPaneLayout {
             }
         }
         Ok(())
+    }
+}
+
+fn validate_url(url: &str) -> Result<(), String> {
+    let host = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .and_then(|rest| rest.split(['/', '?', '#']).next());
+    if host.is_some_and(|host| !host.is_empty() && !host.contains(char::is_whitespace)) {
+        Ok(())
+    } else {
+        Err("browser pages must be http or https URLs".into())
     }
 }
 

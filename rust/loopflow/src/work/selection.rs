@@ -5,7 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod panes;
 mod query;
-pub use panes::{FileDraft, FileTab, PaneIntent, PaneTree, ShellTab, WorkPaneLayout};
+pub use panes::{
+    BrowserTab, FileDraft, FileTab, PaneIntent, PaneKind, PaneTree, ShellTab, WorkPaneLayout,
+};
 
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,

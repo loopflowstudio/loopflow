@@ -49,7 +49,7 @@ mod repositories;
 pub(crate) mod retention;
 mod revisions;
 mod scope_defaults;
-mod selections;
+pub(crate) mod selections;
 mod session_events;
 pub(crate) mod sessions;
 pub(crate) mod task_ownership;

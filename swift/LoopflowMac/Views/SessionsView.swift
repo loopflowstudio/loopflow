@@ -92,8 +92,8 @@ extension PaneContent {
     var terminal: TerminalIdentity? {
         switch self {
         case .shell: selectedShell?.terminal
-        case .session(let id, let location, _): location.map { .session(id, machineId: $0.machineId) }
-        case .empty, .files, .graphLog: nil
+        case .session(let id?, let location, _): location.map { .session(id, machineId: $0.machineId) }
+        case .session(nil, _, _), .browser: nil
         }
     }
 }
@@ -146,47 +146,38 @@ final class SessionsWorkspace {
     var presentation = WorkNavigation.WorkspacePresentation()
     let localMachineId: String?
 
+    /// A Task's first conversation brings its Files into view once.
     func prepareTaskPanes(query: RegistryQuery = RegistryQueryLocal.shared) {
-        guard key.kind == .task, !didPrepareTaskPanes else { return }
-        let panes = multiplexer.layout.allPanes
-        guard panes.count == 1, let session = panes.first,
-              session.content != .empty, session.content.location != nil else { return }
+        guard key.kind == .task, !didPrepareTaskPanes,
+              let session = multiplexer.sessionPane, session.sessionId != nil, session.content.location != nil,
+              case .browser(_, let tabs, _, _, _)? = multiplexer.browserPane?.content, tabs.isEmpty else { return }
         didPrepareTaskPanes = true
-        let content = PaneContent.files(taskId: key.id,
-            location: session.content.location, execution: session.executionLocation)
+        guard let browser = multiplexer.showBrowser(.files, location: session.content.location,
+            execution: session.executionLocation, focus: false) else { return }
         // A location error is presented by the browser's normal error view.
-        _ = try? files(for: content, task: nil, query: query)
-        guard let browser = multiplexer.show(content, beside: session.id, focus: false) else { return }
-        multiplexer.updateRatio(between: session.id, and: browser.id, ratio: LayoutNode.goldenRatio)
+        _ = try? files(for: browser.content, task: nil, query: query)
     }
 
+    /// Add a shell tab at the Task's recorded location.
     @discardableResult
-    func newShell() throws -> PaneState? {
+    func newShell(command: [String]? = nil, focus: Bool = true) throws -> PaneState? {
         guard key.kind == .task else {
             throw RegistryQueryError("Shells belong to Tasks; no shell was opened.")
         }
         let (location, execution) = try shellLocation()
-        let command = try shellCommand(at: location, execution: execution)
-        return multiplexer.newShell(command: command, location: location, execution: execution)
-    }
-
-    var filesPane: PaneState? {
-        multiplexer.layout.allPanes.first { if case .files = $0.content { true } else { false } }
+        let argv = try command.map { try shellCommand($0, at: location, execution: execution) }
+            ?? shellCommand(at: location, execution: execution)
+        return multiplexer.newShell(command: argv, location: location, execution: execution, focus: focus)
     }
 
     func toggleShell() throws {
-        guard key.kind == .task else { return }
-        if let pane = multiplexer.shellPane { toggleTool(pane) }
-        else { try newShell() }
+        guard key.kind == .task, let pane = multiplexer.shellPane else { return }
+        if pane.content.selectedShell == nil { try newShell() } else { toggleTool(pane) }
     }
 
     func toggleFiles() {
-        guard key.kind == .task else { return }
-        if let pane = filesPane { toggleTool(pane) }
-        else {
-            multiplexer.show(.files(taskId: key.id, location: location,
-                execution: multiplexer.layout.allPanes.first { $0.content.location == location }?.executionLocation))
-        }
+        guard key.kind == .task, let pane = multiplexer.browserPane else { return }
+        if pane.content.selectedBrowserTab == .files { toggleTool(pane) } else { showBrowser(.files) }
     }
 
     private func toggleTool(_ pane: PaneState) {
@@ -195,23 +186,32 @@ final class SessionsWorkspace {
         if hidden { multiplexer.setFocusedPane(pane.id) }
     }
 
-    /// Tools retain their content when another tool is selected.
-    func selectContent(_ content: PaneContent, in pane: PaneState) throws {
-        guard multiplexer.layout.pane(for: pane.id)?.incarnation == pane.incarnation else { return }
-        if case .shell = content {
-            if let shell = multiplexer.shellPane { multiplexer.setFocusedPane(shell.id) }
-            else { try newShell() }
-        } else {
-            multiplexer.show(content, beside: pane.id)
-        }
+    /// Select a browser tab at the location of `owner`, or the Task's own.
+    @discardableResult
+    func showBrowser(_ tab: BrowserTab, from owner: PaneState? = nil, focus: Bool = true) -> PaneState? {
+        guard key.kind == .task else { return nil }
+        let source = owner ?? multiplexer.sessionPane
+        let place = source?.content.location ?? location
+        let execution = source?.executionLocation
+            ?? multiplexer.layout.allPanes.first { $0.content.location == place }?.executionLocation
+        if tab == .files { selectFilesPage() }
+        return multiplexer.showBrowser(tab, location: place, execution: execution, focus: focus)
     }
 
+    /// ⌘W closes the selected shell or browser tab, and hides the session pane.
     func closePane(_ paneId: String) {
-        if let pane = multiplexer.layout.pane(for: paneId), case .shell = pane.content,
-           let tab = pane.content.selectedShell {
+        guard let pane = multiplexer.layout.pane(for: paneId) else { return }
+        switch pane.content {
+        case .shell:
+            guard let tab = pane.content.selectedShell else { multiplexer.close(paneId); return }
             if let location = tab.location { surfaces.release(.shell(tab.id, machineId: location.machineId)) }
             multiplexer.closeShell(tab.id)
-        } else { multiplexer.close(paneId) }
+        case .browser:
+            guard let tab = pane.content.selectedBrowserTab else { multiplexer.close(paneId); return }
+            multiplexer.closeBrowserTab(tab.id)
+        case .session:
+            multiplexer.close(paneId)
+        }
     }
 
     var browserPage: TaskFilesStore.Page {
@@ -230,6 +230,14 @@ final class SessionsWorkspace {
         return (location, execution)
     }
 
+    /// A script's command runs in the shell's login shell at the recorded location.
+    private func shellCommand(_ command: [String], at identity: WorkspaceIdentity, execution: TaskLocationObservation?) throws -> [String] {
+        guard identity.machineId == localMachineId else {
+            throw RegistryQueryError("Commands run in local Task shells; this Task is on another Machine. No shell was opened.")
+        }
+        return command
+    }
+
     private func shellCommand(at identity: WorkspaceIdentity, execution: TaskLocationObservation?) throws -> [String] {
         if identity.machineId == localMachineId { return [] }
         guard let location = execution, location.machineID == identity.machineId,
@@ -241,7 +249,7 @@ final class SessionsWorkspace {
             "--repository", location.repositoryID, "task", "shell", task,
             "--checkout", identity.worktree]
     }
-    let multiplexer = MultiplexerStore()
+    let multiplexer: MultiplexerStore
     /// One flag per pane strip, read only by that strip's Close control, so a
     /// crossing never re-renders another pane. Lookup itself is unobserved.
     @ObservationIgnored private var stripHovers: [String: HoverFlag] = [:]
@@ -275,8 +283,8 @@ final class SessionsWorkspace {
     }
     /// Resolve Files from its content, not the selected checkout or a previous link.
     func files(for content: PaneContent, task: RoadmapTask?, query: RegistryQuery) throws -> TaskFilesStore {
-        guard case .files(let taskId, let location, let execution) = content else {
-            throw RegistryQueryError("The addressed pane is not Files.")
+        guard case .browser(let taskId, _, _, let location, let execution) = content else {
+            throw RegistryQueryError("The addressed pane is not the browser.")
         }
         let issue: String
         let checkout: String
@@ -339,6 +347,7 @@ final class SessionsWorkspace {
         self.location = location
         self.localMachineId = localMachineId
         self.surfaces = surfaces
+        multiplexer = MultiplexerStore(taskId: key.kind == .task ? key.id : nil)
         // The workspace outlives SessionsView, including while a shell exits
         // on the Work screen or while another repository is selected.
         surfaceClosed = NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)
@@ -436,13 +445,13 @@ final class SessionsWorkspaceRegistry {
         let workspace = workspace(for: key, title: destination.task.task.name, location: identity)
         workspace.multiplexer.updateSessionLocation(destination.record.id, location: identity, execution: destination.location)
         guard destination.showsChanges else { return nil }
-        let content = PaneContent.files(taskId: destination.task.id, location: identity, execution: destination.location)
+        let content = PaneContent.browser(taskId: destination.task.id, tabs: [.files], selected: BrowserTab.files.id,
+            location: identity, execution: destination.location)
         let files = try workspace.files(for: content, task: destination.task, query: query)
         files.showsChanges = true
         files.page = .files
-        if let pane = workspace.multiplexer.pane(forSessionId: destination.record.id) {
-            try workspace.selectContent(content, in: pane)
-        } else { workspace.multiplexer.show(content, focus: false) }
+        workspace.multiplexer.showBrowser(.files, location: identity, execution: destination.location,
+            focus: workspace.multiplexer.pane(forSessionId: destination.record.id) != nil)
         return files
     }
 
@@ -490,7 +499,7 @@ final class SessionsWorkspaceRegistry {
             }
             try surfaces.sendKey(key, terminal: terminal, surface: surface)
         case .shell:
-            result = try workspace.newShell()
+            result = try workspace.newShell(focus: false)
             resultTab = result?.content.selectedShell?.id
         case .files(let task), .graphLog(let task):
             let shell = target.tab.flatMap { store.shell($0) }
@@ -503,13 +512,9 @@ final class SessionsWorkspaceRegistry {
                     ?? projection.task.reference.workspace?.identity ?? identity) == identity else {
                 throw RegistryQueryError("The Task is not associated with this checkout. Inspect its recorded workspace; no pane was changed.")
             }
-            let content: PaneContent = if case .files = request.action {
-                .files(taskId: projection.task.id, location: identity, execution: execution)
-            } else {
-                .graphLog(taskId: projection.task.id, location: identity, execution: execution)
-            }
-            if case .files = request.action { workspace.selectFilesPage() }
-            result = store.show(content, beside: target.pane, focus: false)
+            let tab: BrowserTab = if case .files = request.action { .files } else { .graphLog }
+            if tab == .files { workspace.selectFilesPage() }
+            result = store.showBrowser(tab, location: identity, execution: execution, focus: false)
             resultTab = nil
         case .hide: workspace.setCollapsed(paneId: target.pane, collapsed: true)
         case .restore: workspace.setCollapsed(paneId: target.pane, collapsed: false)
@@ -1376,7 +1381,7 @@ struct SessionsContentView: View {
         case .graphLog(let id):
             model.select(.task(id: id))
             navigation.content = .terminals
-            multiplexer.show(.graphLog(taskId: id, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation))
+            workspace.showBrowser(.graphLog, from: multiplexer.focusedPane)
         }
         model.remember(destination)
     }
@@ -1442,9 +1447,9 @@ struct SessionsContentView: View {
         case .shell:
             guard let terminal = pane.terminal else { return [] }
             return store.sessions.filter { store.localTerminal(for: $0.record) == terminal }
-        case .session(let id, _, _):
+        case .session(let id?, _, _):
             return store.sessions.filter { $0.id == id }
-        case .empty, .graphLog, .files:
+        case .session(nil, _, _), .browser:
             return []
         }
     }
@@ -1603,7 +1608,7 @@ extension SessionsWorkspace {
                                   cwd: files.store.cwd)
         }
         return multiplexer.paneLayout(work: key, revision: paneRevision,
-            files: place.flatMap { place in taskFiles?.store.paneIntent(location: place) },
+            files: taskFiles?.store.browserTab,
             drafts: (place.flatMap { place in taskFiles?.store.drafts(location: place) } ?? []) + unavailableDrafts)
     }
 
@@ -1612,8 +1617,12 @@ extension SessionsWorkspace {
         isRestoringIntent = true
         defer { isRestoringIntent = false }
         let before = portableLayout()
-        let hadLocalTools = multiplexer.layout.allPanes.count > 1 || multiplexer.layout.allPanes.contains {
-            switch $0.content { case .shell, .files, .graphLog: true; case .empty, .session: false }
+        let hadLocalTools = multiplexer.layout.allPanes.contains {
+            switch $0.content {
+            case .shell(let tabs, _): !tabs.isEmpty
+            case .browser(_, let tabs, _, _, _): !tabs.isEmpty
+            case .session(let id, _, _): id != nil
+            }
         }
         let preserveCurrent = persistenceLoaded || persistenceError != nil || hadLocalTools
         persistenceError = nil
@@ -1627,8 +1636,8 @@ extension SessionsWorkspace {
                 multiplexer.restore(restored)
                 paneRevision = saved.revision
                 unavailableDrafts = restored.drafts
-                if let file = restored.tree?.fileIntent,
-                   case .files(let place?, let tabs, let selected) = file {
+                if case .browser(let place?, let browserTabs, _)? = restored.tree.browserIntent,
+                   case .files(_, let tabs, let selected)? = browserTabs.first(where: { if case .files = $0 { true } else { false } }) {
                     let fileQuery = place.machineID == localMachineId ? query : query.onMachine(place.machineID, repository: key.repository)
                     let documents = files(issue: key.id, cwd: place.cwd, query: fileQuery)
                     documents.restoreTabs(tabs, selected: selected)
@@ -1644,7 +1653,7 @@ extension SessionsWorkspace {
                 }
                 needsSave = portableLayout() != saved
             } else {
-                needsSave = multiplexer.layout.allPanes.contains { $0.content != .empty }
+                needsSave = hadLocalTools
             }
             // Reloads reuse the workspace's existing observation chain.
             if !persistenceLoaded {
@@ -1690,42 +1699,44 @@ extension SessionsWorkspace {
     }
 
     /// A delayed read contributes missing retained content; current edits own selection and geometry.
+    /// Both layouts hold the same designated panes, so merging is per kind.
     private static func merging(_ saved: WorkPaneLayout, with current: WorkPaneLayout) -> WorkPaneLayout {
-        var pending = saved.tree?.panes ?? []
+        let prior = saved.tree.panes
         func merge(_ node: WorkPaneTree) -> WorkPaneTree {
             switch node {
             case .split(let axis, let ratio, let first, let second):
                 return .split(axis: axis, ratio: ratio, first: merge(first), second: merge(second))
             case .pane(let id, let content):
-                let index = pending.firstIndex { prior in
-                    if prior.0 == id { return true }
-                    switch (prior.1, content) {
-                    case (.shell, .shell), (.files, .files), (.empty, .empty): return true
-                    case (.session(let a, _), .session(let b, _)): return a == b
-                    default: return false
+                switch content {
+                case .session(nil, _):
+                    guard case .session(let old?, let place)? = prior.first(where: { if case .session = $0.1 { true } else { false } })?.1 else { return node }
+                    return .pane(id: id, content: .session(id: old, location: place))
+                case .shell(let tabs, let selected):
+                    guard case .shell(let oldTabs, let oldSelected)? = prior.first(where: { if case .shell = $0.1 { true } else { false } })?.1 else { return node }
+                    let merged = tabs + oldTabs.filter { old in !tabs.contains { $0.id == old.id } }
+                    return .pane(id: id, content: .shell(tabs: merged, selected: selected ?? oldSelected))
+                case .browser(let place, let tabs, let selected):
+                    guard case .browser(let oldPlace, let oldTabs, let oldSelected)? = prior.first(where: { if case .browser = $0.1 { true } else { false } })?.1,
+                          oldPlace == place || place == nil else { return node }
+                    var merged = tabs
+                    for old in oldTabs {
+                        if let index = merged.firstIndex(where: { $0.id == old.id }) {
+                            if case .files(let id, let newFiles, let fileSelected) = merged[index],
+                               case .files(_, let oldFiles, _) = old {
+                                merged[index] = .files(id: id, tabs: newFiles + oldFiles.filter { old in
+                                    !newFiles.contains { $0.id == old.id || $0.path == old.path } }, selected: fileSelected)
+                            }
+                        } else { merged.append(old) }
                     }
-                }
-                guard let index else { return node }
-                let old = pending.remove(at: index).1
-                switch (old, content) {
-                case (.shell(let oldTabs, _), .shell(let tabs, let selected)):
-                    return .pane(id: id, content: .shell(tabs: tabs + oldTabs.filter { old in !tabs.contains { $0.id == old.id } }, selected: selected))
-                case (.files(let oldPlace, let oldTabs, _), .files(let place, let tabs, let selected)) where oldPlace == place:
-                    return .pane(id: id, content: .files(location: place, tabs: tabs + oldTabs.filter { old in !tabs.contains { $0.id == old.id || $0.path == old.path } }, selected: selected))
+                    return .pane(id: id, content: .browser(location: place ?? oldPlace, tabs: merged, selected: selected ?? oldSelected))
                 default: return node
                 }
             }
         }
-        var tree = current.tree.map(merge)
-        for (id, content) in pending {
-            if case .empty = content { continue }
-            let leaf = WorkPaneTree.pane(id: id, content: content)
-            tree = tree.map { .split(axis: .vertical, ratio: 0.618, first: $0, second: leaf) } ?? leaf
-        }
         let drafts = current.drafts + saved.drafts.filter { old in
             !current.drafts.contains { $0.path == old.path && $0.location == old.location }
         }
-        return WorkPaneLayout(work: current.work, revision: saved.revision, tree: tree, focused: current.focused,
+        return WorkPaneLayout(work: current.work, revision: saved.revision, tree: merge(current.tree), focused: current.focused,
                               zoomed: current.zoomed, hidden: current.hidden, drafts: drafts)
     }
 }
@@ -1737,7 +1748,7 @@ private extension WorkPaneTree {
         case .split(_, _, let first, let second): first.panes + second.panes
         }
     }
-    var fileIntent: WorkPaneIntent? {
-        panes.first { if case .files = $0.1 { true } else { false } }?.1
+    var browserIntent: WorkPaneIntent? {
+        panes.first { if case .browser = $0.1 { true } else { false } }?.1
     }
 }

@@ -1,5 +1,6 @@
 //! Saved selection and layout intent share one transaction and one Work snapshot.
 mod panes;
+pub(crate) use panes::convert_released_layouts;
 use super::SqliteStore;
 use crate::durable::RepositoryId;
 use crate::store::{StoreError, StoreResult};
@@ -261,7 +262,7 @@ fn plan_in(
             layout
                 .zoomed
                 .as_ref()
-                .and_then(|id| layout.tree.as_ref()?.pane(id))
+                .and_then(|id| layout.tree.pane(id))
                 .cloned()
         });
         let mut content = ViewContent {
@@ -308,12 +309,12 @@ fn plan_in(
             }
             if content.face.is_none() {
                 content.face = primary.map(|primary| PaneIntent::Session {
-                    session_id: primary.id.into(),
+                    session_id: Some(primary.id.into()),
                     location: content.location.clone(),
                 });
             }
             if let Some(PaneIntent::Session {
-                session_id,
+                session_id: Some(session_id),
                 location: Some(location),
             }) = &content.face
             {
@@ -1118,11 +1119,11 @@ mod tests {
             let mut layout = WorkPaneLayout {
                 work: WorkWorkspaceKey {
                     repository: repo.to_string(),
-                    kind,
+                    kind: kind.clone(),
                     id,
                 },
                 revision: 0,
-                tree: None,
+                tree: designated_tree(&kind),
                 focused: None,
                 zoomed: None,
                 hidden: Default::default(),
@@ -1197,9 +1198,53 @@ mod tests {
         }
     }
 
+    fn designated_tree(kind: &WorkWorkspaceKind) -> crate::work::selection::PaneTree {
+        use crate::work::selection::{PaneIntent, PaneTree, SplitAxis};
+        let pane = |id: &str, content| PaneTree::Pane {
+            id: id.into(),
+            content,
+        };
+        let session = pane(
+            "session",
+            PaneIntent::Session {
+                session_id: None,
+                location: None,
+            },
+        );
+        if *kind != WorkWorkspaceKind::Task {
+            return session;
+        }
+        let split = |first, second| PaneTree::Split {
+            axis: SplitAxis::Vertical,
+            ratio: 0.5,
+            first: Box::new(first),
+            second: Box::new(second),
+        };
+        split(
+            session,
+            split(
+                pane(
+                    "shell",
+                    PaneIntent::Shell {
+                        tabs: vec![],
+                        selected: None,
+                    },
+                ),
+                pane(
+                    "browser",
+                    PaneIntent::Browser {
+                        location: None,
+                        tabs: vec![],
+                        selected: None,
+                    },
+                ),
+            ),
+        )
+    }
+
     #[test]
-    fn selection_tool_tabs_restore_and_invalid_writes_are_atomic() {
-        use crate::work::selection::{PaneIntent, PaneTree, WorkPaneLayout};
+    fn selection_designated_panes_restore_and_invalid_writes_are_atomic() {
+        use crate::work::selection::{BrowserTab, PaneIntent, PaneTree, WorkPaneLayout};
         let (dir, store, repo) = fixture();
         let mut layout: WorkPaneLayout = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/pane_layout.json"
@@ -1207,10 +1252,27 @@ mod tests {
         .unwrap();
         layout.work.repository = repo.to_string();
         layout.revision = 0;
-        let Some(PaneTree::Split { second, .. }) = layout.tree.take() else {
-            panic!("fixture tree")
+        // The fixture's conversation is not recorded here; the pane shows the start state.
+        layout.tree = match layout.tree {
+            PaneTree::Split {
+                axis,
+                ratio,
+                second,
+                ..
+            } => PaneTree::Split {
+                axis,
+                ratio,
+                first: Box::new(PaneTree::Pane {
+                    id: "pane-0".into(),
+                    content: PaneIntent::Session {
+                        session_id: None,
+                        location: None,
+                    },
+                }),
+                second,
+            },
+            tree => tree,
         };
-        layout.tree = Some(*second);
         let saved = store.save_pane_layout(&layout).unwrap();
         let reader = SqliteStore::open_read_only(&dir.path().join("db")).unwrap();
         assert_eq!(
@@ -1218,51 +1280,73 @@ mod tests {
             Some(saved.clone())
         );
         let revision = store.revisions().unwrap();
-        let shell = saved.tree.as_ref().unwrap().pane("pane-1").unwrap().clone();
-        let files = saved.tree.as_ref().unwrap().pane("pane-2").unwrap().clone();
-        let PaneIntent::Shell { tabs, selected } = &shell else {
+        let Some(PaneIntent::Shell { tabs, selected }) = saved.tree.pane("pane-1") else {
             panic!("shell")
         };
         assert_eq!(
             tabs.iter().map(|tab| tab.id.as_str()).collect::<Vec<_>>(),
             ["shell-1", "shell-2"]
         );
-        assert_eq!(selected, "shell-2");
-        let PaneIntent::Files { tabs, selected, .. } = &files else {
-            panic!("files")
+        assert_eq!(selected.as_deref(), Some("shell-2"));
+        let Some(PaneIntent::Browser { tabs, selected, .. }) = saved.tree.pane("pane-2") else {
+            panic!("browser")
         };
-        assert_eq!(tabs.len(), 2);
-        assert_eq!(selected.as_deref(), Some("file-1"));
+        assert!(matches!(&tabs[0], BrowserTab::Files { tabs, .. } if tabs.len() == 2));
+        assert_eq!(selected.as_deref(), Some("files"));
         assert_eq!(saved.drafts[0].text, "unsaved edits");
         for kind in [WorkWorkspaceKind::Repository, WorkWorkspaceKind::Wave] {
             let mut invalid = saved.clone();
             invalid.work.kind = kind;
             assert!(store.save_pane_layout(&invalid).is_err());
         }
-        for tool in [shell, files] {
-            let mut invalid = saved.clone();
-            invalid.tree = Some(PaneTree::Split {
-                axis: crate::work::selection::SplitAxis::Vertical,
-                ratio: 0.5,
-                first: Box::new(invalid.tree.take().unwrap()),
-                second: Box::new(PaneTree::Pane {
-                    id: "duplicate-tool".into(),
-                    content: tool,
-                }),
-            });
-            assert!(store.save_pane_layout(&invalid).is_err());
-        }
+        // A fourth pane, a missing pane, a stale tab selection and a non-web page are rejected.
         let mut invalid = saved.clone();
-        if let Some(PaneTree::Split { first, .. }) = &mut invalid.tree {
-            if let PaneTree::Pane {
-                content: PaneIntent::Shell { selected, .. },
-                ..
-            } = first.as_mut()
-            {
-                *selected = "removed".into();
-            }
-        }
+        invalid.tree = PaneTree::Split {
+            axis: crate::work::selection::SplitAxis::Vertical,
+            ratio: 0.5,
+            first: Box::new(invalid.tree),
+            second: Box::new(PaneTree::Pane {
+                id: "second-shell".into(),
+                content: PaneIntent::Shell {
+                    tabs: vec![],
+                    selected: None,
+                },
+            }),
+        };
         assert!(store.save_pane_layout(&invalid).is_err());
+        let mut invalid = saved.clone();
+        if let PaneTree::Split { second, .. } = &invalid.tree {
+            invalid.tree = (**second).clone();
+        }
+        invalid.focused = None;
+        assert!(store.save_pane_layout(&invalid).is_err());
+        let edit = |change: &dyn Fn(&mut PaneIntent)| {
+            let mut invalid = saved.clone();
+            fn visit(tree: &mut PaneTree, change: &dyn Fn(&mut PaneIntent)) {
+                match tree {
+                    PaneTree::Pane { content, .. } => change(content),
+                    PaneTree::Split { first, second, .. } => {
+                        visit(first, change);
+                        visit(second, change);
+                    }
+                }
+            }
+            visit(&mut invalid.tree, change);
+            invalid
+        };
+        assert!(store
+            .save_pane_layout(&edit(&|content| if let PaneIntent::Shell { selected, .. } = content {
+                *selected = Some("removed".into());
+            }))
+            .is_err());
+        assert!(store
+            .save_pane_layout(&edit(&|content| if let PaneIntent::Browser { tabs, .. } = content {
+                tabs.push(BrowserTab::Url {
+                    id: "page-2".into(),
+                    url: "file:///etc/passwd".into(),
+                });
+            }))
+            .is_err());
         assert_eq!(store.revisions().unwrap(), revision);
         assert_eq!(store.pane_layout(&saved.work).unwrap(), Some(saved));
     }
@@ -1270,7 +1354,8 @@ mod tests {
     #[test]
     fn selection_panes_restore_drafts_and_reject_stale_or_foreign_intent() {
         use crate::work::selection::{
-            FileDraft, PaneIntent, PaneTree, ViewLocation, WorkPaneLayout, WorkWorkspaceKey,
+            BrowserTab, FileDraft, PaneIntent, PaneTree, ViewLocation, WorkPaneLayout,
+            WorkWorkspaceKey,
         };
         let (dir, store, repo) = fixture();
         store.test_session(
@@ -1282,6 +1367,41 @@ mod tests {
             machine_id: "machine_recorded".into(),
             cwd: "/repo/task".into(),
         };
+        let with_session = |session_id: Option<&str>| {
+            fn visit(tree: &mut PaneTree, session: Option<&str>, location: &ViewLocation) {
+                match tree {
+                    PaneTree::Pane { content, .. } => match content {
+                        PaneIntent::Session { session_id, .. } => {
+                            *session_id = session.map(Into::into)
+                        }
+                        PaneIntent::Browser {
+                            location: place,
+                            tabs,
+                            selected,
+                        } => {
+                            *place = Some(location.clone());
+                            *tabs = vec![BrowserTab::Files {
+                                id: "files".into(),
+                                tabs: vec![crate::work::selection::FileTab {
+                                    id: "file-1".into(),
+                                    path: "src/lib.rs".into(),
+                                }],
+                                selected: Some("file-1".into()),
+                            }];
+                            *selected = Some("files".into());
+                        }
+                        PaneIntent::Shell { .. } => {}
+                    },
+                    PaneTree::Split { first, second, .. } => {
+                        visit(first, session, location);
+                        visit(second, session, location);
+                    }
+                }
+            }
+            let mut tree = designated_tree(&WorkWorkspaceKind::Task);
+            visit(&mut tree, session_id, &location);
+            tree
+        };
         let layout = WorkPaneLayout {
             work: WorkWorkspaceKey {
                 repository: repo.to_string(),
@@ -1289,22 +1409,12 @@ mod tests {
                 id: "task_22222222222222222222222222222222".into(),
             },
             revision: 0,
-            tree: Some(PaneTree::Pane {
-                id: "files".into(),
-                content: PaneIntent::Files {
-                    location: Some(location.clone()),
-                    tabs: vec![crate::work::selection::FileTab {
-                        id: "file-1".into(),
-                        path: "src/lib.rs".into(),
-                    }],
-                    selected: Some("file-1".into()),
-                },
-            }),
-            focused: Some("files".into()),
-            zoomed: Some("files".into()),
+            tree: with_session(None),
+            focused: Some("browser".into()),
+            zoomed: Some("browser".into()),
             hidden: Default::default(),
             drafts: vec![FileDraft {
-                location,
+                location: location.clone(),
                 path: "src/lib.rs".into(),
                 base_revision: "disk-revision".into(),
                 base_content: "base".into(),
@@ -1318,7 +1428,7 @@ mod tests {
         assert_eq!(plan.contents[0].pane_revision, Some(saved.revision));
         assert!(matches!(
             plan.contents[0].face,
-            Some(PaneIntent::Files { .. })
+            Some(PaneIntent::Browser { .. })
         ));
         assert!(plan.contents[0].argv.is_none());
         for id in ["first", "second"] {
@@ -1361,19 +1471,13 @@ mod tests {
         );
         assert!(store.save_pane_layout(&layout).is_err());
         let mut invalid = saved.clone();
-        invalid.hidden.insert("files".into());
+        invalid.hidden.insert("browser".into());
         assert!(store.save_pane_layout(&invalid).is_err());
         invalid = saved.clone();
         invalid.drafts[0].path = "../outside".into();
         assert!(store.save_pane_layout(&invalid).is_err());
         invalid = saved.clone();
-        invalid.tree = Some(PaneTree::Pane {
-            id: "files".into(),
-            content: PaneIntent::Session {
-                session_id: "unknown-session".into(),
-                location: None,
-            },
-        });
+        invalid.tree = with_session(Some("unknown-session"));
         assert!(store.save_pane_layout(&invalid).is_err());
         invalid = saved.clone();
         invalid.work.id = "task_99999999999999999999999999999999".into();
@@ -1387,15 +1491,9 @@ mod tests {
             .view_plan(&repo, Some(&format!("task:{}", unzoomed.work.id)))
             .unwrap();
         assert!(
-            matches!(&plan.contents[0].face, Some(PaneIntent::Session {session_id, ..}) if session_id == "selection-primary")
+            matches!(&plan.contents[0].face, Some(PaneIntent::Session {session_id: Some(session_id), ..}) if session_id == "selection-primary")
         );
-        unzoomed.tree = Some(PaneTree::Pane {
-            id: "files".into(),
-            content: PaneIntent::Session {
-                session_id: "selection-primary".into(),
-                location: None,
-            },
-        });
+        unzoomed.tree = with_session(Some("selection-primary"));
         let mut session_layout = store.save_pane_layout(&unzoomed).unwrap();
         session_layout.work.id = "task_11111111111111111111111111111111".into();
         session_layout.revision = 0;

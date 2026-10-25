@@ -354,9 +354,8 @@ final class TaskFilesStore {
         }
     }
 
-    func paneIntent(location: WorkViewPlan.Location) -> WorkPaneIntent {
-        .files(location: location, tabs: tabs,
-               selected: tabs.first { $0.path == selection }?.id)
+    var browserTab: WorkBrowserTab {
+        .files(id: BrowserTab.files.id, tabs: tabs, selected: tabs.first { $0.path == selection }?.id)
     }
 
     func drafts(location: WorkViewPlan.Location) -> [WorkFileDraft] {

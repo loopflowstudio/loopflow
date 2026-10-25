@@ -1454,7 +1454,16 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     let mut layout: loopflow::work::selection::WorkPaneLayout =
         serde_json::from_str(include_str!("../../../tests/fixtures/dto/pane_layout.json")).unwrap();
     layout.revision = 0;
-    layout.tree = None;
+    // The fixture's conversation is not recorded here; the session pane shows the start state.
+    if let loopflow::work::selection::PaneTree::Split { first, .. } = &mut layout.tree {
+        **first = loopflow::work::selection::PaneTree::Pane {
+            id: "pane-0".into(),
+            content: loopflow::work::selection::PaneIntent::Session {
+                session_id: None,
+                location: None,
+            },
+        };
+    }
     layout.focused = None;
     layout.zoomed = None;
     layout.hidden.clear();

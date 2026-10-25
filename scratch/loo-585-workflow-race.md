@@ -19,6 +19,9 @@ matches nothing. `cargo test --test two_people` ok; clippy ok. One unrelated lib
 (`store::sqlite::children::…task_labels_and_generated_names…`, "capture does not belong to a recorded
 Session in this Machine") is deterministic on this machine, green on main CI: left to CI.
 
+Gate (2026-10-25, rebased on origin/main): `cargo fmt --check` ok; `cargo clippy -p loopflow --all-targets -D warnings` ok;
+`--lib local_planning::waveless_task_lifecycle` ok; `--lib local_planning::workflow_defaults_follow` ok; `--test two_people` ok.
+
 ## Why it happened (5 whys)
 
 **Affected.** PR #1679 (LOO-583) went red in CI and spent a ci-fix round; PR #1678 (LOO-579) was

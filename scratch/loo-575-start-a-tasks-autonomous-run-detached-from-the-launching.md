@@ -202,3 +202,4 @@ close the conversation, watch `lf top` / Desktop show the Graph advancing.
   `lf task run` from an agent shell never detaches an enclosing execution's viewers.
 - realign (2026-10-24): `docs/lf-reference.md` was stale for `task run`; regenerated via `UPDATE_CLI_REFERENCE=1 … reference_matches_the_compiled_cli` → pass; `cargo check -p loopflow --bins --lib` + `cargo fmt --check` clean on the uncommitted log-path/status tidy.
 - implement (Process log): `cargo test -p loopflow --lib task_graph_launch_tests < /dev/null` → 30/30; clippy `-p loopflow --all-targets` clean. Gate owns the full suite, Swift DesktopHeadlessTests and the rg guidance check.
+- concept-review 2 (2026-10-24, after recovery): code reading only. The implemented launch, status `log:` lines, Desktop cutover and guidance match the accepted contract; no design change and no new open choice. The command-shape assumption stays for demo review.

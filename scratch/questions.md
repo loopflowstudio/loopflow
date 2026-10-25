@@ -1,1 +1,0 @@
-- LOO-586: did not push a merge of main into #1652. Its pr_landing.rs conflict with #1680 means choosing a manual-dequeue policy (block vs re-arm), which LOO-561 reserves for Jack. Left DIRTY for its own conversation; partial resolution in scratch/sync-1652-partial-resolution.patch.

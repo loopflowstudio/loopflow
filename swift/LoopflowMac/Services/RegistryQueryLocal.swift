@@ -33,10 +33,6 @@ enum RegistryQueryLocal {
                 configurationChanged: { try ReaderLaunchConfiguration.current() != configuration }
             )
         }.value
-    }, start: { args, cwd in
-        try await Task.detached(priority: .userInitiated) {
-            try LocalWaveAgentLauncher.startLf(args, cwd: cwd)
-        }.value
     }) { args, cwd in
         try await Perf.measure(Perf.lf, args.prefix(2).joined(separator: " ")) {
             let started = ContinuousClock.now

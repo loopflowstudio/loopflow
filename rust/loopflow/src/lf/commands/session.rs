@@ -319,6 +319,7 @@ async fn list(
                     _ if session.availability.is_some() => "available",
                     SessionState::Unknown => "unknown",
                     SessionState::Active => "active",
+                    SessionState::Detached => "detached",
                     SessionState::Closed => "closed",
                 },
                 session.work_path.as_deref().unwrap_or("Repository"),

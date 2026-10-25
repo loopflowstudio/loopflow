@@ -27,6 +27,9 @@ Choose what is worth implementing before allocating work. Incident findings may
 justify prevention, more investigation, or no further work. Preserve unresolved
 evidence and distinguish proposals from accepted scope. Reuse existing Tasks for
 the same outcome; do not create a prevention project merely to fill a Graph step.
+Before filing work against specific files, list the open PRs that change them
+(`gh pr list --json number,title,headRefName,files`) and name each overlapping
+PR, its Task and any choice it reserves for a person in the new brief.
 When no useful change remains, record that decision and finish.
 
 A standalone invocation need not already have a Task. Use the existing-design
@@ -54,8 +57,8 @@ For each remaining independently shippable outcome, choose one of two actions:
   ```
   Stdin files the Task description; `--directive` on `task run` supplies
   direction, not that durable brief. Use `--stack-on <current-task>` when it
-  must build on this Task's branch. `task run` returns when its Graph ends; run
-  it with your own background tool to keep planning.
+  must build on this Task's branch. `task run` returns once its Graph is
+  running; `lf task status <issue>` follows it, and `-b` waits for the end.
 - If it depends on decisions this core has not settled, leave it in the design
   as a named follow-up. Create it after this PR settles; do not invent durable
   staging state inside Loopflow.

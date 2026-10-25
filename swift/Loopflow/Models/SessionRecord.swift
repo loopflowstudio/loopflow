@@ -4,6 +4,8 @@ public enum SessionState: String, Codable, Sendable, Hashable {
     /// Metadata has no trustworthy live/closed observation.
     case unknown
     case active
+    /// Its agent runs, but no terminal shows it.
+    case detached
     case closed
 }
 
@@ -211,6 +213,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         if state != .closed, let availability { return availability.label }
         switch state {
         case .active: return "Active"
+        case .detached: return "Detached"
         case .closed: return "Closed"
         case .unknown: return interactive ? "Session" : "Run"
         }

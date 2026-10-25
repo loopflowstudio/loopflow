@@ -17,7 +17,9 @@ them in the demo. Each is reversible before landing.
   its tab this Task.
 - **`ls` and `state` both exist; one inspection.** `ls` is Rex's name and a
   rendering of the same Apple-event reply; `state --json` stays the oracle.
-  `ls` scope: the caller's window, else the frontmost one, named in the header.
+  `ls` scope: `--window`, else the caller's window, else the repository's only
+  window (see window positions below). The Task asked to "keep one command";
+  `list` is gone and `ls` renders `state`'s reply, so there is one readback.
 - **Task flag is `-t/--task`, not Rex's `-s`**, because Session means a
   conversation in Loopflow. No `-w` (a Task has one workspace); Desktop window is
   `--window` (long only; Rex's `-C` is uppercase, which lf avoids).

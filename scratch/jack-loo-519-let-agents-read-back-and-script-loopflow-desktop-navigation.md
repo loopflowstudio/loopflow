@@ -147,7 +147,7 @@ the sidebar shows; LOO-576 changes that list, not this API.
 ## Readback
 
 `state --json` (one `inspect desktop` Apple event) carries, per window:
-`destination` (`work`, `dashboard`, `working_tasks`, `view`, `zoomed {from, work}`),
+`destination` (`work`, `dashboard`, `working_tasks`, `view`, `entered {from, work}`),
 `history {back, forward}`, `list` (the sidebar's Tasks in ⌘n order: position,
 work key, label), `actions` (descriptors), and per Task workspace its three
 designated panes (`id`, `kind`, `visible`, `focused`, `zoomed`, `tabs`,
@@ -282,7 +282,15 @@ One PR; deepest deletion first.
    it. `browser.back`/`browser.forward`/`browser.reload` act on the addressed web
    tab; only reload has a key (⌘R) because ⌘[/⌘] are `navigate.*`. No verb maps to
    them, so `VERB_ACTIONS` is unchanged.
-4. **Demo on Dev** (Jack).
+4. **Concept review (2026-10-24): one meaning for zoom.** The same `state` reply
+   says `destination: zoomed` for a Dashboard member entered as full Work and
+   `zoomed: true` for a pane filling its Task (`pane.zoom`, Rex's `zoom`). An agent
+   reading the oracle cannot tell them apart by name. Rename the destination to
+   `entered {from, work}`, matching `dashboard.enter` and the text `ls` already
+   prints ("entered from"): Rust `DesktopDestination::Zoomed`, Swift
+   `DesktopDestination`/`WorkDestination.zoomed`, the inspection fixture and its
+   tests. Zoom then means only the pane.
+5. **Demo on Dev** (Jack).
 
 ## Done when
 
@@ -301,6 +309,8 @@ One PR; deepest deletion first.
 - `-t 99` → 3, nothing changed; ambiguous label → 3 listing matches; unknown
   action → 2; Desktop not running or consent pending → 4.
 - From a Dev Shell, `lf desktop focus` moves focus in Dev, not the installed app (Jack, demo).
+- `lf desktop view <expr> --plan` prints the derived plan without opening Desktop or
+  starting a provider (the Task's LOO-497 reachability check; the flag ships).
 
 ## Checks
 

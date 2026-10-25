@@ -32,20 +32,18 @@ them in the demo. Each is reversible before landing.
   empty panes collapse, extra Session panes leave the layout). No dual-shape reader.
 - **Doubled Dashboard frame — Jack's call in the demo.** `DashboardView.swift` and
   `WorkspacePanesView.swift` both stroke `palette.border`. No change planned.
-- **Close hides; ⌘W closes the selected tab (implemented 2026-10-24).** With
-  retained panes, ⌘W on a shell or browser closes its selected tab and the last
-  tab hides the pane; on the session pane it hides the pane. Undo shows the same
-  occurrence again (the old "Undo never replays" rule holds because the shell is
-  never torn down). Concept review (2026-10-24) found the implementation tears the
-  closed shell tab down and leaves ⇧⌘T unavailable. It applied the rule as written: a
-  closed shell tab's process stays alive until the next close replaces the undo slot.
-  The alternative is that ⌘W ends the shell immediately and ⇧⌘T only shows hidden
-  panes. Jack judges which one in the demo.
+- **Close hides; ⌘W closes the addressed tab (implemented 2026-10-24).** ⌘W on a
+  shell or browser closes the addressed (else selected) tab and the last tab hides
+  the pane; on the session pane it hides the pane. ⇧⌘T ("Undo Close") shows the same
+  occurrence again: a closed shell tab's process stays alive until the next close
+  replaces the undo record (implemented, slice 5). The alternative is that ⌘W ends
+  the shell immediately and ⇧⌘T only shows hidden panes. Jack judges which one in
+  the demo.
 - **New layouts use pane IDs `session`, `shell`, `browser`.** Migrated layouts
   keep their stored IDs; `-b session` resolves by kind either way.
 - **Action request has no `task` field (implement, 2026-10-24).** Every Work-scoped
   action addresses a pane, and `DesktopPaneTarget` already carries the Work.
-- **⌘W and ⇧⌘T are their own actions.** `pane.close` closes the selected tab (last
+- **⌘W and ⇧⌘T are their own actions.** `pane.close` closes the addressed tab (last
   tab hides the pane); `pane.reopen` undoes the last close. `pane.hide`/`pane.restore`
   act on the addressed pane only, so scripts never undo something else.
 - **⇧⌘E is `browser.toggle`.** It shows or hides the browser pane (opening Files

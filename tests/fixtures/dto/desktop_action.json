@@ -137,7 +137,7 @@
     },
     {
       "name": "pane.reopen",
-      "title": "Reopen Closed Pane",
+      "title": "Undo Close",
       "scope": "pane",
       "arguments": [],
       "keys": [

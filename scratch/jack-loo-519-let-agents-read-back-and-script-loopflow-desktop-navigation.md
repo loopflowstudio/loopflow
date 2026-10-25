@@ -288,32 +288,19 @@ One PR; deepest deletion first.
    pane filling its Task (`pane.zoom`, Rex's `zoom`). `WorkModel.enter(_:from:)`/
    `enterTile` replaced `zoom(into:)`/`zoomTile`; the tile-growth transition
    (`ZoomFromTile`, `zoomOrigin`) keeps its visual name.
-5. **Close and reopen act on what they name — next implement (concept review
-   2026-10-24).** The accepted rule is "⌘W closes the selected tab, the last tab hides
-   the pane; Undo shows the same occurrence again because the shell is never torn
-   down." The implementation diverges in three ways:
-   - `closeShell`/`closeBrowserTab` clear `closedState`, and `closePane` releases the
-     shell's surface. So after a person presses ⌘W on a shell or browser tab, ⇧⌘T is
-     unavailable and the shell is already gone. Only a session-pane hide is undoable.
-     `undoCloseShowsTheSameOccurrence` calls `store.close` directly and never goes
-     through the ⌘W path.
-   - `pane.close` ignores `context.tab`: `do pane.close -b shell:2` closes the *selected*
-     tab, which breaks "act on the addressed target only."
-   - `ClosedState` snapshots the whole layout. That made sense when close removed a
-     pane from a free split tree. Now hiding never changes the tree, so the snapshot
-     just restores state that may have gone stale.
-
-   Direction: ⌘W (`pane.close`) closes the addressed tab (`-b shell:2` → tab 2; a bare
-   pane → its selected tab). A session pane, or a pane with no tabs, hides. The
-   workspace keeps one `lastClosed` record, `pane(id) | shellTab(tab, index) |
-   browserTab(tab, index)`, in place of `ClosedState`. A closed shell tab keeps its
-   surface, and its process, until another close replaces the record or the workspace
-   is released; a release then frees it. A browser tab keeps its `BrowserPages` view.
-   `pane.reopen` (⇧⌘T, title "Undo Close") puts that tab back at its index and
-   selects it, or shows the pane again. Precedent: iTerm2's Undo Close keeps the
-   session alive. Proof: in `DesktopPaneControlTests`, ⌘W then ⇧⌘T on a shell tab
-   (sent by key and by event) returns the same tab ID and surface token, and
-   `pane.close -b shell:2` with tab 1 selected leaves tab 1.
+5. **Close and reopen act on what they name — implemented 2026-10-24.** `pane.close`
+   (⌘W) closes the addressed tab (`-b shell:2` → tab 2; a bare pane → its selected
+   tab); a session pane, or one with no tabs, hides. `MultiplexerStore.lastClosed`
+   (`ClosedOccurrence`: `pane(id) | shellTab(tab, index) | browserTab(tab, index)`)
+   replaced the `ClosedState` layout snapshot; only another close replaces it, and
+   the close methods return the replaced record so `SessionsWorkspace.closePane`
+   frees its shell surface or `BrowserPages` view. A shell that exits goes through
+   `removeShell`, which also drops a matching undo record. `pane.reopen` ("Undo
+   Close", ⇧⌘T) reinserts the tab at its index and selects it, or shows the pane;
+   it no longer restores zoom. Proof in `DesktopPaneControlTests`:
+   `undoCloseReturnsTheClosedShellTab` (key and event; same tab ID and pooled view —
+   the headless stand-in for the surface token, which needs a display) and
+   `closeActsOnTheAddressedTab`.
 6. **Demo on Dev** (Jack).
 
 ## Done when
@@ -370,4 +357,4 @@ the doubled frame unless Jack picks a fix in the demo.
 - **`WKWebView` on macOS 15** needs no deployment-target change; SwiftUI
   `WebView` would need 26 and is not used.
 
-Check results (2026-10-24, after compress): `cargo test --lib commands::desktop selection_ designated_panes` + integration `dto_fixtures::desktop cli_discovery::desktop structured_help reference_matches` pass, clippy clean, Swift 14 focused suites pass; after browser controls `swift test --filter 'DesktopPaneControlTests|DTOFixtureTests'` (74) + `dto_fixtures::desktop` + `every_verb_names_a_registry_action` pass; full Rust integration (`work_watch`, `cli_discovery`, `dto_fixtures`) deferred to gate. After the `entered` rename: `dto_fixtures::desktop` (4), `--lib commands::desktop` (9), clippy, Swift `DTOFixtureTests|WorkDestinationTests|DesktopPaneControlTests|WorkNavigationTests` (166) pass.
+Check results (2026-10-24, after compress): `cargo test --lib commands::desktop selection_ designated_panes` + integration `dto_fixtures::desktop cli_discovery::desktop structured_help reference_matches` pass, clippy clean, Swift 14 focused suites pass; after browser controls `swift test --filter 'DesktopPaneControlTests|DTOFixtureTests'` (74) + `dto_fixtures::desktop` + `every_verb_names_a_registry_action` pass; full Rust integration (`work_watch`, `cli_discovery`, `dto_fixtures`) deferred to gate. After the `entered` rename: `dto_fixtures::desktop` (4), `--lib commands::desktop` (9), clippy, Swift `DTOFixtureTests|WorkDestinationTests|DesktopPaneControlTests|WorkNavigationTests` (166) pass. After slice 5: Swift `DesktopPaneControlTests|WorkspaceRetentionTests|DTOFixtureTests|MultiplexerStoreTests|WorktreeWorkspaceTests|TaskFilesTests` (125) and `dto_fixtures::desktop` (4) pass.

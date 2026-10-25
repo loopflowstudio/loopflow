@@ -1,10 +1,10 @@
 #if os(macOS)
+import AppKit
 import Foundation
 import Network
 import Testing
 import WebKit
 #if canImport(GhosttyKit)
-import AppKit
 import GhosttyKit
 #endif
 @testable import Loopflow
@@ -79,7 +79,7 @@ struct DesktopPaneControlTests {
         #expect(store.browserPane?.content == browser.content)
     }
 
-    @Test("Companion switches retain the shell and file draft; closing the tab retires the shell")
+    @Test("Companion switches retain the shell and file draft; the next close retires a closed shell")
     func companionSwitchRetainsViews() throws {
         let workspace = SessionsWorkspace(key: workKey, title: "Task", location: identity, localMachineId: identity.machineId)
         let store = workspace.multiplexer
@@ -109,6 +109,8 @@ struct DesktopPaneControlTests {
         #expect(store.shellPane?.content.selectedShell == nil)
         #expect(store.collapsedPaneIds.contains(shell.id))
         #if canImport(GhosttyKit)
+        #expect(workspace.surfaces.view(for: terminal) === view)
+        workspace.closePane(browser.id)
         #expect(workspace.surfaces.view(for: terminal) !== view)
         #endif
     }
@@ -714,6 +716,8 @@ struct DesktopPaneControlTests {
         try await settle(page) { $0.url == second }
 
         workspace.closePane(browser.id)
+        #expect(workspace.pages.view(for: tab, url: second) === page)
+        workspace.closePane(browser.id) // Closing Files replaces the undoable page.
         #expect(workspace.pages.view(for: tab, url: second) !== page)
     }
 
@@ -899,27 +903,60 @@ struct DesktopPaneControlTests {
         #expect(!store.collapsedPaneIds.contains(old.pane))
     }
 
-    @Test func undoCloseShowsTheSameOccurrence() throws {
-        let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
+    @Test("⌘W then ⇧⌘T returns the same shell tab and surface, by key and by Apple event")
+    func undoCloseReturnsTheClosedShellTab() throws {
+        for byKey in [true, false] {
+            let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId), window = UUID()
+            let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Pane controls must not launch Work") })
+            let workspace = registry.open(workKey, title: "Task", location: identity), store = workspace.multiplexer
+            store.load(sessionId: "conversation", location: identity)
+            let first = try #require(store.newShell(location: identity)?.content.selectedShell)
+            let shell = try #require(store.newShell(location: identity))
+            let closing = try #require(shell.content.selectedShell)
+            #if canImport(GhosttyKit)
+            let view = registry.surfaces.view(for: try #require(shell.terminal))
+            #endif
+            register(router, window: window, registry: registry, model: model)
+            func press(_ key: String, _ modifiers: NSEvent.ModifierFlags) throws -> (pane: String?, tab: String?) {
+                let (action, args) = try #require(DesktopAction.binding(characters: key, modifiers: modifiers))
+                if byKey {
+                    let outcome = try action.perform(DesktopActionContext(model: model, workspaces: registry,
+                        workspace: workspace, pane: store.focusedPane, args: args))
+                    return (outcome.pane, outcome.tab)
+                }
+                let receipt = try router.perform(DesktopActionRequest(action.name, at: target(store.focusedPane, window: window), args: args))
+                return (receipt.pane, receipt.tab)
+            }
+
+            _ = try press("w", .command)
+            #expect(store.shellPane?.content.selectedShell == first)
+            #expect(store.isVisible(try #require(store.shellPane)))
+            let reopened = try press("t", [.command, .shift])
+            #expect(reopened.pane == shell.id)
+            #expect(reopened.tab == closing.id)
+            #expect(store.focusedPane == shell)
+            #if canImport(GhosttyKit)
+            #expect(registry.surfaces.view(for: try #require(shell.terminal)) === view)
+            #endif
+            #expect(throws: DesktopTargetError.self) { _ = try press("t", [.command, .shift]) }
+        }
+    }
+
+    @Test("pane.close closes the tab it names, not the selected one")
+    func closeActsOnTheAddressedTab() throws {
+        let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId), window = UUID()
         let store = registry.open(workKey, title: "Task", location: identity).multiplexer
-        store.load(sessionId: "conversation", location: identity)
-        store.newShell(location: identity)
-        let shell = store.focusedPane
+        let first = try #require(store.newShell(location: identity)?.content.selectedShell)
+        let second = try #require(store.newShell(location: identity)?.content.selectedShell)
+        store.selectShell(first.id)
+        let pane = try #require(store.shellPane)
         register(router, window: window, registry: registry)
-        store.close(shell.id)
-        #expect(!store.isVisible(shell))
-        let session = try #require(store.sessionPane)
-        #expect(throws: DesktopTargetError.self) {
-            try router.perform(DesktopActionRequest("pane.restore", at: target(session, window: window)))
-        }
-        let reopened = try router.perform(DesktopActionRequest("pane.reopen", at: target(session, window: window)))
-        #expect(reopened.pane == shell.id)
-        #expect(store.focusedPane == shell)
-        #expect(throws: DesktopTargetError.self) {
-            try router.perform(DesktopActionRequest("pane.reopen", at: target(session, window: window)))
-        }
-        _ = try router.perform(DesktopActionRequest("pane.hide", at: target(shell, window: window)))
-        #expect(store.collapsedPaneIds.contains(shell.id))
+        let addressed = DesktopPaneTarget(repository: repository, window: window.uuidString, work: workKey,
+            pane: pane.id, incarnation: second.incarnation, tab: second.id)
+        _ = try router.perform(DesktopActionRequest("pane.close", at: addressed))
+        guard case .shell(let tabs, let selected) = store.shellPane?.content else { throw RegistryQueryError("No shell pane") }
+        #expect(tabs == [first])
+        #expect(selected == first.id)
     }
 
     @Test func wrongMachineAndReplacedWindowNeverChangeOrAllocateWorkspaces() throws {

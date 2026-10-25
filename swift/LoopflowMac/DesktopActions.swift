@@ -341,7 +341,7 @@ struct DesktopAction {
         },
         DesktopAction("pane.close", "Close Tab", scope: .pane, keys: [.init(.character("w"), .command)]) { context in
             let (workspace, pane) = try context.addressed
-            workspace.closePane(pane.id)
+            workspace.closePane(pane.id, tab: context.tab)
             return nil
         },
         DesktopAction("pane.restore", "Show Pane", scope: .pane) { context in
@@ -352,7 +352,7 @@ struct DesktopAction {
             workspace.setCollapsed(paneId: pane.id, collapsed: false)
             return nil
         },
-        DesktopAction("pane.reopen", "Reopen Closed Pane", scope: .pane, keys: [.init(.character("t"), [.command, .shift])],
+        DesktopAction("pane.reopen", "Undo Close", scope: .pane, keys: [.init(.character("t"), [.command, .shift])],
             available: { $0.workspace?.multiplexer.canUndoClose == true }) { context in
             let (workspace, _) = try context.addressed
             let store = workspace.multiplexer

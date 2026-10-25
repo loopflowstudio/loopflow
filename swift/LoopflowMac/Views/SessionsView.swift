@@ -204,20 +204,31 @@ final class SessionsWorkspace {
         return multiplexer.showBrowser(tab, location: place, execution: execution, focus: focus)
     }
 
-    /// ⌘W closes the selected shell or browser tab, and hides the session pane.
-    func closePane(_ paneId: String) {
+    /// ⌘W closes the named tab, else the selected one; a session pane, or one
+    /// without tabs, hides. The closed tab keeps its shell or page for Undo until
+    /// another close replaces it.
+    func closePane(_ paneId: String, tab: String? = nil) {
         guard let pane = multiplexer.layout.pane(for: paneId) else { return }
+        let replaced: ClosedOccurrence?
         switch pane.content {
-        case .shell:
-            guard let tab = pane.content.selectedShell else { multiplexer.close(paneId); return }
-            if let location = tab.location { surfaces.release(.shell(tab.id, machineId: location.machineId)) }
-            multiplexer.closeShell(tab.id)
-        case .browser:
-            guard let tab = pane.content.selectedBrowserTab else { multiplexer.close(paneId); return }
-            pages.release(tab.id)
-            multiplexer.closeBrowserTab(tab.id)
+        case .shell(let tabs, let selected):
+            guard let id = tab ?? selected, tabs.contains(where: { $0.id == id }) else {
+                replaced = multiplexer.close(paneId); break
+            }
+            replaced = multiplexer.closeShell(id)
+        case .browser(_, let tabs, let selected, _, _):
+            guard let id = tab ?? selected, tabs.contains(where: { $0.id == id }) else {
+                replaced = multiplexer.close(paneId); break
+            }
+            replaced = multiplexer.closeBrowserTab(id)
         case .session:
-            multiplexer.close(paneId)
+            replaced = multiplexer.close(paneId)
+        }
+        switch replaced {
+        case .shellTab(let tab, _):
+            if let location = tab.location { surfaces.release(.shell(tab.id, machineId: location.machineId)) }
+        case .browserTab(let tab, _): pages.release(tab.id)
+        case .pane, nil: break
         }
     }
 
@@ -364,8 +375,10 @@ final class SessionsWorkspace {
                       case .shell(let tabId, _) = terminal else { return }
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    guard self.multiplexer.shell(tabId)?.location?.machineId == terminal.machineId else { return }
-                    self.multiplexer.closeShell(tabId)
+                    var closed: ShellTab?
+                    if case .shellTab(let tab, _) = self.multiplexer.lastClosed, tab.id == tabId { closed = tab }
+                    guard (self.multiplexer.shell(tabId) ?? closed)?.location?.machineId == terminal.machineId else { return }
+                    self.multiplexer.removeShell(tabId)
                 }
             }
     }

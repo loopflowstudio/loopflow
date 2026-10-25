@@ -41,7 +41,7 @@ private struct BrowserPageControls: View {
     let page: WKWebView
     @State private var canGoBack = false
     @State private var canGoForward = false
-    @State private var title = ""
+    @State private var address = ""
 
     var body: some View {
         HStack(spacing: 4) {
@@ -51,14 +51,14 @@ private struct BrowserPageControls: View {
                 .disabled(!canGoForward).help("Forward").accessibilityIdentifier("browser-forward")
             Button { page.reload() } label: { Image(systemName: "arrow.clockwise") }
                 .help("Reload").accessibilityIdentifier("browser-reload")
-            Text(title).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+            Text(address).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 6).padding(.vertical, 3)
         .onReceive(page.publisher(for: \.canGoBack)) { canGoBack = $0 }
         .onReceive(page.publisher(for: \.canGoForward)) { canGoForward = $0 }
-        .onReceive(page.publisher(for: \.url)) { title = $0?.absoluteString ?? "" }
+        .onReceive(page.publisher(for: \.url)) { address = $0?.absoluteString ?? "" }
     }
 }
 

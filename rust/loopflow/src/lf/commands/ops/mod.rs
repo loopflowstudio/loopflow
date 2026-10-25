@@ -436,14 +436,11 @@ pub(crate) fn run_sync_in(
     };
     let avoidable = is_avoidable_sync_class(&plan.class);
     let (verification, agent_launched) = if manual {
-        (
-            sync_with_plan(repo_root, &options, plan.clone(), progress)?,
-            false,
-        )
+        (sync_with_plan(repo_root, &options, &plan, progress)?, false)
     } else {
         let recovery_config = load_config_or_default(Some(repo_root));
         crate::ops::checkout::with_preserved_edits(repo_root, || {
-            match sync_with_plan(repo_root, &options, plan.clone(), progress) {
+            match sync_with_plan(repo_root, &options, &plan, progress) {
                 Ok(verification) => Ok((verification, false)),
                 Err(OpsError::SyncConflict {
                     onto,

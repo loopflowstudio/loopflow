@@ -64,7 +64,7 @@ struct ConsoleCommands: Commands {
             Button("Forward") { actions?.forward() }.keyboardShortcut("]")
             Button("Next Task") { actions?.adjacent(1) }.keyboardShortcut(.tab, modifiers: .control)
             Button("Previous Task") { actions?.adjacent(-1) }.keyboardShortcut(.tab, modifiers: [.control, .shift])
-            Menu("Working Tasks") {
+            Menu("Sidebar Tasks") {
                 ForEach(1...9, id: \.self) { slot in
                     Button("Task \(slot)") { actions?.slot(slot - 1) }.keyboardShortcut(KeyEquivalent(Character(String(slot))))
                 }
@@ -1134,7 +1134,7 @@ struct SessionsContentView: View {
             focusTerminal: multiplexer.focusedPane.terminal.map { terminal in { workspaces.surfaces.focus(terminal) } },
             zoom: { _handle(.zoom) }, focusPane: { _handle(.focus($0)) },
             back: { model.goBack() }, forward: { model.goForward() },
-            adjacent: { model.cycleWorkingTask($0) }, slot: { model.selectWorkingTask(slot: $0) },
+            adjacent: { model.cycleSidebarTask($0) }, slot: { model.selectSidebarTask(slot: $0) },
             shell: taskTools ? { _handle(.toggleShell) } : nil,
             files: taskTools ? { _handle(.toggleFiles) } : nil,
             newTerminal: taskTools ? { _handle(.newTerminal) } : nil,
@@ -1165,8 +1165,8 @@ struct SessionsContentView: View {
             WorkPaletteShortcut(presented: navigation.palette != nil, restoreFocus: navigation.restorePaletteFocus,
                 toggleSidebar: { navigation.toggleNavigator() }, navigate: { shortcut in
                     switch shortcut {
-                    case .task(let slot): model.selectWorkingTask(slot: slot)
-                    case .adjacent(let offset): model.cycleWorkingTask(offset)
+                    case .task(let slot): model.selectSidebarTask(slot: slot)
+                    case .adjacent(let offset): model.cycleSidebarTask(offset)
                     case .search, .toggleSidebar: break
                     }
                 }, modifiersChanged: { if navigation.showsSlotHints != $0 { navigation.showsSlotHints = $0 } }) {

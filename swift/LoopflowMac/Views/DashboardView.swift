@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct DashboardSidebar: View {
     @Bindable var model: WorkModel
+    let scopeTitle: Namespace.ID
     @State private var creating = false
     /// The whole section reveals New Dashboard; only the button reads it.
     @State private var hover = HoverFlag()
@@ -37,7 +38,10 @@ struct DashboardSidebar: View {
         ForEach(model.dashboards.filter(\.pinned), id: \.dashboardID) { plan in
             if let id = plan.dashboardID {
                 Button { model.selectDashboard(id) } label: {
-                    Label(plan.name ?? id, systemImage: "rectangle.split.2x2")
+                    Label {
+                        Text(plan.name ?? id)
+                            .matchedGeometryEffect(id: WorkNavigation.SidebarScope.dashboard(id), in: scopeTitle)
+                    } icon: { Image(systemName: "rectangle.split.2x2") }
                         .frame(maxWidth: .infinity, alignment: .leading).padding(10)
                         .background(model.navigation.dashboardID == id ? palette.surface : .clear,
                                     in: RoundedRectangle(cornerRadius: 6))

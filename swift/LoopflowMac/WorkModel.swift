@@ -1631,22 +1631,36 @@ final class WorkModel {
         }
     }
 
+    /// A Task on the shown Dashboard keeps its board in the trail, as its tile does.
     func select(_ requested: WorkReference?) {
+        if let requested, requested.kind == .task, let board = navigation.trailBoard,
+           taskIDs(on: board).contains(task(id: requested.id)?.task.id ?? requested.id) {
+            return zoom(into: requested, from: board)
+        }
         select(requested, preservingOpening: false)
     }
 
     /// Working Tasks: the repository plan's started, uncompleted Tasks, in plan order.
-    var workingTaskIDs: [String] { taskIDs(in: builtInPlan(.repository)) }
+    var workingTaskIDs: [String] { taskIDs(in: builtInPlan(.repository)?.resolution.members ?? []) }
 
     /// The Wave the sidebar lists, while its planning is current.
     var sidebarWave: WaveRoadmap? {
         navigation.sidebarWaveID.flatMap { id in visibleRoadmaps.first { $0.wave.id == id } }
     }
 
-    /// Every Wave at the repository; a scoped Wave's child Waves from its built-in plan.
+    /// The sidebar scope's members: its built-in plan's, or a Dashboard's visible ones in arrangement order.
+    private var sidebarMembers: [WorkMemberRef] {
+        switch navigation.sidebarScope {
+        case .repository: builtInPlan(.repository)?.resolution.members ?? []
+        case .wave(let id): builtInPlan(.wave(id))?.resolution.members ?? []
+        case .dashboard(let id): dashboard(id)?.projection.visible ?? []
+        }
+    }
+
+    /// Every Wave at the repository; a scoped Wave's child Waves; a Dashboard's Wave members.
     var sidebarWaves: [WaveRoadmap] {
-        guard let id = navigation.sidebarWaveID else { return visibleRoadmaps }
-        return (builtInPlan(.wave(id))?.resolution.members ?? []).filter { $0.work.kind == .wave }
+        guard navigation.sidebarScope != .repository else { return visibleRoadmaps }
+        return sidebarMembers.filter { $0.work.kind == .wave }
             .compactMap { member in visibleRoadmaps.first { $0.wave.id == member.work.id } }
     }
 
@@ -1654,17 +1668,24 @@ final class WorkModel {
         selectionPlans.value?.first { $0.dashboardID == nil && $0.selection.expression == expression }
     }
 
-    /// Plan members name Tasks by Work ID; rows use the planning ID when it is known.
-    private func taskIDs(in plan: WorkViewPlan?) -> [String] {
+    /// A Dashboard's visible Tasks in arrangement order; Working Tasks in plan order.
+    private func taskIDs(on board: WorkNavigation.Board) -> [String] {
+        switch board {
+        case .workingTasks: workingTaskIDs
+        case .saved(let id): taskIDs(in: dashboard(id)?.projection.visible ?? [])
+        }
+    }
+
+    /// Members name Tasks by Work ID; rows use the planning ID when it is known.
+    private func taskIDs(in members: [WorkMemberRef]) -> [String] {
         var seen = Set<String>()
-        return (plan?.resolution.members ?? []).filter { $0.work.kind == .task }
+        return members.filter { $0.work.kind == .task }
             .map { task(id: $0.work.id)?.task.id ?? $0.work.id }
             .filter { seen.insert($0).inserted }
     }
 
     var sidebarTaskIDs: [String] {
-        let scoped = navigation.sidebarWaveID.map { taskIDs(in: builtInPlan(.wave($0))) } ?? workingTaskIDs
-        return scoped.filter { id in
+        taskIDs(in: sidebarMembers).filter { id in
             switch navigation.sidebarFilter {
             case .working: return true
             case .available:
@@ -1689,13 +1710,16 @@ final class WorkModel {
         await workspace.openPrimaryConversation(wave: wave, store: store, registry: workspaceRegistry)
     }
 
-    func selectWorkingTask(slot: Int) {
-        guard workingTaskIDs.indices.contains(slot) else { return }
-        select(.task(id: workingTaskIDs[slot]))
+    /// ⌘N: the Nth Task row on screen.
+    func selectSidebarTask(slot: Int) {
+        let ids = sidebarTaskIDs
+        guard ids.indices.contains(slot) else { return }
+        select(.task(id: ids[slot]))
     }
 
-    func cycleWorkingTask(_ offset: Int) {
-        let ids = workingTaskIDs
+    /// ⌃⇥: the next Task row on screen, wrapping.
+    func cycleSidebarTask(_ offset: Int) {
+        let ids = sidebarTaskIDs
         guard !ids.isEmpty else { return }
         let index = ids.firstIndex { isSelected(.task(id: $0)) }
         let next = index.map { ($0 + offset + ids.count) % ids.count } ?? (offset > 0 ? 0 : ids.count - 1)
@@ -2439,7 +2463,8 @@ extension WorkModel {
         switch destination {
         case .work(let work): select(work, preservingOpening: false, recordingHistory: recordingHistory)
         case .zoomed(let board, let work):
-            select(work, preservingOpening: false, recordingHistory: recordingHistory)
+            // Re-selecting the zoomed member (⌘N on the open row) is not a new visit.
+            select(work, preservingOpening: false, recordingHistory: recordingHistory && navigation.destination != destination)
             navigation.destination = .zoomed(from: board, work: work)
         case .dashboard, .view, .workingTasks:
             if recordingHistory, navigation.destination != destination {
@@ -2456,11 +2481,14 @@ extension WorkModel {
         }
     }
 
+    /// Dashboards are repository-level; their sidebar's back control returns to the repository.
     func selectDashboard(_ id: String) {
+        navigation.sidebarWaveID = nil
         selectDestination(.dashboard(id), recordingHistory: true)
     }
 
     func selectWorkingTasksDashboard() {
+        navigation.sidebarWaveID = nil
         selectDestination(.workingTasks, recordingHistory: true)
     }
 

@@ -589,18 +589,15 @@ curation changes neither.
   display preferences. The repaired production loopback path demonstrated that
   regression, not just a mock call.
 - A failed-demo conversation is useful evidence, never a success claim.
-  Runnable prototyping and Flow alternatives belong to
-  [LOO-297](https://linear.app/loopflow/issue/LOO-297).
+  Runnable prototyping and Flow alternatives belong to LOO-297.
 - Fixture renders do not prove tab/window interaction or native recovery.
 
-Name-attribution gate and fresh Jack/Maya/unknown CLI prose are recorded at
-`f881ae647:wave/product/MEMORY.md`, this heading; no native, live Task-write or
-review-Flow proof. Native review resume
-still needs anonymous → named → corrected → unknown participant acceptance on
-a differently named Home, preserving historical authors and review authority.
-LOO-297's attempted read failed on missing Linear credentials; local Task absence
-did not establish remote absence. Any sentence repair requires a fresh authorized
-issue read. No Task was filed or changed by these records.
+Name-attribution gate and Jack/Maya/unknown CLI prose: `f881ae647:wave/product/MEMORY.md`,
+this heading; no native, live Task-write or review-Flow proof. Native review resume
+needs anonymous → named → corrected → unknown acceptance on a differently named
+Home, preserving historical authors and review authority.
+LOO-297's read failed without Linear credentials; local absence is not remote
+absence, so repairs need a fresh authorized read. These records changed no Task.
 
 ## Workspace redesign decisions
 
@@ -612,9 +609,9 @@ mono excerpts, neutral selection and quiet Dark burgundy replace older serif/Ink
 on Paper navigation. Prior rejected compositions and limits remain at
 `ac973064c6:.lf/wave/product/MEMORY.md`, this heading.
 
-Explicitly opening started, unpaused work appends once; attention/filter changes
-cannot reorder slots. Pause hides membership without discarding retained order,
-panes or drafts. Completion does not automatically remove retained work. A Wave
+Opening started, unpaused work appends once; attention/filter changes never
+reorder slots. Pause hides membership, keeping order, panes and drafts; completion
+never auto-removes retained work. A Wave
 pairs its conversation with all current planned and started Tasks. The shared
 default query excludes unstarted/terminal Tasks, so its members cannot stand in
 for planning inventory. Repository/Wave selection stays passive; unstarted Task
@@ -628,18 +625,15 @@ APIs, LOO-416 cross-launch attachment, LOO-452 rebinding. Cmd-number uses stable
 slots; Ctrl-Tab cycles them; history retains Cmd-brackets. Publication for demo
 review is authorized, not merge or Task completion.
 
-Preview freshness is separate from execution state: Codex records thread/turn/time,
-clears on turn start and fences replacement attachments. Swift pairs status/text
-from one Session; running text falls back to summary after 30 seconds, Available
-results retain their age. Other providers lack qualified previews.
+Preview freshness is not execution state: Codex records thread/turn/time, clears
+on turn start, fences replacements. Swift pairs one Session's status/text; running
+text falls back to summary after 30s; Available keeps its age. Others lack previews.
 
-October 17 recovery: the demo retained a Codex draft but Claude → Codex failed
-before Claude saved a transcript; later transfer succeeded. Preparation now reads
-requested-provider history before terminal release; failure preserves concurrent
-Session updates and permits retry. Missing history is not an empty conversation.
-An exited status writer restarts on a later event. Headless checks cover refusal,
-retry, new-turn clearing and observation recovery; mounted retention and visual
-acceptance remain open. Jack Heart cut Open in editor on October 17.
+October 17 recovery (Claude → Codex failed before a transcript saved): preparation
+reads requested-provider history before terminal release; failure preserves
+concurrent Session updates and permits retry. Missing history is not an empty
+conversation; an exited status writer restarts on a later event. Mounted retention
+and visual acceptance remain open. Jack Heart cut Open in editor on October 17.
 
 October 16–17, LOO-497/489/416: Jack Heart separated selection from arrangement.
 One Task layout projects primary Session or explicit zoom, never focus. Defaults
@@ -648,9 +642,9 @@ paused/idle. Jack chose first-wins duplicates and lfdb persistence. First-visibl
 tree traversal is the implementation interpretation; incomplete evidence retains
 geometry/order because reordering can promote duplicates. Hide preserves edits.
 
-Jack accepted implementation/review publication, not merge/completion; breadcrumbs,
-Attention first, arrivals at the end, Available and cross-repo Cmd K Find Work.
-Other repos open separate windows; Edit view is separate. Repo scope is implicit;
+Jack accepted review publication, not merge/completion; breadcrumbs, Attention
+first, arrivals last, Available, cross-repo Cmd K Find Work. Other repos open
+separate windows; Edit view is separate. Repo scope is implicit;
 backlog selection starts nothing. October 17: independent Dashboards reuse Task
 workspaces; repository/Wave defaults cannot be replaced. Work bindings were removed.
 
@@ -666,8 +660,8 @@ Jack's October 17 tab decision: each Task has at most one Shell and one Files pa
 shell tabs own independent processes, file tabs share Task/path documents. No
 tear-out, extra tool panes or repo/Wave/Dashboard shells. Creation selects a tab;
 arrangement groups existing panes. Shell identity is independent of pane/selection;
-empty Files keeps location. October 18 application tests cover delayed reads
-merging missing content without replacing newer tabs, selection, geometry or drafts.
+empty Files keeps location. Delayed reads merge missing content without replacing
+newer tabs, selection, geometry or drafts (October 18 tests).
 Revision conflicts preserve live and durable edits. Cold shells have no launch command. Native
 launch still records no Shell Process ID, so cold attachment and mounted restart/
 cross-machine continuity remain unproved with 416.
@@ -1135,17 +1129,15 @@ Workflow-loading landing hold survives; LOO-488 owns whole-app theming.
 ### Shared viewing boundary
 
 Jack Heart accepted per-conversation ownership October 16. LOO-416 integrated
-LOO-415's attach-only transport at `7bfa10fa72` October 17; Desktop adoption and
-combined continuity remain unproved. Viewer loss must not restart execution.
-Text-grid snapshots do not prove exact renderer restoration. Earlier tmux
-comparison and LOO-280–283 allocations: `f8fe8aff0:wave/product/MEMORY.md`, this
-heading.
+LOO-415's attach-only transport (`7bfa10fa72`, October 17); Desktop adoption and
+combined continuity are unproved. Viewer loss never restarts execution; text-grid
+snapshots don't prove renderer restoration. Earlier tmux and LOO-280–283 notes:
+`f8fe8aff0:wave/product/MEMORY.md`, this heading.
 
 ## Learnings
 
-- Adapt proven components; rewriting the sidebar lost established behavior.
-  Charter rewrites remain appropriate; curate memory. Example:
-  `37205c3fb6:wave/product/MEMORY.md`, Learnings.
+- Adapt proven components; rewriting the sidebar lost established behavior
+  (`37205c3fb6:wave/product/MEMORY.md`, Learnings).
 - **`loopflow-dev.py` builds from the worktree it runs in.** Repository
   discovery collapses linked worktrees to the canonical main checkout.
 - `cargo test -p loopflow dto_fixtures` filters by test name; use

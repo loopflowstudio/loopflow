@@ -202,6 +202,17 @@ final class WorkNavigation {
     }
     /// The Wave the sidebar lists; nil lists Working Tasks. Selecting a Task keeps it.
     var sidebarWaveID: String?
+    /// What the sidebar lists: a saved Dashboard while it is shown or zoomed from,
+    /// else the stored Wave, else the repository's Working Tasks.
+    enum SidebarScope: Hashable {
+        case repository
+        case wave(String)
+        case dashboard(String)
+    }
+    var sidebarScope: SidebarScope {
+        if case .saved(let id) = trailBoard { return .dashboard(id) }
+        return sidebarWaveID.map(SidebarScope.wave) ?? .repository
+    }
     var showsSlotHints = false
     var sidebarFilter: SidebarFilter = .working
     var sidebarFocusRequested = false

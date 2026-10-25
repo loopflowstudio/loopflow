@@ -51,6 +51,23 @@ pub(crate) fn execution_blockers(
     store: &SqliteStore,
     processes: &[LfProcess],
 ) -> OpsResult<Vec<String>> {
+    Ok(unresolved_processes(store, processes)?
+        .into_iter()
+        .map(|(process, _)| {
+            format!(
+                "Process {} has live or unresolved execution; inspect `lf history show {}`",
+                process.id, process.id
+            )
+        })
+        .collect())
+}
+
+/// Open Processes outside the caller's own lineage that are not known dead,
+/// with their liveness evidence.
+pub(crate) fn unresolved_processes<'a>(
+    store: &SqliteStore,
+    processes: &'a [LfProcess],
+) -> OpsResult<Vec<(&'a LfProcess, ProcessIdentityEvidence)>> {
     let mut lineage = HashSet::new();
     let mut next = crate::journal::current_lf_process_id();
     while let Some(id) = next.filter(|id| lineage.insert(id.clone())) {
@@ -61,17 +78,9 @@ pub(crate) fn execution_blockers(
     }
     Ok(processes
         .iter()
-        .filter(|process| {
-            process.completed_at.is_none()
-                && !lineage.contains(&process.id)
-                && process_evidence(store, &process.id) != ProcessIdentityEvidence::Dead
-        })
-        .map(|process| {
-            format!(
-                "Process {} has live or unresolved execution; inspect `lf history show {}`",
-                process.id, process.id
-            )
-        })
+        .filter(|process| process.completed_at.is_none() && !lineage.contains(&process.id))
+        .map(|process| (process, process_evidence(store, &process.id)))
+        .filter(|(_, evidence)| *evidence != ProcessIdentityEvidence::Dead)
         .collect())
 }
 

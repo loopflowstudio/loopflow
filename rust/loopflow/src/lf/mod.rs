@@ -1553,7 +1553,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Interrupt the active provider turn
+    /// Stop the Task's running Graph or Task run and its scheduled automation
     Interrupt {
         issue: String,
         #[arg(long)]

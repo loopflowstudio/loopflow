@@ -254,7 +254,7 @@ lf graph customize pursue                # print its local source path
 A Graph whose process died leaves its Processes as history. No command resumes it. To change direction or recover:
 
 ```bash
-lf task interrupt EXP-12             # end the active provider turn
+lf task interrupt EXP-12             # stop its running Graph
 lf task status EXP-12                # the latest Graph and all Task work
 lf graph show ID --processes --json   # one Graph's steps, by its Graph process ID
 lf -b task run EXP-12       # run fresh work

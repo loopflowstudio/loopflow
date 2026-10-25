@@ -1,0 +1,1 @@
+- LOO-577: Fixed the waiter with the existing live-repair reservation instead of a new "lf disarm" record. #1668 is now on main, so the release-run half stays in this Task. It uses the same live-repair rule and adds no disarm table.

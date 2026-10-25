@@ -945,7 +945,13 @@ async fn reconcile_claimed(
                 .map_err(|error| OpsError::Message(error.to_string()))?;
             resume_watching(store, landing, head_sha).await
         }
-        LandingObservation::Unarmed { .. } => {
+        LandingObservation::Unarmed { head_sha } => {
+            // A repair disarms auto-merge before it moves the head and re-arms
+            // after publishing. Its disarm is a pause in this landing, not a
+            // person withdrawing merge intent.
+            if repair_running(store, landing)? {
+                return resume_watching(store, landing, head_sha).await;
+            }
             block_landing(
                 store,
                 landing,
@@ -1434,8 +1440,8 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        classify_github_observation, reconcile_pr_landing, wait_for_landing, LandingObservation,
-        ObservePr, RepairCi,
+        ci_incident, classify_github_observation, reconcile_pr_landing, wait_for_landing,
+        LandingObservation, ObservePr, RepairCi,
     };
     use crate::ops::error::{OpsError, OpsResult};
     use crate::ops::pr::{MergeRequest, PrInfo};
@@ -1678,6 +1684,45 @@ mod tests {
             .is_err());
         let blocked = store.get_pr_landing(&landing.id).await.unwrap().unwrap();
         assert_eq!(blocked.state, PrLandingState::Blocked);
+        assert_eq!(*script.repairs.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn repair_disarm_keeps_landing_until_the_repair_rearms_and_merges() {
+        let (_directory, store, landing) = fixture().await;
+        let incident = ci_incident(
+            &landing,
+            &[CiCheck {
+                name: "rust".into(),
+                url: None,
+            }],
+            OffsetDateTime::now_utc(),
+        );
+        store.observe_ci_incident(&incident).await.unwrap();
+        // A reservation whose Process has no recorded death is a live repair.
+        let conn = store.sqlite.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES('repair-worker','fixture',?1)",
+            [OffsetDateTime::now_utc().unix_timestamp()],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE ci_incidents SET repair_lf_process_id='repair-worker' WHERE identity=?1",
+            [&incident.identity],
+        )
+        .unwrap();
+        drop(conn);
+        let script = script(vec![
+            LandingObservation::Unarmed {
+                head_sha: "head".into(),
+            },
+            merged(),
+        ]);
+        let paused = check(store.clone(), landing, &script).await.unwrap();
+        assert_eq!(paused.state, PrLandingState::Watching);
+        assert!(paused.blocked_reason.is_none());
+        let landed = check(store, paused, &script).await.unwrap();
+        assert_eq!(landed.state, PrLandingState::Merged);
         assert_eq!(*script.repairs.lock().unwrap(), 0);
     }
 

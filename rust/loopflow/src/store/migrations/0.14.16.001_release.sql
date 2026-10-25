@@ -1,3 +1,4 @@
+-- draft: pools_and_rentals
 -- Pools name machines you own; on-demands name what you rent and the most it
 -- may cost. They share one namespace. A rental is one paid window on a
 -- provider, kept separate from the Machine it becomes once reachable.

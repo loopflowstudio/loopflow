@@ -35,6 +35,12 @@ Use that repository as the working directory for every scoped CLI call. Same-nam
 Waves in different repositories are different destinations. Reuse or refine an
 existing Task for the same work rather than filing a duplicate.
 
+Plans do not show which open PRs already rewrite the code. Before filing work
+against specific files, list the open PRs that change them
+(`gh pr list --json number,title,headRefName,files`). The brief names each
+overlapping PR, its Task and what it changes there; a choice that Task reserves
+for a person stays theirs, and the brief says so rather than deciding it.
+
 ## Capture clear intent
 
 File once intent is clear. Show the concrete brief in the conversation and capture it;

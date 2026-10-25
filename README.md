@@ -159,7 +159,7 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 
 ```bash
 lf checkout INF-123                               # durable Task Work + worktree, no controller
-lf -b task run INF-123                            # place the Task, then run its Graph here until it ends
+lf task run INF-123                               # place the Task, start its Graph, return once it runs
 lf task run INF-123 pursue                        # on a workflow: take the edge that runs pursue
 lf comment INF-123 "take the smaller approach"   # save a steer for the Task's Sessions
 lf interrupt INF-123                             # end the active turn

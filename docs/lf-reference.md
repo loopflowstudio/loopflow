@@ -1977,7 +1977,7 @@ Ensure tracked Task Work and its worktree without launching a Graph
 
 ## lf task run
 
-Place a Task's worktree, then run a Graph there like `lf --task ISSUE graph GRAPH`
+Place a Task's worktree, then start a Graph there like `lf --task ISSUE graph GRAPH`; returns once it runs (`-b` waits for its end)
 
 | Argument | What it does |
 |---|---|

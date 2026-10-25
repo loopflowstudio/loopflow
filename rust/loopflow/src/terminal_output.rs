@@ -76,7 +76,7 @@ impl TerminalOutput {
     }
 }
 
-fn redirect(source: &File, destination: i32) -> io::Result<()> {
+pub(crate) fn redirect(source: &File, destination: i32) -> io::Result<()> {
     // SAFETY: source is live; dup2 atomically replaces the standard descriptor.
     if unsafe { libc::dup2(source.as_raw_fd(), destination) } < 0 {
         return Err(io::Error::last_os_error());

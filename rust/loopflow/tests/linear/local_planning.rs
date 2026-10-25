@@ -3801,22 +3801,12 @@ fn waveless_task_lifecycle() {
     let inventory = lf(repo.path(), home.path(), &["wave", "show", "--json"]);
     assert_eq!(inventory["tasks"]["items"][0]["task"]["id"], id);
     let placed = lf(repo.path(), home.path(), &["checkout", id, "--json"]);
-    lf(repo.path(), home.path(), &["task", "run", id]);
-    // The edge's Graph writes its arrival after `task run` returns; compare
-    // the settled position, not one caught mid-edge.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    let before = loop {
-        let shown = lf(
-            repo.path(),
-            home.path(),
-            &["task", "workflow", "show", id, "--json"],
-        );
-        if shown["position"]["kind"] == "node" {
-            break shown;
-        }
-        assert!(std::time::Instant::now() < deadline, "{shown}");
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    };
+    lf(repo.path(), home.path(), &["-b", "task", "run", id]);
+    let before = lf(
+        repo.path(),
+        home.path(),
+        &["task", "workflow", "show", id, "--json"],
+    );
     lf(
         repo.path(),
         home.path(),
@@ -3861,8 +3851,16 @@ fn waveless_task_lifecycle() {
         &["task", "create", "--title", "Always standalone", "--json"],
     );
     let standalone_id = standalone["id"].as_str().unwrap();
-    lf(repo.path(), home.path(), &["task", "run", standalone_id]);
-    lf(repo.path(), home.path(), &["task", "run", standalone_id]);
+    lf(
+        repo.path(),
+        home.path(),
+        &["-b", "task", "run", standalone_id],
+    );
+    lf(
+        repo.path(),
+        home.path(),
+        &["-b", "task", "run", standalone_id],
+    );
     let completed = lf(
         repo.path(),
         home.path(),
@@ -3912,7 +3910,7 @@ fn workflow_defaults_follow_task_wave_and_repository() {
         ],
     );
     let id = task["id"].as_str().unwrap();
-    lf(repo.path(), home.path(), &["task", "run", id]);
+    lf(repo.path(), home.path(), &["-b", "task", "run", id]);
     let captured = lf(
         repo.path(),
         home.path(),
@@ -3970,7 +3968,7 @@ fn workflow_defaults_follow_task_wave_and_repository() {
     lf(
         repo.path(),
         home.path(),
-        &["task", "run", explicit_id, "repository"],
+        &["-b", "task", "run", explicit_id, "repository"],
     );
     assert_eq!(
         lf(

@@ -329,3 +329,5 @@ the doubled frame unless Jack picks a fix in the demo.
   `WebView` would need 26 and is not used.
 
 Check results (2026-10-24, implement slices 2–3): `cargo test --lib commands::desktop selection_ designated_panes` 50 pass; integration `dto_fixtures::desktop cli_discovery::desktop structured_help reference_matches` pass; clippy clean; Swift 14 focused suites, 242 pass. Full Rust integration (`work_watch` etc.) deferred to gate.
+
+Compress (2026-10-24): `Verb` carries `--json` in its target args; pane resolution builds candidates through one constructor and indexes positions directly; unused `DesktopKeyBinding.matches(_:)` deleted. `cargo test --lib commands::desktop` 9 pass, clippy clean, Swift `DesktopPaneControlTests|WorkNavigationTests` 63 pass.

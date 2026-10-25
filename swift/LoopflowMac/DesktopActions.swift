@@ -66,11 +66,6 @@ struct DesktopKeyBinding: Equatable {
         case .down: specialKey == .downArrow
         }
     }
-
-    func matches(_ event: NSEvent) -> Bool {
-        matches(characters: event.charactersIgnoringModifiers, keyCode: event.keyCode,
-                specialKey: event.specialKey, modifiers: event.modifierFlags)
-    }
 }
 
 /// The window an action runs in and, for pane actions, the addressed pane:

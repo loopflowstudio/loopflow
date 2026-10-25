@@ -819,7 +819,7 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
     // Arguments are checked before Desktop is contacted.
     let verb = Verb::parse(command)?;
     require_supported()?;
-    let json = cli.json || verb.json;
+    let json = cli.json || verb.target.json;
     let inspection = || -> Result<DesktopInspection> {
         serde_json::from_slice(&contact(DesktopEvent::Inspect)?)
             .context("Desktop returned an invalid reading; inspect again before retrying")
@@ -940,8 +940,8 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
 #[derive(Debug)]
 struct Verb {
     kind: VerbKind,
+    /// `--json` rides in the target arguments for every verb.
     target: crate::lf::DesktopTargetArgs,
-    json: bool,
 }
 
 #[derive(Debug)]
@@ -984,7 +984,7 @@ fn verb_action(verb: &str) -> String {
 impl Verb {
     fn parse(command: &crate::lf::DesktopCommand) -> Result<Self> {
         use crate::lf::DesktopCommand;
-        let bare = &crate::lf::DesktopTargetArgs::default();
+        use crate::lf::DesktopTargetArgs;
         let argument =
             |message: String| -> anyhow::Error { DesktopError::Argument(message).into() };
         let action = |verb: &str, args: Vec<(&str, String)>| VerbKind::Action {
@@ -994,19 +994,20 @@ impl Verb {
                 .map(|(key, value)| (key.to_owned(), value))
                 .collect(),
         };
-        let (kind, target, json) = match command {
-            DesktopCommand::State { json } => (VerbKind::State, bare, *json),
-            DesktopCommand::Ls { window, json } => {
-                return Ok(Self {
-                    kind: VerbKind::Ls,
-                    target: crate::lf::DesktopTargetArgs {
-                        window: window.clone(),
-                        ..Default::default()
-                    },
-                    json: *json,
-                })
-            }
-            DesktopCommand::Actions { json } => (VerbKind::Actions, bare, *json),
+        let bare = |json: bool| DesktopTargetArgs {
+            json,
+            ..Default::default()
+        };
+        let (kind, target) = match command {
+            DesktopCommand::State { json } => (VerbKind::State, bare(*json)),
+            DesktopCommand::Ls { window, json } => (
+                VerbKind::Ls,
+                DesktopTargetArgs {
+                    window: window.clone(),
+                    ..bare(*json)
+                },
+            ),
+            DesktopCommand::Actions { json } => (VerbKind::Actions, bare(*json)),
             DesktopCommand::Do {
                 action: name,
                 args,
@@ -1034,8 +1035,7 @@ impl Verb {
                         name: name.clone(),
                         args: parsed,
                     },
-                    target,
-                    target.json,
+                    target.clone(),
                 )
             }
             DesktopCommand::Send { text, target } => {
@@ -1045,12 +1045,11 @@ impl Verb {
                         .context("read text to send from stdin")?,
                 };
                 validate_literal_text(&text)?;
-                (action("send", vec![("text", text)]), target, target.json)
+                (action("send", vec![("text", text)]), target.clone())
             }
             DesktopCommand::SendKey { key, target } => (
                 action("send-key", vec![("key", key.as_str().to_owned())]),
-                target,
-                target.json,
+                target.clone(),
             ),
             DesktopCommand::Capture {
                 region,
@@ -1069,8 +1068,7 @@ impl Verb {
                         max_bytes: *max_bytes,
                         trim: *trim,
                     },
-                    target,
-                    target.json,
+                    target.clone(),
                 )
             }
             DesktopCommand::Run { command, target } => {
@@ -1084,7 +1082,7 @@ impl Verb {
                         })?,
                     )]
                 };
-                (action("run", args), target, target.json)
+                (action("run", args), target.clone())
             }
             DesktopCommand::Zoom { on, off, target } => {
                 let args = match (on, off) {
@@ -1092,11 +1090,11 @@ impl Verb {
                     (_, true) => vec![("on", "false".to_owned())],
                     _ => vec![],
                 };
-                (action("zoom", args), target, target.json)
+                (action("zoom", args), target.clone())
             }
-            DesktopCommand::Focus { target } => (action("focus", vec![]), target, target.json),
-            DesktopCommand::Hide { target } => (action("hide", vec![]), target, target.json),
-            DesktopCommand::Restore { target } => (action("restore", vec![]), target, target.json),
+            DesktopCommand::Focus { target } => (action("focus", vec![]), target.clone()),
+            DesktopCommand::Hide { target } => (action("hide", vec![]), target.clone()),
+            DesktopCommand::Restore { target } => (action("restore", vec![]), target.clone()),
             DesktopCommand::Move {
                 destination,
                 axis,
@@ -1109,8 +1107,7 @@ impl Verb {
                         ("axis", axis.as_str().to_owned()),
                     ],
                 ),
-                target,
-                target.json,
+                target.clone(),
             ),
             DesktopCommand::Resize {
                 toward,
@@ -1125,8 +1122,7 @@ impl Verb {
                         "resize",
                         vec![("toward", toward.clone()), ("ratio", ratio.to_string())],
                     ),
-                    target,
-                    target.json,
+                    target.clone(),
                 )
             }
             DesktopCommand::View { .. }
@@ -1139,11 +1135,7 @@ impl Verb {
             | DesktopCommand::Order { .. }
             | DesktopCommand::Layout { .. } => unreachable!("saved intent is not a live verb"),
         };
-        Ok(Self {
-            kind,
-            target: target.clone(),
-            json,
-        })
+        Ok(Self { kind, target })
     }
 }
 
@@ -1480,6 +1472,11 @@ impl<'a> Scope<'a> {
     ) -> Result<ResolvedPane<'a>> {
         let workspace = self.workspace(window, target.task.as_deref())?;
         let leaves = workspace.layout.leaves();
+        let pane = |leaf, tab| ResolvedPane {
+            workspace,
+            leaf,
+            tab,
+        };
         let Some(selector) = target.block.as_deref() else {
             // Without -b, a command from one of this workspace's terminals acts on that terminal.
             if let Some((_, caller)) = self.caller() {
@@ -1495,49 +1492,26 @@ impl<'a> Scope<'a> {
             }
             let candidates = leaves
                 .iter()
-                .flat_map(|leaf| match need {
-                    PaneNeed::Any => vec![ResolvedPane {
-                        workspace,
-                        leaf,
-                        tab: None,
-                    }],
-                    PaneNeed::Kind(kind) => (leaf.content.as_deref() == Some(kind))
-                        .then_some(ResolvedPane {
-                            workspace,
-                            leaf,
-                            tab: None,
-                        })
-                        .into_iter()
-                        .collect(),
-                    PaneNeed::Hidden => leaf
-                        .pane
-                        .as_ref()
-                        .filter(|pane| workspace.hidden_panes.contains(pane))
-                        .map(|_| ResolvedPane {
-                            workspace,
-                            leaf,
-                            tab: None,
-                        })
-                        .into_iter()
-                        .collect(),
-                    // Retained shells, including background tabs, without consulting selection.
-                    PaneNeed::Terminal => match leaf.content.as_deref() {
-                        Some("session") => vec![ResolvedPane {
-                            workspace,
-                            leaf,
-                            tab: None,
-                        }],
-                        Some("shell") => leaf
-                            .tabs
-                            .iter()
-                            .map(|tab| ResolvedPane {
-                                workspace,
-                                leaf,
-                                tab: Some(tab),
-                            })
-                            .collect(),
+                .flat_map(|leaf| -> Vec<ResolvedPane<'a>> {
+                    let content = leaf.content.as_deref();
+                    match need {
+                        PaneNeed::Any => vec![pane(leaf, None)],
+                        PaneNeed::Kind(kind) if content == Some(kind) => vec![pane(leaf, None)],
+                        PaneNeed::Hidden
+                            if leaf
+                                .pane
+                                .as_ref()
+                                .is_some_and(|id| workspace.hidden_panes.contains(id)) =>
+                        {
+                            vec![pane(leaf, None)]
+                        }
+                        // Retained shells, including background tabs, without consulting selection.
+                        PaneNeed::Terminal if content == Some("session") => vec![pane(leaf, None)],
+                        PaneNeed::Terminal if content == Some("shell") => {
+                            leaf.tabs.iter().map(|tab| pane(leaf, Some(tab))).collect()
+                        }
                         _ => vec![],
-                    },
+                    }
                 })
                 .collect::<Vec<_>>();
             return match candidates.as_slice() {
@@ -1572,48 +1546,29 @@ impl<'a> Scope<'a> {
                             leaf.tabs.len()
                         )
                     })?;
-                return Ok(ResolvedPane {
-                    workspace,
-                    leaf,
-                    tab: Some(tab),
-                });
+                return Ok(pane(leaf, Some(tab)));
             }
+        }
+        // Positions count panes in layout order; tabs are reached with `kind:N`.
+        if let Ok(position) = selector.parse::<usize>() {
+            return position
+                .checked_sub(1)
+                .and_then(|index| leaves.get(index))
+                .map(|leaf| pane(leaf, None))
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "No pane at position {position}; there are {}. Nothing changed.",
+                        leaves.len()
+                    )
+                });
         }
         let candidates = leaves
             .iter()
             .flat_map(|leaf| {
-                std::iter::once(ResolvedPane {
-                    workspace,
-                    leaf,
-                    tab: None,
-                })
-                .chain(leaf.tabs.iter().map(move |tab| ResolvedPane {
-                    workspace,
-                    leaf,
-                    tab: Some(tab),
-                }))
+                std::iter::once(pane(leaf, None))
+                    .chain(leaf.tabs.iter().map(|tab| pane(leaf, Some(tab))))
             })
             .collect::<Vec<_>>();
-        // Positions count panes in layout order; tabs are reached with `kind:N`.
-        let panes = candidates.iter().filter(|pane| pane.tab.is_none()).count();
-        if let Ok(position) = selector.parse::<usize>() {
-            return position
-                .checked_sub(1)
-                .filter(|index| *index < panes)
-                .map(|index| {
-                    candidates
-                        .iter()
-                        .filter(|pane| pane.tab.is_none())
-                        .nth(index)
-                        .copied()
-                        .expect("index within panes")
-                })
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "No pane at position {position}; there are {panes}. Nothing changed."
-                    )
-                });
-        }
         let index = resolve(
             "pane",
             selector,

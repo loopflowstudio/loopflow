@@ -64,7 +64,7 @@ struct ConsoleCommands: Commands {
             Button("Forward") { actions?.forward() }.keyboardShortcut("]")
             Button("Next Task") { actions?.adjacent(1) }.keyboardShortcut(.tab, modifiers: .control)
             Button("Previous Task") { actions?.adjacent(-1) }.keyboardShortcut(.tab, modifiers: [.control, .shift])
-            Menu("Sidebar Tasks") {
+            Menu("Working Tasks") {
                 ForEach(1...9, id: \.self) { slot in
                     Button("Task \(slot)") { actions?.slot(slot - 1) }.keyboardShortcut(KeyEquivalent(Character(String(slot))))
                 }

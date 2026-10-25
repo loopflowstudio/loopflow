@@ -191,7 +191,7 @@ struct ThemeChooser: View {
 struct KeyboardShortcutsView: View {
     private let shortcuts = [
         ("Navigate", "⌘K"), ("Toggle sidebar", "⌘\\"),
-        ("Sidebar Task 1–9", "⌘1…9"), ("Next / previous Task", "⌃Tab / ⌃⇧Tab"),
+        ("Working Task 1–9", "⌘1…9"), ("Next / previous Task", "⌃Tab / ⌃⇧Tab"),
         ("Back / Forward", "⌘[ / ⌘]"), ("Task actions", "⌘/"),
         ("Show / hide Shell", "⌃`"), ("Show / hide Files", "⇧⌘E"),
         ("New shell tab", "⌘T"), ("Close pane / shell tab", "⌘W"),

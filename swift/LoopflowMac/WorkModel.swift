@@ -851,6 +851,7 @@ final class WorkModel {
 
     private(set) var roadmap: WorkReading<RoadmapSnapshot> = .loading {
         didSet {
+            taskIndexCache = nil
             // Retain the latest observed Task across temporary chapter membership
             // gaps, including selections saved in another repository.
             for navigation in navigationByRepo.values {
@@ -2204,16 +2205,45 @@ final class WorkModel {
     }
 
     /// Current repository inventory only; retained navigation evidence is display-only.
-    var visibleTasks: [RoadmapTask] {
+    var visibleTasks: [RoadmapTask] { taskIndex.tasks }
+
+    /// The repository's Tasks with lookups by ID, Work ID and identifier. Every
+    /// sidebar row looks Tasks up on each update; a filtered scan per lookup made
+    /// returning to a long list take over a second.
+    private struct TaskIndex {
+        let key: (revision: Int, repoPath: String?)
+        let tasks: [RoadmapTask]
+        let positions: [String: Int]
+        let waves: [String: WaveRoadmap]
+    }
+    @ObservationIgnored private var taskIndexCache: TaskIndex?
+
+    private var taskIndex: TaskIndex {
         let tasks = roadmap.value?.tasks.items ?? []
-        guard let repoPath else { return tasks }
-        let repository = repoIdentity(repoPath)
-        return tasks.filter { repoIdentity($0.task.repo) == repository }
+        let key = (revision: WaveOrigin.revision, repoPath: repoPath)
+        if let cached = taskIndexCache, cached.key == key { return cached }
+        let visible = repoPath.map { path in
+            let repository = repoIdentity(path)
+            return tasks.filter { repoIdentity($0.task.repo) == repository }
+        } ?? tasks
+        // The first Task matching any of its keys wins, as a scan in order would.
+        var positions: [String: Int] = [:]
+        for (index, task) in visible.enumerated() {
+            for name in [task.id, task.runtime?.workId, task.task.identifier].compactMap({ $0 }) where positions[name] == nil {
+                positions[name] = index
+            }
+        }
+        let waves = Dictionary(visibleRoadmaps.map { ($0.wave.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let index = TaskIndex(key: key, tasks: visible, positions: positions, waves: waves)
+        taskIndexCache = index
+        return index
     }
 
     private func currentTask(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask)? {
-        guard let task = visibleTasks.first(where: { $0.id == id || $0.runtime?.workId == id || $0.task.identifier == id }) else { return nil }
-        return (visibleRoadmaps.first { $0.wave.id == task.task.waveId }, task)
+        let index = taskIndex
+        guard let position = index.positions[id] else { return nil }
+        let task = index.tasks[position]
+        return (task.task.waveId.flatMap { index.waves[$0] }, task)
     }
 
     func task(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask)? {

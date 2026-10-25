@@ -80,7 +80,7 @@ Every positional consumer reads this one list:
 - `selectSidebarTask(slot:)` and `cycleSidebarTask(_:)` replace
   `selectWorkingTask(slot:)` and `cycleWorkingTask` (menu at
   `SessionsView.swift:65–69`, shortcut monitor at `SessionsView.swift:1137,1168`).
-  The "Working Tasks" menu becomes "Sidebar Tasks".
+  The menu and Keyboard Shortcuts keep the "Working Tasks" label (Jack, demo October 25: "go back to Working Tasks, not Sidebar Tasks … in the UX at least").
 - Slot hints come from `sidebarTaskIDs.prefix(9)`.
 - The sidebar-only palette (`searchDestinations(sidebarOnly:)`) uses
   `sidebarTaskIDs` + `sidebarWaves`, not every visible roadmap.

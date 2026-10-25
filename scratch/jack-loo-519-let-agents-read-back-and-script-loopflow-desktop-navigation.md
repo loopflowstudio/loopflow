@@ -66,15 +66,17 @@ Ambiguous or absent → change nothing, list matches, exit 3.
   selection; `-t` wins when both are given.
 - **Pane** (`-b`): label = `session`, `shell`, `browser`; `shell:2` names a tab by
   position; position = order in the layout; full pane/tab IDs from `state` still work.
-- **Window** (`--window`): position counts the repository's windows, frontmost first.
+- **Window** (`--window`): position counts the repository's windows in inspection
+  order (the inspection carries no z-order; frontmost ordering would be a Swift change
+  in `WorkLinkRouter.inspect`).
 
 **Context.** A bare command acts on the caller, like `REX_BLOCK`: `LF_TERMINAL_ID`
 names the terminal (session pane or shell tab) the command came from, trusted
 from the environment without the PTY check, so an agent's tool subprocess gets
 its own pane with no new variable. A stale inherited ID resolves to its pane, or
-exits 3 if gone. Without a caller: root Work flags, then the checkout's Task
-binding; window-level actions use the single window showing that Work. Nothing
-ever follows focus; more than one candidate exits 3.
+exits 3 if gone. Precedence: `-t`, then root Work flags (`--task/--wave`), then
+the caller, then the checkout's Task binding; window-level actions use the single
+window showing that Work. Nothing ever follows focus; more than one candidate exits 3.
 
 ## Designated panes (B)
 
@@ -150,8 +152,8 @@ work key, label), `actions` (descriptors), and per Task workspace its three
 designated panes (`id`, `kind`, `visible`, `focused`, `zoomed`, `tabs`,
 `selected_tab`, owner) plus the split tree. `ls` renders the same reply: header
 naming the window and its scope, then positions, short IDs, labels and panes.
-`ls` scope is the caller's window, else the repository's frontmost window, named
-explicitly in the header.
+`ls` scope is `--window`, else the caller's window, else the repository's only
+window, named in the header; several windows and no caller exit 3 asking for `--window`.
 
 ## Exit statuses
 
@@ -181,7 +183,8 @@ exits 1 naming the fix: update Desktop.
   switchable); missing designated panes are added hidden. File drafts survive unchanged.
 - **Wire DTOs.** `DesktopWindowInspection` gains `list`, `actions`; pane
   inspection gains `kind` and designated tabs; `supported_operations` goes.
-  `DesktopActionRequest {repository, window, task?, pane?, action, args}` and its
+  `DesktopActionRequest {repository, window, pane?, action, args}` (the pane target
+  carries the Work, so there is no `task` field) and its
   receipt replace `DesktopPaneCommand` and `DesktopNavigationCommand`. No
   defaults; fixtures `desktop_inspection.json`, `desktop_action.json` with Rust
   and Swift fixture tests. The Swift registry's names equal the fixture's action
@@ -252,8 +255,7 @@ One PR; deepest deletion first.
    `session`, `shell`, `browser` (migrated layouts keep theirs). Close hides a
    pane; ⌘W closes the selected shell/browser tab and the last tab hides the pane.
    Opening a conversation switches the session pane in place. `BrowserPageView`
-   is a bare `WKWebView`. Still open here: browser back/reload controls; the
-   current `desktop shell` verb already keeps focus (as `run` will).
+   is a `WKWebView` with swipe back/forward only.
 2. **Action registry — implemented 2026-10-24.** `LoopflowMac/DesktopActions.swift`
    holds every action (name, title, scope, args, default `DesktopKeyBinding`s,
    `available`, `perform`); `DesktopActionMonitor`, View/File menus, Keyboard
@@ -273,7 +275,9 @@ One PR; deepest deletion first.
    `-1708` → "update Desktop". `VERB_ACTIONS` maps verbs to actions; a unit test
    checks each is in the fixture. Docs (`docs/lf.md`, `swift/README.md`,
    architecture reference) rewritten; reference regenerated.
-   Still open: browser back/reload controls (slice 1 carry-over).
+
+   **Remaining before demo:** browser back/reload controls (`BrowserPageView` has
+   only swipe gestures; the plan's browser bullet promises back/reload).
 4. **Demo on Dev** (Jack).
 
 ## Done when
@@ -328,6 +332,4 @@ the doubled frame unless Jack picks a fix in the demo.
 - **`WKWebView` on macOS 15** needs no deployment-target change; SwiftUI
   `WebView` would need 26 and is not used.
 
-Check results (2026-10-24, implement slices 2–3): `cargo test --lib commands::desktop selection_ designated_panes` 50 pass; integration `dto_fixtures::desktop cli_discovery::desktop structured_help reference_matches` pass; clippy clean; Swift 14 focused suites, 242 pass. Full Rust integration (`work_watch` etc.) deferred to gate.
-
-Compress (2026-10-24): `Verb` carries `--json` in its target args; pane resolution builds candidates through one constructor and indexes positions directly; unused `DesktopKeyBinding.matches(_:)` deleted. `cargo test --lib commands::desktop` 9 pass, clippy clean, Swift `DesktopPaneControlTests|WorkNavigationTests` 63 pass.
+Check results (2026-10-24, after compress): `cargo test --lib commands::desktop selection_ designated_panes` + integration `dto_fixtures::desktop cli_discovery::desktop structured_help reference_matches` pass, clippy clean, Swift 14 focused suites pass; full Rust integration (`work_watch`, `cli_discovery`, `dto_fixtures`) deferred to gate.

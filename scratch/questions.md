@@ -54,5 +54,8 @@ them in the demo. Each is reversible before landing.
 - **Crumb chevrons and the sidebar's Working Tasks item still call `WorkModel`
   directly** (`goBack`, `selectWorkingTasksDashboard`); the registry's handlers call
   the same functions. Routing chrome clicks through the registry is optional.
-- **Proposed Wave memory edit (not applied):** `.lf/wave/product/MEMORY.md:138`
-  still describes `--pane` and verified caller-terminal inference.
+- **Proposed Wave memory edit (not applied):** `.lf/wave/product/MEMORY.md` ~line 138
+  still teaches `--repo`/`--task`/`--pane` then verified caller-terminal inference.
+  Replace with: targets resolve `-t`, root Work flags, trusted `LF_TERMINAL_ID`, Task
+  binding, in Rex order (ID, label, position, suffix); `-b session|shell|browser`;
+  mutations go through the `DesktopAction` registry; exit 2/3/4 from typed errors.

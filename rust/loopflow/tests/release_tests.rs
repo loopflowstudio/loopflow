@@ -163,7 +163,7 @@ if [ "$1 $2" = "api graphql" ]; then
 {checks}
 JSON
       exit 0 ;;
-    *LoopflowPrMergeRemovals*)
+    *LoopflowPrMergeRequestEvents*)
       echo '{{"data":{{"repository":{{"pullRequest":{{"timelineItems":{{"nodes":[{removals}]}}}}}}}}}}'
       exit 0 ;;
   esac

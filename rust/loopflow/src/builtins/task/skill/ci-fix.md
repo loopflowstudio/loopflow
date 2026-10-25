@@ -41,6 +41,13 @@ Task completion.
 3. **Repair and verify**
    - For required integration with green checks, finish the sync and verify its
      result; green checks on an obsolete base do not satisfy required integration.
+   - A `merge-queue (<reason>)` check means GitHub's queue dropped the PR and
+     cleared auto-merge. Read the supplied merge-group run (or the latest
+     `gh run list --event merge_group` run on `gh-readonly-queue/*/pr-<n>-*`).
+     A runner fault (Docker or service unavailable, cancelled infrastructure,
+     a check that never started) needs no code change: verify the PR head's own
+     checks pass and run `lf arm` to queue it again. A real failure gets repaired
+     like any other check. Rerunning the merge-group run does not re-queue it.
    - Reproduce each failure locally and apply the smallest correct fix.
    - Run focused checks first; broaden only when needed. Do not ignore tests
      or publish an empty commit to manufacture a rerun.

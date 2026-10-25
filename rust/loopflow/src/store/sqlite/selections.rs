@@ -989,7 +989,10 @@ mod tests {
             panic!("slots 1 and 2 split");
         };
         assert_eq!(weights, &[1.5, 0.5]);
-        assert_eq!(children[1], golden_band(&golden));
+        let SlotNode::Split { children: band, .. } = &golden.root else {
+            panic!("golden root splits");
+        };
+        assert_eq!(children[1], band[1]);
         // Slots 0 and 5 meet only at the root.
         let SlotNode::Split { weights, .. } = &golden.resized(0, 5, 0.5).unwrap().root else {
             panic!("golden root splits");
@@ -997,15 +1000,6 @@ mod tests {
         assert_eq!(weights, &[0.5, 0.5]);
         assert!(golden.resized(3, 3, 0.5).is_none());
         assert!(golden.resized(3, 9, 0.5).is_none());
-    }
-
-    fn golden_band(
-        layout: &crate::work::selection::SlotLayout,
-    ) -> crate::work::selection::SlotNode {
-        match &layout.root {
-            crate::work::selection::SlotNode::Split { children, .. } => children[1].clone(),
-            crate::work::selection::SlotNode::Slot { .. } => unreachable!("golden root splits"),
-        }
     }
 
     #[test]

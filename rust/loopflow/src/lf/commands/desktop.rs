@@ -423,8 +423,8 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         ["desktop", "query" | "pin" | "unpin"] => {
             Some(schema::<crate::work::selection::Dashboard>())
         }
-        ["desktop", "layout"] => Some(schema::<DesktopLayoutRecord>()),
-        ["desktop", "hide" | "show" | "move" | "resize"] => Some(schema::<DesktopTileOutput>()),
+        ["desktop", "layout"] => Some(schema::<DesktopLayoutRecord<'_>>()),
+        ["desktop", "hide" | "show" | "move" | "resize"] => Some(schema::<DesktopTileOutput<'_>>()),
         ["open"] => Some(schema::<super::open::OpenReport>()),
         ["desktop", "ls"] => Some(schema::<DesktopWindowInspection>()),
         ["desktop", "actions"] => Some(schema::<Vec<DesktopActionDescriptor>>()),
@@ -474,10 +474,10 @@ enum DesktopViewResult<'a> {
 /// `layout` reads and writes a Work's pane intent or a Dashboard's slot layout.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
-enum DesktopLayoutRecord {
-    Work(Option<crate::work::selection::WorkPaneLayout>),
+enum DesktopLayoutRecord<'a> {
+    Work(&'a Option<crate::work::selection::WorkPaneLayout>),
     /// Its `slots`; null is the default layout.
-    Dashboard(Box<crate::work::selection::Dashboard>),
+    Dashboard(&'a crate::work::selection::Dashboard),
 }
 
 fn open_url(mut url: reqwest::Url, json: bool) -> Result<()> {
@@ -673,18 +673,18 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
     } = command
     {
         let record = match work.strip_prefix("query:") {
-            Some(id) => DesktopLayoutRecord::Dashboard(Box::new(
-                reader
+            Some(id) => serde_json::to_string(&DesktopLayoutRecord::Dashboard(
+                &reader
                     .sqlite
                     .read_dashboard(&repository, &DashboardId(id.into()))?
                     .ok_or(crate::store::StoreError::NotFound)?
                     .saved,
-            )),
-            None => {
-                DesktopLayoutRecord::Work(reader.sqlite.pane_layout(&work_key(&repository, work)?)?)
-            }
+            ))?,
+            None => serde_json::to_string(&DesktopLayoutRecord::Work(
+                &reader.sqlite.pane_layout(&work_key(&repository, work)?)?,
+            ))?,
         };
-        println!("{}", serde_json::to_string(&record)?);
+        println!("{record}");
         return Ok(());
     }
     drop(reader);
@@ -807,8 +807,10 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
     }
     // Arguments are checked before Desktop is contacted.
     let verb = Verb::parse(command)?;
-    if let Some(request) = named_tile(&verb) {
-        return edit_named_tile(cli, request);
+    if let VerbKind::Action { name, args } = &verb.kind {
+        if let Some((board, tile)) = saved_tile(name, verb.target.pane.as_deref()) {
+            return edit_saved_tile(cli, board, tile, name, args);
+        }
     }
     require_supported()?;
     let json = cli.json || verb.target.json;
@@ -887,7 +889,7 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             if let Some(request) =
                 scope.tile_request(window, name, verb.target.pane.as_deref(), args)?
             {
-                return edit_shown_tile(window, request, json);
+                return edit_shown_tile(window, name, &request, json);
             }
             let descriptor = window
                 .actions
@@ -1308,55 +1310,53 @@ enum DesktopTileRecord {
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
-enum DesktopTileOutput {
-    Verb(DesktopVerbResult),
-    Record(DesktopTileRecord),
+enum DesktopTileOutput<'a> {
+    Verb(&'a DesktopVerbResult),
+    Record(&'a DesktopTileRecord),
 }
 
-/// A tile verb naming a saved record's tile, which edits it without Desktop.
-pub fn names_saved_tile(command: &crate::lf::DesktopCommand) -> bool {
+#[derive(Debug, Clone, PartialEq)]
+struct TileRequest {
+    board: TileBoard,
+    member: WorkWorkspaceKey,
+    edit: TileEdit,
+}
+
+/// Commands that never contact Desktop, so they run on any platform: saved
+/// intent, view plans and tile verbs naming a saved record's tile.
+pub fn runs_without_desktop(command: &crate::lf::DesktopCommand) -> bool {
     use crate::lf::DesktopCommand;
-    let (DesktopCommand::Hide { target }
-    | DesktopCommand::Show { target }
-    | DesktopCommand::Move { target, .. }
-    | DesktopCommand::Resize { target, .. }) = command
-    else {
-        return false;
-    };
-    target
-        .pane
-        .as_deref()
-        .and_then(|path| path.split_once('/'))
-        .is_some_and(|(board, _)| TileBoard::parse(board).is_some())
+    match command {
+        DesktopCommand::View { .. }
+        | DesktopCommand::Query { .. }
+        | DesktopCommand::Pin { .. }
+        | DesktopCommand::Unpin { .. }
+        | DesktopCommand::Rename { .. }
+        | DesktopCommand::Layout { .. } => true,
+        _ => Verb::parse(command).is_ok_and(|verb| match &verb.kind {
+            VerbKind::Action { name, .. } => {
+                saved_tile(name, verb.target.pane.as_deref()).is_some()
+            }
+            _ => false,
+        }),
+    }
 }
 
-/// `-p query:ID/TILE` or `-p working-tasks/TILE`, tiles named by Work key.
-fn named_tile(
-    verb: &Verb,
-) -> Option<(
-    TileBoard,
-    &str,
-    &str,
-    &std::collections::BTreeMap<String, String>,
-)> {
-    let VerbKind::Action { name, args } = &verb.kind else {
-        return None;
-    };
-    if !TILE_VERBS.contains(&name.as_str()) {
+/// `-p query:ID/TILE` or `-p working-tasks/TILE`: a saved record's tile by Work key.
+fn saved_tile<'p>(name: &str, path: Option<&'p str>) -> Option<(TileBoard, &'p str)> {
+    if !TILE_VERBS.contains(&name) {
         return None;
     }
-    let (board, tile) = verb.target.pane.as_deref()?.split_once('/')?;
-    Some((TileBoard::parse(board)?, tile, name, args))
+    let (board, tile) = path?.split_once('/')?;
+    Some((TileBoard::parse(board)?, tile))
 }
 
-fn edit_named_tile(
+fn edit_saved_tile(
     cli: &crate::lf::Cli,
-    (board, tile, name, args): (
-        TileBoard,
-        &str,
-        &str,
-        &std::collections::BTreeMap<String, String>,
-    ),
+    board: TileBoard,
+    tile: &str,
+    name: &str,
+    args: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     let repository = {
         let reader = crate::store::read_existing_registry()?
@@ -1365,22 +1365,32 @@ fn edit_named_tile(
         selection_repository(cli, &reader.sqlite)?
     };
     let key = |selector: &str| work_key(&repository, selector);
-    let edit = TileEdit::parse(name, args, key)?;
-    let record = edit_tiles(&repository, &board, &key(tile)?, &edit)?;
+    let request = TileRequest {
+        board,
+        member: key(tile)?,
+        edit: TileEdit::parse(name, args, key)?,
+    };
+    let record = edit_tiles(&repository, &request)?;
     println!(
         "{}",
-        serde_json::to_string(&DesktopTileOutput::Record(record))?
+        serde_json::to_string(&DesktopTileOutput::Record(&record))?
     );
     Ok(())
 }
 
 fn edit_shown_tile(
     window: &DesktopWindowInspection,
-    (board, member, edit, name): (TileBoard, WorkWorkspaceKey, TileEdit, &str),
+    name: &str,
+    request: &TileRequest,
     json: bool,
 ) -> Result<()> {
     let repository = crate::durable::RepositoryId::parse(&window.repository)?;
-    edit_tiles(&repository, &board, &member, &edit)?;
+    edit_tiles(&repository, request)?;
+    if !json {
+        // A full ID, so the line can be passed back as -p.
+        println!("{}", request.member.id);
+        return Ok(());
+    }
     let observed_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs() as i64);
@@ -1399,21 +1409,16 @@ fn edit_shown_tile(
         },
         target: DesktopResolution {
             window: window.window.clone(),
-            work: Some(member),
+            work: Some(request.member.clone()),
             pane: None,
             tab: None,
             rule: DesktopTargetRule::Pane,
         },
     };
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&DesktopTileOutput::Verb(result))?
-        );
-    } else if let Some(work) = &result.target.work {
-        // A full ID, so the line can be passed back as -p.
-        println!("{}", work.id);
-    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&DesktopTileOutput::Verb(&result))?
+    );
     Ok(())
 }
 
@@ -1421,9 +1426,11 @@ fn edit_shown_tile(
 /// read and write use its current revision.
 fn edit_tiles(
     repository: &crate::durable::RepositoryId,
-    board: &TileBoard,
-    member: &WorkWorkspaceKey,
-    edit: &TileEdit,
+    TileRequest {
+        board,
+        member,
+        edit,
+    }: &TileRequest,
 ) -> Result<DesktopTileRecord> {
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let absent = |work: &WorkWorkspaceKey| -> anyhow::Error {
@@ -2021,19 +2028,17 @@ impl<'a> Scope<'a> {
     fn tile_request(
         &self,
         window: &'a DesktopWindowInspection,
-        name: &'a str,
+        name: &str,
         path: Option<&str>,
         args: &std::collections::BTreeMap<String, String>,
-    ) -> Result<Option<(TileBoard, WorkWorkspaceKey, TileEdit, &'a str)>> {
-        if !TILE_VERBS.contains(&name) || !Self::shows_board(window) {
+    ) -> Result<Option<TileRequest>> {
+        let Some(path) = path.filter(|_| TILE_VERBS.contains(&name) && Self::shows_board(window))
+        else {
             return Ok(None);
-        }
-        let tile = match path.map(|path| path.split_once('/')) {
-            Some(Some((tile, ""))) => tile,
-            Some(None) => match path.filter(|path| self.tile_work(window, path).is_ok()) {
-                Some(tile) => tile,
-                None => return Ok(None),
-            },
+        };
+        let tile = match path.split_once('/') {
+            Some((tile, "")) => tile,
+            None if self.tile_work(window, path).is_ok() => path,
             _ => return Ok(None),
         };
         let work = |selector: &str| {
@@ -2041,14 +2046,11 @@ impl<'a> Scope<'a> {
                 .cloned()
                 .map_err(DesktopError::target)
         };
-        let member = work(tile)?;
-        let board = TileBoard::shown(window)?;
-        Ok(Some((
-            board,
-            member,
-            TileEdit::parse(name, args, work)?,
-            name,
-        )))
+        Ok(Some(TileRequest {
+            member: work(tile)?,
+            board: TileBoard::shown(window)?,
+            edit: TileEdit::parse(name, args, work)?,
+        }))
     }
 
     /// A tile's Work: on a Dashboard or Wave view its tiles in slot order, else

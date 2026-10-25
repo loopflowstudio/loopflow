@@ -144,8 +144,9 @@ reference_matches_the_compiled_cli`; `cargo clippy --all-targets -- -D warnings`
 `scripts/test_desktop.sh --filter 'DesktopServerTests|DesktopPaneControlTests|DTOFixtureTests|WorkNavigationTests|WorkspaceRetentionTests|DashboardWorkspaceTests|WorkDestinationTests'`.
 Demo/review (Jack): Dev targeting, inline conversation, doubled frame, pane feel.
 
-Last check (2026-10-25, implement slice 7): `--lib commands::desktop selection
-resizing_two_slots` (74) pass; integration and Swift suites below.
+Last check (2026-10-25, compress slice 7): `--lib commands::desktop selection
+resizing_two_slots` 74 pass; integration filters 39 pass (reference regenerated);
+clippy clean; Swift filter above 188 pass.
 
 ## Exclusions
 

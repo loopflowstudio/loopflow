@@ -1102,46 +1102,15 @@ Rename a Dashboard or Task through its shared owner; prints the owner's record a
 | `--revision` | The target's last read revision; a stale one writes nothing |
 | `--help / -h` | Print help |
 
-## lf desktop arrange
-
-Replace a Dashboard's occurrence order and hidden members from JSON on stdin; prints the Dashboard as JSON
-
-| Argument | What it does |
-|---|---|
-| `<query>` | Dashboard name or query:ID |
-| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
-| `--help / -h` | Print help |
-
-## lf desktop slots
-
-Replace a Dashboard's slot layout from JSON on stdin; `null` restores the default
-
-| Argument | What it does |
-|---|---|
-| `<query>` | Dashboard name or query:ID |
-| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
-| `--help / -h` | Print help |
-
-## lf desktop order
-
-Move a member into another's place: the repository's Task order, or a Dashboard's with --query; prints the result as JSON
-
-| Argument | What it does |
-|---|---|
-| `<member>` | Member to move: task:<durable-id>, or wave:<durable-id> on a Dashboard |
-| `--to` | Member whose place it takes |
-| `--query` | Dashboard whose order to edit instead of the repository's Task order |
-| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
-| `--help / -h` | Print help |
-
 ## lf desktop layout
 
-Read portable pane intent as JSON, or save a complete revision-checked record from stdin
+Read a Work's pane intent or a Dashboard's slots as JSON, or save a complete revision-checked record from stdin
 
 | Argument | What it does |
 |---|---|
-| `<work>` | repository, wave:<durable-id> or task:<durable-id> |
-| `--save` | Replace the record from JSON on stdin instead of reading it Default: false. |
+| `<work>` | repository, wave:<durable-id>, task:<durable-id> or query:ID |
+| `--save` | Replace the record from JSON on stdin instead of reading it (a Dashboard's: slots, null for the default) Default: false. |
+| `--revision` | A Dashboard's last read revision; a stale one writes nothing |
 | `--help / -h` | Print help |
 
 ## lf desktop ls
@@ -1342,7 +1311,7 @@ Focus a pane, or the pane in a direction, opening its retained workspace when ne
 
 ## lf desktop hide
 
-Hide a pane without closing its Session or process
+Hide a pane without closing its Session or process; on a Dashboard, hide a tile from its shared record
 
 | Argument | What it does |
 |---|---|
@@ -1353,7 +1322,7 @@ Hide a pane without closing its Session or process
 
 ## lf desktop show
 
-Show a hidden pane without selecting Work or acquiring a client
+Show a hidden pane without selecting Work or acquiring a client; on a Dashboard, a hidden tile
 
 | Argument | What it does |
 |---|---|
@@ -1386,12 +1355,12 @@ Undo the Task's last close, as ⇧⌘T does
 
 ## lf desktop move
 
-Move a pane beside another pane of the same Task
+Move a pane beside another pane of the same Task; on a Dashboard or Wave view, a tile into another's place
 
 | Argument | What it does |
 |---|---|
-| `--destination` | Pane to place it beside, as for -p |
-| `--axis` | axis |
+| `--destination` | Pane to place it beside, or tile whose place it takes, as for -p |
+| `--axis` | Split axis for a pane; tiles take the destination's place |
 | `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
@@ -1399,11 +1368,11 @@ Move a pane beside another pane of the same Task
 
 ## lf desktop resize
 
-Resize the divider between two panes; ratio is the addressed pane's share
+Resize the divider between two panes or Dashboard tiles; ratio is the addressed one's share
 
 | Argument | What it does |
 |---|---|
-| `--toward` | The other pane, as for -p |
+| `--toward` | The other pane or tile, as for -p |
 | `--ratio` | ratio |
 | `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |

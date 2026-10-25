@@ -24,6 +24,8 @@ struct LoopflowApp: App {
     @State private var didOpenCaptureView = false
     @AppStorage("taskFilesAutosave") private var taskFilesAutosave = true
     @State private var appearance: AppearanceStore
+    /// `lf desktop`'s socket, held for the app's lifetime.
+    @State private var desktopServer: DesktopServer?
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
@@ -52,6 +54,9 @@ struct LoopflowApp: App {
         // Ghostty borrows the process environment when appearance initializes it.
         // Finish environment changes before publishing the initial theme.
         _appearance = State(initialValue: AppearanceStore.shared)
+        if AppTestMode.current() == nil {
+            _desktopServer = State(initialValue: DesktopServer.start())
+        }
     }
 
     var body: some Scene {

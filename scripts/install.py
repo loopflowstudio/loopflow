@@ -83,7 +83,6 @@ def default_bundle_spec(root: Path = ROOT) -> BundleSpec:
         ),
         info_plist=swift / "LoopflowMac" / "Info.plist",
         resources=(
-            swift / "LoopflowMac" / "Loopflow.sdef",
             swift / "LoopflowMac" / "AppIcon.icns",
         ),
     )

@@ -14,6 +14,15 @@ pub struct DesktopInspection {
     pub openings: Vec<DesktopOpening>,
 }
 
+/// One `lf desktop events` frame: changed windows, whole, and closed window IDs.
+/// The first frame after subscribing carries every window.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DesktopChange {
+    pub observed_at: i64,
+    pub windows: Vec<DesktopWindowInspection>,
+    pub closed: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopWindowInspection {
     pub repository: String,
@@ -320,39 +329,6 @@ pub enum DesktopTextUnavailable {
     NotTerminal,
 }
 
-// Raw event spelling avoids loading an installed scripting dictionary during
-// compilation. Checking running state precedes the tell: inspection never opens
-// an app or an unrelated workspace. No caller-controlled text enters the script.
-// An app that is not running raises -600, as an event to a quit app does.
-const DESKTOP_EVENT: &str = r#"
-on run argv
-    set bundle to item 1 of argv
-    set eventKind to item 2 of argv
-    try
-        set appRunning to application id bundle is running
-    on error
-        set appRunning to false
-    end try
-    if not appRunning then
-        error "Loopflow Desktop (" & bundle & ") is not running. Open it with lf open, or inspect Work with lf task status <task>." number -600
-    end if
-    with timeout of 5 seconds
-        if eventKind is "inspect" then
-            tell application id bundle to return «event CNRTinsp»
-        else if eventKind is "text" then
-            tell application id bundle to return «event CNRTtext» (item 3 of argv)
-        else
-            tell application id bundle to return «event CNRTactn» (item 3 of argv)
-        end if
-    end timeout
-end run
-"#;
-
-/// Desktop's script error numbers, mirrored in `DesktopInspection.swift`:
-/// an unknown action or bad argument, and a stale or missing target.
-const ARGUMENT_SCRIPT_ERROR: i32 = 1002;
-const TARGET_SCRIPT_ERROR: i32 = 1003;
-
 /// Failures a caller can act on by status; everything else exits 1.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -363,7 +339,7 @@ pub enum DesktopError {
     /// Missing, ambiguous or replaced Work, window or pane. Nothing changed.
     #[error("{0}")]
     Target(String),
-    /// Not running, not macOS, or Automation consent pending or denied.
+    /// Not running, not macOS, or not answering its socket.
     #[error("{0}")]
     Unreachable(String),
 }
@@ -380,14 +356,6 @@ impl DesktopError {
             Self::Unreachable(_) => 4,
         }
     }
-}
-
-/// One Apple event and its JSON request.
-#[derive(Debug, Clone, Copy)]
-enum DesktopEvent<'a> {
-    Inspect,
-    Action(&'a str),
-    Text(&'a str),
 }
 
 /// Output schemas are generated from the same DTOs that decode Desktop and opening replies.
@@ -820,10 +788,9 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
     let verb = Verb::parse(command)?;
     require_supported()?;
     let json = cli.json || verb.target.json;
-    let inspection = || -> Result<DesktopInspection> {
-        serde_json::from_slice(&contact(DesktopEvent::Inspect)?)
-            .context("Desktop returned an invalid reading; inspect again before retrying")
-    };
+    let mut desktop = DesktopConnection::open()?;
+    let mut inspection =
+        || -> Result<DesktopInspection> { desktop.call("inspect", serde_json::json!({})) };
     if let VerbKind::State = verb.kind {
         let reading = inspection()?;
         if json {
@@ -882,7 +849,7 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
                 region: *region,
                 max_bytes: *max_bytes,
             };
-            read_text(request, json, *trim)
+            read_text(&mut desktop, request, json, *trim)
         }
         VerbKind::Action { name, args } => {
             let descriptor = window
@@ -923,6 +890,7 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
                 }
             };
             perform(
+                &mut desktop,
                 DesktopActionRequest {
                     repository: window.repository.clone(),
                     window: window.window.clone(),
@@ -1139,10 +1107,8 @@ impl Verb {
     }
 }
 
-fn perform(request: DesktopActionRequest, json: bool) -> Result<()> {
-    let output = contact(DesktopEvent::Action(&serde_json::to_string(&request)?))?;
-    let receipt: DesktopActionReceipt = serde_json::from_slice(&output)
-        .context("Desktop returned an invalid receipt; inspect before retrying")?;
+fn perform(desktop: &mut DesktopConnection, request: DesktopActionRequest, json: bool) -> Result<()> {
+    let receipt: DesktopActionReceipt = desktop.call("perform", &request)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&receipt)?);
     } else if let Some(pane) = &receipt.pane {
@@ -1646,11 +1612,13 @@ impl DesktopLayoutInspection {
 
 /// Decode only a bounded reply for this exact request; never follow focus or
 /// fall back to an unbounded clipboard read.
-fn read_text(request: DesktopTextRequest, json: bool, trim: bool) -> Result<()> {
-    let encoded = serde_json::to_string(&request)?;
-    let output = contact(DesktopEvent::Text(&encoded))?;
-    let reading: DesktopTextReading = serde_json::from_slice(&output)
-        .context("Desktop returned an invalid terminal text reading")?;
+fn read_text(
+    desktop: &mut DesktopConnection,
+    request: DesktopTextRequest,
+    json: bool,
+    trim: bool,
+) -> Result<()> {
+    let reading: DesktopTextReading = desktop.call("read_text", &request)?;
     if reading.request != request {
         bail!("Desktop returned text for a different request");
     }
@@ -1695,57 +1663,131 @@ fn validate_literal_text(text: &str) -> Result<()> {
     Ok(())
 }
 
-fn contact(event: DesktopEvent) -> Result<Vec<u8>> {
-    let (kind, request) = match event {
-        DesktopEvent::Inspect => ("inspect", None),
-        DesktopEvent::Action(request) => ("action", Some(request)),
-        DesktopEvent::Text(request) => ("text", Some(request)),
-    };
-    let output = std::process::Command::new("/usr/bin/osascript")
-        .args(["-e", DESKTOP_EVENT, "--"])
-        .arg(super::open::desktop_bundle())
-        .arg(kind)
-        .args(request)
-        .output()
-        .context("contact Loopflow Desktop via macOS automation")?;
-    if !output.status.success() {
-        return Err(contact_failure(&String::from_utf8_lossy(&output.stderr)));
-    }
-    Ok(output.stdout)
+// ---------------------------------------------------------------------------
+// Desktop's socket (`DesktopServer.swift`): newline-delimited JSON at
+// `$LF_HOME/run/desktop/<bundle-id>.sock`. A typed error code, never the
+// message, decides the exit status.
+// ---------------------------------------------------------------------------
+
+/// Mirrors `DesktopServer.version`; a mismatch names the fix instead of guessing.
+const DESKTOP_API_VERSION: u32 = 1;
+
+/// The socket the caller's Desktop serves: `LF_DESKTOP`'s bundle, else the installed app.
+pub(crate) fn socket_path() -> std::path::PathBuf {
+    crate::store::lf_home_dir()
+        .join("run")
+        .join("desktop")
+        .join(format!("{}.sock", super::open::desktop_bundle()))
 }
 
-/// osascript reports `NN:NN: execution error: <message> (<number>)`; the number,
-/// never the message, decides the status.
-fn contact_failure(stderr: &str) -> anyhow::Error {
-    let stderr = stderr.trim();
-    let (message, number) = stderr
-        .strip_suffix(')')
-        .and_then(|rest| rest.rsplit_once(" ("))
-        .and_then(|(message, number)| Some((message, number.parse::<i32>().ok()?)))
-        .unwrap_or((stderr, 0));
-    let message = message
-        .split_once("execution error: ")
-        .map_or(message, |(_, message)| message);
-    let consent =
-        "Allow Automation for Loopflow in System Settings › Privacy & Security › Automation";
-    match number {
-        ARGUMENT_SCRIPT_ERROR => DesktopError::Argument(message.into()).into(),
-        TARGET_SCRIPT_ERROR => DesktopError::Target(message.into()).into(),
-        // Event not understood: this Desktop predates the lf that asked.
-        -1708 => anyhow::anyhow!("Loopflow Desktop does not understand this request; update Desktop to match this lf ({message})."),
-        // Not running, or quit mid-request.
-        -600 | -609 => DesktopError::Unreachable(message.into()).into(),
-        -1712 => DesktopError::Unreachable(format!(
-            "Desktop did not answer within 5 seconds; an Automation consent prompt may be waiting. {consent}, then inspect again before retrying."
-        ))
-        .into(),
-        -1743 | -1744 => DesktopError::Unreachable(format!(
-            "This terminal may not control Loopflow Desktop. {consent}."
-        ))
-        .into(),
-        // A lost reply does not prove the command had no effect. In particular,
-        // repeating shell creation allocates another tab; inspect before retrying.
-        _ => anyhow::anyhow!("Desktop request failed: {stderr}. Inspect again before retrying; `lf task status <task>` remains available in this terminal."),
+/// One client connection; requests are answered in order.
+struct DesktopConnection {
+    reader: std::io::BufReader<std::os::unix::net::UnixStream>,
+    writer: std::os::unix::net::UnixStream,
+    next_id: u64,
+}
+
+#[derive(Deserialize)]
+struct DesktopReply {
+    id: Option<u64>,
+    result: Option<serde_json::Value>,
+    error: Option<DesktopReplyError>,
+}
+
+#[derive(Deserialize)]
+struct DesktopReplyError {
+    code: String,
+    message: String,
+}
+
+#[derive(Deserialize)]
+struct DesktopEventFrame {
+    event: DesktopChange,
+}
+
+impl DesktopConnection {
+    fn open() -> Result<Self> {
+        let path = socket_path();
+        let bundle = super::open::desktop_bundle();
+        let stream = std::os::unix::net::UnixStream::connect(&path).map_err(|error| {
+            DesktopError::Unreachable(format!(
+                "Loopflow Desktop ({bundle}) is not running or not serving {} ({error}). Open it with lf open, or inspect Work with lf task status <task>.",
+                path.display()
+            ))
+        })?;
+        // Desktop answers on its main thread; a hung app is unreachable, not a failure.
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
+        Ok(Self {
+            reader: std::io::BufReader::new(stream.try_clone()?),
+            writer: stream,
+            next_id: 1,
+        })
+    }
+
+    fn call<R: serde::de::DeserializeOwned>(
+        &mut self,
+        method: &str,
+        params: impl Serialize,
+    ) -> Result<R> {
+        use std::io::{BufRead, Write};
+        let id = self.next_id;
+        self.next_id += 1;
+        let mut line = serde_json::to_vec(&serde_json::json!({
+            "v": DESKTOP_API_VERSION, "id": id, "method": method, "params": params,
+        }))?;
+        line.push(b'\n');
+        self.writer
+            .write_all(&line)
+            .map_err(|error| DesktopError::Unreachable(format!("Desktop closed its socket: {error}")))?;
+        let mut reply = String::new();
+        match self.reader.read_line(&mut reply) {
+            Ok(0) => return Err(lost_reply("Desktop closed the connection")),
+            Ok(_) => {}
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                return Err(DesktopError::Unreachable(
+                    "Desktop did not answer within 10 seconds. Inspect again before retrying.".into(),
+                )
+                .into())
+            }
+            Err(error) => return Err(lost_reply(&error.to_string())),
+        }
+        let reply: DesktopReply =
+            serde_json::from_str(&reply).context("Desktop returned an unreadable reply")?;
+        if let Some(error) = reply.error {
+            return Err(reply_failure(error));
+        }
+        anyhow::ensure!(reply.id == Some(id), "Desktop answered a different request");
+        serde_json::from_value(reply.result.unwrap_or_default())
+            .with_context(|| format!("Desktop returned an invalid {method} reply; inspect before retrying"))
+    }
+
+    /// Subscribe; the first change carries every window, later ones what changed.
+    fn events(mut self) -> Result<impl Iterator<Item = Result<DesktopChange>>> {
+        use std::io::BufRead;
+        let _: serde_json::Value = self.call("events", serde_json::json!({}))?;
+        self.reader.get_ref().set_read_timeout(None)?;
+        Ok(self.reader.lines().map(|line| {
+            let line = line.map_err(|error| lost_reply(&error.to_string()))?;
+            Ok(serde_json::from_str::<DesktopEventFrame>(&line)
+                .context("Desktop sent an unreadable change")?
+                .event)
+        }))
+    }
+}
+
+/// A lost reply does not prove the request had no effect. In particular,
+/// repeating `run` allocates another tab; inspect before retrying.
+fn lost_reply(reason: &str) -> anyhow::Error {
+    anyhow::anyhow!("Desktop request failed: {reason}. Inspect again before retrying; `lf task status <task>` remains available in this terminal.")
+}
+
+fn reply_failure(error: DesktopReplyError) -> anyhow::Error {
+    let DesktopReplyError { code, message } = error;
+    match code.as_str() {
+        "argument" => DesktopError::Argument(message).into(),
+        "target" => DesktopError::Target(message).into(),
+        "version" => anyhow::anyhow!("{message} Update Desktop and lf to the same release."),
+        _ => anyhow::anyhow!("Desktop failed: {message}. Inspect again before retrying."),
     }
 }
 
@@ -2277,53 +2319,23 @@ mod tests {
     }
 
     #[test]
-    fn desktop_failures_take_their_status_from_the_script_error_number() {
-        let status = |stderr: &str| {
-            let error = super::contact_failure(stderr);
-            error
-                .downcast_ref::<DesktopError>()
-                .map(|error| (error.exit_status(), error.to_string()))
+    fn desktop_failures_take_their_status_from_the_error_code() {
+        let status = |code: &str| {
+            super::reply_failure(super::DesktopReplyError {
+                code: code.into(),
+                message: "No pane 9. Nothing changed.".into(),
+            })
+            .downcast_ref::<DesktopError>()
+            .map(DesktopError::exit_status)
         };
-        let (code, message) = status("88:188: execution error: Loopflow Desktop (com.loopflow.mac.dev) is not running. (-600)\n").unwrap();
-        assert_eq!(code, 4);
-        assert!(
-            message.starts_with("Loopflow Desktop (com.loopflow.mac.dev)"),
-            "{message}"
-        );
-        let (code, message) = status(
-            "12:40: execution error: Loopflow Dev got an error: AppleEvent timed out. (-1712)",
-        )
-        .unwrap();
-        assert_eq!(code, 4);
-        assert!(
-            message.contains("Privacy & Security › Automation"),
-            "{message}"
-        );
-        assert_eq!(
-            status(
-                "1:2: execution error: Not authorized to send Apple events to Loopflow. (-1743)"
-            )
-            .unwrap()
-            .0,
-            4
-        );
-        let (code, message) = status("1:2: execution error: Loopflow got an error: The pane content was replaced; inspect Desktop again. (1003)").unwrap();
-        assert_eq!(code, 3);
-        assert!(message.ends_with("inspect Desktop again."), "{message}");
-        let (code, _) = status("1:2: execution error: Loopflow got an error: Unknown action pane.spin; see lf desktop actions. Nothing changed. (1002)").unwrap();
-        assert_eq!(code, 2);
-        // An older Desktop exits 1 and names the fix.
-        let older = super::contact_failure(
-            "1:2: execution error: Loopflow got an error: AppleEvent handler failed. (-1708)",
-        );
-        assert!(older.downcast_ref::<DesktopError>().is_none());
-        assert!(older.to_string().contains("update Desktop"));
-        // Other failures, including a message that only mentions a number, stay 1.
-        assert!(status(
-            "1:2: execution error: Loopflow got an error: decoding failed (1003 bytes) (-10000)"
-        )
-        .is_none());
-        assert!(status("osascript crashed").is_none());
+        assert_eq!(status("argument"), Some(2));
+        assert_eq!(status("target"), Some(3));
+        assert_eq!(status("internal"), None);
+        let older = super::reply_failure(super::DesktopReplyError {
+            code: "version".into(),
+            message: "This Desktop speaks API version 2, not 1.".into(),
+        });
+        assert!(older.to_string().contains("Update Desktop"));
     }
 
     #[test]

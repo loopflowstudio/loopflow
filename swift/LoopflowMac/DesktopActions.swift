@@ -1,5 +1,5 @@
 // The one mutation path for Desktop gestures. The shortcut monitor, menus,
-// Keyboard Shortcuts window and the `perform desktop action` Apple event all
+// Keyboard Shortcuts window and the Desktop socket's `perform` all
 // look actions up here and call `perform`; `lf desktop` verbs name them.
 
 #if os(macOS)
@@ -224,7 +224,7 @@ struct DesktopAction {
         return nil
     }
 
-    /// The Apple event's entry: resolve the exact target, then perform.
+    /// The socket's entry: resolve the exact target, then perform.
     static func perform(_ request: DesktopActionRequest, model: WorkModel,
                         workspaces: SessionsWorkspaceRegistry) throws -> DesktopActionOutcome {
         let action = try named(request.action)

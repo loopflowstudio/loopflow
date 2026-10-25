@@ -15,6 +15,21 @@ public struct DesktopInspection: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey { case observedAt = "observed_at", windows, openings }
 }
 
+/// One `lf desktop events` frame: the windows whose reading changed, whole, and
+/// the windows that closed. The first frame after subscribing carries every window.
+public struct DesktopChange: Codable, Sendable, Equatable {
+    public let observedAt: Int64
+    public let windows: [DesktopWindowInspection]
+    public let closed: [String]
+
+    public init(observedAt: Int64, windows: [DesktopWindowInspection], closed: [String]) {
+        self.observedAt = observedAt
+        self.windows = windows
+        self.closed = closed
+    }
+    enum CodingKeys: String, CodingKey { case observedAt = "observed_at", windows, closed }
+}
+
 public struct DesktopOpening: Codable, Sendable, Equatable {
     public enum Status: String, Codable, Sendable { case opening, usable, failed }
     public let url: String
@@ -246,19 +261,17 @@ public struct DesktopHistory: Codable, Sendable, Equatable {
     public init(back: Int, forward: Int) { self.back = back; self.forward = forward }
 }
 
-/// A stale or missing target: nothing changed. Apple events report it with
-/// `scriptErrorNumber`, which `lf desktop` maps to exit status 3.
+/// A stale or missing target: nothing changed. The Desktop socket reports it as
+/// error code `target`, which `lf desktop` maps to exit status 3.
 public struct DesktopTargetError: LocalizedError, Sendable {
-    public static let scriptErrorNumber = 1003
     public let message: String
     public init(_ message: String) { self.message = message }
     public var errorDescription: String? { message }
 }
 
-/// An unknown action or a bad action argument: nothing changed. Apple events
-/// report it with `scriptErrorNumber`, which `lf desktop` maps to exit status 2.
+/// An unknown action or a bad action argument: nothing changed. The Desktop
+/// socket reports it as error code `argument`, which `lf desktop` maps to exit status 2.
 public struct DesktopArgumentError: LocalizedError, Sendable {
-    public static let scriptErrorNumber = 1002
     public let message: String
     public init(_ message: String) { self.message = message }
     public var errorDescription: String? { message }

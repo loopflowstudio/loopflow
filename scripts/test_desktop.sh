@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build Desktop and run tests with WindowServer connections denied, even on a
 # logged-in host. SwiftPM's nested sandbox must be off inside this outer one.
-# A test that outlives swift_test_limit.py's limit ends the run and is named.
+# A test that outlives swift_test_limit.py's limit ends the run and is named; a
+# leaked continuation fails the run and names the test it leaked in.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 unset LOOPFLOW_NATIVE_TESTS

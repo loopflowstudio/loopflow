@@ -286,10 +286,21 @@ impl ClaudeHarness {
                 }
                 if let Some(status) = result {
                     // One provider turn ended. Only close the runner turn once
-                    // every queued steer turn has also drained, and while
-                    // backgrounded tasks run, Claude's own next turn answers.
+                    // every queued steer turn has also drained. While
+                    // backgrounded tasks run, the last owed result stays open:
+                    // Claude's own next turn answers it.
                     state = ReaderState::default();
-                    if history.settled() && pending_results.fetch_sub(1, Ordering::SeqCst) <= 1 {
+                    let settled = if history.activity.has_background() {
+                        let _ = pending_results.try_update(
+                            Ordering::SeqCst,
+                            Ordering::SeqCst,
+                            |pending| (pending > 1).then(|| pending - 1),
+                        );
+                        false
+                    } else {
+                        pending_results.fetch_sub(1, Ordering::SeqCst) <= 1
+                    };
+                    if settled {
                         pending_results.store(0, Ordering::SeqCst);
                         let _ = events.send(ConversationEvent::TurnCompleted {
                             turn_id: turn_id(),
@@ -975,27 +986,86 @@ mod tests {
         assert!(!harness.interrupt_requested.load(Ordering::SeqCst));
     }
 
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // Isolate the stand-in provider and its homes.
-    async fn agent_session_resumes_on_a_fresh_process() {
-        let _lock = crate::journal::test_env_lock();
-        let _ambient = crate::test_ambient::EnvGuard::new();
-        let _environment = crate::test_ambient::EnvGuard::clear(&[
-            "LF_HOME",
-            "LF_BIN",
-            "PATH",
-            "HOME",
-            "CLAUDE_CONFIG_DIR",
-        ]);
-        let home = tempfile::tempdir().unwrap();
-        for key in ["LF_HOME", "HOME", "CLAUDE_CONFIG_DIR"] {
-            std::env::set_var(key, home.path());
+    /// A stand-in `claude` on an isolated PATH and home, with a store whose
+    /// headless sessions it attaches to.
+    struct StandInClaude {
+        home: tempfile::TempDir,
+        store: crate::store::sqlite::SqliteStore,
+        database: std::path::PathBuf,
+        process: crate::id::LfProcessId,
+        _environment: crate::test_ambient::EnvGuard,
+        _ambient: crate::test_ambient::EnvGuard,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl StandInClaude {
+        fn new(script: &str) -> Self {
+            let _lock = crate::journal::test_env_lock();
+            let _ambient = crate::test_ambient::EnvGuard::new();
+            let _environment = crate::test_ambient::EnvGuard::clear(&[
+                "LF_HOME",
+                "LF_BIN",
+                "PATH",
+                "HOME",
+                "CLAUDE_CONFIG_DIR",
+            ]);
+            let home = tempfile::tempdir().unwrap();
+            for key in ["LF_HOME", "HOME", "CLAUDE_CONFIG_DIR"] {
+                std::env::set_var(key, home.path());
+            }
+            std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+            // Admission samples the child's birth through ps before exec.
+            std::env::set_var("PATH", format!("{}:/usr/bin:/bin", home.path().display()));
+            let claude = home.path().join("claude");
+            std::fs::write(&claude, script).unwrap();
+            std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let database = home.path().join("loopflow.db");
+            let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+            let process = crate::id::LfProcessId::new();
+            rusqlite::Connection::open(&database)
+                .unwrap()
+                .execute(
+                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+                    [&process],
+                )
+                .unwrap();
+            Self {
+                home,
+                store,
+                database,
+                process,
+                _environment,
+                _ambient,
+                _lock,
+            }
         }
-        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        // Admission samples the child's birth through ps before exec.
-        std::env::set_var("PATH", format!("{}:/usr/bin:/bin", home.path().display()));
-        let script = home.path().join("claude");
-        std::fs::write(&script, r#"#!/bin/sh
+
+        /// Config for a fresh headless Session the stand-in attaches to.
+        fn attach(&self, id: &str) -> AgentConfig {
+            self.store
+                .test_session(id, &crate::session_record::new_artifact_key());
+            rusqlite::Connection::open(&self.database)
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET interactive=0, provider='claude' WHERE id=?1",
+                    [id],
+                )
+                .unwrap();
+            let attachment = self
+                .store
+                .claim_session_attachment(id, None, &self.process, true)
+                .unwrap();
+            let mut config = live_config();
+            config.cwd = Some(self.home.path().to_path_buf());
+            config.session_attachment = Some((id.into(), attachment));
+            config
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_session_resumes_on_a_fresh_process() {
+        let claude = StandInClaude::new(
+            r#"#!/bin/sh
 resume=""
 while [ "$#" -gt 0 ]; do
     if [ "$1" = "--resume" ]; then shift; resume="$1"; fi
@@ -1014,40 +1084,13 @@ while read -r line; do
     printf '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"%s"}}\n' "$answer"
     printf '{"type":"result","subtype":"success","session_id":"vendor-conversation","result":"%s"}\n' "$answer"
 done
-"#).unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+"#,
+        );
         // Each harness is its own admitted conversation; both resume one
         // provider-owned AgentSession.
-        let database = home.path().join("loopflow.db");
-        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
-        let process = crate::id::LfProcessId::new();
-        rusqlite::Connection::open(&database)
-            .unwrap()
-            .execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
-                [&process],
-            )
-            .unwrap();
-        let admitted = |id: &str| {
-            store.test_session(id, &crate::session_record::new_artifact_key());
-            rusqlite::Connection::open(&database)
-                .unwrap()
-                .execute(
-                    "UPDATE agent_sessions SET interactive=0, provider='claude' WHERE id=?1",
-                    [id],
-                )
-                .unwrap();
-            let attachment = store
-                .claim_session_attachment(id, None, &process, true)
-                .unwrap();
-            let mut config = live_config();
-            config.cwd = Some(home.path().to_path_buf());
-            config.session_attachment = Some((id.into(), attachment));
-            config
-        };
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut first = ClaudeHarness::new(tx);
-        first.config = Some(admitted("first"));
+        first.config = Some(claude.attach("first"));
         first.send_input("remember").await.unwrap();
         let (status, answer, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
             .await
@@ -1059,7 +1102,7 @@ done
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut resumed = ClaudeHarness::new(tx);
         resumed.set_agent_session(Some(agent_session.clone()));
-        resumed.config = Some(admitted("second"));
+        resumed.config = Some(claude.attach("second"));
         resumed.send_input("recall").await.unwrap();
         let (status, answer, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
             .await
@@ -1074,27 +1117,11 @@ done
     }
 
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // Isolate the stand-in provider and its homes.
     async fn a_turn_with_background_tasks_completes_on_the_turn_their_notifications_start() {
-        let _lock = crate::journal::test_env_lock();
-        let _ambient = crate::test_ambient::EnvGuard::new();
-        let _environment = crate::test_ambient::EnvGuard::clear(&[
-            "LF_HOME",
-            "LF_BIN",
-            "PATH",
-            "HOME",
-            "CLAUDE_CONFIG_DIR",
-        ]);
-        let home = tempfile::tempdir().unwrap();
-        for key in ["LF_HOME", "HOME", "CLAUDE_CONFIG_DIR"] {
-            std::env::set_var(key, home.path());
-        }
-        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        std::env::set_var("PATH", format!("{}:/usr/bin:/bin", home.path().display()));
         // Claude Code's shape, from a live stream-json probe: the turn ends while
         // the suite runs, then Claude starts its own turn once it finishes.
-        let script = home.path().join("claude");
-        std::fs::write(&script, r#"#!/bin/sh
+        let claude = StandInClaude::new(
+            r#"#!/bin/sh
 while read -r line; do
     uuid=$(printf '%s' "$line" | sed -n 's/.*"uuid":"\([^"]*\)".*/\1/p')
     printf '%s\n' '{"type":"system","subtype":"init","session_id":"vendor-conversation"}'
@@ -1108,39 +1135,22 @@ while read -r line; do
     printf '%s\n' '{"type":"system","subtype":"init","session_id":"vendor-conversation"}'
     printf '%s\n' '{"type":"result","subtype":"success","session_id":"vendor-conversation","result":"FINISHED"}'
 done
-"#).unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let database = home.path().join("loopflow.db");
-        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
-        let process = crate::id::LfProcessId::new();
-        rusqlite::Connection::open(&database)
-            .unwrap()
-            .execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
-                [&process],
-            )
-            .unwrap();
-        store.test_session("step", &crate::session_record::new_artifact_key());
-        let attachment = store
-            .claim_session_attachment("step", None, &process, true)
-            .unwrap();
-        let mut config = live_config();
-        config.cwd = Some(home.path().to_path_buf());
-        config.session_attachment = Some(("step".into(), attachment));
-
+"#,
+        );
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = ClaudeHarness::new(tx);
-        harness.config = Some(config);
+        harness.config = Some(claude.attach("step"));
         harness.send_input("run the suites").await.unwrap();
         let (status, _, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
             .await
             .unwrap();
-        let survived = home.path().join("survived").exists();
+        let survived = claude.home.path().join("survived").exists();
         harness.stop().await.unwrap();
 
         assert_eq!(status, Lifecycle::Completed);
         assert!(survived, "the provider ran until its tasks finished");
-        let outputs: Vec<_> = store
+        let outputs: Vec<_> = claude
+            .store
             .session_history("step", 0, 0)
             .unwrap()
             .into_iter()
@@ -1148,6 +1158,52 @@ done
             .map(|event| event.payload["text"].clone())
             .collect();
         assert_eq!(outputs, vec![serde_json::json!("FINISHED")]);
+    }
+
+    #[tokio::test]
+    async fn a_steer_answered_while_background_tasks_run_still_completes_the_turn() {
+        let claude = StandInClaude::new(
+            r#"#!/bin/sh
+echo_user() {
+    uuid=$(printf '%s' "$1" | sed -n 's/.*"uuid":"\([^"]*\)".*/\1/p')
+    printf '{"type":"user","uuid":"%s","session_id":"vendor-conversation","message":{"content":"m"}}\n' "$uuid"
+}
+read -r seed
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"vendor-conversation"}'
+echo_user "$seed"
+printf '%s\n' '{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"suite"}]}'
+printf '%s\n' '{"type":"result","subtype":"success","session_id":"vendor-conversation","result":"WAITING"}'
+read -r steer
+echo_user "$steer"
+printf '%s\n' '{"type":"result","subtype":"success","session_id":"vendor-conversation","result":"STEERED"}'
+printf '%s\n' '{"type":"system","subtype":"background_tasks_changed","tasks":[]}'
+printf '%s\n' '{"type":"result","subtype":"success","session_id":"vendor-conversation","result":"FINISHED"}'
+cat > /dev/null
+"#,
+        );
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut harness = ClaudeHarness::new(tx);
+        harness.config = Some(claude.attach("step"));
+        harness.send_input("run the suites").await.unwrap();
+        assert!(matches!(
+            harness.send_current("also lint").await,
+            SendCurrentOutcome::Sent { .. }
+        ));
+        let (status, _, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
+            .await
+            .expect("the turn completes once the tasks finish");
+        harness.stop().await.unwrap();
+
+        assert_eq!(status, Lifecycle::Completed);
+        let outputs: Vec<_> = claude
+            .store
+            .session_history("step", 0, 0)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == crate::session::SessionEventKind::Output)
+            .map(|event| event.payload["text"].clone())
+            .collect();
+        assert_eq!(outputs.last(), Some(&serde_json::json!("FINISHED")));
     }
 
     // Live persistent-process checks against the real `claude` CLI (subscription

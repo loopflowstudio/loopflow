@@ -91,7 +91,10 @@ Claude's background tasks.
 Contradicting evidence: none found. The agent did not misjudge the headless rules
 as written; it followed the provider's contract.
 
-## Prevention (proposed, not built)
+## Prevention
+
+Status (2026-10-25): 1 is built in LOO-600 (`ClaudeHarness` reads
+`background_tasks_changed`); 2 was not needed because stream-json carries the signal.
 
 1. **Settle on the provider being idle, not on the first `result`** (code, highest
    leverage). In `ClaudeHarness`, a batch step keeps the process alive while

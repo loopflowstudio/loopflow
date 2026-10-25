@@ -17,12 +17,6 @@ pub(super) struct History {
 }
 
 impl History {
-    /// Whether a `result` now ends the request rather than waiting on
-    /// backgrounded tasks.
-    pub fn settled(&self) -> bool {
-        !self.activity.has_background()
-    }
-
     pub fn record(&mut self, line: &str) -> Result<()> {
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             return Ok(());
@@ -68,8 +62,8 @@ impl History {
                 )?;
             }
             // Backgrounded tasks still running: Claude starts its own turn when
-            // they finish, and that turn's result answers this request.
-            if !self.settled() {
+            // they finish, and that turn's result answers the last request.
+            if self.activity.has_background() && self.pending.len() == 1 {
                 return Ok(());
             }
             let status = if value["subtype"] == "success" && value["is_error"] != true {

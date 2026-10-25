@@ -386,3 +386,21 @@ current state is between graphs at a strucutred convo in the task session", "Bus
 is not available", "Working = task is currently running a grpah, regardless of session
 availability" (renamed `moving`), dead ship process: "i would say idle". Operator reading of
 "marked for chat" as Ship it pressed is still unconfirmed by Jack; it is what's built.
+
+## Sync with main #1672–#1676 (2026-10-25)
+
+- Merged twice (da454caf92, b14204991d) and pushed; PR #1652 MERGEABLE/CLEAN at b5058a91d1, not
+  armed. Checks on that head: `ops::pr_landing`/`ops::task::ship`/`lf::commands::ship` 28/28,
+  integration `land_tests` 30/30; the sync agent ran fmt, clippy and `task_graph_launch_tests`
+  (35/36).
+- **Open for Jack:** with #1675 (`lf task run` returns once its Graph runs) and main deleting
+  Desktop's detached starter, the sync agent made `lf ship` return once the Task is shipping
+  (b5058a91d1), logging to `~/.lf/logs/graph-ship-<issue>.log`; `-b` still waits. This reverses
+  Jack's 2026-10-21 choice that the CLI `lf ship` stays in the foreground.
+- **Regression from 427d91bfe8 (state axes), not the merge:** a Task canceled in Linear is not
+  refused for `-b task run … proof`; it runs to `end`. `every_task_launch_runs_in_the_foreground_
+  under_the_same_checks` catches it (fails on 863e6793e0 too). Launch admission reads
+  `task_work_status`, whose state SQL no longer reads Linear cancellation as abandoned.
+- Stale assertions from the state axes fixed (0966cc00ce): with a checkout and nothing running
+  a Task reads idle, at a stage active, with a live Graph moving.
+

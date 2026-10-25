@@ -174,7 +174,20 @@ pub fn sync_with_recovery(
             target_sha,
         });
     }
-    start_owned_sync(repo, options, false, progress)
+    start_owned_sync(repo, options, None, false, progress)
+}
+
+/// Execute a plan the caller classified before hiding the checkout's edits,
+/// with its target already fetched. Planning again on the cleaned tree would
+/// judge the branch without its work, and record one strategy while running
+/// another.
+pub fn sync_with_plan(
+    repo: &Path,
+    options: &SyncOptions,
+    plan: SyncPlan,
+    progress: &impl Progress,
+) -> OpsResult<SyncVerification> {
+    start_owned_sync(repo, options, Some(plan), false, progress)
 }
 
 /// Delivery must not publish an empty tree, even for an unmanaged branch.
@@ -183,7 +196,7 @@ pub(crate) fn sync_for_delivery(
     options: &SyncOptions,
     progress: &impl Progress,
 ) -> OpsResult<SyncVerification> {
-    start_owned_sync(repo, options, true, progress)
+    start_owned_sync(repo, options, None, true, progress)
 }
 
 /// Continue a local sync after its conflict paths have been resolved.
@@ -246,14 +259,20 @@ pub fn recover_sync(
 fn start_owned_sync(
     repo: &Path,
     options: &SyncOptions,
+    plan: Option<SyncPlan>,
     require_changes: bool,
     progress: &impl Progress,
 ) -> OpsResult<SyncVerification> {
     let mut operation = begin_sync_operation(repo, &options.onto)?;
     let tracked_dirty = tracked_dirty_state(repo)?;
-    fetch_target(repo, &options.onto)?;
+    let plan = match plan {
+        Some(plan) => plan,
+        None => {
+            fetch_target(repo, &options.onto)?;
+            plan_sync(repo, Some(&options.onto), options.fork_base.clone())?
+        }
+    };
     let target_sha = rev_parse(repo, &options.onto)?;
-    let plan = plan_sync(repo, Some(&options.onto), options.fork_base.clone())?;
     operation.pin_target(target_sha.clone())?;
     revalidate_start(repo, operation.owner())?;
 

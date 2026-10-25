@@ -103,19 +103,25 @@ fn preserve_untracked_collisions(repo: &Path, stash: &str) -> OpsResult<()> {
     Ok(())
 }
 
+const STASH_MESSAGE: &str = "lf checkout update: caller edits in ";
+
 fn stash_message(repo: &Path) -> String {
-    format!("lf checkout update: caller edits in {}", repo.display())
+    format!("{STASH_MESSAGE}{}", repo.display())
 }
 
 /// The stash holding this checkout's edits after a checkout update could not
 /// restore them. Starting work over on top of it would strand those edits.
+/// Paths compare canonically: a Task's recorded worktree and the root a sync
+/// ran from may spell the same directory differently.
 pub fn retained_edits(repo: &Path) -> OpsResult<Option<String>> {
-    let suffix = stash_message(repo);
+    let checkout = std::fs::canonicalize(repo)?;
     Ok(git(repo, &["stash", "list", "--format=%H %gs"])?
         .lines()
-        .find(|line| line.ends_with(&suffix))
-        .and_then(|line| line.split_once(' '))
-        .map(|(sha, _)| sha.to_string()))
+        .find_map(|line| {
+            let (sha, subject) = line.split_once(' ')?;
+            let (_, path) = subject.split_once(STASH_MESSAGE)?;
+            (std::fs::canonicalize(path).ok()? == checkout).then(|| sha.to_string())
+        }))
 }
 
 /// Restore index, working edits and untracked files even when an update fails.

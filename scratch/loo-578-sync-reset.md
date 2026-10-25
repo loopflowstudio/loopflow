@@ -19,32 +19,25 @@ restore edits made on top of them.
   A branch with its own commits always merges its target; reset remains only
   for branches with no unique commits (`stale_empty`, `scratch_only`) and
   persistent branches whose commits have landed.
+- `lf sync` plans once. It fetches the target, classifies against the tree
+  holding the caller's edits, and passes that `SyncPlan` to `sync_with_plan`
+  inside `with_preserved_edits`. The strategy that runs is the one the metric
+  records and `is_avoidable_sync_class` judges. `sync_with_recovery` (no plan)
+  still fetches and plans inside the owned sync for library callers.
 - Recovery stashes name their checkout (`lf checkout update: caller edits in
-  <path>`); `lf task run` stops instead of restarting a failed Graph when its
-  checkout has one, and prints the restore command (3).
+  <path>`, matched canonically); `lf task run` stops instead of restarting a
+  failed Graph when its checkout has one, and prints the restore command (3).
 
 ## Verification
 
-- `graph_sync_keeps_an_unpublished_scratch_commit_and_its_edits`
-  (`tests/sync_tests.rs`): kickoff scratch commit + tracked, scratch and
-  untracked edits, upstream advance, then the Graph's `lf sync origin/main`.
-
-## Execution plan
-
-This Task (LOO-578) keeps the sync and retry core and ships it in one PR:
-1. Done: `GeneratedOnly` deleted, with a test.
-2. Done in code: `lf task run` stops when its checkout holds a checkout-update
-   stash. Still to do: a test where a Graph step fails with a stash retained,
-   asserting one attempt and a message that names the stash.
-3. To do: plan sync once. Pass the outer `SyncPlan` into
-   `sync_with_recovery`/`start_owned_sync` so the strategy that runs is the
-   one the metric records. Test: a dirty, committed branch, where the metric's
-   strategy equals the executed one.
+- `graph_sync_keeps_an_unpublished_scratch_commit_and_its_edits` and
+  `sync_runs_the_strategy_it_records_for_a_dirty_branch` (`tests/sync_tests.rs`);
+  `a_graph_that_fails_with_retained_edits_is_not_started_again`
+  (`tests/linear/task_graph_launch_tests.rs`). Focused runs and
+  `cargo clippy --all-targets -- -D warnings` pass; full suites left to gate/CI.
 
 Interrupt (4) is filed as LOO-579, "lf task interrupt stops a running Task
-Graph". It hasn't been launched. Until this fix is installed, an autonomous
-Graph can repeat the sync reset. LOO-579 also edits the same `run_for_task`
-retry loop. Launch it after this PR lands.
+Graph". Launch it after this PR lands; it edits the same `run_for_task` loop.
 
 ## Open
 
@@ -60,8 +53,8 @@ retry loop. Launch it after this PR lands.
 
 Affected: LOO-575's autonomous Graph. Its implementation sat only in stash
 `08ebe9d2ca` until it was recovered by hand (`e1d2815de2`). Recovery is done.
-On this branch the reset is repaired and covered by a test; the retry stop is
-repaired but has no test; the interrupt is still open.
+On this branch the reset, the retry stop and the double plan are repaired and
+tested; the interrupt is still open (LOO-579).
 
 **A. The branch was reset (1).**
 1. *Why reset?* The inner `plan_sync` in `start_owned_sync` classified the
@@ -123,16 +116,13 @@ log was not re-read.**
 ### Prevention (proposed unless marked done)
 - **Done:** the `GeneratedOnly` class is deleted. A branch with its own
   commits always merges. Proof: `graph_sync_keeps_an_unpublished_scratch_commit_and_its_edits`.
-- **Done, untested:** `lf task run` stops when its checkout holds a
-  checkout-update stash. A test should make a Graph step fail with a retained
-  stash and assert there is a single attempt and the message names the stash.
-- **Proposed, highest leverage:** plan sync once. Pass the outer `SyncPlan`
-  into `sync_with_recovery`/`start_owned_sync` (or classify inside
-  `with_preserved_edits` before the stash), so the executed strategy is the
-  one recorded in the metric and judged by `is_avoidable_sync_class`. That
-  closes the "classified with the work hidden" class of bug instead of one
-  instance of it. Proof: a test asserting the metric's strategy equals the
-  executed one for a dirty, committed branch.
+- **Done:** `lf task run` stops when its checkout holds a checkout-update
+  stash. Proof: `a_graph_that_fails_with_retained_edits_is_not_started_again`.
+- **Done:** sync plans once, before the stash. Proof:
+  `sync_runs_the_strategy_it_records_for_a_dirty_branch`. With `GeneratedOnly`
+  gone, a committed branch classifies the same either way; the remaining
+  divergence was a branch with no commits and dirty edits (recorded merge,
+  executed reset), which the test covers.
 - **Proposed:** make interrupt a Task-run control rather than a turn control.
   `run_for_task` and the Graph runner check `latest_interrupt_id` against a
   cursor captured at Task-run start, before each step and before each retry,

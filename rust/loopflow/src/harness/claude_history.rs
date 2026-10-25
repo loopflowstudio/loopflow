@@ -17,6 +17,12 @@ pub(super) struct History {
 }
 
 impl History {
+    /// Whether a `result` now ends the request rather than waiting on
+    /// backgrounded tasks.
+    pub fn settled(&self) -> bool {
+        !self.activity.has_background()
+    }
+
     pub fn record(&mut self, line: &str) -> Result<()> {
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             return Ok(());
@@ -52,6 +58,20 @@ impl History {
                 value["session_id"] == thread.as_str(),
                 "Claude result changed conversation"
             );
+            if !value["usage"].is_null() {
+                store.record_session_event(
+                    session,
+                    thread,
+                    turn,
+                    SessionEventKind::Usage,
+                    &json!({"provider":"claude","usage":value["usage"]}),
+                )?;
+            }
+            // Backgrounded tasks still running: Claude starts its own turn when
+            // they finish, and that turn's result answers this request.
+            if !self.settled() {
+                return Ok(());
+            }
             let status = if value["subtype"] == "success" && value["is_error"] != true {
                 "completed"
             } else {
@@ -72,15 +92,6 @@ impl History {
                     turn,
                     SessionEventKind::Output,
                     &json!({"text": text}),
-                )?;
-            }
-            if !value["usage"].is_null() {
-                store.record_session_event(
-                    session,
-                    thread,
-                    turn,
-                    SessionEventKind::Usage,
-                    &json!({"provider":"claude","usage":value["usage"]}),
                 )?;
             }
             store.record_session_event(

@@ -286,9 +286,10 @@ impl ClaudeHarness {
                 }
                 if let Some(status) = result {
                     // One provider turn ended. Only close the runner turn once
-                    // every queued steer turn has also drained.
+                    // every queued steer turn has also drained, and while
+                    // backgrounded tasks run, Claude's own next turn answers.
                     state = ReaderState::default();
-                    if pending_results.fetch_sub(1, Ordering::SeqCst) <= 1 {
+                    if history.settled() && pending_results.fetch_sub(1, Ordering::SeqCst) <= 1 {
                         pending_results.store(0, Ordering::SeqCst);
                         let _ = events.send(ConversationEvent::TurnCompleted {
                             turn_id: turn_id(),
@@ -1070,6 +1071,83 @@ done
         assert_eq!(status, Lifecycle::Completed);
         assert!(answer.contains("remembered"));
         assert_eq!(resumed.agent_session(), Some(agent_session));
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Isolate the stand-in provider and its homes.
+    async fn a_turn_with_background_tasks_completes_on_the_turn_their_notifications_start() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _environment = crate::test_ambient::EnvGuard::clear(&[
+            "LF_HOME",
+            "LF_BIN",
+            "PATH",
+            "HOME",
+            "CLAUDE_CONFIG_DIR",
+        ]);
+        let home = tempfile::tempdir().unwrap();
+        for key in ["LF_HOME", "HOME", "CLAUDE_CONFIG_DIR"] {
+            std::env::set_var(key, home.path());
+        }
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        std::env::set_var("PATH", format!("{}:/usr/bin:/bin", home.path().display()));
+        // Claude Code's shape, from a live stream-json probe: the turn ends while
+        // the suite runs, then Claude starts its own turn once it finishes.
+        let script = home.path().join("claude");
+        std::fs::write(&script, r#"#!/bin/sh
+while read -r line; do
+    uuid=$(printf '%s' "$line" | sed -n 's/.*"uuid":"\([^"]*\)".*/\1/p')
+    printf '%s\n' '{"type":"system","subtype":"init","session_id":"vendor-conversation"}'
+    printf '{"type":"user","uuid":"%s","session_id":"vendor-conversation","message":{"content":"seed"}}\n' "$uuid"
+    printf '%s\n' '{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"suite"}]}'
+    printf '%s\n' '{"type":"result","subtype":"success","session_id":"vendor-conversation","result":"WAITING"}'
+    sleep 1
+    touch survived
+    printf '%s\n' '{"type":"system","subtype":"task_notification","task_id":"suite","status":"completed"}'
+    printf '%s\n' '{"type":"system","subtype":"background_tasks_changed","tasks":[]}'
+    printf '%s\n' '{"type":"system","subtype":"init","session_id":"vendor-conversation"}'
+    printf '%s\n' '{"type":"result","subtype":"success","session_id":"vendor-conversation","result":"FINISHED"}'
+done
+"#).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let database = home.path().join("loopflow.db");
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
+        let process = crate::id::LfProcessId::new();
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+                [&process],
+            )
+            .unwrap();
+        store.test_session("step", &crate::session_record::new_artifact_key());
+        let attachment = store
+            .claim_session_attachment("step", None, &process, true)
+            .unwrap();
+        let mut config = live_config();
+        config.cwd = Some(home.path().to_path_buf());
+        config.session_attachment = Some(("step".into(), attachment));
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut harness = ClaudeHarness::new(tx);
+        harness.config = Some(config);
+        harness.send_input("run the suites").await.unwrap();
+        let (status, _, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
+            .await
+            .unwrap();
+        let survived = home.path().join("survived").exists();
+        harness.stop().await.unwrap();
+
+        assert_eq!(status, Lifecycle::Completed);
+        assert!(survived, "the provider ran until its tasks finished");
+        let outputs: Vec<_> = store
+            .session_history("step", 0, 0)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == crate::session::SessionEventKind::Output)
+            .map(|event| event.payload["text"].clone())
+            .collect();
+        assert_eq!(outputs, vec![serde_json::json!("FINISHED")]);
     }
 
     // Live persistent-process checks against the real `claude` CLI (subscription

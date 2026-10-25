@@ -22,6 +22,9 @@ pub(super) enum Signal {
     ToolResolved(String),
     InputRequested(String),
     InputResolved(String),
+    /// The provider's complete set of backgrounded tasks. They outlive the
+    /// turn that started them, and the provider starts a turn when they finish.
+    Background(BTreeSet<String>),
     /// The provider handed the turn back; `true` when it succeeded.
     Yielded(bool),
 }
@@ -29,6 +32,7 @@ pub(super) enum Signal {
 #[derive(Debug, Default)]
 pub(super) struct SessionActivityTracker {
     open_tools: BTreeSet<String>,
+    background: BTreeSet<String>,
     pending_input: BTreeSet<String>,
     yielded: bool,
     failed: bool,
@@ -60,6 +64,9 @@ impl SessionActivityTracker {
                 Signal::InputResolved(id) => {
                     self.pending_input.remove(&id);
                 }
+                Signal::Background(tasks) => {
+                    self.background = tasks;
+                }
                 Signal::Yielded(ok) => {
                     self.open_tools.clear();
                     self.failed |= !ok;
@@ -70,12 +77,17 @@ impl SessionActivityTracker {
         any
     }
 
+    /// Whether backgrounded tasks are still running, so a result is not settled.
+    pub(super) fn has_background(&self) -> bool {
+        !self.background.is_empty()
+    }
+
     /// The reading to save, when it changed or the saved one has aged.
     pub(super) fn reading(&mut self, now: i64) -> Option<SessionActivity> {
         let reading = SessionActivity {
             preview: self.preview.clone(),
             observed_at: now,
-            open_tools: self.open_tools.len(),
+            open_tools: self.open_tools.len() + self.background.len(),
             pending_input: self.pending_input.len(),
             yielded: self.yielded,
         };
@@ -174,6 +186,16 @@ pub(super) fn claude(line: &Value) -> Vec<Signal> {
             } else {
                 results.into_iter().map(Signal::ToolResolved).collect()
             }
+        }
+        Some("system") if event["subtype"] == "background_tasks_changed" => {
+            vec![Signal::Background(
+                event["tasks"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|task| task["task_id"].as_str().map(str::to_owned))
+                    .collect(),
+            )]
         }
         Some("message_start" | "content_block_start" | "content_block_delta") => {
             vec![Signal::Working]

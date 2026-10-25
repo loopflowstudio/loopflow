@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Loopflow — the CLI your agents use to get work done</title>
+    <link rel="canonical" href="https://testserver/">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.7/dist/htmx.js"></script><script src="https://cdn.jsdelivr.net/gh/answerdotai/fasthtml-js@1.0.12/fasthtml.js"></script><script src="https://cdn.jsdelivr.net/gh/answerdotai/surreal@main/surreal.js"></script><script src="https://cdn.jsdelivr.net/gh/gnat/css-scope-inline@main/script.js"></script>    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@latest/css/pico.min.css">
+    <style>:root { --pico-font-size: 100%; }</style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="../../website/static/logo.svg" type="image/svg+xml">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+    <link rel="stylesheet" href="../../website/static/style.css?v=b8f9aa9275aa">
+  <link rel="stylesheet" href="takes.css">
+</head>
+  <body>
+<p class="take-bar"><a href="index.html">← all takes</a><span>/cli · four benefits</span></p>
+<a href="#main-content" class="skip-link">Skip to main content</a>    <div class="home-page">
+      <header>
+<a href="/" class="brand"><img src="../../website/static/logo.svg" alt="">loopflow</a>        <nav aria-label="Main navigation">
+<a href="/#mac" class="optional">For you</a><a href="cli.html">CLI</a><a href="/docs">Docs</a><details><summary>Company</summary>            <div class="menu">
+<a href="/studio">Loopflow Studio</a><a href="/etude">Etude</a><a href="/fantasia">Fantasia</a><a href="/about">About</a>            </div>
+</details><a href="https://github.com/loopflowstudio/loopflow" class="optional">GitHub ↗</a><a href="/#start" class="button solid">Install</a>        </nav>
+      </header>
+<main id="main-content" class="home"><section class="home-hero ta">
+  <h1>The CLI your agents use to get work done.</h1>
+  <p class="sub"><code>lf</code> is the command you type <em>and</em> the CLI your coding agent uses. What you ask for becomes Tasks that run in the background, every agent starts where the last one left off, and no conversation is ever lost.</p>
+  <div class="tell"><p class="lbl">Give your agent the skill</p><div class="install-row"><pre tabindex="0" class="term"><span class="p">$</span> npx skills add loopflowstudio/loopflow --skill loopflow -g -y</pre><button type="button" data-copy="npx skills add loopflowstudio/loopflow --skill loopflow -g -y" class="copy">Copy</button></div><p class="lbl">or install the CLI</p><div class="install-row"><pre tabindex="0" aria-label="Install the lf command line" class="term"><span class="p">$</span> curl -fsSL https://loopflow.studio/install.sh | sh</pre><button type="button" data-copy="curl -fsSL https://loopflow.studio/install.sh | sh" aria-live="polite" class="copy">Copy</button></div></div>
+</section>
+<section class="pair cats"><h2>Everything your agents need to build on each other’s work.</h2><div class="grid-cats"><div class="cat"><p class="eyebrow">Work</p><h3>Say what you want. It becomes Tasks that run without you.</h3><p>Your agent turns each piece into a Task with its own worktree, branch and pull request, so ten requests come back as ten PRs you can review one at a time.</p><pre class="term"><span class="p">$</span> <b>lf</b> task create --title "rent CPU pods"
+<span class="p">$</span> <b>lf</b> -b task run ETU-14</pre></div><div class="cat"><p class="eyebrow">Context</p><h3>Every agent starts where the last one left off.</h3><p>Each launch carries the Wave’s memory, the Task’s notes in <code>scratch/</code>, the docs you name and any new comments, and gets them back after compaction.</p><pre class="term"><span class="p">$</span> <b>lf</b> comment ETU-14 "smallest pod by default"
+<span class="p">$</span> <b>lf</b> gate --docs docs/runpod.md</pre></div><div class="cat"><p class="eyebrow">Orchestration</p><h3>Work finishes while you’re doing something else.</h3><p>Runs go to the agent and machine you pick, Graphs carry them step to step, Waves keep their Tasks moving, and landing repairs CI until the PR merges. Get as much as possible off the main thread: plans into code, code into verified code.</p><pre class="term"><span class="p">$</span> <b>lf</b> --machine mini -b -a codex graph pursue
+<span class="p">$</span> <b>lf</b> land --wait-and-fix</pre></div><div class="cat"><p class="eyebrow">Sessions</p><h3>You never lose a conversation.</h3><p>Every conversation outlives its terminal, and new work starts on whichever of your logins has room. Close the window and come back next week; the conversation and what it knows are still there.</p><pre class="term"><span class="p">$</span> <b>lf</b> resume --task ETU-14</pre></div></div></section>
+<section class="pair">
+  <h2>Skill Graphs: write down how you work.</h2>
+  <div class="halves">
+    <article>
+      <p>Skills are Markdown and Graphs are YAML, files in your repository reviewed like code.</p>
+      <p>Loopflow ships reasonable workflows for software engineering, and they are templates. Copy one with <code>lf graph customize pursue</code>, change it, or write down the way you work and share it.</p>
+<pre tabindex="0" class="term"><span class="p">$</span> <b>lf</b> audit                 <span class="c"># run one Skill</span>
+<span class="p">$</span> <b>lf</b> -b graph ship-api     <span class="c"># run the Graph headless</span></pre>
+      <p class="more"><a href="/docs/authoring">Write a Skill ↗</a><a href="/docs/authoring#graphs">Graphs ↗</a></p>
+    </article>
+    <article>
+<pre tabindex="0" class="term"><span class="c">&lt;!-- .lf/skills/audit.md --&gt;</span>
+Audit auth changes on this branch. Fix missing
+validation and untested paths.</pre>
+<pre tabindex="0" class="term g2"><span class="c"># .lf/graphs/ship-api.yaml</span>
+- design      <span class="c"># leaves scratch/&lt;task&gt;.md</span>
+- implement   <span class="c"># leaves commits on the branch</span>
+- audit
+- gate        <span class="c"># leaves passing checks</span></pre>
+    </article>
+  </div>
+</section>
+<section class="aside"><p><b>Use what you like and skip what you don’t.</b> The launcher needs no Task and no Linear: <code>lf : "fix the flaky retry test"</code> starts one agent, like starting it yourself.</p></section>
+<section class="pair"><h2>Want to see it all at once?</h2><p class="lede">Loopflow for Mac shows every Task, run and conversation <code>lf</code> knows about, built on the same commands. <a class="u" href="home-split.html">Loopflow for Mac →</a></p></section>
+<section id="works" class="works">
+  <p class="eyebrow">Works with</p>
+  <ul>
+    <li><b><a href="https://claude.com/claude-code" target="_blank" rel="noopener">Claude Code</a> · <a href="https://openai.com/codex" target="_blank" rel="noopener">Codex</a> · <a href="https://opencode.ai" target="_blank" rel="noopener">OpenCode</a> · <a href="https://pi.dev" target="_blank" rel="noopener">Pi</a></b><span>the coding agent, on your own account</span></li>
+    <li><b><a href="https://github.com" target="_blank" rel="noopener">GitHub</a></b><span>your code, your pull requests, and your reviewers</span></li>
+    <li><b><a href="https://linear.app" target="_blank" rel="noopener">Linear</a> · Asana · Notion</b><span>the plan your team already reads, or keep it in Git; Asana and Notion coming</span></li>
+    <li><b><a href="https://wisprflow.ai" target="_blank" rel="noopener">Wispr Flow</a></b><span>talk instead of typing</span></li>
+    <li><b><a href="https://cmux.com" target="_blank" rel="noopener">cmux</a> · <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a></b><span><code>lf</code> runs inside them</span></li>
+  </ul>
+</section></main>      <footer>
+<span>Loopflow · An open-source software instrument.</span>        <div>
+<a href="/studio">Loopflow Studio</a><a href="/docs/getting-started">Get started ↗</a><a href="https://github.com/loopflowstudio/loopflow">Source ↗</a>        </div>
+      </footer>
+<script>
+document.querySelectorAll('[data-copy]').forEach(function (button) {
+  var label = button.textContent;
+  button.addEventListener('click', function () {
+    navigator.clipboard.writeText(button.dataset.copy).then(function () {
+      button.textContent = 'Copied';
+      setTimeout(function () { button.textContent = label; }, 1600);
+    });
+  });
+});
+</script>    </div>
+  </body>
+</html>

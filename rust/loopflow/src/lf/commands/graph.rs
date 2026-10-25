@@ -158,6 +158,14 @@ pub fn run_for_task(cli: &Cli, issue: &str, graph: &str, checkout: &Path) -> Res
             && store
                 .child_process_after(&process, mark)?
                 .is_some_and(|child| matches!(store.graph_process(child.as_str()), Ok(Some(_))));
+        if failed {
+            if let Some(stash) = crate::ops::checkout::retained_edits(checkout)? {
+                eprintln!(
+                    "Graph {graph} failed with the checkout's edits retained in stash {stash}; this Task run stops here. Restore them with `git stash apply --index {stash}`."
+                );
+                return Err(crate::process::CommandExit(1).into());
+            }
+        }
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {
                 eprintln!("Graph {graph} failed {attempt} times; this Task run stops here.");

@@ -1587,3 +1587,102 @@ fn independently_added_scratch_is_merged_without_losing_either_version() {
     assert!(notes.contains("local notes"));
     assert!(notes.contains("upstream notes"));
 }
+
+#[test]
+fn graph_sync_keeps_an_unpublished_scratch_commit_and_its_edits() {
+    // LOO-578: a kickoff commit adding only scratch notes, then implementation
+    // edits, then a Graph's `op: sync`. The branch must keep its commit.
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_file("lib.txt", "original\n");
+    repo.stage_all();
+    repo.commit("library");
+    repo.push();
+    repo.create_branch("feature");
+    repo.create_file("scratch/plan.md", "plan\n");
+    repo.create_file("scratch/questions.md", "questions\n");
+    repo.stage_all();
+    repo.commit("kickoff");
+    let kickoff = repo.head_sha();
+    repo.checkout("main");
+    repo.create_file("main.txt", "upstream\n");
+    repo.stage_all();
+    repo.commit("upstream");
+    repo.push();
+    repo.checkout("feature");
+    repo.create_file("scratch/plan.md", "plan, implemented\n");
+    repo.create_file("lib.txt", "implemented\n");
+    repo.create_file("src/new.rs", "fn new() {}\n");
+
+    let command: loopflow::graph::Command =
+        serde_json::from_str(r#"{"command":"sync","args":["origin/main"]}"#).unwrap();
+    run_graph_command(repo.path(), &command);
+
+    git(
+        repo.path(),
+        &["merge-base", "--is-ancestor", &kickoff, "HEAD"],
+    );
+    git(
+        repo.path(),
+        &["merge-base", "--is-ancestor", "origin/main", "HEAD"],
+    );
+    for (path, content) in [
+        ("scratch/plan.md", "plan, implemented\n"),
+        ("scratch/questions.md", "questions\n"),
+        ("lib.txt", "implemented\n"),
+        ("src/new.rs", "fn new() {}\n"),
+        ("main.txt", "upstream\n"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join(path)).unwrap(),
+            content
+        );
+    }
+    assert!(!git(repo.path(), &["stash", "list"]).contains("lf checkout update"));
+}
+
+#[test]
+fn sync_runs_the_strategy_it_records_for_a_dirty_branch() {
+    // LOO-578: `lf sync` classified the branch with its edits, stashed them,
+    // then classified again on the cleaned tree and ran that plan instead.
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_file("lib.txt", "original\n");
+    repo.stage_all();
+    repo.commit("library");
+    repo.push();
+    repo.create_branch("feature");
+    repo.checkout("main");
+    repo.create_file("main.txt", "upstream\n");
+    repo.stage_all();
+    repo.commit("upstream");
+    repo.push();
+    repo.checkout("feature");
+    repo.create_file("lib.txt", "edited\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["sync", "origin/main"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+
+    let metrics = std::fs::read_to_string(repo.path().join(".lf/tmp/metrics/ops.jsonl")).unwrap();
+    let metric: serde_json::Value = serde_json::from_str(metrics.lines().last().unwrap()).unwrap();
+    assert_eq!(metric["class"], "clean_authored");
+    assert_eq!(metric["strategy"], "merge_target");
+    // A merge commits even here; a reset would leave HEAD at the target.
+    assert_ne!(
+        repo.head_sha(),
+        git(repo.path(), &["rev-parse", "origin/main"])
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("lib.txt")).unwrap(),
+        "edited\n"
+    );
+    git(
+        repo.path(),
+        &["merge-base", "--is-ancestor", "origin/main", "HEAD"],
+    );
+}

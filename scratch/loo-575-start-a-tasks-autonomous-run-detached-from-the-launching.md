@@ -2,7 +2,9 @@
 
 Status: draft plan (kickoff, 2026-10-24). Jack Heart filed the Task on 2026-10-24
 for a fully autonomous run; the command shape below is an executive choice
-recorded in `scratch/questions.md`, open to demo review.
+recorded in `scratch/questions.md`, open to demo review. Every slice below is
+implemented (e1d2815de2, restored after the LOO-578 sync reset); gate owns the
+Done-when checks.
 
 ## Problem
 

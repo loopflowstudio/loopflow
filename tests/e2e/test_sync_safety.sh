@@ -196,7 +196,7 @@ case "${1:-} ${2:-}" in
   "api graphql")
     request=null
     if [ -e "$GH_STATE.auto" ]; then request='{"enabledAt":"2026-09-30T00:00:00Z"}'; fi
-    printf '{"data":{"repository":{"pullRequest":{"id":"PR_fixture","number":7,"url":"https://example.com/pr/7","state":"OPEN","isDraft":false,"headRefName":"feature","headRefOid":"%s","mergedAt":null,"mergeCommit":null,"mergeStateStatus":"CLEAN","isMergeQueueEnabled":false,"autoMergeRequest":%s,"mergeQueueEntry":null}}}}\n' "$(git rev-parse HEAD)" "$request"
+    printf '{"data":{"repository":{"pullRequest":{"id":"PR_fixture","number":7,"url":"https://example.com/pr/7","state":"OPEN","isDraft":false,"headRefName":"feature","headRefOid":"%s","mergedAt":null,"mergeCommit":null,"mergeStateStatus":"CLEAN","isMergeQueueEnabled":false,"isInMergeQueue":false,"autoMergeRequest":%s,"mergeQueueEntry":null}}}}\n' "$(git rev-parse HEAD)" "$request"
     ;;
   "pr merge")
     if [[ "$*" == *--disable-auto* ]]; then rm -f "$GH_STATE.auto"; else : >"$GH_STATE.auto"; fi

@@ -258,7 +258,7 @@ lf mon prune --dry-run     # inspect dead receipts and registered orphan provide
 ```bash
 lf session list
 lf connect                        # this scope's ongoing conversation
-lf connect SESSION                # Loopflow, Claude, or Codex ID
+lf connect SESSION                # Loopflow, Claude, or Codex ID, or a Task identifier
 lf session attach SESSION         # existing execution; Ctrl+] detaches
 lf -b connect SESSION --message "Continue"    # headless turn in the saved Session workspace
 lf session list --interactive false --history --json
@@ -345,7 +345,9 @@ repository primary; Task and persistent Wave checkouts open their own primary.
 continues the conversation last opened there; ordinary `lf` starts a new one.
 
 `lf --repo NAME connect`, `lf connect --wave NAME`, and `lf connect --task ISSUE`
-select an explicit scope. `lf connect SESSION` opens the exact retained conversation.
+select an explicit scope. `lf connect SESSION` opens the exact retained conversation;
+a Task identifier in its place opens that Task's, as `--task` does. A Session whose
+terminal closed while its agent runs lists as `detached`; connecting reattaches it.
 `--fresh` creates a new primary without stopping the previous client or losing its
 history. Ordinary connect recovers the current primary after a lost reply; each
 explicit `--fresh` creates another. `--prepare` returns connection data without

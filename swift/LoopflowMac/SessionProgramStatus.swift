@@ -49,7 +49,7 @@ enum SessionProgramStatus {
         default: candidate = session ?? sessions.min(by: Self.precedes)
         }
         if let session = candidate, session.programStatus?.seen != true || session.programStatus?.summary != nil,
-           session.state == .active, let excerpt = session.preview,
+           session.state == .active || session.state == .detached, let excerpt = session.preview,
            !excerpt.providerThread.isEmpty, !excerpt.providerTurn.isEmpty,
            session.agentProcessId != nil {
             let age = now.timeIntervalSince1970 - Double(excerpt.observedAt)

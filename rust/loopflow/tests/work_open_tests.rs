@@ -868,3 +868,97 @@ fn links_tell_the_current_conversation_from_another_on_the_same_task() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("is this conversation; continue here"));
 }
+
+#[test]
+fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let provider = Child(Command::new("/bin/sleep").arg("3600").spawn().unwrap());
+    let started = time::OffsetDateTime::now_utc().unix_timestamp();
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let primary = live_conversation(
+        home.path(),
+        &provider.0,
+        started,
+        repo.path(),
+        "Design",
+        0,
+        1,
+    );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        rusqlite::params![registered.task.id.as_str(), primary],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE processes SET terminal_id='cmux:WS-1' WHERE id=(SELECT attached_lf_process_id FROM processes p JOIN agent_sessions s ON s.agent_process_id=p.id WHERE s.id=?1)",
+        [&primary],
+    )
+    .unwrap();
+
+    // A Task identifier in place of a Session id opens the Task's conversation.
+    let opened = json(&lf(
+        home.path(),
+        repo.path(),
+        None,
+        &["session", "connect", "INF-123", "--prepare", "--json"],
+    ));
+    assert_eq!(opened["id"], primary.as_str());
+    let missing = lf(
+        home.path(),
+        repo.path(),
+        None,
+        &["session", "connect", "NOPE-185", "--prepare"],
+    );
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("Session NOPE-185 was not found"));
+
+    // Its execution owner keeps running after the last viewer's terminal closed.
+    let owner = loopflow::id::LfProcessId::new();
+    db.execute(
+        "INSERT INTO processes(id,trace_id,started_at,viewed,detached_at) VALUES(?1,'fixture',1,0,2)",
+        [&owner],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET transport_lf_process_id=?2 WHERE id=?1",
+        rusqlite::params![primary, owner],
+    )
+    .unwrap();
+    let listed = |state: &str| {
+        let sessions = json(&lf(
+            home.path(),
+            repo.path(),
+            None,
+            &["session", "list", "--json", "--all"],
+        ));
+        let session = sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|session| session["id"] == primary.as_str())
+            .unwrap()
+            .clone();
+        assert_eq!(session["state"], state, "{session}");
+        session
+    };
+    let detached = listed("detached");
+    assert_eq!(detached["terminal_ids"], serde_json::json!([]));
+    assert_eq!(detached["actions"][0]["label"], "Reconnect");
+    assert!(detached["actions"][0]["unavailable_reason"].is_null());
+    assert_eq!(detached["actions"].as_array().unwrap().len(), 1);
+
+    db.execute("UPDATE processes SET viewed=1 WHERE id=?1", [&owner])
+        .unwrap();
+    let viewed = listed("active");
+    assert_eq!(viewed["terminal_ids"], serde_json::json!(["cmux:WS-1"]));
+}

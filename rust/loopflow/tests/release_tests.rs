@@ -8,9 +8,11 @@ use std::time::{Duration, Instant};
 
 use loopflow::ops::{
     bump_version, generate_release, preview_release_notes, release_bump, release_check,
-    release_notes, release_run, release_status, release_tag, NullProgress, ReleaseNotesDegradation,
-    ReleaseNotesStatus, ReleaseRunOutcome,
+    release_notes, release_run, release_status, release_tag, NullProgress, OpsError, Progress,
+    ReleaseNotesDegradation, ReleaseNotesStatus, ReleaseRunOutcome,
 };
+use loopflow::repository::RepoId;
+use loopflow::store::{open_store, storage_config_from_env, StorageConfig};
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
 
@@ -129,8 +131,14 @@ exit 1
     )
 }
 
-fn write_gh_merge_wait_script(log_path: &str, queued: bool) -> String {
+fn write_gh_merge_wait_script(log_path: &str, queued: bool, disarmed: bool) -> String {
     let queued = if queued { "1" } else { "0" };
+    // A manual disarm stamped after any arm this run makes.
+    let removals = if disarmed {
+        r#"{"__typename":"AutoMergeDisabledEvent","createdAt":"2099-01-01T00:00:00Z","reason":"Manually disabled by user","reasonCode":"manually_disabled","actor":{"login":"lf-bot"}}"#
+    } else {
+        ""
+    };
     let checks = support::github_checks_page("$head", &[]);
     let unarmed = support::github_merge_response(1176, "$head", "OPEN", "CLEAN", None);
     let pending =
@@ -156,7 +164,7 @@ if [ "$1 $2" = "api graphql" ]; then
 JSON
       exit 0 ;;
     *LoopflowPrMergeRemovals*)
-      echo '{{"data":{{"repository":{{"pullRequest":{{"timelineItems":{{"nodes":[]}}}}}}}}}}'
+      echo '{{"data":{{"repository":{{"pullRequest":{{"timelineItems":{{"nodes":[{removals}]}}}}}}}}}}'
       exit 0 ;;
   esac
 fi
@@ -2101,7 +2109,7 @@ fn prove_release_merge_wait(queued: bool) {
     let head = git_output(&repo, &["rev-parse", "HEAD"]);
     let state = tempfile::tempdir().expect("release state");
     let log_path = state.path().join("gh.log");
-    let gh_script = write_gh_merge_wait_script(&log_path.to_string_lossy(), queued);
+    let gh_script = write_gh_merge_wait_script(&log_path.to_string_lossy(), queued, false);
     let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
 
     let outcome = release_run(repo.path(), "patch", None, &NullProgress)
@@ -2119,6 +2127,85 @@ fn prove_release_merge_wait(queued: bool) {
         assert!(log.contains(&format!(
             "pr merge 1176 --squash --auto --match-head-commit {head}"
         )));
+    }
+}
+
+/// Stands in for a CI repair that re-arms once the release notices its pause.
+struct RepairRearms(PathBuf);
+
+impl Progress for RepairRearms {
+    fn status(&self, msg: &str) {
+        if msg.contains("active CI repair") {
+            fs::write(&self.0, "").unwrap();
+        }
+    }
+    fn error(&self, _msg: &str) {}
+    fn confirm(&self, _msg: &str) -> bool {
+        false
+    }
+}
+
+#[test]
+fn release_run_waits_out_a_repair_disarm_but_stops_on_a_persons() {
+    for repairing in [true, false] {
+        let repo = TestRepo::new();
+        git(&repo, &["tag", "v0.9.1"]);
+        git(&repo, &["push", "origin", "v0.9.1"]);
+        fs::write(repo.path().join("feature.txt"), "release me\n").unwrap();
+        git(&repo, &["add", "feature.txt"]);
+        git(&repo, &["commit", "-m", "Add release change"]);
+        git(&repo, &["push", "origin", "HEAD"]);
+        let state = tempfile::tempdir().expect("release state");
+        let log_path = state.path().join("gh.log");
+        let gh_script = write_gh_merge_wait_script(&log_path.to_string_lossy(), false, true);
+        let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+        if repairing {
+            // A repair reservation whose Process has no recorded death is live.
+            let config = storage_config_from_env().unwrap();
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(open_store(&config))
+                .unwrap();
+            let StorageConfig::Sqlite { path } = config;
+            let conn = rusqlite::Connection::open(path).unwrap();
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000577','fixture',?1)",
+                [now],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO ci_incidents(identity,repo,pr_number,failed_head_sha,failure_set_json,
+                 poll_observed_at,created_at,updated_at,repair_lf_process_id)
+                 VALUES('incident',?1,1176,'old-head','[]',?2,?2,?2,'00000000-0000-4000-8000-000000000577')",
+                rusqlite::params![RepoId::discover(repo.path()).unwrap().as_str(), now],
+            )
+            .unwrap();
+        }
+
+        let outcome = release_run(
+            repo.path(),
+            "patch",
+            None,
+            &RepairRearms(PathBuf::from(format!("{}.armed", log_path.display()))),
+        );
+
+        if repairing {
+            assert!(matches!(outcome, Ok(ReleaseRunOutcome::Released(_))));
+            let log = fs::read_to_string(&log_path).unwrap();
+            assert!(
+                !log.contains("pr merge"),
+                "a repair's pause is not re-armed"
+            );
+        } else {
+            assert!(matches!(
+                outcome,
+                Err(OpsError::ManualMergeRemoval {
+                    pr_number: 1176,
+                    ..
+                })
+            ));
+        }
     }
 }
 

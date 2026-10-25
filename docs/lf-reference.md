@@ -548,7 +548,7 @@ Open the ongoing conversation of this scope, or an exact Session
 
 | Argument | What it does |
 |---|---|
-| `<id>` | Session ID or provider conversation ID |
+| `<id>` | Session ID, Task identifier, or provider conversation ID |
 | `--task` | task |
 | `--wave` | wave |
 | `--fresh` | Create a fresh primary in this scope, keeping the previous client and history Default: false. |

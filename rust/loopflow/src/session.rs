@@ -228,6 +228,8 @@ impl Default for SessionFilter {
 pub(crate) struct SessionSummary {
     pub preview: Option<SessionPreview>,
     pub terminal_id: Option<String>,
+    /// Its execution owner runs with no viewer attached.
+    pub unviewed: bool,
     pub primary_scope: Option<String>,
     pub agent_process_evidence: crate::journal::ProcessIdentityEvidence,
     /// Available for a person, as of the read's clock.

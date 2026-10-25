@@ -46,3 +46,4 @@ This branch: 235 MB, `session_events` 101,353 rows (117 MB), usage rows 11,042 (
 `lf history usage --weekly --json`: all five weeks byte-identical to the base. Release prune first pass 357–390 s (1,327 s under load); next pass 27 ms.
 Remaining `session_events` bulk: `provider_output` rows of captures still inside LOO-570's 24 h settle window, and retained turn facts. The 50 MB target is not met.
 Checks: fmt and clippy `--all-targets -D warnings` clean; lib suites session_events, session_record, retention, journal, context_cost, disk, revisions, harness pass; integration global_commands and integration (context_block, task_diff, history, preview, process, wave_show) pass.
+- Compress: fmt, clippy `--all-targets -D warnings` clean; `cargo test --lib retention` 4 passed.

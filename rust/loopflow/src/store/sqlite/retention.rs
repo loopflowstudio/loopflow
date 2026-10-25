@@ -9,10 +9,9 @@
 //! Each step is one short transaction on its own connection, so live writers
 //! wait well under their busy timeout.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
-
-use std::collections::BTreeMap;
 
 use clap::{CommandFactory, FromArgMatches};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -277,8 +276,7 @@ fn compact_native_turn(
                 continue;
             }
         }
-        let (kept, ..) = receipts.last().expect("a key has a receipt");
-        let kept = *kept;
+        let kept = receipts.last().expect("a key has a receipt").0;
         let merged = receipts
             .iter()
             .map(|(_, _, payload)| payload.clone())
@@ -356,14 +354,17 @@ fn compact_input_usage(conn: &Connection, session: &str, input: &str) -> StoreRe
 /// agent is settled, `completed_at` records when it was found dead and the
 /// outcome stays unknown. A machine restart bounds the exit by the boot time.
 fn close_dead_processes(conn: &Connection, home: &Path, now: i64) -> StoreResult<u64> {
-    let select = super::processes::PROCESS_SELECT
-        .replace(" FROM processes e", ",e.receipt_locator FROM processes e");
+    let columns = super::processes::PROCESS_SELECT
+        .strip_suffix(" FROM processes e")
+        .expect("Process select ends with its table");
     let unfinished = conn
-        .prepare(&format!("{select} WHERE e.completed_at IS NULL"))?
+        .prepare(&format!(
+            "{columns},e.receipt_locator FROM processes e WHERE e.completed_at IS NULL"
+        ))?
         .query_map([], |row| {
             Ok((
                 super::processes::read_process(row)?,
-                row.get::<_, Option<String>>(19)?,
+                row.get::<_, Option<String>>("receipt_locator")?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;

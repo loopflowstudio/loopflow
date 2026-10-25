@@ -190,6 +190,7 @@ When editing Rust tests:
 - `unwrap()` is fine in tests
 - Use `#[test]` for unit tests in the same file
 - Integration tests go in `tests/` directory
+- A test that reads state a run writes uses the waited form, `lf -b task run`; bare `task run` returns once the Graph registers. A change to when a command returns inventories its test callers too (`grep -rn '"task", "run"' rust/loopflow/tests/`).
 - Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`.
 - Mock via closures or `#[cfg(test)]`, not factory traits or extra abstractions
 - Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.

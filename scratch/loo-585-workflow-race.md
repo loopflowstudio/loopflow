@@ -19,8 +19,11 @@ Verification (12-step Graph probe to widen the window, CPU saturated with `yes` 
   green on main CI: looks local to this machine, left to CI.
 - `cargo test --test two_people`: ok. clippy -D warnings: ok.
 
-Note: PR #1679's ci-fix `a0ef70f1e7` polls for the arrival in `waveless_task_lifecycle`; whichever lands
-second will conflict at that hunk. Keep the `-b` form.
+After rebasing onto `385b6a66ea` (2026-10-25), the conflict with #1679's poll loop (`a0ef70f1e7`) was resolved
+by keeping `-b` and deleting the loop. The same probe on the rebased branch gives 10/10 failures before
+(at :3823 and :3927) and 0/10 after. These tests compile into the lib target (`src/lib.rs` `#[path]`), so
+run them as `cargo test -p loopflow --lib local_planning::<name>`. A `--test integration` filter matches
+nothing. Keep the probe at 12 steps: at 40 steps both reads land mid-edge and agree, which hides the race.
 
 ## Why it happened (5 whys)
 
@@ -90,11 +93,8 @@ the failing line, not to the class it belongs to.
 
 ## Execution decision (launch-plan, 2026-10-25)
 
-Stays in LOO-585 (this PR, no new Tasks):
-1. Rebase onto main (`385b6a66ea`); resolve the `waveless_task_lifecycle` conflict with `a0ef70f1e7` by
-   keeping `-b` and deleting the poll loop (prevention 1). Rerun the probe for the PR's before/after counts.
-2. Add the one-line Rust-tests rule to AGENTS.md (prevention 2), naming the waited form and the
-   `grep -rn '"task", "run"' rust/loopflow/tests/` inventory check (folds in prevention 3).
+Done on this branch: rebase plus poll-loop deletion (prevention 1), and the AGENTS.md Rust-tests rule
+naming `lf -b task run` and the `grep -rn '"task", "run"' rust/loopflow/tests/` inventory (preventions 2–3).
 
 Deferred, not filed:
 - ci-fix sweeping sibling call sites (prevention 4): unmeasured and pulls against ci-fix's narrow

@@ -86,8 +86,9 @@ lf --repo ./another-checkout list
 lf --task EXP-12 skill design       # contribute in the Task's checkout
 lf --wt csv-export : "Add CSV export"
 lf --wave exports : "Review the goal" # add context in the current directory
-lf -b task run EXP-12       # place the Task, run its default
-lf -b task run EXP-12 pursue # take the workflow edge that runs pursue
+lf task run EXP-12          # place the Task, start its default, return once it runs
+lf task run EXP-12 pursue   # take the workflow edge that runs pursue
+lf -b task run EXP-12       # the same, waiting until its Graph ends
 lf task run EXP-12 end       # take an edge that runs nothing
 lf task workflow move EXP-12 demo     # put the Task at a node, running nothing
 lf --task EXP-12 graph incident # run a Graph without moving the Task

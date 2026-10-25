@@ -71,9 +71,10 @@ conflicts, verify and push, then reread status.
    complete the Task. Ask about consequential scope
    or direction conflicts; when judgment is unavailable, name the exact decision.
 
-3. **Advance the work.** `lf task run <issue> [graph]` runs a
-   fresh Graph in the Task's worktree and returns when it ends; it never continues
-   an earlier one. Run it with your own background tool to keep working. Check installed
+3. **Advance the work.** `lf task run <issue> [graph]` starts a
+   fresh Graph in the Task's worktree and returns once it is running; it never
+   continues an earlier one. `lf task status <issue>` follows it; `-b` waits for
+   the end. Check installed
    help first. Leave a live Graph process running. After a stopped or failed Graph,
    launch only the work that remains; never relaunch merely to bypass a blocker.
    When judgment is needed, ask here if interactive; never open another Session

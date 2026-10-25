@@ -25,6 +25,10 @@ ci-fix URL lookup; behavior unchanged.
 ops::ci_watch`: 69 passed (2026-10-24, after compress; one unnamed failure in
 the first of three runs, not reproduced — gate should watch for a flake). `pytest python/tests/test_task_installation.py`: 8 passed.
 Clippy clean. Replayed the timeline query and run lookup against PR #1676.
+Gate (2026-10-25): `cargo fmt --check`, `cargo clippy -p loopflow --all-targets -D warnings`,
+`ruff check`/`format --check` clean; focused Rust suite 69 passed twice (no flake
+reproduced; tests wait >60s each on shared-lock contention, 1.3s alone, pre-existing);
+pytest 8 passed. Full matrix deferred to CI.
 
 **Unproved.** A live eviction → watcher → ci-fix → re-arm on an installed build. An
 evicted PR whose merge-group run is older than the latest 100 merge-group runs

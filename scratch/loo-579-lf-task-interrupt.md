@@ -81,8 +81,8 @@ One reader per Task run, with one cursor taken when the Task run starts.
    unrelated reason.
 7. **Truthful receipt.** `task_interrupt` decides liveness before it appends
    (`live_execution` in `ops/task.rs`):
-   - live = the Task's latest Graph is Running, Stalled, Starting or Unknown
-     (`execution_of_latest_graph`); otherwise any open, not-dead Process in the
+   - live = the Task's latest Graph process is not Dead and its execution is
+     Running, Stalled, Starting or Unknown (`execution_of_latest_graph`); otherwise any open, not-dead Process in the
      Task's work outside the caller's lineage (`task_open_processes` +
      `unresolved_processes`, the set `execution_blockers` already uses). That
      covers a Task run between attempts and a direct Task Session with one
@@ -208,5 +208,4 @@ From an lf-launched shell, with inherited `LF_*` unset and `< /dev/null`:
 - `cargo clippy --all-targets -- -D warnings`; `cargo fmt --check`.
 - Regenerate the reference with `UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration reference_matches_the_compiled_cli < /dev/null`.
 
-Check result (kickoff, after restoring onto #1675/#1676 as 5a1c2cfa7d): build clean; `--lib interrupt` 17 ok, `--lib task_graph_launch` 34 ok, `--test integration task_github_cache` 3 ok, reference test ok; clippy/fmt clean. Full suites deferred to gate.
-Compress: `live_execution` reads the Graph only when its process isn't dead (no empty-name default); `cargo test --lib interrupt` 17 ok, clippy clean.
+Check result (kickoff + compress, on #1676 at 72598db02f): `cargo test --lib interrupt` 17 ok, `--lib task_graph_launch` 34 ok, `--test integration task_github_cache` 3 ok, reference test ok; clippy/fmt clean. Full suites deferred to gate.

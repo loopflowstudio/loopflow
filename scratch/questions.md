@@ -1,13 +1,15 @@
 # LOO-519 questions and assumptions
 
 Jack Heart waived design review (2026-10-24); kickoff settled these, Jack judges
-them in the demo. Each is reversible before landing.
+them in the demo. Each is reversible before landing. v1 entries the v2 direction
+superseded (`-t`/`-b`, `do`, `run -- CMD`, layout conversion) were removed at
+realign, 2026-10-25; see git history.
 
 - **No `LF_TASK`/`LF_SESSION`/`LF_REPO` (accepted, Jack Heart 2026-10-24).** Caller
   context is `LF_TERMINAL_ID`, trusted for targeting; the earlier
   `LF_AGENT_CALLER` Session matching is dropped.
 - **Other conversations of a Task switch into the session pane**
-  (`do session.switch`), not browser tabs. Keeps browser = documents/web and the
+  (`switch`), not browser tabs. Keeps browser = documents/web and the
   session pane a single slot; Desktop retains switched-away surfaces.
 - **Side-by-side shells: out.** One visible shell; revisit if it bites (a pane
   showing two of its own tabs, not a split tree).
@@ -16,20 +18,12 @@ them in the demo. Each is reversible before landing.
   dev-server demo has nowhere to land. Files keeps its own document tabs inside
   its tab this Task.
 - **`ls` and `state` both exist; one inspection.** `ls` is Rex's name and a
-  rendering of the same Apple-event reply; `state --json` stays the oracle.
+  rendering of the same `inspect` reply; `state --json` stays the oracle.
   `ls` scope: `--window`, else the caller's window, else the repository's only
   window (see window positions below). The Task asked to "keep one command";
   `list` is gone and `ls` renders `state`'s reply, so there is one readback.
-- **Task flag is `-t/--task`, not Rex's `-s`**, because Session means a
-  conversation in Loopflow. No `-w` (a Task has one workspace); Desktop window is
-  `--window` (long only; Rex's `-C` is uppercase, which lf avoids).
-- **`run` takes the Rex name for "new shell tab"** and accepts `-- CMD`; `--wait`
-  stays with LOO-453.
 - **Bare target never follows focus.** Without caller or binding, more than one
   candidate exits 3.
-- **`view working-tasks` is deleted** in favor of `do dashboard.working_tasks`.
-- **Layout migration converts stored layouts** (Files+Log → one browser pane,
-  empty panes collapse, extra Session panes leave the layout). No dual-shape reader.
 - **Doubled Dashboard frame — Jack's call in the demo.** `DashboardView.swift` and
   `WorkspacePanesView.swift` both stroke `palette.border`. No change planned.
 - **Close hides; ⌘W closes the addressed tab (implemented 2026-10-24).** ⌘W on a
@@ -39,38 +33,26 @@ them in the demo. Each is reversible before landing.
   replaces the undo record (implemented, slice 5). The alternative is that ⌘W ends
   the shell immediately and ⇧⌘T only shows hidden panes. Jack judges which one in
   the demo.
-- **New layouts use pane IDs `session`, `shell`, `browser`.** Migrated layouts
-  keep their stored IDs; `-b session` resolves by kind either way.
 - **Action request has no `task` field (implement, 2026-10-24).** Every Work-scoped
   action addresses a pane, and `DesktopPaneTarget` already carries the Work.
-- **⌘W and ⇧⌘T are their own actions.** `pane.close` closes the addressed tab (last
-  tab hides the pane); `pane.reopen` undoes the last close. `pane.hide`/`pane.restore`
+- **⌘W and ⇧⌘T are their own actions.** `close` closes the addressed tab (last
+  tab hides the pane); `reopen` undoes the last close. `hide`/`show`
   act on the addressed pane only, so scripts never undo something else.
-- **⇧⌘E is `browser.toggle`.** It shows or hides the browser pane (opening Files
+- **⇧⌘E is `toggle-browser`.** It shows or hides the browser pane (opening Files
   when it has no tab), replacing "Toggle Files" now that Files is a browser tab.
-- **Root `--task`/`--wave` outrank the caller's own pane.** The plan listed the
-  caller first; an explicit root flag from a Desktop shell should win. `-t` wins
-  over both.
 - **Window positions use inspection order, not frontmost.** The inspection has no
   z-order yet; `ls` with several windows and no caller exits 3 asking for
   `--window`. Frontmost ordering is a Swift change in `WorkLinkRouter.inspect`.
-- **`run -- CMD` runs through `/bin/sh -c`** with the argv shell-quoted by lf.
 - **Crumb chevrons and the sidebar's Working Tasks item still call `WorkModel`
   directly** (`goBack`, `selectWorkingTasksDashboard`); the registry's handlers call
   the same functions. Routing chrome clicks through the registry is optional.
-- **Proposed Wave memory edit (not applied):** `.lf/wave/product/MEMORY.md` ~line 138
-  still teaches `--repo`/`--task`/`--pane` then verified caller-terminal inference.
-  Replace with: targets resolve `-t`, root Work flags, trusted `LF_TERMINAL_ID`, Task
-  binding, in Rex order (ID, label, position, suffix); `-b session|shell|browser`;
-  mutations go through the `DesktopAction` registry; exit 2/3/4 from typed errors.
-
 ## Concept review, 2026-10-25 (Jack Heart, in the Task conversation)
 
 - **Unresolved: pane visibility vs tab closing.** Hiding a pane has five spellings
-  (`hide`, `shell.toggle`, `browser.toggle`, ⌘W on session, ⌘W on a last tab) and
+  (`hide`, `toggle-shell`, `toggle-browser`, ⌘W on session, ⌘W on a last tab) and
   getting it back depends on which was used; `state` does not say. Proposed, not
   accepted: panes only hide/show, tabs only close/reopen, closing the last tab leaves
-  an empty pane, ⌘W on the session pane does nothing, `shell.toggle`/`browser.toggle`
+  an empty pane, ⌘W on the session pane does nothing, `toggle-shell`/`toggle-browser`
   go. Question for Jack: when the last shell tab closes, does the pane stay visible
   and empty, or vanish? It also settles whether ⌘W ends the shell.
 - **Follow-up Tasks filed at Jack's request:** LOO-590 (PR as a browser tab),
@@ -104,3 +86,15 @@ them in the demo. Each is reversible before landing.
   Dashboard `resize --span`. Keep what is implemented (closing the last tab hides the
   pane; Dashboard sizing stays in `layout`) and don't raise them again unless the demo
   shows a problem.
+
+## Realign, 2026-10-25
+
+- **Proposed Wave memory edit (not applied; `.lf/wave/` is read-only outside a Graph
+  that maintains it).** `.lf/wave/product/MEMORY.md` (LOO-427 paragraph, ~line 136)
+  still teaches `--repo`/`--task`/`--pane` and PTY-verified caller inference. Replace
+  with: `lf desktop` talks to a socket inside Desktop
+  (`$LF_HOME/run/desktop/<bundle-id>.sock`); targets resolve root `--task`/`--wave`,
+  trusted `LF_TERMINAL_ID`, Task binding, in Rex order (ID, label, position, suffix);
+  `-p` paths address panes in Task, Dashboard and Wave views; registry action names
+  are the verbs; exit 2/3/4 from typed error codes. Memory is at its token limit
+  (15996/16000), so the replacement must not grow the paragraph.

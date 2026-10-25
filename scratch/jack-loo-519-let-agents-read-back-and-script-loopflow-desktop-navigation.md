@@ -1,442 +1,161 @@
 # LOO-519 — Agents read back and script Desktop navigation
 
-Status: **accepted for implementation** (2026-10-24). Jack Heart's concept review
-(2026-10-24) set the scope: **A**, a Rex-aligned `lf desktop` CLI, plus **B**, designated
-session/shell/browser panes, freely arrangeable, with tabs in shell and browser.
-Jack waived design review; kickoff settled the open questions (`scratch/questions.md`)
-and Jack judges them in the demo. LOO-576 owns the sidebar scope. History: Jack Heart's
-October 16 navigation brief (Task 2), moved from LOO-497 on October 18; LOO-568's
-follow-ups folded in on October 24.
-
-## v2 (Jack Heart, 2026-10-25) — next implement direction
-
-From Jack's concept review of PR #1677 (a simulated Mitchell Hashimoto review, then
-Jack's answers). Accepted unless marked proposed. Supersedes conflicting text above.
-
-- **Transport: a minimal server inside Desktop, in this PR** (Jack, 2026-10-25: "we
-  need the server to build the right desktop API"). Only what the `lf desktop` API
-  needs: inspection, the verbs, `wait`, `events`. Other roles and the long-term
-  architecture belong to LOO-593; don't build ahead of it. Jack: "Loopflow Desktop just needs to
-  have a server running inside it." Desktop binds `$LF_HOME/run/desktop/<bundle-id>.sock`
-  (0700 dir, 0600 socket, same-uid peer check, stale file unlinked at bind) and serves
-  newline-delimited JSON: `{v,id,method,params}` → `{id,result|error{code}}`, with a
-  version handshake. Path derives from `LF_DESKTOP`; no new env var; the
-  `LF_DESKTOP=1` fallback goes. Exit statuses come from typed error codes (missing
-  socket/refused → 4 immediately). `view` still launches via `loopflow://` when the
-  app is not running, then connects. Delete the osascript path, `Loopflow.sdef`,
-  `ScriptCommands.swift`, `(NNN)` parsing and Automation-consent handling. The server
-  lives and dies with the app; it hosts no Sessions (lf's detached transport does).
-- **No `--`.** Jack hates it. `lf desktop run 'cargo test -p loopflow'` opens a shell
-  tab and submits that line to the shell, as if typed; no lf-side `sh -c` or quoting.
-  (Proposed mechanics.) Bare `run` opens an empty shell tab.
-- **Scripts get explicit state.** `zoom` (and any toggle) requires `--on`/`--off` from
-  the CLI; only keys toggle.
-- **One name per operation (Jack: "simplify — for us there is no server without the
-  app").** Rex's verb vs `do` split has no meaning here. Proposed: the registry's
-  actions *are* the `lf desktop` verbs (`zoom`, `hide`, `show`, `send`, `back`,
-  `next`, `enter`, …); `do` and the dotted names go; `actions` lists verbs. Reverses
-  the earlier `do` decision; Jack to confirm in the demo.
-- **IDs for scripts.** Every receipt returns full IDs of what it resolved or created and
-  the rule that chose it (`-t`, root `--task`, caller pane); `ls` prints short IDs;
-  docs say scripts use IDs, positions are for people.
-- **`-p/--pane`, not `-b`** (collides with root `lf -b` batch). Targets:
-  `--window`, `--dashboard`, `-t/--task`, `-p/--pane` (`session`, `shell:2`, …).
-- **`wait` and `events` move into this Task** (from LOO-453). `events` streams
-  window/pane/destination changes over the socket (`--json` NDJSON, `state` is the
-  snapshot they update). `wait` waits for a pane, tab or shell command to finish, or
-  for readiness, with `--for <duration>`; a timeout exits 1; waiting on a command exits
-  with its status (needs the shell's command-finished mark).
-- **No migration of existing data** (Jack: don't worry about existing data so far).
-  Drop the layout conversion in `designated_panes.sql`; old layouts may reset.
-- **Prove it end to end (Jack: get there).** The demo runs on Loopflow Dev over the
-  socket: `ls`, a navigation verb, `run`, `capture`, `wait`, `events`, exit 3 and 4.
-- **Task view / Dashboard view share verbs** (v2 table in the conversation, proposed):
-  `view`, `hide`/`show`, `move`, `resize`, `layout` at both levels, target picks the
-  level; `enter` vs `zoom` and query-derived membership stay distinct; receipts say
-  `applies_to: dashboard | window`. `arrange`, `slots`, `order`, `restore` fold in.
-
-- **Views contain panes; `--pane` addresses parts of every view (Jack, 2026-10-25:
-  "using --pane even for tasks").** Three view kinds: Task, Dashboard, Wave (Jack: a
-  Wave is its own view; simplest version here, UI refinement in LOO-594). A Task
-  view's panes are `session`, `shell`, `browser`; a Dashboard's panes are its tiles,
-  each holding a Task view; a Wave view starts as its conversation pane plus its Tasks
-  as tiles. `-p` takes a path from the view on screen (or root `--task/--wave`):
-  `-p shell:2`, `-p 3` (third tile), `-p LOO-519` (tile by Task),
-  `-p LOO-519/shell:2` (inside that tile). Subcommand `-t` goes; root
-  `--task`/`--wave` set the base view. Pane verbs (`hide`, `show`, `move`, `resize`,
-  `zoom`, `focus`, `send`, `capture`, `close`, `reopen`) work on any pane;
-  navigation verbs (`view`, `enter`, `back`, `forward`, `next`, `previous`) change the
-  view. On a Dashboard, pane verbs edit the shared record (`applies_to: dashboard`).
-
-**v2 implemented (2026-10-25), slice 6:** socket transport (`DesktopServer.swift`,
-`DesktopConnection` in `desktop.rs`; osascript, sdef, ScriptCommands, `(NNN)` and
-`LF_DESKTOP=1` deleted); registry names are the verbs (`goto`, `back`, `enter`,
-`show`, `run`, `browse`, `page-back`, …; `do` gone; `toggle-shell`/`toggle-browser`
-are keys only); `-p` paths (`shell:2`, tile, `TILE/PANE`), `-t`/`-b` gone; `zoom`
-requires `--on`/`--off`; `run LINE` types the line via Ghostty `initial_input`;
-receipts add `target {window, work, pane, tab, rule}`; `events` (first frame = every
-window, then changed windows, 250 ms poll while subscribed) and `wait` (tab
-`commands {submitted, finished, exit_status}` from `GHOSTTY_ACTION_COMMAND_FINISHED`);
-`designated_panes.sql` deletes old layouts instead of converting them.
-Compress (2026-10-25): `PaneNeed::for_action` maps verb names (`run` → shell;
-`browse`/`files`/`graph-log`/page verbs → browser; `switch` → session), since the
-dotted-group split stopped matching after the rename; `wait` reuses its connection;
-the server's line reader has no stop flag. `--lib commands::desktop` (11), clippy, Swift
-`WorkNavigationTests|DesktopServerTests|DesktopPaneControlTests` (66) pass.
-Remaining: Wave view (conversation + Task tiles); Dashboard pane verbs editing the
-shared record (`applies_to`); `arrange`/`slots`/`order`/`restore` folding into
-`move`/`resize`/`hide`/`show`; the Dev demo (Jack).
-
-Still Jack's: last shell tab closed → empty pane or hidden; Dashboard `resize --span`.
+Status: **v2 implemented; three v2 items and the Dev demo remain** (realigned
+2026-10-25). Jack Heart's concept review (2026-10-24) set the scope: **A**, a
+Rex-aligned `lf desktop` CLI, plus **B**, designated session/shell/browser panes.
+Jack's v2 direction (2026-10-25, concept review of PR #1677) replaced the Apple-event
+transport and the `-t`/`-b`/`do` surface; this plan describes v2 only. v1 text lives
+in git (`c4c9ff9e2e:scratch/…navigation.md`). Jack waived design review; open
+assumptions are in `scratch/questions.md`, judged in the demo. LOO-576 owns sidebar
+scope; LOO-593 owns Desktop server architecture beyond this API; LOO-594 refines the
+Wave view. LOO-568's follow-ups were folded in on 2026-10-24; LOO-453's `wait` and
+`events` moved here on 2026-10-25.
 
 ## Problem
 
 An agent arranging Jack's work through Desktop cannot fully verify what it did,
-cannot tell "no such pane" from "Desktop unreachable" by exit status, cannot
-drive the window-level gestures a person uses (back, ⌘n, tile zoom), and from
-inside a Desktop Session it has no caller identity, so every command needs
-`--pane`. Pane identity is also weak: a Task workspace is a free split tree of
-anonymous panes (`empty`, `session`, `shell`, `files`, `log`), so "the shell" or
-"the browser" is not a target anyone can name. The Dev targeting shipped in #1664
-has never been seen working.
+cannot tell "no such pane" from "Desktop unreachable" by exit status, cannot drive
+the gestures a person uses, and from inside a Desktop Session has no caller identity.
+Pane identity was weak (a free split tree of anonymous panes). Dev targeting from
+#1664 has never been seen working.
 
-## Demo
-
-From a shell tab in **Loopflow Dev**, Task LOO-519 shown, Jack watching:
+## Demo (Jack, on Loopflow Dev, from a Dev shell tab)
 
 ```sh
-lf desktop ls                                  # Working Tasks: 1 LOO-519 …, 2 LOO-576 …; panes session shell browser
-lf desktop do task.goto index=2                # what ⌘2 does
-lf desktop do navigate.back                    # what ⌘[ does
-lf desktop run -- cargo test -p loopflow desktop   # a new shell tab runs it, focus stays put
-lf desktop capture -b shell:2 --trim | tail -3
-lf desktop do browser.open url=http://localhost:5173
-lf desktop move -b browser --destination session --axis vertical
-lf desktop zoom -b browser --on
-lf desktop state --json | jq '.windows[0] | {destination, history}'
-lf desktop zoom -t 99; echo $?                 # 3: no Task 99, nothing changed
-LF_DESKTOP=com.example.none lf desktop ls; echo $?   # 4: Desktop unreachable
+lf desktop ls                                  # Tasks in ⌘n order; panes session shell browser; short IDs
+lf desktop goto 2                              # what ⌘2 does
+lf desktop back                                # what ⌘[ does
+lf desktop run 'cargo test -p loopflow desktop'    # new shell tab, line typed, focus stays
+lf desktop wait -p shell:2 --for 10m; echo $?  # the command's exit status
+lf desktop capture -p shell:2 --trim | tail -3
+lf desktop browse http://localhost:5173
+lf desktop zoom -p browser --on
+lf desktop events --json &                     # NDJSON frames as the above happens
+lf desktop zoom -p 99 --on; echo $?            # 3: nothing changed
+LF_DESKTOP=com.example.none lf desktop ls; echo $?   # 4: no socket
 ```
 
-Then, in the session pane, Jack asks the agent to "zoom yourself": it runs
-`lf desktop zoom --on` with no `-b` and its own session pane fills the Task.
-Same demo, from LOO-568: `lf desktop ls`/`focus` from the Dev Shell act on Dev,
-not the installed app; Jack opens a conversation inline (#1580); Jack judges the
-Dashboard tile's doubled border.
+Then Jack asks the session-pane agent to "zoom yourself": `lf desktop zoom --on`, no
+`-p`, zooms its own pane. Same demo, from LOO-568: `ls`/`focus` act on Dev, not the
+installed app; Jack opens a conversation inline (#1580) and judges the Dashboard
+tile's doubled border. Exact flag spellings follow the compiled CLI.
 
-## Concepts (Rex mapping)
+## Decisions (accepted unless marked proposed)
 
-Reference: https://www.superlogical.com/rex/docs/automate/cli. Defer to Rex's
-API where a verb exists; Loopflow's work model sits above it. Being more
-constrained than Rex is fine.
+- **Transport (Jack, 2026-10-25): a minimal socket server inside Desktop**, only what
+  `lf desktop` needs. Desktop binds `$LF_HOME/run/desktop/<bundle-id>.sock` (0700 dir,
+  0600 socket, same-uid `getpeereid`, stale file unlinked) and serves NDJSON
+  `{v,id,method,params}` → `{id,result|error{code}}`; methods `inspect`, `perform`,
+  `read_text`, `events`; a version mismatch names the fix. Path derives from
+  `LF_DESKTOP` (bundle ID); the `LF_DESKTOP=1` fallback is gone. `view` launches via
+  `loopflow://` when Desktop is not running.
+- **No `--` (Jack).** `run LINE` opens a shell tab and types the line (Ghostty
+  `initial_input`); bare `run` opens an empty tab.
+- **Explicit state for scripts.** `zoom` requires `--on`/`--off`; only keys toggle.
+- **One name per operation (proposed by Jack's "simplify"; Jack confirms in demo).**
+  The Swift `DesktopAction` registry's names are the verbs; `do` and dotted names are
+  gone; `actions` lists them. `toggle-shell`/`toggle-browser` are key-only.
+- **Views contain panes; `-p/--pane` addresses parts of every view (Jack,
+  2026-10-25).** View kinds: Task (`session`, `shell`, `browser`), Dashboard (tiles,
+  each a Task view), Wave (its conversation plus its Tasks as tiles; simplest version,
+  LOO-594 refines). Paths: `-p shell:2`, `-p 3` (third tile), `-p LOO-519`,
+  `-p LOO-519/shell:2`. Root `--task`/`--wave` set the base view; subcommand `-t`
+  and `-b` are gone. Pane verbs (`hide`, `show`, `move`, `resize`, `zoom`, `focus`,
+  `send`, `capture`, `close`, `reopen`) work on any pane; navigation verbs (`view`,
+  `enter`, `back`, `forward`, `next`, `previous`, `goto`) change the view.
+- **Target precedence:** root Work flags, then the caller (`LF_TERMINAL_ID`, trusted
+  for targeting), then the checkout's Task binding. Rex resolution order: full ID,
+  label, 1-based position, ID suffix. Nothing follows focus; ambiguous or absent
+  exits 3 and changes nothing.
+- **IDs for scripts.** Receipts carry `target {window, work, pane, tab, rule}`; `ls`
+  prints short IDs; docs say scripts use IDs, positions are for people.
+- **`wait` and `events` (from LOO-453).** `events` streams changed windows (first
+  frame = every window); `wait` ends when a pane is ready or a tab's submitted
+  commands finish (exit = last status, from `GHOSTTY_ACTION_COMMAND_FINISHED`);
+  `--for` elapsing exits 1.
+- **No migration of existing data (Jack).** `designated_panes.sql` deletes old
+  layouts; they reset to the designated three panes.
+- **Exit statuses:** 0 · 1 failure · 2 bad arguments/unknown verb · 3 missing or
+  ambiguous target · 4 Desktop unreachable (no socket, refused, not macOS) · 130.
+  Typed server error codes decide them, never message text.
+- **Dashboard pane verbs edit the shared record (proposed):** on a Dashboard,
+  `hide`/`show`/`move`/`resize` act on tiles and the receipt says
+  `applies_to: dashboard | window`; `arrange`, `slots`, `order` fold into those verbs.
+  `enter` (open a tile as full Work) and `zoom` (a pane fills its view) stay distinct.
 
-| Rex | Loopflow | Target flag |
-|---|---|---|
-| session | Task (its workspace) | `-t/--task` |
-| window (tab of a session) | — a Task has one workspace | none |
-| block | designated pane, or `pane:N` tab | `-b/--block` |
-| client | Desktop window | `--window` |
-| — | Wave, Dashboard, Working Tasks | `view`, `query`, `do dashboard.*` |
+## What exists (v2, slice 6, 2026-10-25)
 
-Every target resolves in Rex's order, stopping at the first kind that matches:
-full ID, case-insensitive label, 1-based position, ID suffix (≥4 chars).
-Ambiguous or absent → change nothing, list matches, exit 3.
+- `DesktopServer.swift` + `DesktopConnection` (`desktop.rs`); osascript, `Loopflow.sdef`,
+  `ScriptCommands.swift`, `(NNN)` parsing and `LF_DESKTOP=1` deleted.
+- Registry verbs: `back forward goto next previous working-tasks enter focus zoom
+  hide close show reopen move resize send send-key run toggle-shell toggle-browser
+  files graph-log browse page-back page-forward reload switch`; plus `ls`, `state`,
+  `actions`, `events`, `wait`, `capture`. `PaneNeed::for_action` maps verbs to the
+  pane they need.
+- Designated panes (Rust `PaneIntent` Session/Shell/Browser with validation; Swift
+  `PaneContent`); browser tabs `files`, `graph-log`, URL (`WKWebView` with page
+  controls). ⌘W closes the addressed tab (last tab hides the pane), ⇧⌘T reopens the
+  last close with the shell still alive. `destination: entered {from, work}` for a
+  tile opened as full Work; `zoomed` means only a pane filling its Task.
+- `lf desktop view <expr> --plan` derives the plan without opening Desktop (LOO-497
+  reachability check).
 
-- **Task** (`-t`): label = issue key or name; position = place in the window's
-  sidebar list (⌘3 ≡ `-t 3`). Root `--task/--wave/--repo` keep meaning Work
-  selection; `-t` wins when both are given.
-- **Pane** (`-b`): label = `session`, `shell`, `browser`; `shell:2` names a tab by
-  position; position = order in the layout; full pane/tab IDs from `state` still work.
-- **Window** (`--window`): position counts the repository's windows in inspection
-  order (the inspection carries no z-order; frontmost ordering would be a Swift change
-  in `WorkLinkRouter.inspect`).
+## Remaining
 
-**Context.** A bare command acts on the caller, like `REX_BLOCK`: `LF_TERMINAL_ID`
-names the terminal (session pane or shell tab) the command came from, trusted
-from the environment without the PTY check, so an agent's tool subprocess gets
-its own pane with no new variable. A stale inherited ID resolves to its pane, or
-exits 3 if gone. Precedence: `-t`, then root Work flags (`--task/--wave`), then
-the caller, then the checkout's Task binding; window-level actions use the single
-window showing that Work. Nothing ever follows focus; more than one candidate exits 3.
-
-## Designated panes (B)
-
-A Task workspace has exactly three panes: **session**, **shell**, **browser**.
-They are always retained; the arrangement is free — `move`, `resize`, `zoom`,
-`hide`, `restore` act on them, and the layout is a split tree over the visible
-ones. Every visible pane has a Work owner by construction.
-
-- **session** — one conversation, no tabs. It shows the Task's current
-  conversation; other conversations of the Task switch into it
-  (`do session.switch session=…`, palette, inline open from #1580). Desktop retains
-  switched-away surfaces; nothing is closed.
-- **shell** — tabs. `lf desktop run [-- CMD]` adds a tab at the Task's recorded
-  location and selects it without moving focus (Rex's `--focus=false` as the
-  default for scripts); ⌘T, "new terminal", adds and focuses one. One visible
-  shell at a time.
-- **browser** — tabs: `files` (the Task's Files view, which keeps its own document
-  tabs and drafts), `graph-log`, and URL tabs (`WKWebView`; http/https only,
-  Back/Forward/Reload and a read-only address). Files and Graph log stop being pane kinds.
-
-Wave and repository workspaces have only the session pane (shell and browser
-already require a Task). `empty` panes and free splitting are gone.
-
-## Command surface (A)
-
-| Command | Rex | Replaces |
-|---|---|---|
-| `ls [--window W] [--json]` | `ls` | — (projection of the same inspection as `state`) |
-| `state [--json]` | `inspect` | unchanged name; the complete test oracle |
-| `do ACTION [k=v…]` | `do` | `enter`, `back`, `forward`, `slot`, `next`, `previous`, `files`, `graph-log`, `view working-tasks` |
-| `actions [--json]` | `rex -C x actions` | `supported_operations` |
-| `send [TEXT]` (stdin if omitted) | `send` | `text` |
-| `send-key KEY` | `send-key` | `key` |
-| `capture [--trim] [--max-bytes N]` | `capture` | `read` |
-| `run [-- CMD]` | `run` | `shell` |
-| `zoom [--on\|--off]` (bare toggles) | `zoom` | `zoom [--off]` |
-| `focus`, `hide`, `restore`, `move`, `resize` | — | same, `-b` instead of `--pane` |
-| `view`, `query`, `pin`, `unpin`, `rename`, `arrange`, `slots`, `order`, `layout` | — | unchanged (Loopflow layer) |
-
-All pane commands take `-t`, `-b`, `--window`, `--json`. `--pane` is deleted.
-Richer key names (`ctrl+c`) stay with LOO-452; `send-key` keeps today's key set.
-
-**Actions are the one mutation path.** A Swift `DesktopAction` registry names
-every gesture once — name, title, args, default key — and the shortcut monitor,
-menus, Keyboard Shortcuts window and Apple event all call its `perform`. Verbs
-are CLI sugar for actions (`zoom` → `pane.zoom`, `run` → `shell.new`). Inventory:
-
-| Action | Args | Bound to |
-|---|---|---|
-| `navigate.back` / `navigate.forward` | — | ⌘[ / ⌘], crumb chevrons |
-| `task.goto` | `index` | ⌘1–9 |
-| `task.next` / `task.previous` | — | ⌃⇥ / ⌃⇧⇥ |
-| `dashboard.working_tasks` | — | sidebar menu, crumb |
-| `dashboard.enter` | `task` | tile click (only a member of the shown Dashboard) |
-| `pane.focus` | `direction?` | ⌘⌥arrows; with `-b`, that pane |
-| `pane.zoom` / `pane.hide` / `pane.restore` | `on?` / — / — | zoom key / — / — |
-| `pane.close` / `pane.reopen` | — | ⌘W (addressed tab) / ⇧⌘T (the Task's last close; `-b` picks only the Task) |
-| `pane.move` / `pane.resize` | `destination, axis` / `toward, ratio` | drag |
-| `pane.send` / `pane.send_key` | `text` / `key` | — |
-| `shell.new` | `command?` | ⌘T |
-| `shell.toggle` / `browser.toggle` | — | existing toggles |
-| `browser.files` / `browser.graph_log` / `browser.open` | — / — / `url` | menus |
-| `browser.back` / `browser.forward` / `browser.reload` | — | page toolbar, ⌘R |
-| `session.switch` | `session` | palette, inline open |
-
-Chrome (sidebar toggle, palette, themes) stays out. Positions follow whatever list
-the sidebar shows; LOO-576 changes that list, not this API.
-
-## Readback
-
-`state --json` (one `inspect desktop` Apple event) carries, per window:
-`destination` (`work`, `dashboard`, `working_tasks`, `view`, `entered {from, work}`),
-`history {back, forward}`, `list` (the sidebar's Tasks in ⌘n order: position,
-work key, label), `actions` (descriptors), and per Task workspace its three
-designated panes (`id`, `kind`, `visible`, `focused`, `zoomed`, `tabs`,
-`selected_tab`, owner) plus the split tree. `ls` renders the same reply: header
-naming the window and its scope, then positions, short IDs, labels and panes.
-`ls` scope is `--window`, else the caller's window, else the repository's only
-window, named in the header; several windows and no caller exit 3 asking for `--window`.
-
-## Exit statuses
-
-0 success · 1 failure · 2 bad arguments, malformed expression, unknown action
-or bad action args · 3 missing/ambiguous Task, window, pane or tab (nothing
-changed) · 4 Desktop unreachable (not running, not macOS, Automation consent
-pending -1712 or denied -1743, which names System Settings › Privacy & Security ›
-Automation) · 130 interrupted. Typed errors decide the status: Swift sets
-`scriptErrorNumber` 1002 (argument) / 1003 (target); Rust reads osascript's
-`(NNN)` suffix. A Desktop older than this lf (`-1708`, event not understood)
-exits 1 naming the fix: update Desktop.
-
-## Contract
-
-- **Source of truth.** Persisted arrangement is `work_pane_layouts.layout_json`
-  through the Rust store (`WorkPaneLayout`); live destination, focus, zoom and
-  retained surfaces are the window's `WorkNavigation`/`SessionsWorkspaceRegistry`.
-  `state` reads both through `inspectDesktop`; the CLI caches nothing. An action
-  receipt carries the destination and pane state the next `state` reports.
-- **Persisted shape.** `PaneIntent` becomes `Session | Shell{tabs,selected} |
-  Browser{tabs,selected}`; `BrowserTab` is `Files{tabs,selected} | GraphLog |
-  Url{url}`. Validation: Task layouts hold exactly one of each kind (tree ∪
-  hidden), Wave/repository layouts exactly one session. A draft migration
-  converts stored layouts in Rust (precedent: `convert_project_content`): Files
-  and Log panes merge into one Browser pane at the first one's place; empty
-  panes collapse; extra Session panes leave the layout (their conversations stay
-  switchable); missing designated panes are added hidden. File drafts survive unchanged.
-- **Wire DTOs.** `DesktopWindowInspection` gains `list`, `actions`; pane
-  inspection gains `kind` and designated tabs; `supported_operations` goes.
-  `DesktopActionRequest {repository, window, pane?, action, args}` (the pane target
-  carries the Work, so there is no `task` field) and its
-  receipt replace `DesktopPaneCommand` and `DesktopNavigationCommand`. No
-  defaults; fixtures `desktop_inspection.json`, `desktop_action.json` with Rust
-  and Swift fixture tests. The Swift registry's names equal the fixture's action
-  list (Swift test); every Rust verb's action is in it (Rust test).
-- **Absent states.** No window for the repository → 3. Task without a
-  conversation → its session pane shows the start state; `send` to it exits 3.
-  `capture`/`send` on a browser tab → 1, "not a terminal".
-
-## Current → target architecture
-
-| | Before | After |
-|---|---|---|
-| Pane model | free tree; `empty/session/shell/files/log` | three designated panes; browser tabs |
-| Mutations | `CNRTpane` (11 typed kinds) + `CNRTnavg` + `SessionsShortcut` + menu closures | one `DesktopAction` registry, one `perform desktop action` event |
-| Gestures from CLI | per-gesture verbs | `do ACTION k=v` |
-| Caller | `LF_TERMINAL_ID` + PTY check; agents pass `--pane` | env trusted for targeting; PTY check stays for Session attachment (`current_terminal_id`, #1386) |
-| Targets | exact pane IDs | Rex resolution for `-t`, `-b`, `--window` |
-
-## Delete — do not maintain
-
-Done in slices 2–3 except where noted; kept here for review.
-
-- `PaneContent.empty/.files/.graphLog`, `PaneIntent::Empty/Files/Log` and free
-  split creation (`newTerminal` as a split; `.empty` handling in views).
-- `SessionsShortcut` and its handler (`SessionsView.swift`); the
-  `WorkModel.navigate`/`DesktopNavigationAction` dispatch (its bodies move into
-  action handlers); `CNRTnavg` (`Loopflow.sdef`, `NavigateDesktopCommand`);
-  `DesktopPaneAction`/`DesktopPaneCommand` (Rust, Swift) and the `CNRTpane` event.
-- CLI: `text`, `key`, `read`, `shell`, `files`, `graph-log`, `enter`, `back`,
-  `forward`, `slot`, `next`, `previous`, the `working-tasks` view expression, `--pane`.
-- `supported_operations`; `selection_kind`/`selection_id` (already gone in the diff).
-- `tests/fixtures/dto/desktop_navigation.json`, `desktop_pane_commands.json`, `desktop_pane_receipt.json` (→ `desktop_action.json`).
-- `WorkNavigationShortcut.task/.adjacent` (keys moved to the registry).
-- `docs/lf.md` sections teaching `--pane`, the nav verbs, and Files/Graph log panes.
-
-## Forbidden outcomes
-
-A verb that mutates outside the action registry; a second readback beside the
-inspection (`ls` is a rendering of it); an `empty` or fourth pane kind; Files or
-Graph log as panes again; keeping `--pane` beside `-b`; target resolution that
-falls back to focus; exit codes chosen by matching message text; a layout reader
-that accepts both shapes.
-
-## Carried from the stopped pursue (committed in 56ffb2c6f3)
-
-In place: `DesktopError` (Target 3 / Unreachable 4) and osascript code mapping;
-Swift `DesktopTargetError` → 1003; `destination`/`history` in state, Rust/Swift
-DTOs and fixture; `after_help` exit text and the AGENTS.md rule; navigation
-handler bodies in `WorkModel`; `WorkDestination`/workspace test updates. Agent
-`LF_AGENT_CALLER` Session inference is deleted (e5ff80c882).
-Still to do in slices 2–3: those `WorkModel` bodies become `navigate.*`,
-`task.*`, `dashboard.*` action handlers; `CNRTnavg` folds into the generic action
-event; the nav verbs (`enter`, `back`, `forward`, `slot`, `next`, `previous`) and
-`view working-tasks` go; the docs navigation section is rewritten.
-`.lf/wave/product/MEMORY.md` was compressed by that run; left as is.
-
-## Slices
-
-One PR; deepest deletion first.
-
-1. **Designated panes — implemented 2026-10-24.** Rust `PaneIntent` is
-   `Session{session_id?} | Shell{tabs, selected?} | Browser{location, tabs, selected?}`,
-   `tree` is required, and validation demands exactly one of each kind (Task) or one
-   session (Wave/repository). Draft `designated_panes` marks the batch
-   (`-- breaks:`); `convert_released_data` recognizes its statement after released
-   migrations and drafts alike and runs `convert_released_layouts`. Swift `PaneContent` is `session(id?) | shell | browser`;
-   `MultiplexerStore(taskId:)` builds the designated tree with stable pane IDs
-   `session`, `shell`, `browser` (migrated layouts keep theirs). Close hides a
-   pane; ⌘W closes the selected shell/browser tab and the last tab hides the pane.
-   Opening a conversation switches the session pane in place. URL tabs are
-   `WKWebView`s (page controls under slice 3).
-2. **Action registry — implemented 2026-10-24.** `LoopflowMac/DesktopActions.swift`
-   holds every action (name, title, scope, args, default `DesktopKeyBinding`s,
-   `available`, `perform`); `DesktopActionMonitor`, View/File menus, Keyboard
-   Shortcuts and `PerformDesktopActionCommand` (`CNRTactn`) call it.
-   `WorkModel.navigate`/`selectWorkingTask`/`cycleWorkingTask` bodies moved into
-   `navigate.*`/`task.*`/`dashboard.*`; `WorkNavigationShortcut` keeps only ⌘K/⌘\.
-   `DesktopArgumentError` → 1002. Added beyond the inventory: `pane.close` (⌘W:
-   selected tab, last tab hides) and `pane.reopen` (⇧⌘T: undo close); `pane.restore`
-   shows the addressed hidden pane. Tabs inspect as `DesktopTabInspection` (shell and
-   browser). `DesktopPaneControlTests.everyKeyBindingMatchesItsAppleEvent` performs
-   each binding by key and by event on twin fixtures and compares the results.
-3. **CLI — implemented 2026-10-24.** `ls`, `state`, `actions`, `do`, `send`,
-   `send-key`, `capture [--trim]`, `run [-- CMD]`, `zoom [--on|--off]`, `focus`,
-   `hide`, `restore`, `move`, `resize`, all with `DesktopTargetArgs` (`-t`, `-b`,
-   `--window`, `--json`). `Scope` resolves window → workspace → pane in Rex order
-   (`resolve`); `LF_TERMINAL_ID` is read directly. `DesktopError::Argument` (2) and
-   `-1708` → "update Desktop". `VERB_ACTIONS` maps verbs to actions; a unit test
-   checks each is in the fixture. Docs (`docs/lf.md`, `swift/README.md`,
-   architecture reference) rewritten; reference regenerated.
-
-   Browser page controls (2026-10-24): `BrowserPages` retains one `WKWebView` per
-   URL tab (released on close); `BrowserPageView` shows Back/Forward/Reload above
-   it. `browser.back`/`browser.forward`/`browser.reload` act on the addressed web
-   tab; only reload has a key (⌘R) because ⌘[/⌘] are `navigate.*`. No verb maps to
-   them, so `VERB_ACTIONS` is unchanged.
-4. **One meaning for zoom — implemented 2026-10-24.** A Dashboard member entered
-   as full Work reads `destination: entered {from, work}` (wire kind `entered`),
-   matching `dashboard.enter` and `ls`'s "entered from"; `zoomed` now means only a
-   pane filling its Task (`pane.zoom`, Rex's `zoom`). `WorkModel.enter(_:from:)`/
-   `enterTile` replaced `zoom(into:)`/`zoomTile`; the tile-growth transition
-   (`ZoomFromTile`, `zoomOrigin`) keeps its visual name.
-5. **Close and reopen act on what they name — implemented 2026-10-24.** `pane.close`
-   (⌘W) closes the addressed tab (`-b shell:2` → tab 2; a bare pane → its selected
-   tab); a session pane, or one with no tabs, hides. `MultiplexerStore.lastClosed`
-   (`ClosedOccurrence`: `pane(id) | shellTab(tab, index) | browserTab(tab, index)`)
-   replaced the `ClosedState` layout snapshot; only another close replaces it, and
-   the close methods return the replaced record so `SessionsWorkspace.closePane`
-   frees its shell surface or `BrowserPages` view. A shell that exits goes through
-   `removeExitedShell`, which also drops a matching undo record. `pane.reopen` ("Undo
-   Close", ⇧⌘T) reinserts the tab at its index and selects it, or shows the pane;
-   it no longer restores zoom. Proof in `DesktopPaneControlTests`:
-   `undoCloseReturnsTheClosedShellTab` (key and event; same tab ID and pooled view —
-   the headless stand-in for the surface token, which needs a display) and
-   `closeActsOnTheAddressedTab`.
-6. **Demo on Dev** (Jack).
+1. **Wave view, simplest version:** its conversation pane plus its Tasks as tiles,
+   addressable with `-p` like a Dashboard. Today `.wave` is a destination without
+   tiles.
+2. **Dashboard pane verbs on the shared record:** `hide`/`show`/`move`/`resize`
+   targeting tiles edit the Dashboard; receipts gain `applies_to` (DTO, both
+   fixtures, Rust and Swift fixture tests). Nothing implements `applies_to` yet.
+3. **Fold `arrange`, `slots`, `order` into those verbs** and delete the three
+   subcommands, their docs and `documented_commands` entries in the same diff.
+4. **Demo on Dev** (Jack).
 
 ## Done when
 
-- `lf desktop ls` in a Dev Shell lists Dev's sidebar Tasks with positions matching
-  ⌘n and each Task's session/shell/browser; `state --json` reports the same.
-- `lf desktop do task.goto index=2`, `navigate.back`, `dashboard.enter task=…`
-  produce exactly what ⌘2, ⌘[ and a tile click produce, and the receipt's
-  destination equals the next `state`.
-- `lf desktop run -- CMD` adds a shell tab running CMD; `capture -b shell:N`
-  returns its output; `do browser.open url=…` shows the page in a browser tab.
-- `move`/`resize`/`zoom`/`hide`/`restore` rearrange the three panes, and a
-  relaunch restores the arrangement; an existing layout with Files and Log panes
-  opens as one browser pane with those tabs and its file drafts intact.
-- An agent in the session pane runs `lf desktop zoom --on` with no `-b` and its
-  own pane zooms.
-- `-t 99` → 3, nothing changed; ambiguous label → 3 listing matches; unknown
-  action → 2; Desktop not running or consent pending → 4.
-- From a Dev Shell, `lf desktop focus` moves focus in Dev, not the installed app (Jack, demo).
-- `lf desktop view <expr> --plan` prints the derived plan without opening Desktop or
-  starting a provider (the Task's LOO-497 reachability check; the flag ships).
+- `lf desktop ls` in a Dev shell lists Dev's sidebar Tasks in ⌘n order with each
+  Task's panes and short IDs; `state --json` reports the same.
+- `goto`, `back`, `enter` produce exactly what ⌘2, ⌘[ and a tile click produce, and
+  the receipt's destination and target equal the next `state`.
+- `run LINE` adds a shell tab running LINE; `wait` returns its exit status;
+  `capture -p shell:N` returns its output; `browse URL` shows the page.
+- `move`/`resize`/`zoom --on`/`hide`/`show` rearrange panes in a Task view and tiles
+  in a Dashboard or Wave view (`applies_to` says which); a relaunch restores both.
+- `events --json` emits a frame for each of the above.
+- An agent in the session pane runs `lf desktop zoom --on` and its own pane zooms.
+- Unknown pane/tile → 3, nothing changed; unknown verb → 2; no socket → 4.
+- From a Dev shell, `focus` moves focus in Dev, not the installed app (Jack, demo).
 
 ## Checks
 
-Gate, headless, inherited `LF_*` unset, `< /dev/null`:
-
-- `cargo test -p loopflow --lib desktop` and `--lib selection` — resolution,
-  caller trust, classifier, layout validation.
-- `cargo test -p loopflow --test integration dto_fixtures::desktop` and the
-  layout migration test; Swift `DTOFixtureTests`.
-- `scripts/test_desktop.sh --filter 'DesktopPaneControlTests|DTOFixtureTests|WorkspaceRetentionTests|DashboardWorkspaceTests|WorkDestinationTests|WorkOpeningCLITests'`.
-- `UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration reference_matches_the_compiled_cli`; `cargo clippy --all-targets -- -D warnings`.
-
+Gate, headless, inherited `LF_*` unset, `< /dev/null`: `cargo test -p loopflow --lib
+commands::desktop selection`; integration `dto_fixtures::desktop cli_discovery
+reference_matches_the_compiled_cli`; `cargo clippy --all-targets -- -D warnings`;
+`scripts/test_desktop.sh --filter 'DesktopServerTests|DesktopPaneControlTests|DTOFixtureTests|WorkNavigationTests|WorkspaceRetentionTests|DashboardWorkspaceTests|WorkDestinationTests'`.
 Demo/review (Jack): Dev targeting, inline conversation, doubled frame, pane feel.
+
+Last check (2026-10-25, compress): `--lib commands::desktop` (11), clippy, Swift
+`WorkNavigationTests|DesktopServerTests|DesktopPaneControlTests` (66) pass; full
+integration deferred to gate.
 
 ## Exclusions
 
-Sidebar scope and header animation (LOO-576); readiness waits, `run --wait` and
-events (LOO-453); richer keys (LOO-452); OSC 7501 (LOO-422); external hosts
-(LOO-498); `LF_DESKTOP=1` removal (LOO-571); side-by-side shells; flattening
-Files' document tabs into browser tabs; Lua, daemons, cwd/cross-repo pane moves;
-the doubled frame unless Jack picks a fix in the demo.
+Sidebar scope and header animation (LOO-576); server roles beyond this API and a push
+signal for `events` (LOO-593); Wave view refinement (LOO-594); richer keys (LOO-452);
+OSC 7501 (LOO-422); external hosts (LOO-498); side-by-side shells; flattening Files'
+document tabs into browser tabs; Lua, cwd/cross-repo pane moves; the doubled frame
+unless Jack picks a fix in the demo. LOO-571 (`LF_DESKTOP=1` removal) closes with
+this PR.
 
 ## Risks
 
-- **Layout migration is a released-store change**: a branch build that opens
-  Jack's lfdb raises the reader floor. Dev must run against a copied store until
-  release, per the migration-compat practice.
-- **Trusting `LF_TERMINAL_ID`** lets an inherited marker target a pane; the
-  blast radius is one Desktop pane of the same user, and a gone pane exits 3.
-- **Dev Automation consent**: LOO-568's headless check reached Dev but got
-  "AppleEvent timed out", likely consent pending (-1712 → exit 4). The demo
-  grants consent first; until then Dev targeting is unproven.
-- **`WKWebView` on macOS 15** needs no deployment-target change; SwiftUI
-  `WebView` would need 26 and is not used.
-
-Check results (2026-10-24, after compress): `cargo test --lib commands::desktop selection_ designated_panes` + integration `dto_fixtures::desktop cli_discovery::desktop structured_help reference_matches` pass, clippy clean, Swift 14 focused suites pass; after browser controls `swift test --filter 'DesktopPaneControlTests|DTOFixtureTests'` (74) + `dto_fixtures::desktop` + `every_verb_names_a_registry_action` pass; full Rust integration (`work_watch`, `cli_discovery`, `dto_fixtures`) deferred to gate. After the `entered` rename: `dto_fixtures::desktop` (4), `--lib commands::desktop` (9), clippy, Swift `DTOFixtureTests|WorkDestinationTests|DesktopPaneControlTests|WorkNavigationTests` (166) pass. After slice 5: Swift `DesktopPaneControlTests|WorkspaceRetentionTests|DTOFixtureTests|MultiplexerStoreTests|WorktreeWorkspaceTests|TaskFilesTests` (125) and `dto_fixtures::desktop` (4) pass.
+- **`designated_panes.sql` is a released-store change** that deletes layouts and their
+  file drafts; a branch build on Jack's lfdb raises the reader floor. Dev runs against
+  a copied store until release.
+- **Trusting `LF_TERMINAL_ID`** lets an inherited marker target a pane; blast radius
+  is one pane of the same user, and a gone pane exits 3.
+- **`wait` depends on the shell's OSC 133 integration**; a shell without it never
+  finishes and `--for` is the only exit.
+- **`events` polls every 250 ms while subscribed**; acceptable until LOO-593 designs
+  a push signal.

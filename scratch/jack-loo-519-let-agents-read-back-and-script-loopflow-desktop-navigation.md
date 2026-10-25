@@ -77,9 +77,9 @@ tile's doubled border. Exact flag spellings follow the compiled CLI.
 - **Exit statuses:** 0 · 1 failure · 2 bad arguments/unknown verb · 3 missing or
   ambiguous target · 4 Desktop unreachable (no socket, refused, not macOS) · 130.
   Typed server error codes decide them, never message text.
-- **Dashboard pane verbs edit the shared record (proposed):** on a Dashboard,
+- **Dashboard pane verbs edit the shared record (built, slice 7):** on a Dashboard,
   `hide`/`show`/`move`/`resize` act on tiles and the receipt says
-  `applies_to: dashboard | window`; `arrange`, `slots`, `order` fold into those verbs.
+  `applies_to: dashboard | window`; `arrange`, `slots`, `order` folded into those verbs.
   `enter` (open a tile as full Work) and `zoom` (a pane fills its view) stay distinct.
 
 ## What exists (v2, slice 6, 2026-10-25)
@@ -130,6 +130,11 @@ tile's doubled border. Exact flag spellings follow the compiled CLI.
   the Task). `WorkModel.enterTile(work, origin:)` reads the board from the
   window's destination, so tile clicks and `enter` share one rule; a tile on an
   unsaved query is plainly selected.
+
+## Concept review, 2026-10-25 (Graph, after `enter` compress)
+
+- Nothing to change: verbs are the registry's names, `-p` grammar is shared by pane
+  verbs and `enter`, and the remaining choices are Jack's demo calls.
 
 ## Remaining
 

@@ -1485,7 +1485,7 @@ fn run() -> anyhow::Result<()> {
                     cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
                 })
             );
-        if preview {
+        if !cli.records_process() {
             journal::mark_effect_free_read();
         }
         // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
@@ -1524,6 +1524,9 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
+    if !cli.records_process() {
+        journal::mark_effect_free_read();
+    }
     // Provider hooks keep the callbacks their launching lf wrote. A removed
     // one must not fail: Claude treats exit 2 at Stop as "keep working".
     if let Some(Commands::External(parts)) = &cli.command {
@@ -1593,9 +1596,6 @@ fn run() -> anyhow::Result<()> {
         })
     );
     let desktop_read = desktop_intent_read(&cli);
-    if cli.context || cli.explain || planning_read || location_read || desktop_read {
-        journal::mark_effect_free_read();
-    }
     init_tracing(cli.verbose);
     validate_desktop_platform(&cli)?;
     let _selected_repo_cwd = cli

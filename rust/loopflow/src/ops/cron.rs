@@ -119,6 +119,8 @@ impl CronSchedule {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum CronTargetKind {
+    // 0.14.14 receipts say "flow"; LOO-574 removes the alias.
+    #[serde(alias = "flow")]
     Graph,
     Skill,
     /// The retired every-minute repository check, which lazy recovery replaced.
@@ -143,7 +145,8 @@ impl FromStr for CronTargetKind {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "graph" => Ok(Self::Graph),
+            // 0.14.14 plists say "flow"; LOO-574 removes it.
+            "graph" | "flow" => Ok(Self::Graph),
             "skill" => Ok(Self::Skill),
             "repository" => Ok(Self::Repository),
             "command" => Ok(Self::Command),
@@ -182,6 +185,8 @@ pub struct CronReceipt {
     #[serde(alias = "home_id")]
     pub machine_id: MachineId,
     pub wave: String,
+    // 0.14.14 receipts say "flow"; LOO-574 removes the alias.
+    #[serde(alias = "flow")]
     pub graph: String,
     pub target_kind: CronTargetKind,
     pub source: CronSource,
@@ -364,18 +369,18 @@ fn retain_installed_obligation(spec: &CronSpec, activated_at: i64, now: i64) -> 
     if !matches!(spec.graph.as_str(), "release-run" | "telemetry-daily") {
         return Ok(());
     }
-    let repo = spec.working_directory.canonicalize()?;
     // The predecessor keeps its observed timezone. Only a legacy job without
     // retained evidence needs today's zone, explicitly unknown before now.
-    let retained = accounting::read(&spec.host.lf_home)?.iter().any(|s| {
-        s.repo == repo
-            && s.machine_id == spec.host.machine_id
-            && s.wave == spec.wave
-            && s.graph == spec.graph
-            && s.schedule == spec.schedule.expression()
-            && s.installation_activated_at == activated_at
-            && s.closed_at.is_none()
-    });
+    let retained = accounting::read(&spec.host.lf_home, &spec.working_directory)?
+        .iter()
+        .any(|s| {
+            s.machine_id == spec.host.machine_id
+                && s.wave == spec.wave
+                && s.graph == spec.graph
+                && s.schedule == spec.schedule.expression()
+                && s.installation_activated_at == activated_at
+                && s.closed_at.is_none()
+        });
     if !retained {
         let zone = iana_time_zone::get_timezone().map_err(|e| OpsError::Message(e.to_string()))?;
         accounting::observe(spec, activated_at, now, &zone)?;
@@ -399,6 +404,9 @@ pub fn list_crons(
         };
         if !is_cron_plist(name) {
             continue;
+        }
+        if upgrade_plist(&path)? {
+            reload_upgraded(&path, launchctl)?;
         }
         crons.push(inspect_cron(&path, launchctl)?);
     }
@@ -575,6 +583,8 @@ pub(crate) fn run_cron_recorded(
     record: &mut dyn FnMut(&CronReceipt) -> OpsResult<()>,
 ) -> OpsResult<CronReceipt> {
     let path = plist_path(launch_agents_dir, wave, graph);
+    // launchd keeps this job's loaded arguments until its next load.
+    upgrade_plist(&path)?;
     let spec = read_cron_spec(&path)?;
     validate_installed_spec(&spec, wave, graph)?;
     let root = receipt_root(&spec.host.lf_home);
@@ -728,7 +738,9 @@ pub fn record_cron_preflight_failure(
     source: CronSource,
     error: &str,
 ) -> OpsResult<CronReceipt> {
-    let spec = read_cron_spec(&plist_path(launch_agents_dir, wave, graph))?;
+    let path = plist_path(launch_agents_dir, wave, graph);
+    upgrade_plist(&path)?;
+    let spec = read_cron_spec(&path)?;
     validate_installed_spec(&spec, wave, graph)?;
     let root = receipt_root(&spec.host.lf_home);
     let mut receipt = new_receipt(&spec, &spec.host.machine_id, source)?;
@@ -738,7 +750,7 @@ pub fn record_cron_preflight_failure(
     receipt.error = Some(format!("Machine placement preflight failed: {error}"));
     if matches!(graph, "release-run" | "telemetry-daily") {
         let zone = iana_time_zone::get_timezone().map_err(|e| OpsError::Message(e.to_string()))?;
-        let prior = read_cron_obligation(&plist_path(launch_agents_dir, wave, graph))?;
+        let prior = read_cron_obligation(&path)?;
         let id = accounting::observe(&spec, prior.activated_at, receipt.started_at, &zone)?;
         if graph == "release-run" {
             accounting::preflight_failure(&spec.host.lf_home, &id, &receipt)?;
@@ -886,6 +898,78 @@ pub fn resolve_lf_path() -> OpsResult<PathBuf> {
     std::env::current_exe().map_err(Into::into)
 }
 
+/// Rewrite a 0.14.14 plist, its receipts and the Machine's obligations in the
+/// Graph shape. The label, activation and receipt locations are unchanged. Returns whether
+/// the plist itself was rewritten. LOO-574 removes this with the Flow readers.
+fn upgrade_plist(path: &Path) -> OpsResult<bool> {
+    let Ok(content) = fs::read_to_string(path) else {
+        return Ok(false);
+    };
+    if plist_string(&content, "LoopflowFlow").is_none() {
+        return Ok(false);
+    }
+    let spec = read_cron_spec(path)?;
+    parse_cron_command(&spec.command)?;
+    accounting::upgrade(&spec.host.lf_home)?;
+    upgrade_receipts(&receipt_root(&spec.host.lf_home), &spec.wave, &spec.graph)?;
+    let activated_at = read_cron_obligation(path)?.activated_at;
+    let dir = path.parent().expect("plist path has a directory");
+    let mut pending = tempfile::NamedTempFile::new_in(dir)?;
+    pending.write_all(render_plist(&spec, activated_at)?.as_bytes())?;
+    pending.as_file().sync_all()?;
+    pending
+        .persist(path)
+        .map_err(|error| OpsError::Message(format!("persist {}: {error}", path.display())))?;
+    Ok(true)
+}
+
+/// Load a rewritten job's new arguments unless it is running now; a running
+/// job keeps its loaded arguments, which `lf wave cron run --flow` still accepts.
+fn reload_upgraded(path: &Path, launchctl: &dyn Launchctl) -> OpsResult<()> {
+    let spec = read_cron_spec(path)?;
+    if !launchctl.is_loaded(&label(&spec.wave, &spec.graph))? {
+        return Ok(());
+    }
+    let now = Utc::now().timestamp();
+    let running = latest_cron_receipt(&receipt_root(&spec.host.lf_home), &spec.wave, &spec.graph)?
+        .is_some_and(|receipt| {
+            receipt.outcome == CronOutcome::Running && !receipt_is_stale(&receipt, now)
+        });
+    if running {
+        return Ok(());
+    }
+    launchctl.unload(path)?;
+    launchctl.load(path)
+}
+
+/// Rewrite one job's finished 0.14.14 receipts in place. A running receipt
+/// still has a writer, which records its terminal state in the current shape.
+/// An unreadable receipt stays as it is; its reader names it.
+fn upgrade_receipts(root: &Path, wave: &str, graph: &str) -> OpsResult<()> {
+    let dir = root.join(safe_component(wave)).join(safe_component(graph));
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let bytes = fs::read(&path)?;
+        let legacy = serde_json::from_slice::<serde_json::Value>(&bytes)
+            .is_ok_and(|document| document.get("flow").is_some());
+        if !legacy {
+            continue;
+        }
+        if let Ok(receipt) = serde_json::from_slice::<CronReceipt>(&bytes) {
+            if receipt.finished_at.is_some() {
+                write_receipt(root, &receipt)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn inspect_cron(path: &Path, launchctl: &dyn Launchctl) -> OpsResult<InstalledCron> {
     let spec = read_cron_spec(path)?;
     let obligation = read_cron_obligation(path)?;
@@ -927,31 +1011,49 @@ fn read_cron_spec(path: &Path) -> OpsResult<CronSpec> {
             ))
         })
     };
+    // A 0.14.14 plist names its job LoopflowFlow and its command `lf flow`.
+    // LOO-574 removes this reading once every installed job is rewritten.
+    let wave = required("LoopflowWave")?;
+    let legacy = plist_string(&content, "LoopflowFlow");
+    let graph = match &legacy {
+        Some(graph) => graph.clone(),
+        None => required("LoopflowGraph")?,
+    };
+    let mut command: Vec<String> = match plist_string(&content, "LoopflowCommand") {
+        Some(json) => {
+            serde_json::from_str(&json).map_err(|error| OpsError::Parse(error.to_string()))?
+        }
+        None => match required("LoopflowTargetKind")?.parse()? {
+            CronTargetKind::Repository => RETIRED_REPOSITORY_CHECK.map(String::from).to_vec(),
+            kind @ (CronTargetKind::Graph | CronTargetKind::Skill) => vec![
+                "--wave".into(),
+                wave.clone(),
+                "--batch".into(),
+                kind.as_str().into(),
+                "--".into(),
+                graph.clone(),
+            ],
+            CronTargetKind::Command => {
+                return Err(OpsError::Parse(
+                    "Installed command has no saved arguments".into(),
+                ))
+            }
+        },
+    };
+    if legacy.is_some() {
+        if let Some(token) = command
+            .iter_mut()
+            .take_while(|token| token.as_str() != "--")
+            .find(|token| token.as_str() == "flow")
+        {
+            *token = "graph".into();
+        }
+    }
     Ok(CronSpec {
         published: plist_string(&content, "LoopflowPublished").as_deref() == Some("true"),
-        wave: required("LoopflowWave")?,
-        graph: required("LoopflowGraph")?,
-        command: match plist_string(&content, "LoopflowCommand") {
-            Some(json) => {
-                serde_json::from_str(&json).map_err(|error| OpsError::Parse(error.to_string()))?
-            }
-            None => match required("LoopflowTargetKind")?.parse()? {
-                CronTargetKind::Repository => RETIRED_REPOSITORY_CHECK.map(String::from).to_vec(),
-                kind @ (CronTargetKind::Graph | CronTargetKind::Skill) => vec![
-                    "--wave".into(),
-                    required("LoopflowWave")?,
-                    "--batch".into(),
-                    kind.as_str().into(),
-                    "--".into(),
-                    required("LoopflowGraph")?,
-                ],
-                CronTargetKind::Command => {
-                    return Err(OpsError::Parse(
-                        "Installed command has no saved arguments".into(),
-                    ))
-                }
-            },
-        },
+        wave,
+        graph,
+        command,
         schedule: schedule_from_cron(&required("LoopflowSchedule")?)?,
         working_directory: PathBuf::from(required("LoopflowRepo")?),
         lf_path: PathBuf::from(required("LoopflowLfPath")?),
@@ -1908,6 +2010,247 @@ mod tests {
         assert_eq!(obligations[0].receipts, vec![receipt]);
     }
 
+    /// A plist as 0.14.14 wrote it: Flow-named job and `--flow` arguments.
+    fn released_flow_plist(cron: &CronSpec, activated: i64, command: Option<&str>) -> String {
+        let command = command.map_or(String::new(), |json| {
+            format!(
+                "    <key>LoopflowCommand</key>\n    <string>{}</string>\n",
+                xml_escape(json)
+            )
+        });
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{label}</string>
+    <key>LoopflowWave</key>
+    <string>{wave}</string>
+    <key>LoopflowFlow</key>
+    <string>{graph}</string>
+{command}    <key>LoopflowTargetKind</key>
+    <string>flow</string>
+    <key>LoopflowSchedule</key>
+    <string>{schedule}</string>
+    <key>LoopflowHomeId</key>
+    <string>{machine}</string>
+    <key>LoopflowActivatedAt</key>
+    <string>{activated}</string>
+    <key>LoopflowRepo</key>
+    <string>{repo}</string>
+    <key>LoopflowLfPath</key>
+    <string>{lf}</string>
+    <key>LoopflowLfHome</key>
+    <string>{home}</string>
+    <key>LoopflowPath</key>
+    <string>/usr/bin:/bin</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{lf}</string>
+        <string>wave</string>
+        <string>cron</string>
+        <string>run</string>
+        <string>--scheduled</string>
+        <string>--wave</string>
+        <string>{wave}</string>
+        <string>--flow</string>
+        <string>{graph}</string>
+    </array>
+</dict>
+</plist>
+"#,
+            label = label(&cron.wave, &cron.graph),
+            wave = cron.wave,
+            graph = cron.graph,
+            schedule = cron.schedule.expression(),
+            machine = cron.host.machine_id,
+            repo = cron.working_directory.display(),
+            lf = cron.lf_path.display(),
+            home = cron.host.lf_home.display(),
+        )
+    }
+
+    #[test]
+    fn released_flow_jobs_list_run_and_converge_on_the_graph_shape() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let agents = root.join("agents");
+        fs::create_dir_all(&agents).unwrap();
+        let mut telemetry = named_spec(
+            &root,
+            Path::new("/usr/bin/true"),
+            "infrastructure",
+            "telemetry-daily",
+            "0 0 9 * * *",
+            CronTargetKind::Graph,
+        );
+        let mut report = spec(&root, Path::new("/usr/bin/true"));
+        report.host = telemetry.host.clone();
+        fs::create_dir_all(&telemetry.working_directory).unwrap();
+        let activated = 1_787_419_441;
+        let telemetry_plist = plist_path(&agents, &telemetry.wave, &telemetry.graph);
+        let report_plist = plist_path(&agents, &report.wave, &report.graph);
+        fs::write(
+            &telemetry_plist,
+            released_flow_plist(&telemetry, activated, None),
+        )
+        .unwrap();
+        fs::write(
+            &report_plist,
+            released_flow_plist(
+                &report,
+                activated,
+                Some(r#"["--wave","reliability","--batch","flow","--","wave-report"]"#),
+            ),
+        )
+        .unwrap();
+        let obligations = telemetry.host.lf_home.join("cron/obligations");
+        fs::create_dir_all(&obligations).unwrap();
+        let obligation_id = "ee151760e9d54c96e4015d728392af21251c87b7d1cfeb0daf8e4cffd1efa467";
+        let obligation = obligations.join(format!("{obligation_id}.json"));
+        fs::write(
+            &obligation,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "activated_at": activated,
+                "closed_at": null,
+                "flow": "telemetry-daily",
+                "home_id": telemetry.host.machine_id,
+                "id": obligation_id,
+                "installation_activated_at": activated,
+                "observed_at": activated,
+                "opportunities": [],
+                "replaces": null,
+                "repo": telemetry.working_directory,
+                "schedule": "0 0 9 * * *",
+                "schema_version": 1,
+                "timezone": "America/Los_Angeles",
+                "wave": "infrastructure"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let receipts = receipt_root(&telemetry.host.lf_home).join("infrastructure/telemetry-daily");
+        fs::create_dir_all(&receipts).unwrap();
+        let receipt = receipts.join("1792771360-cron_a40b6ad2052d4069a526b9411186deab.json");
+        fs::write(
+            &receipt,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "schema_version": 1,
+                "id": "cron_a40b6ad2052d4069a526b9411186deab",
+                "runner_pid": 47574,
+                "runner_started_at": 1792771360,
+                "machine_id": telemetry.host.machine_id,
+                "wave": "infrastructure",
+                "flow": "telemetry-daily",
+                "target_kind": "flow",
+                "source": "scheduled",
+                "schedule": "0 0 9 * * *",
+                "repo": telemetry.working_directory,
+                "lf_path": "/usr/bin/true",
+                "log_path": telemetry.log_path(),
+                "started_at": 1792771360,
+                "finished_at": 1792771361,
+                "outcome": "failed",
+                "exit_code": 2,
+                "error": "target exited with status 2"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let launchctl = FakeLaunchctl::default();
+        for cron in [&telemetry, &report] {
+            launchctl
+                .loaded
+                .borrow_mut()
+                .insert(label(&cron.wave, &cron.graph));
+        }
+
+        let listed = list_crons(&agents, &launchctl).unwrap();
+
+        assert_eq!(listed.len(), 2);
+        let telemetry_listed = listed
+            .iter()
+            .find(|c| c.graph == "telemetry-daily")
+            .unwrap();
+        assert_eq!(telemetry_listed.activated_at, activated);
+        assert_eq!(telemetry_listed.target_kind, CronTargetKind::Graph);
+        assert!(telemetry_listed.loaded);
+        let latest = telemetry_listed.latest_receipt.as_ref().unwrap();
+        assert_eq!(latest.id.as_str(), "cron_a40b6ad2052d4069a526b9411186deab");
+        assert_eq!(latest.graph, "telemetry-daily");
+        report.command[3] = "graph".into();
+        assert_eq!(read_cron_spec(&report_plist).unwrap(), report);
+        telemetry.command = vec![
+            "--wave".into(),
+            "infrastructure".into(),
+            "--batch".into(),
+            "graph".into(),
+            "--".into(),
+            "telemetry-daily".into(),
+        ];
+        assert_eq!(read_cron_spec(&telemetry_plist).unwrap(), telemetry);
+        for path in [&telemetry_plist, &report_plist] {
+            let content = fs::read_to_string(path).unwrap();
+            assert!(!content.contains("LoopflowFlow") && !content.contains("--flow"));
+            assert_eq!(read_cron_obligation(path).unwrap().activated_at, activated);
+        }
+        for path in [&obligation, &receipt] {
+            let document: serde_json::Value =
+                serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+            assert!(document.get("flow").is_none(), "{}", path.display());
+            assert_ne!(document["target_kind"], "flow");
+        }
+        let segments =
+            accounting::read(&telemetry.host.lf_home, &telemetry.working_directory).unwrap();
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].id, obligation_id);
+        assert_eq!(segments[0].graph, "telemetry-daily");
+
+        // A still-loaded 0.14.14 job runs from its rewritten declaration.
+        fs::write(
+            &report_plist,
+            released_flow_plist(
+                &report,
+                activated,
+                Some(r#"["--wave","reliability","--batch","flow","--","wave-report"]"#),
+            ),
+        )
+        .unwrap();
+        let args = crate::lf::navigation::normalize_args(
+            [
+                "lf",
+                "wave",
+                "cron",
+                "run",
+                "--scheduled",
+                "--wave",
+                "reliability",
+                "--flow",
+                "wave-report",
+            ]
+            .map(String::from)
+            .to_vec(),
+        )
+        .unwrap();
+        let cli = crate::lf::Cli::try_parse_from(args).unwrap();
+        assert!(format!("{cli:?}").contains("graph: \"wave-report\""));
+        let ran = run_cron(
+            &agents,
+            &report.wave,
+            &report.graph,
+            &report.host.machine_id,
+            &report.host.machine_id,
+            CronSource::Scheduled,
+        )
+        .unwrap();
+        assert_eq!(ran.outcome, CronOutcome::Succeeded);
+        assert_eq!(ran.target_kind, CronTargetKind::Graph);
+        assert!(!fs::read_to_string(&report_plist)
+            .unwrap()
+            .contains("LoopflowFlow"));
+    }
+
     #[test]
     fn list_rejects_a_loopflow_job_without_durable_metadata() {
         let temp = tempfile::TempDir::new().unwrap();
@@ -2051,7 +2394,7 @@ mod tests {
         fs::write(&path, render_plist(&telemetry, 0).unwrap()).unwrap();
         telemetry.schedule = parse_schedule("0 0 8 * * *").unwrap();
         add_cron(&agents, &telemetry, &launchctl).unwrap();
-        let rows = accounting::read(&telemetry.host.lf_home).unwrap();
+        let rows = accounting::read(&telemetry.host.lf_home, &telemetry.working_directory).unwrap();
         assert_eq!(rows.len(), 2);
         let old = rows.iter().find(|r| r.schedule == "0 0 9 * * *").unwrap();
         assert_eq!(old.activated_at, 0);
@@ -2060,18 +2403,22 @@ mod tests {
         let current = rows.iter().find(|r| r.closed_at.is_none()).unwrap();
         assert_eq!(current.replaces.as_ref(), Some(&old.id));
         add_cron(&agents, &telemetry, &launchctl).unwrap();
-        assert_eq!(accounting::read(&telemetry.host.lf_home).unwrap(), rows);
+        assert_eq!(
+            accounting::read(&telemetry.host.lf_home, &telemetry.working_directory).unwrap(),
+            rows
+        );
 
         let old_home = telemetry.host.lf_home.clone();
         telemetry.host.lf_home = temp.path().join("other-home");
         telemetry.host.machine_id = MachineId::new();
         add_cron(&agents, &telemetry, &launchctl).unwrap();
-        assert!(accounting::read(&old_home)
+        assert!(accounting::read(&old_home, &telemetry.working_directory)
             .unwrap()
             .iter()
             .all(|s| s.closed_at.is_some()));
         remove_cron(&agents, &telemetry.wave, &telemetry.graph, &launchctl).unwrap();
-        let moved = accounting::read(&telemetry.host.lf_home).unwrap();
+        let moved =
+            accounting::read(&telemetry.host.lf_home, &telemetry.working_directory).unwrap();
         assert_eq!(moved.len(), 1);
         assert_eq!(moved[0].machine_id, telemetry.host.machine_id);
         assert!(moved[0].closed_at.is_some());
@@ -2134,7 +2481,7 @@ mod tests {
             let receipt = new_receipt(&cron, &cron.host.machine_id, CronSource::Scheduled).unwrap();
             write_receipt(&receipt_root(&cron.host.lf_home), &receipt).unwrap();
             accounting::begin(&cron.host.lf_home, &id, &receipt).unwrap();
-            let retained = accounting::read(&cron.host.lf_home).unwrap();
+            let retained = accounting::read(&cron.host.lf_home, &cron.working_directory).unwrap();
             let lock = accounting::claim_execution(&decoded).unwrap().unwrap();
             let mut child = spawn_cron_target(&decoded, Some(&lock), &receipt).unwrap();
             drop(lock);
@@ -2152,7 +2499,10 @@ mod tests {
             assert_eq!(installed.machine_id, cron.host.machine_id);
             assert_eq!(installed.latest_receipt.as_ref(), Some(&receipt));
             assert_eq!(installed.target_kind, kind);
-            assert_eq!(accounting::read(&cron.host.lf_home).unwrap(), retained);
+            assert_eq!(
+                accounting::read(&cron.host.lf_home, &cron.working_directory).unwrap(),
+                retained
+            );
             assert_eq!(read_cron_spec(&path).unwrap(), cron);
             assert!(accounting::claim_execution(&cron).unwrap().is_some());
         }

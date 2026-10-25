@@ -816,6 +816,93 @@ fn parse_pr_merge(output: &[u8]) -> OpsResult<PrMergeObservation> {
     })
 }
 
+/// A person's removal of a PR's merge request: a manual merge-queue dequeue or
+/// a manually disabled auto-merge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ManualMergeRemoval {
+    pub at: chrono::DateTime<chrono::Utc>,
+    pub actor: Option<String>,
+    pub queued: bool,
+}
+
+/// The latest manual removal of `number`'s merge request after `since`.
+pub(crate) fn manual_merge_removal_since(
+    repo: &Path,
+    number: u64,
+    since: chrono::DateTime<chrono::Utc>,
+) -> OpsResult<Option<ManualMergeRemoval>> {
+    let query = "query LoopflowPrMergeRemovals($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){timelineItems(last:20,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT,AUTO_MERGE_DISABLED_EVENT]){nodes{__typename ... on RemovedFromMergeQueueEvent{createdAt reason actor{login}} ... on AutoMergeDisabledEvent{createdAt reason reasonCode actor{login}}}}}}}";
+    let output = Command::new("gh")
+        .args([
+            "api",
+            "graphql",
+            "-F",
+            "owner={owner}",
+            "-F",
+            "name={repo}",
+            "-F",
+            &format!("number={number}"),
+            "-f",
+            &format!("query={query}"),
+        ])
+        .current_dir(repo)
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: format!("gh api graphql [pull request #{number} merge removals]"),
+            stderr: stderr_from_output(&output),
+        });
+    }
+    parse_manual_merge_removal(&output.stdout, since)
+}
+
+fn parse_manual_merge_removal(
+    output: &[u8],
+    since: chrono::DateTime<chrono::Utc>,
+) -> OpsResult<Option<ManualMergeRemoval>> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Removal {
+        #[serde(rename = "__typename")]
+        typename: String,
+        created_at: chrono::DateTime<chrono::Utc>,
+        reason: Option<String>,
+        reason_code: Option<String>,
+        actor: Option<Actor>,
+    }
+    #[derive(Deserialize)]
+    struct Actor {
+        login: String,
+    }
+    let response: serde_json::Value = serde_json::from_slice(output)
+        .map_err(|error| OpsError::Parse(format!("failed to parse PR timeline: {error}")))?;
+    let removals: Vec<Removal> = serde_json::from_value(
+        response["data"]["repository"]["pullRequest"]["timelineItems"]["nodes"].clone(),
+    )
+    .map_err(|error| OpsError::Parse(format!("failed to parse PR timeline: {error}")))?;
+    Ok(removals
+        .into_iter()
+        .filter(|removal| removal.created_at > since)
+        .filter_map(|removal| {
+            let queued = match removal.typename.as_str() {
+                "RemovedFromMergeQueueEvent" => true,
+                "AutoMergeDisabledEvent" => false,
+                _ => return None,
+            };
+            let manual = if queued {
+                removal.reason.as_deref() == Some("manual")
+            } else {
+                removal.reason_code.as_deref() == Some("manually_disabled")
+            };
+            manual.then(|| ManualMergeRemoval {
+                at: removal.created_at,
+                actor: removal.actor.map(|actor| actor.login),
+                queued,
+            })
+        })
+        .max_by_key(|removal| removal.at))
+}
+
 pub(crate) fn observe_merge_request(repo: &Path, number: u64) -> OpsResult<Option<MergeRequest>> {
     Ok(observe_pr_merge(repo, number)?.request)
 }
@@ -2244,6 +2331,48 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 mod tests {
     use std::ffi::OsString;
     use std::os::unix::fs::PermissionsExt;
+    #[test]
+    fn only_a_manual_removal_after_the_run_armed_stops_a_release() {
+        // PR #1654's timeline: Jack disabled auto-merge, later dequeued the
+        // queued release, and GitHub's merge queue finally removed it as merged.
+        let timeline = serde_json::to_vec(&serde_json::json!({"data": {"repository": {
+        "pullRequest": {"timelineItems": {"nodes": [
+            {"__typename": "AutoMergeDisabledEvent", "createdAt": "2026-10-22T18:56:59Z",
+             "reason": "Manually disabled by user", "reasonCode": "manually_disabled",
+             "actor": {"login": "jacklionheart"}},
+            {"__typename": "RemovedFromMergeQueueEvent", "createdAt": "2026-10-22T20:13:13Z",
+             "reason": "manual", "actor": {"login": "jacklionheart"}},
+            {"__typename": "RemovedFromMergeQueueEvent", "createdAt": "2026-10-22T20:23:15Z",
+             "reason": "merged", "actor": {"login": "github-merge-queue"}}
+        ]}}}}}))
+        .unwrap();
+        let at = |time: &str| time.parse::<chrono::DateTime<chrono::Utc>>().unwrap();
+
+        let dequeued = super::parse_manual_merge_removal(&timeline, at("2026-10-22T20:12:44Z"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(dequeued.at, at("2026-10-22T20:13:13Z"));
+        assert_eq!(dequeued.actor.as_deref(), Some("jacklionheart"));
+        assert!(dequeued.queued);
+        // Removals before this run armed, and GitHub's own, never stop it.
+        assert_eq!(
+            super::parse_manual_merge_removal(&timeline, at("2026-10-22T20:13:19Z")).unwrap(),
+            None
+        );
+        let only_disabled = serde_json::to_vec(&serde_json::json!({"data": {"repository": {
+        "pullRequest": {"timelineItems": {"nodes": [
+            {"__typename": "AutoMergeDisabledEvent", "createdAt": "2026-10-22T18:56:59Z",
+             "reason": "Manually disabled by user", "reasonCode": "manually_disabled",
+             "actor": {"login": "jacklionheart"}}
+        ]}}}}}))
+        .unwrap();
+        let disabled =
+            super::parse_manual_merge_removal(&only_disabled, at("2026-10-22T18:53:31Z"))
+                .unwrap()
+                .unwrap();
+        assert!(!disabled.queued);
+    }
+
     #[test]
     fn merge_policy_uses_allowed_methods_and_rejects_disabled_preferences() {
         use crate::config::MergeMethod;

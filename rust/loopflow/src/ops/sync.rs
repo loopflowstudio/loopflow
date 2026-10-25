@@ -25,7 +25,6 @@ pub struct SyncOptions {
 pub enum SyncClass {
     StaleEmpty,
     ScratchOnly,
-    GeneratedOnly,
     CleanAuthored,
     Protected,
 }
@@ -117,11 +116,10 @@ pub fn plan_sync(
         (SyncClass::ScratchOnly, SyncStrategy::ResetToBase)
     } else if unique_commits == 0 && changed_files.is_empty() {
         (SyncClass::StaleEmpty, SyncStrategy::ResetToBase)
-    } else if has_non_scratch_changes {
-        (SyncClass::CleanAuthored, SyncStrategy::MergeTarget)
-    } else if scratch_only || generated_only(repo, comparison_base)? {
-        (SyncClass::GeneratedOnly, SyncStrategy::ResetToBase)
     } else {
+        // The branch's own commits are work, whatever they touch. Callers can
+        // stash edits before syncing, so a commit that looks disposable here
+        // may be the base those hidden edits were written against.
         (SyncClass::CleanAuthored, SyncStrategy::MergeTarget)
     };
     // Stacked children retain their history when integrating the parent.
@@ -771,20 +769,6 @@ fn dirty_paths(repo: &Path) -> OpsResult<Vec<PathBuf>> {
         .collect())
 }
 
-fn generated_only(repo: &Path, base_ref: &str) -> OpsResult<bool> {
-    let stdout = git(repo, &["log", "--format=%s", &format!("{base_ref}..HEAD")])?;
-    let subjects = stdout
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .collect::<Vec<_>>();
-    Ok(!subjects.is_empty()
-        && subjects.iter().all(|subject| {
-            subject.starts_with("checkpoint:")
-                || subject.starts_with("wip:")
-                || subject.contains("generated")
-        }))
-}
-
 fn is_protected_path(path: &Path) -> bool {
     path.starts_with(Path::new(".lf/wave"))
         || path.starts_with(Path::new(".lf/skills"))
@@ -796,7 +780,6 @@ pub fn sync_class_name(class: &SyncClass) -> &'static str {
     match class {
         SyncClass::StaleEmpty => "stale_empty",
         SyncClass::ScratchOnly => "scratch_only",
-        SyncClass::GeneratedOnly => "generated_only",
         SyncClass::CleanAuthored => "clean_authored",
         SyncClass::Protected => "protected",
     }

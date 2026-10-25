@@ -547,7 +547,6 @@ fn is_avoidable_sync_class(class: &crate::ops::SyncClass) -> bool {
         class,
         crate::ops::SyncClass::StaleEmpty
             | crate::ops::SyncClass::ScratchOnly
-            | crate::ops::SyncClass::GeneratedOnly
     )
 }
 
@@ -560,7 +559,6 @@ mod sync_performance_tests {
     fn disposable_sync_classes_make_an_agent_launch_a_repair_incident() {
         assert!(is_avoidable_sync_class(&SyncClass::StaleEmpty));
         assert!(is_avoidable_sync_class(&SyncClass::ScratchOnly));
-        assert!(is_avoidable_sync_class(&SyncClass::GeneratedOnly));
         assert!(!is_avoidable_sync_class(&SyncClass::CleanAuthored));
         assert!(!is_avoidable_sync_class(&SyncClass::Protected));
     }

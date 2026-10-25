@@ -146,10 +146,22 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
   bar computes its stages once. `cargo test --lib task_ship_` 7/7 (with `LOOPFLOW_TEST_LF` set:
   the support crate's compiled-in `CARGO` path is stale here), `ops::task::ship` 4/4, clippy clean, Mac build ok.
 
+0. **Next implement (seventh concept review, 2026-10-24).** The Workflow bar's live line says
+   "At <stage> · yours to try" at every stage. "Try" is demo's word: at `review-design` the
+   person reviews a plan, at `verify` they check main. A stage is where a person takes part, so
+   the line reads "At <stage> · yours" (`TaskWorkflowBar.live`). Nothing else changes: the post-merge rule (the stage whose route into
+   `end` runs nothing, reached once per graph) and the restart backoff hold against the normal
+   path, a hand-merge and a killed carrier.
 1. **Re-demo** on the branch build: the Workflow bar (dots, click-to-expand stage cells, live
    line, Ship it / Stop shipping), a failed stand-in that backs off and names its cause instead
-   of the hot loop, the `loopflow://` world links and `unstarted` world Tasks. Still open from
-   Re-demo 2: should `lf ship` take an issue positional (`lf ship LOO-1`) like `lf task run`?
+   of the hot loop, the `loopflow://` world links and `unstarted` world Tasks. Open for Jack at
+   re-demo (unresolved; none blocks implement or gate):
+   - Should `lf ship` take an issue positional (`lf ship LOO-1`) like `lf task run`? Its
+     positional is the graph (accepted `lf ship [GRAPH]`), so one positional for both is a guess.
+   - At `verify`, the session workspace's Workflow bar offers only Ship it, which runs a verify
+     stand-in. A person who already checked main finishes through the conversation or the
+     detail page's Complete. Does the bar want Complete at a post-merge stage?
+   - Should any work in a Task's checkout make it `working` (questions.md, 2026-10-22)?
 2. **Not in this Task:** the `automation:` config key now names a deleted concept (its only field
    is repair startup retries). `.lf/config.yaml` is read by released lf, so a rename needs the
    shared-file fallback plus a removal Task; leave it. (Both 2026-10-22 concept reviews' docs drift is fixed: docs teach `interactive:` stages, routes,

@@ -196,6 +196,14 @@ pub fn run_for_task(cli: &Cli, task: &Task, graph: &str) -> Result<()> {
         }
         // Only a Graph process that failed is started again.
         let failed = status.code() == Some(1) && attempt_graph(store, &process, mark)?.is_some();
+        if failed {
+            if let Some(stash) = crate::ops::checkout::retained_edits(checkout)? {
+                eprintln!(
+                    "Graph {graph} failed with the checkout's edits retained in stash {stash}; this Task run stops here. Restore them with `git stash apply --index {stash}`."
+                );
+                return Err(crate::process::CommandExit(1).into());
+            }
+        }
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {
                 eprintln!("Graph {graph} failed {attempt} times; this Task run stops here.");

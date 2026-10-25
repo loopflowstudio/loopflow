@@ -1349,8 +1349,8 @@ case "$1 $2" in
         else echo '[]'; fi;;
       *) echo '[]';;
     esac;;
-  'api graphql') echo '{{"data":{{"repository":{{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"pullRequest":{{"id":"PR_fixture","number":1176,"url":"https://example.com/pr/1176","state":"OPEN","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"mergeCommit":null,"mergeStateStatus":"DIRTY","isMergeQueueEnabled":false,"isInMergeQueue":false,"autoMergeRequest":null,"mergeQueueEntry":null,"timelineItems":{{"nodes":[]}}}}}}}}}}';;
-  'pr merge') exit 0;;
+  'api graphql') if [ -f '{state}/gh-auto' ]; then echo '{{"data":{{"repository":{{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"pullRequest":{{"id":"PR_fixture","number":1176,"url":"https://example.com/pr/1176","state":"OPEN","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"mergeCommit":null,"mergeStateStatus":"DIRTY","isMergeQueueEnabled":false,"isInMergeQueue":false,"autoMergeRequest":{{"enabledAt":"2026-10-25T00:00:00Z"}},"mergeQueueEntry":null,"timelineItems":{{"nodes":[]}}}}}}}}}}'; else echo '{{"data":{{"repository":{{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"pullRequest":{{"id":"PR_fixture","number":1176,"url":"https://example.com/pr/1176","state":"OPEN","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"mergeCommit":null,"mergeStateStatus":"DIRTY","isMergeQueueEnabled":false,"isInMergeQueue":false,"autoMergeRequest":null,"mergeQueueEntry":null,"timelineItems":{{"nodes":[]}}}}}}}}}}'; fi;;
+  'pr merge') : > '{state}/gh-auto'; exit 0;;
   *) exit 91;;
 esac
 "#,

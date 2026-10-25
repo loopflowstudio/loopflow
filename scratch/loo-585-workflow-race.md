@@ -87,3 +87,17 @@ the failing line, not to the class it belongs to.
    prompt; unmeasured. Weigh against ci-fix's mandate to stay narrow.
 5. Not proposed: a test-only delay knob in `task run` to widen the window in CI. It reshapes
    production code for tests, and the probe already shows the race on demand.
+
+## Execution decision (launch-plan, 2026-10-25)
+
+Stays in LOO-585 (this PR, no new Tasks):
+1. Rebase onto main (`385b6a66ea`); resolve the `waveless_task_lifecycle` conflict with `a0ef70f1e7` by
+   keeping `-b` and deleting the poll loop (prevention 1). Rerun the probe for the PR's before/after counts.
+2. Add the one-line Rust-tests rule to AGENTS.md (prevention 2), naming the waited form and the
+   `grep -rn '"task", "run"' rust/loopflow/tests/` inventory check (folds in prevention 3).
+
+Deferred, not filed:
+- ci-fix sweeping sibling call sites (prevention 4): unmeasured and pulls against ci-fix's narrow
+  mandate. File only if another race repair stops at one line.
+- Auditing every bare `task run` in `global_commands.rs`, and other "returns once running" commands:
+  no failure evidence; the AGENTS.md rule covers new callers.

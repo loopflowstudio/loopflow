@@ -1,6 +1,5 @@
 //! Saved selection and layout intent share one transaction and one Work snapshot.
 mod panes;
-pub(crate) use panes::convert_released_layouts;
 use super::SqliteStore;
 use crate::durable::RepositoryId;
 use crate::store::{StoreError, StoreResult};
@@ -9,6 +8,7 @@ use crate::work::selection::{
     DashboardReading, Selection, SelectionExpression, SelectionId, SelectionResolution,
     SelectionState, SelectionWork, SlotLayout, WorkWorkspaceKey, WorkWorkspaceKind,
 };
+pub(crate) use panes::convert_released_layouts;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -1335,17 +1335,21 @@ mod tests {
             invalid
         };
         assert!(store
-            .save_pane_layout(&edit(&|content| if let PaneIntent::Shell { selected, .. } = content {
-                *selected = Some("removed".into());
-            }))
+            .save_pane_layout(&edit(
+                &|content| if let PaneIntent::Shell { selected, .. } = content {
+                    *selected = Some("removed".into());
+                }
+            ))
             .is_err());
         assert!(store
-            .save_pane_layout(&edit(&|content| if let PaneIntent::Browser { tabs, .. } = content {
-                tabs.push(BrowserTab::Url {
-                    id: "page-2".into(),
-                    url: "file:///etc/passwd".into(),
-                });
-            }))
+            .save_pane_layout(&edit(
+                &|content| if let PaneIntent::Browser { tabs, .. } = content {
+                    tabs.push(BrowserTab::Url {
+                        id: "page-2".into(),
+                        url: "file:///etc/passwd".into(),
+                    });
+                }
+            ))
             .is_err());
         assert_eq!(store.revisions().unwrap(), revision);
         assert_eq!(store.pane_layout(&saved.work).unwrap(), Some(saved));

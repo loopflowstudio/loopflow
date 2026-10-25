@@ -47,7 +47,11 @@ pub(super) fn layout_in(
         .transpose()
 }
 
-fn validate_sessions(conn: &Connection, work: &WorkWorkspaceKey, tree: &PaneTree) -> StoreResult<()> {
+fn validate_sessions(
+    conn: &Connection,
+    work: &WorkWorkspaceKey,
+    tree: &PaneTree,
+) -> StoreResult<()> {
     for (_, content) in tree.panes() {
         let PaneIntent::Session {
             session_id: Some(session_id),
@@ -158,7 +162,10 @@ fn convert_released_layout(mut released: serde_json::Value) -> Result<WorkPaneLa
     let mut browser_location = Value::Null;
 
     // Rewrite leaves in layout order; a leaf that leaves the layout returns None.
-    fn rewrite(node: Value, visit: &mut dyn FnMut(String, Value) -> Option<Value>) -> Option<Value> {
+    fn rewrite(
+        node: Value,
+        visit: &mut dyn FnMut(String, Value) -> Option<Value>,
+    ) -> Option<Value> {
         match node["kind"].as_str() {
             Some("split") => {
                 let mut node = node;
@@ -180,8 +187,9 @@ fn convert_released_layout(mut released: serde_json::Value) -> Result<WorkPaneLa
             }
         }
     }
-    let tree = rewrite(released["tree"].take(), &mut |id, content| {
-        match content["kind"].as_str() {
+    let tree = rewrite(
+        released["tree"].take(),
+        &mut |id, content| match content["kind"].as_str() {
             Some("session") if session.is_none() => {
                 session = Some(id);
                 Some(content)
@@ -206,13 +214,16 @@ fn convert_released_layout(mut released: serde_json::Value) -> Result<WorkPaneLa
                 Some(json!({"kind": "browser", "location": null, "tabs": [], "selected": null}))
             }
             _ => None,
-        }
-    });
+        },
+    );
 
-    let mut hidden: BTreeSet<String> = serde_json::from_value(released["hidden"].take())
-        .map_err(|error| error.to_string())?;
+    let mut hidden: BTreeSet<String> =
+        serde_json::from_value(released["hidden"].take()).map_err(|error| error.to_string())?;
     let mut tree = tree;
-    let add = |tree: &mut Option<Value>, id: &str, content: Value, hidden: &mut BTreeSet<String>| {
+    let add = |tree: &mut Option<Value>,
+               id: &str,
+               content: Value,
+               hidden: &mut BTreeSet<String>| {
         let pane = json!({"kind": "pane", "id": id, "content": content});
         *tree = Some(match tree.take() {
             Some(existing) => {
@@ -223,23 +234,47 @@ fn convert_released_layout(mut released: serde_json::Value) -> Result<WorkPaneLa
         });
     };
     if session.is_none() {
-        add(&mut tree, "session", json!({"kind": "session", "session_id": null, "location": null}), &mut hidden);
+        add(
+            &mut tree,
+            "session",
+            json!({"kind": "session", "session_id": null, "location": null}),
+            &mut hidden,
+        );
     }
     if task && shell.is_none() {
-        add(&mut tree, "shell", json!({"kind": "shell", "tabs": [], "selected": null}), &mut hidden);
+        add(
+            &mut tree,
+            "shell",
+            json!({"kind": "shell", "tabs": [], "selected": null}),
+            &mut hidden,
+        );
     }
     if task && browser.is_none() {
-        add(&mut tree, "browser", json!({"kind": "browser", "location": null, "tabs": [], "selected": null}), &mut hidden);
+        add(
+            &mut tree,
+            "browser",
+            json!({"kind": "browser", "location": null, "tabs": [], "selected": null}),
+            &mut hidden,
+        );
         browser = Some("browser".into());
     }
-    let mut tree: PaneTree =
-        serde_json::from_value(tree.expect("a session pane was added")).map_err(|error| error.to_string())?;
+    let mut tree: PaneTree = serde_json::from_value(tree.expect("a session pane was added"))
+        .map_err(|error| error.to_string())?;
     if let Some(browser) = &browser {
-        let tabs: Vec<BrowserTab> =
-            serde_json::from_value(Value::Array(browser_tabs)).map_err(|error| error.to_string())?;
+        let tabs: Vec<BrowserTab> = serde_json::from_value(Value::Array(browser_tabs))
+            .map_err(|error| error.to_string())?;
         let selected = tabs.first().map(|tab| tab.id().to_string());
-        let location = serde_json::from_value(browser_location).map_err(|error| error.to_string())?;
-        set_content(&mut tree, browser, PaneIntent::Browser { location, tabs, selected });
+        let location =
+            serde_json::from_value(browser_location).map_err(|error| error.to_string())?;
+        set_content(
+            &mut tree,
+            browser,
+            PaneIntent::Browser {
+                location,
+                tabs,
+                selected,
+            },
+        );
     }
     let ids: BTreeSet<String> = tree.panes().iter().map(|(id, _)| id.to_string()).collect();
     hidden.retain(|id| ids.contains(id));
@@ -250,16 +285,22 @@ fn convert_released_layout(mut released: serde_json::Value) -> Result<WorkPaneLa
             hidden.remove("session");
         }
     }
-    let visible = |id: &Option<String>| id.clone().filter(|id| ids.contains(id) && !hidden.contains(id));
-    let focused: Option<String> = serde_json::from_value(released["focused"].take()).map_err(|error| error.to_string())?;
-    let zoomed: Option<String> = serde_json::from_value(released["zoomed"].take()).map_err(|error| error.to_string())?;
+    let visible = |id: &Option<String>| {
+        id.clone()
+            .filter(|id| ids.contains(id) && !hidden.contains(id))
+    };
+    let focused: Option<String> =
+        serde_json::from_value(released["focused"].take()).map_err(|error| error.to_string())?;
+    let zoomed: Option<String> =
+        serde_json::from_value(released["zoomed"].take()).map_err(|error| error.to_string())?;
     let layout = WorkPaneLayout {
         work,
         revision: released["revision"].as_i64().ok_or("revision is missing")?,
         focused: visible(&focused),
         zoomed: visible(&zoomed),
         hidden,
-        drafts: serde_json::from_value(released["drafts"].take()).map_err(|error| error.to_string())?,
+        drafts: serde_json::from_value(released["drafts"].take())
+            .map_err(|error| error.to_string())?,
         tree,
     };
     layout.validate()?;

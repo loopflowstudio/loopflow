@@ -561,13 +561,8 @@ final class WorkModel {
         } else { sessionPane = layout.allPanes.first { $0.sessionId == destination.record.id } }
         var panes = [PaneState]()
         if let sessionPane { panes.append(sessionPane) }
-        if destination.showsChanges,
-           let pane = layout.allPanes.first(where: {
-               if case .browser(let task, let tabs, _, _, _) = $0.content {
-                   return task == destination.task.id && tabs.contains(.files)
-               }
-               return false
-           }) { panes.append(pane) }
+        if destination.showsChanges, let pane = layout.pane(of: .browser),
+           pane.content.selectedBrowserTab == .files { panes.append(pane) }
         guard panes.count == (destination.showsChanges ? 2 : 1) else {
             taskOpening = taskOpening.map { DesktopOpening(url: $0.url, status: .failed, reason: "Opening panes are no longer available.") }
             return

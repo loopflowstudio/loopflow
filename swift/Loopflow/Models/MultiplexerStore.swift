@@ -289,13 +289,16 @@ public final class MultiplexerStore {
                         self.shell(tab.id) ?? ShellTab(id: tab.id, location: location(tab.location), command: nil, lfProcessID: tab.lfProcessID)
                     }, selected: selected)
                 case .browser(let place, let tabs, let selected):
-                    content = .browser(taskId: saved.work.id, tabs: tabs.compactMap { tab in
+                    let restored = tabs.compactMap { tab -> BrowserTab? in
                         switch tab {
                         case .files: .files
                         case .graphLog: .graphLog
                         case .url(let id, let url): URL(string: url).flatMap { BrowserTab.page($0, id: id) }
                         }
-                    }, selected: selected, location: location(place))
+                    }
+                    content = .browser(taskId: saved.work.id, tabs: restored,
+                        selected: restored.contains { $0.id == selected } ? selected : restored.first?.id,
+                        location: location(place))
                 }
                 if let retained = layout.pane(for: id), retained.content == content { return .leaf(retained) }
                 return .leaf(PaneState(id: id, content: content))

@@ -287,7 +287,7 @@ struct WorkDestinationTests {
         model.select(.wave(id: wave.wave.id))
         #expect(entry.conversationError == "Conversation launcher unavailable")
         #expect(!entry.openingConversation)
-        #expect(entry.multiplexer.layout.allPanes.allSatisfy { $0.content == .empty })
+        #expect(entry.multiplexer.sessionPane?.sessionId == nil)
     }
 
     @Test(arguments: [false, true])
@@ -430,9 +430,9 @@ struct WorkDestinationTests {
             let sessionOnly = LinkedSession(generation: request.generation, record: record,
                 task: task, showsChanges: false, location: request.location)
             #expect(try registry.openLinkedFiles(sessionOnly, in: remote.key, query: query) == nil)
-            let companion = try remote.files(for: .files(taskId: task.id, execution: request.location), task: task, query: query)
+            let companion = try remote.files(for: .browser(taskId: task.id, tabs: [.files], selected: "files", execution: request.location), task: task, query: query)
             companion.document("remote-draft.txt").editor.string = "retained peer draft"
-            #expect(remote.multiplexer.layout.allPanes.count == 1)
+            #expect(remote.multiplexer.browserPane.map(remote.multiplexer.isVisible) == false)
             #expect(try registry.openLinkedFiles(request, in: remote.key, query: query) === companion)
             #expect(companion.document("remote-draft.txt").editor.string == "retained peer draft")
             let sessions = local.sessionStore(repoPath: wave.wave.repo, query: query)
@@ -445,7 +445,7 @@ struct WorkDestinationTests {
             #expect(sessions.taskSubject(for: record) == .task(id: taskID))
             #expect(companion.issue == remoteID)
             #expect(companion.query.remoteMachine == "peer")
-            #expect(remote.multiplexer.layout.allPanes.count == 2)
+            #expect(remote.multiplexer.browserPane.map(remote.multiplexer.isVisible) == true)
             let targetPane = remote.multiplexer.focusedPane
             remote.multiplexer.setZoom(targetPane.id, enabled: true)
             let target = DesktopPaneTarget(repository: "repository", window: UUID().uuidString,
@@ -458,11 +458,13 @@ struct WorkDestinationTests {
             let splitID = try registry.controlPane(.init(target: target, action: .shell), model: model)
             #expect(remote.multiplexer.shell(splitID.tab ?? "")?.execution == request.location)
             #expect(remote.multiplexer.layout.pane(for: splitID.pane)?.content.selectedShell?.command == command)
+            // A scripted shell tab keeps the caller's focus and zoom.
             #expect(remote.multiplexer.layout.pane(for: targetPane.id) == targetPane)
-            #expect(remote.multiplexer.focusedPaneId == shell.id)
-            #expect(remote.multiplexer.zoomedPaneId == nil)
+            #expect(remote.multiplexer.focusedPaneId == targetPane.id)
+            #expect(remote.multiplexer.zoomedPaneId == targetPane.id)
+            #expect(shell.kind == .shell)
             #expect(companion.document("remote-draft.txt").editor.string == "retained peer draft")
-            remote.multiplexer.replace(targetPane.id, with: .session(id: "replacement"))
+            remote.multiplexer.showBrowser(.files, location: WorkspaceIdentity(machineId: "peer", worktree: "/replacement"))
             let unchanged = remote.multiplexer.layout
             #expect(throws: DesktopTargetError.self) {
                 try registry.controlPane(.init(target: target, action: .shell), model: model)
@@ -618,9 +620,10 @@ struct WorkDestinationTests {
         let files = workspace.files(issue: task.task.identifier, cwd: identity.worktree, query: query)
         files.selection = "retained-draft.rs"
         await model.openTaskLink(link)
-        #expect(workspace.multiplexer.layout.allPanes.count == 2)
+        #expect(workspace.multiplexer.layout.allPanes.count == 3)
         #expect(workspace.multiplexer.layout.pane(for: terminal.id) == terminal)
-        #expect(workspace.multiplexer.focusedPane.content == .files(taskId: task.id, location: identity))
+        #expect(workspace.multiplexer.focusedPane.content.selectedBrowserTab == .files)
+        #expect(workspace.multiplexer.focusedPane.content.location == identity)
         #expect(files.selection == "retained-draft.rs")
         #expect(files.showsChanges)
         let failure = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: "missing", diff: true)
@@ -652,7 +655,9 @@ struct WorkDestinationTests {
             case "closed": workspace.multiplexer.close(pane.id)
             case "hidden": workspace.multiplexer.setCollapsed(paneId: pane.id, collapsed: true)
             case "zoomed": workspace.multiplexer.setZoom(pane.id, enabled: true)
-            case "replaced": workspace.multiplexer.replace(pane.id, with: .session(id: "replacement"))
+            case "replaced":
+                if pane.kind == .session { workspace.multiplexer.replace(pane.id, with: .session(id: "replacement")) }
+                else { workspace.multiplexer.showBrowser(.graphLog) }
             case "surface": store.recordPaneFailure(record.id, reason: "Native surface unavailable")
             default: store.recordPaneLive(record.id)
             }
@@ -1389,7 +1394,7 @@ struct WorkDestinationTests {
         let identity = WorkspaceIdentity(machineId: "fixture-machine", worktree: path)
         let oldKey = WorkWorkspaceKey(repository: "old-plan", kind: .repository, id: "old-plan")
         let retained = registry.open(oldKey, title: "Repository", location: identity), store = retained.multiplexer
-        store.newShell(command: ["retained-command"], location: identity)
+        store.load(sessionId: "retained", location: identity)
         let pane = store.focusedPane
         let document = retained.files(issue: "TASK", cwd: path).document("note.txt")
         document.editor.string = "unfinished draft"

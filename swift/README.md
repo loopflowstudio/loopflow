@@ -223,7 +223,13 @@ colors however Desktop was opened.
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
 
-**View → Toggle Files** opens a Task's checkout as a pane beside the
+A Task workspace holds three designated panes — session, shell and browser —
+arranged freely by dragging, zoom and hide; Wave and repository workspaces hold
+only the session pane. The session pane shows one conversation and switches when
+another opens. ⌘T adds a shell tab. The browser's tabs are the Task's Files, its
+Graph processes and http(s) pages. ⌘W closes the selected tab, or hides the pane.
+
+**View → Toggle Files** shows a Task's checkout in the browser pane beside the
 retained terminal. Expand folders to read one page of up to 500 entries;
 **Load more** continues the directory and **Show ignored** includes ignored paths.
 Tracked, unchanged and untracked files remain available without an active PR.
@@ -237,7 +243,7 @@ Closing the pane keeps its drafts in this window.
 shows the draft comparison read-only. Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
 Changing Work assignment leaves the recorded checkout Machine and path intact.
-Files panes retain their opening location through Close/Undo, including a first open
+The browser retains its opening location through Close/Undo, including a first open
 without a Session link. New shell tabs use the Task's recorded location;
 existing tabs and file drafts keep their original locations.
 Unknown or changed owners stay unavailable without redirecting retained drafts.
@@ -854,9 +860,8 @@ zoom does not redirect input to an unselected pane. Window/content replacement
 rejects stale targets, including the second target of a move or resize. Mutation replies
 identify the affected pane directly; shell creation also returns its new `tab`.
 They are not native-rendering proof. `--pane shell:ID` targets an exact shell even
-when another tab is selected. Files and Graph-log reveal retained companions without
-changing focus or zoom. They reuse existing panes for the named Task; its recorded checkout must
-match. Remote shells run on the recorded execution Machine; changed or missing checkouts
+when another tab is selected. Files and Graph-log select browser tabs without
+changing focus or zoom; the named Task's recorded checkout must match. Remote shells run on the recorded execution Machine; changed or missing checkouts
 refuse launch without opening a local shell. Disconnects never replay shell commands.
 
 `lf --task LOO-427 desktop read --pane "$pane" --region selection --json`

@@ -285,7 +285,7 @@ struct TaskGraphTests {
         let content = try view.inspect().find(SessionsContentView.self).actualView()
         content.navigate(.graphLog(task.id))
         try await settle()
-        #expect(panes.focusedPane.content == .graphLog(taskId: task.id, location: task.reference.workspace?.identity))
+        #expect(panes.focusedPane.content == .browser(taskId: task.id, tabs: [.graphLog], selected: "graph-log", location: task.reference.workspace?.identity))
         #expect(panes.layout.allPanes.count == 3)
         // A line per process; its id, graph and steps only when opened.
         model.confirmMachine(try #require(task.reference.workspace?.machineId))
@@ -301,7 +301,7 @@ struct TaskGraphTests {
 
         // Files remains the same tool when hidden and shown through the View command.
         let workspace = try #require(registry.retained(key))
-        let filesPane = try #require(workspace.filesPane)
+        let filesPane = try #require(workspace.multiplexer.browserPane)
         workspace.toggleFiles()
         workspace.toggleFiles()
         try await settle()

@@ -44,38 +44,34 @@ struct DesktopPaneControlTests {
         #expect(window.path != window.repository)
     }
 
-    @Test("A Task starts with Files at the golden ratio; switching preserves resized and closed panes")
+    @Test("A Task's first conversation brings Files into view once; closing hides it and toggling returns it")
     func taskStartsWithRetainedCompanion() throws {
         let workspace = SessionsWorkspace(key: workKey, title: "Task", location: identity, localMachineId: identity.machineId)
         let store = workspace.multiplexer
         store.load(sessionId: "main", location: identity)
         let main = store.focusedPane
         workspace.prepareTaskPanes()
-        let browser = try #require(store.layout.allPanes.last)
-        #expect(browser.content == .files(taskId: "task", location: identity))
+        let browser = try #require(store.browserPane)
+        #expect(browser.content == .browser(taskId: "task", tabs: [.files], selected: "files", location: identity))
+        #expect(store.isVisible(browser))
         #expect(workspace.browserPage == .files)
         #expect(store.focusedPane == main)
-        guard case .split(.vertical, _, _, let ratio) = store.layout else { Issue.record("Missing vertical split"); return }
-        #expect(ratio == LayoutNode.goldenRatio)
         store.updateRatio(between: main.id, and: browser.id, ratio: 0.6)
-        try workspace.selectContent(.files(taskId: "task", location: identity), in: main)
+        workspace.showBrowser(.files, from: main)
         #expect(store.focusedPaneId == browser.id)
-        #expect(store.layout.allPanes.count == 2)
+        #expect(store.layout.allPanes.count == 3)
         #expect(store.layout.pane(for: main.id) == main)
         let retained = store.layout
         workspace.prepareTaskPanes()
         #expect(store.layout == retained)
-        workspace.closePane(browser.id)
-        workspace.prepareTaskPanes()
-        #expect(store.layout.allPanes.count == 1)
-        #expect(workspace.filesPane == nil)
-        #expect(store.layout.pane(for: main.id) == main)
+        store.close(browser.id)
+        #expect(store.collapsedPaneIds.contains(browser.id))
         workspace.toggleFiles()
-        #expect(store.layout.allPanes.count == 2)
-        #expect(workspace.filesPane?.content == browser.content)
+        #expect(store.isVisible(try #require(store.browserPane)))
+        #expect(store.browserPane?.content == browser.content)
     }
 
-    @Test("Companion switches retain the shell and file draft; close retires the hidden shell")
+    @Test("Companion switches retain the shell and file draft; closing the tab retires the shell")
     func companionSwitchRetainsViews() throws {
         let workspace = SessionsWorkspace(key: workKey, title: "Task", location: identity, localMachineId: identity.machineId)
         let store = workspace.multiplexer
@@ -86,27 +82,24 @@ struct DesktopPaneControlTests {
         let terminal = try #require(shell.terminal)
         let view = workspace.surfaces.view(for: terminal)
         #endif
-        let content = PaneContent.files(taskId: "task", location: identity)
-        let files = try workspace.files(for: content, task: nil, query: RegistryQuery { _, _ in "{}" })
+        let browser = try #require(workspace.showBrowser(.files, from: shell))
+        let files = try workspace.files(for: browser.content, task: nil, query: RegistryQuery { _, _ in "{}" })
         files.selection = "draft.txt"
         files.document("draft.txt").editor.string = "retained draft"
-        try workspace.selectContent(content, in: shell)
-        #expect(store.focusedPane.content == content)
+        #expect(store.focusedPaneId == browser.id)
         #expect(store.layout.allPanes.count == 3)
         #if canImport(GhosttyKit)
         #expect(workspace.surfaces.view(for: terminal) === view)
         #endif
-        try workspace.selectContent(.shell(location: identity), in: store.focusedPane)
+        store.setFocusedPane(shell.id)
         #expect(store.layout.pane(for: shell.id)?.content.selectedShell?.command == ["retained-shell"])
-        #if canImport(GhosttyKit)
-        #expect(workspace.surfaces.view(for: terminal) === view)
-        #endif
-        try workspace.selectContent(content, in: store.focusedPane)
+        workspace.showBrowser(.files, from: store.focusedPane)
         #expect(files.selection == "draft.txt")
         #expect(files.document("draft.txt").editor.string == "retained draft")
         #expect(store.layout.pane(for: main.id) == main)
         workspace.closePane(shell.id)
-        #expect(store.layout.pane(for: shell.id)?.content.selectedShell?.command == nil)
+        #expect(store.shellPane?.content.selectedShell == nil)
+        #expect(store.collapsedPaneIds.contains(shell.id))
         #if canImport(GhosttyKit)
         #expect(workspace.surfaces.view(for: terminal) !== view)
         #endif
@@ -222,7 +215,7 @@ struct DesktopPaneControlTests {
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         let router = WorkLinkRouter(), window = UUID()
         let store = registry.open(workKey, title: "Task", location: identity).multiplexer
-        store.show(.files(taskId: "fixture"))
+        store.showBrowser(.files)
         let companion = target(store.focusedPane, window: window)
         store.newShell(command: ["retained-command"], location: identity)
         let shell = target(store.focusedPane, window: window)
@@ -256,7 +249,8 @@ struct DesktopPaneControlTests {
             object: TerminalIdentity.shell(try #require(shell.content.selectedShell).id, machineId: fixtureMachineId))
         #expect(workspace.multiplexer.layout.pane(for: shell.id) == shell)
         NotificationCenter.default.post(name: .ghosttySurfaceClosed, object: terminal)
-        #expect(workspace.multiplexer.focusedPane.content == .empty)
+        #expect(workspace.multiplexer.focusedPane.kind == .session)
+        #expect(workspace.multiplexer.collapsedPaneIds.contains(shell.id))
         let unknown = try #require(workspace.multiplexer.newShell())
         #expect(unknown.terminal == nil)
     }
@@ -540,16 +534,20 @@ struct DesktopPaneControlTests {
             #expect(created.pane != source.pane)
             #expect(store.layout.pane(for: created.pane) != nil)
         }
-        #expect(store.layout.allPanes.count == 4)
-        let files = try #require(store.layout.allPanes.first { $0.content == .files(taskId: task.id, location: identity) })
+        #expect(store.layout.allPanes.count == 3)
+        let files = try #require(store.browserPane)
+        guard case .browser(_, let tabs, _, _, _) = files.content else { Issue.record("Missing browser"); return }
+        #expect(tabs == [.files, .graphLog])
+        #expect(files.content.location == identity)
         store.setCollapsed(paneId: files.id, collapsed: true)
         _ = try router.controlPane(.init(target: source, action: .files(task: task.id)))
         #expect(!store.collapsedPaneIds.contains(files.id))
-        #expect(store.layout.pane(for: files.id) == files)
+        #expect(store.browserPane?.incarnation == files.incarnation)
+        #expect(store.browserPane?.content.selectedBrowserTab == .files)
         let shellReceipt = try router.controlPane(.init(target: source, action: .shell))
         #expect(store.shell(shellReceipt.tab ?? "")?.location == identity)
         #expect(shellReceipt.pane == selected.id)
-        #expect(store.layout.allPanes.count == 4)
+        #expect(store.layout.allPanes.count == 3)
         #expect(store.layout.pane(for: session.id) == session)
         #expect(store.focusedPaneId == selected.id)
         #expect(store.zoomedPaneId == selected.id)
@@ -574,7 +572,7 @@ struct DesktopPaneControlTests {
             try router.controlPane(.init(target: target(store.focusedPane, window: window), action: .shell))
         }
         #expect(store.layout == before)
-        #expect(store.shellPane == nil)
+        #expect(store.shellPane?.content.selectedShell == nil)
     }
 
     @Test func hideRestoreRetainsContentAndIgnoresLaterFocus() throws {
@@ -591,12 +589,12 @@ struct DesktopPaneControlTests {
         for _ in 0..<2 { // Repeating after a lost reply is idempotent.
             let report = try router.controlPane(DesktopPaneCommand(target: request, action: .hide))
             #expect(report.pane == shell.id)
-            #expect(router.inspect().windows[0].workspaces[0].hiddenPanes == [shell.id])
+            #expect(router.inspect().windows[0].workspaces[0].hiddenPanes == ["browser", shell.id])
             #expect(store.focusedPane == session)
         }
         let report = try router.controlPane(DesktopPaneCommand(target: request, action: .restore))
         #expect(report.pane == shell.id)
-        #expect(router.inspect().windows[0].workspaces[0].hiddenPanes.isEmpty)
+        #expect(router.inspect().windows[0].workspaces[0].hiddenPanes == ["browser"])
         #expect(store.layout == layout)
         #expect(store.focusedPane == session)
         #expect(store.layout.pane(for: shell.id)?.content.selectedShell?.command == ["fixture-shell"])
@@ -612,7 +610,7 @@ struct DesktopPaneControlTests {
         let shell = store.focusedPane
         store.load(sessionId: "retained-session", location: identity)
         let session = store.focusedPane
-        store.show(.files(taskId: "task"))
+        store.showBrowser(.files)
         let filesPane = store.focusedPane
         let document = workspace.files(issue: "TASK", cwd: identity.worktree).document("note.txt")
         document.editor.string = "unfinished draft"
@@ -666,7 +664,7 @@ struct DesktopPaneControlTests {
         store.newShell(location: identity)
         let peer = target(store.focusedPane, window: window)
         register(router, window: window, registry: registry)
-        let before = store.layout, focus = store.focusedPaneId
+        let before = store.layout, focus = store.focusedPaneId, hidden = store.collapsedPaneIds
         let actions: [DesktopPaneAction] = [.hide, .restore, .focus,
             .move(destination: peer, axis: .vertical), .resize(toward: peer, ratio: 0.6), .zoom(enabled: true), .shell, .files(task: "task"), .graphLog(task: "task"),
             .text(surface: "stale", text: "draft"), .key(surface: "stale", key: .enter)]
@@ -675,7 +673,7 @@ struct DesktopPaneControlTests {
             #expect(store.layout == before)
             #expect(store.focusedPaneId == focus)
             #expect(store.zoomedPaneId == nil)
-            #expect(store.collapsedPaneIds.isEmpty)
+            #expect(store.collapsedPaneIds == hidden)
         }
     }
 
@@ -710,16 +708,16 @@ struct DesktopPaneControlTests {
         #expect(registry.keys == [workKey])
     }
 
-    @Test func focusingTheOnlyHiddenPaneRevealsItWithoutChangingItsContent() throws {
+    @Test func focusingAHiddenPaneRevealsItWithoutChangingItsContent() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
         let store = registry.open(workKey, title: "Task", location: identity).multiplexer
         store.newShell(location: identity)
         let pane = store.focusedPane, request = target(pane, window: window)
         register(router, window: window, registry: registry)
         _ = try router.controlPane(.init(target: request, action: .hide))
-        #expect(store.visibleLayout == nil)
+        #expect(!store.isVisible(pane))
         _ = try router.controlPane(.init(target: request, action: .focus))
-        #expect(store.visibleLayout == .leaf(pane))
+        #expect(store.isVisible(pane))
         #expect(store.focusedPane == pane)
     }
 
@@ -736,23 +734,22 @@ struct DesktopPaneControlTests {
         #expect(throws: DesktopTargetError.self) {
             try router.controlPane(DesktopPaneCommand(target: old, action: .hide))
         }
-        #expect(store.collapsedPaneIds.isEmpty)
+        #expect(!store.collapsedPaneIds.contains(old.pane))
     }
 
-    @Test func undoCloseKeepsContentsButInvalidatesTheRemovedOccurrence() throws {
+    @Test func undoCloseShowsTheSameOccurrence() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(), window = UUID()
         let store = registry.open(workKey, title: "Task", location: identity).multiplexer
+        store.load(sessionId: "conversation", location: identity)
         store.newShell(location: identity)
         let shell = store.focusedPane
         register(router, window: window, registry: registry)
         store.close(shell.id)
+        #expect(!store.isVisible(shell))
         store.undoClose()
-        #expect(store.focusedPane.content.selectedShell?.id == shell.content.selectedShell?.id)
-        #expect(store.focusedPane.content.selectedShell?.command == nil)
-        #expect(throws: DesktopTargetError.self) {
-            try router.controlPane(DesktopPaneCommand(target: target(shell, window: window), action: .hide))
-        }
-        #expect(store.collapsedPaneIds.isEmpty)
+        #expect(store.focusedPane == shell)
+        _ = try router.controlPane(DesktopPaneCommand(target: target(shell, window: window), action: .hide))
+        #expect(store.collapsedPaneIds.contains(shell.id))
     }
 
     @Test func wrongMachineAndReplacedWindowNeverChangeOrAllocateWorkspaces() throws {
@@ -770,14 +767,14 @@ struct DesktopPaneControlTests {
         #expect(throws: DesktopTargetError.self) {
             try router.controlPane(DesktopPaneCommand(target: target(pane, window: old), action: .hide))
         }
-        #expect(store.collapsedPaneIds.isEmpty)
+        #expect(!store.collapsedPaneIds.contains(pane.id))
         _ = try router.controlPane(DesktopPaneCommand(target: target(pane, window: replacement), action: .hide))
-        #expect(store.collapsedPaneIds == [pane.id])
+        #expect(store.collapsedPaneIds.contains(pane.id))
         router.remove(replacement, repository: repository)
         #expect(throws: DesktopTargetError.self) {
             try router.controlPane(DesktopPaneCommand(target: target(pane, window: replacement), action: .restore))
         }
-        #expect(store.collapsedPaneIds == [pane.id])
+        #expect(store.collapsedPaneIds.contains(pane.id))
     }
 }
 #endif

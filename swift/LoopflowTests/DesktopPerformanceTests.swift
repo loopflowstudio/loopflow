@@ -512,18 +512,18 @@ struct DesktopPerformanceTests {
             try await sample("graph_log_active", population, attempt, journal, window, action: {
                 // This Task already has a retained Session choice; the Graph
                 // process log opens alongside it.
-                multiplexer.show(.graphLog(taskId: "perf-task-0"))
+                multiplexer.showBrowser(.graphLog)
             }, ready: {
                 hasRendered(window, "task-work-perf-graph-0")
                     && !terminals.contains { window.firstResponder === $0 }
-                    && multiplexer.focusedPane.content == .graphLog(taskId: "perf-task-0")
+                    && multiplexer.focusedPane.content == .browser(taskId: "perf-task-0", tabs: [.graphLog], selected: "graph-log")
             })
             let logPane = multiplexer.focusedPaneId
             try await sample("graph_log_empty", population, attempt, journal, window, action: {
                 // A Task no Graph has run for: scoping the reader to it is part of the wait.
                 try openTask(.task(id: "perf-task-1"))
                 model.syncWorkScope()
-                multiplexer.show(.graphLog(taskId: "perf-task-1"))
+                multiplexer.showBrowser(.graphLog)
             }, ready: { hasRendered(window, "task-graph-processes-empty") })
             try await sample("session_return", population, attempt, journal, window, action: {
                 navigator.onOpenSession(first)
@@ -559,10 +559,10 @@ struct DesktopPerformanceTests {
             try await sample("task_overview", population, attempt, journal, window, action: {
                 files.page = .task
                 let pane = try #require(multiplexer.layout.pane(for: sessionPane))
-                try workspace.selectContent(.files(taskId: "perf-task-0", location: pane.content.location), in: pane)
+                try workspace.showBrowser(.files, from: pane)
             }, ready: { hasRendered(window, "browser-task-overview") })
             try await sample("task_graph", population, attempt, journal, window, action: {
-                multiplexer.show(.graphLog(taskId: "perf-task-0"))
+                multiplexer.showBrowser(.graphLog)
                 model.syncWorkScope()
                 try pressElement("task-work-perf-graph-0", in: window)
                 try await wait(window) {
@@ -576,7 +576,7 @@ struct DesktopPerformanceTests {
             })
             try await sample("file_edit_refresh", population, attempt, journal, window, action: {
                 files.page = .files
-                multiplexer.show(.files(taskId: "perf-task-0", location: workspace.location))
+                multiplexer.showBrowser(.files, location: workspace.location)
                 try await wait(window) { files.changedPaths.first == "notes.txt" }
                 files.navigator = .dropdown
                 try pressElement("notes.txt", in: window, property: "Label")

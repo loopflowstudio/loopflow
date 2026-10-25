@@ -30,3 +30,10 @@ them in the demo. Each is reversible before landing.
   empty panes collapse, extra Session panes leave the layout). No dual-shape reader.
 - **Doubled Dashboard frame — Jack's call in the demo.** `DashboardView.swift` and
   `WorkspacePanesView.swift` both stroke `palette.border`. No change planned.
+- **Close hides; ⌘W closes the selected tab (implemented 2026-10-24).** With
+  retained panes, ⌘W on a shell or browser closes its selected tab and the last
+  tab hides the pane; on the session pane it hides the pane. Undo shows the same
+  occurrence again (the old "Undo never replays" rule holds because the shell is
+  never torn down).
+- **New layouts use pane IDs `session`, `shell`, `browser`.** Migrated layouts
+  keep their stored IDs; `-b session` resolves by kind either way.

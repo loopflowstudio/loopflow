@@ -3346,13 +3346,25 @@ mod tests {
 
         let task = layout("task_22222222222222222222222222222222");
         task.validate().unwrap();
-        let panes: Vec<_> = task.tree.panes().iter().map(|(id, _)| id.to_string()).collect();
+        let panes: Vec<_> = task
+            .tree
+            .panes()
+            .iter()
+            .map(|(id, _)| id.to_string())
+            .collect();
         assert_eq!(panes, ["pane-0", "pane-1", "pane-2"]);
-        let Some(PaneIntent::Browser { tabs, selected, location }) = task.tree.pane("pane-2") else {
+        let Some(PaneIntent::Browser {
+            tabs,
+            selected,
+            location,
+        }) = task.tree.pane("pane-2")
+        else {
             panic!("Files becomes the browser pane at its own place")
         };
         assert!(location.is_some());
-        assert!(matches!(&tabs[..], [BrowserTab::Files { tabs: files, .. }, BrowserTab::GraphLog { .. }] if files.len() == 2));
+        assert!(
+            matches!(&tabs[..], [BrowserTab::Files { tabs: files, .. }, BrowserTab::GraphLog { .. }] if files.len() == 2)
+        );
         assert_eq!(selected.as_deref(), Some("files"));
         assert_eq!(
             (task.focused.as_deref(), task.zoomed.as_deref()),
@@ -3374,7 +3386,11 @@ mod tests {
         let conversation = layout("task_33333333333333333333333333333333");
         conversation.validate().unwrap();
         assert_eq!(
-            conversation.hidden.iter().map(String::as_str).collect::<Vec<_>>(),
+            conversation
+                .hidden
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
             ["browser", "shell"]
         );
         assert_eq!(conversation.zoomed.as_deref(), Some("only"));

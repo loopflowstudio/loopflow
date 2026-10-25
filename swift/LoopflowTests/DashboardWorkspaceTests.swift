@@ -241,10 +241,11 @@ struct DashboardWorkspaceTests {
         let work = try #require(registry.retained(key))
         let pane = try #require(work.multiplexer.pane(forSessionId: "primary"))
         work.multiplexer.setCollapsed(paneId: pane.id, collapsed: true)
+        let layout = work.multiplexer.layout
         model.applySelectionPlans([plan], reason: "")
         #expect(work.multiplexer.pane(forSessionId: "primary") == pane)
         #expect(work.multiplexer.collapsedPaneIds.contains(pane.id))
-        #expect(work.multiplexer.layout.allPanes.count == 1)
+        #expect(work.multiplexer.layout == layout)
     }
 
     @Test func dashboardFocusPreservesQueryGeometryAndRetainedWork() throws {

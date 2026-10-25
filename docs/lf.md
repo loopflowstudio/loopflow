@@ -1150,10 +1150,12 @@ lf --task LOO-427 desktop zoom --pane "$pane"
 lf --task LOO-427 desktop zoom --pane "$pane" --off
 ```
 
-Each Task has one Shell pane. Creating a shell adds and selects a tab with its own
-identity and recorded Task location. Repository and Wave shell requests change nothing.
-Files reuse one Task pane and one document per path; reopening a file selects its tab
-and preserves its draft.
+A Task workspace has exactly three panes: `session`, `shell` and `browser`.
+Wave and repository workspaces have only `session`. Panes are never created or
+destroyed; closing one hides it. Creating a shell adds and selects a tab with its
+own identity and recorded Task location. Repository and Wave shell requests change
+nothing. Files and the Graph log are tabs of the browser pane; Files keeps one
+document per path, and reopening a file selects its tab and preserves its draft.
 
 ```sh
 receipt=$(lf --task LOO-427 desktop shell --json)
@@ -1188,8 +1190,8 @@ lf --task LOO-427 desktop files --pane "$pane"
 lf --task LOO-427 desktop graph-log --pane "$pane"
 ```
 
-Companions fill an empty pane or open beside occupied content, retaining focus,
-zoom and Work. Files/Graph-log reuse the Task's pane. Shell opens on the recorded
+Shell, Files and Graph log select a tab in their pane without moving focus or
+zoom. Shell opens on the recorded
 execution Machine and rechecks the checkout before launch; it never falls back to
 a local shell. Repeating Shell creates another shell, so inspect after a lost reply.
 Remote filesystem events update retained documents; disconnects retain drafts.

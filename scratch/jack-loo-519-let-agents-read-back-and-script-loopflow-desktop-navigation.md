@@ -239,12 +239,18 @@ Delete: the nav verbs, `view working-tasks`, agent `LF_AGENT_CALLER` inference.
 
 One PR; deepest deletion first.
 
-1. **This slice — designated panes.** Rust `PaneIntent`/validation + draft
-   migration converting stored layouts; Swift `PaneContent`, multiplexer and
-   views (browser pane with `files`, `graph-log`, URL tabs; session switch;
-   shell tabs as the only "new terminal"). Focused: `cargo test -p loopflow
-   selection::panes` and a migration test seeding a released layout with
-   files/log/empty/two-session panes; Swift `WorkspaceRetentionTests`.
+1. **Designated panes — implemented 2026-10-24.** Rust `PaneIntent` is
+   `Session{session_id?} | Shell{tabs, selected?} | Browser{location, tabs, selected?}`,
+   `tree` is required, and validation demands exactly one of each kind (Task) or one
+   session (Wave/repository). Draft `designated_panes` marks the batch
+   (`-- breaks:`); the runner's Rust hook `convert_released_layouts` rewrites
+   stored layouts. Swift `PaneContent` is `session(id?) | shell | browser`;
+   `MultiplexerStore(taskId:)` builds the designated tree with stable pane IDs
+   `session`, `shell`, `browser` (migrated layouts keep theirs). Close hides a
+   pane; ⌘W closes the selected shell/browser tab and the last tab hides the pane.
+   Opening a conversation switches the session pane in place. `BrowserPageView`
+   is a bare `WKWebView`. Still open here: browser back/reload controls; the
+   current `desktop shell` verb already keeps focus (as `run` will).
 2. **Action registry.** `DesktopAction` with perform; shortcut monitor, menus
    and Keyboard Shortcuts window bound to it; `perform desktop action` event;
    delete `CNRTpane`, `CNRTnavg`, `SessionsShortcut`. Swift
@@ -303,4 +309,8 @@ the doubled frame unless Jack picks a fix in the demo.
 - **`WKWebView` on macOS 15** needs no deployment-target change; SwiftUI
   `WebView` would need 26 and is not used.
 
-Check results: none yet for this plan.
+Check results: `cargo test -p loopflow --lib selection` and `designated_panes` pass
+(one unrelated `task_graph_launch_tests` failure under inherited LF_* env); Swift
+focused suites (Multiplexer*, DesktopPaneControl, ToolTab, WorkDestination,
+Dashboard/Worktree/WorkspacePanes, TaskFiles, WorkSelection, DTOFixture) pass;
+`cargo clippy -p loopflow --all-targets -D warnings` clean; Rust integration suite (`cli_discovery`, `dto_fixtures`) left to gate.

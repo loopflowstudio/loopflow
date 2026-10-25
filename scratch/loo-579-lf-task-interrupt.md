@@ -208,4 +208,4 @@ From an lf-launched shell, with inherited `LF_*` unset and `< /dev/null`:
 - `cargo clippy --all-targets -- -D warnings`; `cargo fmt --check`.
 - Regenerate the reference with `UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration reference_matches_the_compiled_cli < /dev/null`.
 
-Check result (compress): `cargo test --lib interrupt` 16 ok (both new launch tests, the RunningGraph unit test); `--test integration task_github_cache` 3 ok; clippy/fmt clean. Full suites deferred to gate.
+Check result (kickoff, after restoring onto #1675/#1676 as 5a1c2cfa7d): build clean; `--lib interrupt` 17 ok, `--lib task_graph_launch` 34 ok, `--test integration task_github_cache` 3 ok, reference test ok; clippy/fmt clean. Full suites deferred to gate.

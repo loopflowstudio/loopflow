@@ -1394,6 +1394,27 @@ usage and account-event assertions in the recorder tests, rather than racing
 its queue in subprocess-launch tests. Reproduce suspected races with a temporary
 recorder delay beyond that drain window; remove the delay before publication.
 
+### Reproducing races under CPU load
+
+Never start a load generator in the background of your shell (`yes > /dev/null &`,
+`stress &`). A tool timeout, a killed step or a failed command ends the shell
+before its cleanup line runs, and the generators run forever. On October 25,
+32 orphaned `yes` processes from one such probe burned about 7.7 cores for
+13 hours. Bound every generator by its own lifetime, so nothing outlives the run:
+
+```bash
+# Load ends after 10 minutes even if this shell is killed.
+N=$(sysctl -n hw.ncpu)
+for i in $(seq "$N"); do perl -e 'alarm 600; exec "yes"' > /dev/null & done
+trap 'kill $(jobs -p) 2>/dev/null' EXIT
+for i in $(seq 20); do cargo test -p loopflow --test integration <test> < /dev/null || echo FAIL; done
+```
+
+The alarm survives `exec`, so each `yes` dies after 600 seconds whatever happens to
+the shell (macOS has no `timeout`); the `trap` only ends it sooner. Prefer a repeated run on
+an idle machine, or a deliberate delay at the race point (as above), over CPU load:
+it reproduces the same ordering without loading other people's work.
+
 Orphan Session proofs must launch outside every registered Task checkout; changing
 branches in the same directory does not remove checkout membership. Run these
 proofs with a canonical `TMPDIR` (on macOS, `TMPDIR=/private/tmp`) so temporary

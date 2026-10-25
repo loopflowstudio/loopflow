@@ -1,6 +1,6 @@
 # LOO-584: landing and release agree on who removed a PR's merge request
 
-Status: implemented 2026-10-25, slices 1–4; gate pending. Stacks on LOO-583 (PR #1679). Source:
+Status: implemented 2026-10-25, slices 1–4; gate pending. Based on main after LOO-583 (#1679) landed. Source:
 LOO-583's 5-whys, Prevention 1–3 (git `4ea55cba4a~1:scratch/loo-583-merge-queue-eviction.md`).
 
 ## Problem
@@ -66,12 +66,9 @@ re-queues forever and never reaches ci-fix. That is inferred from code, not obse
 - **Item 3 mostly holds already.** `ci_incident` digests each check's name and URL.
   A distinct run URL is already a distinct incident. The gap is the run lookup
   above, not the dedupe.
-- **LOO-583 broke a release test.** It renamed the timeline query to
-  `LoopflowPrMergeRequestEvents`. `tests/release_tests.rs` `write_gh_merge_wait_script`
-  still matches `*LoopflowPrMergeRemovals*`, so
-  `release_run_waits_out_a_repair_disarm_but_stops_on_a_persons` fails locally
-  (verified 2026-10-25). PR #1679 CI was pending at kickoff. If #1679 lands with the
-  fix, rebase over it. Otherwise this branch rewrites that fixture anyway.
+- **LOO-583 broke a release test.** Its timeline-query rename left
+  `tests/release_tests.rs` matching `*LoopflowPrMergeRemovals*`. This branch rewrote
+  that fixture; the stale name is gone.
 
 ## Chosen approach
 
@@ -182,10 +179,15 @@ Survive: `OpsError::ManualMergeRemoval` (cron accounting/history read it),
 - Webhook-driven observation.
 - Release's `NeedsIntegration` rebuild.
 
-## Known limits (accepted)
+## Known limits
 
-- A person who dequeues in the seconds between a repair's `lf arm` and that repair
-  Process exiting is read as ByLoopflow. The landing re-repairs; it does not stop.
+- Unresolved, for Jack at review (questions.md): a person who dequeues in the
+  seconds between a repair's `lf arm` and that repair Process exiting is read as
+  ByLoopflow. The landing re-repairs and ci-fix re-arms over that dequeue. Closing
+  the race needs durable records of Loopflow's disarms (excluded). Concept review
+  rejected a cheaper rule, "a manual-shaped removal after the window's last arm is
+  Manual". A repair that pushes twice disarms after its own first re-arm, so that
+  rule would block a live repair.
 - A repair that dies with no end record leaves its disarm read as Manual, so the
   landing blocks. That errs toward stopping.
 
@@ -232,3 +234,10 @@ All four slices are in the working diff. Notes from implementation:
 
 Compress (2026-10-25): `cargo test -p loopflow --lib -- ops::pr ops::ci_watch ops::release::tests::merge_request_removals` 68 pass; clippy/fmt clean.
 Check results (2026-10-25): focused lib tests (59) and release_tests `release_run_{repairs_an_eviction,reconciles,waits_for_queued,rearms_a_dropped,repairs_failed_checks,waits_out_a_repair_disarm}` pass; clippy/fmt clean. Full affected suites: gate.
+Concept review (2026-10-25): no implement change; the known-limit race is now labelled unresolved rather than accepted.
+Realign (2026-10-25): every Delete item is gone and every acceptance test exists; origin/main has not moved past the base. No tests rerun.
+
+## Proposed Wave memory (not written; standalone realign)
+
+- GitHub attributes Loopflow's own `gh` disarms to the person whose token runs them (`manually_disabled`, actor = Jack). Who removed a merge request comes from Loopflow's repair windows, never from actor or reason.
+- Landing and release share one removal reader (`pr.rs`) and one decision (`pr_landing::decide_merge`); only a person's removal stops either. Release no longer re-arms on its own; ci-fix re-arms, bounded by incident dedupe.

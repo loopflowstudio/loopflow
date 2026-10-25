@@ -18,3 +18,10 @@ The branch build runs on a stale Machine copy (`~/.lf/copies/45407719…`, in us
 another process), so MTG-185 itself could not be connected by the branch build here.
 
 Check: `cargo test -p loopflow --test integration a_task_identifier_connects` + `--lib human_session` (34) pass; clippy clean. Swift build deferred to gate/CI.
+
+Concept review 2026-10-24: no change. `detached` matches the existing idle-policy term
+(`session.end_detached_after`) and earns its place by changing the one action (Reconnect,
+no Move here). Observers count as viewers, so a Session shown only in a passive Desktop pane
+stays `active`; Swift's terminal-keyed `.active` checks stay correct since `detached` carries
+no terminal ids. A Task identifier as the positional id overlaps `--task`, which stays for
+scripts and Desktop. Open: the PR-recorded real Codex reconnect is still owed at gate.

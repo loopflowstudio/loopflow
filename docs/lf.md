@@ -706,7 +706,9 @@ past already-merged history, including squash merges. PR operations also work on
 ordinary branches without creating a Task.
 Arm and bare land return after recording delivery. `--wait-and-fix` observes and repairs
 its PR every 15 seconds until verified merge, closure, a concrete blocker or
-interruption, including with Desktop closed. Elapsed time never ends the wait or
+interruption, including with Desktop closed. Only a person's dequeue or disabled
+auto-merge blocks it; a queue eviction or other dropped request becomes a CI
+incident whose repair re-arms. Elapsed time never ends the wait or
 triggers a rerun. Interruption leaves the intent intact. Repeating land for a merged
 Task PR with no new work succeeds and reports whether Task completion remains.
 With new work, the same command prepares its next PR.

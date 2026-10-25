@@ -131,15 +131,38 @@ exit 1
     )
 }
 
-fn write_gh_merge_wait_script(log_path: &str, queued: bool, disarmed: bool) -> String {
-    let queued = if queued { "1" } else { "0" };
-    // A manual disarm stamped after any arm this run makes.
-    let removals = if disarmed {
-        r#"{"__typename":"AutoMergeDisabledEvent","createdAt":"2099-01-01T00:00:00Z","reason":"Manually disabled by user","reasonCode":"manually_disabled","actor":{"login":"lf-bot"}}"#
-    } else {
-        ""
+/// What happened to the release PR's merge request before or after this run armed it.
+enum MergeWait {
+    /// Nothing explains its missing request; the run arms it.
+    Dropped,
+    /// It sits in the merge queue and needs no arm.
+    Queued,
+    /// A CI repair disabled auto-merge at this time.
+    RepairDisarmed(String),
+    /// A person disables auto-merge after the run arms it.
+    PersonDisarms,
+}
+
+fn write_gh_merge_wait_script(log_path: &str, wait: MergeWait) -> String {
+    let disabled = |at: &str| {
+        format!(
+            r#"{{"__typename":"AutoMergeDisabledEvent","createdAt":"{at}","reason":"Manually disabled by user","reasonCode":"manually_disabled","actor":{{"login":"jacklionheart"}}}}"#
+        )
     };
-    let checks = support::github_checks_page("$head", &[]);
+    let (mode, before_arm, after_arm) = match &wait {
+        MergeWait::Dropped => ("dropped", String::new(), String::new()),
+        MergeWait::Queued => ("queued", String::new(), String::new()),
+        MergeWait::RepairDisarmed(at) => ("repair", disabled(at), String::new()),
+        MergeWait::PersonDisarms => (
+            "person",
+            String::new(),
+            format!(
+                r#"{{"__typename":"AutoMergeEnabledEvent","createdAt":"2026-10-25T00:00:00Z"}},{}"#,
+                disabled("2026-10-25T00:00:01Z")
+            ),
+        ),
+    };
+    let checks = support::github_checks_page("$head", &[("tests-result", "SUCCESS", true)]);
     let unarmed = support::github_merge_response(1176, "$head", "OPEN", "CLEAN", None);
     let pending =
         support::github_merge_response(1176, "$head", "OPEN", "DIRTY", Some("queued:PR_release"));
@@ -148,7 +171,7 @@ fn write_gh_merge_wait_script(log_path: &str, queued: bool, disarmed: bool) -> S
         r#"#!/bin/sh
 log="{log_path}"
 armed="{log_path}.armed"
-queued="{queued}"
+mode="{mode}"
 seen="{log_path}.seen"
 if [ "$1" = "--version" ]; then
   exit 0
@@ -157,14 +180,16 @@ printf '%s\n' "$*" >> "$log"
 if [ "$1 $2" = "api graphql" ]; then
   case "$*" in
     *LoopflowPrChecks*)
-      if [ "$queued" = 1 ]; then echo "original-head checks cannot settle queued work" >&2; exit 55; fi
+      if [ "$mode" = queued ]; then echo "original-head checks cannot settle queued work" >&2; exit 55; fi
       head="$(git rev-parse HEAD)"
       cat <<JSON
 {checks}
 JSON
       exit 0 ;;
     *LoopflowPrMergeRequestEvents*)
-      echo '{{"data":{{"repository":{{"pullRequest":{{"timelineItems":{{"nodes":[{removals}]}}}}}}}}}}'
+      events='{before_arm}'
+      [ ! -f "$armed" ] || [ "$mode" != person ] || events='{after_arm}'
+      echo '{{"data":{{"repository":{{"pullRequest":{{"timelineItems":{{"nodes":['"$events"']}}}}}}}}}}'
       exit 0 ;;
   esac
 fi
@@ -178,14 +203,15 @@ case "$1 $2" in
       *) echo '[]' ;;
     esac
     exit 0;;
+  'run list') echo '[]'; exit 0;;
   'api graphql')
     head="$(git rev-parse HEAD)"
-    if [ "$queued" = 1 ] && [ ! -f "$seen" ]; then
+    if [ "$mode" = queued ] && [ ! -f "$seen" ]; then
       touch "$seen"
       cat <<JSON
 {pending}
 JSON
-    elif [ -f "$armed" ] || [ "$queued" = 1 ]; then
+    elif {{ [ -f "$armed" ] && [ "$mode" != person ]; }} || [ "$mode" = queued ]; then
       cat <<JSON
 {merged}
 JSON
@@ -196,7 +222,7 @@ JSON
     fi
     exit 0;;
   'pr merge')
-    if [ "$queued" = 1 ]; then echo 'queued work is already armed' >&2; exit 56; fi
+    if [ "$mode" = queued ]; then echo 'queued work is already armed' >&2; exit 56; fi
     touch "$armed"
     exit 0;;
   'release view') echo 'release not found' >&2; exit 1;;
@@ -235,6 +261,9 @@ if [ "$1 $2" = "api graphql" ]; then
 {checks}
 JSON
       exit 0 ;;
+    *LoopflowPrMergeRequestEvents*)
+      echo '{{"data":{{"repository":{{"pullRequest":{{"timelineItems":{{"nodes":[]}}}}}}}}}}'
+      exit 0 ;;
   esac
 fi
 case "$1 $2" in
@@ -253,8 +282,9 @@ case "$1 $2" in
       cat <<JSON
 {merged}
 JSON
-    elif [ ! -f "$seen" ]; then
-      touch "$seen"
+    elif [ ! -f "$seen" ] || [ "$(cat "$seen")" = "$release_head" ]; then
+      # The published release head conflicts until a rebuild replaces it.
+      printf '%s' "$release_head" > "$seen"
       cat <<JSON
 {dirty}
 JSON
@@ -273,7 +303,8 @@ JSON
   'pr merge')
     release_head="$(git ls-remote origin "refs/heads/$release_branch" | cut -f1)"
     main_head="$(git ls-remote origin "refs/heads/$main_branch" | cut -f1)"
-    if git merge-base --is-ancestor "$main_head" "$release_head"; then
+    if [ "$(cat "$seen" 2>/dev/null)" != "$release_head" ] \
+      && git merge-base --is-ancestor "$main_head" "$release_head"; then
       touch "$integrated"
     fi
     exit 0;;
@@ -2109,7 +2140,12 @@ fn prove_release_merge_wait(queued: bool) {
     let head = git_output(&repo, &["rev-parse", "HEAD"]);
     let state = tempfile::tempdir().expect("release state");
     let log_path = state.path().join("gh.log");
-    let gh_script = write_gh_merge_wait_script(&log_path.to_string_lossy(), queued, false);
+    let wait = if queued {
+        MergeWait::Queued
+    } else {
+        MergeWait::Dropped
+    };
+    let gh_script = write_gh_merge_wait_script(&log_path.to_string_lossy(), wait);
     let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
 
     let outcome = release_run(repo.path(), "patch", None, &NullProgress)
@@ -2130,13 +2166,27 @@ fn prove_release_merge_wait(queued: bool) {
     }
 }
 
-/// Stands in for a CI repair that re-arms once the release notices its pause.
-struct RepairRearms(PathBuf);
+/// Stands in for a CI repair that re-arms and finishes once the release reconciles it.
+struct RepairRearms {
+    armed: PathBuf,
+    process: &'static str,
+}
 
 impl Progress for RepairRearms {
     fn status(&self, msg: &str) {
-        if msg.contains("active CI repair") {
-            fs::write(&self.0, "").unwrap();
+        if msg.contains("needs a CI repair") {
+            let StorageConfig::Sqlite { path } = storage_config_from_env().unwrap();
+            rusqlite::Connection::open(path)
+                .unwrap()
+                .execute(
+                    "UPDATE ci_incidents SET repair_finished_at=?2 WHERE repair_lf_process_id=?1",
+                    rusqlite::params![
+                        self.process,
+                        time::OffsetDateTime::now_utc().unix_timestamp()
+                    ],
+                )
+                .unwrap();
+            fs::write(&self.armed, "").unwrap();
         }
     }
     fn error(&self, _msg: &str) {}
@@ -2147,6 +2197,7 @@ impl Progress for RepairRearms {
 
 #[test]
 fn release_run_waits_out_a_repair_disarm_but_stops_on_a_persons() {
+    const REPAIR: &str = "00000000-0000-4000-8000-000000000577";
     for repairing in [true, false] {
         let repo = TestRepo::new();
         git(&repo, &["tag", "v0.9.1"]);
@@ -2155,12 +2206,30 @@ fn release_run_waits_out_a_repair_disarm_but_stops_on_a_persons() {
         git(&repo, &["add", "feature.txt"]);
         git(&repo, &["commit", "-m", "Add release change"]);
         git(&repo, &["push", "origin", "HEAD"]);
+        let branch = format!(
+            "{}/release-default-v0-9-2",
+            loopflow::naming::git_user(repo.path()).unwrap()
+        );
+        git(
+            &repo,
+            &["push", "origin", &format!("HEAD:refs/heads/{branch}")],
+        );
         let state = tempfile::tempdir().expect("release state");
         let log_path = state.path().join("gh.log");
-        let gh_script = write_gh_merge_wait_script(&log_path.to_string_lossy(), false, true);
+        let now = time::OffsetDateTime::now_utc();
+        let wait = if repairing {
+            let at = now
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap();
+            MergeWait::RepairDisarmed(at)
+        } else {
+            MergeWait::PersonDisarms
+        };
+        let gh_script = write_gh_merge_wait_script(&log_path.to_string_lossy(), wait);
         let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
         if repairing {
-            // A repair reservation whose Process has no recorded death is live.
+            // A repair reservation whose Process has no recorded death is live;
+            // the disarm falls inside its lifetime.
             let config = storage_config_from_env().unwrap();
             tokio::runtime::Runtime::new()
                 .unwrap()
@@ -2168,17 +2237,21 @@ fn release_run_waits_out_a_repair_disarm_but_stops_on_a_persons() {
                 .unwrap();
             let StorageConfig::Sqlite { path } = config;
             let conn = rusqlite::Connection::open(path).unwrap();
-            let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            let started = now.unix_timestamp() - 60;
             conn.execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000577','fixture',?1)",
-                [now],
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',?2)",
+                rusqlite::params![REPAIR, started],
             )
             .unwrap();
             conn.execute(
                 "INSERT INTO ci_incidents(identity,repo,pr_number,failed_head_sha,failure_set_json,
                  poll_observed_at,created_at,updated_at,repair_lf_process_id)
-                 VALUES('incident',?1,1176,'old-head','[]',?2,?2,?2,'00000000-0000-4000-8000-000000000577')",
-                rusqlite::params![RepoId::discover(repo.path()).unwrap().as_str(), now],
+                 VALUES('incident',?1,1176,'old-head','[]',?2,?2,?2,?3)",
+                rusqlite::params![
+                    RepoId::discover(repo.path()).unwrap().as_str(),
+                    started,
+                    REPAIR
+                ],
             )
             .unwrap();
         }
@@ -2187,24 +2260,38 @@ fn release_run_waits_out_a_repair_disarm_but_stops_on_a_persons() {
             repo.path(),
             "patch",
             None,
-            &RepairRearms(PathBuf::from(format!("{}.armed", log_path.display()))),
+            &RepairRearms {
+                armed: PathBuf::from(format!("{}.armed", log_path.display())),
+                process: REPAIR,
+            },
         );
 
+        let log = fs::read_to_string(&log_path).unwrap();
         if repairing {
-            assert!(matches!(outcome, Ok(ReleaseRunOutcome::Released(_))));
-            let log = fs::read_to_string(&log_path).unwrap();
+            assert!(
+                matches!(outcome, Ok(ReleaseRunOutcome::Released(_))),
+                "{outcome:?}"
+            );
             assert!(
                 !log.contains("pr merge"),
                 "a repair's pause is not re-armed"
             );
         } else {
-            assert!(matches!(
-                outcome,
-                Err(OpsError::ManualMergeRemoval {
-                    pr_number: 1176,
-                    ..
-                })
-            ));
+            assert!(
+                matches!(
+                    outcome,
+                    Err(OpsError::ManualMergeRemoval {
+                        pr_number: 1176,
+                        ..
+                    })
+                ),
+                "{outcome:?}"
+            );
+            assert_eq!(
+                log.matches("pr merge").count(),
+                1,
+                "a person's disarm stays"
+            );
         }
     }
 }
@@ -2378,6 +2465,148 @@ exec '{}' "$@"
         "{}\n{}",
         String::from_utf8_lossy(&outcome.stdout),
         String::from_utf8_lossy(&outcome.stderr)
+    );
+}
+
+#[test]
+fn release_run_repairs_an_eviction_with_a_green_head() {
+    let state = tempfile::tempdir().unwrap();
+    let repaired = state.path().join("repaired");
+    let prompt = state.path().join("prompt");
+    let log = state.path().join("gh.log");
+    let run = "https://github.com/loopflowstudio/release-fixture/actions/runs/40166998506";
+    let checks = support::github_checks_page("$head", &[]);
+    let evicted = support::github_merge_response(1309, "$head", "OPEN", "CLEAN", None);
+    let merged = support::github_merge_response(1309, "$head", "MERGED", "UNKNOWN", None);
+    let gh = format!(
+        r#"#!/bin/sh
+repaired='{repaired}'
+printf '%s\n' "$*" >> '{log}'
+head=$(git rev-parse HEAD)
+case "$*" in
+  *actions/runs*created=2026-10-25T05:50:32Z..2026-10-25T06:02:33Z*)
+    echo '{{"workflow_runs":[{{"head_branch":"gh-readonly-queue/main/pr-1309-abc","conclusion":"failure","html_url":"{run}"}}]}}'
+    exit 0;;
+esac
+case "$1 $2" in
+  '--version ') echo 'gh fixture';;
+  'release view') echo 'release not found' >&2; exit 1;;
+  'run list') echo '[]';;
+  'pr list')
+    case " $* " in
+      *' --head '*) printf '[{{"number":1309,"state":"OPEN","mergeCommit":null,"url":"https://github.com/loopflowstudio/release-fixture/pull/1309","headRefOid":"%s"}}]\n' "$head";;
+      *) echo '[]';;
+    esac;;
+  'api graphql')
+    case "$*" in
+      *LoopflowPrChecks*)
+        cat <<JSON
+{checks}
+JSON
+        ;;
+      *LoopflowPrMergeRequestEvents*)
+        echo '{{"data":{{"repository":{{"pullRequest":{{"timelineItems":{{"nodes":[
+          {{"__typename":"AutoMergeEnabledEvent","createdAt":"2026-10-25T05:40:31Z"}},
+          {{"__typename":"AddedToMergeQueueEvent","createdAt":"2026-10-25T05:50:32Z"}},
+          {{"__typename":"RemovedFromMergeQueueEvent","createdAt":"2026-10-25T06:02:33Z","reason":"failed_checks","actor":{{"login":"github-merge-queue"}}}}
+        ]}}}}}}}}}}'
+        ;;
+      *)
+        if [ -f "$repaired" ]; then
+          cat <<JSON
+{merged}
+JSON
+        else
+          cat <<JSON
+{evicted}
+JSON
+        fi ;;
+    esac;;
+  *) echo "unexpected gh: $*" >&2; exit 1;;
+esac
+"#,
+        repaired = repaired.display(),
+        log = log.display(),
+    );
+    // The repair records the prompt it was handed, then publishes.
+    let codex = support::codex_socket_script(&format!(
+        r#"#!/bin/sh
+read -r initialize
+echo '{{"jsonrpc":"2.0","id":1,"result":{{}}}}'
+read -r initialized
+read -r thread_start
+echo '{{"jsonrpc":"2.0","id":2,"result":{{"thread":{{"id":"thread-test"}}}}}}'
+read -r turn_start
+printf '%s\n' "$turn_start" > '{prompt}'
+touch '{repaired}'
+echo '{{"jsonrpc":"2.0","id":3,"result":{{"turn":{{"id":"turn-test"}}}}}}'
+echo '{{"jsonrpc":"2.0","method":"turn/started","params":{{"threadId":"thread-test","turn":{{"id":"turn-test","status":"inProgress"}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"item/completed","params":{{"threadId":"thread-test","turnId":"turn-test","item":{{"type":"agentMessage","id":"message-test","text":"{{\"status\":\"published\",\"summary\":\"Merge group rerun green; re-armed.\"}}","phase":"final_answer"}}}}}}'
+echo '{{"jsonrpc":"2.0","method":"turn/completed","params":{{"threadId":"thread-test","turn":{{"id":"turn-test","status":"completed"}}}}}}'
+if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
+while read -r line; do :; done
+"#,
+        prompt = prompt.display(),
+        repaired = repaired.display(),
+    ));
+    let lf = format!("#!/bin/sh\nexec '{}' \"$@\"\n", env!("CARGO_BIN_EXE_lf"));
+    let _env = EnvGuard::new(&[("gh", &gh), ("codex", &codex), ("lf", &lf)]);
+    let repair_bin = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .next()
+        .unwrap()
+        .join("lf");
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+    git(&repo, &["push", "origin", "v0.9.1"]);
+    fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    fs::write(repo.path().join(".lf/config.yaml"), "agent: codex\n").unwrap();
+    fs::write(repo.path().join("feature.txt"), "release me").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-m", "Release fixture"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    let head = git_output(&repo, &["rev-parse", "HEAD"]);
+    let branch = format!(
+        "{}/release-default-v0-9-2",
+        loopflow::naming::git_user(repo.path()).unwrap()
+    );
+    git(
+        &repo,
+        &["push", "origin", &format!("HEAD:refs/heads/{branch}")],
+    );
+    let local_remote = git_output(&repo, &["remote", "get-url", "origin"]);
+    let github_remote = "https://github.com/loopflowstudio/release-fixture.git";
+    git(
+        &repo,
+        &[
+            "config",
+            &format!("url.{local_remote}.insteadOf"),
+            github_remote,
+        ],
+    );
+    git(&repo, &["remote", "set-url", "origin", github_remote]);
+
+    let outcome = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["repo", "release", "run", "patch"])
+        .env("LF_BIN", &repair_bin)
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(
+        outcome.status.success(),
+        "release did not settle: {}\n{}",
+        String::from_utf8_lossy(&outcome.stdout),
+        String::from_utf8_lossy(&outcome.stderr)
+    );
+    let prompt = fs::read_to_string(&prompt).expect("the eviction reached ci-fix");
+    assert!(prompt.contains("merge-queue (failed_checks)"), "{prompt}");
+    assert!(prompt.contains(run), "{prompt}");
+    assert!(
+        !fs::read_to_string(&log).unwrap().contains("pr merge"),
+        "release never re-arms an evicted PR itself"
+    );
+    assert_eq!(
+        git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
+        head
     );
 }
 

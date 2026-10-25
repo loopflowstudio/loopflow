@@ -3924,14 +3924,15 @@ fn workflow_defaults_follow_task_wave_and_repository() {
     );
     lf(repo.path(), home.path(), &["task", "move", id, "--no-wave"]);
     repo.create_file(".lf/config.yaml", "workflow: ''\n");
-    assert_eq!(
-        lf(
-            repo.path(),
-            home.path(),
-            &["task", "workflow", "show", id, "--json"]
-        ),
-        captured
+    // The proof edge may still be running, so compare the taken-up graph, not its position.
+    let shown = lf(
+        repo.path(),
+        home.path(),
+        &["task", "workflow", "show", id, "--json"],
     );
+    for field in ["name", "nodes", "edges"] {
+        assert_eq!(shown[field], captured[field], "{field}");
+    }
     let standalone = lf(
         repo.path(),
         home.path(),

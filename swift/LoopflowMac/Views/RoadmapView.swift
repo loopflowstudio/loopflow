@@ -276,9 +276,7 @@ struct RoadmapView: View {
                 do {
                     let repo = task.task.repo
                     let issue = task.task.identifier
-                    try await Task.detached(priority: .userInitiated) {
-                        try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
-                    }.value
+                    try await LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
                     try await model.confirmWorkUpdate()
                 } catch {
                     controlError = error.localizedDescription

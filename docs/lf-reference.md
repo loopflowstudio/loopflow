@@ -560,7 +560,7 @@ Open the ongoing conversation of this scope, or an exact Session
 
 | Argument | What it does |
 |---|---|
-| `<id>` | Session ID or provider conversation ID |
+| `<id>` | Session ID, Task identifier, or provider conversation ID |
 | `--task` | task |
 | `--wave` | wave |
 | `--fresh` | Create a fresh primary in this scope, keeping the previous client and history Default: false. |
@@ -1946,7 +1946,7 @@ Ensure tracked Task Work and its worktree without launching a Graph
 
 ## lf task run
 
-Place a Task's worktree, then run a Graph there like `lf --task ISSUE graph GRAPH`
+Place a Task's worktree, then start a Graph there like `lf --task ISSUE graph GRAPH`; returns once it runs (`-b` waits for its end)
 
 | Argument | What it does |
 |---|---|

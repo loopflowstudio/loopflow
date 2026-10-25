@@ -80,7 +80,7 @@ for the remaining reader, wire and lifecycle conversion.
 
 ```bash
 lf checkout INF-123                    # ensure Work and worktree only
-lf -b task run INF-123                 # place an existing Task, run its Graph, return when it ends
+lf task run INF-123                    # place an existing Task, start its Graph, return once it runs
 lf task create --wave <wave> --title "add passkeys"  # file the issue; run it with `lf task run`
 pbpaste | lf task create --wave <wave>               # report from stdin; first line is the title
 lf task run INF-124 --stack-on INF-123 # dependent work before the parent PR merges

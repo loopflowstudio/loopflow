@@ -1128,7 +1128,7 @@ pub enum SessionCommand {
     /// Open the ongoing conversation of this scope, or an exact Session
     #[command(visible_alias = "resume")]
     Connect {
-        /// Session ID or provider conversation ID
+        /// Session ID, Task identifier, or provider conversation ID
         #[arg(conflicts_with_all = ["task", "wave"])]
         id: Option<String>,
         #[command(flatten)]
@@ -1358,7 +1358,8 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Place a Task's worktree, then run a Graph there like `lf --task ISSUE graph GRAPH`
+    /// Place a Task's worktree, then start a Graph there like `lf --task ISSUE graph GRAPH`;
+    /// returns once it runs (`-b` waits for its end)
     Run {
         issue: Option<String>,
         /// A route from the Task's stage, or a graph to take up; the Task's only

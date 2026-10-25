@@ -145,7 +145,7 @@ Start from a Task; Loopflow creates and retains its worktree.
 
 ```bash
 lf task create --wave <wave> --title "add OAuth login"
-lf -b task run <issue-id> &
+lf task run <issue-id>
 lf task status <issue-id>
 lf comment <issue-id> "support passkeys too"
 lf wait <issue-id> --until terminal

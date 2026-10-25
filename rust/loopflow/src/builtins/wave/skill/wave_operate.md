@@ -150,9 +150,9 @@ perform a Graph's steps here. Preserve Graph history, conversation reviews,
 worktrees, ownership and execution history.
 
 - Continue a Task you own with `lf task run <issue-id>`; it takes the Task's
-  Workflow route or default Graph. Each run is a fresh Graph and returns when it
-  ends; background it with your own tool. Leave a live one running instead of
-  duplicating it.
+  Workflow route or default Graph. Each run is a fresh Graph and returns once it
+  is running; `lf task status <issue-id>` follows it. Leave a live one running
+  instead of duplicating it.
 - Use supported Task/Work operations, not raw stores, unclaimed process
   signals or a competing worker on this Machine. A missing Machine stays an
   explicit blocker.

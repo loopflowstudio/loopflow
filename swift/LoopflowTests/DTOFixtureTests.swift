@@ -422,7 +422,7 @@ struct DTOFixtureTests {
     @Test("Session states follow process evidence")
     func sessionStatesFixture() throws {
         let states = try JSONDecoder().decode([SessionState].self, from: loadFixtureData("session_states.json"))
-        #expect(states == [.unknown, .active, .closed])
+        #expect(states == [.unknown, .active, .detached, .closed])
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(SessionState.self, from: Data(#""interrupted""#.utf8))
         }

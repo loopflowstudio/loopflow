@@ -815,6 +815,151 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
     }
 }
 
+#[test]
+fn task_run_returns_while_its_graph_keeps_running() {
+    let task = WorkflowTask::new();
+    task.repo.create_file(
+        ".lf/graphs/held.yaml",
+        "- cmd: __telemetry-scorecard\n- cmd: task sync --plan\n",
+    );
+    task.repo.create_file(
+        ".lf/workflows/held.yaml",
+        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: held}\n  - {from: review, to: end}\n",
+    );
+    task.repo.create_file(
+        "scripts/lifecycle_scorecard.py",
+        r#"
+import json
+import os
+from pathlib import Path
+import time
+
+home = Path(os.environ['LF_HOME'])
+while not (home / 'release').exists():
+    time.sleep(.02)
+print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}))
+"#,
+    );
+    task.select_workflow("held");
+    let home = task.home.path();
+    let (out, returned, release) = (
+        home.join("launcher.out"),
+        home.join("returned"),
+        home.join("release"),
+    );
+    // A launching shell that keeps living after `lf task run` returns.
+    let mut shell = Command::new("/bin/sh");
+    for (name, _) in
+        std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
+    {
+        shell.env_remove(name);
+    }
+    std::os::unix::process::CommandExt::process_group(&mut shell, 0);
+    let mut shell = shell
+        .arg("-c")
+        .arg(format!(
+            "'{}' task run INF-123 > '{}' 2>&1 < /dev/null; touch '{}'; sleep 600",
+            loopflow_test_support::lf_binary(),
+            out.display(),
+            returned.display()
+        ))
+        .current_dir(task.repo.path())
+        .env("LF_HOME", home)
+        .env("LF_BIN", loopflow_test_support::lf_binary())
+        .env("HTTPS_PROXY", "http://127.0.0.1:1")
+        .env("HTTP_PROXY", "http://127.0.0.1:1")
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !returned.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "lf task run never returned: {}",
+            fs::read_to_string(&out).unwrap_or_default()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let printed = fs::read_to_string(&out).unwrap();
+    let graph = printed
+        .split("Graph process ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .unwrap_or_else(|| panic!("no Graph process named: {printed}"))
+        .to_string();
+    assert!(printed.contains(&format!("graph-{graph}.log")), "{printed}");
+    assert!(
+        printed.contains("follow: lf task status INF-123"),
+        "{printed}"
+    );
+    // Returned while the first step is still held.
+    let graphs = task.status()["work"]["graph_processes"].clone();
+    assert_eq!(graphs[0]["id"], graph.as_str());
+    assert_eq!(graphs[0]["state"], "current");
+    // The launching shell and everything in its process group go away.
+    let killed = Command::new("kill")
+        .args(["-KILL", "--", &format!("-{}", shell.id())])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    shell.wait().unwrap();
+    fs::write(&release, "").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let graphs = task.status()["work"]["graph_processes"].clone();
+        if graphs[0]["state"] != "current" {
+            assert_eq!(graphs[0]["state"], "completed", "{graphs}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "Graph never finished");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    let steps: i64 = db
+        .query_row(
+            "SELECT count(*) FROM processes WHERE parent_lf_process_id=?1",
+            [&graph],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(steps >= 2, "the second step never ran: {steps}");
+    // The owner writes the arrival after its Graph exits.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while task.workflow()["position"] != at("review") {
+        assert!(Instant::now() < deadline, "{}", task.workflow());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let status = task.run(&["task", "status", "INF-123"]);
+    let status = String::from_utf8_lossy(&status.stdout);
+    let log = home
+        .canonicalize()
+        .unwrap()
+        .join("logs")
+        .join(format!("graph-{graph}.log"));
+    assert!(
+        status.contains(&format!("Graph: {graph}"))
+            && status.contains(&format!("log: {}", log.display())),
+        "{status}"
+    );
+    // The step that ran after the launcher was gone wrote to the log.
+    let written = fs::read_to_string(&log).unwrap();
+    assert!(written.contains("op: task sync --plan"), "{written}");
+}
+
+#[test]
+fn a_refused_bare_task_run_returns_its_refusal() {
+    let task = WorkflowTask::new();
+    let output = command(
+        task.repo.path(),
+        task.home.path(),
+        &["task", "run", "missing-task", "proof"],
+    )
+    .stdin(std::process::Stdio::null())
+    .output()
+    .unwrap();
+    assert!(!refusal(output).is_empty());
+    assert!(support::recorded_graphs(task.home.path()).is_empty());
+}
+
 /// A registered Task whose repository defines the Graphs and workflows below.
 struct WorkflowTask {
     repo: TestRepo,

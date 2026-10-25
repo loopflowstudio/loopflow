@@ -655,9 +655,17 @@ fn print_task_snapshot(
             );
         }
         for graph in &snapshot.work.graph_processes {
+            let log = loopflow::lf::commands::graph::graph_log_path(&graph.summary.id);
             println!(
-                "  Graph: {}  {}  {:?}",
-                graph.summary.id, graph.summary.name, graph.summary.state,
+                "  Graph: {}  {}  {:?}{}",
+                graph.summary.id,
+                graph.summary.name,
+                graph.summary.state,
+                if log.exists() {
+                    format!("  log: {}", log.display())
+                } else {
+                    String::new()
+                },
             );
         }
         for process in &snapshot.work.processes {
@@ -2397,12 +2405,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         // This process carries the edge and writes where it left the Task: at
         // the edge's target once an attempt at its Graph succeeded, otherwise
         // still on the edge.
-        loopflow::lf::commands::graph::run_for_task(
-            &cli,
-            task.id.as_str(),
-            &graph,
-            task.worktree()?,
-        )?;
+        loopflow::lf::commands::graph::run_for_task(&cli, &task, &graph)?;
         return Ok(loopflow::ops::task::workflow_arrive(&task)?);
     }
     if let Some(Commands::Session { cmd }) = &cli.command {

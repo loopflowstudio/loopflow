@@ -147,14 +147,9 @@ tool" with "returns once its Graph is running; `lf task status <issue>` follows 
 
 ## Delete — do not maintain
 
-- `LocalWaveAgentLauncher.startLf`, `startRefusalWindow` and the temp
-  `loopflow-start-*.log` files (`swift/LoopflowMac/MacLocalWaveAgentLauncher.swift`);
-  `taskRunArguments`' `-b`.
-- `RegistryStarter`, `RegistryQuery.start` and its `onMachine` forwarding
-  (`swift/Loopflow/Services/RegistryQuery.swift`), the `start:` closure in
-  `RegistryQueryLocal.swift`; move `DesktopHeadlessTests` assertions from
-  `started.calls` to the runner's recorded calls with `["task","run",…]`.
-- Guidance telling agents to background `task run` themselves (the skill lines above).
+Done: Desktop's starter (`startLf`, `startRefusalWindow`, temp start logs,
+`RegistryStarter`/`RegistryQuery.start`) and the "background it yourself"
+guidance are deleted. Nothing remains on this list.
 
 Forbidden: a `--detach` flag beside the new default, a second spawn path for
 detached runs, a store column for the log, polling with a deadline, keeping
@@ -167,7 +162,8 @@ acceptance test below. Then status `log:`, guidance/docs/reference, Desktop cuto
 
 ## Done when (gate, headless)
 
-1. `cargo test -p loopflow --test integration task_run_returns_while_its_graph_keeps_running < /dev/null`
+1. `cargo test -p loopflow --lib task_run_returns_while_its_graph_keeps_running < /dev/null`
+   (library suite: `tests/linear/` is mounted from `lib.rs`; `--lib` does not rebuild `target/debug/lf`)
    (new, in `tests/linear/task_graph_launch_tests.rs`): a fixture Graph whose
    first step blocks on a release file (prior art: `__telemetry-scorecard` +
    script in `ops/task/lifecycle_tests.rs`) and whose second is a `cmd:` step.
@@ -176,7 +172,8 @@ acceptance test below. Then status `log:`, guidance/docs/reference, Desktop cuto
    stdout names `Graph process <id>` and `graph-<id>.log`; `kill(-pgid, SIGKILL)`;
    write the release; the Graph records its second step Process and succeeds;
    the Task arrives at the edge target; `lf task status INF-123` prints
-   `Graph: <id>` with `log: …graph-<id>.log`, and the log holds step output.
+   `Graph: <id>` with `log: …graph-<id>.log`, and the log holds the second
+   step's output (the scorecard step's stderr is piped and shown only on failure).
 2. Same file: bare `lf task run` for a refused placement exits non-zero with the
    refusal and records no Graph process.
 3. Existing `-b` suites stay green: `every_task_launch_runs_in_the_foreground_under_the_same_checks`,
@@ -192,3 +189,4 @@ close the conversation, watch `lf top` / Desktop show the Graph advancing.
 ## Checks
 
 - kickoff: no build; evidence from code reading and live `ps` only.
+- compress: `cargo test -p loopflow --lib task_graph_launch_tests` → 28/29, then the two new tests pass after the log-assertion repair; clippy `--all-targets` clean. Gate owns the full suite and Swift.

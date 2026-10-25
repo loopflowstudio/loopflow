@@ -289,7 +289,7 @@ def _package_source(source: Path, destination: Path, specification: dict) -> Non
     with (
         tarfile.open(source) as upstream,
         destination.open("wb") as raw,
-        gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as compressed,
+        gzip.GzipFile(filename="", fileobj=raw, mode="wb", compresslevel=9, mtime=0) as compressed,
         tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive,
     ):
         for member in upstream:

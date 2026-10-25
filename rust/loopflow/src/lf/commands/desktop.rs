@@ -895,9 +895,7 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             let pane = scope
                 .pane(window, verb.target.pane.as_deref(), PaneNeed::Any)
                 .map_err(DesktopError::target)?;
-            let watched = WaitTarget::of(window, pane);
-            drop(desktop);
-            wait(watched, *timeout, json)
+            wait(desktop, WaitTarget::of(window, pane), *timeout, json)
         }
         VerbKind::Action { name, args } => {
             let descriptor = window
@@ -1345,9 +1343,14 @@ fn wait_outcome(baseline: Option<u32>, state: WaitState) -> Option<u8> {
     }
 }
 
-fn wait(target: WaitTarget, timeout: Option<std::time::Duration>, json: bool) -> Result<()> {
+fn wait(
+    desktop: DesktopConnection,
+    target: WaitTarget,
+    timeout: Option<std::time::Duration>,
+    json: bool,
+) -> Result<()> {
     let deadline = timeout.map(|timeout| std::time::Instant::now() + timeout);
-    let mut events = DesktopConnection::open()?.events()?;
+    let mut events = desktop.events()?;
     let mut baseline = None;
     loop {
         let remaining = match deadline {
@@ -1474,7 +1477,7 @@ fn resolve<T>(
     )
 }
 
-/// What a pane command can address when no `-b` names a pane.
+/// What a pane command can address when no `-p` names a pane.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PaneNeed {
     Any,
@@ -1484,13 +1487,15 @@ enum PaneNeed {
 }
 
 impl PaneNeed {
+    /// A verb that belongs to one designated pane addresses it without `-p`.
     fn for_action(action: &str) -> Self {
-        match action.split_once('.').map_or(action, |(group, _)| group) {
-            "shell" => Self::Kind("shell"),
-            "browser" => Self::Kind("browser"),
-            "session" => Self::Kind("session"),
-            _ if matches!(action, "send" | "send-key") => Self::Terminal,
-            _ if action == "show" => Self::Hidden,
+        match action {
+            "run" | "toggle-shell" => Self::Kind("shell"),
+            "browse" | "files" | "graph-log" | "page-back" | "page-forward" | "reload"
+            | "toggle-browser" => Self::Kind("browser"),
+            "switch" => Self::Kind("session"),
+            "send" | "send-key" => Self::Terminal,
+            "show" => Self::Hidden,
             _ => Self::Any,
         }
     }
@@ -2614,8 +2619,12 @@ mod tests {
         );
         // `run` from the session pane adds to that Task's shell.
         assert_eq!(
-            pane(&session, None, None, PaneNeed::Kind("shell")).unwrap(),
+            pane(&session, None, None, PaneNeed::for_action("run")).unwrap(),
             "shell (shell)"
+        );
+        assert_eq!(
+            pane(&session, None, None, PaneNeed::for_action("browse")).unwrap(),
+            "browser (browser)"
         );
         let shell = scope(&inspection, &work, Some("shell-tab"));
         assert_eq!(

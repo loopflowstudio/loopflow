@@ -115,7 +115,7 @@ final class DesktopServer: @unchecked Sendable {
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         let connection = Connection(fd: fd)
         Thread.detachNewThread { [weak self] in
-            connection.readLines { line in self?.handle(line, on: connection) ?? false }
+            connection.readLines { line in self?.handle(line, on: connection) }
             DispatchQueue.main.async { [weak self] in
                 MainActor.assumeIsolated { self?.unsubscribe(connection) }
             }
@@ -123,8 +123,8 @@ final class DesktopServer: @unchecked Sendable {
         }
     }
 
-    /// Runs on the connection's reader thread; false stops reading.
-    private func handle(_ line: Data, on connection: Connection) -> Bool {
+    /// Runs on the connection's reader thread.
+    private func handle(_ line: Data, on connection: Connection) {
         DispatchQueue.main.sync {
             MainActor.assumeIsolated {
                 let (reply, subscribes) = self.reply(to: line)
@@ -133,7 +133,6 @@ final class DesktopServer: @unchecked Sendable {
                 if subscribes { self.subscribe(connection) }
             }
         }
-        return true
     }
 
     @MainActor
@@ -264,8 +263,8 @@ final class DesktopServer: @unchecked Sendable {
 
         init(fd: Int32) { self.fd = fd }
 
-        /// Calls `line` for each newline-terminated request until EOF or a false return.
-        func readLines(_ line: (Data) -> Bool) {
+        /// Calls `line` for each newline-terminated request until EOF.
+        func readLines(_ line: (Data) -> Void) {
             var pending = Data()
             var buffer = [UInt8](repeating: 0, count: 64 * 1024)
             while true {
@@ -278,7 +277,7 @@ final class DesktopServer: @unchecked Sendable {
                 while let end = pending.firstIndex(of: 10) {
                     let request = pending[pending.startIndex..<end]
                     pending.removeSubrange(pending.startIndex...end)
-                    if !request.isEmpty, !line(Data(request)) { return }
+                    if !request.isEmpty { line(Data(request)) }
                 }
             }
         }

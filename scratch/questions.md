@@ -63,3 +63,44 @@ them in the demo. Each is reversible before landing.
   Replace with: targets resolve `-t`, root Work flags, trusted `LF_TERMINAL_ID`, Task
   binding, in Rex order (ID, label, position, suffix); `-b session|shell|browser`;
   mutations go through the `DesktopAction` registry; exit 2/3/4 from typed errors.
+
+## Concept review, 2026-10-25 (Jack Heart, in the Task conversation)
+
+- **Unresolved: pane visibility vs tab closing.** Hiding a pane has five spellings
+  (`hide`, `shell.toggle`, `browser.toggle`, ⌘W on session, ⌘W on a last tab) and
+  getting it back depends on which was used; `state` does not say. Proposed, not
+  accepted: panes only hide/show, tabs only close/reopen, closing the last tab leaves
+  an empty pane, ⌘W on the session pane does nothing, `shell.toggle`/`browser.toggle`
+  go. Question for Jack: when the last shell tab closes, does the pane stay visible
+  and empty, or vanish? It also settles whether ⌘W ends the shell.
+- **Follow-up Tasks filed at Jack's request:** LOO-590 (PR as a browser tab),
+  LOO-591 (Task state in its workspace), LOO-592 (file browser inside the browser pane).
+
+## Implement v2, 2026-10-25 (assumptions, reversible)
+
+- **`wait` semantics.** On a shell tab: done when every line `run` submitted has
+  finished (exit with the last status), else at the next finish after the wait
+  began. On a pane: done when it is ready (session surface running; browser at
+  once). A closed tab has finished. `--for` elapsing exits 1. Depends on the shell's
+  OSC 133 integration; a shell without it never finishes.
+- **`events` uses a 250 ms coalesced poll** inside Desktop, only while a client is
+  subscribed, comparing each window's encoded reading. Desktop state spans
+  Observation, ObservableObject and AppKit; a push signal is LOO-593's to design.
+- **Toggles are key-only.** `toggle-shell`/`toggle-browser` stay in the registry for
+  their keys but have no CLI verb; `actions` still lists them.
+- **`browse URL` names "open a web page"** because `lf desktop open` would collide
+  with `lf open` shorthand. Page history is `page-back`/`page-forward`, distinct
+  from window `back`/`forward`.
+- **On a Dashboard a lone `-p` part is a tile first, then a pane** of the default
+  Task; on a Task view it is a pane, and `TILE/` picks a sidebar Task.
+- **Old layouts are deleted, not converted** (Jack: no migration of existing data);
+  file drafts stored in them go too.
+- **`LF_DESKTOP=1` removed here** (v2 says it goes) rather than in LOO-571; LOO-571
+  can close with this PR.
+- **`lf wait` shorthand docs now say `lf task wait`**: `lf desktop wait` makes the
+  shorthand ambiguous.
+
+- **No input from Jack (2026-10-25)** on: last shell tab closed → empty pane or hidden;
+  Dashboard `resize --span`. Keep what is implemented (closing the last tab hides the
+  pane; Dashboard sizing stays in `layout`) and don't raise them again unless the demo
+  shows a problem.

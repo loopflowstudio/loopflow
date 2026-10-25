@@ -942,7 +942,7 @@ struct DesktopPaneControlTests {
         }
     }
 
-    @Test("pane.close closes the tab it names, not the selected one")
+    @Test("close closes the tab it names, not the selected one")
     func closeActsOnTheAddressedTab() throws {
         let router = WorkLinkRouter(), registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId), window = UUID()
         let store = registry.open(workKey, title: "Task", location: identity).multiplexer

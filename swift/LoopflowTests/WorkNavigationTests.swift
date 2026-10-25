@@ -218,12 +218,12 @@ struct WorkNavigationTests {
         func action(_ characters: String, _ modifiers: NSEvent.ModifierFlags) -> String? {
             DesktopAction.binding(characters: characters, modifiers: modifiers).map { "\($0.0.name) \($0.1)" }
         }
-        #expect(action("1", .command) == "task.goto [\"index\": \"1\"]")
-        #expect(action("9", [.command, .capsLock]) == "task.goto [\"index\": \"9\"]")
+        #expect(action("1", .command) == "goto [\"index\": \"1\"]")
+        #expect(action("9", [.command, .capsLock]) == "goto [\"index\": \"9\"]")
         #expect(action("0", .command) == nil)
         #expect(action("1", [.command, .option]) == nil)
-        #expect(action("\t", .control) == "task.next [:]")
-        #expect(action("\u{19}", [.control, .shift]) == "task.previous [:]")
+        #expect(action("\t", .control) == "next [:]")
+        #expect(action("\u{19}", [.control, .shift]) == "previous [:]")
         #expect(action("\t", []) == nil)
     }
 

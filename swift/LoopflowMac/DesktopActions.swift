@@ -8,7 +8,7 @@ import Loopflow
 import SwiftUI
 import WebKit
 
-/// A default key and the arguments pressing it supplies (⌘2 is `task.goto index=2`).
+/// A default key and the arguments pressing it supplies (⌘2 is `goto index=2`).
 struct DesktopKeyBinding: Equatable {
     enum Key: Equatable { case character(Character), `return`, tab, left, right, up, down }
     let key: Key

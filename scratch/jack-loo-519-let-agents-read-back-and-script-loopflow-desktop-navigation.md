@@ -8,6 +8,87 @@ and Jack judges them in the demo. LOO-576 owns the sidebar scope. History: Jack 
 October 16 navigation brief (Task 2), moved from LOO-497 on October 18; LOO-568's
 follow-ups folded in on October 24.
 
+## v2 (Jack Heart, 2026-10-25) — next implement direction
+
+From Jack's concept review of PR #1677 (a simulated Mitchell Hashimoto review, then
+Jack's answers). Accepted unless marked proposed. Supersedes conflicting text above.
+
+- **Transport: a minimal server inside Desktop, in this PR** (Jack, 2026-10-25: "we
+  need the server to build the right desktop API"). Only what the `lf desktop` API
+  needs: inspection, the verbs, `wait`, `events`. Other roles and the long-term
+  architecture belong to LOO-593; don't build ahead of it. Jack: "Loopflow Desktop just needs to
+  have a server running inside it." Desktop binds `$LF_HOME/run/desktop/<bundle-id>.sock`
+  (0700 dir, 0600 socket, same-uid peer check, stale file unlinked at bind) and serves
+  newline-delimited JSON: `{v,id,method,params}` → `{id,result|error{code}}`, with a
+  version handshake. Path derives from `LF_DESKTOP`; no new env var; the
+  `LF_DESKTOP=1` fallback goes. Exit statuses come from typed error codes (missing
+  socket/refused → 4 immediately). `view` still launches via `loopflow://` when the
+  app is not running, then connects. Delete the osascript path, `Loopflow.sdef`,
+  `ScriptCommands.swift`, `(NNN)` parsing and Automation-consent handling. The server
+  lives and dies with the app; it hosts no Sessions (lf's detached transport does).
+- **No `--`.** Jack hates it. `lf desktop run 'cargo test -p loopflow'` opens a shell
+  tab and submits that line to the shell, as if typed; no lf-side `sh -c` or quoting.
+  (Proposed mechanics.) Bare `run` opens an empty shell tab.
+- **Scripts get explicit state.** `zoom` (and any toggle) requires `--on`/`--off` from
+  the CLI; only keys toggle.
+- **One name per operation (Jack: "simplify — for us there is no server without the
+  app").** Rex's verb vs `do` split has no meaning here. Proposed: the registry's
+  actions *are* the `lf desktop` verbs (`zoom`, `hide`, `show`, `send`, `back`,
+  `next`, `enter`, …); `do` and the dotted names go; `actions` lists verbs. Reverses
+  the earlier `do` decision; Jack to confirm in the demo.
+- **IDs for scripts.** Every receipt returns full IDs of what it resolved or created and
+  the rule that chose it (`-t`, root `--task`, caller pane); `ls` prints short IDs;
+  docs say scripts use IDs, positions are for people.
+- **`-p/--pane`, not `-b`** (collides with root `lf -b` batch). Targets:
+  `--window`, `--dashboard`, `-t/--task`, `-p/--pane` (`session`, `shell:2`, …).
+- **`wait` and `events` move into this Task** (from LOO-453). `events` streams
+  window/pane/destination changes over the socket (`--json` NDJSON, `state` is the
+  snapshot they update). `wait` waits for a pane, tab or shell command to finish, or
+  for readiness, with `--for <duration>`; a timeout exits 1; waiting on a command exits
+  with its status (needs the shell's command-finished mark).
+- **No migration of existing data** (Jack: don't worry about existing data so far).
+  Drop the layout conversion in `designated_panes.sql`; old layouts may reset.
+- **Prove it end to end (Jack: get there).** The demo runs on Loopflow Dev over the
+  socket: `ls`, a navigation verb, `run`, `capture`, `wait`, `events`, exit 3 and 4.
+- **Task view / Dashboard view share verbs** (v2 table in the conversation, proposed):
+  `view`, `hide`/`show`, `move`, `resize`, `layout` at both levels, target picks the
+  level; `enter` vs `zoom` and query-derived membership stay distinct; receipts say
+  `applies_to: dashboard | window`. `arrange`, `slots`, `order`, `restore` fold in.
+
+- **Views contain panes; `--pane` addresses parts of every view (Jack, 2026-10-25:
+  "using --pane even for tasks").** Three view kinds: Task, Dashboard, Wave (Jack: a
+  Wave is its own view; simplest version here, UI refinement in LOO-594). A Task
+  view's panes are `session`, `shell`, `browser`; a Dashboard's panes are its tiles,
+  each holding a Task view; a Wave view starts as its conversation pane plus its Tasks
+  as tiles. `-p` takes a path from the view on screen (or root `--task/--wave`):
+  `-p shell:2`, `-p 3` (third tile), `-p LOO-519` (tile by Task),
+  `-p LOO-519/shell:2` (inside that tile). Subcommand `-t` goes; root
+  `--task`/`--wave` set the base view. Pane verbs (`hide`, `show`, `move`, `resize`,
+  `zoom`, `focus`, `send`, `capture`, `close`, `reopen`) work on any pane;
+  navigation verbs (`view`, `enter`, `back`, `forward`, `next`, `previous`) change the
+  view. On a Dashboard, pane verbs edit the shared record (`applies_to: dashboard`).
+
+**v2 implemented (2026-10-25), slice 6:** socket transport (`DesktopServer.swift`,
+`DesktopConnection` in `desktop.rs`; osascript, sdef, ScriptCommands, `(NNN)` and
+`LF_DESKTOP=1` deleted); registry names are the verbs (`goto`, `back`, `enter`,
+`show`, `run`, `browse`, `page-back`, …; `do` gone; `toggle-shell`/`toggle-browser`
+are keys only); `-p` paths (`shell:2`, tile, `TILE/PANE`), `-t`/`-b` gone; `zoom`
+requires `--on`/`--off`; `run LINE` types the line via Ghostty `initial_input`;
+receipts add `target {window, work, pane, tab, rule}`; `events` (first frame = every
+window, then changed windows, 250 ms poll while subscribed) and `wait` (tab
+`commands {submitted, finished, exit_status}` from `GHOSTTY_ACTION_COMMAND_FINISHED`);
+`designated_panes.sql` deletes old layouts instead of converting them.
+Compress (2026-10-25): `PaneNeed::for_action` maps verb names (`run` → shell;
+`browse`/`files`/`graph-log`/page verbs → browser; `switch` → session), since the
+dotted-group split stopped matching after the rename; `wait` reuses its connection;
+the server's line reader has no stop flag. `--lib commands::desktop` (11), clippy, Swift
+`WorkNavigationTests|DesktopServerTests|DesktopPaneControlTests` (66) pass.
+Remaining: Wave view (conversation + Task tiles); Dashboard pane verbs editing the
+shared record (`applies_to`); `arrange`/`slots`/`order`/`restore` folding into
+`move`/`resize`/`hide`/`show`; the Dev demo (Jack).
+
+Still Jack's: last shell tab closed → empty pane or hidden; Dashboard `resize --span`.
+
 ## Problem
 
 An agent arranging Jack's work through Desktop cannot fully verify what it did,

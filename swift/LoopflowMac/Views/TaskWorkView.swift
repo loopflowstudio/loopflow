@@ -378,7 +378,7 @@ struct TaskWorkflowBar: View {
         switch workflow.position {
         case .node("start"): return "Not started"
         case .node("end"): return "At its end"
-        case .node(let node): return "At \(node) · yours to try"
+        case .node(let node): return "At \(node) · yours"
         case .edge(let index, let process, let running):
             guard workflow.edges.indices.contains(index) else { return "Workflow position unavailable" }
             let edge = workflow.edges[index]

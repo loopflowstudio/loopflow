@@ -119,7 +119,7 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
 **Built 2026-10-24 (Jack approved the pass: "yes"), from Re-demo 2 below:**
 - a. `TaskWorkflowBar` (`TaskWorkView.swift`) under the jump bar on `RepoView`: Workflow name,
   stages + `end` as dots (hover names, click opens stage cells: who, and arrived/here/ahead), the
-  live line (shipping reason, running route + Graph step, "At demo · yours to try"), and
+  live line (shipping reason, running route + Graph step, "At demo · yours"), and
   `TaskShipControl` always visible. `ShippableTaskHeading` deleted; the jump-bar heading reads
   only the lifecycle ("Shipping"), so shipping progress no longer rewrites it. Not built: the
   live line's elapsed time and Session link from the prototype.
@@ -146,12 +146,9 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
   bar computes its stages once. `cargo test --lib task_ship_` 7/7 (with `LOOPFLOW_TEST_LF` set:
   the support crate's compiled-in `CARGO` path is stale here), `ops::task::ship` 4/4, clippy clean, Mac build ok.
 
-0. **Next implement (seventh concept review, 2026-10-24).** The Workflow bar's live line says
-   "At <stage> · yours to try" at every stage. "Try" is demo's word: at `review-design` the
-   person reviews a plan, at `verify` they check main. A stage is where a person takes part, so
-   the line reads "At <stage> · yours" (`TaskWorkflowBar.live`). Nothing else changes: the post-merge rule (the stage whose route into
-   `end` runs nothing, reached once per graph) and the restart backoff hold against the normal
-   path, a hand-merge and a killed carrier.
+0. **Built (seventh concept review, 2026-10-24):** the live line reads "At <stage> · yours"
+   (`TaskWorkflowBar.live`); "try" was demo's word. Check: `swift test --filter
+   'DesktopHeadless|WorkNavigationTests'` 53 ok.
 1. **Re-demo** on the branch build: the Workflow bar (dots, click-to-expand stage cells, live
    line, Ship it / Stop shipping), a failed stand-in that backs off and names its cause instead
    of the hot loop, the `loopflow://` world links and `unstarted` world Tasks. Open for Jack at
@@ -326,7 +323,7 @@ task_execution ok; mixed-runner planning/store failures pass alone (owner: gate)
   disclosure or click to expand or somethign would work"). Prototype variant 3 in
   `scratch/workflow-bar.html`. A bar under the jump bar: the Workflow's name, its stages as
   dots (hover a dot for its name), the live line (the Graph step running now with its time and
-  Session link, or "At demo · yours to try", or the shipping reason including the real failure),
+  Session link, or "At demo · yours", or the shipping reason including the real failure),
   and Ship it / Stop shipping at the right end, always visible. Clicking the dots expands a row
   of stage cells: who does each stage (you / agents / stand-in), and what happened there or will.
   Operator reading, reversible: the jump bar returns to navigation (crumbs, lifecycle state,

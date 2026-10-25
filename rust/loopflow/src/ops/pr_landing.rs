@@ -532,14 +532,12 @@ fn process_ci_fix(
         .iter()
         .any(|name| name.starts_with("merge-queue"))
     {
-        if let Some(eviction) =
-            merge_queue_eviction(&landing.worktree, u64::from(landing.pr_number))
-                .ok()
-                .flatten()
+        if let Ok(Some(MergeQueueEviction {
+            reason,
+            run_url: Some(url),
+        })) = merge_queue_eviction(&landing.worktree, u64::from(landing.pr_number))
         {
-            if let Some(url) = eviction.run_url {
-                urls.insert(merge_queue_check(&eviction.reason), url);
-            }
+            urls.insert(merge_queue_check(&reason), url);
         }
     }
     let checks = incident
@@ -1525,7 +1523,6 @@ mod tests {
         let run = "https://github.com/loopflowstudio/loopflow/actions/runs/40166998506";
         let observed = classify_github_observation(&landing, pr, None, || {
             Ok(Some(MergeQueueEviction {
-                at: chrono::Utc::now(),
                 reason: "failed_checks".to_string(),
                 run_url: Some(run.to_string()),
             }))

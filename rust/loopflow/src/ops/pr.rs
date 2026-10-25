@@ -803,18 +803,11 @@ fn latest_manual_removal(
 ) -> Option<ManualMergeRemoval> {
     events
         .into_iter()
-        .filter(|event| event.created_at > since)
-        .filter_map(|event| {
-            let queued = match event.typename.as_str() {
-                "RemovedFromMergeQueueEvent" => true,
-                "AutoMergeDisabledEvent" => false,
-                _ => return None,
-            };
-            event.is_manual_removal().then(|| ManualMergeRemoval {
-                at: event.created_at,
-                actor: event.actor.map(|actor| actor.login),
-                queued,
-            })
+        .filter(|event| event.created_at > since && event.is_manual_removal())
+        .map(|event| ManualMergeRemoval {
+            queued: event.typename == "RemovedFromMergeQueueEvent",
+            at: event.created_at,
+            actor: event.actor.map(|actor| actor.login),
         })
         .max_by_key(|removal| removal.at)
 }
@@ -822,7 +815,6 @@ fn latest_manual_removal(
 /// GitHub's merge queue removing a PR on its own, e.g. for failed merge-group checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MergeQueueEviction {
-    pub at: chrono::DateTime<chrono::Utc>,
     pub reason: String,
     /// The failed merge-group run that tested this PR, when one is visible.
     pub run_url: Option<String>,
@@ -834,26 +826,22 @@ pub(crate) fn merge_queue_eviction(
     repo: &Path,
     number: u64,
 ) -> OpsResult<Option<MergeQueueEviction>> {
-    let events = merge_request_events(repo, number)?;
-    let Some((at, reason)) = latest_queue_eviction(events) else {
+    let Some(reason) = latest_queue_eviction(merge_request_events(repo, number)?) else {
         return Ok(None);
     };
     Ok(Some(MergeQueueEviction {
-        at,
         reason,
         run_url: failed_merge_group_run(repo, number)?,
     }))
 }
 
-fn latest_queue_eviction(
-    events: Vec<MergeRequestEvent>,
-) -> Option<(chrono::DateTime<chrono::Utc>, String)> {
+fn latest_queue_eviction(events: Vec<MergeRequestEvent>) -> Option<String> {
     let latest = events.into_iter().max_by_key(|event| event.created_at)?;
     if latest.typename != "RemovedFromMergeQueueEvent" || latest.is_manual_removal() {
         return None;
     }
     let reason = latest.reason.unwrap_or_else(|| "unknown".into());
-    (reason != "merged").then_some((latest.created_at, reason))
+    (reason != "merged").then_some(reason)
 }
 
 fn failed_merge_group_run(repo: &Path, number: u64) -> OpsResult<Option<String>> {
@@ -2222,7 +2210,6 @@ mod tests {
             "pullRequest": {"timelineItems": {"nodes": nodes}}}}}))
             .unwrap();
             super::latest_queue_eviction(super::parse_merge_request_events(&timeline).unwrap())
-                .map(|(_, reason)| reason)
         };
 
         assert_eq!(eviction(&nodes).as_deref(), Some("failed_checks"));

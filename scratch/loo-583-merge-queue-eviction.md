@@ -18,8 +18,12 @@ intent and blocked: "run lf arm to resume landing".
 - `test_task_installation.py`: waits up to 120s for Docker before failing as an
   infrastructure fault.
 
+A compress pass dropped `MergeQueueEviction.at` (never read) and flattened the
+ci-fix URL lookup; behavior unchanged.
+
 **Verification.** `cargo test -p loopflow --lib -- ops::pr_landing ops::pr::tests
-ops::ci_watch`: 69 passed. `pytest python/tests/test_task_installation.py`: 8 passed.
+ops::ci_watch`: 69 passed (2026-10-24, after compress; one unnamed failure in
+the first of three runs, not reproduced — gate should watch for a flake). `pytest python/tests/test_task_installation.py`: 8 passed.
 Clippy clean. Replayed the timeline query and run lookup against PR #1676.
 
 **Unproved.** A live eviction → watcher → ci-fix → re-arm on an installed build. An

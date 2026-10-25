@@ -949,7 +949,7 @@ async fn reconcile_claimed(
             // A repair disarms auto-merge before it moves the head and re-arms
             // after publishing. Its disarm is a pause in this landing, not a
             // person withdrawing merge intent.
-            if repair_running(store, landing)? {
+            if repair_running(store, &landing.repo, landing.pr_number)? {
                 return resume_watching(store, landing, head_sha).await;
             }
             block_landing(
@@ -967,7 +967,7 @@ async fn reconcile_claimed(
             // Publication can expose a new head before its repair worker exits.
             // Keep observing that worker's landing rather than admitting a new
             // incident against the checkout it still owns.
-            if repair_running(store, landing)? {
+            if repair_running(store, &landing.repo, landing.pr_number)? {
                 return Ok(());
             }
             let incident = ci_incident(landing, &failing_checks, now);
@@ -1288,11 +1288,11 @@ pub(crate) async fn repair_landing(store: SharedStore, landing: PrLanding) -> Op
     reconcile_pr_landing(store, landing, Arc::new(observe_github), Some(ci_fix(None))).await
 }
 
-/// Whether a repair worker for this landing is running now.
-pub(crate) fn repair_running(store: &SharedStore, landing: &PrLanding) -> OpsResult<bool> {
+/// Whether a repair worker for this PR is running now, whichever landing reserved it.
+pub(crate) fn repair_running(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<bool> {
     Ok(store
         .sqlite
-        .landing_repair_processes(&landing.id)
+        .pr_repair_processes(repo, pr_number)
         .map_err(repair_error)?
         .iter()
         .any(|process| repair_live(store, Some(process))))
@@ -1700,18 +1700,19 @@ mod tests {
         );
         store.observe_ci_incident(&incident).await.unwrap();
         // A reservation whose Process has no recorded death is a live repair.
-        let conn = store.sqlite.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES('repair-worker','fixture',?1)",
-            [OffsetDateTime::now_utc().unix_timestamp()],
-        )
-        .unwrap();
-        conn.execute(
-            "UPDATE ci_incidents SET repair_lf_process_id='repair-worker' WHERE identity=?1",
-            [&incident.identity],
-        )
-        .unwrap();
-        drop(conn);
+        {
+            let conn = store.sqlite.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000577','fixture',?1)",
+                [OffsetDateTime::now_utc().unix_timestamp()],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE ci_incidents SET repair_lf_process_id='00000000-0000-4000-8000-000000000577' WHERE identity=?1",
+                [&incident.identity],
+            )
+            .unwrap();
+        }
         let script = script(vec![
             LandingObservation::Unarmed {
                 head_sha: "head".into(),

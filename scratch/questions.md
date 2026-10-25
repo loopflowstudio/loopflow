@@ -1,1 +1,2 @@
 - LOO-577: Fixed the waiter with the existing live-repair reservation instead of a new "lf disarm" record. #1668 is now on main, so the release-run half stays in this Task. It uses the same live-repair rule and adds no disarm table.
+- LOO-577 release run: a repair that ends without re-arming still reads as a manual removal (its disarm postdates `armed_at`). Kept per the plan's "no live repair → still a dequeue"; the deferred block-message item covers naming it.

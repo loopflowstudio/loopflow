@@ -53,7 +53,7 @@ changed here; noted below.
 
 ## Fix made (this branch)
 
-`Unarmed` while `repair_running(store, landing)` → `resume_watching`, same rule as
+`Unarmed` while `repair_running` → `resume_watching`, same rule as
 `Failing`. The live repair reservation is the record of "lf disarmed this"; no new
 disarm table. Repairs from the waiter and `lf ci watch` share one landing
 (`start_or_join_pr_landing`), so either is seen. A disarm with no live repair still

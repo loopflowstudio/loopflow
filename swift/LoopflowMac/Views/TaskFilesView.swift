@@ -368,78 +368,72 @@ struct TaskFileReadingView: View {
 
 /// Pages run their scripts but never reach the network; links open in the browser.
 /// A rewrite reloads in place at the same scroll position.
-private struct TaskHTMLView: NSViewRepresentable {
+private struct TaskHTMLView: View {
     let html: String
     let baseURL: URL?
     let interacted: () -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    @State private var page: WebPage?
+    @State private var position = ScrollPosition()
+    @State private var offset = CGPoint.zero
+    /// Offsets during a load are the page settling, not the person scrolling.
+    @State private var loading = false
 
-    func makeNSView(context: Context) -> TaskHTMLWebView {
-        let view = TaskHTMLWebView(frame: .zero, configuration: WKWebViewConfiguration())
-        view.navigationDelegate = context.coordinator
-        return view
-    }
-
-    func updateNSView(_ view: TaskHTMLWebView, context: Context) {
-        view.interacted = interacted
-        context.coordinator.show(html, baseURL: baseURL, in: view)
-    }
-
-    @MainActor
-    final class Coordinator: NSObject, WKNavigationDelegate {
-        private var shown: String?
-        private var offline = false
-        private var restore: [Double]?
-        private var loading: Task<Void, Never>?
-
-        func show(_ html: String, baseURL: URL?, in view: WKWebView) {
-            guard html != shown else { return }
-            let reload = shown != nil
-            shown = html
-            loading?.cancel()
-            loading = Task { [weak self, weak view] in
-                guard let self, let view else { return }
-                if !self.offline {
-                    guard let rules = await TaskHTMLRules.offline() else {
-                        view.loadHTMLString("<p>Page unavailable: network blocking could not be set up.</p>", baseURL: nil)
-                        return
+    var body: some View {
+        Group {
+            if let page {
+                WebView(page)
+                    .webViewScrollPosition($position)
+                    .webViewOnScrollGeometryChange(for: CGPoint.self, of: \.contentOffset) { _, new in
+                        offset = new
+                        if !loading { interacted() }
                     }
-                    view.configuration.userContentController.add(rules)
-                    self.offline = true
-                }
-                if reload { self.restore = try? await view.evaluateJavaScript("[scrollX, scrollY]") as? [Double] }
-                guard !Task.isCancelled else { return }
-                view.loadHTMLString(html, baseURL: baseURL)
+                    .simultaneousGesture(TapGesture().onEnded { interacted() })
+            } else {
+                Color.clear
             }
         }
+        .task(id: html) { await show() }
+    }
 
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            guard let restore, restore.count == 2 else { return }
-            self.restore = nil
-            webView.evaluateJavaScript("scrollTo(\(restore[0]), \(restore[1]))")
+    private func show() async {
+        if page == nil {
+            guard let rules = await TaskHTMLRules.offline() else {
+                let blank = WebPage()
+                page = blank
+                await Self.load(blank, html: "<p>Page unavailable: network blocking could not be set up.</p>", baseURL: nil)
+                return
+            }
+            var configuration = WebPage.Configuration()
+            configuration.userContentController.add(rules)
+            page = WebPage(configuration: configuration, navigationDecider: TaskHTMLLinks())
         }
+        guard let page else { return }
+        let restore = offset
+        loading = true
+        defer { loading = false }
+        guard await Self.load(page, html: html, baseURL: baseURL), !Task.isCancelled else { return }
+        position.scrollTo(point: restore)
+    }
 
-        func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
-            guard action.navigationType == .linkActivated, let url = action.request.url,
-                  ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") else { return .allow }
-            NSWorkspace.shared.open(url)
-            return .cancel
-        }
+    /// Whether the page finished loading; a superseded or failed load reports false.
+    @discardableResult
+    private static func load(_ page: WebPage, html: String, baseURL: URL?) async -> Bool {
+        do {
+            for try await _ in page.load(html: html, baseURL: baseURL ?? URL(string: "about:blank")!) {}
+            return true
+        } catch { return false }
     }
 }
 
-final class TaskHTMLWebView: WKWebView {
-    var interacted: () -> Void = {}
-
-    override func scrollWheel(with event: NSEvent) {
-        interacted()
-        super.scrollWheel(with: event)
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        interacted()
-        super.mouseDown(with: event)
+/// Links leave the page for the browser; everything else loads in place.
+private struct TaskHTMLLinks: WebPage.NavigationDeciding {
+    func decidePolicy(for action: WebPage.NavigationAction,
+                      preferences: inout WebPage.NavigationPreferences) async -> WKNavigationActionPolicy {
+        guard action.navigationType == .linkActivated, let url = action.request.url,
+              ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") else { return .allow }
+        NSWorkspace.shared.open(url)
+        return .cancel
     }
 }
 

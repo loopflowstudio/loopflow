@@ -4,7 +4,7 @@ Status (2026-10-24): design accepted (Jack Heart, 2026-10-21/22); every accepted
 and committed, including the 2026-10-24 pass (Workflow bar, ship-restart backoff, post-merge
 verify) and the second pass (Task/Session state axes, `lf ship ISSUE`). What's left: re-demo
 on the branch build, and gate (see Remaining).
-Main merged at 7f63da1649 (2026-10-24). This Task's schema draft is
+Main merged at 936afed62c (2026-10-24, #1667/#1668). This Task's schema draft is
 `store/migrations/drafts/ship_it.sql`; main's unreleased `pools_and_rentals.sql` (#1653) sits
 beside it and touches none of the same tables (main's #1655 rewrite released in `0.14.15.002`).
 
@@ -40,12 +40,16 @@ Verbatim:
   it. Outside a Task it creates one for the branch (default branch refused). `lf ship <graph>`
   takes the graph up like `lf task run X <graph>`. Idempotent on a live carrier. Stand-ins
   decide at every stage; nothing asks Jack. No NeedsYou state.
-- **Lifecycle** (Jack, 2026-10-22: "it should be live state", "Working", "Shipping for, now"):
-  `unstarted → working → shipping → done`, plus `abandoned`; `paused` is a hold. A Task becomes
-  `shipping` on any Task-API route into the stage-free tail of its graph (Ship it, choosing
-  `deliver`, an `autonomous` run); a direct `lf land` does not. "auto tasks become auto shipping".
-- **Stop shipping** (Jack: "yes, disarm"): shipping → working, ends the carrier, disarms the
-  auto-merge Loopflow armed, recorded in history.
+- **States, two axes** (Jack, 2026-10-24: "so its Working vs Active and Available vs Busy as two
+  different axes"; "leaning towards moving"): Task `unstarted · idle · active · moving · shipping ·
+  paused · done · abandoned`, derived from checkout, stage, a running Graph and the Ship it
+  approval (`shipped_at`); Session `available · busy`. Shipping = a Graph running that won't stop
+  for chat again ("either because no caht or marked for chat"). Ship it, `lf ship` or any Task-API
+  route into `end` records the approval; a direct `lf land` does not. With verify ahead, `deliver`
+  no longer leads to `end`, so choosing it alone does not approve. Lists show only `shipping`,
+  never approved vs auto ("i dont think we generally need to differentiate").
+- **Stop shipping** (Jack: "yes, disarm"): clears the approval, ends the carrier, disarms the
+  auto-merge Loopflow armed, recorded in history; the Task reads active at a stage, else idle.
 - **Workflow travels** (Jack: "yes, workflow should travel"): captured graph and stage sync
   with the shared Work model. Machine-local execution (carrier, liveness, attention) stays local;
   only the checkout's Machine restarts a carrier.
@@ -179,14 +183,19 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
    line, Ship it / Stop shipping), a failed stand-in that backs off and names its cause instead
    of the hot loop, the `loopflow://` world links and `unstarted` world Tasks. Open for Jack at
    re-demo (unresolved; none blocks implement or gate):
-   - Settled (Jack, 2026-10-24: "yep. maybe optionally take a new graph to ship with"):
-     `lf ship [ISSUE]` takes the Task like `lf task run`; the graph moves to an option,
-     `lf ship LOO-1 --graph deliver` (operator's spelling, reversible). No issue: the checkout's
-     Task, or a new one for a taskless branch, as today.
+   - Built (Jack, 2026-10-24: "yep. maybe optionally take a new graph to ship with"):
+     `lf ship [ISSUE] [--graph GRAPH]` (operator's spelling, reversible).
    - At `verify`, the session workspace's Workflow bar offers only Ship it, which runs a verify
      stand-in. A person who already checked main finishes through the conversation or the
      detail page's Complete. Does the bar want Complete at a post-merge stage?
-   - Answered by the state redesign below (Jack, 2026-10-24).
+   - The state axes (Remaining d): Working excludes unstarted, a Task approved with nothing
+     running reads idle with the failure and next restart in the Workflow bar.
+   - Open (main #1668, 2026-10-24): main's release stops when a person dequeues its PR or turns
+     off auto-merge (`manual_merge_removal_since`). A shipping Task's landing instead re-arms
+     after a manual dequeue/disable (the accepted #1628 pattern; Stop shipping is the way to
+     stop). Same GitHub event, opposite policies, and two timeline queries reading it
+     (`observe_pr_merge`'s `last:1` and main's `last:20`). Jack's choice: should a person's
+     manual dequeue also stop shipping (clear the approval), or keep re-arming?
 2. **Not in this Task:** the `automation:` config key now names a deleted concept (its only field
    is repair startup retries). `.lf/config.yaml` is read by released lf, so a rename needs the
    shared-file fallback plus a removal Task; leave it. (Both 2026-10-22 concept reviews' docs drift is fixed: docs teach `interactive:` stages, routes,
@@ -217,7 +226,7 @@ Settled (2026-10-22):
   `tasks.planning_completed(_at)`/`planning_state` stay: they are the done authority in the portable
   `Disposition` WorkValue that released peers read. `completion_request/error` stays as the retry
   path for a failed completion. Folding either is a shared-wire change with its own Task.
-  Backlog/Todo↔unstarted, In Progress↔working, Done↔done and Canceled↔abandoned go through
+  Backlog/Todo↔unstarted, In Progress↔idle/active/moving, Done↔done and Canceled↔abandoned go through
   `task_state_delivery::queue_in`. In Review↔shipping is out of this Task: In Review is a named
   `started` state and needs a per-team lookup and a rule for inbound edits.
 - Completion on merge is the ship process's job: before each route it reads the PR and completes
@@ -225,8 +234,7 @@ Settled (2026-10-22):
   completion"; `lf pr reconcile`, `lf land` and reads settle it.
 - Sixth concept review (2026-10-23, jump-bar slice): nothing to change. The heading reads one
   lifecycle; a paused shipping Task reads "Shipping · Paused…" and keeps Stop shipping, which
-  matches "paused is a hold". Open item stays Jack's: whether checkout work alone reads
-  `working`. None blocks re-demo or gate.
+  matches "paused is a hold". (Checkout-work question since answered by the state axes.)
 - Eighth concept review (2026-10-24, after "At <stage> · yours" and `routes(_:)`): nothing to
   change. The header's routes exclude any route into `end`, which hides verify's pass route.
   That's the open Complete-at-verify question in Remaining 1, and it stays Jack's.
@@ -258,10 +266,11 @@ Settled (2026-10-22):
 
 - Ship it or `lf ship` on a `feature` Task at `review-design` runs to merge and completion with
   no person, headless `demo` included; history shows who shipped it and each stand-in decision.
-- A shipping Task appears under the `state:shipping` query, not Working; its conversation stays open.
+- A shipping Task appears under the `state:shipping` query, not Working (idle, active, moving);
+  its conversation stays open.
 - `lf ship` on a bare branch creates a Task that Shipping shows.
 - A second `lf ship` exits 0 "already shipping"; a killed carrier restarts on the next lf read;
-  Pause stops it, resume restarts it; Stop returns it to working and disarms.
+  Pause stops it, resume restarts it; Stop returns it to active/idle and disarms.
 - A failed leaf in `tests-result`'s `needs` closure starts a repair within one poll.
 - #1613/#1628 patterns (queue removal for `failed_checks`/`checks_timed_out`, manual disable)
   merge with no hand.
@@ -295,8 +304,7 @@ The hosted merge-queue run is left to demo.
 - World Tasks that ran a Graph read `unstarted` on the branch. Not a state regression: main's
   `task_state_sql` also derived from Workflow position (`ready` at `start`, `active` past it);
   the branch renamed those to `unstarted`/`working`. A Graph run taskless in a Task's checkout
-  never moved the Workflow on either. Kept position-derived; whether checkout work alone should
-  read `working` is an open question for Jack at re-demo (scratch/questions.md).
+  never moved the Workflow on either. Superseded by the 2026-10-24 state axes.
 
 Check (2026-10-22): clippy/fmt clean; `dto_fixtures` 42 ok; lib pr_landing/chapter/children/waves/
 task_execution ok; mixed-runner planning/store failures pass alone (owner: gate).
@@ -339,7 +347,7 @@ task_execution ok; mixed-runner planning/store failures pass alone (owner: gate)
 - **Reason hides the cause.** "Ship process exited" says nothing about the missing account.
 - **CLI form.** `lf ship <issue>` is not a form: the positional is the graph. The Task comes from
   `--task <issue>` or the checkout. The operator's demo instructions (`wlf ship d5580f`) were
-  wrong. Open: should `lf ship` take an issue (e.g. `lf ship LOO-1`) the way `lf task run` does?
+  wrong. Since built: `lf ship ISSUE` (Remaining e).
 - Not exercised: shipping past the first stand-in (the fake world cannot run headless agents).
 - **Hover reveal flashes** (Jack: "its not really working with the flashing in the heeader").
   Likely causes, unconfirmed: the hot loop rewrote the heading's "Shipping · reason" text about
@@ -361,54 +369,12 @@ task_execution ok; mixed-runner planning/store failures pass alone (owner: gate)
   Machine); the hover Ship it in `ShippableTaskHeading` is deleted; expanded/collapsed is
   per-viewer UI state. This supersedes "Variant C later" for this Task.
 
-## Task states, redrawn (Jack Heart, 2026-10-24) — under discussion, not yet direction
+## Task states (settled 2026-10-24, built as Remaining d)
 
-Jack: "i think we basically want states for:
-- has a checkout but not currently running a workflow (idle)
-- currently at an interactivestage of workflow (waiting? yours?)
-- currently running an atuonomous graph with at least one interactive stage left before shipping (working)
-- no more interactive stages left, running a flow that culminates in completion and landing (shipping)"
-
-Operator reading: the open-Task states become derived from checkout, Workflow position and
-whether a Graph is running, instead of stored `working`/`shipping`:
-- unstarted: no checkout yet (kept; Jack's list starts at "has a checkout").
-- idle: checkout, no Graph running, not at an interactive stage (e.g. a stopped route).
-- at an interactive stage: name open (Jack: "waiting? yours?").
-- working: a Graph running with an interactive stage still ahead before shipping.
-- shipping: no interactive stage left, a Graph running toward landing and completion. Ship it
-  makes this true by standing in at the remaining interactive stages.
-- plus done, abandoned, and paused as a hold.
-Settled (Jack Heart, 2026-10-24), superseding the operator's earlier Available/Active draft:
-"Available = task-session is avaialble" and "Active = current state is between graphs at a
-strucutred convo in the task session". So:
-- **Active** is the Task state: the Task sits at an interactive stage (between Graphs, in a
-  structured conversation in its Task Session).
-- **Available** is not a Task state. It stays the Session attention state AGENTS.md already
-  defines: the Task Session's turn has ended and it is ready for the person. An Active Task's
-  Session is Available or mid-turn; that is shown on the Session, not as another Task state.
-- **Busy** is the other Session state (Jack, 2026-10-24: "Busy = task session is not
-  available"): the Task Session is mid-turn. Available and Busy describe the Session only.
-- **Working** (Jack, 2026-10-24: "Working = task is currently running a grpah, regardless of
-  session availability"): a Graph is running for the Task, whatever its Session is doing.
-  Shipping stays the case where no interactive stage remains and that run ends in landing and
-  completion.
-Task states: unstarted · idle · active · working · shipping · paused · done · abandoned.
-Session states: available · busy.
-Settled (Jack, 2026-10-24, "so its Working vs Active and Available vs Busy as two different
-axes"; on a dead ship process: "i would say idle"): Task and Session states are two axes. A Task
-whose ship process died reads **idle**; shipping is derived from a running ship Graph, not a
-stored intent. Jack then defined it: "shipping is: graph is running *and* wont stop for chat again (either
-because no caht or marked for chat)". Operator reading ("marked for chat" taken as marked to
-stand in, i.e. Ship it pressed; confirm): shipping = a Graph is running AND no interactive stage
-ahead will stop it, because none remain or Ship it marked them for stand-ins. The Ship it mark is
-the stored part (a per-Task "stand in at remaining stages"), cleared by Stop shipping, by
-reaching `end`, and by moving the Task back to a stage. A marked Task with no Graph running
-reads idle; lazy recovery restarts its ship process from the mark, with backoff, and the idle
-reason names the failure and the next restart. This keeps "recovery is lazy and universal".
-Jack, 2026-10-24: "so there is an additional box we need to check to maintain "explicitly
-approved for fast mode" or whatever but i dont think we generally need to differentiate in the
-lists or searches". So the mark is one stored approval on the Task (the branch's existing
-`task_shipped_at` WorkValue serves; its name is open), shown in the Task's own detail and
-history, while lists and `state:` queries show only `shipping`, never "approved shipping" vs
-"auto shipping".
-
+Jack's draft: "has a checkout but not currently running a workflow (idle)", "currently at an
+interactivestage of workflow", "currently running an atuonomous graph … (working)", "no more
+interactive stages left … (shipping)". Then: "Available = task-session is avaialble", "Active =
+current state is between graphs at a strucutred convo in the task session", "Busy = task session
+is not available", "Working = task is currently running a grpah, regardless of session
+availability" (renamed `moving`), dead ship process: "i would say idle". Operator reading of
+"marked for chat" as Ship it pressed is still unconfirmed by Jack; it is what's built.

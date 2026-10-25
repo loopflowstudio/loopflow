@@ -42,11 +42,8 @@ design rewrite, each reversible before implementation:
   a failed completion. Removing them needs its own shared-wire Task. Reversible.
 - In Review↔shipping is not built: `queue_in` targets Linear state types, and In Review is a
   named `started` state that needs a per-team lookup by name plus a reconcile rule.
-- `unstarted` vs `working` (third concept review, 2026-10-22): kept main's position-derived rule
-  (`working` once the Workflow leaves `start`), renamed from `ready`/`active`. A Task with Sessions
-  or a taskless Graph in its checkout but still at `start` reads `unstarted`. Jack's "it should be
-  live state" was about ship intent, so it doesn't settle this. Question for re-demo: should any
-  work in a Task's checkout make it `working`?
+- `unstarted` vs `working` (2026-10-22): superseded by the 2026-10-24 state axes; `unstarted`
+  now means no checkout, and a Graph running in the Task's Workflow reads `moving`.
 - Launch tests (2026-10-22): the two "regressions" were stale expectations from merging graphs and
   Workflows into one kind, so the tests changed, not the chooser. Bare `lf task run` at `review`
   already names both routes. `lf task run X proof` takes up graph `proof` as docs/lf.md says, and
@@ -57,8 +54,7 @@ design rewrite, each reversible before implementation:
   `lf task restart` now resolves to `task workflow restart`, so it left the removed-command list.
 - Verify (2026-10-23): superseded, see the 2026-10-24 settlement below.
 - Jump-bar heading (2026-10-23): a Task whose runtime is absent but planning is terminal reads
-  Done/Abandoned from planning; otherwise the heading follows `runtime.status` only, so a Task
-  with an owner but still at `start` reads Unstarted (was "Started").
+  Done/Abandoned from planning; otherwise the heading follows the derived Task state.
 
 ## 2026-10-24 implement pass (assumptions, reversible)
 

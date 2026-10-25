@@ -654,24 +654,31 @@ fn print_task_snapshot(
                 },
             );
         }
-        for graph in &snapshot.work.graph_processes {
-            let log = loopflow::lf::commands::graph::graph_log_path(&graph.summary.id);
-            let log = if log.exists() {
-                format!("  log: {}", log.display())
+        // A run that let its launcher go named this log after its Graph or skill Process.
+        let log = |id: &str| {
+            let path = loopflow::lf::commands::graph::graph_log_path(id);
+            if path.exists() {
+                format!("  log: {}", path.display())
             } else {
                 String::new()
-            };
+            }
+        };
+        for graph in &snapshot.work.graph_processes {
             println!(
-                "  Graph: {}  {}  {:?}{log}",
-                graph.summary.id, graph.summary.name, graph.summary.state,
+                "  Graph: {}  {}  {:?}{}",
+                graph.summary.id,
+                graph.summary.name,
+                graph.summary.state,
+                log(&graph.summary.id),
             );
         }
         for process in &snapshot.work.processes {
             println!(
-                "  Process: {}  {}  {}",
+                "  Process: {}  {}  {}{}",
                 process.id,
                 process.command.as_deref().unwrap_or("unknown command"),
-                process.outcome.as_deref().unwrap_or("unknown")
+                process.outcome.as_deref().unwrap_or("unknown"),
+                log(process.id.as_str()),
             );
         }
         if let Some(project) = &snapshot.project_id {

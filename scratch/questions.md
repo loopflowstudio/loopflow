@@ -11,8 +11,8 @@
 - **Single-skill edges (assumption, 2026-10-24 implement).** An edge naming a
   skill records no GraphProcess, so a bare run lets go once that skill's Process
   registers and prints `running as Process <id>`; its log is
-  `graph-<process id>.log`. Concept review settled the status gap: the
-  `Process:` line gets the same `log:` suffix (next implement).
+  `graph-<process id>.log`. Status shows that log beside the `Process:`
+  line (concept review; implemented).
 - **Retry output (implement).** After letting go, the inner run's own output
   (retry notices, arrival errors) stays in the first attempt's log; later
   attempts' Graph children write to their own `graph-<id>.log`.

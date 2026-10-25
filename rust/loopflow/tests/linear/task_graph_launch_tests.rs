@@ -946,6 +946,47 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
 }
 
 #[test]
+fn a_skill_edges_process_names_the_log_its_run_printed() {
+    let task = WorkflowTask::new();
+    task.repo
+        .create_file(".lf/skills/held-skill.md", "Hold the edge.");
+    task.repo.create_file(
+        ".lf/workflows/skilled.yaml",
+        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: held-skill}\n  - {from: review, to: end}\n",
+    );
+    task.select_workflow("skilled");
+    let printed = task.run(&["task", "run", "INF-123"]);
+    let printed = String::from_utf8_lossy(&printed.stdout);
+    let process = printed
+        .split("running as Process ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .unwrap_or_else(|| panic!("no Process named: {printed}"))
+        .to_string();
+    assert!(
+        printed.contains("follow: lf task status INF-123"),
+        "{printed}"
+    );
+    let log = task
+        .home
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("logs")
+        .join(format!("graph-{process}.log"));
+    let status = task.run(&["task", "status", "INF-123"]);
+    let status = String::from_utf8_lossy(&status.stdout);
+    let line = status
+        .lines()
+        .find(|line| line.contains(&format!("Process: {process}")))
+        .unwrap_or_else(|| panic!("no Process line: {status}"));
+    assert!(
+        line.ends_with(&format!("log: {}", log.display())),
+        "{status}"
+    );
+}
+
+#[test]
 fn a_refused_bare_task_run_returns_its_refusal() {
     let task = WorkflowTask::new();
     let output = command(

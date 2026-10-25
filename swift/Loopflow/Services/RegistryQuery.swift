@@ -367,7 +367,7 @@ public struct RegistryQuery: Sendable {
         }
     }
 
-    /// Return a shipping Task to working: its ship process stops and any
+    /// Withdraw a Task's Ship it approval: its ship process stops and any
     /// auto-merge Loopflow armed is disabled.
     public func stopShipping(issue: String, cwd: String?) async throws {
         _ = try await run(["--task", issue, "ship", "--stop"], cwd)

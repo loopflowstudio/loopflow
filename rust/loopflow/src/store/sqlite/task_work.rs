@@ -931,8 +931,8 @@ impl SqliteStore {
         Ok(shipping)
     }
 
-    /// Return a shipping Task to working. Returns the process that carried
-    /// it, when it was shipping.
+    /// Withdraw a Task's Ship it approval. Returns the approval and the process
+    /// that carried it, when it was approved.
     pub(crate) fn stop_shipping(
         &self,
         task: &TaskId,

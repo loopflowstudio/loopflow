@@ -138,6 +138,10 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
   and fmt clean. Broad lib run under load: only planning 5 s deadline timeouts and
   `os_process::private_home_keeps_explicit_binary_selection` (pre-existing; owner: gate).
 - Gap (scratch/questions.md): a route carrier killed without settling reads moving until settled.
+- Compress (2026-10-24): selections map `TaskState` to one `SelectionState` (done/abandoned → `done`);
+  chapter "begun" reads Workflow past `start` or the approval, not a state list. `cargo test --lib
+  selections selection_tests chapter task_work` 63/64, the one a known shared-runner planning
+  isolation failure that passes alone (owner: gate); clippy/fmt clean.
 
 **Built 2026-10-24 (Jack approved the pass: "yes"), from Re-demo 2 below:**
 - a. `TaskWorkflowBar` (`TaskWorkView.swift`) under the jump bar on `RepoView`: Workflow name,

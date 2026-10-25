@@ -389,7 +389,7 @@ impl SqliteStore {
                 [id.as_str()],
             )?;
             super::task_state_delivery::queue_in(&tx, id, "unstarted")?;
-            // Reopening returns to working: a handoff ended with the Task.
+            // Reopening withdraws Ship it: the approval ended with the Task.
             super::task_work::unship_in(&tx, id)?;
             insert_task_event_in(
                 &tx,

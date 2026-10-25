@@ -1,7 +1,7 @@
 //! Saved selection and layout intent share one transaction and one Work snapshot.
 mod panes;
 use super::SqliteStore;
-use crate::durable::RepositoryId;
+use crate::durable::{RepositoryId, TaskState};
 use crate::store::{StoreError, StoreResult};
 use crate::work::selection::{
     move_into_place, Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId,
@@ -125,31 +125,17 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         if open {
             states.insert(SelectionState::Open);
         }
-        if state.is_terminal() {
-            states.insert(SelectionState::Done);
-        } else if !started {
+        states.insert(match state {
+            TaskState::Unstarted => SelectionState::Unstarted,
+            TaskState::Idle => SelectionState::Idle,
+            TaskState::Active => SelectionState::Active,
+            TaskState::Moving => SelectionState::Moving,
+            TaskState::Shipping => SelectionState::Shipping,
+            TaskState::Paused => SelectionState::Paused,
+            TaskState::Done | TaskState::Abandoned => SelectionState::Done,
+        });
+        if !started && !state.is_terminal() {
             states.insert(SelectionState::Backlog);
-        }
-        match state {
-            crate::durable::TaskState::Unstarted => {
-                states.insert(SelectionState::Unstarted);
-            }
-            crate::durable::TaskState::Idle => {
-                states.insert(SelectionState::Idle);
-            }
-            crate::durable::TaskState::Active => {
-                states.insert(SelectionState::Active);
-            }
-            crate::durable::TaskState::Moving => {
-                states.insert(SelectionState::Moving);
-            }
-            crate::durable::TaskState::Shipping => {
-                states.insert(SelectionState::Shipping);
-            }
-            crate::durable::TaskState::Paused => {
-                states.insert(SelectionState::Paused);
-            }
-            crate::durable::TaskState::Done | crate::durable::TaskState::Abandoned => {}
         }
         let mut activity_known = true;
         for session in sessions_by_task.get(&task.id).into_iter().flatten() {

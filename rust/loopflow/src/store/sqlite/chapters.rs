@@ -51,9 +51,10 @@ impl SqliteStore {
             [task.as_str()],
             |row| row.get(0),
         )?;
+        // Begun follows the Workflow: past `start`, or approved to ship.
         let (abandoned, completed, active): (bool, bool, bool) = conn.query_row(
             &format!(
-                "SELECT state='abandoned',state='done',state IN ('active','moving','shipping') OR EXISTS(SELECT 1 FROM task_workflows wf WHERE wf.task_id=t.id AND NOT (wf.node='start' AND wf.edge IS NULL)) FROM (SELECT {} AS state, t.id FROM tasks t WHERE t.id=?1) t",
+                "SELECT state='abandoned',state='done',t.shipped_at IS NOT NULL OR EXISTS(SELECT 1 FROM task_workflows wf WHERE wf.task_id=t.id AND NOT (wf.node='start' AND wf.edge IS NULL)) FROM (SELECT {} AS state, t.id, t.shipped_at FROM tasks t WHERE t.id=?1) t",
                 super::durable::task_state_sql("t")
             ),
             [task.as_str()],

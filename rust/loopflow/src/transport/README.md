@@ -24,7 +24,8 @@ command and attach when shown. Ended execution needs explicit resume.
 never recorded an exit and is gone from the OS, as after a reboot, crash or kill.
 Leaving through the provider or detaching records an exit, so those never qualify.
 Each resumes through ordinary `lf resume` in a new owner with no viewer; its
-interrupted turn is flagged, not replayed.
+interrupted turn is flagged, not replayed. It reports each Session it resumes or
+skips. Desktop runs it at launch.
 
 A Session nobody views ends after `session.end_detached_after` (default `24h`,
 `off` disables it), counted from when its last viewer left. Owners from builds

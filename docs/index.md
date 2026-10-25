@@ -1,22 +1,75 @@
 # Loopflow
 
 ```bash
-curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
+curl -fsSL https://loopflow.studio/install.sh | sh
 lf init
-lf debug -c
+npx skills add loopflowstudio/loopflow --skill loopflow -g -y   # teach your coding agent to use lf
 ```
 
-Build software with other people and their coding agents. Each task has one
-owner, its own working copy and one pull request, so several people's agents can
-work in one project without colliding. The plan is shared through Linear or a shared
-Git ref; a comment on a task reaches its agents before their next step;
-and each task's workflow stops for a person where judgment counts. Skills, Graphs
-and workflows are files in the project, reviewed like code. Conversations stay on
-your computer; only the plan travels.
+`lf` is the command you type *and* the CLI your coding agent uses to get work
+done. Works with Claude Code, Codex, OpenCode and Pi, on your own logins.
 
-Free and open source. Needs [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
-[Codex](https://github.com/openai/codex), [OpenCode](https://github.com/anomalyco/opencode)
-or [Pi](https://github.com/earendil-works/pi), which have their own cost.
+**Work: say what you want, and it becomes Tasks that run without you.** Each
+Task gets its own worktree, branch and pull request, so ten requests come back
+as ten PRs you can review one at a time.
+
+```bash
+lf task create --title "rent CPU pods for templates with no GPU"   # prints the Task ID
+lf -b task run <ID>
+```
+
+**Context: every agent starts where the last one left off.** Each launch carries
+the Wave's memory, the Task's notes in `scratch/`, the docs you name and any new
+comments, and gets them back after compaction.
+
+```bash
+lf comment <ID> "default to the smallest pod"    # reaches the run before its next step
+lf gate --docs docs/runpod.md                    # name what it should read
+```
+
+**Orchestration: work finishes while you're doing something else.** Runs go to
+the agent and machine you pick, Graphs carry them step to step, Waves keep their
+Tasks moving, and landing repairs CI until the PR merges. Get as much as
+possible off the main thread: plans into code, code into verified code.
+
+```bash
+lf --machine mini -b -a codex graph pursue   # a Graph, headless, on Codex, on your mini
+lf land --wait-and-fix          # merge when checks pass; fix them if not
+```
+
+**Sessions: you never lose a conversation.** Every conversation outlives its
+terminal, and new work starts on whichever of your logins has room. Close the
+window and come back next week; the conversation and what it knows are still
+there.
+
+```bash
+lf resume --task <ID>
+```
+
+**Skill Graphs: write down how you work.** Skills are Markdown and Graphs are
+YAML, files in your repository reviewed like code.
+
+```markdown
+<!-- .lf/skills/audit.md -->
+Audit auth changes on this branch. Fix missing validation and untested paths.
+```
+
+```yaml
+# .lf/graphs/ship-api.yaml
+- design      # leaves scratch/<task>.md
+- implement   # leaves commits on the branch
+- audit
+- gate        # leaves passing checks
+```
+
+```bash
+lf audit                 # run one Skill
+lf -b graph ship-api     # run the Graph headless
+```
+
+Loopflow ships reasonable workflows for software engineering, and they are
+templates. Copy one with `lf graph customize pursue`, change it, or write down
+the way you work and share it.
 
 ## The pieces
 

@@ -127,7 +127,9 @@ tile's doubled border. Exact flag spellings follow the compiled CLI.
   gone. `DesktopBoard`/`WorkNavigation.Board` gained `wave(id)`, so a Wave tile
   click and `enter` both produce `entered {from: {wave: ID}, work}`, the trail
   shows the Wave, and back returns to it (a Wave tile click used to plain-select
-  the Task).
+  the Task). `WorkModel.enterTile(work, origin:)` reads the board from the
+  window's destination, so tile clicks and `enter` share one rule; a tile on an
+  unsaved query is plainly selected.
 
 ## Remaining
 
@@ -156,9 +158,8 @@ reference_matches_the_compiled_cli`; `cargo clippy --all-targets -- -D warnings`
 `scripts/test_desktop.sh --filter 'DesktopServerTests|DesktopPaneControlTests|DTOFixtureTests|WorkNavigationTests|WorkspaceRetentionTests|DashboardWorkspaceTests|WorkDestinationTests'`.
 Demo/review (Jack): Dev targeting, inline conversation, doubled frame, pane feel.
 
-Last check (2026-10-25, implement `enter` tiles): `--lib commands::desktop` 12 pass,
-`--lib selection` 63 pass; reference regenerated; clippy clean; Swift
-`DesktopServerTests|DesktopPaneControlTests|WorkNavigationTests|DashboardWorkspaceTests|DTOFixtureTests` 127 pass.
+Last check (2026-10-25, compress `enter` tiles): Swift
+`DesktopServerTests|DesktopPaneControlTests|WorkNavigationTests|DashboardWorkspaceTests` 79 pass; Rust unchanged since implement (`--lib commands::desktop` 12, `--lib selection` 63 pass).
 
 ## Exclusions
 

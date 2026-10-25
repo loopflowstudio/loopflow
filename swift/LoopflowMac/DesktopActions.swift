@@ -274,17 +274,17 @@ struct DesktopAction {
         DesktopAction("enter", "Enter Tile", arguments: [.init(name: "tile", kind: .string, required: true)]) { context in
             let model = context.model
             let id = try context.string("tile")
-            let shown: (plan: WorkViewPlan, members: [WorkMemberRef])? = switch model.navigation.destination {
-            case .workingTasks: model.selectedViewPlan.map { ($0, model.workingTaskMembers) }
-            case .dashboard, .view: model.selectedViewPlan.map { ($0, $0.projection.visible) }
-            case .work(let work?) where work.kind == .wave: model.wavePlan(work.id).map { ($0, model.waveTiles(work.id)) }
+            let tiles: [WorkMemberRef]? = switch model.navigation.destination {
+            case .workingTasks: model.workingTaskMembers
+            case .dashboard, .view: model.selectedViewPlan?.projection.visible
+            case .work(let wave?) where wave.kind == .wave: model.waveTiles(wave.id)
             case .work, .entered: nil
             }
-            guard let shown else { throw DesktopTargetError("This window shows no tiles. Nothing changed.") }
-            guard let member = shown.members.first(where: { $0.work.id == id }) else {
+            guard let tiles else { throw DesktopTargetError("This window shows no tiles. Nothing changed.") }
+            guard let member = tiles.first(where: { $0.work.id == id }) else {
                 throw DesktopTargetError("\(id) is not a tile here. Nothing changed.")
             }
-            model.enterTile(member, plan: shown.plan, workingTasks: model.navigation.destination == .workingTasks, origin: nil)
+            model.enterTile(member.work, origin: nil)
             return nil
         },
     ]

@@ -298,7 +298,7 @@ struct DashboardTile: View {
     }
 
     private func enter() {
-        model.enterTile(member, plan: plan, workingTasks: workingTasks, origin: frame.rect)
+        model.enterTile(member.work, origin: frame.rect)
     }
 }
 
@@ -343,12 +343,16 @@ extension AnyTransition {
 }
 
 extension WorkModel {
-    func enterTile(_ member: WorkMemberRef, plan: WorkViewPlan, workingTasks: Bool, origin: CGRect?) {
-        let board: WorkNavigation.Board? = if let id = plan.dashboardID { .saved(id) }
-            else if workingTasks { .workingTasks }
-            else if case .wave(let id) = plan.selection.expression { .wave(id) }
-            else { nil }
-        guard let board, let work = member.work.reference else { return select(member.work.reference) }
+    /// Enter a tile as full Work from the view showing it; an unsaved query has
+    /// no trail to return through, so its tile is plainly selected.
+    func enterTile(_ key: WorkWorkspaceKey, origin: CGRect?) {
+        let board: WorkNavigation.Board? = switch navigation.destination {
+        case .dashboard(let id): .saved(id)
+        case .workingTasks: .workingTasks
+        case .work(let wave?) where wave.kind == .wave: .wave(wave.id)
+        case .work, .view, .entered: nil
+        }
+        guard let board, let work = key.reference else { return select(key.reference) }
         navigation.zoomOrigin = origin
         withAnimation(FocusSizing.animation) { enter(work, from: board) }
     }

@@ -167,9 +167,8 @@ struct WorkNavigationTests {
         }
         model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: tasks)], reason: "")
         model.selectWorkingTasksDashboard()
-        let plan = try #require(model.selectedViewPlan)
         let member = try #require(model.workingTaskMembers.first { $0.work.id == "issue-now" })
-        model.enterTile(member, plan: plan, workingTasks: true, origin: nil)
+        model.enterTile(member.work, origin: nil)
         #expect(model.navigation.trailBoard == .workingTasks)
         #expect(model.breadcrumb?.task?.task.id == "issue-now")
         model.goBack()

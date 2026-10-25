@@ -1498,19 +1498,19 @@ fn a_graph_that_fails_with_retained_edits_is_not_started_again() {
 #[test]
 fn completion_is_independent_of_workflow_readiness() {
     let task = WorkflowTask::new();
-    assert_eq!(task.state(), "unstarted");
+    assert_eq!(task.state(), "idle");
     // A node, then a stopped edge: both between start and end.
     task.ok(&["-b", "task", "run", "INF-123", "gated"]);
     assert_eq!(task.workflow()["position"], at("review"));
-    assert_eq!(task.state(), "working");
+    assert_eq!(task.state(), "active");
     assert!(!task
         .run(&["-b", "task", "run", "INF-123", "gate"])
         .status
         .success());
     assert_eq!(task.workflow()["position"]["kind"], "edge");
-    assert_eq!(task.state(), "working");
+    assert_eq!(task.state(), "idle");
     task.ok(&["task", "workflow", "move", "INF-123", "start"]);
-    assert_eq!(task.state(), "unstarted");
+    assert_eq!(task.state(), "idle");
     // Moving away from end does not reopen a completed Task.
     task.finish_after_provider_observation(&[
         "task",
@@ -1559,8 +1559,8 @@ fn end_is_retained_while_the_tasks_pr_blocks_completion() {
         let error = refusal(task.run(reach));
         assert!(error.to_lowercase().contains("pull request"), "{error}");
         assert_eq!(task.workflow()["position"], at("end"));
-        // The route into `end` handed it off; it stays shipping until it completes.
-        assert_eq!(task.state(), "shipping");
+        // Nothing runs while completion waits on the PR, so the Task reads idle.
+        assert_eq!(task.state(), "idle");
     }
 }
 
@@ -1609,7 +1609,7 @@ fn local_reopening_preserves_delivery_and_workflow_and_supersedes_pending_comple
     task.complete_in_linear();
     assert_eq!(task.state(), "done");
     task.ok(&["task", "reopen", "INF-123"]);
-    assert_eq!(task.state(), "working");
+    assert_eq!(task.state(), "idle");
     assert_eq!(task.workflow(), workflow);
     task.ok(&["task", "reopen", "INF-123"]);
     assert_eq!(task.workflow(), workflow);
@@ -1646,11 +1646,11 @@ fn linear_completion_and_reopening_preserve_workflow_and_supersede_old_end() {
         .unwrap();
     rt.block_on(store.seed_issue(&scope, "linear", stale, None, None))
         .unwrap();
-    assert_eq!(task.state(), "working");
+    assert_eq!(task.state(), "idle");
     assert_eq!(task.workflow(), ended);
     assert!(task.status()["completion_pending"].is_null());
     task.ok(&["task", "workflow", "move", "INF-123", "end"]);
-    assert_eq!(task.state(), "working");
+    assert_eq!(task.state(), "idle");
 }
 
 #[test]
@@ -1901,7 +1901,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
     assert_eq!(task.state(), "done");
     assert_eq!(task.workflow(), before);
     task.ok(&["task", "reopen", "INF-123"]);
-    assert_eq!(task.state(), "working");
+    assert_eq!(task.state(), "moving");
     assert_eq!(task.workflow(), before);
     assert!(held.child.try_wait().unwrap().is_none());
     assert!(task.repo.path().exists());

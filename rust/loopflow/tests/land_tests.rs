@@ -2117,10 +2117,11 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         )
         .unwrap();
     assert_eq!(node, destination);
+    // Short of `end` the Task waits at a stage with nothing running.
     let expected_state = if destination == "end" {
         "done"
     } else {
-        "working"
+        "active"
     };
     let state = tokio::runtime::Runtime::new()
         .unwrap()
@@ -2277,7 +2278,7 @@ esac
         );
         let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         let status = &status["execution"];
-        assert_eq!(status["status"], "unstarted", "{status}");
+        assert_eq!(status["status"], "idle", "{status}");
         assert_eq!(
             fs::read_to_string(worktree.join("feature.txt")).unwrap(),
             "retain until completion\n"

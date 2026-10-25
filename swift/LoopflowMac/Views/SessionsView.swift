@@ -1636,7 +1636,7 @@ extension SessionsWorkspace {
                 multiplexer.restore(restored)
                 paneRevision = saved.revision
                 unavailableDrafts = restored.drafts
-                if case .browser(let place?, let browserTabs, _)? = restored.tree.browserIntent,
+                if case .browser(let place?, let browserTabs, _)? = restored.tree.intent(.browser),
                    case .files(_, let tabs, let selected)? = browserTabs.first(where: { if case .files = $0 { true } else { false } }) {
                     let fileQuery = place.machineID == localMachineId ? query : query.onMachine(place.machineID, repository: key.repository)
                     let documents = files(issue: key.id, cwd: place.cwd, query: fileQuery)
@@ -1701,7 +1701,7 @@ extension SessionsWorkspace {
     /// A delayed read contributes missing retained content; current edits own selection and geometry.
     /// Both layouts hold the same designated panes, so merging is per kind.
     private static func merging(_ saved: WorkPaneLayout, with current: WorkPaneLayout) -> WorkPaneLayout {
-        let prior = saved.tree.panes
+        let prior = saved.tree
         func merge(_ node: WorkPaneTree) -> WorkPaneTree {
             switch node {
             case .split(let axis, let ratio, let first, let second):
@@ -1709,14 +1709,14 @@ extension SessionsWorkspace {
             case .pane(let id, let content):
                 switch content {
                 case .session(nil, _):
-                    guard case .session(let old?, let place)? = prior.first(where: { if case .session = $0.1 { true } else { false } })?.1 else { return node }
+                    guard case .session(let old?, let place)? = prior.intent(.session) else { return node }
                     return .pane(id: id, content: .session(id: old, location: place))
                 case .shell(let tabs, let selected):
-                    guard case .shell(let oldTabs, let oldSelected)? = prior.first(where: { if case .shell = $0.1 { true } else { false } })?.1 else { return node }
+                    guard case .shell(let oldTabs, let oldSelected)? = prior.intent(.shell) else { return node }
                     let merged = tabs + oldTabs.filter { old in !tabs.contains { $0.id == old.id } }
                     return .pane(id: id, content: .shell(tabs: merged, selected: selected ?? oldSelected))
                 case .browser(let place, let tabs, let selected):
-                    guard case .browser(let oldPlace, let oldTabs, let oldSelected)? = prior.first(where: { if case .browser = $0.1 { true } else { false } })?.1,
+                    guard case .browser(let oldPlace, let oldTabs, let oldSelected)? = prior.intent(.browser),
                           oldPlace == place || place == nil else { return node }
                     var merged = tabs
                     for old in oldTabs {
@@ -1748,7 +1748,18 @@ private extension WorkPaneTree {
         case .split(_, _, let first, let second): first.panes + second.panes
         }
     }
-    var browserIntent: WorkPaneIntent? {
-        panes.first { if case .browser = $0.1 { true } else { false } }?.1
+    /// The designated pane of this kind.
+    func intent(_ kind: PaneContent.Kind) -> WorkPaneIntent? {
+        panes.first { $0.1.kind == kind }?.1
+    }
+}
+
+private extension WorkPaneIntent {
+    var kind: PaneContent.Kind {
+        switch self {
+        case .session: .session
+        case .shell: .shell
+        case .browser: .browser
+        }
     }
 }

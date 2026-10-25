@@ -211,8 +211,6 @@ exits 1 naming the fix: update Desktop.
 - CLI: `text`, `key`, `read`, `shell`, `files`, `graph-log`, `enter`, `back`,
   `forward`, `slot`, `next`, `previous`, the `working-tasks` view expression, `--pane`.
 - `supported_operations`; `selection_kind`/`selection_id` (already gone in the diff).
-- Agent caller inference from `LF_AGENT_CALLER.session_id` (desktop.rs `session:` in
-  the caller struct, its tests and docs sentence).
 - `tests/fixtures/dto/desktop_navigation.json` (→ `desktop_action.json`).
 - `docs/lf.md` sections teaching `--pane`, the nav verbs, and Files/Graph log panes.
 
@@ -232,7 +230,7 @@ DTOs and fixture; `after_help` exit text and the AGENTS.md rule; navigation
 handler bodies in `WorkModel` (they become `navigate.*`, `task.*`,
 `dashboard.*` handlers); `WorkDestination`/workspace test updates.
 Rework: `CNRTnavg` → generic action event; docs navigation section.
-Delete: the nav verbs, `view working-tasks`, agent `LF_AGENT_CALLER` inference.
+Delete: the nav verbs, `view working-tasks` (agent `LF_AGENT_CALLER` inference is gone).
 `.lf/wave/product/MEMORY.md` was compressed by that run; left as is.
 
 ## Slices
@@ -243,8 +241,8 @@ One PR; deepest deletion first.
    `Session{session_id?} | Shell{tabs, selected?} | Browser{location, tabs, selected?}`,
    `tree` is required, and validation demands exactly one of each kind (Task) or one
    session (Wave/repository). Draft `designated_panes` marks the batch
-   (`-- breaks:`); the runner's Rust hook `convert_released_layouts` rewrites
-   stored layouts. Swift `PaneContent` is `session(id?) | shell | browser`;
+   (`-- breaks:`); `convert_released_data` recognizes its statement after released
+   migrations and drafts alike and runs `convert_released_layouts`. Swift `PaneContent` is `session(id?) | shell | browser`;
    `MultiplexerStore(taskId:)` builds the designated tree with stable pane IDs
    `session`, `shell`, `browser` (migrated layouts keep theirs). Close hides a
    pane; ⌘W closes the selected shell/browser tab and the last tab hides the pane.
@@ -314,3 +312,4 @@ Check results: `cargo test -p loopflow --lib selection` and `designated_panes` p
 focused suites (Multiplexer*, DesktopPaneControl, ToolTab, WorkDestination,
 Dashboard/Worktree/WorkspacePanes, TaskFiles, WorkSelection, DTOFixture) pass;
 `cargo clippy -p loopflow --all-targets -D warnings` clean; Rust integration suite (`cli_discovery`, `dto_fixtures`) left to gate.
+Compress (2026-10-24): `cargo test --lib designated_panes selection_ commands::desktop` pass; Swift focused suites 206 pass; clippy clean. Fixture-CLI work_watch tests failed locally building `aes-gcm` (registry), left to gate.

@@ -860,12 +860,9 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             *json || cli.json,
         );
     }
-    let caller = DesktopCaller {
-        terminal: crate::session_record::current_terminal_id(),
-        session: crate::journal::agent_caller().map(|caller| caller.session_id.as_str().to_owned()),
-    };
-    let (request, json) =
-        pane_request(&inspection, &resolution, command, &caller).map_err(DesktopError::target)?;
+    let caller = crate::session_record::current_terminal_id();
+    let (request, json) = pane_request(&inspection, &resolution, command, caller.as_deref())
+        .map_err(DesktopError::target)?;
     let output = match request {
         PaneRequest::Read(request) => return read_text(request, json || cli.json),
         PaneRequest::Control(request) => {
@@ -893,7 +890,7 @@ fn pane_request(
     inspection: &DesktopInspection,
     resolution: &crate::ops::context::ContextExplanation,
     command: &crate::lf::DesktopCommand,
-    caller: &DesktopCaller,
+    caller: Option<&str>,
 ) -> Result<(PaneRequest, bool)> {
     use crate::lf::DesktopCommand;
     let selected = inspection.resolve_pane(resolution, command, caller)?;
@@ -1036,14 +1033,6 @@ fn navigate(request: DesktopNavigationCommand, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Who issued a pane command: a verified Desktop terminal, or an agent whose
-/// Session a pane shows. Either selects its own pane when `--pane` is omitted.
-#[derive(Debug, Default)]
-struct DesktopCaller {
-    terminal: Option<String>,
-    session: Option<String>,
-}
-
 fn bound<'a>(fact: &'a crate::ops::context::ContextFact, name: &str) -> Result<&'a str> {
     use crate::ops::context::ContextFact;
     match fact {
@@ -1082,7 +1071,7 @@ impl DesktopInspection {
         &self,
         work: &crate::ops::context::ContextExplanation,
         command: &crate::lf::DesktopCommand,
-        caller: &DesktopCaller,
+        caller: Option<&str>,
     ) -> Result<ResolvedPane<'_>> {
         use crate::lf::DesktopCommand;
         use crate::ops::context::ContextFact;
@@ -1207,7 +1196,7 @@ impl DesktopInspection {
             }
         }
         if pane.is_none() {
-            if let Some(caller) = caller.terminal.as_deref() {
+            if let Some(caller) = caller {
                 let own = candidates.iter().filter(|candidate| {
                     let location = candidate.tab.map_or(&candidate.leaf.location, |tab| &tab.location);
                     matches!((&work.machine, location), (ContextFact::Bound { value, .. }, Some(location)) if value == &location.machine_id)
@@ -1215,30 +1204,6 @@ impl DesktopInspection {
                 }).collect::<Vec<_>>();
                 if let [candidate] = own.as_slice() {
                     return Ok(**candidate);
-                }
-            }
-            // An agent's own pane shows its Session. Showing it twice is ambiguous;
-            // focus never chooses between them.
-            if let Some(session) = caller.session.as_deref() {
-                let own = candidates
-                    .iter()
-                    .filter(|candidate| {
-                        candidate.tab.is_none()
-                            && candidate.leaf.content.as_deref() == Some("session")
-                            && candidate.leaf.subject.as_deref() == Some(session)
-                    })
-                    .collect::<Vec<_>>();
-                match own.as_slice() {
-                    [candidate] => return Ok(**candidate),
-                    [] => {}
-                    _ => bail!(
-                        "Session {session} is shown in {} panes: {}. Choose --pane; no pane was changed.",
-                        own.len(),
-                        own.iter()
-                            .filter_map(|candidate| candidate.leaf.pane.as_deref())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
                 }
             }
         }
@@ -1624,7 +1589,7 @@ impl DesktopTextUnavailable {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_literal_text, DesktopCaller, DesktopError};
+    use super::{validate_literal_text, DesktopError};
     use crate::ops::context::{ContextExplanation, ContextFact};
 
     fn pane_fixture() -> (super::DesktopInspection, ContextExplanation) {
@@ -1660,9 +1625,7 @@ mod tests {
             text: "draft".into(),
             json: true,
         };
-        let selected = inspection
-            .resolve_pane(&work, &text, &DesktopCaller::default())
-            .unwrap();
+        let selected = inspection.resolve_pane(&work, &text, None).unwrap();
         let target = selected.target().unwrap();
         let surface = selected.surface().unwrap();
         assert_eq!(target.pane, "session-pane");
@@ -1675,7 +1638,7 @@ mod tests {
         workspace.layout.children.push(other);
         workspace.focused_pane = "second-terminal".into();
         let error = inspection
-            .resolve_pane(&work, &text, &DesktopCaller::default())
+            .resolve_pane(&work, &text, None)
             .unwrap_err()
             .to_string();
         assert!(
@@ -1689,9 +1652,7 @@ mod tests {
             text: "draft".into(),
             json: false,
         };
-        let explicit_selection = inspection
-            .resolve_pane(&work, &explicit, &DesktopCaller::default())
-            .unwrap();
+        let explicit_selection = inspection.resolve_pane(&work, &explicit, None).unwrap();
         assert_eq!(explicit_selection.target().unwrap(), target);
         assert_eq!(explicit_selection.surface().unwrap(), surface);
         // The already resolved transport request retains the old lifetime, not
@@ -1700,50 +1661,10 @@ mod tests {
             Some("replacement".into());
         inspection.windows[0].workspaces[0].layout.children[0].surface =
             Some("replacement-surface".into());
-        let replacement = inspection
-            .resolve_pane(&work, &explicit, &DesktopCaller::default())
-            .unwrap();
+        let replacement = inspection.resolve_pane(&work, &explicit, None).unwrap();
         assert_ne!(replacement.target().unwrap(), target);
         assert_ne!(replacement.surface().unwrap(), surface);
         assert_eq!(target.incarnation, "occurrence-session-pane");
-    }
-
-    fn terminal(id: &str) -> DesktopCaller {
-        DesktopCaller {
-            terminal: Some(id.into()),
-            session: None,
-        }
-    }
-
-    #[test]
-    fn an_agent_selects_the_pane_showing_its_session_and_refuses_two() {
-        use crate::lf::DesktopCommand;
-        let (mut inspection, work) = pane_fixture();
-        let zoom = DesktopCommand::Zoom {
-            pane: None,
-            off: false,
-            json: false,
-        };
-        let agent = DesktopCaller {
-            terminal: None,
-            session: Some("session-one".into()),
-        };
-        // Two panes are eligible; the caller's Session picks its own.
-        assert!(inspection
-            .resolve_pane(&work, &zoom, &DesktopCaller::default())
-            .is_err());
-        let own = inspection.resolve_pane(&work, &zoom, &agent).unwrap();
-        assert_eq!(own.target().unwrap().pane, "session-pane");
-        let workspace = &mut inspection.windows[0].workspaces[0];
-        let mut twice = workspace.layout.children[0].clone();
-        twice.pane = Some("session-again".into());
-        workspace.layout.children.push(twice);
-        workspace.focused_pane = "session-again".into();
-        let error = inspection.resolve_pane(&work, &zoom, &agent).unwrap_err();
-        assert!(
-            error.to_string().contains("session-pane, session-again"),
-            "{error}"
-        );
     }
 
     #[test]
@@ -1813,11 +1734,11 @@ mod tests {
             json: true,
         };
         let selected = inspection
-            .resolve_pane(&work, &text, &terminal("native-surface-incarnation"))
+            .resolve_pane(&work, &text, Some("native-surface-incarnation"))
             .unwrap();
         assert_eq!(selected.target().unwrap().pane, "session-pane");
         let selected = inspection
-            .resolve_pane(&work, &text, &terminal("caller-shell"))
+            .resolve_pane(&work, &text, Some("caller-shell"))
             .unwrap();
         assert_eq!(selected.target().unwrap().pane, "caller-shell");
         let explicit = DesktopCommand::Text {
@@ -1827,7 +1748,7 @@ mod tests {
         };
         assert_eq!(
             inspection
-                .resolve_pane(&work, &explicit, &terminal("caller-shell"))
+                .resolve_pane(&work, &explicit, Some("caller-shell"))
                 .unwrap()
                 .target()
                 .unwrap()
@@ -1837,14 +1758,14 @@ mod tests {
         // A marker from another Machine or a replaced Session cannot resolve
         // ambiguous panes, even when one of them has focus.
         assert!(inspection
-            .resolve_pane(&work, &text, &terminal("old-surface"))
+            .resolve_pane(&work, &text, Some("old-surface"))
             .is_err());
         work.machine = crate::ops::context::ContextFact::Bound {
             value: "other-machine".into(),
             source: "observer".into(),
         };
         assert!(inspection
-            .resolve_pane(&work, &text, &terminal("caller-shell"))
+            .resolve_pane(&work, &text, Some("caller-shell"))
             .is_err());
     }
 
@@ -1869,9 +1790,7 @@ mod tests {
             text: "draft".into(),
             json: true,
         };
-        let selected = inspection
-            .resolve_pane(&work, &command, &DesktopCaller::default())
-            .unwrap();
+        let selected = inspection.resolve_pane(&work, &command, None).unwrap();
         assert_eq!(selected.target().unwrap().tab.as_deref(), Some("first"));
         assert_eq!(selected.target().unwrap().incarnation, "first-occurrence");
         assert_eq!(selected.surface().unwrap(), "first-surface");
@@ -1879,13 +1798,9 @@ mod tests {
             pane: None,
             json: true,
         };
-        assert!(inspection
-            .resolve_pane(&work, &create, &DesktopCaller::default())
-            .is_ok());
+        assert!(inspection.resolve_pane(&work, &create, None).is_ok());
         work.task = ContextFact::Unbound;
-        assert!(inspection
-            .resolve_pane(&work, &create, &DesktopCaller::default())
-            .is_err());
+        assert!(inspection.resolve_pane(&work, &create, None).is_err());
     }
 
     #[test]
@@ -1897,7 +1812,7 @@ mod tests {
             json: false,
         };
         assert!(inspection
-            .resolve_pane(&work, &focus, &DesktopCaller::default())
+            .resolve_pane(&work, &focus, None)
             .unwrap_err()
             .to_string()
             .contains("Multiple eligible"));
@@ -1906,7 +1821,7 @@ mod tests {
             json: false,
         };
         assert!(inspection
-            .resolve_pane(&work, &missing, &DesktopCaller::default())
+            .resolve_pane(&work, &missing, None)
             .unwrap_err()
             .to_string()
             .contains("No eligible pane"));
@@ -1915,16 +1830,14 @@ mod tests {
             text: "no input".into(),
             json: false,
         };
-        assert!(inspection
-            .resolve_pane(&work, &files, &DesktopCaller::default())
-            .is_err());
+        assert!(inspection.resolve_pane(&work, &files, None).is_err());
         let restore = DesktopCommand::Restore {
             pane: None,
             json: false,
         };
         assert_eq!(
             inspection
-                .resolve_pane(&work, &restore, &DesktopCaller::default())
+                .resolve_pane(&work, &restore, None)
                 .unwrap()
                 .target()
                 .unwrap()
@@ -1935,15 +1848,11 @@ mod tests {
         work.checkout = ContextFact::Unavailable {
             reason: "owner offline".into(),
         };
-        assert!(inspection
-            .resolve_pane(&work, &restore, &DesktopCaller::default())
-            .is_ok());
+        assert!(inspection.resolve_pane(&work, &restore, None).is_ok());
         work.task = ContextFact::Unavailable {
             reason: "Task identity unavailable".into(),
         };
-        assert!(inspection
-            .resolve_pane(&work, &restore, &DesktopCaller::default())
-            .is_err());
+        assert!(inspection.resolve_pane(&work, &restore, None).is_err());
     }
 
     #[test]
@@ -1960,9 +1869,7 @@ mod tests {
             axis: super::DesktopSplitAxis::Vertical,
             json: false,
         };
-        let selected = inspection
-            .resolve_pane(&work, &command, &DesktopCaller::default())
-            .unwrap();
+        let selected = inspection.resolve_pane(&work, &command, None).unwrap();
         let target = selected.target().unwrap();
         assert_eq!(target.pane, "session-pane");
         let destination = selected.peer("files-pane").unwrap().target().unwrap();

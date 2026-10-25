@@ -132,9 +132,7 @@ impl PaneTree {
             Self::Split { first, second, .. } => first.pane(target).or_else(|| second.pane(target)),
         }
     }
-}
 
-impl PaneTree {
     pub fn panes(&self) -> Vec<(&str, &PaneIntent)> {
         match self {
             Self::Pane { id, content } => vec![(id.as_str(), content)],

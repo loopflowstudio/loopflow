@@ -1126,11 +1126,10 @@ lf --task LOO-427 desktop restore --pane "$pane"
 ```
 
 Without `--pane`, a command issued on a verified Desktop terminal's original
-PTY selects that terminal within the chosen Work, and an agent selects the pane
-showing its own Session. Explicit `--pane` wins. A Session shown in two panes is
-ambiguous; focus never chooses. Otherwise one eligible pane is selected; ambiguity
-lists choices and changes nothing. Redirected stdin and markers inherited across
-SSH do not establish caller identity.
+PTY selects that terminal within the chosen Work. Explicit `--pane` wins.
+Otherwise one eligible pane is selected; ambiguity lists choices and changes
+nothing. Redirected stdin, agent tool subprocesses without that PTY, and markers
+inherited across SSH do not establish caller identity: use `--pane` when needed.
 Terminal targeting never follows current focus. Use `--pane shell:ID` or the raw shell ID
 to address a retained shell, including a background tab. State lists ordered `tabs`
 and `selected_tab` on each Shell pane. Text/key/read require an existing terminal surface. Restore without a pane

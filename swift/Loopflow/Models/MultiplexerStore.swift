@@ -195,13 +195,21 @@ public final class MultiplexerStore {
     /// Remove a shell tab; the last one leaving hides the shell pane.
     public func closeShell(_ id: String) {
         guard let pane = shellPane, case .shell(let tabs, let selected) = pane.content,
-              let index = tabs.firstIndex(where: { $0.id == id }) else { return }
-        var remaining = tabs
-        remaining.remove(at: index)
-        let next = selected == id ? remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)].id : selected
+              let (remaining, next) = Self._closing(id, in: tabs, selected: selected) else { return }
         layout = layout.updatingShellTabs(of: pane.id, tabs: remaining, selected: next)
         if remaining.isEmpty { setCollapsed(paneId: pane.id, collapsed: true) }
         closedState = nil
+    }
+
+    /// The tabs left after closing one, and the selection: unchanged, else the
+    /// tab that took the closed one's place.
+    private static func _closing<Tab: Identifiable>(_ id: String, in tabs: [Tab], selected: String?)
+        -> (remaining: [Tab], selected: String?)? where Tab.ID == String {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return nil }
+        var remaining = tabs
+        remaining.remove(at: index)
+        guard selected == id else { return (remaining, selected) }
+        return (remaining, remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)].id)
     }
 
     /// Select a browser tab, adding it when absent. A fresh owner observation
@@ -226,10 +234,7 @@ public final class MultiplexerStore {
     public func closeBrowserTab(_ id: String) {
         guard let pane = browserPane,
               case .browser(let taskId, let tabs, let selected, let place, let observed) = pane.content,
-              let index = tabs.firstIndex(where: { $0.id == id }) else { return }
-        var remaining = tabs
-        remaining.remove(at: index)
-        let next = selected == id ? remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)].id : selected
+              let (remaining, next) = Self._closing(id, in: tabs, selected: selected) else { return }
         layout = layout.replacingBrowser(of: pane.id, with: .browser(taskId: taskId, tabs: remaining, selected: next,
             location: place, execution: observed), retainingOccurrence: true)
         if remaining.isEmpty { setCollapsed(paneId: pane.id, collapsed: true) }

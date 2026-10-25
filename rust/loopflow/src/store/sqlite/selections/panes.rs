@@ -129,22 +129,11 @@ pub(crate) fn convert_released_layouts(conn: &Connection) -> StoreResult<()> {
         let layout = convert_released_layout(released).map_err(|error| {
             StoreError::InvalidData(format!("pane layout for {kind} {work}: {error}"))
         })?;
-        update_layout(conn, &repository, &kind, &work, &layout)?;
+        conn.execute(
+            "UPDATE work_pane_layouts SET layout_json=?4 WHERE repository_id=?1 AND kind=?2 AND work_id=?3",
+            params![repository, kind, work, serde_json::to_string(&layout)?],
+        )?;
     }
-    Ok(())
-}
-
-fn update_layout(
-    conn: &Connection,
-    repository: &str,
-    kind: &str,
-    work: &str,
-    layout: &WorkPaneLayout,
-) -> StoreResult<()> {
-    conn.execute(
-        "UPDATE work_pane_layouts SET layout_json=?4 WHERE repository_id=?1 AND kind=?2 AND work_id=?3",
-        params![repository, kind, work, serde_json::to_string(layout)?],
-    )?;
     Ok(())
 }
 
@@ -279,11 +268,7 @@ fn convert_released_layout(mut released: serde_json::Value) -> Result<WorkPaneLa
     let ids: BTreeSet<String> = tree.panes().iter().map(|(id, _)| id.to_string()).collect();
     hidden.retain(|id| ids.contains(id));
     if hidden.len() == ids.len() {
-        if let Some(session) = &session {
-            hidden.remove(session);
-        } else {
-            hidden.remove("session");
-        }
+        hidden.remove(session.as_deref().unwrap_or("session"));
     }
     let visible = |id: &Option<String>| {
         id.clone()

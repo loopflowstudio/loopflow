@@ -170,7 +170,7 @@ pub(crate) fn prepare_clone_sqlite(conn: &rusqlite::Connection) -> StoreResult<(
                 super::canonical_ids::preflight(conn, guards)?;
             }
             conn.execute_batch(draft.sql)?;
-            seed_peer_planning(conn, draft.sql)?;
+            convert_released_data(conn, draft.sql)?;
         }
         validate_foreign_keys(conn)?;
         validate_persisted_json(conn)?;
@@ -210,7 +210,7 @@ fn _initialize_experiment_in(
     apply_set(conn, MIGRATIONS, guards)?;
     for draft in drafts {
         conn.execute_batch(draft.sql)?;
-        seed_peer_planning(conn, draft.sql)?;
+        convert_released_data(conn, draft.sql)?;
     }
     validate_foreign_keys(conn)?;
     validate_persisted_json(conn)?;
@@ -814,10 +814,7 @@ fn apply_set(
         let parent_history = migration_prefix_fingerprint(&set[..applied.len() + offset]);
         migration_preflight(conn, migration, guards)?;
         conn.execute_batch(migration.sql)?;
-        seed_peer_planning(conn, migration.sql)?;
-        if migration_contains(migration, "designated_panes") {
-            super::sqlite::selections::convert_released_layouts(conn)?;
-        }
+        convert_released_data(conn, migration.sql)?;
         backfill_known_checksums(conn, set)?;
         insert_applied_migration(conn, migration, &parent_history)?;
     }
@@ -826,7 +823,9 @@ fn apply_set(
     validate_schema(conn, set)
 }
 
-pub(crate) fn seed_peer_planning(conn: &rusqlite::Connection, sql: &str) -> StoreResult<()> {
+/// Convert stored rows whose shape a migration's SQL changes. Released
+/// migrations and drafts both run it after their SQL, keyed on that SQL.
+pub(crate) fn convert_released_data(conn: &rusqlite::Connection, sql: &str) -> StoreResult<()> {
     if sql.contains("CREATE TABLE planning_peer_changes (") {
         convert_project_content(conn)?;
         let mut query = conn.prepare(
@@ -859,6 +858,9 @@ pub(crate) fn seed_peer_planning(conn: &rusqlite::Connection, sql: &str) -> Stor
                 }
             }
         }
+    }
+    if sql.contains("UPDATE work_pane_layouts SET layout_json=layout_json WHERE 0;") {
+        super::sqlite::selections::convert_released_layouts(conn)?;
     }
     if sql.contains("CREATE TABLE planning_peer_changes (")
         || sql.contains("CREATE TABLE delegated_placements (")
@@ -1825,7 +1827,7 @@ mod tests {
             apply_set(conn, MIGRATIONS, guards)?;
             for draft in crate::build_info::migration_draft_manifest() {
                 conn.execute_batch(draft.sql)?;
-                super::seed_peer_planning(conn, draft.sql)?;
+                super::convert_released_data(conn, draft.sql)?;
             }
             super::validate_persisted_json(conn)
         })
@@ -1978,7 +1980,7 @@ mod tests {
         let sql = current_draft_sql("planning_peers");
         super::_migration_transaction(&conn, |conn, _guards| {
             conn.execute_batch(&sql)?;
-            super::seed_peer_planning(conn, &sql)
+            super::convert_released_data(conn, &sql)
         })
         .unwrap();
         for (table, expected) in tables.iter().zip(before) {
@@ -2078,7 +2080,7 @@ mod tests {
         let before = receipt(&conn);
         let sql = current_draft_sql("planning_peers");
         conn.execute_batch(&sql).unwrap();
-        super::seed_peer_planning(&conn, &sql).unwrap();
+        super::convert_released_data(&conn, &sql).unwrap();
         for (id, field, expected) in [
             (
                 "project-proof",
@@ -2264,7 +2266,7 @@ mod tests {
             .unwrap();
         conn.execute_batch(&current_draft_sql("task_checkout_machine"))
             .unwrap();
-        super::seed_peer_planning(&conn, &current_draft_sql("task_checkout_machine")).unwrap();
+        super::convert_released_data(&conn, &current_draft_sql("task_checkout_machine")).unwrap();
         conn.execute(
             "UPDATE work_placements SET machine_id='machine-b' WHERE task_id='t'",
             [],
@@ -3330,9 +3332,9 @@ mod tests {
             "../../tests/fixtures/migrations/pane_layouts_released.sql"
         ))
         .unwrap();
-        conn.execute_batch(&current_draft_sql("designated_panes"))
-            .unwrap();
-        crate::store::sqlite::selections::convert_released_layouts(&conn).unwrap();
+        let sql = current_draft_sql("designated_panes");
+        conn.execute_batch(&sql).unwrap();
+        super::convert_released_data(&conn, &sql).unwrap();
         let layout = |work: &str| -> WorkPaneLayout {
             let json: String = conn
                 .query_row(
@@ -3426,7 +3428,7 @@ mod tests {
             if _draft_is_canonical(name) {
                 let (index, sql, offset) = draft_location(name);
                 conn.execute_batch(&sql[offset..])?;
-                super::seed_peer_planning(conn, sql)?;
+                super::convert_released_data(conn, sql)?;
                 super::insert_applied_migration(
                     conn,
                     &MIGRATIONS[index],
@@ -3448,7 +3450,7 @@ mod tests {
     fn _apply_build_drafts_in(conn: &rusqlite::Connection) -> crate::store::StoreResult<()> {
         for draft in crate::build_info::migration_draft_manifest() {
             conn.execute_batch(draft.sql)?;
-            super::seed_peer_planning(conn, draft.sql)?;
+            super::convert_released_data(conn, draft.sql)?;
         }
         Ok(())
     }

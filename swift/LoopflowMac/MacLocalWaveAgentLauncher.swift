@@ -12,8 +12,9 @@ struct LocalLfError: LocalizedError {
 enum LocalWaveAgentLauncher {
     /// Run a filed Task on its workflow. `lf task run` owns Workflow selection,
     /// worktree placement and Graph selection; the app does not reproduce them.
-    static func runTask(repoPath: String, issue: String) throws {
-        try startLf(taskRunArguments(issue: issue), cwd: WaveOrigin.resolve(repoPath))
+    /// It returns once the Task's Graph is running, which keeps on without the app.
+    static func runTask(repoPath: String, issue: String) async throws {
+        _ = try await queryLf(["task", "run", issue], cwd: WaveOrigin.resolve(repoPath))
     }
 
     /// Ensure Task Work and its checkout without running a Graph; returns
@@ -35,10 +36,6 @@ enum LocalWaveAgentLauncher {
                 errorDescription: "lf task checkout returned an invalid receipt: \(error.localizedDescription)"
             )
         }
-    }
-
-    static func taskRunArguments(issue: String) -> [String] {
-        ["-b", "task", "run", issue]
     }
 
     /// Use the app's bundled CLI, or the pinned helper inside an offline clone.
@@ -85,36 +82,6 @@ enum LocalWaveAgentLauncher {
         }
         return result.stdout
     }
-
-    /// Start an `lf` command that runs for as long as its work does, such as
-    /// `lf -b task run`, and leave it running as this app's child. A refusal
-    /// exits within moments and is thrown; later output stays in lf's own logs.
-    static func startLf(_ subargs: [String], cwd: String?) throws {
-        let process = queryProcess([try controlLfPath()] + subargs, cwd: cwd)
-        let log = FileManager.default.temporaryDirectory
-            .appendingPathComponent("loopflow-start-\(UUID().uuidString).log")
-        FileManager.default.createFile(atPath: log.path, contents: nil)
-        let output = try FileHandle(forWritingTo: log)
-        defer { try? output.close() }
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = output
-        process.standardError = output
-        do { try process.run() } catch {
-            throw LocalLfError(errorDescription: "Failed to spawn: lf \(subargs.joined(separator: " "))")
-        }
-        let deadline = Date().addingTimeInterval(startRefusalWindow)
-        while process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
-        guard !process.isRunning, process.terminationStatus != 0 else { return }
-        let detail = (try? String(contentsOf: log, encoding: .utf8))?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        try? FileManager.default.removeItem(at: log)
-        throw LocalLfError(errorDescription: detail.isEmpty
-            ? "lf \(subargs.joined(separator: " ")) failed (\(process.terminationStatus))"
-            : detail)
-    }
-
-    /// How long a started command is watched for an immediate refusal.
-    private static let startRefusalWindow: TimeInterval = 3
 
     // MARK: - Process plumbing
 

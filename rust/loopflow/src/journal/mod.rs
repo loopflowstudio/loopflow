@@ -112,8 +112,9 @@ static PROCESS_STARTED_AT: OnceLock<i64> = OnceLock::new();
 static PROCESS_START: OnceLock<Instant> = OnceLock::new();
 static EFFECT_FREE_READ: AtomicBool = AtomicBool::new(false);
 
-/// Effect-free reads and previews must not acquire an observation Process on exit.
-/// The executable selects this before any command admission; environment cannot.
+/// Effect-free reads, previews and provider hooks never become Processes: neither
+/// admission nor exit observation records them. The executable selects this
+/// before any command admission; environment cannot.
 pub fn mark_effect_free_read() {
     EFFECT_FREE_READ.store(true, Ordering::Relaxed);
 }
@@ -289,9 +290,7 @@ pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<
         .set(Instant::now())
         .expect("one lf entry point per process");
     let result = run();
-    if current_context().is_none() && !EFFECT_FREE_READ.load(Ordering::Relaxed) {
-        observe_process(&std::env::args().collect::<Vec<_>>());
-    }
+    observe_process(&std::env::args().collect::<Vec<_>>());
     crate::agent::wait_for_interrupt_cleanup();
     let receipts = if let Some(context) = current_context() {
         finish_runtime(&context.cwd, &result);
@@ -313,7 +312,10 @@ pub fn observe_process(command: &[String]) {
     let wait = receipt_wait();
     // Failed early observation must not be retried at exit with a longer wait.
     static ATTEMPTED: AtomicBool = AtomicBool::new(false);
-    if current_context().is_some() || ATTEMPTED.swap(true, Ordering::Relaxed) {
+    if current_context().is_some()
+        || EFFECT_FREE_READ.load(Ordering::Relaxed)
+        || ATTEMPTED.swap(true, Ordering::Relaxed)
+    {
         return;
     }
     let observe = || -> anyhow::Result<()> {
@@ -366,6 +368,9 @@ pub fn with_runtime<T>(
 
 /// Attach ordinary command observation after installation/data selection.
 pub fn admit_process(repo_root: &Path, command: &[String]) {
+    if EFFECT_FREE_READ.load(Ordering::Relaxed) {
+        return;
+    }
     let started = Instant::now();
     let attribution = crate::work::wave::context::process_attribution(Some(repo_root));
     if let Some(failure) = attribution.failure.as_deref() {
@@ -555,7 +560,7 @@ fn ledger_insert(
     let record = LfProcess {
         kind: crate::process::ProcessKind::Lf,
         agent_session_id: None,
-        os_started_at: None,
+        os_started_at: context.process_started_at,
         id: context.lf_process_id.clone(),
         pid: Some(std::process::id()),
         trace_id: event.trace_id.clone(),
@@ -1127,11 +1132,17 @@ pub(crate) fn recorded_process_evidence(
     let Ok(receipt) = receipt else {
         return ProcessIdentityEvidence::Unknown;
     };
-    if let Some(receipt) = receipt
-        .as_ref()
-        .filter(|receipt| receipt.matches_process(record.id.as_str(), record.trace_id.as_str()))
-    {
-        return observe(receipt.pid, receipt.started_at);
+    match receipt {
+        Some(receipt) if receipt.matches_process(record.id.as_str(), record.trace_id.as_str()) => {
+            return observe(receipt.pid, receipt.started_at);
+        }
+        // Without a receipt, an unfinished row's own OS identity still tells a reused PID.
+        None if record.completed_at.is_none() => {
+            if let Some((pid, started_at)) = record.pid.zip(record.os_started_at) {
+                return observe(pid, started_at);
+            }
+        }
+        _ => {}
     }
     // Historical Processes can lack identity evidence. A restart still proves exit.
     if record.completed_at.is_some() || began_before_boot(record.started_at) {
@@ -1999,10 +2010,11 @@ mod tests {
             super::process_evidence(&store, &context.lf_process_id),
             ProcessIdentityEvidence::Unknown
         );
+        // Without a receipt, the Process row's own OS identity still answers.
         std::fs::remove_file(&path).unwrap();
         assert_eq!(
             super::process_evidence(&store, &context.lf_process_id),
-            ProcessIdentityEvidence::Unknown
+            ProcessIdentityEvidence::Live
         );
         std::fs::create_dir(&path).unwrap();
         assert_eq!(

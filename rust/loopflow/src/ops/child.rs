@@ -6,19 +6,19 @@ use crate::store::SharedStore;
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkControlReceipt {
-    Interrupt { work: WorkRef },
+    /// An interrupt was recorded; `target` says what it reached and how.
+    Interrupt { work: WorkRef, target: String },
+    /// Nothing was live, so nothing was recorded.
+    NoLiveRun { work: WorkRef },
 }
 
 impl WorkControlReceipt {
-    pub fn label(&self) -> String {
+    pub fn summary(&self, issue: &str) -> String {
         match self {
-            Self::Interrupt { work } => work.id().to_string(),
-        }
-    }
-
-    pub fn action(&self) -> &'static str {
-        match self {
-            Self::Interrupt { .. } => "interrupted",
+            Self::Interrupt { target, .. } => format!("{issue}: {target}"),
+            Self::NoLiveRun { .. } => {
+                format!("{issue} has no live run; nothing to stop. Scheduled automation is off.")
+            }
         }
     }
 }

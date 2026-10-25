@@ -5,20 +5,28 @@ ignores cancellation, such as one blocked on a child process, so a hung test
 held CI until the step timeout without naming itself. This reads the run's
 event stream, names the overrunning test and ends every process the run started.
 
+A leaked continuation only prints a runtime warning, and the test it stranded
+passes or hangs depending on scheduling. The run fails when one is printed,
+naming the test that was running.
+
     swift_test_limit.py swift test --skip-build ...
 """
 
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
 TIME_LIMIT_SECONDS = 300
 _STREAM_FLAG = "--event-stream-output-path"
+_CONTINUATION_MISUSE = "SWIFT TASK CONTINUATION MISUSE"
+_STARTED = re.compile(r"Test (.+) started\.$")
 
 
 def _with_event_stream(command: list[str], directory: Path) -> tuple[list[str], Path]:
@@ -104,11 +112,41 @@ def _stop(process: subprocess.Popen) -> None:
     process.wait()
 
 
+class _Output:
+    """The run's output passed through, with each continuation misuse warning
+    attributed to the test that the same output last reported started."""
+
+    def __init__(self) -> None:
+        self.started = "no test"
+        self.misuses: list[str] = []
+
+    def forward(self, source, destination) -> None:
+        for line in source:
+            text = line.decode(errors="replace")
+            destination.write(text)
+            destination.flush()
+            if match := _STARTED.search(text):
+                self.started = match.group(1)
+            elif _CONTINUATION_MISUSE in text:
+                self.misuses.append(self.started)
+
+
 def run(command: list[str]) -> int:
     with tempfile.TemporaryDirectory(prefix="swift-test-") as directory:
         command, path = _with_event_stream(command, Path(directory))
         stream = _Stream(path)
-        process = subprocess.Popen(command)
+        output = _Output()
+        # swift test relays the runtime's warnings on stdout.
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        forwarders = [
+            threading.Thread(target=output.forward, args=(source, destination), daemon=True)
+            for source, destination in (
+                (process.stdout, sys.stdout),
+                (process.stderr, sys.stderr),
+            )
+        ]
+        for forwarder in forwarders:
+            forwarder.start()
         try:
             while process.poll() is None:
                 time.sleep(1)
@@ -124,7 +162,16 @@ def run(command: list[str]) -> int:
                     )
                     _stop(process)
                     return 1
-            return process.returncode
+            # A fixture child that outlives the run may hold its output open.
+            for forwarder in forwarders:
+                forwarder.join(timeout=10)
+            for test in output.misuses:
+                print(
+                    f"swift test: {test} leaked a continuation (SWIFT TASK CONTINUATION "
+                    "MISUSE above); a task waiting on it can hang.",
+                    file=sys.stderr,
+                )
+            return process.returncode or (1 if output.misuses else 0)
         finally:
             if process.poll() is None:
                 _stop(process)

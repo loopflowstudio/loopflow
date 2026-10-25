@@ -28,6 +28,17 @@
     ]
   },
   {
+    "state": "detached",
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Reconnect",
+        "help": "Show the running Session in this terminal",
+        "unavailable_reason": null
+      }
+    ]
+  },
+  {
     "state": "closed",
     "actions": [
       {

@@ -634,16 +634,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             })();
             result.is_ok()
         });
-        if detach {
-            control = None;
-            for viewer in viewers.iter_mut().filter(|v| v.attached) {
-                let _ = viewer.queue(&Response::Detached);
-                let _ = viewer.flush();
-            }
-            // The execution's own control connections outlive its viewers.
-            viewers.retain(|v| !v.attached);
-            detach = false;
-        }
         if let Some(response) = returning.take() {
             viewers.retain_mut(|v| !v.attached || v.queue(&response).is_ok());
         }
@@ -717,6 +707,17 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             }
         }
         readers.retain(|(stream, _)| !drained.contains(stream));
+        // Output written before the execution detached reaches its viewers first.
+        if detach {
+            control = None;
+            for viewer in viewers.iter_mut().filter(|v| v.attached) {
+                let _ = viewer.queue(&Response::Detached);
+                let _ = viewer.flush();
+            }
+            // The execution's own control connections outlive its viewers.
+            viewers.retain(|v| !v.attached);
+            detach = false;
+        }
         if let Some(held) = client.as_mut().map(native::NativeClient::expire) {
             deliver(
                 &mut output,

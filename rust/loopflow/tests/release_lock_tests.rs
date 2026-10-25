@@ -1349,7 +1349,8 @@ case "$1 $2" in
         else echo '[]'; fi;;
       *) echo '[]';;
     esac;;
-  'api graphql') echo '{{"data":{{"repository":{{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"pullRequest":{{"id":"PR_fixture","number":1176,"url":"https://example.com/pr/1176","state":"OPEN","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"mergeCommit":null,"mergeStateStatus":"DIRTY","isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null}}}}}}}}';;
+  'api graphql') echo '{{"data":{{"repository":{{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"pullRequest":{{"id":"PR_fixture","number":1176,"url":"https://example.com/pr/1176","state":"OPEN","isDraft":false,"headRefName":"release","headRefOid":"observed","mergedAt":null,"mergeCommit":null,"mergeStateStatus":"DIRTY","isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null,"timelineItems":{{"nodes":[]}}}}}}}}}}';;
+  'pr merge') exit 0;;
   *) exit 91;;
 esac
 "#,

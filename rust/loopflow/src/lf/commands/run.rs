@@ -786,6 +786,9 @@ fn run_headless_prompt(
     debug!(exit_code = result.exit_code, "agent completed");
     if result.exit_code == 0 {
         Ok(())
+    } else if result.exit_code == 130 {
+        eprintln!("The agent's turn was interrupted.");
+        Err(crate::process::CommandExit(130).into())
     } else if let Some(failure) = &result.failure {
         Err(anyhow!(
             "agent stopped after {failure}. Check {} for details.",

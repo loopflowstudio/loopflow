@@ -346,10 +346,10 @@ struct DesktopHeadlessTests {
             with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
         let started = Recorder()
         let model = WorkModel(query: RegistryQuery(
-            start: { args, _ in await started.add(args) },
             run: { args, _ in
                 if args.prefix(2) == ["wave", "show"] { return String(decoding: planning, as: UTF8.self) }
-                if args.prefix(3) == ["task", "workflow", "move"] || args.prefix(2) == ["task", "complete"] { await started.add(args) }
+                if args.prefix(2) == ["task", "run"] || args.prefix(3) == ["task", "workflow", "move"]
+                    || args.prefix(2) == ["task", "complete"] { await started.add(args) }
                 return "{}"
             }))
         func view(position: [String: Any]? = nil, outgoing: [Int] = []) throws -> TaskWorkflowHeader {
@@ -387,7 +387,7 @@ struct DesktopHeadlessTests {
         #expect(try ship.labelView().text().string() == "ship")
         try ship.tap()
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls == [["-b", "task", "run", task.task.identifier, "ship"]])
+        #expect(await started.calls == [["task", "run", task.task.identifier, "ship"]])
 
         // A Task that has taken up no workflow uses its Wave or repository default.
         wire["workflow"] = NSNull()
@@ -395,7 +395,7 @@ struct DesktopHeadlessTests {
             try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))))
         try unstarted.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start").button().tap()
         for _ in 0..<200 where await started.calls.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls.last == ["-b", "task", "run", task.task.identifier])
+        #expect(await started.calls.last == ["task", "run", task.task.identifier])
 
         // Going back is the same command a person would type.
         await model.moveTask(to: "design", task: task)
@@ -442,7 +442,10 @@ struct DesktopHeadlessTests {
         let wave = try #require(roadmap.waves.first)
         let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil })
         let started = Recorder()
-        let model = WorkModel(query: RegistryQuery(start: { args, _ in await started.add(args) }, run: { _, _ in "{}" }))
+        let model = WorkModel(query: RegistryQuery(run: { args, _ in
+            if args.prefix(2) == ["task", "run"] { await started.add(args) }
+            return "{}"
+        }))
         var wire = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
         var drawnWorkflow: Workflow?
@@ -492,7 +495,7 @@ struct DesktopHeadlessTests {
         #expect(try finish.labelView().text().string() == "finish")
         try finish.tap()
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls == [["-b", "task", "run", task.task.identifier, "end"]])
+        #expect(await started.calls == [["task", "run", task.task.identifier, "end"]])
 
         // An edge that goes back, or passes over a node, takes its own lane below the row.
         let node = { Workflow.Node(name: $0, skill: "demo", description: nil) }

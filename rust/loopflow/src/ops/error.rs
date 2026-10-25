@@ -33,6 +33,19 @@ pub enum OpsError {
         reason: String,
         continuation: String,
     },
+    /// A person dequeued the release PR or disabled its auto-merge.
+    #[error(
+        "release PR #{pr_number} was {} by {} at {}; the release stops. Run `lf release run` to resume.",
+        if *.queued { "removed from the merge queue" } else { "taken off auto-merge" },
+        .actor.as_deref().unwrap_or("someone"),
+        .at.to_rfc3339()
+    )]
+    ManualMergeRemoval {
+        pr_number: u64,
+        actor: Option<String>,
+        at: chrono::DateTime<chrono::Utc>,
+        queued: bool,
+    },
     #[error("sync onto {onto} failed ({detail})")]
     SyncConflict {
         onto: String,

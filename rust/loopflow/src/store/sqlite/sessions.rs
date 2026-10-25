@@ -251,7 +251,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
          AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
-        p.started_at
+        p.started_at,
+        COALESCE((SELECT o.viewed=0 FROM processes o WHERE o.id=a.transport_lf_process_id AND o.completed_at IS NULL),0)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
@@ -311,6 +312,7 @@ fn read_summary(
             crate::journal::process_identity_evidence,
         );
         let live = agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live;
+        let unviewed: bool = row.get(38)?;
         let task_identifier = task_id
             .as_ref()
             .map(|id| super::children::cached_short_task_id(conn, labels, id))
@@ -322,7 +324,11 @@ fn read_summary(
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?
                 .filter(|_| live),
-            terminal_id: row.get::<_, Option<String>>(35)?.filter(|_| live),
+            // A terminal no viewer occupies is gone, whatever its launch recorded.
+            terminal_id: row
+                .get::<_, Option<String>>(35)?
+                .filter(|_| live && !unviewed),
+            unviewed,
             task_ids: serde_json::from_str(&row.get::<_, String>(25)?)?,
             primary_scope: row.get(26)?,
             agent_process_evidence,
@@ -793,9 +799,12 @@ impl SqliteStore {
         thread: &AgentSessionId,
     ) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        // Only `provider-session:` observations carry the id; matching their
+        // receipt first spares parsing millions of other payloads.
         let mut query = conn.prepare(
             "SELECT id FROM agent_sessions WHERE provider_thread=?1
              UNION SELECT session_id FROM session_events WHERE kind='observed'
+                AND instr(receipt_key,':provider-session:')>0
                 AND json_extract(payload,'$.evidence.provider_session_id')=?1
              ORDER BY 1",
         )?;
@@ -1546,18 +1555,29 @@ pub(super) fn retain_history_in(
             return Err(invalid("artifact belongs to another conversation"));
         }
         let key = format!("{}:{}", observation.artifact_key, observation.source);
-        let payload = serde_json::to_string(&observation.payload)?;
+        let mut payload = serde_json::to_string(&observation.payload)?;
         let saved: Option<String> = conn.query_row(
             "SELECT payload FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
             params![session.id,key], |row| row.get(0)).optional()?;
         if let Some(saved) = saved {
-            if saved != payload {
+            if saved == payload {
+                continue;
+            }
+            // A usage stream keeps one row; a later observation replaces it.
+            let merged = serde_json::from_str(&saved).ok().and_then(|saved| {
+                crate::session_record::merge_usage_observation(&saved, &observation.payload)
+            });
+            let Some(merged) = merged else {
                 return Err(invalid(format!(
                     "input {} has conflicting {} evidence",
                     observation.artifact_key, observation.source
                 )));
-            }
-            continue;
+            };
+            payload = serde_json::to_string(&merged)?;
+            conn.execute(
+                "DELETE FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
+                params![session.id, key],
+            )?;
         }
         conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
             VALUES(?1,'observed',?2,?3,?4,?5,?6,?7)",

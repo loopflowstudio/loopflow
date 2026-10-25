@@ -705,7 +705,8 @@ impl Watcher {
             );
         }
         let running = |store: &SharedStore| {
-            super::pr_landing::repair_running(store, landing).unwrap_or(false)
+            super::pr_landing::repair_running(store, &landing.repo, landing.pr_number)
+                .unwrap_or(false)
         };
         if running(store) {
             return (true, Some("ci-fix running".to_string()));
@@ -729,7 +730,7 @@ impl Watcher {
             Ok(_) if running(store) => {
                 let reason = failure
                     .map(|(names, _)| names.join(", "))
-                    .unwrap_or_else(|| "required integration".to_string());
+                    .unwrap_or_else(|| "required integration or merge queue".to_string());
                 self.state.repairs.insert(
                     0,
                     WatchRepair {

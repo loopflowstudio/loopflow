@@ -1492,7 +1492,8 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(receipts, 3);
+    // The turn's three native receipts merge into one usage row.
+    assert_eq!(receipts, 1);
     let received = fixture.received();
     assert!(args(&received).contains(&"--extension"));
     assert!(received["input"]

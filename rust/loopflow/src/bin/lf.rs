@@ -654,18 +654,31 @@ fn print_task_snapshot(
                 },
             );
         }
+        // A run that let its launcher go named this log after its Graph or skill Process.
+        let log = |id: &str| {
+            let path = loopflow::lf::commands::graph::graph_log_path(id);
+            if path.exists() {
+                format!("  log: {}", path.display())
+            } else {
+                String::new()
+            }
+        };
         for graph in &snapshot.work.graph_processes {
             println!(
-                "  Graph: {}  {}  {:?}",
-                graph.summary.id, graph.summary.name, graph.summary.state,
+                "  Graph: {}  {}  {:?}{}",
+                graph.summary.id,
+                graph.summary.name,
+                graph.summary.state,
+                log(&graph.summary.id),
             );
         }
         for process in &snapshot.work.processes {
             println!(
-                "  Process: {}  {}  {}",
+                "  Process: {}  {}  {}{}",
                 process.id,
                 process.command.as_deref().unwrap_or("unknown command"),
-                process.outcome.as_deref().unwrap_or("unknown")
+                process.outcome.as_deref().unwrap_or("unknown"),
+                log(process.id.as_str()),
             );
         }
         if let Some(project) = &snapshot.project_id {
@@ -705,12 +718,7 @@ fn print_task_control(
     if json {
         println!("{}", serde_json::to_string_pretty(result)?);
     } else {
-        println!(
-            "{} → {} ({})",
-            result.receipt.label(),
-            result.issue_id,
-            result.receipt.action(),
-        );
+        println!("{}", result.receipt.summary(&result.issue_id));
         match &result.observation {
             loopflow::work::task::Observation::Cached { observed_at } => {
                 println!("PR observation: cached from {observed_at}");
@@ -1535,7 +1543,7 @@ fn run() -> anyhow::Result<()> {
                     cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
                 })
             );
-        if preview {
+        if !cli.records_process() {
             journal::mark_effect_free_read();
         }
         // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
@@ -1574,6 +1582,9 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
+    if !cli.records_process() {
+        journal::mark_effect_free_read();
+    }
     // Provider hooks keep the callbacks their launching lf wrote. A removed
     // one must not fail: Claude treats exit 2 at Stop as "keep working".
     if let Some(Commands::External(parts)) = &cli.command {
@@ -1643,9 +1654,6 @@ fn run() -> anyhow::Result<()> {
         })
     );
     let desktop_read = desktop_intent_read(&cli);
-    if cli.context || cli.explain || planning_read || location_read || desktop_read {
-        journal::mark_effect_free_read();
-    }
     init_tracing(cli.verbose);
     validate_desktop_platform(&cli)?;
     let _selected_repo_cwd = cli
@@ -2397,12 +2405,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         // This process carries the edge and writes where it left the Task: at
         // the edge's target once an attempt at its Graph succeeded, otherwise
         // still on the edge.
-        loopflow::lf::commands::graph::run_for_task(
-            &cli,
-            task.id.as_str(),
-            &graph,
-            task.worktree()?,
-        )?;
+        loopflow::lf::commands::graph::run_for_task(&cli, &task, &graph)?;
         return Ok(loopflow::ops::task::workflow_arrive(&task)?);
     }
     if let Some(Commands::Session { cmd }) = &cli.command {

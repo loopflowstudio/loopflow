@@ -209,6 +209,43 @@ impl Cli {
         }
     }
 
+    /// Whether this invocation becomes a Process row. Provider hooks run once
+    /// per agent turn and Desktop polls once per refresh; nothing references
+    /// them, so recording each would make them most of the store. Previews,
+    /// planning and location reads, and hooks an earlier lf left behind are
+    /// effect-free reads too.
+    pub fn records_process(&self) -> bool {
+        if self.context || self.explain {
+            return false;
+        }
+        match &self.command {
+            Some(Commands::ContextBlock { .. }) => false,
+            Some(Commands::External(parts)) => !parts[0].starts_with("__"),
+            Some(Commands::Task { cmd }) => !matches!(
+                cmd,
+                TaskCommand::File { .. }
+                    | TaskCommand::Files { .. }
+                    | TaskCommand::Diff { .. }
+                    | TaskCommand::Location { .. }
+                    | TaskCommand::WatchFiles { .. }
+            ),
+            Some(Commands::Wave { cmd }) => !matches!(
+                cmd,
+                WaveCommand::Show { .. }
+                    | WaveCommand::Workflow {
+                        cmd: WaveWorkflowCommand::List { .. }
+                            | WaveWorkflowCommand::Show { .. }
+                            | WaveWorkflowCommand::Source { .. }
+                    }
+            ),
+            Some(Commands::Desktop { cmd }) => !matches!(
+                cmd,
+                DesktopCommand::View { .. } | DesktopCommand::Layout { save: false, .. }
+            ),
+            _ => true,
+        }
+    }
+
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(mut self) -> Result<Self, clap::Error> {
@@ -1062,7 +1099,7 @@ pub enum SessionCommand {
     /// Open the ongoing conversation of this scope, or an exact Session
     #[command(visible_alias = "resume")]
     Connect {
-        /// Session ID or provider conversation ID
+        /// Session ID, Task identifier, or provider conversation ID
         #[arg(conflicts_with_all = ["task", "wave"])]
         id: Option<String>,
         #[command(flatten)]
@@ -1308,7 +1345,8 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Place a Task's worktree, then run a Graph there like `lf --task ISSUE graph GRAPH`
+    /// Place a Task's worktree, then start a Graph there like `lf --task ISSUE graph GRAPH`;
+    /// returns once it runs (`-b` waits for its end)
     Run {
         issue: Option<String>,
         /// The edge's Graph, or a workflow to take up; the Task's only edge or its
@@ -1515,7 +1553,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Interrupt the active provider turn
+    /// Stop the Task's running Graph or Task run and its scheduled automation
     Interrupt {
         issue: String,
         #[arg(long)]
@@ -1869,7 +1907,8 @@ pub enum CronCommand {
         #[arg(short = 'w', long = "wave")]
         wave: String,
         /// Graph or skill name to run
-        #[arg(long = "graph")]
+        // Loaded 0.14.14 jobs pass --flow until reloaded; LOO-574 removes it.
+        #[arg(long = "graph", alias = "flow")]
         graph: String,
         /// Mark a launchd-owned invocation
         #[arg(long, hide = true)]

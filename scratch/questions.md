@@ -44,6 +44,11 @@ Decisions made headless; each is reversible.
 LOO-570 prune only: 546 MB, `session_events` 341,852 rows (378 MB with indexes), `processes` 85,477 rows (74 MB), 3,892 open.
 This branch: 235 MB, `session_events` 101,353 rows (117 MB), usage rows 11,042 (from ~248k), `processes` 30,929 (34 MB); every open row has a live PID.
 `lf history usage --weekly --json`: all five weeks byte-identical to the base. Release prune first pass 357–390 s (1,327 s under load); next pass 27 ms.
-Remaining `session_events` bulk: `provider_output` rows of captures still inside LOO-570's 24 h settle window, and retained turn facts. The 50 MB target is not met.
+Remaining `session_events` bulk: `provider_output` rows of captures still inside LOO-570's 24 h settle window, and retained turn facts. The Task's expected ≤50 MB for `session_events` is not met (117 MB); every Done-when item is. Shrinking further means changing LOO-570's settle window or the turn facts, outside this Task's three changes.
 Checks: fmt and clippy `--all-targets -D warnings` clean; lib suites session_events, session_record, retention, journal, context_cost, disk, revisions, harness pass; integration global_commands and integration (context_block, task_diff, history, preview, process, wave_show) pass.
 - Compress: fmt, clippy `--all-targets -D warnings` clean; `cargo test --lib retention` 4 passed.
+
+## Proposed Wave memory (infrastructure; not written, standalone realign)
+
+- Codex continues one `usage_stream_id` across turns; usage rows key by attempt turn plus stream, never stream alone (LOO-572 clone: +841k tokens misattributed).
+- `processes.completed_at` NULL is not proof of life: the retention prune closes dead PIDs, bounded by boot time, outcome NULL.

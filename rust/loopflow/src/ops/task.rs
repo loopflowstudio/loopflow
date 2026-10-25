@@ -4386,9 +4386,10 @@ pub(crate) fn append_task_comment(
     Ok(id)
 }
 
-/// Request that the Task end its current turn so the next re-reads its
-/// direction. The request is a durable comment on the Work; a live run observes
-/// it and interrupts. With no live run it is inert — there is no turn to end.
+/// Stop the Task's live execution and its scheduled automation. The request is
+/// a durable interrupt on the Work, recorded only when something live can act
+/// on it: a running Graph stops before its next step and ends an agent turn at
+/// once, and its Task run starts nothing again.
 pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
     let issue = issue.to_string();
     block_on_task(async move {
@@ -4403,14 +4404,78 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
             .set_task_automation(&task.id, false)
             .map_err(task_error)?;
         let work = crate::durable::WorkRef::Task(task.id.clone());
-        store.append_interrupt(&work).await.map_err(task_error)?;
+        let receipt = match live_execution(&store, &task).await? {
+            Some(target) => {
+                store.append_interrupt(&work).await.map_err(task_error)?;
+                super::child::WorkControlReceipt::Interrupt { work, target }
+            }
+            None => super::child::WorkControlReceipt::NoLiveRun { work },
+        };
         Ok(TaskControlResult {
             issue_id: task.identifier.clone(),
             task_id: task.id.to_string(),
-            receipt: super::child::WorkControlReceipt::Interrupt { work },
+            receipt,
             observation: task.observation.clone(),
         })
     })
+}
+
+/// What an interrupt would reach now, as the receipt's text: the Task's latest
+/// Graph while its own process lives, otherwise another open Process in its
+/// work, such as a Task run between Graph attempts or a Task Session. Unknown
+/// liveness counts as live.
+async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<String>> {
+    use crate::journal::ProcessIdentityEvidence;
+    use crate::ops::task_execution::TaskExecutionState;
+    let graph = store
+        .sqlite
+        .task_graphs(&task.id)
+        .map_err(task_error)?
+        .pop()
+        .filter(|graph| {
+            !matches!(
+                crate::journal::process_evidence(&store.sqlite, graph.id()),
+                ProcessIdentityEvidence::Dead
+            )
+        });
+    let name = graph
+        .as_ref()
+        .map(|graph| graph.name.clone())
+        .unwrap_or_default();
+    let (execution, _) = crate::ops::task_execution::execution_of_latest_graph(store, graph)
+        .await
+        .map_err(task_error)?;
+    let step = execution.step.unwrap_or_default();
+    let position = match execution.state {
+        TaskExecutionState::Running | TaskExecutionState::Stalled => Some(format!("at {step}")),
+        TaskExecutionState::Starting => Some(format!("between steps after {step}")),
+        TaskExecutionState::Unknown => Some(format!("at {step} (liveness unknown)")),
+        TaskExecutionState::Idle | TaskExecutionState::Blocked => None,
+    };
+    if let Some(position) = position {
+        return Ok(Some(format!("stopped Graph {name} {position}")));
+    }
+    let processes = store
+        .sqlite
+        .task_open_processes(&task.id)
+        .map_err(task_error)?;
+    let open = crate::ops::task_automation::unresolved_processes(&store.sqlite, &processes)?;
+    Ok(open.first().map(|(process, evidence)| {
+        let command = process
+            .command
+            .as_deref()
+            .and_then(|command| serde_json::from_str::<Vec<String>>(command).ok())
+            .map(|argv| format!(" running `{}`", argv.join(" ")))
+            .unwrap_or_default();
+        let unknown = match evidence {
+            ProcessIdentityEvidence::Unknown => " (liveness unknown)",
+            _ => "",
+        };
+        format!(
+            "interrupt recorded for Process {}{command}{unknown}; a Task run or a `--task` Session stops on it",
+            process.id
+        )
+    }))
 }
 
 pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -> OpsResult<Task> {

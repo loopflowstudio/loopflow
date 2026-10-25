@@ -115,7 +115,7 @@ const TASK_RUN_ATTEMPTS: u32 = 3;
 /// and start it again while a Graph process fails. Each Graph attempt records its
 /// own GraphProcess beneath this process; a single skill remains a skill launch. A Graph held for a person or a watcher, an interrupted
 /// one, and a launch refused before any Graph started are returned as they
-/// ended.
+/// ended. Once someone interrupts the Task, nothing is started again.
 ///
 /// A bare run inside its execution owner lets its launcher go once the first
 /// attempt has registered, and carries on with its output in that attempt's log.
@@ -134,6 +134,8 @@ pub fn run_for_task(cli: &Cli, task: &Task, graph: &str) -> Result<()> {
     let store = &store.sqlite;
     let process =
         journal::current_lf_process_id().context("a Task run requires a registered Process")?;
+    let work = WorkRef::Task(task.id.clone());
+    let cursor = store.latest_interrupt_id(&work)?;
     // An interrupted Task run takes its running attempt with it.
     static ATTEMPT_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     crate::agent::register_interrupt_cleanup(|| {
@@ -149,6 +151,10 @@ pub fn run_for_task(cli: &Cli, task: &Task, graph: &str) -> Result<()> {
         let mark = store.process_mark()?;
         let mut command = std::process::Command::new(&lf);
         command.args(&args).current_dir(checkout);
+        // A skill's agent shell must never inherit the cursor.
+        if owner == "graph" {
+            command.env(graph_process::TASK_INTERRUPT_CURSOR_ENV, cursor.to_string());
+        }
         crate::transport::configure_child(&mut command);
         let log = letting_go
             .then(|| PendingLog::open(&process, attempt))
@@ -193,6 +199,10 @@ pub fn run_for_task(cli: &Cli, task: &Task, graph: &str) -> Result<()> {
         let status = status.context("could not wait for the Task's Graph")?;
         if status.success() {
             return Ok(());
+        }
+        if store.latest_interrupt_id(&work)? > cursor {
+            eprintln!("Task run interrupted; not starting {graph} again.");
+            return Err(crate::process::CommandExit(130).into());
         }
         // Only a Graph process that failed is started again.
         let failed = status.code() == Some(1) && attempt_graph(store, &process, mark)?.is_some();
@@ -348,8 +358,17 @@ fn execute(
         &cli.only_account,
     )?;
     report_outcome(block_on(async {
+        let store = open_graph_store().await?;
+        let task = binding.and_then(|binding| match &binding.work {
+            WorkRef::Task(id) => Some(id.clone()),
+            _ => None,
+        });
+        let interrupt = match &task {
+            Some(task) => Some(interrupt_cursor(&store, task).await?),
+            None => None,
+        };
         let running = RunningGraph {
-            store: open_graph_store().await?,
+            store,
             process: journal::current_lf_process_id()
                 .context("a Graph requires a registered Process")?,
             graph: graph_name,
@@ -358,10 +377,8 @@ fn execute(
             cwd: repo,
             launcher: cli,
             position: Mutex::new(ExecutionCursor::default()),
-            task: binding.and_then(|binding| match &binding.work {
-                WorkRef::Task(id) => Some(id.clone()),
-                _ => None,
-            }),
+            task,
+            interrupt,
         };
         // A chapter rotation moving this checkout's Task excludes new work in it.
         let admission = running
@@ -393,6 +410,20 @@ fn execute(
     })?)
 }
 
+/// The interrupt cursor of the Task run this Graph belongs to, or its own when
+/// it was started directly.
+async fn interrupt_cursor(store: &SharedStore, task: &crate::durable::TaskId) -> Result<i64> {
+    if let Some(cursor) = std::env::var(graph_process::TASK_INTERRUPT_CURSOR_ENV)
+        .ok()
+        .and_then(|value| value.parse().ok())
+    {
+        return Ok(cursor);
+    }
+    Ok(store
+        .latest_interrupt_id(&WorkRef::Task(task.clone()))
+        .await?)
+}
+
 /// Run `future` to completion from this synchronous command.
 fn block_on<T>(future: impl std::future::Future<Output = Result<T>>) -> Result<T> {
     tokio::runtime::Builder::new_current_thread()
@@ -411,6 +442,7 @@ async fn open_graph_store() -> Result<SharedStore> {
 fn report_outcome(outcome: GraphOutcome) -> Result<()> {
     match outcome {
         GraphOutcome::Completed => Ok(()),
+        GraphOutcome::Interrupted => Err(crate::process::CommandExit(130).into()),
         GraphOutcome::Waiting => Err(crate::process::GraphHeld(
             "Graph stopped before its last step; inspect its history and effects".into(),
         )
@@ -576,13 +608,26 @@ struct RunningGraph<'a> {
     /// Where the runner stands, as of its last checkpoint.
     position: Mutex<ExecutionCursor>,
     task: Option<crate::durable::TaskId>,
+    /// The Task's latest interrupt when its run began; a later one stops the Graph.
+    interrupt: Option<i64>,
 }
 
 /// How a step's process ended, before any answer is read.
 enum StepExit {
     Finished,
-    /// Held or interrupted: the Graph stops here without an automatic retry.
-    Stopped,
+    /// Held for a person or a watcher: the Graph stops here without a retry.
+    Held,
+    /// Someone interrupted the Task: the Graph starts nothing further.
+    Interrupted,
+}
+
+/// Whether the Graph process may end a step early when its Task is interrupted.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StepKind {
+    /// An agent turn ends at once; its Session records the interruption.
+    Agent,
+    /// An operation always finishes: stopping one midway strands its work.
+    Operation,
 }
 
 impl RunningGraph<'_> {
@@ -612,16 +657,40 @@ impl RunningGraph<'_> {
         Ok(Some(step))
     }
 
+    /// Whether someone interrupted this Graph's Task after its run began.
+    fn interrupted(&self) -> bool {
+        let (Some(task), Some(cursor)) = (&self.task, self.interrupt) else {
+            return false;
+        };
+        match self
+            .store
+            .sqlite
+            .latest_interrupt_id(&WorkRef::Task(task.clone()))
+        {
+            Ok(latest) => latest > cursor,
+            Err(error) => {
+                tracing::warn!(%error, "failed to read Task interrupts");
+                false
+            }
+        }
+    }
+
     /// Run `lf <args>` as a child and record its Process as this Graph's next step.
     async fn spawn(
         &self,
         label: &str,
+        kind: StepKind,
         args: &[String],
     ) -> Result<(StepExit, Option<crate::id::LfProcessId>)> {
+        if self.interrupted() {
+            eprintln!("Graph {} interrupted before {label}.", self.graph);
+            return Ok((StepExit::Interrupted, None));
+        }
         // The absolute selected path becomes argv[0] in the child's Process record.
         let mut command = tokio::process::Command::new(crate::os_process::resolve_lf_binary()?);
         command.current_dir(self.cwd);
         command.env(graph_process::GRAPH_ID_ENV, self.process.as_str());
+        command.env_remove(graph_process::TASK_INTERRUPT_CURSOR_ENV);
         if let Some(fd) =
             crate::ops::cron::accounting::CronExecution::from_env().map(|cron| cron.lock_fd)
         {
@@ -650,12 +719,23 @@ impl RunningGraph<'_> {
         let mut child = command.spawn().context("could not execute Graph step")?;
         drop(admission);
         let mut step = None;
+        let mut watch = tokio::time::interval(std::time::Duration::from_secs(1));
+        watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut signalled = false;
         let status = loop {
             tokio::select! {
                 status = child.wait() => break status,
                 // A read can fail while a newer child migrates; the exit retries it.
                 () = tokio::time::sleep(std::time::Duration::from_millis(10)), if step.is_none() => {
                     step = self.record_step(mark).unwrap_or(None);
+                }
+                _ = watch.tick(), if kind == StepKind::Agent && !signalled => {
+                    if self.interrupted() {
+                        if let Some(pid) = child.id() {
+                            crate::platform::kill_process(pid);
+                        }
+                        signalled = true;
+                    }
                 }
             }
         };
@@ -675,16 +755,18 @@ impl RunningGraph<'_> {
                 )
             })?;
         let status = status.context("could not execute Graph step")?;
+        // An interrupt during an operation takes effect once it has finished.
+        if signalled || status.code() == Some(130) || self.interrupted() {
+            eprintln!("Graph {} interrupted at {label}.", self.graph);
+            return Ok((StepExit::Interrupted, step));
+        }
         match status.code() {
             Some(0) => Ok((StepExit::Finished, step)),
-            Some(3 | 130) => Ok((StepExit::Stopped, step)),
+            Some(3) => Ok((StepExit::Held, step)),
             _ => {
-                // The step's own conversation says how its turn ended.
+                // The step's own conversation says why its turn failed.
                 for envelope in self.turn_events(step.as_ref())?.iter().rev() {
                     let event = &envelope["event"];
-                    if event["type"] == "turn_completed" && event["status"] == "interrupted" {
-                        return Ok((StepExit::Stopped, step));
-                    }
                     if event["type"] == "error" {
                         anyhow::bail!(
                             "{label}: {}: {}",
@@ -809,9 +891,11 @@ impl SkillExecutor for &RunningGraph<'_> {
         }
         // An invalid answer is corrected in the same conversation, twice at most.
         for turn in 1.. {
-            let (exit, step) = self.spawn(name, &args).await?;
-            if let StepExit::Stopped = exit {
-                return Ok(SkillOutcome::Waiting);
+            let (exit, step) = self.spawn(name, StepKind::Agent, &args).await?;
+            match exit {
+                StepExit::Finished => {}
+                StepExit::Held => return Ok(SkillOutcome::Waiting),
+                StepExit::Interrupted => return Ok(SkillOutcome::Interrupted),
             }
             let Some(output) = &output else {
                 return Ok(SkillOutcome::Completed);
@@ -869,8 +953,10 @@ impl SkillExecutor for &RunningGraph<'_> {
             _ => None,
         };
         let args: Vec<String> = argv.into_iter().skip(1).collect();
-        if let (StepExit::Stopped, _) = self.spawn(&label, &args).await? {
-            return Ok(SkillOutcome::Waiting);
+        match self.spawn(&label, StepKind::Operation, &args).await?.0 {
+            StepExit::Finished => {}
+            StepExit::Held => return Ok(SkillOutcome::Waiting),
+            StepExit::Interrupted => return Ok(SkillOutcome::Interrupted),
         }
         // Only a nonwaiting land hands delivery off. A recent landing in the
         // same checkout says nothing about an unrelated command's result.
@@ -962,6 +1048,7 @@ mod tests {
                 launcher: &cli,
                 position: Mutex::new(ExecutionCursor::default()),
                 task: None,
+                interrupt: None,
             };
             runtime.block_on(async {
                 let conn = rusqlite::Connection::open(&fixture.database).unwrap();
@@ -993,6 +1080,74 @@ mod tests {
                     assert_eq!(state.lock().await.requests, 1);
                 }
             });
+        });
+    }
+
+    #[test]
+    fn an_interrupt_ends_the_running_agent_step_and_starts_nothing_further() {
+        use crate::graph::runner::{ExecutionCursor, GraphOutcome, GraphRunner};
+        use crate::graph::{ConcreteSkill, Skill};
+        use crate::lf::Cli;
+        use crate::ops::linear::task_planning_tests::with_planning_task;
+        use clap::Parser;
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::Mutex;
+
+        with_planning_task(|runtime, fixture, repo, task, _| {
+            let _env = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
+            let started = fixture.directory.path().join("started");
+            let child = fixture.directory.path().join("lf-step");
+            fs::write(
+                &child,
+                format!(
+                    "#!/bin/sh\necho >> '{}'\nexec sleep 30\n",
+                    started.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&child, fs::Permissions::from_mode(0o755)).unwrap();
+            std::env::set_var("LF_BIN", &child);
+            let cli = Cli::try_parse_from(["lf", "--batch"]).unwrap();
+            let skill = ConcreteStep::Skill(ConcreteSkill {
+                skill: Skill::named("probe"),
+                id: None,
+                human: false,
+                returns: None,
+                sources: Vec::new(),
+            });
+            let steps = [skill.clone(), skill];
+            let work = crate::durable::WorkRef::Task(task.id.clone());
+            let running = super::RunningGraph {
+                store: fixture.store.clone(),
+                process: crate::id::LfProcessId::new(),
+                graph: "probe",
+                steps: &steps,
+                message: None,
+                cwd: repo,
+                launcher: &cli,
+                position: Mutex::new(ExecutionCursor::default()),
+                task: Some(task.id.clone()),
+                interrupt: Some(
+                    runtime
+                        .block_on(fixture.store.latest_interrupt_id(&work))
+                        .unwrap(),
+                ),
+            };
+            let begun = std::time::Instant::now();
+            let outcome = runtime.block_on(async {
+                let interrupt = async {
+                    while !started.exists() {
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    }
+                    fixture.store.append_interrupt(&work).await.unwrap();
+                };
+                let runner = GraphRunner::new(&running);
+                let (outcome, ()) = tokio::join!(runner.run(&steps, 0), interrupt);
+                outcome.unwrap()
+            });
+            assert_eq!(outcome, GraphOutcome::Interrupted);
+            assert!(begun.elapsed() < std::time::Duration::from_secs(10));
+            assert_eq!(fs::read_to_string(&started).unwrap().lines().count(), 1);
         });
     }
 

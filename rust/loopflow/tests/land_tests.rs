@@ -45,8 +45,10 @@ fn remote_branch_exists(repo: &TestRepo, name: &str) -> bool {
 
 fn gh_no_pr_script() -> String {
     let unarmed = support::github_merge_response(1, "fixture-head", "OPEN", "CLEAN", None);
+    let armed = support::github_merge_response(1, "fixture-head", "OPEN", "CLEAN", Some("auto"));
     format!(
         r#"#!/bin/sh
+auto_state="$(dirname "$0")/auto"
 if [ "$1" = "--version" ]; then
   exit 0
 fi
@@ -62,7 +64,7 @@ if [ "$1 $2" = "pr create" ]; then
 fi
 
 if [ "$1 $2" = "api graphql" ]; then
-  echo '{unarmed}'
+  if [ -f "$auto_state" ]; then echo '{armed}'; else echo '{unarmed}'; fi
   exit 0
 fi
 
@@ -72,6 +74,7 @@ if [ "$1 $2" = "pr view" ]; then
 fi
 
 if [ "$1 $2" = "pr merge" ]; then
+  touch "$auto_state"
   exit 0
 fi
 

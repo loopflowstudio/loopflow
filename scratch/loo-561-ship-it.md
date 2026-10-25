@@ -405,20 +405,17 @@ availability" (renamed `moving`), dead ship process: "i would say idle". Operato
   a Task reads idle, at a stage active, with a live Graph moving.
 
 
-## Sync with main #1678–#1683 (2026-10-25)
+## Sync with main #1678–#1686 (2026-10-25)
 
-- Landing policy now follows main's #1680 (LOO-584): `decide_merge` is the one decision for
-  landing and release. A person's dequeue or disabled auto-merge blocks the landing, naming
-  who and when (`Withdrawn`); this replaces the branch's re-arm after a manual removal, which
-  answers open item 1's manual-dequeue question the way Jack landed it. The branch's
-  `Dequeued`, `classify_dequeue` and `describe_drop` are deleted.
-- Kept from the branch: a drop with no failing check (`merge-request (…)`, a queue eviction
-  other than `failed_checks`/`merge_conflict`, such as a timeout) re-arms the requested head
-  once, without an agent, before a repair, and records it in Task history. A queue removal
-  that leaves auto-merge on reads as no merge request (`live_request`), so `rearm_github`
-  re-enqueues it. Failed-check and conflict evictions go straight to repair: each merge-group
-  run is its own incident, so re-arming them would loop without ever repairing.
-- Main's "same failed run again blocks" became the branch's backoff: that incident's next
-  repair attempt.
+- Merge-queue removal follows main (Jack's decision 2026-10-25, comment 949c51fc):
+  `decide_merge` (#1680/LOO-584, #1679/LOO-583) is the one decision for landing and release.
+  A person's removal blocks, naming who and when; every other removal is a CI incident whose
+  repair re-arms. Deleted from the branch: the in-process re-arm (`Dequeued`,
+  `classify_dequeue`, `rearm_github`, `rearm_landing`, `RearmPr`, the re-arm-once rule),
+  `enqueue_pr`, and `observe_pr_merge`'s `timelineItems`/`merge_exit` reader. Kept: the
+  required-producer early failure detection and the repair backoff (a same-run repeat is
+  that incident's next attempt, not a block). #1652 stays unarmed.
 - #1678's interrupt cursor reaches the Task run's Graph child through `spawn_task_child`;
-  `unresolved_processes` lives in `task_execution.rs` (`task_automation.rs` stays deleted).
+  `unresolved_processes` lives in `task_execution.rs`. #1684's `isInMergeQueue` merged in.
+- Checks after this sync: lib `ops::pr`/`pr_landing`/`release`/`task::ship`/`commands::ship`
+  116/116; integration `land_tests`/`release_lock` 45/45; fmt and clippy clean.

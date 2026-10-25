@@ -22,14 +22,13 @@ use crate::session_record::{
 };
 use crate::store::sqlite::ci_incidents::RepairAttempt;
 use crate::store::{open_store, storage_config_from_env, SharedStore};
-use crate::work::task::{CiCheck, CiIncident, TaskEventKind};
+use crate::work::task::{CiCheck, CiIncident};
 
 use super::error::{OpsError, OpsResult};
 use super::land::LandOptions;
 use super::pr::{
-    enable_auto_merge, enqueue_pr, merge_gate_state, merge_needs_integration,
-    merge_request_removal, observe_pr_merge, published_pr_copy, ManualRemoval, MergeGateReading,
-    MergeRequest, MergeRequestRemoval, PrInfo, RepairWindow,
+    merge_gate_state, merge_needs_integration, merge_request_removal, observe_pr_merge,
+    ManualRemoval, MergeGateReading, MergeRequest, MergeRequestRemoval, PrInfo, RepairWindow,
 };
 
 #[derive(Debug, serde::Deserialize)]
@@ -105,8 +104,6 @@ pub(crate) type ObservePr = Arc<dyn Fn(&PrLanding) -> OpsResult<LandingObservati
 /// How one check starts a ci-fix. A check without one (`lf pr reconcile`) still
 /// records the failure and leaves the repair to the landing's own process.
 pub(crate) type RepairCi = Arc<dyn Fn(&PrLanding, &CiIncident) -> OpsResult<()> + Send + Sync>;
-/// How one check asks GitHub to merge the requested head again.
-pub(crate) type RearmPr = Arc<dyn Fn(&PrLanding, &str) -> OpsResult<()> + Send + Sync>;
 
 /// Before attempt `n` (n ≥ 2) of the same incident starts: 1, 2, 4… minutes, at most 30.
 pub(crate) fn repair_backoff(attempt: u32) -> i64 {
@@ -119,51 +116,10 @@ fn observe_github(landing: &PrLanding) -> OpsResult<LandingObservation> {
     decide_merge(
         observation.pr,
         &landing.observed_head_sha,
-        live_request(observation.request, observation.merge_exit.as_deref()),
+        observation.request,
         || read_merge_request_removal(&landing.worktree, &landing.repo, landing.pr_number),
         |head| merge_gate_state(&landing.worktree, number, head),
     )
-}
-
-/// Whether a lone failing check is a dropped merge request a re-arm answers.
-fn rearm_answers(check: &str) -> bool {
-    check.starts_with("merge-request (")
-        || (check.starts_with("merge-queue (")
-            && !matches!(
-                check,
-                "merge-queue (failed_checks)" | "merge-queue (merge_conflict)"
-            ))
-}
-
-/// A queue removal can leave auto-merge on; GitHub then never re-enters, so the
-/// PR has no merge request.
-fn live_request(request: Option<MergeRequest>, merge_exit: Option<&str>) -> Option<MergeRequest> {
-    match request {
-        Some(MergeRequest::AwaitingQueue) if merge_exit.is_some() => None,
-        request => request,
-    }
-}
-
-/// Put exactly the requested head back on its way to merge: re-enter the queue
-/// when auto-merge survived the removal, otherwise re-arm with its published copy.
-fn rearm_github(landing: &PrLanding, head_sha: &str) -> OpsResult<()> {
-    let observation = observe_pr_merge(&landing.worktree, u64::from(landing.pr_number))?;
-    match observation.request {
-        Some(MergeRequest::AwaitingQueue) => {
-            enqueue_pr(&landing.worktree, &observation.node_id, head_sha)
-        }
-        Some(MergeRequest::Auto | MergeRequest::Queued(_)) => Ok(()),
-        None => {
-            let copy = published_pr_copy(&landing.worktree, head_sha)?;
-            enable_auto_merge(
-                &landing.worktree,
-                u64::from(landing.pr_number),
-                copy.as_ref(),
-                head_sha,
-                &|_| {},
-            )
-        }
-    }
 }
 
 /// Why this PR has no merge request, judged against its recorded CI repairs.
@@ -1049,17 +1005,17 @@ pub(crate) async fn reconcile_pr_landing(
 }
 
 /// What one check may do. An observing check reads and records; an acting
-/// check also repairs and re-arms.
+/// check also repairs.
 #[derive(Clone)]
 pub(crate) struct LandingIo {
     pub observe: ObservePr,
-    pub act: Option<(RepairCi, RearmPr)>,
+    pub repair: Option<RepairCi>,
 }
 
 impl std::fmt::Debug for LandingIo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LandingIo")
-            .field("acts", &self.act.is_some())
+            .field("acts", &self.repair.is_some())
             .finish()
     }
 }
@@ -1068,20 +1024,16 @@ impl LandingIo {
     fn github(repair: Option<RepairCi>) -> Self {
         Self {
             observe: Arc::new(observe_github),
-            act: repair.map(|repair| (repair, Arc::new(rearm_github) as RearmPr)),
+            repair,
         }
     }
 }
 
 #[cfg(test)]
 impl LandingIo {
-    /// Scripted reads; an acting check's re-arm succeeds without GitHub.
+    /// Scripted reads.
     pub(crate) fn scripted(observe: ObservePr, repair: Option<RepairCi>) -> Self {
-        Self {
-            observe,
-            act: repair
-                .map(|repair| (repair, Arc::new(|_: &PrLanding, _: &str| Ok(())) as RearmPr)),
-        }
+        Self { observe, repair }
     }
 }
 
@@ -1091,8 +1043,7 @@ async fn reconcile_claimed(
     io: LandingIo,
     ownership: &Arc<File>,
 ) -> OpsResult<()> {
-    let LandingIo { observe, act } = io;
-    let (repair, rearm) = act.unzip();
+    let LandingIo { observe, repair } = io;
     refresh_joined_request(store, landing).await?;
     let mut observed = if let Some(merge_commit) = &landing.merge_commit {
         LandingObservation::Merged {
@@ -1250,46 +1201,6 @@ async fn reconcile_claimed(
                 .observe_ci_incident(&incident)
                 .await
                 .map_err(|error| OpsError::Message(error.to_string()))?;
-            // A request dropped without a failing check, such as a queue timeout,
-            // needs only asking again: re-arm the requested head once before a
-            // repair. Each failed merge-group run is its own incident, so a queue
-            // run that failed its checks or conflicted goes straight to repair.
-            if let Some(rearm) = rearm.filter(|_| {
-                attempt_number(&incident.identity) == 1
-                    && head_sha == landing.requested_head_sha
-                    && matches!(incident.failure_set.as_slice(), [check] if rearm_answers(check))
-            }) {
-                if !rearm_landing(store, landing, ownership, rearm, &head_sha, "re-arm").await? {
-                    return Ok(());
-                }
-                store
-                    .record_ci_response(&incident.identity, &landing.id, landing.generation, now)
-                    .await
-                    .map_err(|error| OpsError::Message(error.to_string()))?;
-                let summary = format!(
-                    "PR #{}: {} at {}; re-armed {head_sha} once before repairing",
-                    landing.pr_number,
-                    incident.failure_set[0],
-                    now.format(&time::format_description::well_known::Rfc3339)
-                        .unwrap_or_else(|_| now.unix_timestamp().to_string())
-                );
-                eprintln!("{summary}");
-                if let Some(task_id) = &landing.task_id {
-                    store
-                        .append_task_event(task_id, &TaskEventKind::Progress { summary })
-                        .await
-                        .map_err(|error| OpsError::Message(error.to_string()))?;
-                }
-                return persist_landing_state(
-                    store,
-                    landing,
-                    PrLandingState::Watching,
-                    head_sha,
-                    None,
-                    None,
-                )
-                .await;
-            }
             persist_landing_state(
                 store,
                 landing,
@@ -1342,44 +1253,6 @@ async fn reconcile_claimed(
             .await
         }
     }
-}
-
-/// Ask GitHub to merge `head_sha` again, returning whether it was asked. Pause
-/// is the one hold on this; a held or failed request blocks the landing until
-/// the next check.
-async fn rearm_landing(
-    store: &SharedStore,
-    landing: &mut PrLanding,
-    ownership: &Arc<File>,
-    rearm: RearmPr,
-    head_sha: &str,
-    label: &'static str,
-) -> OpsResult<bool> {
-    let paused = match &landing.task_id {
-        Some(task_id) => {
-            store.sqlite.task_state(task_id).map_err(repair_error)?
-                == crate::durable::TaskState::Paused
-        }
-        None => false,
-    };
-    if paused {
-        let reason = "Task is paused; landing continues after `lf task resume`";
-        return block_landing(store, landing, reason.into())
-            .await
-            .map(|()| false);
-    }
-    let requested = run_landing_operation(ownership, label, {
-        let landing = landing.clone();
-        let head_sha = head_sha.to_string();
-        move || rearm(&landing, &head_sha)
-    })
-    .await;
-    if let Err(error) = requested {
-        return block_landing(store, landing, format!("{label} failed: {error}"))
-            .await
-            .map(|()| false);
-    }
-    Ok(true)
 }
 
 /// An armed head whose checks no longer fail has outlived its recorded block.
@@ -1796,7 +1669,7 @@ mod tests {
 
     use super::{
         ci_incident, decide_merge, next_attempt, reconcile_pr_landing, wait_for_landing,
-        wait_with_io, LandingIo, LandingObservation, NextAttempt, ObservePr, RearmPr, RepairCi,
+        wait_with_io, LandingIo, LandingObservation, NextAttempt, ObservePr, RepairCi,
     };
     use crate::durable::TaskId;
     use crate::ops::error::{OpsError, OpsResult};
@@ -1805,9 +1678,7 @@ mod tests {
     };
     use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::{SharedStore, StorageConfig};
-    use crate::work::task::{
-        CiCheck, LinearWritebackState, Observation, Task, TaskEventKind, TaskPr, TaskPrId,
-    };
+    use crate::work::task::{CiCheck, LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
     use std::path::{Path, PathBuf};
 
     fn github_landing_fixture() -> (PrLanding, PrInfo) {
@@ -1944,23 +1815,6 @@ mod tests {
                     None => Ok(()),
                 }
             })
-        }
-
-        /// An acting check whose re-arms record the heads they asked for.
-        fn rearming(self: &Arc<Self>) -> (LandingIo, Arc<Mutex<Vec<String>>>) {
-            let rearmed = Arc::new(Mutex::new(Vec::new()));
-            let rearm: RearmPr = {
-                let rearmed = Arc::clone(&rearmed);
-                Arc::new(move |_: &PrLanding, head: &str| {
-                    rearmed.lock().unwrap().push(head.to_string());
-                    Ok(())
-                })
-            };
-            let io = LandingIo {
-                observe: self.observe(),
-                act: Some((self.repair(), rearm)),
-            };
-            (io, rearmed)
         }
     }
 
@@ -2159,115 +2013,6 @@ mod tests {
             )
         );
         assert_eq!(*script.repairs.lock().unwrap(), 0);
-    }
-
-    #[tokio::test]
-    async fn a_rearm_is_recorded_in_task_history() {
-        let (_directory, store, landing) = fixture_for(true).await;
-        let task_id = landing.task_id.clone().unwrap();
-        let dropped = || LandingObservation::Failing {
-            head_sha: "head".into(),
-            failing_checks: vec![CiCheck {
-                name: "merge-queue (checks_timed_out)".into(),
-                url: None,
-            }],
-        };
-        let script = script(vec![dropped(), dropped()]);
-        let (io, rearmed) = script.rearming();
-        reconcile_pr_landing(store.clone(), landing, io)
-            .await
-            .unwrap();
-        assert_eq!(*rearmed.lock().unwrap(), ["head"]);
-        let summaries: Vec<_> = store
-            .task_events_after(&task_id, 0)
-            .await
-            .unwrap()
-            .into_iter()
-            .filter_map(|event| match event.kind {
-                TaskEventKind::Progress { summary } => Some(summary),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(summaries.len(), 1, "{summaries:?}");
-        assert!(
-            summaries[0].starts_with("PR #248: merge-queue (checks_timed_out) at ")
-                && summaries[0].ends_with("; re-armed head once before repairing"),
-            "{}",
-            summaries[0]
-        );
-    }
-
-    #[tokio::test]
-    async fn a_paused_task_holds_its_rearm() {
-        let (_directory, store, landing) = fixture_for(true).await;
-        let task_id = landing.task_id.clone().unwrap();
-        store.sqlite.set_task_paused(&task_id, true).unwrap();
-        let dropped = || LandingObservation::Failing {
-            head_sha: "head".into(),
-            failing_checks: vec![CiCheck {
-                name: "merge-request (unexplained)".into(),
-                url: None,
-            }],
-        };
-        let script = script(vec![dropped(), dropped()]);
-        let (io, rearmed) = script.rearming();
-        let held = reconcile_pr_landing(store, landing, io).await;
-        assert!(
-            matches!(&held, Err(OpsError::DeliveryHeld(reason)) if reason.contains("lf task resume")),
-            "{held:?}"
-        );
-        assert!(rearmed.lock().unwrap().is_empty());
-    }
-
-    #[test]
-    fn a_queue_removal_that_leaves_auto_merge_on_has_no_merge_request() {
-        let awaiting = || Some(MergeRequest::AwaitingQueue);
-        assert!(super::live_request(awaiting(), Some("checks_timed_out")).is_none());
-        // Without a removal, auto-merge is waiting for the queue.
-        assert!(matches!(
-            super::live_request(awaiting(), None),
-            Some(MergeRequest::AwaitingQueue)
-        ));
-    }
-
-    #[tokio::test]
-    async fn a_timed_out_queue_run_is_requeued_once_before_a_repair() {
-        let (_directory, store, landing) = fixture().await;
-        let queue_failure = || LandingObservation::Failing {
-            head_sha: "head".into(),
-            failing_checks: vec![CiCheck {
-                name: "merge-queue (checks_timed_out)".into(),
-                url: None,
-            }],
-        };
-        let script = script(vec![
-            queue_failure(),
-            queue_failure(),
-            queue_failure(),
-            queue_failure(),
-        ]);
-        let (io, rearmed) = script.rearming();
-        let requeued = reconcile_pr_landing(store.clone(), landing, io.clone())
-            .await
-            .unwrap();
-        assert_eq!(requeued.state, PrLandingState::Watching);
-        assert_eq!(
-            (
-                rearmed.lock().unwrap().len(),
-                *script.repairs.lock().unwrap()
-            ),
-            (1, 0)
-        );
-        // The same failure again is a repair's, after its backoff.
-        let backing_off = reconcile_pr_landing(store, requeued, io).await.unwrap();
-        assert_eq!(backing_off.state, PrLandingState::Repairing);
-        assert_eq!(
-            (
-                rearmed.lock().unwrap().len(),
-                *script.repairs.lock().unwrap()
-            ),
-            (1, 0)
-        );
     }
 
     #[tokio::test(start_paused = true)]

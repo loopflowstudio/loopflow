@@ -71,7 +71,7 @@ pub fn github_merge_response(
         "state":state, "isDraft":false, "headRefName":"fixture", "headRefOid":head,
         "mergedAt":if state == "MERGED" { Some("2026-09-29T00:00:00Z") } else { None },
         "mergeCommit":if state == "MERGED" { Some(serde_json::json!({"oid":head})) } else { None },
-        "mergeStateStatus":merge_state, "isMergeQueueEnabled":request == Some("awaiting_queue") || queued.is_some(),
+        "mergeStateStatus":merge_state, "isMergeQueueEnabled":request == Some("awaiting_queue") || queued.is_some(), "isInMergeQueue":queued.is_some(),
         "autoMergeRequest":request.map(|_| serde_json::json!({"enabledAt":"2026-09-29T00:00:00Z"})),
         "mergeQueueEntry":queued.map(|_| serde_json::json!({"id":"queue-entry"})),
         "timelineItems":{"nodes":[]}

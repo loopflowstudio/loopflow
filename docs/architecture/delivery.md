@@ -249,20 +249,10 @@ PR, landing and release wait for the queue's integrated-commit proof instead
 of interpreting the original head's mergeability or checks. Only an
 authoritative GitHub merge finishes the landing.
 
-GitHub can drop a merge request, sometimes leaving auto-merge on so the PR
-never re-enters the queue. The newest queue-removal or auto-merge-disable event
-says why:
-
-| Why | Landing does |
-| --- | --- |
-| `failed_checks` | Re-enters the queue once, then repairs the same failure with backoff |
-| `merge_conflict`, or a conflicting head | Repairs `required-integration` |
-| a head nobody armed | Repairs `auto-merge`: verify, then `lf arm` |
-| anything else, or no event | Re-enters the queue (`enqueuePullRequest`) or re-arms the requested head |
-
-A missing request with no event is read again after five seconds, so a check
-racing a fresh arm never acts on the stale read. Pause holds these actions;
-resume continues them.
+When a PR loses its merge request, landing and release read its latest
+merge-request event. A person's dequeue or disabled auto-merge stops them,
+naming who and when; `lf arm` resumes. Every other removal (a queue eviction,
+a repair's own disarm, no event) is a CI incident, and the repair re-arms the PR.
 
 Landing and release read PR state, head, merge commit, auto-merge request, and
 queue membership in one GitHub response. A merge therefore takes precedence

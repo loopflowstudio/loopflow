@@ -164,6 +164,7 @@ fn write_gh_merge_wait_script(log_path: &str, wait: MergeWait) -> String {
     };
     let checks = support::github_checks_page("$head", &[("tests-result", "SUCCESS", true)]);
     let unarmed = support::github_merge_response(1176, "$head", "OPEN", "CLEAN", None);
+    let armed = support::github_merge_response(1176, "$head", "OPEN", "CLEAN", Some("auto"));
     let pending =
         support::github_merge_response(1176, "$head", "OPEN", "DIRTY", Some("queued:PR_release"));
     let merged = support::github_merge_response(1176, "$head", "MERGED", "UNKNOWN", None);
@@ -215,6 +216,12 @@ JSON
       cat <<JSON
 {merged}
 JSON
+    elif [ -f "$armed" ] && [ ! -f "$armed.shown" ]; then
+      # GitHub shows the person's request once before they disarm it.
+      touch "$armed.shown"
+      cat <<JSON
+{armed}
+JSON
     else
       cat <<JSON
 {unarmed}
@@ -241,10 +248,13 @@ fn write_gh_dirty_release_script(
     let checks = support::github_checks_page("$head", &[]);
     let dirty = support::github_merge_response(1176, "$release_head", "OPEN", "DIRTY", None);
     let open = support::github_merge_response(1176, "$release_head", "OPEN", "$merge_state", None);
+    let armed =
+        support::github_merge_response(1176, "$release_head", "OPEN", "BEHIND", Some("auto"));
     let merged = support::github_merge_response(1176, "$release_head", "MERGED", "UNKNOWN", None);
     format!(
         r#"#!/bin/sh
 log="{log_path}"
+armed="{log_path}.armed"
 integrated="{log_path}.integrated"
 seen="{log_path}.seen"
 release_branch="{release_branch}"
@@ -282,6 +292,10 @@ case "$1 $2" in
       cat <<JSON
 {merged}
 JSON
+    elif [ "$(cat "$armed" 2>/dev/null)" = "$release_head" ]; then
+      cat <<JSON
+{armed}
+JSON
     elif [ ! -f "$seen" ] || [ "$(cat "$seen")" = "$release_head" ]; then
       # The published release head conflicts until a rebuild replaces it.
       printf '%s' "$release_head" > "$seen"
@@ -306,6 +320,8 @@ JSON
     if [ "$(cat "$seen" 2>/dev/null)" != "$release_head" ] \
       && git merge-base --is-ancestor "$main_head" "$release_head"; then
       touch "$integrated"
+    else
+      printf '%s' "$release_head" > "$armed"
     fi
     exit 0;;
   'pr ready'|'pr edit') exit 0;;
@@ -1184,7 +1200,7 @@ if [ -f "$state/merged-$number" ]; then
   status=MERGED
   merge="{{\"oid\":\"$(cat "$state/merged-$number")\"}}"
 fi
-result=$(printf '{{"id":"PR_release","isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null,"mergedAt":null,"number":%s,"state":"%s","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":%s,"headRefOid":"%s","headRefName":"%s","baseRefName":"main","url":"https://example.com/pr/%s","title":"Release","body":"Release notes","statusCheckRollup":[]}}' "$number" "$status" "$merge" "$head" "$branch" "$number")
+result=$(printf '{{"id":"PR_release","isMergeQueueEnabled":false,"isInMergeQueue":false,"autoMergeRequest":null,"mergeQueueEntry":null,"mergedAt":null,"number":%s,"state":"%s","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":%s,"headRefOid":"%s","headRefName":"%s","baseRefName":"main","url":"https://example.com/pr/%s","title":"Release","body":"Release notes","statusCheckRollup":[]}}' "$number" "$status" "$merge" "$head" "$branch" "$number")
 if [ "$2" = list ]; then printf '[%s]\n' "$result";
 elif [ "$1 $2" = "api graphql" ]; then printf '{{"data":{{"repository":{{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"pullRequest":%s}}}}}}\n' "$result";
 else printf '%s\n' "$result"; fi

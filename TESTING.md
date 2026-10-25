@@ -1394,6 +1394,21 @@ usage and account-event assertions in the recorder tests, rather than racing
 its queue in subprocess-launch tests. Reproduce suspected races with a temporary
 recorder delay beyond that drain window; remove the delay before publication.
 
+### Reproducing races without CPU load
+
+Never generate CPU load to reproduce a race: no `yes > /dev/null &`, `stress`,
+or busy loops. Agents can't reliably kill what they start: the cleanup line is
+cut off by a tool timeout or the kill command is refused, and the generators run
+forever. On October 25, 32 orphaned `yes` processes from one such probe burned
+about 7.7 cores for 13 hours and slowed every build on the machine.
+
+Reproduce the ordering instead: add a deliberate delay at the race point (as
+above) and remove it before publication, or repeat the test on its own:
+
+```bash
+for i in $(seq 20); do cargo test -p loopflow --test integration <test> < /dev/null || echo FAIL; done
+```
+
 Orphan Session proofs must launch outside every registered Task checkout; changing
 branches in the same directory does not remove checkout membership. Run these
 proofs with a canonical `TMPDIR` (on macOS, `TMPDIR=/private/tmp`) so temporary

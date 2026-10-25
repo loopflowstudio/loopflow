@@ -86,6 +86,7 @@ fn read_dispositions(home: &Path) -> OpsResult<Vec<FailureDisposition>> {
 
 pub fn disposition(
     home: &Path,
+    repo: &Path,
     wave: &str,
     subject: &str,
     owner: TaskId,
@@ -99,7 +100,7 @@ pub fn disposition(
     let receipt_failed = read_receipts(&receipt_root(home), wave, None)?
         .iter()
         .any(|r| r.id.as_str() == subject && r.outcome == CronOutcome::Failed);
-    let mut obligations = accounting::read(home)?;
+    let mut obligations = accounting::read(home, repo)?;
     for record in obligations
         .iter_mut()
         .filter(|r| r.wave == wave && r.closed_at.is_some())
@@ -516,6 +517,49 @@ mod tests {
                 "source {source:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_scheduled_opportunity_stopped_by_a_manual_dequeue_cannot_qualify() {
+        let mut report = fixture();
+        let summarize_pairs = |report: &ReleaseHistory| {
+            summarize(
+                &report.obligations,
+                &report.receipts,
+                &report.dispositions,
+                0,
+            )
+            .qualifying_pairs
+            .len()
+        };
+        assert_eq!(summarize_pairs(&report), 1);
+
+        // The dequeue stops the first attempt; a later retry publishes cleanly.
+        let opportunity = &mut report.obligations[0].opportunities[1];
+        let mut stopped = opportunity.attempts[0].clone();
+        stopped.receipt_id = crate::durable::CronReceiptId::new();
+        stopped.verification.clear();
+        stopped.outcome = crate::ops::cron::accounting::ScheduledReleaseOutcome::Failed {
+            cause: crate::ops::OpsError::ManualMergeRemoval {
+                pr_number: 1700,
+                actor: Some("jack-heart".into()),
+                at: chrono::DateTime::from_timestamp(stopped.started_at + 30, 0).unwrap(),
+                queued: true,
+            }
+            .to_string(),
+        };
+        opportunity.attempts[0].started_at += 3600;
+        opportunity.attempts[0].finished_at = opportunity.attempts[0].finished_at.map(|f| f + 3600);
+        opportunity.attempts.insert(0, stopped);
+        opportunity
+            .interventions
+            .push(crate::ops::cron::accounting::ReleaseIntervention {
+                recorded_at: opportunity.attempts[0].started_at + 60,
+                target: "default".into(),
+                operation: "jack-heart removed release PR #1700 from the merge queue".into(),
+            });
+
+        assert_eq!(summarize_pairs(&report), 0);
     }
 
     #[test]

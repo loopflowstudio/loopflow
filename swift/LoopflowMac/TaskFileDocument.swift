@@ -326,12 +326,12 @@ final class TaskFilesStore {
 
     /// A write takes the view only from stale attention: nothing selected, a
     /// document that was itself followed, or Files untouched for the quiet
-    /// interval. Editing, diffing, a draft or keyboard focus keep it.
+    /// interval. Editing, diffing or a draft keep it.
     static func follow(_ path: String, selection: String?, page: Page, mode: Mode, dirty: Bool,
-                       keyboardFocused: Bool, autoSelected: Bool, lastInteraction: Date?, now: Date) -> Follow {
+                       autoSelected: Bool, lastInteraction: Date?, now: Date) -> Follow {
         if selection == path, page == .files { return .reload }
         guard selection != nil else { return .select }
-        if mode != .read || dirty || keyboardFocused { return .openTab }
+        if mode != .read || dirty { return .openTab }
         guard !autoSelected, let lastInteraction else { return .select }
         return now.timeIntervalSince(lastInteraction) >= quietInterval ? .select : .openTab
     }
@@ -339,8 +339,6 @@ final class TaskFilesStore {
     /// The selection came from a write, not from you.
     private(set) var autoSelected = false
     @ObservationIgnored private var lastInteraction: Date?
-    /// Files holds keyboard focus in its window.
-    @ObservationIgnored var keyboardFocused = false
 
     /// You selected, scrolled, clicked or switched something in Files.
     func noteInteraction() {
@@ -350,8 +348,8 @@ final class TaskFilesStore {
 
     private func follow(_ path: String) {
         let outcome = Self.follow(path, selection: selection, page: page, mode: mode,
-            dirty: selectedDocument?.dirty == true, keyboardFocused: keyboardFocused,
-            autoSelected: autoSelected, lastInteraction: lastInteraction, now: .now)
+            dirty: selectedDocument?.dirty == true, autoSelected: autoSelected,
+            lastInteraction: lastInteraction, now: .now)
         switch outcome {
         case .reload: break
         case .select:

@@ -107,7 +107,6 @@ struct TaskFilesView: View {
         .task(id: "\(store.selection ?? "")|\(store.mode)") {
             if store.mode != .diff { await store.loadFile() }
         }
-        .onChange(of: isFocused, initial: true) { _, focused in store.keyboardFocused = focused }
         .task(id: diffIdentity) { if store.mode == .diff { await store.loadDiff() } }
     }
 

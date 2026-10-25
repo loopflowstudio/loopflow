@@ -209,9 +209,9 @@ struct TaskFilesTests {
         let now = Date()
         func follow(_ path: String = "scratch/explore.html", selection: String? = "scratch/plan.md",
                     page: TaskFilesStore.Page = .files, mode: TaskFilesStore.Mode = .read, dirty: Bool = false,
-                    focused: Bool = false, auto: Bool = false, idle: TimeInterval? = 10) -> TaskFilesStore.Follow {
+                    auto: Bool = false, idle: TimeInterval? = 10) -> TaskFilesStore.Follow {
             TaskFilesStore.follow(path, selection: selection, page: page, mode: mode, dirty: dirty,
-                keyboardFocused: focused, autoSelected: auto,
+                autoSelected: auto,
                 lastInteraction: idle.map { now.addingTimeInterval(-$0) }, now: now)
         }
         #expect(TaskFilesStore.isScratchPage("scratch/explore.html"))
@@ -230,7 +230,6 @@ struct TaskFilesTests {
         #expect(follow(mode: .edit, auto: true) == .openTab)
         #expect(follow(mode: .diff, idle: 600) == .openTab)
         #expect(follow(dirty: true, auto: true) == .openTab)
-        #expect(follow(focused: true, idle: 600) == .openTab)
         #expect(follow(selection: "scratch/explore.html", page: .task, idle: 600) == .select)
     }
 

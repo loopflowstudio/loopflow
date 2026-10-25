@@ -27,8 +27,8 @@ Assumptions made during implement (2026-10-24):
    the checkout; other files in Read show the existing text editor. Changed-file
    rows still open in Diff.
 8. **"While you've been in the conversation"** is approximated: Files untouched
-   for two minutes counts as stale regardless of where you were. Keyboard focus
-   in Files always keeps the view. A Files pane that has never been touched is
+   for two minutes counts as stale regardless of where you were. Pane focus no
+   longer keeps the view (demo, 2026-10-25). A Files pane that has never been touched is
    stale.
 9. **Node rename.** The feature node is now `explore` (was `design`). Tasks
    that already took up `feature` keep their captured graph, so a Task stored

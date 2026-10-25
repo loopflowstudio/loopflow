@@ -187,8 +187,9 @@ Desktop change:
   Files view is unimportant. Otherwise it opens the file's tab in the background
   (or leaves its existing tab where it is). Accepted by Jack 2026-10-24 (2-minute interval is a starting value to tune); all local view
   state:
-  - **Never take:** Edit or Diff mode, an unsaved draft, or Files holding
-    keyboard focus.
+  - **Never take:** Edit or Diff mode, or an unsaved draft. (Pane focus was
+    dropped 2026-10-25 after the demo: Files keeps it indefinitely, so it
+    blocked every take. See `scratch/files-demo.md`.)
   - **Take:** nothing selected yet; the current document was itself
     auto-selected; or your last interaction with Files (select, scroll,
     click, find) is older than a quiet interval (proposal: 2 minutes) while you've

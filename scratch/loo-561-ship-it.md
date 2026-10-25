@@ -135,12 +135,13 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
 - Check: `cargo test --lib task_ship_` 7/7 and `ops::task::ship` 4/4; `--lib -- workflow graph::
   builtins task_workflow` ok but `linear_on_demand_graph_steps_acquire_before_spawning` (5 s
   planning deadline under load); `swift test --filter 'DesktopHeadless|WorkNavigationTests'` 52 ok;
-  clippy/fmt clean. Integration `land_tests::waited_task_landing_completes_at_workflow_end…`
-  (still drives deleted `lf ci watch`) and `cli_discovery::graph_help_validates…` fail; this pass
-  didn't touch either path, but both are the branch's: `land_tests` still runs `ci watch
-  --once` (lines ~1872, ~2326), which this branch deleted; the graph-help test exercises the
-  branch's `interactive:` validation (failure cause not yet diagnosed). Rewrite the land tests to drive the ship process / lazy
-  recovery instead (owner: gate, item 3).
+  clippy/fmt clean.
+- Test repair (2026-10-24): graph help compiles the graph again, so a duplicate stage id fails
+  "not unique" (the `human_occurrence_ids` removal had dropped validation). Land tests no longer
+  drive `ci watch`: the non-Task check case keeps only `pr reconcile` observing merge (its repair
+  variants tested the deleted watcher repair); `waited_task_landing` is one waiter held by live
+  work, read via `task status` (lazy recovery), then released. GitHub fixtures carry
+  `timelineItems`. Check: `land_tests` 30/30, `graph_help_validates` ok.
 - Compress (2026-10-24): `merge_target`'s `Option<Option<&str>>` became `reached`; the Workflow
   bar computes its stages once. `cargo test --lib task_ship_` 7/7 (with `LOOPFLOW_TEST_LF` set:
   the support crate's compiled-in `CARGO` path is stale here), `ops::task::ship` 4/4, clippy clean, Mac build ok.

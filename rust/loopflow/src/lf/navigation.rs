@@ -563,6 +563,7 @@ fn definition_help(
             skill.source.as_ref().map(|source| source.path.clone()),
         ),
         Target::Graph(graph) => {
+            crate::graph::compile_graph(graph, repo)?;
             let description = format_written_steps(&graph.items);
             (
                 graph.name.as_str(),

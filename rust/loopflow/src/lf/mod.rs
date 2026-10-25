@@ -1117,7 +1117,7 @@ pub enum SessionCommand {
     /// Open the ongoing conversation of this scope, or an exact Session
     #[command(visible_alias = "resume")]
     Connect {
-        /// Session ID or provider conversation ID
+        /// Session ID, Task identifier, or provider conversation ID
         #[arg(conflicts_with_all = ["task", "wave"])]
         id: Option<String>,
         #[command(flatten)]

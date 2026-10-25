@@ -3802,11 +3802,21 @@ fn waveless_task_lifecycle() {
     assert_eq!(inventory["tasks"]["items"][0]["task"]["id"], id);
     let placed = lf(repo.path(), home.path(), &["checkout", id, "--json"]);
     lf(repo.path(), home.path(), &["task", "run", id]);
-    let before = lf(
-        repo.path(),
-        home.path(),
-        &["task", "workflow", "show", id, "--json"],
-    );
+    // The edge's Graph writes its arrival after `task run` returns; compare
+    // the settled position, not one caught mid-edge.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let before = loop {
+        let shown = lf(
+            repo.path(),
+            home.path(),
+            &["task", "workflow", "show", id, "--json"],
+        );
+        if shown["position"]["kind"] == "node" {
+            break shown;
+        }
+        assert!(std::time::Instant::now() < deadline, "{shown}");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
     lf(
         repo.path(),
         home.path(),

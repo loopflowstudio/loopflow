@@ -32,9 +32,9 @@ struct ConsoleCommands: Commands {
     @FocusedValue(\.consoleActions) private var actions
     var body: some Commands {
         CommandGroup(after: .newItem) {
-            action("shell.new")
-            action("pane.close")
-            action("pane.reopen")
+            action("run")
+            action("close")
+            action("reopen")
             Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
         }
@@ -43,19 +43,19 @@ struct ConsoleCommands: Commands {
             Button("Toggle Sidebar") { actions?.toggleSidebar() }.keyboardShortcut("\\")
             Button("Focus Sidebar") { actions?.focusSidebar() }.disabled(actions == nil)
             Button("Focus Terminal") { actions?.focusTerminal?() }.disabled(actions?.focusTerminal == nil)
-            action("pane.zoom")
-            Menu("Focus Pane") { action("pane.focus") }.disabled(actions == nil)
-            action("navigate.back")
-            action("navigate.forward")
-            action("task.next")
-            action("task.previous")
-            Menu("Working Tasks") { action("task.goto") }
-            action("dashboard.working_tasks")
-            action("shell.toggle")
-            action("browser.toggle")
-            action("browser.back")
-            action("browser.forward")
-            action("browser.reload")
+            action("zoom")
+            Menu("Focus Pane") { action("focus") }.disabled(actions == nil)
+            action("back")
+            action("forward")
+            action("next")
+            action("previous")
+            Menu("Working Tasks") { action("goto") }
+            action("working-tasks")
+            action("toggle-shell")
+            action("toggle-browser")
+            action("page-back")
+            action("page-forward")
+            action("reload")
         }
     }
 
@@ -443,9 +443,10 @@ final class SessionsWorkspaceRegistry {
             let panes = workspace.multiplexer
             return DesktopWorkspaceInspection(work: workspace.key, title: workspace.title,
                 isOpen: openWork.contains(workspace.key), selected: selectedWork == workspace.key,
-                layout: DesktopLayoutInspection(panes.layout) { content in
-                    content.terminal.flatMap { surfaces.surfaceIncarnation(for: $0) }
-                }, focusedPane: panes.focusedPaneId,
+                layout: DesktopLayoutInspection(panes.layout,
+                    surface: { content in content.terminal.flatMap { surfaces.surfaceIncarnation(for: $0) } },
+                    commands: { content in content.terminal.flatMap { surfaces.commandStatus(for: $0) } }),
+                focusedPane: panes.focusedPaneId,
                 zoomedPane: panes.zoomedPaneId, hiddenPanes: panes.collapsedPaneIds.sorted())
         }
     }

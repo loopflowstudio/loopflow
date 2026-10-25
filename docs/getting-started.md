@@ -148,7 +148,7 @@ lf task create --wave <wave> --title "add OAuth login"
 lf task run <issue-id>
 lf task status <issue-id>
 lf comment <issue-id> "support passkeys too"
-lf wait <issue-id> --until terminal
+lf task wait <issue-id> --until terminal
 ```
 
 ### Skills chain

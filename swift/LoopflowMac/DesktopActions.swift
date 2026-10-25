@@ -244,17 +244,17 @@ struct DesktopAction {
     static let all: [DesktopAction] = navigation + panes + tools
 
     private static let navigation: [DesktopAction] = [
-        DesktopAction("navigate.back", "Back", keys: [.init(.character("["), .command)]) { context in
+        DesktopAction("back", "Back", keys: [.init(.character("["), .command)]) { context in
             guard !context.model.navigation.backStack.isEmpty else { throw DesktopTargetError("Nothing to go back to. Nothing changed.") }
             context.model.goBack()
             return nil
         },
-        DesktopAction("navigate.forward", "Forward", keys: [.init(.character("]"), .command)]) { context in
+        DesktopAction("forward", "Forward", keys: [.init(.character("]"), .command)]) { context in
             guard !context.model.navigation.forwardStack.isEmpty else { throw DesktopTargetError("Nothing to go forward to. Nothing changed.") }
             context.model.goForward()
             return nil
         },
-        DesktopAction("task.goto", "Working Task", arguments: [.init(name: "index", kind: .integer, required: true)],
+        DesktopAction("goto", "Working Task", arguments: [.init(name: "index", kind: .integer, required: true)],
             keys: (1...9).map { .init(.character(Character(String($0))), .command, args: ["index": String($0)]) }) { context in
             let index = try context.integer("index")
             let ids = context.model.workingTaskIDs
@@ -264,13 +264,13 @@ struct DesktopAction {
             context.model.select(.task(id: ids[index - 1]))
             return nil
         },
-        DesktopAction("task.next", "Next Task", keys: [.init(.tab, .control)]) { try cycle($0, by: 1) },
-        DesktopAction("task.previous", "Previous Task", keys: [.init(.tab, [.control, .shift])]) { try cycle($0, by: -1) },
-        DesktopAction("dashboard.working_tasks", WorkNavigation.workingTasksTitle) { context in
+        DesktopAction("next", "Next Task", keys: [.init(.tab, .control)]) { try cycle($0, by: 1) },
+        DesktopAction("previous", "Previous Task", keys: [.init(.tab, [.control, .shift])]) { try cycle($0, by: -1) },
+        DesktopAction("working-tasks", WorkNavigation.workingTasksTitle) { context in
             context.model.selectWorkingTasksDashboard()
             return nil
         },
-        DesktopAction("dashboard.enter", "Enter Task", arguments: [.init(name: "task", kind: .string, required: true)]) { context in
+        DesktopAction("enter", "Enter Task", arguments: [.init(name: "task", kind: .string, required: true)]) { context in
             let model = context.model
             let selector = try context.string("task")
             guard let plan = model.selectedViewPlan, model.navigation.showsSelection else {
@@ -303,7 +303,7 @@ struct DesktopAction {
     }
 
     private static let panes: [DesktopAction] = [
-        DesktopAction("pane.focus", "Focus Pane", scope: .pane, arguments: [.init(name: "direction", kind: .direction, required: false)],
+        DesktopAction("focus", "Focus Pane", scope: .pane, arguments: [.init(name: "direction", kind: .direction, required: false)],
             keys: [(DesktopKeyBinding.Key.left, "left"), (.right, "right"), (.up, "up"), (.down, "down")].map {
                 .init($0.0, [.command, .option], args: ["direction": $0.1])
             }) { context in
@@ -327,24 +327,24 @@ struct DesktopAction {
             if let terminal = try? context.terminal { workspaces.surfaces.focus(terminal) }
             return nil
         },
-        DesktopAction("pane.zoom", "Zoom Pane", scope: .pane, arguments: [.init(name: "on", kind: .boolean, required: false)],
+        DesktopAction("zoom", "Zoom Pane", scope: .pane, arguments: [.init(name: "on", kind: .boolean, required: false)],
             keys: [.init(.return, [.command, .shift])]) { context in
             let (workspace, pane) = try context.addressed
             if let on = try context.boolean("on") { workspace.multiplexer.setZoom(pane.id, enabled: on) }
             else { workspace.toggleFocus(pane.id) }
             return nil
         },
-        DesktopAction("pane.hide", "Hide Pane", scope: .pane) { context in
+        DesktopAction("hide", "Hide Pane", scope: .pane) { context in
             let (workspace, pane) = try context.addressed
             workspace.setCollapsed(paneId: pane.id, collapsed: true)
             return nil
         },
-        DesktopAction("pane.close", "Close Tab", scope: .pane, keys: [.init(.character("w"), .command)]) { context in
+        DesktopAction("close", "Close Tab", scope: .pane, keys: [.init(.character("w"), .command)]) { context in
             let (workspace, pane) = try context.addressed
             workspace.closePane(pane.id, tab: context.tab)
             return nil
         },
-        DesktopAction("pane.restore", "Show Pane", scope: .pane) { context in
+        DesktopAction("show", "Show Pane", scope: .pane) { context in
             let (workspace, pane) = try context.addressed
             guard workspace.multiplexer.collapsedPaneIds.contains(pane.id) else {
                 throw DesktopTargetError("\(pane.id) is already shown; nothing changed.")
@@ -352,7 +352,7 @@ struct DesktopAction {
             workspace.setCollapsed(paneId: pane.id, collapsed: false)
             return nil
         },
-        DesktopAction("pane.reopen", "Undo Close", scope: .pane, keys: [.init(.character("t"), [.command, .shift])],
+        DesktopAction("reopen", "Undo Close", scope: .pane, keys: [.init(.character("t"), [.command, .shift])],
             available: { $0.workspace?.multiplexer.canUndoClose == true }) { context in
             let (workspace, _) = try context.addressed
             let store = workspace.multiplexer
@@ -360,7 +360,7 @@ struct DesktopAction {
             store.undoClose()
             return DesktopActionOutcome(pane: store.focusedPaneId, tab: store.focusedPane.content.selectedTabID)
         },
-        DesktopAction("pane.move", "Move Pane", scope: .pane, arguments: [
+        DesktopAction("move", "Move Pane", scope: .pane, arguments: [
             .init(name: "destination", kind: .pane, required: true), .init(name: "axis", kind: .axis, required: true),
         ]) { context in
             let (workspace, pane) = try context.addressed
@@ -372,7 +372,7 @@ struct DesktopAction {
             workspace.multiplexer.move(pane.id, beside: destination.id, axis: axis)
             return nil
         },
-        DesktopAction("pane.resize", "Resize Pane", scope: .pane, arguments: [
+        DesktopAction("resize", "Resize Pane", scope: .pane, arguments: [
             .init(name: "toward", kind: .pane, required: true), .init(name: "ratio", kind: .ratio, required: true),
         ]) { context in
             let (workspace, pane) = try context.addressed
@@ -384,7 +384,7 @@ struct DesktopAction {
             workspace.multiplexer.updateRatio(between: pane.id, and: toward.id, ratio: ratio)
             return nil
         },
-        DesktopAction("pane.send", "Send Text", scope: .pane, arguments: [
+        DesktopAction("send", "Send Text", scope: .pane, arguments: [
             .init(name: "text", kind: .string, required: true), .init(name: "surface", kind: .string, required: false),
         ]) { context in
             let terminal = try context.terminal
@@ -392,7 +392,7 @@ struct DesktopAction {
                 surface: try context.surface(for: terminal))
             return nil
         },
-        DesktopAction("pane.send_key", "Send Key", scope: .pane, arguments: [
+        DesktopAction("send-key", "Send Key", scope: .pane, arguments: [
             .init(name: "key", kind: .key, required: true), .init(name: "surface", kind: .string, required: false),
         ]) { context in
             let value = try context.string("key")
@@ -407,33 +407,38 @@ struct DesktopAction {
 
     private static let tools: [DesktopAction] = [
         // Scripts add a tab without moving focus; ⌘T focuses it.
-        DesktopAction("shell.new", "New Terminal", scope: .pane, arguments: [
+        DesktopAction("run", "New Terminal", scope: .pane, arguments: [
             .init(name: "command", kind: .string, required: false), .init(name: "focus", kind: .boolean, required: false),
         ], keys: [.init(.character("t"), .command, args: ["focus": "true"])], available: taskTool) { context in
             let workspace = try context.task
-            let command = context.args["command"].map { ["/bin/sh", "-c", $0] }
-            let shell = try workspace.newShell(command: command, focus: try context.boolean("focus") ?? false)
+            if let line = context.args["command"] { try validateDesktopLiteralText(line) }
+            let shell = try workspace.newShell(focus: try context.boolean("focus") ?? false)
+            // The line is typed into the tab's own shell, as a person would, so the
+            // tab outlives the command and `wait` reads its finish.
+            if let line = context.args["command"], let terminal = shell?.content.selectedShell?.terminal {
+                try context.workspaces.surfaces.submit(line, terminal: terminal)
+            }
             return DesktopActionOutcome(pane: shell?.id, tab: shell?.content.selectedShell?.id)
         },
-        DesktopAction("shell.toggle", "Toggle Shell", scope: .pane, keys: [.init(.character("`"), .control)],
+        DesktopAction("toggle-shell", "Toggle Shell", scope: .pane, keys: [.init(.character("`"), .control)],
             available: taskTool) { context in
             let workspace = try context.task
             try workspace.toggleShell()
             return DesktopActionOutcome(pane: workspace.multiplexer.shellPane?.id, tab: workspace.multiplexer.shellPane?.content.selectedTabID)
         },
-        DesktopAction("browser.toggle", "Toggle Browser", scope: .pane, keys: [.init(.character("e"), [.command, .shift])],
+        DesktopAction("toggle-browser", "Toggle Browser", scope: .pane, keys: [.init(.character("e"), [.command, .shift])],
             available: taskTool) { context in
             let workspace = try context.task
             workspace.toggleBrowser()
             return browserOutcome(workspace)
         },
-        DesktopAction("browser.files", "Show Files", scope: .pane, available: taskTool) { context in
+        DesktopAction("files", "Show Files", scope: .pane, available: taskTool) { context in
             try show(.files, context)
         },
-        DesktopAction("browser.graph_log", "Show Graph Processes", scope: .pane, available: taskTool) { context in
+        DesktopAction("graph-log", "Show Graph Processes", scope: .pane, available: taskTool) { context in
             try show(.graphLog, context)
         },
-        DesktopAction("browser.open", "Open Web Page", scope: .pane, arguments: [.init(name: "url", kind: .url, required: true)]) { context in
+        DesktopAction("browse", "Open Web Page", scope: .pane, arguments: [.init(name: "url", kind: .url, required: true)]) { context in
             let value = try context.string("url")
             guard let url = URL(string: value), let page = BrowserTab.page(url) else {
                 throw DesktopArgumentError("url=\(value) is not an http or https address; nothing changed.")
@@ -441,24 +446,24 @@ struct DesktopAction {
             return try show(page, context)
         },
         // ⌘[ and ⌘] stay Desktop navigation; the page's own Back and Forward are scriptable and in its toolbar.
-        DesktopAction("browser.back", "Web Page Back", scope: .pane, available: webPage) { context in
+        DesktopAction("page-back", "Web Page Back", scope: .pane, available: webPage) { context in
             let page = try page(context)
             guard page.canGoBack else { throw DesktopTargetError("The web page has nothing to go back to. Nothing changed.") }
             page.goBack()
             return nil
         },
-        DesktopAction("browser.forward", "Web Page Forward", scope: .pane, available: webPage) { context in
+        DesktopAction("page-forward", "Web Page Forward", scope: .pane, available: webPage) { context in
             let page = try page(context)
             guard page.canGoForward else { throw DesktopTargetError("The web page has nothing to go forward to. Nothing changed.") }
             page.goForward()
             return nil
         },
-        DesktopAction("browser.reload", "Reload Web Page", scope: .pane, keys: [.init(.character("r"), .command)],
+        DesktopAction("reload", "Reload Web Page", scope: .pane, keys: [.init(.character("r"), .command)],
             available: webPage) { context in
             try page(context).reload()
             return nil
         },
-        DesktopAction("session.switch", "Switch Conversation", scope: .pane,
+        DesktopAction("switch", "Switch Conversation", scope: .pane,
             arguments: [.init(name: "session", kind: .string, required: true)]) { context in
             let (workspace, _) = try context.addressed
             let id = try context.string("session")

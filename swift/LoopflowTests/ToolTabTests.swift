@@ -83,12 +83,12 @@ struct ToolTabTests {
         let source = DesktopPaneTarget(repository: work.repository, window: "window", work: work,
             pane: session.id, incarnation: session.incarnation, tab: nil)
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No execution during control") })
-        let first = try DesktopAction.perform(DesktopActionRequest("shell.new", at: source), model: model, workspaces: registry)
+        let first = try DesktopAction.perform(DesktopActionRequest("run", at: source), model: model, workspaces: registry)
         let firstID = try #require(first.tab)
         let shell = try #require(workspace.multiplexer.shell(firstID))
         let exact = DesktopPaneTarget(repository: work.repository, window: "window", work: work,
             pane: try #require(first.pane), incarnation: shell.incarnation, tab: shell.id)
-        let second = try DesktopAction.perform(DesktopActionRequest("shell.new", at: source), model: model, workspaces: registry)
+        let second = try DesktopAction.perform(DesktopActionRequest("run", at: source), model: model, workspaces: registry)
         #expect(first.pane == second.pane)
         #expect(first.tab != second.tab)
         #expect(workspace.multiplexer.shellPane?.content.selectedShell?.id == second.tab)
@@ -103,12 +103,12 @@ struct ToolTabTests {
         let toolRead = DesktopTextRequest(target: toolTarget, surface: "missing", region: .screen, maxBytes: 1024)
         #expect(try registry.readText(toolRead).result == .unavailable(reason: .notTerminal))
         #expect(throws: RegistryQueryError.self) {
-            try DesktopAction.perform(DesktopActionRequest("pane.send", at: toolTarget, args: ["text": "draft", "surface": "missing"]), model: model, workspaces: registry)
+            try DesktopAction.perform(DesktopActionRequest("send", at: toolTarget, args: ["text": "draft", "surface": "missing"]), model: model, workspaces: registry)
         }
-        let hidden = try DesktopAction.perform(DesktopActionRequest("pane.hide", at: exact), model: model, workspaces: registry)
+        let hidden = try DesktopAction.perform(DesktopActionRequest("hide", at: exact), model: model, workspaces: registry)
         #expect(hidden.tab == firstID)
         #expect(try registry.readText(request).hidden)
-        _ = try DesktopAction.perform(DesktopActionRequest("pane.restore", at: exact), model: model, workspaces: registry)
+        _ = try DesktopAction.perform(DesktopActionRequest("show", at: exact), model: model, workspaces: registry)
         workspace.multiplexer.selectShell(shell.id)
         #expect(!(try registry.readText(request)).hidden)
         workspace.closePane(try #require(first.pane))

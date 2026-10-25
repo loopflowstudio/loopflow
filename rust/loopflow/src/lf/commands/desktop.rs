@@ -208,6 +208,17 @@ pub struct DesktopTabInspection {
     pub surface: Option<String>,
     pub location: Option<DesktopContentLocation>,
     pub url: Option<String>,
+    /// Shell tabs with a live surface; `None` before it starts and for browser tabs.
+    pub commands: Option<DesktopCommandStatus>,
+}
+
+/// A shell's commands as its shell integration reports them: lines `run`
+/// submitted, commands finished, and the last one's exit status.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DesktopCommandStatus {
+    pub submitted: u32,
+    pub finished: u32,
+    pub exit_status: Option<i32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -273,6 +284,29 @@ impl DesktopKey {
             Self::Down => "down",
             Self::Home => "home",
             Self::End => "end",
+        }
+    }
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Serialize, Deserialize, clap::ValueEnum, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DesktopDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+impl DesktopDirection {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::Up => "up",
+            Self::Down => "down",
         }
     }
 }
@@ -384,8 +418,12 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         ["desktop", "ls"] => Some(schema::<DesktopWindowInspection>()),
         ["desktop", "actions"] => Some(schema::<Vec<DesktopActionDescriptor>>()),
         ["desktop", "capture"] => Some(schema::<DesktopTextReading>()),
-        ["desktop", "do" | "send" | "send-key" | "run" | "zoom" | "focus" | "hide" | "restore" | "move"
-        | "resize"] => Some(schema::<DesktopActionReceipt>()),
+        ["desktop", "events"] => Some(schema::<DesktopChange>()),
+        ["desktop", "wait"] => None,
+        // Saved-intent commands answered above; `rename` writes a shared owner's record.
+        ["desktop", verb] if !READING_VERBS.contains(verb) && *verb != "rename" => {
+            Some(schema::<DesktopVerbResult>())
+        }
         _ => None,
     }
 }
@@ -789,21 +827,23 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
     require_supported()?;
     let json = cli.json || verb.target.json;
     let mut desktop = DesktopConnection::open()?;
-    let mut inspection =
-        || -> Result<DesktopInspection> { desktop.call("inspect", serde_json::json!({})) };
-    if let VerbKind::State = verb.kind {
-        let reading = inspection()?;
-        if json {
-            println!("{}", serde_json::to_string_pretty(&reading)?);
-        } else {
-            println!("{}", reading.render());
+    match verb.kind {
+        VerbKind::State => {
+            let reading: DesktopInspection = desktop.call("inspect", serde_json::json!({}))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&reading)?);
+            } else {
+                println!("{}", reading.render());
+            }
+            return Ok(());
         }
-        return Ok(());
+        VerbKind::Events => return stream_events(desktop, json),
+        _ => {}
     }
     // One live reading supplies every lifetime token; dispatch never
     // reinterprets the request using later focus.
     let resolution = super::open::selected_context(cli, None)?;
-    let reading = inspection()?;
+    let reading: DesktopInspection = desktop.call("inspect", serde_json::json!({}))?;
     let scope = Scope {
         inspection: &reading,
         resolution: &resolution,
@@ -816,7 +856,7 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
         .window(verb.target.window.as_deref())
         .map_err(DesktopError::target)?;
     match &verb.kind {
-        VerbKind::State => unreachable!("state returned above"),
+        VerbKind::State | VerbKind::Events => unreachable!("answered above"),
         VerbKind::Ls => {
             if json {
                 println!("{}", serde_json::to_string_pretty(window)?);
@@ -841,7 +881,7 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             trim,
         } => {
             let pane = scope
-                .pane(window, &verb.target, PaneNeed::Terminal)
+                .pane(window, verb.target.pane.as_deref(), PaneNeed::Terminal)
                 .map_err(DesktopError::target)?;
             let request = DesktopTextRequest {
                 target: pane.target(window),
@@ -851,6 +891,14 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             };
             read_text(&mut desktop, request, json, *trim)
         }
+        VerbKind::Wait { timeout } => {
+            let pane = scope
+                .pane(window, verb.target.pane.as_deref(), PaneNeed::Any)
+                .map_err(DesktopError::target)?;
+            let watched = WaitTarget::of(window, pane);
+            drop(desktop);
+            wait(watched, *timeout, json)
+        }
         VerbKind::Action { name, args } => {
             let descriptor = window
                 .actions
@@ -858,23 +906,28 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
                 .find(|action| action.name == *name)
                 .ok_or_else(|| {
                     DesktopError::Argument(format!(
-                        "Desktop has no action {name}; see `lf desktop actions`. Nothing changed."
+                        "This Desktop has no verb {name}; see `lf desktop actions`, or update Desktop. Nothing changed."
                     ))
                 })?;
             let mut args = args.clone();
-            let pane = match descriptor.scope {
-                DesktopActionScope::Window => {
-                    if verb.target.task.is_some() || verb.target.block.is_some() {
-                        return Err(DesktopError::Argument(format!(
-                            "{name} acts on the window; drop -t/-b. Nothing changed."
-                        ))
-                        .into());
-                    }
-                    None
-                }
+            let (pane, resolved) = match descriptor.scope {
+                DesktopActionScope::Window => (
+                    None,
+                    DesktopResolution {
+                        window: window.window.clone(),
+                        work: None,
+                        pane: None,
+                        tab: None,
+                        rule: DesktopTargetRule::Window,
+                    },
+                ),
                 DesktopActionScope::Pane => {
                     let pane = scope
-                        .pane(window, &verb.target, PaneNeed::for_action(name))
+                        .pane(
+                            window,
+                            verb.target.pane.as_deref(),
+                            PaneNeed::for_action(name),
+                        )
                         .map_err(DesktopError::target)?;
                     // Pane arguments are Rex selectors in the same workspace.
                     for key in ["destination", "toward"] {
@@ -883,10 +936,17 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
                             args.insert(key.into(), peer);
                         }
                     }
-                    if matches!(name.as_str(), "pane.send" | "pane.send_key") {
+                    if matches!(name.as_str(), "send" | "send-key") {
                         args.insert("surface".into(), pane.surface()?);
                     }
-                    Some(pane.target(window))
+                    let resolved = DesktopResolution {
+                        window: window.window.clone(),
+                        work: Some(pane.workspace.work.clone()),
+                        pane: pane.leaf.pane.clone(),
+                        tab: pane.tab.map(|tab| tab.id.clone()),
+                        rule: pane.rule,
+                    };
+                    (Some(pane.target(window)), resolved)
                 }
             };
             perform(
@@ -898,13 +958,14 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
                     action: name.clone(),
                     args,
                 },
+                resolved,
                 json,
             )
         }
     }
 }
 
-/// A parsed `lf desktop` live command: what it reads or which action it performs.
+/// A parsed `lf desktop` live command: what it reads or which verb it performs.
 #[derive(Debug)]
 struct Verb {
     kind: VerbKind,
@@ -917,46 +978,32 @@ enum VerbKind {
     State,
     Ls,
     Actions,
+    Events,
+    Wait {
+        timeout: Option<std::time::Duration>,
+    },
     Capture {
         region: DesktopTextRegion,
         max_bytes: usize,
         trim: bool,
     },
+    /// A registry action; its name is the verb.
     Action {
         name: String,
         args: std::collections::BTreeMap<String, String>,
     },
 }
 
-/// Every action a verb is sugar for; each must be in Desktop's registry.
-pub const VERB_ACTIONS: &[(&str, &str)] = &[
-    ("send", "pane.send"),
-    ("send-key", "pane.send_key"),
-    ("run", "shell.new"),
-    ("zoom", "pane.zoom"),
-    ("focus", "pane.focus"),
-    ("hide", "pane.hide"),
-    ("restore", "pane.restore"),
-    ("move", "pane.move"),
-    ("resize", "pane.resize"),
-];
-
-fn verb_action(verb: &str) -> String {
-    VERB_ACTIONS
-        .iter()
-        .find(|(name, _)| *name == verb)
-        .map(|(_, action)| (*action).to_owned())
-        .expect("every pane verb names a registry action")
-}
+/// Verbs that read rather than perform a registry action.
+pub const READING_VERBS: &[&str] = &["ls", "state", "actions", "events", "wait", "capture"];
 
 impl Verb {
     fn parse(command: &crate::lf::DesktopCommand) -> Result<Self> {
-        use crate::lf::DesktopCommand;
-        use crate::lf::DesktopTargetArgs;
+        use crate::lf::{DesktopCommand, DesktopTargetArgs, DesktopWindowArgs};
         let argument =
             |message: String| -> anyhow::Error { DesktopError::Argument(message).into() };
-        let action = |verb: &str, args: Vec<(&str, String)>| VerbKind::Action {
-            name: verb_action(verb),
+        let action = |name: &str, args: Vec<(&str, String)>| VerbKind::Action {
+            name: name.to_owned(),
             args: args
                 .into_iter()
                 .map(|(key, value)| (key.to_owned(), value))
@@ -965,6 +1012,11 @@ impl Verb {
         let bare = |json: bool| DesktopTargetArgs {
             json,
             ..Default::default()
+        };
+        let window = |args: &DesktopWindowArgs| DesktopTargetArgs {
+            pane: None,
+            window: args.window.clone(),
+            json: args.json,
         };
         let (kind, target) = match command {
             DesktopCommand::State { json } => (VerbKind::State, bare(*json)),
@@ -976,36 +1028,25 @@ impl Verb {
                 },
             ),
             DesktopCommand::Actions { json } => (VerbKind::Actions, bare(*json)),
-            DesktopCommand::Do {
-                action: name,
-                args,
-                target,
-            } => {
-                let mut parsed = std::collections::BTreeMap::new();
-                for pair in args {
-                    let (key, value) = pair.split_once('=').ok_or_else(|| {
-                        argument(format!(
-                            "Expected key=value, got {pair:?}; nothing changed."
-                        ))
-                    })?;
-                    if key.is_empty() {
-                        return Err(argument(format!(
-                            "Expected key=value, got {pair:?}; nothing changed."
-                        )));
-                    }
-                    parsed.insert(key.to_owned(), value.to_owned());
-                }
-                if let Some(text) = parsed.get("text") {
-                    validate_literal_text(text)?;
-                }
-                (
-                    VerbKind::Action {
-                        name: name.clone(),
-                        args: parsed,
-                    },
-                    target.clone(),
-                )
+            DesktopCommand::Events { json } => (VerbKind::Events, bare(*json)),
+            DesktopCommand::Wait { timeout, target } => {
+                (VerbKind::Wait { timeout: *timeout }, target.clone())
             }
+            DesktopCommand::Back { target } => (action("back", vec![]), window(target)),
+            DesktopCommand::Forward { target } => (action("forward", vec![]), window(target)),
+            DesktopCommand::Next { target } => (action("next", vec![]), window(target)),
+            DesktopCommand::Previous { target } => (action("previous", vec![]), window(target)),
+            DesktopCommand::WorkingTasks { target } => {
+                (action("working-tasks", vec![]), window(target))
+            }
+            DesktopCommand::Goto { index, target } => (
+                action("goto", vec![("index", index.to_string())]),
+                window(target),
+            ),
+            DesktopCommand::Enter { task, target } => (
+                action("enter", vec![("task", task.clone())]),
+                window(target),
+            ),
             DesktopCommand::Send { text, target } => {
                 let text = match text {
                     Some(text) => text.clone(),
@@ -1039,30 +1080,49 @@ impl Verb {
                     target.clone(),
                 )
             }
-            DesktopCommand::Run { command, target } => {
-                let args = if command.is_empty() {
-                    vec![]
-                } else {
-                    vec![(
-                        "command",
-                        shlex::try_join(command.iter().map(String::as_str)).map_err(|error| {
-                            argument(format!("Cannot quote the command: {error}"))
-                        })?,
-                    )]
-                };
-                (action("run", args), target.clone())
+            DesktopCommand::Run { line, target } => {
+                if let Some(line) = line {
+                    validate_literal_text(line)?;
+                }
+                (
+                    action(
+                        "run",
+                        line.iter().map(|line| ("command", line.clone())).collect(),
+                    ),
+                    target.clone(),
+                )
             }
-            DesktopCommand::Zoom { on, off, target } => {
-                let args = match (on, off) {
-                    (true, _) => vec![("on", "true".to_owned())],
-                    (_, true) => vec![("on", "false".to_owned())],
-                    _ => vec![],
-                };
-                (action("zoom", args), target.clone())
+            DesktopCommand::Zoom { on, target, .. } => {
+                (action("zoom", vec![("on", on.to_string())]), target.clone())
             }
-            DesktopCommand::Focus { target } => (action("focus", vec![]), target.clone()),
+            DesktopCommand::Focus { direction, target } => (
+                action(
+                    "focus",
+                    direction
+                        .iter()
+                        .map(|direction| ("direction", direction.as_str().to_owned()))
+                        .collect(),
+                ),
+                target.clone(),
+            ),
             DesktopCommand::Hide { target } => (action("hide", vec![]), target.clone()),
-            DesktopCommand::Restore { target } => (action("restore", vec![]), target.clone()),
+            DesktopCommand::Show { target } => (action("show", vec![]), target.clone()),
+            DesktopCommand::Close { target } => (action("close", vec![]), target.clone()),
+            DesktopCommand::Reopen { target } => (action("reopen", vec![]), target.clone()),
+            DesktopCommand::Files { target } => (action("files", vec![]), target.clone()),
+            DesktopCommand::GraphLog { target } => (action("graph-log", vec![]), target.clone()),
+            DesktopCommand::PageBack { target } => (action("page-back", vec![]), target.clone()),
+            DesktopCommand::PageForward { target } => {
+                (action("page-forward", vec![]), target.clone())
+            }
+            DesktopCommand::Reload { target } => (action("reload", vec![]), target.clone()),
+            DesktopCommand::Browse { url, target } => {
+                (action("browse", vec![("url", url.clone())]), target.clone())
+            }
+            DesktopCommand::Switch { session, target } => (
+                action("switch", vec![("session", session.clone())]),
+                target.clone(),
+            ),
             DesktopCommand::Move {
                 destination,
                 axis,
@@ -1107,16 +1167,234 @@ impl Verb {
     }
 }
 
-fn perform(desktop: &mut DesktopConnection, request: DesktopActionRequest, json: bool) -> Result<()> {
+/// How a command's target was chosen, so a script can pin it by ID next time.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DesktopTargetRule {
+    /// A window-level verb: `--window`, the caller's window or the only one.
+    Window,
+    /// `-p` named it.
+    Pane,
+    /// Root `--task`/`--wave` chose the view; the pane was the only eligible one.
+    Work,
+    /// The terminal the command ran in (`LF_TERMINAL_ID`).
+    Caller,
+    /// The checkout's Task binding chose the view; the pane was the only eligible one.
+    Binding,
+}
+
+/// Full IDs of what a verb acted on and the rule that chose them.
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
+pub struct DesktopResolution {
+    pub window: String,
+    pub work: Option<WorkWorkspaceKey>,
+    pub pane: Option<String>,
+    pub tab: Option<String>,
+    pub rule: DesktopTargetRule,
+}
+
+/// A verb's output: Desktop's receipt plus how lf resolved the target.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct DesktopVerbResult {
+    #[serde(flatten)]
+    receipt: DesktopActionReceipt,
+    target: DesktopResolution,
+}
+
+fn perform(
+    desktop: &mut DesktopConnection,
+    request: DesktopActionRequest,
+    target: DesktopResolution,
+    json: bool,
+) -> Result<()> {
     let receipt: DesktopActionReceipt = desktop.call("perform", &request)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&receipt)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&DesktopVerbResult { receipt, target })?
+        );
     } else if let Some(pane) = &receipt.pane {
+        // Full IDs, so the line can be passed back as -p.
         println!("{}", receipt.tab.as_deref().unwrap_or(pane));
     } else {
         println!("{}", receipt.destination);
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Events and waits: one socket subscription; `state` is the snapshot they update.
+// ---------------------------------------------------------------------------
+
+fn stream_events(desktop: DesktopConnection, json: bool) -> Result<()> {
+    use std::io::Write;
+    let mut events = desktop.events()?;
+    let mut stdout = std::io::stdout().lock();
+    while let Some(change) = events.next(None)? {
+        if json {
+            writeln!(stdout, "{}", serde_json::to_string(&change)?)?;
+        } else {
+            for window in &change.windows {
+                writeln!(
+                    stdout,
+                    "{} {}",
+                    short(&window.window),
+                    window.render_change()
+                )?;
+            }
+            for window in &change.closed {
+                writeln!(stdout, "{} closed", short(window))?;
+            }
+        }
+        stdout.flush()?;
+    }
+    Ok(())
+}
+
+/// What `wait` watches, by full ID so a later reading cannot retarget it.
+#[derive(Debug, Clone, PartialEq)]
+struct WaitTarget {
+    window: String,
+    work: WorkWorkspaceKey,
+    pane: String,
+    tab: Option<String>,
+}
+
+/// One observation of the watched target.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum WaitState {
+    /// Not there yet, or a terminal without a running surface.
+    Pending,
+    /// A pane that is ready, or a tab that closed: exit 0.
+    Ready,
+    /// A shell's commands: lines `run` submitted, finished, last status.
+    Commands {
+        submitted: u32,
+        finished: u32,
+        exit_status: Option<i32>,
+    },
+}
+
+impl WaitTarget {
+    fn of(window: &DesktopWindowInspection, pane: ResolvedPane<'_>) -> Self {
+        Self {
+            window: window.window.clone(),
+            work: pane.workspace.work.clone(),
+            pane: pane.leaf.pane.clone().unwrap_or_default(),
+            tab: pane.tab.map(|tab| tab.id.clone()),
+        }
+    }
+
+    fn observe(&self, window: &DesktopWindowInspection) -> WaitState {
+        let Some(leaf) = window
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.work == self.work)
+            .and_then(|workspace| {
+                workspace
+                    .layout
+                    .leaves()
+                    .into_iter()
+                    .find(|leaf| leaf.pane.as_deref() == Some(&self.pane))
+            })
+        else {
+            return WaitState::Pending;
+        };
+        let Some(tab) = &self.tab else {
+            // A terminal pane is ready when its surface runs; a browser at once.
+            return match leaf.content.as_deref() {
+                Some("session") if leaf.surface.is_none() => WaitState::Pending,
+                _ => WaitState::Ready,
+            };
+        };
+        match leaf.tabs.iter().find(|candidate| candidate.id == *tab) {
+            // A closed tab, or a shell that exited, has finished.
+            None => WaitState::Ready,
+            Some(tab) => match &tab.commands {
+                Some(commands) => WaitState::Commands {
+                    submitted: commands.submitted,
+                    finished: commands.finished,
+                    exit_status: commands.exit_status,
+                },
+                None if tab.kind == DesktopTabKind::Shell => WaitState::Pending,
+                None => WaitState::Ready,
+            },
+        }
+    }
+}
+
+/// The exit status once the wait is over: lines `run` submitted have all finished,
+/// else a command finished after the wait began; a ready pane or closed tab is 0.
+fn wait_outcome(baseline: Option<u32>, state: WaitState) -> Option<u8> {
+    match state {
+        WaitState::Pending => None,
+        WaitState::Ready => Some(0),
+        WaitState::Commands {
+            submitted,
+            finished,
+            exit_status,
+        } => {
+            let done = if submitted > 0 {
+                finished >= submitted
+            } else {
+                baseline.is_some_and(|baseline| finished > baseline)
+            };
+            done.then(|| exit_status.map_or(0, |status| status.clamp(0, 255) as u8))
+        }
+    }
+}
+
+fn wait(target: WaitTarget, timeout: Option<std::time::Duration>, json: bool) -> Result<()> {
+    let deadline = timeout.map(|timeout| std::time::Instant::now() + timeout);
+    let mut events = DesktopConnection::open()?.events()?;
+    let mut baseline = None;
+    loop {
+        let remaining = match deadline {
+            Some(deadline) => match deadline.checked_duration_since(std::time::Instant::now()) {
+                Some(remaining) => Some(remaining),
+                None => break,
+            },
+            None => None,
+        };
+        let Some(change) = events.next(remaining)? else {
+            break;
+        };
+        if change.closed.contains(&target.window) {
+            return Err(DesktopError::Target(
+                "The window closed while waiting; nothing is left to wait for.".into(),
+            )
+            .into());
+        }
+        let Some(window) = change
+            .windows
+            .iter()
+            .find(|window| window.window == target.window)
+        else {
+            continue;
+        };
+        let state = target.observe(window);
+        if let WaitState::Commands { finished, .. } = state {
+            baseline.get_or_insert(finished);
+        }
+        if let Some(status) = wait_outcome(baseline, state) {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "pane": target.pane, "tab": target.tab, "status": status })
+                );
+            }
+            return match status {
+                0 => Ok(()),
+                status => Err(crate::process::CommandExit(status).into()),
+            };
+        }
+    }
+    bail!(
+        "{} did not finish within {}.",
+        target.tab.as_deref().unwrap_or(&target.pane),
+        timeout.map_or_else(String::new, |timeout| format!("{}s", timeout.as_secs()))
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1211,8 +1489,8 @@ impl PaneNeed {
             "shell" => Self::Kind("shell"),
             "browser" => Self::Kind("browser"),
             "session" => Self::Kind("session"),
-            _ if matches!(action, "pane.send" | "pane.send_key") => Self::Terminal,
-            _ if action == "pane.restore" => Self::Hidden,
+            _ if matches!(action, "send" | "send-key") => Self::Terminal,
+            _ if action == "show" => Self::Hidden,
             _ => Self::Any,
         }
     }
@@ -1224,6 +1502,7 @@ struct ResolvedPane<'a> {
     workspace: &'a DesktopWorkspaceInspection,
     leaf: &'a DesktopLayoutInspection,
     tab: Option<&'a DesktopTabInspection>,
+    rule: DesktopTargetRule,
 }
 
 impl ResolvedPane<'_> {
@@ -1284,6 +1563,7 @@ impl<'a> Scope<'a> {
                                 workspace,
                                 leaf,
                                 tab: None,
+                                rule: DesktopTargetRule::Caller,
                             },
                         ));
                     }
@@ -1297,6 +1577,7 @@ impl<'a> Scope<'a> {
                             workspace,
                             leaf,
                             tab: Some(tab),
+                            rule: DesktopTargetRule::Caller,
                         },
                     ))
                 })
@@ -1353,44 +1634,16 @@ impl<'a> Scope<'a> {
         }
     }
 
-    /// `-t`, then root Work flags, then the caller's workspace, then the checkout's binding.
+    /// A tile of the view (`-p 3`, `-p LOO-519`), then root Work flags, then the
+    /// caller's workspace, then the checkout's binding.
     fn workspace(
         &self,
         window: &'a DesktopWindowInspection,
-        task: Option<&str>,
-    ) -> Result<&'a DesktopWorkspaceInspection> {
+        tile: Option<&str>,
+    ) -> Result<(&'a DesktopWorkspaceInspection, DesktopTargetRule)> {
         use crate::ops::context::ContextFact;
-        let find = |work: &WorkWorkspaceKey| {
-            window.workspaces.iter().find(|workspace| workspace.work == *work).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "{} has no workspace in this Desktop window yet; open it first. Nothing changed.",
-                    work.id
-                )
-            })
-        };
-        if let Some(selector) = task {
-            let index = resolve(
-                "Task",
-                selector,
-                &window.list,
-                |entry| vec![entry.work.id.clone()],
-                |entry| {
-                    entry
-                        .identifier
-                        .iter()
-                        .cloned()
-                        .chain([entry.title.clone()])
-                        .collect()
-                },
-                |entry| {
-                    format!(
-                        "{} {}",
-                        entry.position,
-                        entry.identifier.as_deref().unwrap_or(&entry.title)
-                    )
-                },
-            )?;
-            return find(&window.list[index].work);
+        if let Some(selector) = tile {
+            return Ok((self.tile(window, selector)?, DesktopTargetRule::Pane));
         }
         let selected = || match (&self.resolution.task, &self.resolution.wave) {
             (ContextFact::Bound { value, .. }, _) => {
@@ -1414,37 +1667,116 @@ impl<'a> Scope<'a> {
         };
         if self.explicit_work {
             if let Some(selection) = selected() {
-                return by_selection(selection);
+                return Ok((by_selection(selection)?, DesktopTargetRule::Work));
             }
         }
         if let Some(id) = &self.caller {
             return match self.caller() {
-                Some((caller, pane)) if caller.window == window.window => Ok(pane.workspace),
-                Some(_) => bail!("This terminal belongs to another Desktop window; pass -t. Nothing changed."),
-                None => bail!("This terminal ({id}) is no longer in Desktop; pass -t and -b. Nothing changed."),
+                Some((caller, pane)) if caller.window == window.window => Ok((pane.workspace, DesktopTargetRule::Caller)),
+                Some(_) => bail!("This terminal belongs to another Desktop window; pass --task or -p TILE/PANE. Nothing changed."),
+                None => bail!("This terminal ({id}) is no longer in Desktop; pass --task or -p TILE/PANE. Nothing changed."),
             };
         }
         match selected() {
-            Some(selection) => by_selection(selection),
-            None => bail!("No Task selected: pass -t, or run from a Task's checkout or Desktop terminal. Nothing changed."),
+            Some(selection) => Ok((by_selection(selection)?, DesktopTargetRule::Binding)),
+            None => bail!("No Task selected: pass --task or -p TILE/PANE, or run from a Task's checkout or Desktop terminal. Nothing changed."),
         }
     }
 
+    /// The window shows a Dashboard (saved, Working Tasks or an unsaved query):
+    /// its tiles are the view's parts.
+    fn shows_board(window: &DesktopWindowInspection) -> bool {
+        matches!(
+            window.destination,
+            DesktopDestination::Dashboard { .. }
+                | DesktopDestination::WorkingTasks
+                | DesktopDestination::View { .. }
+        )
+    }
+
+    /// A tile: on a Dashboard its members in slot order, else the sidebar's Tasks (⌘N).
+    fn tile(
+        &self,
+        window: &'a DesktopWindowInspection,
+        selector: &str,
+    ) -> Result<&'a DesktopWorkspaceInspection> {
+        let tiles: Vec<&WorkWorkspaceKey> = if Self::shows_board(window) {
+            window.open_work.iter().collect()
+        } else {
+            window.list.iter().map(|entry| &entry.work).collect()
+        };
+        let label = |work: &WorkWorkspaceKey| {
+            let entry = window.list.iter().find(|entry| entry.work == *work);
+            let title = window
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.work == *work)
+                .map(|workspace| workspace.title.clone());
+            entry
+                .and_then(|entry| entry.identifier.clone())
+                .into_iter()
+                .chain(entry.map(|entry| entry.title.clone()))
+                .chain(title)
+                .collect::<Vec<_>>()
+        };
+        let index = resolve(
+            "tile",
+            selector,
+            &tiles,
+            |work| vec![work.id.clone()],
+            |work| label(work),
+            |work| {
+                label(work)
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| work.id.clone())
+            },
+        )?;
+        let work = tiles[index];
+        window
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.work == *work)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "{} has no workspace in this Desktop window yet; open it first. Nothing changed.",
+                    work.id
+                )
+            })
+    }
+
+    /// `-p` is `[TILE/]PANE`; on a Dashboard a lone part is a tile first, then a pane.
     fn pane(
         &self,
         window: &'a DesktopWindowInspection,
-        target: &crate::lf::DesktopTargetArgs,
+        path: Option<&str>,
         need: PaneNeed,
     ) -> Result<ResolvedPane<'a>> {
-        let workspace = self.workspace(window, target.task.as_deref())?;
+        let (tile, selector) = match path {
+            Some(path) => match path.split_once('/') {
+                Some((tile, pane)) => (Some(tile), Some(pane).filter(|pane| !pane.is_empty())),
+                None if Self::shows_board(window) && self.tile(window, path).is_ok() => {
+                    (Some(path), None)
+                }
+                None => (None, Some(path)),
+            },
+            None => (None, None),
+        };
+        let (workspace, rule) = self.workspace(window, tile)?;
+        let rule = if selector.is_some() {
+            DesktopTargetRule::Pane
+        } else {
+            rule
+        };
         let leaves = workspace.layout.leaves();
         let pane = |leaf, tab| ResolvedPane {
             workspace,
             leaf,
             tab,
+            rule,
         };
-        let Some(selector) = target.block.as_deref() else {
-            // Without -b, a command from one of this workspace's terminals acts on that terminal.
+        let Some(selector) = selector else {
+            // Without a pane part, a command from one of this workspace's terminals acts on that terminal.
             if let Some((_, caller)) = self.caller() {
                 let own = caller.workspace.work == workspace.work
                     && match need {
@@ -1484,7 +1816,7 @@ impl<'a> Scope<'a> {
                 [pane] => Ok(*pane),
                 [] => bail!("No eligible pane in {}; nothing changed.", workspace.title),
                 _ => bail!(
-                    "Several panes are eligible: {}. Choose one with -b; nothing changed.",
+                    "Several panes are eligible: {}. Choose one with -p; nothing changed.",
                     candidates
                         .iter()
                         .map(ResolvedPane::describe)
@@ -1736,16 +2068,22 @@ impl DesktopConnection {
             "v": DESKTOP_API_VERSION, "id": id, "method": method, "params": params,
         }))?;
         line.push(b'\n');
-        self.writer
-            .write_all(&line)
-            .map_err(|error| DesktopError::Unreachable(format!("Desktop closed its socket: {error}")))?;
+        self.writer.write_all(&line).map_err(|error| {
+            DesktopError::Unreachable(format!("Desktop closed its socket: {error}"))
+        })?;
         let mut reply = String::new();
         match self.reader.read_line(&mut reply) {
             Ok(0) => return Err(lost_reply("Desktop closed the connection")),
             Ok(_) => {}
-            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
                 return Err(DesktopError::Unreachable(
-                    "Desktop did not answer within 10 seconds. Inspect again before retrying.".into(),
+                    "Desktop did not answer within 10 seconds. Inspect again before retrying."
+                        .into(),
                 )
                 .into())
             }
@@ -1757,21 +2095,53 @@ impl DesktopConnection {
             return Err(reply_failure(error));
         }
         anyhow::ensure!(reply.id == Some(id), "Desktop answered a different request");
-        serde_json::from_value(reply.result.unwrap_or_default())
-            .with_context(|| format!("Desktop returned an invalid {method} reply; inspect before retrying"))
+        serde_json::from_value(reply.result.unwrap_or_default()).with_context(|| {
+            format!("Desktop returned an invalid {method} reply; inspect before retrying")
+        })
     }
 
     /// Subscribe; the first change carries every window, later ones what changed.
-    fn events(mut self) -> Result<impl Iterator<Item = Result<DesktopChange>>> {
-        use std::io::BufRead;
+    fn events(mut self) -> Result<DesktopEvents> {
         let _: serde_json::Value = self.call("events", serde_json::json!({}))?;
-        self.reader.get_ref().set_read_timeout(None)?;
-        Ok(self.reader.lines().map(|line| {
-            let line = line.map_err(|error| lost_reply(&error.to_string()))?;
-            Ok(serde_json::from_str::<DesktopEventFrame>(&line)
-                .context("Desktop sent an unreadable change")?
-                .event)
-        }))
+        Ok(DesktopEvents {
+            reader: self.reader,
+        })
+    }
+}
+
+/// A subscribed connection, read one change at a time.
+struct DesktopEvents {
+    reader: std::io::BufReader<std::os::unix::net::UnixStream>,
+}
+
+impl DesktopEvents {
+    /// The next change, or `None` when `timeout` elapses first.
+    fn next(&mut self, timeout: Option<std::time::Duration>) -> Result<Option<DesktopChange>> {
+        use std::io::BufRead;
+        // A zero timeout means none to the socket; the caller checks its deadline first.
+        let timeout = timeout.map(|timeout| timeout.max(std::time::Duration::from_millis(1)));
+        self.reader.get_ref().set_read_timeout(timeout)?;
+        let mut line = String::new();
+        match self.reader.read_line(&mut line) {
+            Ok(0) => Err(DesktopError::Unreachable(
+                "Desktop quit; no more changes will arrive.".into(),
+            )
+            .into()),
+            Ok(_) => Ok(Some(
+                serde_json::from_str::<DesktopEventFrame>(&line)
+                    .context("Desktop sent an unreadable change")?
+                    .event,
+            )),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(lost_reply(&error.to_string())),
+        }
     }
 }
 
@@ -1914,6 +2284,24 @@ impl DesktopInspection {
 }
 
 impl DesktopWindowInspection {
+    /// One `lf desktop events` line: what the window shows and where focus is.
+    fn render_change(&self) -> String {
+        let selected = self.workspaces.iter().find(|workspace| workspace.selected);
+        match selected {
+            Some(workspace) => format!(
+                "showing {} · {} focused {}{}",
+                self.destination,
+                workspace.title,
+                workspace.focused_pane,
+                workspace
+                    .zoomed_pane
+                    .as_deref()
+                    .map_or_else(String::new, |pane| format!(" · {pane} zoomed"))
+            ),
+            None => format!("showing {}", self.destination),
+        }
+    }
+
     /// `lf desktop ls`: the window, its sidebar Tasks by position, and each retained Task's panes.
     fn render_list(&self) -> String {
         let mut lines = vec![format!(
@@ -2075,7 +2463,6 @@ mod tests {
     use super::{
         trim_capture, validate_literal_text, DesktopError, DesktopInspection, PaneNeed, Scope,
     };
-    use crate::lf::DesktopTargetArgs;
     use crate::ops::context::{ContextExplanation, ContextFact};
 
     const ACTIONS: &str = include_str!("../../../../../tests/fixtures/dto/desktop_action.json");
@@ -2120,23 +2507,19 @@ mod tests {
         }
     }
 
-    fn target(task: Option<&str>, block: Option<&str>) -> DesktopTargetArgs {
-        DesktopTargetArgs {
-            task: task.map(str::to_owned),
-            block: block.map(str::to_owned),
-            ..Default::default()
-        }
-    }
-
+    /// `-p TILE/PANE` when a tile is named, else `-p PANE`.
     fn pane(
         scope: &Scope,
-        task: Option<&str>,
-        block: Option<&str>,
+        tile: Option<&str>,
+        pane: Option<&str>,
         need: PaneNeed,
     ) -> anyhow::Result<String> {
         let window = scope.window(None)?;
-        let pane = scope.pane(window, &target(task, block), need)?;
-        Ok(pane.describe())
+        let path = match tile {
+            Some(tile) => Some(format!("{tile}/{}", pane.unwrap_or_default())),
+            None => pane.map(str::to_owned),
+        };
+        Ok(scope.pane(window, path.as_deref(), need)?.describe())
     }
 
     #[test]
@@ -2147,7 +2530,7 @@ mod tests {
         let task = |selector: &str| {
             scope
                 .workspace(window, Some(selector))
-                .map(|w| w.work.id.clone())
+                .map(|(workspace, _)| workspace.work.id.clone())
         };
         let fixture_task = "task_44444444444444444444444444444444";
         assert_eq!(task("loo-519").unwrap(), fixture_task);
@@ -2208,10 +2591,10 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("no tab 3"));
-        // Without -b or a caller nothing follows focus: several panes are ambiguous.
+        // Without -p or a caller nothing follows focus: several panes are ambiguous.
         let error = pane(&scope, None, None, any).unwrap_err().to_string();
         assert!(
-            error.contains("session") && error.contains("browser") && error.contains("-b"),
+            error.contains("session") && error.contains("browser") && error.contains("-p"),
             "{error}"
         );
         assert_eq!(
@@ -2261,19 +2644,60 @@ mod tests {
         let scope = scope(&inspection, &work, Some("shell-tab"));
         let window = scope.window(None).unwrap();
         let browser = scope
-            .pane(window, &target(None, Some("browser:1")), PaneNeed::Terminal)
+            .pane(window, Some("browser:1"), PaneNeed::Terminal)
             .unwrap();
         assert!(browser
             .surface()
             .unwrap_err()
             .to_string()
             .contains("not a terminal"));
-        let shell = scope
-            .pane(window, &target(None, None), PaneNeed::Any)
-            .unwrap();
+        let shell = scope.pane(window, None, PaneNeed::Any).unwrap();
         assert_eq!(scope.peer(shell, "session").unwrap(), "session");
         assert!(scope.peer(shell, "shell").is_err());
         assert!(scope.peer(shell, "elsewhere").is_err());
+    }
+
+    #[test]
+    fn on_a_dashboard_a_lone_part_is_a_tile_and_a_slash_reaches_inside_it() {
+        let (mut inspection, work) = fixture();
+        let window = &mut inspection.windows[0];
+        window.destination = super::DesktopDestination::WorkingTasks;
+        window.open_work = vec![window.workspaces[0].work.clone()];
+        let scope = scope(&inspection, &work, None);
+        // `-p 1` is the first tile; its only shell answers a shell verb.
+        assert_eq!(
+            pane(&scope, None, Some("1"), PaneNeed::Kind("shell")).unwrap(),
+            "shell (shell)"
+        );
+        assert_eq!(
+            pane(&scope, Some("LOO-519"), Some("shell:1"), PaneNeed::Any).unwrap(),
+            "shell/shell-tab (Shell)"
+        );
+        let window = scope.window(None).unwrap();
+        let tile = scope
+            .pane(window, Some("loo-519/browser"), PaneNeed::Any)
+            .unwrap();
+        assert_eq!(tile.rule, super::DesktopTargetRule::Pane);
+    }
+
+    #[test]
+    fn wait_returns_the_submitted_command_status_or_the_next_finish() {
+        use super::{wait_outcome, WaitState};
+        let commands = |submitted, finished, exit_status| WaitState::Commands {
+            submitted,
+            finished,
+            exit_status,
+        };
+        // `run 'false'`: one line submitted, still running, then finished with 1.
+        assert_eq!(wait_outcome(Some(0), commands(1, 0, None)), None);
+        assert_eq!(wait_outcome(Some(0), commands(1, 1, Some(1))), Some(1));
+        // Already finished before the wait began: answered at once.
+        assert_eq!(wait_outcome(Some(1), commands(1, 1, Some(0))), Some(0));
+        // A tab nobody ran into waits for the next finish after the wait began.
+        assert_eq!(wait_outcome(Some(3), commands(0, 3, Some(0))), None);
+        assert_eq!(wait_outcome(Some(3), commands(0, 4, Some(2))), Some(2));
+        assert_eq!(wait_outcome(None, WaitState::Pending), None);
+        assert_eq!(wait_outcome(None, WaitState::Ready), Some(0));
     }
 
     #[test]
@@ -2313,8 +2737,16 @@ mod tests {
             .iter()
             .map(|action| action["name"].as_str().unwrap())
             .collect::<Vec<_>>();
-        for (verb, action) in super::VERB_ACTIONS {
-            assert!(names.contains(action), "{verb} → {action}");
+        let cli = <crate::lf::Cli as clap::CommandFactory>::command();
+        let desktop = cli.find_subcommand("desktop").unwrap();
+        let saved = [
+            "view", "query", "pin", "unpin", "rename", "arrange", "slots", "order", "layout",
+        ];
+        for verb in desktop.get_subcommands().map(clap::Command::get_name) {
+            if saved.contains(&verb) || super::READING_VERBS.contains(&verb) {
+                continue;
+            }
+            assert!(names.contains(&verb), "{verb} is not a registry action");
         }
     }
 

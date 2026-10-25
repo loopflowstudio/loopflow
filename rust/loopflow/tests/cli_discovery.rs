@@ -1107,19 +1107,27 @@ fn native_skill_help_and_graph_capture_keep_the_selected_source_and_declarations
 }
 
 #[test]
-fn desktop_verbs_take_rex_targets_without_public_lifetime_tokens() {
+fn desktop_verbs_take_pane_paths_without_public_lifetime_tokens() {
     use loopflow::lf::commands::desktop::DesktopKey;
     use loopflow::lf::DesktopCommand;
     let literal = "héλ🙂 \\n \"$(literal)\"";
     let cli = Cli::try_parse_from([
-        "lf", "--repo", "project", "--task", "LOO-427", "desktop", "send", "-t", "2", "-b",
-        "shell:1", "--", literal,
+        "lf",
+        "--repo",
+        "project",
+        "--task",
+        "LOO-427",
+        "desktop",
+        "send",
+        "-p",
+        "2/shell:1",
+        literal,
     ])
     .unwrap();
     assert_eq!(cli.task.as_deref(), Some("LOO-427"));
     assert!(matches!(cli.command, Some(Commands::Desktop {
         cmd: DesktopCommand::Send { text: Some(text), target }
-    }) if text == literal && target.task.as_deref() == Some("2") && target.block.as_deref() == Some("shell:1")));
+    }) if text == literal && target.pane.as_deref() == Some("2/shell:1")));
     let cli = Cli::try_parse_from(["lf", "desktop", "send-key", "enter"]).unwrap();
     assert!(matches!(
         cli.command,
@@ -1130,26 +1138,24 @@ fn desktop_verbs_take_rex_targets_without_public_lifetime_tokens() {
             }
         })
     ));
-    let cli = Cli::try_parse_from([
-        "lf", "desktop", "run", "-t", "LOO-519", "--", "cargo", "test", "-p", "loopflow",
-    ])
-    .unwrap();
+    // One shell line, as typed; no `--`.
+    let cli = Cli::try_parse_from(["lf", "desktop", "run", "cargo test -p loopflow"]).unwrap();
     assert!(matches!(cli.command, Some(Commands::Desktop {
-        cmd: DesktopCommand::Run { command, .. }
-    }) if command == ["cargo", "test", "-p", "loopflow"]));
-    let cli =
-        Cli::try_parse_from(["lf", "desktop", "do", "task.goto", "index=2", "--json"]).unwrap();
+        cmd: DesktopCommand::Run { line: Some(line), .. }
+    }) if line == "cargo test -p loopflow"));
+    let cli = Cli::try_parse_from(["lf", "desktop", "goto", "2", "--json"]).unwrap();
     assert!(matches!(cli.command, Some(Commands::Desktop {
-        cmd: DesktopCommand::Do { action, args, target }
-    }) if action == "task.goto" && args == ["index=2"] && target.json));
+        cmd: DesktopCommand::Goto { index: 2, target }
+    }) if target.json));
     for removed in [
-        &["desktop", "text", "hello"][..],
-        &["desktop", "key", "enter"],
+        &["desktop", "do", "goto", "index=2"][..],
+        &["desktop", "text", "hello"],
         &["desktop", "read", "--region", "screen"],
-        &["desktop", "shell"],
-        &["desktop", "back"],
-        &["desktop", "slot", "2"],
-        &["desktop", "zoom", "--pane", "one"],
+        &["desktop", "restore"],
+        &["desktop", "zoom"],
+        &["desktop", "zoom", "-b", "shell", "--on"],
+        &["desktop", "zoom", "-t", "2", "--on"],
+        &["desktop", "back", "-p", "shell"],
         &["desktop", "send", "--surface", "removed", "text"],
     ] {
         assert!(
@@ -1160,7 +1166,7 @@ fn desktop_verbs_take_rex_targets_without_public_lifetime_tokens() {
     assert!(Cli::try_parse_from(["lf", "desktop", "send-key", "arbitrary-bytes"]).is_err());
     assert!(Cli::try_parse_from(["lf", "desktop", "zoom", "--on", "--off"]).is_err());
     assert!(
-        matches!(Cli::try_parse_from(["lf", "desktop", "move", "-b", "browser", "--destination", "session", "--axis", "vertical"]).unwrap().command,
+        matches!(Cli::try_parse_from(["lf", "desktop", "move", "-p", "browser", "--destination", "session", "--axis", "vertical"]).unwrap().command,
         Some(Commands::Desktop { cmd: DesktopCommand::Move { destination, .. } }) if destination == "session")
     );
 }
@@ -1211,7 +1217,8 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
     let args = definition["arguments"].as_array().unwrap();
     assert!(!args.iter().any(|arg| arg["name"] == "axis"));
     assert!(definition["result_schema"]["properties"]["tab"].is_object());
-    for name in ["task", "block", "window"] {
+    assert!(definition["result_schema"]["properties"]["target"].is_object());
+    for name in ["pane", "window", "line"] {
         assert!(
             args.iter()
                 .any(|arg| arg["name"] == name && arg["required"] == false),
@@ -1220,7 +1227,7 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
     }
     assert!(!args
         .iter()
-        .any(|arg| arg["name"] == "pane" || arg["name"] == "target"));
+        .any(|arg| arg["name"] == "task" || arg["name"] == "block" || arg["name"] == "target"));
     assert_eq!(
         definition["result_schema"]["properties"]["destination"]["$ref"],
         "#/$defs/DesktopDestination"
@@ -1248,7 +1255,9 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|command| command["command"] != "lf desktop rename")
+        .filter(|command| {
+            command["command"] != "lf desktop rename" && command["command"] != "lf desktop wait"
+        })
         .all(|command| command["result_schema"].is_object()));
 }
 

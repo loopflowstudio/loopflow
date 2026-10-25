@@ -268,7 +268,7 @@ struct DashboardWorkspaceTests {
         let window = UUID()
         let target = DesktopPaneTarget(repository: "repo", window: window.uuidString, work: b,
             pane: pane.id, incarnation: pane.incarnation, tab: nil)
-        _ = try DesktopAction.perform(DesktopActionRequest("pane.focus", at: target), model: model, workspaces: registry)
+        _ = try DesktopAction.perform(DesktopActionRequest("focus", at: target), model: model, workspaces: registry)
         let state = model.inspectDesktop(repository: "repo", window: window, workspaces: registry)
         #expect(state.destination == .dashboard(id: "review"))
         #expect(state.view == plan)

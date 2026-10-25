@@ -552,7 +552,7 @@ pub enum Commands {
     Open(commands::open::OpenArgs),
     /// Select Work and control Loopflow Desktop panes
     #[command(
-        after_help = "Targets: -t Task, -b pane, --window window; each resolves by full ID, case-insensitive label, 1-based position, then ID suffix. Without them a command acts on the terminal it runs in.\n\nExit status: 0 success, 1 failure, 2 bad arguments, expression, unknown action or action arguments, 3 missing or ambiguous Task, window, pane or tab (nothing changed), 4 Desktop unreachable (not running, not macOS, or Automation consent pending or denied), 130 interrupted."
+        after_help = "Targets: root --task/--wave set the base view; -p names a part of it (shell:2, a tile 3 or LOO-519, LOO-519/shell:2); --window picks the window. Each part resolves by full ID, case-insensitive label, 1-based position, then ID suffix. Without them a command acts on the terminal it runs in. Scripts should pass the IDs receipts return; positions are for people.\n\nExit status: 0 success, 1 failure, 2 bad arguments, expression or verb arguments, 3 missing or ambiguous Task, window, pane or tab (nothing changed), 4 Desktop unreachable (not running, not macOS, or not answering its socket), 130 interrupted."
     )]
     Desktop {
         #[command(subcommand)]
@@ -746,19 +746,65 @@ pub enum DesktopCommand {
         #[arg(long)]
         json: bool,
     },
-    /// List the actions `do` performs, with their arguments and default keys
+    /// List the verbs Desktop performs, with their arguments and default keys
     Actions {
         #[arg(long)]
         json: bool,
     },
-    /// Perform an action as its key or menu item does: `do task.goto index=2`
-    Do {
-        /// Action name from `lf desktop actions`
-        action: String,
-        /// Action arguments as key=value
-        args: Vec<String>,
+    /// Stream window, pane and destination changes; the first change is every window
+    Events {
+        /// One change per line as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Wait for a shell tab's command to finish (exits with its status), else for the pane to appear
+    #[command(
+        after_help = "Exit status: the command's status when waiting on a shell tab, 1 when --for elapses, otherwise as for lf desktop."
+    )]
+    Wait {
+        /// Longest wait, e.g. 30s, 5m (default: no limit)
+        #[arg(long = "for", value_name = "DURATION", value_parser = crate::config::parse_duration)]
+        timeout: Option<std::time::Duration>,
         #[command(flatten)]
         target: DesktopTargetArgs,
+    },
+    /// Go back, as ⌘[ and the crumb chevron do
+    Back {
+        #[command(flatten)]
+        target: DesktopWindowArgs,
+    },
+    /// Go forward, as ⌘] does
+    Forward {
+        #[command(flatten)]
+        target: DesktopWindowArgs,
+    },
+    /// Show the window's Nth Working Task, as ⌘N does
+    Goto {
+        index: u32,
+        #[command(flatten)]
+        target: DesktopWindowArgs,
+    },
+    /// Show the next Working Task, as ⌃⇥ does
+    Next {
+        #[command(flatten)]
+        target: DesktopWindowArgs,
+    },
+    /// Show the previous Working Task, as ⌃⇧⇥ does
+    Previous {
+        #[command(flatten)]
+        target: DesktopWindowArgs,
+    },
+    /// Show the Working Tasks Dashboard
+    WorkingTasks {
+        #[command(flatten)]
+        target: DesktopWindowArgs,
+    },
+    /// Enter a member of the shown Dashboard as full Work, as a tile click does
+    Enter {
+        /// Task on the Dashboard: issue key, name or ID
+        task: String,
+        #[command(flatten)]
+        target: DesktopWindowArgs,
     },
     /// Insert literal text at a terminal's cursor (stdin when omitted); never submits
     Send {
@@ -786,25 +832,26 @@ pub enum DesktopCommand {
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
-    /// Add a shell tab at the Task's recorded location, optionally running CMD; focus stays put
+    /// Add a shell tab at the Task's location and type LINE into it, as if typed; focus stays put
     Run {
-        /// Command and arguments after `--`
-        #[arg(last = true)]
-        command: Vec<String>,
+        /// One shell line, e.g. 'cargo test -p loopflow'; omitted opens an empty shell
+        line: Option<String>,
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
-    /// Zoom a pane without changing selection; bare toggles
+    /// Zoom a pane, or return it to the layout, without changing selection
     Zoom {
-        #[arg(long, conflicts_with = "off")]
+        #[arg(long, conflicts_with = "off", required_unless_present = "off")]
         on: bool,
         #[arg(long)]
         off: bool,
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
-    /// Focus a pane, opening its retained workspace when needed
+    /// Focus a pane, or the pane in a direction, opening its retained workspace when needed
     Focus {
+        #[arg(long, value_enum)]
+        direction: Option<commands::desktop::DesktopDirection>,
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
@@ -814,13 +861,23 @@ pub enum DesktopCommand {
         target: DesktopTargetArgs,
     },
     /// Show a hidden pane without selecting Work or acquiring a client
-    Restore {
+    Show {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Close a shell or browser tab, as ⌘W does; a session pane hides
+    Close {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Undo the Task's last close, as ⇧⌘T does
+    Reopen {
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
     /// Move a pane beside another pane of the same Task
     Move {
-        /// Pane to place it beside, as for -b
+        /// Pane to place it beside, as for -p
         #[arg(long)]
         destination: String,
         #[arg(long, value_enum)]
@@ -830,7 +887,7 @@ pub enum DesktopCommand {
     },
     /// Resize the divider between two panes; ratio is the addressed pane's share
     Resize {
-        /// The other pane, as for -b
+        /// The other pane, as for -p
         #[arg(long)]
         toward: String,
         #[arg(long)]
@@ -838,19 +895,65 @@ pub enum DesktopCommand {
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
+    /// Show the Task's Files in the browser
+    Files {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Show the Task's Graph processes in the browser
+    GraphLog {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Open an http(s) page in a browser tab
+    Browse {
+        url: String,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Go back in a web page
+    PageBack {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Go forward in a web page
+    PageForward {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Reload a web page, as ⌘R does
+    Reload {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Show another of the Task's conversations in its session pane
+    Switch {
+        /// Session ID
+        session: String,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
 }
 
-/// Which Desktop window, Task and pane a command acts on. Each resolves by full
-/// ID, case-insensitive label, 1-based position, then ID suffix (4+ characters).
-/// Without flags a command acts on the terminal it runs in (`LF_TERMINAL_ID`).
+/// Which part of the view on screen a command acts on. `-p` is a path: a pane
+/// (`session`, `shell`, `browser`, `shell:2`), a Dashboard tile (`3`, `LOO-519`),
+/// or `TILE/PANE`. Root `--task`/`--wave` set the base view; without either, a
+/// command acts on the terminal it runs in (`LF_TERMINAL_ID`).
 #[derive(Args, Debug, Clone, Default)]
 pub struct DesktopTargetArgs {
-    /// Task: issue key, name, sidebar position (⌘N) or ID suffix
-    #[arg(short = 't', long = "task", value_name = "TASK")]
-    pub task: Option<String>,
-    /// Pane: session, shell, browser, shell:N or browser:N for a tab, position, or ID
-    #[arg(short = 'b', long = "block", value_name = "PANE")]
-    pub block: Option<String>,
+    /// Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix
+    #[arg(short = 'p', long = "pane", value_name = "PATH")]
+    pub pane: Option<String>,
+    /// Desktop window: ID, position or ID suffix
+    #[arg(long, value_name = "WINDOW")]
+    pub window: Option<String>,
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Window-level verbs name no pane.
+#[derive(Args, Debug, Clone, Default)]
+pub struct DesktopWindowArgs {
     /// Desktop window: ID, position or ID suffix
     #[arg(long, value_name = "WINDOW")]
     pub window: Option<String>,

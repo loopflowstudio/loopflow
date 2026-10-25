@@ -450,12 +450,12 @@ struct WorkDestinationTests {
             remote.multiplexer.setZoom(targetPane.id, enabled: true)
             let target = DesktopPaneTarget(repository: "repository", window: UUID().uuidString,
                 work: remote.key, pane: targetPane.id, incarnation: targetPane.incarnation, tab: nil)
-            try DesktopAction.perform(DesktopActionRequest("shell.new", at: target), model: model, workspaces: registry)
+            try DesktopAction.perform(DesktopActionRequest("run", at: target), model: model, workspaces: registry)
             let shell = try #require(remote.multiplexer.layout.allPanes.first { $0.content.selectedShell?.location == remoteIdentity })
             let command = try #require(remote.multiplexer.layout.pane(for: shell.id)?.content.selectedShell?.command)
             #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repository", "repository",
                 "task", "shell", remoteID, "--checkout", remoteIdentity.worktree])
-            let splitID = try DesktopAction.perform(DesktopActionRequest("shell.new", at: target), model: model, workspaces: registry)
+            let splitID = try DesktopAction.perform(DesktopActionRequest("run", at: target), model: model, workspaces: registry)
             #expect(remote.multiplexer.shell(splitID.tab ?? "")?.execution == request.location)
             #expect(remote.multiplexer.layout.pane(for: try #require(splitID.pane))?.content.selectedShell?.command == command)
             // A scripted shell tab keeps the caller's focus and zoom.
@@ -467,7 +467,7 @@ struct WorkDestinationTests {
             remote.multiplexer.showBrowser(.files, location: WorkspaceIdentity(machineId: "peer", worktree: "/replacement"))
             let unchanged = remote.multiplexer.layout
             #expect(throws: DesktopTargetError.self) {
-                try DesktopAction.perform(DesktopActionRequest("shell.new", at: target), model: model, workspaces: registry)
+                try DesktopAction.perform(DesktopActionRequest("run", at: target), model: model, workspaces: registry)
             }
             #expect(remote.multiplexer.layout == unchanged)
 
@@ -1038,8 +1038,8 @@ struct WorkDestinationTests {
         let workspaces = SessionsWorkspaceRegistry()
         let report = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: workspaces)
         #expect(report.reading == "loading")
-        #expect(report.actions.map(\.name).contains("navigate.back"))
-        #expect(report.actions.map(\.name).contains("pane.send"))
+        #expect(report.actions.map(\.name).contains("back"))
+        #expect(report.actions.map(\.name).contains("send"))
         #expect(report.task?.reading == "current")
         #expect(report.task?.actions == task.actions)
         #expect(report.task?.runControl == task.runControl)
@@ -1443,12 +1443,12 @@ struct WorkDestinationTests {
         let stale = DesktopPaneTarget(repository: "old-plan", window: window.uuidString,
             work: oldKey, pane: pane.id, incarnation: pane.incarnation, tab: nil)
         #expect(throws: DesktopTargetError.self) {
-            try router.perform(DesktopActionRequest("pane.hide", at: stale))
+            try router.perform(DesktopActionRequest("hide", at: stale))
         }
         let current = DesktopPaneTarget(repository: "plan", window: report.windows[0].window,
             work: retained.key, pane: pane.id, incarnation: pane.incarnation, tab: nil)
-        _ = try router.perform(DesktopActionRequest("pane.hide", at: current))
-        _ = try router.perform(DesktopActionRequest("pane.restore", at: current))
+        _ = try router.perform(DesktopActionRequest("hide", at: current))
+        _ = try router.perform(DesktopActionRequest("show", at: current))
         #expect(store.layout == layout)
         await barrier.release("delivery")
         while received.count < 2 { await Task.yield() }
@@ -1459,10 +1459,10 @@ struct WorkDestinationTests {
         }) { _ in Issue.record("Binding back must also reuse the window") }
         #expect(router.inspect().windows.first?.repository == "old-plan")
         #expect(throws: DesktopTargetError.self) {
-            try router.perform(DesktopActionRequest("pane.hide", at: stale))
+            try router.perform(DesktopActionRequest("hide", at: stale))
         }
         #expect(throws: DesktopTargetError.self) {
-            try router.perform(DesktopActionRequest("pane.hide", at: current))
+            try router.perform(DesktopActionRequest("hide", at: current))
         }
         router.remove(window, repository: scene.id)
         #expect(router.inspect().windows.isEmpty)

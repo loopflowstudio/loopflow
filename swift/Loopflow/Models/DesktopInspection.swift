@@ -346,6 +346,25 @@ public struct DesktopWorkspaceInspection: Codable, Sendable, Equatable {
 /// Children retain first/second order; a pane has no children. Values are copied
 /// from MultiplexerStore at inspection, never written back as layout authority.
 /// A shell tab carries its own occurrence and surface; a browser tab shares its pane's.
+/// A shell surface's commands as its shell integration reports them: lines `run`
+/// submitted, commands finished, and the last one's exit status. `lf desktop wait` reads it.
+public struct DesktopCommandStatus: Codable, Sendable, Equatable {
+    public let submitted: Int
+    public let finished: Int
+    public let exitStatus: Int?
+
+    public init(submitted: Int, finished: Int, exitStatus: Int?) {
+        self.submitted = submitted; self.finished = finished; self.exitStatus = exitStatus
+    }
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(submitted, forKey: .submitted)
+        try values.encode(finished, forKey: .finished)
+        try values.encode(exitStatus, forKey: .exitStatus)
+    }
+    enum CodingKeys: String, CodingKey { case submitted, finished; case exitStatus = "exit_status" }
+}
+
 public struct DesktopTabInspection: Codable, Sendable, Equatable {
     public enum Kind: String, Codable, Sendable { case shell, files; case graphLog = "graph_log"; case url }
     public let id: String
@@ -355,10 +374,13 @@ public struct DesktopTabInspection: Codable, Sendable, Equatable {
     public let surface: String?
     public let location: WorkspaceIdentity?
     public let url: String?
+    /// Shell tabs with a live surface; `nil` before the surface starts and for browser tabs.
+    public let commands: DesktopCommandStatus?
 
-    public init(id: String, kind: Kind, title: String, incarnation: String, surface: String?, location: WorkspaceIdentity?, url: String?) {
+    public init(id: String, kind: Kind, title: String, incarnation: String, surface: String?, location: WorkspaceIdentity?, url: String?,
+                commands: DesktopCommandStatus?) {
         self.id = id; self.kind = kind; self.title = title; self.incarnation = incarnation
-        self.surface = surface; self.location = location; self.url = url
+        self.surface = surface; self.location = location; self.url = url; self.commands = commands
     }
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
@@ -369,8 +391,9 @@ public struct DesktopTabInspection: Codable, Sendable, Equatable {
         try values.encode(surface, forKey: .surface)
         try values.encode(location, forKey: .location)
         try values.encode(url, forKey: .url)
+        try values.encode(commands, forKey: .commands)
     }
-    enum CodingKeys: String, CodingKey { case id, kind, title, incarnation, surface, location, url }
+    enum CodingKeys: String, CodingKey { case id, kind, title, incarnation, surface, location, url, commands }
 }
 
 public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
@@ -392,7 +415,7 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
         case selectedTab = "selected_tab"
     }
 
-    public init(_ layout: LayoutNode, surface: (PaneContent) -> String?) {
+    public init(_ layout: LayoutNode, surface: (PaneContent) -> String?, commands: (PaneContent) -> DesktopCommandStatus?) {
         switch layout {
         case .leaf(let state):
             switch state.content {
@@ -400,7 +423,7 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
                 tabs = shells.map { tab in
                     let content = PaneContent.shell(tabs: [tab], selected: tab.id)
                     return DesktopTabInspection(id: tab.id, kind: .shell, title: tab.command?.joined(separator: " ") ?? "Shell", incarnation: tab.incarnation,
-                        surface: surface(content), location: tab.location, url: nil)
+                        surface: surface(content), location: tab.location, url: nil, commands: commands(content))
                 }
                 selectedTab = selected
             case .browser(_, let pages, let selected, _, _):
@@ -413,7 +436,7 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
                     case .url(_, let address): kind = .url; url = address.absoluteString
                     }
                     return DesktopTabInspection(id: page.id, kind: kind, title: page.title, incarnation: state.incarnation,
-                        surface: nil, location: state.content.location, url: url)
+                        surface: nil, location: state.content.location, url: url, commands: nil)
                 }
                 selectedTab = selected
             case .session: tabs = []; selectedTab = nil
@@ -429,7 +452,7 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
             tabs = []; selectedTab = nil
             location = nil
             pane = nil; incarnation = nil; self.surface = nil; content = nil; subject = nil; axis = splitAxis.rawValue; ratio = splitRatio
-            children = [Self(first, surface: surface), Self(second, surface: surface)]
+            children = [Self(first, surface: surface, commands: commands), Self(second, surface: surface, commands: commands)]
         }
     }
 }

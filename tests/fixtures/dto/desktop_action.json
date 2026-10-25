@@ -1,7 +1,7 @@
 {
   "actions": [
     {
-      "name": "navigate.back",
+      "name": "back",
       "title": "Back",
       "scope": "window",
       "arguments": [],
@@ -10,7 +10,7 @@
       ]
     },
     {
-      "name": "navigate.forward",
+      "name": "forward",
       "title": "Forward",
       "scope": "window",
       "arguments": [],
@@ -19,7 +19,7 @@
       ]
     },
     {
-      "name": "task.goto",
+      "name": "goto",
       "title": "Working Task",
       "scope": "window",
       "arguments": [
@@ -42,7 +42,7 @@
       ]
     },
     {
-      "name": "task.next",
+      "name": "next",
       "title": "Next Task",
       "scope": "window",
       "arguments": [],
@@ -51,7 +51,7 @@
       ]
     },
     {
-      "name": "task.previous",
+      "name": "previous",
       "title": "Previous Task",
       "scope": "window",
       "arguments": [],
@@ -60,14 +60,14 @@
       ]
     },
     {
-      "name": "dashboard.working_tasks",
+      "name": "working-tasks",
       "title": "Working Tasks",
       "scope": "window",
       "arguments": [],
       "keys": []
     },
     {
-      "name": "dashboard.enter",
+      "name": "enter",
       "title": "Enter Task",
       "scope": "window",
       "arguments": [
@@ -80,7 +80,7 @@
       "keys": []
     },
     {
-      "name": "pane.focus",
+      "name": "focus",
       "title": "Focus Pane",
       "scope": "pane",
       "arguments": [
@@ -98,7 +98,7 @@
       ]
     },
     {
-      "name": "pane.zoom",
+      "name": "zoom",
       "title": "Zoom Pane",
       "scope": "pane",
       "arguments": [
@@ -113,14 +113,14 @@
       ]
     },
     {
-      "name": "pane.hide",
+      "name": "hide",
       "title": "Hide Pane",
       "scope": "pane",
       "arguments": [],
       "keys": []
     },
     {
-      "name": "pane.close",
+      "name": "close",
       "title": "Close Tab",
       "scope": "pane",
       "arguments": [],
@@ -129,14 +129,14 @@
       ]
     },
     {
-      "name": "pane.restore",
+      "name": "show",
       "title": "Show Pane",
       "scope": "pane",
       "arguments": [],
       "keys": []
     },
     {
-      "name": "pane.reopen",
+      "name": "reopen",
       "title": "Undo Close",
       "scope": "pane",
       "arguments": [],
@@ -145,7 +145,7 @@
       ]
     },
     {
-      "name": "pane.move",
+      "name": "move",
       "title": "Move Pane",
       "scope": "pane",
       "arguments": [
@@ -163,7 +163,7 @@
       "keys": []
     },
     {
-      "name": "pane.resize",
+      "name": "resize",
       "title": "Resize Pane",
       "scope": "pane",
       "arguments": [
@@ -181,7 +181,7 @@
       "keys": []
     },
     {
-      "name": "pane.send",
+      "name": "send",
       "title": "Send Text",
       "scope": "pane",
       "arguments": [
@@ -199,7 +199,7 @@
       "keys": []
     },
     {
-      "name": "pane.send_key",
+      "name": "send-key",
       "title": "Send Key",
       "scope": "pane",
       "arguments": [
@@ -217,7 +217,7 @@
       "keys": []
     },
     {
-      "name": "shell.new",
+      "name": "run",
       "title": "New Terminal",
       "scope": "pane",
       "arguments": [
@@ -237,7 +237,7 @@
       ]
     },
     {
-      "name": "shell.toggle",
+      "name": "toggle-shell",
       "title": "Toggle Shell",
       "scope": "pane",
       "arguments": [],
@@ -246,7 +246,7 @@
       ]
     },
     {
-      "name": "browser.toggle",
+      "name": "toggle-browser",
       "title": "Toggle Browser",
       "scope": "pane",
       "arguments": [],
@@ -255,21 +255,21 @@
       ]
     },
     {
-      "name": "browser.files",
+      "name": "files",
       "title": "Show Files",
       "scope": "pane",
       "arguments": [],
       "keys": []
     },
     {
-      "name": "browser.graph_log",
+      "name": "graph-log",
       "title": "Show Graph Processes",
       "scope": "pane",
       "arguments": [],
       "keys": []
     },
     {
-      "name": "browser.open",
+      "name": "browse",
       "title": "Open Web Page",
       "scope": "pane",
       "arguments": [
@@ -282,21 +282,21 @@
       "keys": []
     },
     {
-      "name": "browser.back",
+      "name": "page-back",
       "title": "Web Page Back",
       "scope": "pane",
       "arguments": [],
       "keys": []
     },
     {
-      "name": "browser.forward",
+      "name": "page-forward",
       "title": "Web Page Forward",
       "scope": "pane",
       "arguments": [],
       "keys": []
     },
     {
-      "name": "browser.reload",
+      "name": "reload",
       "title": "Reload Web Page",
       "scope": "pane",
       "arguments": [],
@@ -305,7 +305,7 @@
       ]
     },
     {
-      "name": "session.switch",
+      "name": "switch",
       "title": "Switch Conversation",
       "scope": "pane",
       "arguments": [
@@ -323,7 +323,7 @@
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
       "pane": null,
-      "action": "task.goto",
+      "action": "goto",
       "args": {
         "index": "2"
       }
@@ -332,7 +332,7 @@
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
       "pane": null,
-      "action": "navigate.back",
+      "action": "back",
       "args": {}
     },
     {
@@ -350,7 +350,7 @@
         "incarnation": "shell-tab-occurrence",
         "tab": "shell-tab"
       },
-      "action": "shell.new",
+      "action": "run",
       "args": {
         "command": "cargo test -p loopflow desktop"
       }
@@ -370,7 +370,7 @@
         "incarnation": "shell-tab-occurrence",
         "tab": "shell-tab"
       },
-      "action": "pane.zoom",
+      "action": "zoom",
       "args": {
         "on": "true"
       }
@@ -379,7 +379,7 @@
   "receipt": {
     "repository": "repo_22222222222222222222222222222222",
     "window": "55555555-5555-5555-5555-555555555555",
-    "action": "browser.open",
+    "action": "browse",
     "destination": {
       "kind": "work",
       "work": {
@@ -461,7 +461,12 @@
                       "machine_id": "home_11111111111111111111111111111111",
                       "worktree": "/repo.task"
                     },
-                    "url": null
+                    "url": null,
+                    "commands": {
+                      "submitted": 1,
+                      "finished": 1,
+                      "exit_status": 0
+                    }
                   }
                 ],
                 "selected_tab": "shell-tab"
@@ -490,7 +495,8 @@
                       "machine_id": "home_11111111111111111111111111111111",
                       "worktree": "/repo.task"
                     },
-                    "url": null
+                    "url": null,
+                    "commands": null
                   },
                   {
                     "id": "page-1",
@@ -502,7 +508,8 @@
                       "machine_id": "home_11111111111111111111111111111111",
                       "worktree": "/repo.task"
                     },
-                    "url": "http://localhost:5173"
+                    "url": "http://localhost:5173",
+                    "commands": null
                   }
                 ],
                 "selected_tab": "page-1"

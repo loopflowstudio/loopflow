@@ -1036,29 +1036,32 @@ Read a window and act in it as its keys, menus and tiles do:
 
 ```sh
 lf desktop ls                                 # Tasks by ⌘N position, each with session/shell/browser
-lf desktop actions                            # every action, its arguments and default keys
-lf desktop do task.goto index=2               # what ⌘2 does
-lf desktop do navigate.back                   # ⌘[
-lf desktop do dashboard.working_tasks         # the default Dashboard
-lf desktop do dashboard.enter task=LOO-519    # a tile click
+lf desktop actions                            # every verb, its arguments and default keys
+lf desktop goto 2                             # what ⌘2 does
+lf desktop back                               # ⌘[
+lf desktop working-tasks                      # the default Dashboard
+lf desktop enter LOO-519                      # a tile click
 lf desktop state --json | jq '.windows[0] | {destination, history}'
+lf desktop events --json                      # one line per change; the first is every window
 ```
 
-Every gesture is one registry action; keys, menus, the Keyboard Shortcuts window
-and `do` all perform it, and pane verbs below are sugar for one (`zoom` is
-`pane.zoom`, `run` is `shell.new`). `state` reports each window's `destination`
-(`work`, `dashboard`, `working_tasks`, `view` or `entered` with the Dashboard it
-was entered `from`), `history` counts, the sidebar `list` and `actions`. A receipt
-carries the destination and affected workspace the next `state` reports. `ls`
-renders the same reading. `dashboard.enter` requires a member of the shown
-Dashboard; empty history or an absent position change nothing and exit 3.
+Every gesture is one verb in Desktop's registry; keys, menus, the Keyboard
+Shortcuts window and `lf desktop` all perform it by the same name. `state`
+reports each window's `destination` (`work`, `dashboard`, `working_tasks`, `view`
+or `entered` with the Dashboard it was entered `from`), `history` counts, the
+sidebar `list` and `actions`. A receipt carries the destination and affected
+workspace the next `state` reports, plus `target`: the full window, Work, pane and
+tab IDs it acted on and the `rule` that chose them (`pane`, `work`, `caller`,
+`binding` or `window`). Scripts pass those IDs back; positions are for people.
+`ls` renders the same reading with short IDs. `enter` requires a member of the
+shown Dashboard; empty history or an absent position change nothing and exit 3.
+`events` streams changed windows whole, and closed window IDs, until interrupted.
 
 Every `lf desktop` command exits 0 on success, 1 on other failures, 2 for bad
-arguments, a malformed expression, an unknown action or bad action arguments, 3
-for a missing or ambiguous Task, window, pane or tab (nothing changed), 4 when
-Desktop is unreachable (not running, not macOS, or an Automation consent prompt
-pending or denied in System Settings › Privacy & Security › Automation) and 130
-when interrupted. A Desktop older than this lf exits 1 and says to update it.
+arguments, a malformed expression or bad verb arguments, 3 for a missing or
+ambiguous Task, window, pane or tab (nothing changed), 4 when Desktop is
+unreachable (not running, not macOS, or not answering its socket) and 130 when
+interrupted. A Desktop that speaks another API version exits 1 and says to update.
 
 `desktop view EXPRESSION` opens the shared query results as a Dashboard in the Mac
 app, including unsaved queries. Save the Dashboard to name, pin and arrange it.
@@ -1070,7 +1073,9 @@ Repository and Wave navigation still opens their ordinary conversations.
 `lf desktop` and `lf open` address the Desktop you run in: the app sets
 `LF_DESKTOP` to its bundle identifier on every child, so a Loopflow Dev shell
 reads and steers Dev. Elsewhere they address the installed app; set
-`LF_DESKTOP=com.loopflow.mac.dev` to reach Dev from an ordinary terminal.
+`LF_DESKTOP=com.loopflow.mac.dev` to reach Dev from an ordinary terminal. Each
+running Desktop serves `$LF_HOME/run/desktop/<bundle-id>.sock` to the same user
+only; the socket lives and dies with the app.
 
 `desktop view --plan`, `query`, `pin`/`unpin`, `rename`, `arrange`, `slots`,
 `order` and `layout` work without macOS and print JSON. Plans contain
@@ -1113,8 +1118,8 @@ freshness. Inspection neither focuses windows nor opens clients. Terminal panes 
 incarnation only when a native surface exists. It is separate from the pane's
 content incarnation; inspection never creates a surface or cleans up an exited
 child. Neither token authorizes terminal input.
-It requires macOS and a running app with automation access; failure leaves
-`lf task status <task>` available in the terminal.
+It requires macOS and a running app; failure leaves `lf task status <task>`
+available in the terminal.
 The window `layout` places open Work; `workspaces` also includes retained Work
 outside that tree. Hiding a Dashboard occurrence preserves its split position and inner panes;
 restoring it keeps edits made to its visible neighbors. Work navigation starts no
@@ -1122,48 +1127,55 @@ Session or checkout. Pane layouts, selected tool tabs and file drafts save throu
 lfdb; restored shell tabs remain unattached. Mutation receipts identify `work` and
 `pane`, not readiness.
 
-Address a Task with `-t`, a pane with `-b` and a window with `--window`:
+Name a part of the view with `-p` and a window with `--window`:
 
 ```sh
 lf desktop zoom --on                          # from a Desktop terminal: its own pane
-lf desktop run -- cargo test -p loopflow      # a new shell tab runs it; focus stays put
-lf desktop capture -b shell:2 --trim | tail -3
-lf desktop send -t LOO-519 -b session 'add to the draft'
-lf desktop send-key -t LOO-519 -b session enter
-lf desktop do browser.open url=http://localhost:5173
-lf desktop do browser.reload -b browser
-lf desktop move -b browser --destination session --axis vertical
-lf desktop resize -b browser --toward session --ratio 0.4
-lf desktop hide -b shell; lf desktop restore -b shell
+lf desktop run 'cargo test -p loopflow'       # a new shell tab, the line typed in; focus stays put
+lf desktop wait -p shell:2 --for 5m           # exits with that command's status
+lf desktop capture -p shell:2 --trim | tail -3
+lf --task LOO-519 desktop send -p session 'add to the draft'
+lf desktop send-key -p LOO-519/session enter  # a tile on the Dashboard, then its pane
+lf desktop browse http://localhost:5173
+lf desktop reload -p browser
+lf desktop move -p browser --destination session --axis vertical
+lf desktop resize -p browser --toward session --ratio 0.4
+lf desktop hide -p shell; lf desktop show -p shell
 ```
 
-Each target resolves in order, stopping at the first kind that matches: full ID,
-case-insensitive label, 1-based position, then ID suffix of four or more
-characters. A Task's label is its issue key or name and its position is its ⌘N
-place in the sidebar. A pane's label is `session`, `shell` or `browser`;
-`shell:2` and `browser:1` name a tab by position; full pane and tab IDs from
-`state` still work. Ambiguous or absent targets list the choices and change
-nothing.
+`-p` is a path from the view on screen: a pane (`session`, `shell`, `browser`), a
+tab (`shell:2`, `browser:1`), a Dashboard tile (`3`, `LOO-519`), or `TILE/PANE`.
+On a Dashboard a lone part names a tile first; on a Task it names a pane, and a
+tile part picks a Task by its ⌘N place. Each part resolves in order, stopping at
+the first kind that matches: full ID, case-insensitive label, 1-based position,
+then ID suffix of four or more characters. Ambiguous or absent targets list the
+choices and change nothing.
 
-Without `-t` or `-b` a command acts on the terminal it runs in: `LF_TERMINAL_ID`
-names the session pane or shell tab, so an agent's tool subprocess reaches its
-own pane. A terminal that has since closed exits 3. Root `--task`/`--wave`, then
-the checkout's Task, select the Work otherwise. Nothing follows focus: several
-eligible panes exit 3. `run` and `browser.*` go to the Task's shell or browser.
+Without `-p` a command acts on the terminal it runs in: `LF_TERMINAL_ID` names
+the session pane or shell tab, so an agent's tool subprocess reaches its own pane.
+A terminal that has since closed exits 3. Root `--task`/`--wave` set the base view
+and outrank the caller; the checkout's Task is the last resort. Nothing follows
+focus: several eligible panes exit 3. `run` and the browser verbs go to the Task's
+shell or browser. Toggles are keys only: `zoom` takes `--on` or `--off`.
+
+`run LINE` types the line into a fresh shell tab as a person would, so the tab
+outlives the command. `wait` on that tab exits with the command's status once it
+finishes (another tab waits for its next finish); on a pane it waits for the pane
+to be ready. A closed tab has finished. `--for` bounds the wait; elapsing exits 1.
 
 A Task workspace has exactly three panes: `session`, `shell` and `browser`.
 Wave and repository workspaces have only `session`. Panes are never created or
 destroyed; hiding or ⌘W closing one keeps it. The session pane shows one
-conversation (`do session.switch session=ID`). The shell holds tabs at the Task's
+conversation (`switch SESSION`). The shell holds tabs at the Task's
 recorded execution location; it never falls back to a local shell. The browser
 holds Files, the Graph log and http/https pages; Files keeps one document per path
-and its drafts. Move, resize, zoom, hide and restore retain drafts and selection.
+and its drafts. Move, resize, zoom, hide and show retain drafts and selection.
 Vertical places a pane to the right, horizontal below; resize gives the addressed
 pane its share (0.1–0.9).
 
-Receipts print the affected tab or pane; `--json` adds the destination and the
-workspace reading. A receipt confirms the operation, not terminal readiness.
-Shell creation and input are not idempotent: inspect after a lost reply.
+Receipts print the affected tab or pane ID; `--json` adds the destination, the
+workspace reading and `target`. A receipt confirms the operation, not terminal
+readiness. Shell creation and input are not idempotent: inspect after a lost reply.
 
 Capture regions are `screen` (default), `scrollback` and `selection`. Byte
 bounds are 1–1048576 (default 65536); truncation ends at a complete UTF-8

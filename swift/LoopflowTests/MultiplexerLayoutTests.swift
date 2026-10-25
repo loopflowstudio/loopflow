@@ -30,7 +30,7 @@ struct MultiplexerLayoutTests {
             ]
             for (content, location) in contents {
                 #expect(content.location == location)
-                let inspected = DesktopLayoutInspection(.leaf(PaneState(content: content))) { _ in nil }
+                let inspected = DesktopLayoutInspection(.leaf(PaneState(content: content)), surface: { _ in nil }, commands: { _ in nil })
                 #expect(inspected.location == location)
             }
         }

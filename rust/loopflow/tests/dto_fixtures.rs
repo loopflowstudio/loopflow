@@ -720,7 +720,7 @@ fn desktop_actions_name_an_exact_window_and_report_the_next_reading() {
     let actions: Vec<DesktopActionDescriptor> =
         serde_json::from_value(value["actions"].clone()).unwrap();
     assert_eq!(serde_json::to_value(&actions).unwrap(), value["actions"]);
-    assert!(actions.iter().any(|action| action.name == "task.goto"
+    assert!(actions.iter().any(|action| action.name == "goto"
         && action.keys.len() == 9
         && action.arguments[0].required));
     let requests: Vec<DesktopActionRequest> =

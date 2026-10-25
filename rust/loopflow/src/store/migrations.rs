@@ -859,9 +859,6 @@ pub(crate) fn convert_released_data(conn: &rusqlite::Connection, sql: &str) -> S
             }
         }
     }
-    if sql.contains("UPDATE work_pane_layouts SET layout_json=layout_json WHERE 0;") {
-        super::sqlite::selections::convert_released_layouts(conn)?;
-    }
     if sql.contains("CREATE TABLE planning_peer_changes (")
         || sql.contains("CREATE TABLE delegated_placements (")
         || sql.contains("ALTER TABLE waves ADD COLUMN workflow TEXT;")
@@ -3324,8 +3321,7 @@ mod tests {
     }
 
     #[test]
-    fn designated_panes_convert_released_free_trees_and_keep_drafts() {
-        use crate::work::selection::{BrowserTab, PaneIntent, PaneTree, WorkPaneLayout};
+    fn designated_panes_resets_released_free_trees() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_current_draft(&conn, "designated_panes");
         conn.execute_batch(include_str!(
@@ -3335,67 +3331,13 @@ mod tests {
         let sql = current_draft_sql("designated_panes");
         conn.execute_batch(&sql).unwrap();
         super::convert_released_data(&conn, &sql).unwrap();
-        let layout = |work: &str| -> WorkPaneLayout {
-            let json: String = conn
-                .query_row(
-                    "SELECT layout_json FROM work_pane_layouts WHERE work_id=?1",
-                    [work],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            serde_json::from_str(&json).unwrap()
-        };
-
-        let task = layout("task_22222222222222222222222222222222");
-        task.validate().unwrap();
-        let panes: Vec<_> = task
-            .tree
-            .panes()
-            .iter()
-            .map(|(id, _)| id.to_string())
-            .collect();
-        assert_eq!(panes, ["pane-0", "pane-1", "pane-2"]);
-        let Some(PaneIntent::Browser {
-            tabs,
-            selected,
-            location,
-        }) = task.tree.pane("pane-2")
-        else {
-            panic!("Files becomes the browser pane at its own place")
-        };
-        assert!(location.is_some());
-        assert!(
-            matches!(&tabs[..], [BrowserTab::Files { tabs: files, .. }, BrowserTab::GraphLog { .. }] if files.len() == 2)
-        );
-        assert_eq!(selected.as_deref(), Some("files"));
-        assert_eq!(
-            (task.focused.as_deref(), task.zoomed.as_deref()),
-            (Some("pane-1"), Some("pane-2"))
-        );
-        assert!(task.hidden.is_empty());
-        assert_eq!(task.drafts[0].text, "unsaved edits");
-
-        let wave = layout("11111111-1111-1111-1111-111111111111");
-        wave.validate().unwrap();
-        assert!(matches!(
-            &wave.tree,
-            PaneTree::Pane { id, content: PaneIntent::Session { session_id: Some(session), .. } }
-                if id == "first" && session == "wave-first"
-        ));
-        assert_eq!(wave.focused, None);
-        assert_eq!(wave.revision, 4);
-
-        let conversation = layout("task_33333333333333333333333333333333");
-        conversation.validate().unwrap();
-        assert_eq!(
-            conversation
-                .hidden
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-            ["browser", "shell"]
-        );
-        assert_eq!(conversation.zoomed.as_deref(), Some("only"));
+        super::validate_persisted_json(&conn).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM work_pane_layouts", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     #[test]

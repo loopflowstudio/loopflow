@@ -22,7 +22,7 @@ struct DesktopServerTests {
         let lines = try await Task.detached {
             try SocketClient(path: path).exchange([
                 #"{"v":1,"id":1,"method":"inspect","params":{}}"#,
-                #"{"v":1,"id":2,"method":"perform","params":{"repository":"r","window":"w","pane":null,"action":"navigate.back","args":{}}}"#,
+                #"{"v":1,"id":2,"method":"perform","params":{"repository":"r","window":"w","pane":null,"action":"back","args":{}}}"#,
                 #"{"v":9,"id":3,"method":"inspect","params":{}}"#,
                 #"{"v":1,"id":4,"method":"events","params":{}}"#,
             ], expecting: 5)

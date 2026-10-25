@@ -846,33 +846,43 @@ keeping the owner's data directory and explicit takeover behavior. Local panes a
 drafts remain retained; no remote planning tree or execution record is imported.
 
 Every Desktop gesture is a `DesktopAction` in `LoopflowMac/DesktopActions.swift`:
-name, title, arguments, default keys and `perform`. `DesktopActionMonitor`, the
-View and File menus, the Keyboard Shortcuts window and the `perform desktop
-action` Apple event (`CNRTactn`) look actions up there; nothing else mutates
-navigation or panes. Keys and menus act on the shown workspace's focused pane;
-the Apple event names an exact window and pane, and `lf desktop` resolves those
-from one inspection (see the [CLI examples](../docs/lf.md#desktop-navigation)).
-An unknown action or bad argument throws `DesktopArgumentError` (script error
-1002, exit 2); a stale or missing target throws `DesktopTargetError` (1003, exit
-3). The receipt carries the window's destination and the affected workspace in
-the same MainActor turn, so it equals the next inspection.
+name (the `lf desktop` verb), title, arguments, default keys and `perform`.
+`DesktopActionMonitor`, the View and File menus, the Keyboard Shortcuts window and
+the Desktop socket look actions up there; nothing else mutates navigation or panes.
+Keys and menus act on the shown workspace's focused pane; a socket request names an
+exact window and pane, and `lf desktop` resolves those from one inspection (see the
+[CLI examples](../docs/lf.md#desktop-navigation)).
+
+`DesktopServer` (`LoopflowMac/DesktopServer.swift`) binds
+`$LF_HOME/run/desktop/<bundle-id>.sock` at launch (0700 directory, 0600 socket,
+same-uid peers, a stale file unlinked) and answers newline-delimited JSON:
+`inspect`, `perform`, `read_text` and `events`. It serves only `lf desktop` and
+hosts no Sessions. An unknown action or bad argument throws `DesktopArgumentError`
+(code `argument`, exit 2); a stale or missing target throws `DesktopTargetError`
+(`target`, exit 3); another API version answers `version`. The receipt carries the
+window's destination and the affected workspace in the same MainActor turn, so it
+equals the next inspection. `events` sends the whole reading, then every quarter
+second while subscribed, the windows whose reading changed.
 
 Move retains the pane itself, including its content occurrence and surface key;
-it never closes/reopens a client. `shell.new` adds and selects a tab at the
-Task's recorded location without moving focus (⌘T passes `focus=true`). Each tab
+it never closes/reopens a client. `run` adds and selects a tab at the Task's
+recorded location without moving focus (⌘T passes `focus=true`); a `command` line
+is typed into the tab's own shell (Ghostty's initial input before the surface
+starts), so the tab outlives it. Shell tabs inspect `commands`: lines submitted and
+commands finished, from Ghostty's command-finished action, with the last status. Each tab
 retains its location through arrangement and Close/Undo; restored intent does not
 restart a process. Session panes capture their recorded location; changed
 readings invalidate old pane targets without changing focus. Unknown locations
 never open a local replacement. Window/content replacement rejects stale
-targets. `browser.files`, `browser.graph_log` and `browser.open` select browser
+targets. `files`, `graph-log` and `browse` select browser
 tabs without changing focus or zoom. Each web page tab retains its `WKWebView`
-until the tab closes; `browser.back`, `browser.forward` and `browser.reload`
+until the tab closes; `page-back`, `page-forward` and `reload`
 (⌘R, the page's toolbar) act on the addressed page. ⌘[ and ⌘] stay Desktop
 navigation. Remote shells run on the recorded execution
 Machine; changed or missing checkouts refuse launch without opening a local
 shell. Disconnects never replay shell commands.
 
-`lf desktop capture -b shell:1 --region selection --json` validates the retained
+`lf desktop capture -p shell:1 --region selection --json` validates the retained
 pane and native surface without following focus or retiring an exited surface.
 Missing surfaces and nonterminal panes are explicit unavailable results, not
 empty text. The verified lf3 reader writes directly into the requested byte
@@ -882,8 +892,8 @@ command block (empty when nothing is selected). No unbounded extraction is used.
 Mounted extraction/draft acceptance and cross-machine composition remain unproved.
 
 ```sh
-lf desktop send -b session 'add to the draft'
-lf desktop send-key -b session enter
+lf desktop send -p session 'add to the draft'
+lf desktop send-key -p session enter
 ```
 
 Text preserves the draft and inserts at its cursor; Enter is separate. Control

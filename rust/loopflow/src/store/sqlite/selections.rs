@@ -8,7 +8,6 @@ use crate::work::selection::{
     DashboardReading, Selection, SelectionExpression, SelectionId, SelectionResolution,
     SelectionState, SelectionWork, SlotLayout, WorkWorkspaceKey, WorkWorkspaceKind,
 };
-pub(crate) use panes::convert_released_layouts;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 

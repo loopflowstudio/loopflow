@@ -145,7 +145,7 @@
       ],
       "actions": [
         {
-          "name": "navigate.back",
+          "name": "back",
           "title": "Back",
           "scope": "window",
           "arguments": [],
@@ -154,7 +154,7 @@
           ]
         },
         {
-          "name": "navigate.forward",
+          "name": "forward",
           "title": "Forward",
           "scope": "window",
           "arguments": [],

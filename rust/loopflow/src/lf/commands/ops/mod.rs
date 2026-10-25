@@ -434,6 +434,7 @@ pub(crate) fn run_sync_in(
         push: !manual && !on_main,
         fork_base,
     };
+    let avoidable = is_avoidable_sync_class(&plan.class);
     let (verification, agent_launched) = if manual {
         (sync_with_plan(repo_root, &options, &plan, progress)?, false)
     } else {
@@ -451,7 +452,7 @@ pub(crate) fn run_sync_in(
                         &onto,
                         &detail,
                         recovery,
-                        is_avoidable_sync_class(&plan.class),
+                        avoidable,
                         progress,
                         &recovery_config,
                     )

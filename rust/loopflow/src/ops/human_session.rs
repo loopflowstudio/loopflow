@@ -2115,7 +2115,7 @@ mod tests {
         // Captures from before node keys carried a leaf index and scalar visit.
         let old: SessionGraphStep = serde_json::from_value(serde_json::json!({
             "task_id": null, "task_pr_id": null, "invocation_id": "process_old",
-            "flow": "review", "step": "review-design", "iteration": 3, "step_index": 1
+            "flow": "review", "step": "explore", "iteration": 3, "step_index": 1
         }))
         .unwrap();
         assert_eq!((old.node, old.key, old.iterations), (None, None, None));
@@ -2182,7 +2182,7 @@ mod tests {
                 cwd: home.path().into(),
                 repo: None,
                 worktree: None,
-                skill: Some("review-design".into()),
+                skill: Some("explore".into()),
                 subjects: Vec::new(),
                 graph: crate::session_record::SessionGraphMembership::Independent,
                 work: None,

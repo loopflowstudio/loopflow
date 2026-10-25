@@ -263,26 +263,26 @@ conversation, joined by edges that each run one Graph.
 ```yaml
 # .lf/workflows/feature.yaml
 nodes:
-  design: review-design      # the skill the conversation uses at this node
+  explore: explore            # the skill the conversation uses at this node
   demo: demo
 edges:
-  - { from: start,  to: design, graph: task-design }
-  - { from: design, to: design, graph: task-design }  # revise the design
-  - { from: design, to: demo,   graph: pursue }
-  - { from: demo,   to: demo,   graph: pursue }       # another pass
-  - { from: demo,   to: end,    graph: ship }         # land
+  - { from: start,   to: explore, graph: task-design }
+  - { from: explore, to: explore, graph: task-design }  # re-plan the chosen direction
+  - { from: explore, to: demo,    graph: pursue }
+  - { from: demo,    to: demo,    graph: pursue }       # another pass
+  - { from: demo,    to: end,     graph: ship }         # land
 ```
 
 ```bash
 lf task run DES-123            # start: the only edge, task-design
-lf task run DES-123 pursue     # at design: build it
+lf task run DES-123 pursue     # at explore: build it
 lf task run DES-123 ship       # at demo: land it
 lf task status DES-123         # node, or the edge it is on
-lf task workflow move DES-123 design    # go back without running anything
+lf task workflow move DES-123 explore   # go back without running anything
 ```
 
 `start` and `end` are implicit. A node may say what you do there:
-`design: { skill: review-design, description: you review the plan }`;
+`explore: { skill: explore, description: you choose what to build }`;
 without one, the skill's first line stands in. An edge names a Graph or skill; Task launch resolves it and uses the explicit
 `graph` or `skill` invocation. Only an edge into `end` may omit `graph:`; take it with
 `lf task run ISSUE end`. A Task with no PR is a workflow with no landing edge,

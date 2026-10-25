@@ -781,7 +781,7 @@ and Wave selectors retain installed identities and receipt history.
 ## Repair failed CI until merge
 
 ```bash
-nohup lf ship &           # a Task: the remaining steps, then land and repair
+lf ship                   # a Task: the remaining steps, then land and repair
 lf land --wait-and-fix    # this PR: land and repair in the foreground
 ```
 

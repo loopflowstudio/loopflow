@@ -1,8 +1,9 @@
-//! `lf ship`: run a shipped Task's remaining graph in the foreground until it
-//! reaches `end`. At each stage a headless stand-in runs the stage's skill for
-//! the person who would be there and decides the route; each edge runs as
-//! `lf task run` would run it. The caller backgrounds this process; it is
-//! started again if it dies while the Task is shipping.
+//! `lf ship`: run a shipped Task's remaining graph until it reaches `end`. At
+//! each stage a headless stand-in runs the stage's skill for the person who
+//! would be there and decides the route; each edge runs as `lf task run` would
+//! run it. A bare ship inside its execution owner returns once it is shipping
+//! and carries on in its log; `-b` stays until the end. It is started again if
+//! it dies while the Task is shipping.
 
 use std::path::Path;
 
@@ -42,6 +43,14 @@ pub fn run(
     };
     let issue = task.identifier.clone();
     let worktree = task.worktree()?.to_path_buf();
+    if !cli.batch && !cli.interactive && crate::transport::current().is_some() {
+        let log = super::graph::PendingLog::open(&format!("ship-{issue}"))?;
+        println!(
+            "{issue} shipping\n  follow: lf task status {issue}\n  log:    {}",
+            log.path.display()
+        );
+        super::graph::release_launcher(&log.file)?;
+    }
     // Blocked decisions in a row; each repeat after one waits longer.
     let mut blocked = 0;
     loop {
@@ -133,7 +142,8 @@ pub fn run(
             },
         )?;
         if let Some(edge) = runs {
-            super::graph::run_task_edge_for(cli, task.id.as_str(), &edge, &worktree)?;
+            // This ship has already let its launcher go, or keeps it to the end.
+            super::graph::run_task_edge_for(cli, &task, &edge, false)?;
             crate::ops::task::workflow_arrive(&task)?;
             ship_progressed(&task.id)?;
         }

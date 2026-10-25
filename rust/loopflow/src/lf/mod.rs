@@ -442,8 +442,8 @@ pub enum Commands {
     },
     /// Ship the Task: run every remaining step to merge and completion, standing in at each stage
     ///
-    /// Runs in the foreground until the Task reaches its end; background it
-    /// yourself (`nohup lf ship &`). A second `lf ship` while one runs exits 0.
+    /// Returns once the Task is shipping and runs on to its end (`-b` waits for
+    /// it); `lf task status` follows it. A second `lf ship` while one runs exits 0.
     /// With no ISSUE, ships the checkout's Task, or a new one for its branch.
     /// `--stop` withdraws the approval and takes back its merge request.
     Ship {

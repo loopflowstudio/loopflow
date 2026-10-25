@@ -230,13 +230,13 @@ Use the same delivery verbs for Task and non-Task branches. They act on the
 branch and Task PR record when present; they do not require a running Task Graph.
 
 ```bash
-nohup lf ship &   # run the Task's remaining steps to merge and completion
+lf ship           # run the Task's remaining steps to merge and completion
 lf ship --stop    # withdraw it; disarms auto-merge it armed
 ```
 
 `lf ship` (or `lf ship ISSUE`) makes the Task shipping, stands in for you at each
-Workflow stage, running its skill headless, and stays in the foreground until
-the Task completes. On a branch with no Task it first creates one for the branch
+Workflow stage, running its skill headless, and keeps going after it returns
+until the Task completes (`-b` waits for that); `lf task status` follows it. On a branch with no Task it first creates one for the branch
 and its checkout. A second `lf ship` while one runs exits 0; `lf task pause`
 holds it, and the next read of the Task (`lf task status`, Desktop) restarts one
 that died. Choosing a

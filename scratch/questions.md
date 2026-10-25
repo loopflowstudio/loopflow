@@ -96,3 +96,18 @@ design rewrite, each reversible before implementation:
 - Linear mapping unchanged: it follows claim/reopen/complete/abandon events, so idle, active
   and moving all sit in In Progress.
 - `lf ship ISSUE` is lifted into `--task` in `Cli::checked`; a different `--task` conflicts.
+
+## Sync onto main a3a4268c06 (#1675 `lf task run` returns once running)
+
+- Main deleted Desktop's `RegistryStarter`/`startLf`, which Ship it used to launch `lf -b ship`
+  detached. Assumption: bare `lf ship` inside its execution owner now lets its launcher go once
+  shipping begins (log `~/.lf/logs/graph-ship-<issue>.log`), mirroring `lf task run`; `-b` still
+  waits for the end. This replaces Jack's earlier "caller backgrounds it" (`nohup lf ship &`);
+  revisit at demo if a foreground terminal ship is preferred.
+- Routes a ship runs never let go themselves (`run_task_edge_for(.., release: false)`).
+- Main's `a_skill_edges_process_names_the_log_its_run_printed` was dropped: every route runs
+  as a Graph process here, so `task_run_returns_while_its_graph_keeps_running` covers it.
+- Pre-existing: `every_task_launch_runs_in_the_foreground_under_the_same_checks` fails at
+  0966cc00ce too (terminal Task admitted `-b task run … proof`); not caused by this sync.
+- Checks: `cargo test --lib task_graph_launch_tests` 35/36 (the pre-existing failure); Swift
+  `DesktopHeadlessTests` deferred to gate/CI.

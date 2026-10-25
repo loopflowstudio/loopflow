@@ -905,7 +905,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
     );
     // The step that ran after the launcher was gone wrote to the log.
     let written = fs::read_to_string(&log).unwrap();
-    assert!(written.contains("op: task sync --plan"), "{written}");
+    assert!(written.contains("op: sync --plan"), "{written}");
 }
 
 #[test]

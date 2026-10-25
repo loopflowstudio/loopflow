@@ -288,7 +288,7 @@ skill's first line of prose. `interactive:` may sit inside an `xor` path as a
 conditional stage. A graph with no stages runs whole; one with no PR, like
 builtin `research`, ends with a route into `end` that runs nothing.
 
-`lf ship` runs the remaining steps in the foreground, with a headless agent
+`lf ship` returns once the Task is shipping and runs the remaining steps, with a headless agent
 standing in for you at each stage: it runs the stage's skill, decides advance or
 repeat, and records why in the Task history. `lf ship DES-123 --graph deliver`
 takes up another graph first.

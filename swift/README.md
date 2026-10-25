@@ -864,7 +864,10 @@ restart a process. Session panes capture their recorded location; changed
 readings invalidate old pane targets without changing focus. Unknown locations
 never open a local replacement. Window/content replacement rejects stale
 targets. `browser.files`, `browser.graph_log` and `browser.open` select browser
-tabs without changing focus or zoom. Remote shells run on the recorded execution
+tabs without changing focus or zoom. Each web page tab retains its `WKWebView`
+until the tab closes; `browser.back`, `browser.forward` and `browser.reload`
+(⌘R, the page's toolbar) act on the addressed page. ⌘[ and ⌘] stay Desktop
+navigation. Remote shells run on the recorded execution
 Machine; changed or missing checkouts refuse launch without opening a local
 shell. Disconnects never replay shell commands.
 

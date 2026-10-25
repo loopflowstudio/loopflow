@@ -1,6 +1,8 @@
 #if os(macOS)
 import Foundation
+import Network
 import Testing
+import WebKit
 #if canImport(GhosttyKit)
 import AppKit
 import GhosttyKit
@@ -678,6 +680,49 @@ struct DesktopPaneControlTests {
         #expect(store.focusedPaneId == selected.id)
     }
 
+    @Test("Web page Back, Forward and Reload act on the browser tab's retained page")
+    func webPageActionsDriveTheRetainedPage() async throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId), router = WorkLinkRouter(), window = UUID()
+        let workspace = registry.open(workKey, title: "Task", location: identity), store = workspace.multiplexer
+        store.load(sessionId: "main", location: identity)
+        let source = target(store.focusedPane, window: window)
+        register(router, window: window, registry: registry)
+        _ = try router.perform(DesktopActionRequest("browser.files", at: source))
+        let files = try #require(store.browserPane)
+        #expect(throws: DesktopTargetError.self) { try router.perform(DesktopActionRequest("browser.reload", at: target(files, window: window))) }
+
+        let server = try await LoopbackPages()
+        defer { server.listener.cancel() }
+        let first = server.url("one"), second = server.url("two")
+        let opened = try router.perform(DesktopActionRequest("browser.open", at: source, args: ["url": first.absoluteString]))
+        let browser = try #require(store.browserPane)
+        let tab = try #require(opened.tab)
+        let page = workspace.pages.view(for: tab, url: first)
+        #expect(workspace.pages.view(for: tab, url: first) === page)
+        let at = target(browser, window: window)
+        try await settle(page) { $0.url == first && $0.title?.isEmpty == false }
+        let loaded = page.title
+        page.load(URLRequest(url: second))
+        try await settle(page) { $0.url == second && $0.canGoBack }
+        #expect(throws: DesktopTargetError.self) { try router.perform(DesktopActionRequest("browser.forward", at: at)) }
+
+        _ = try router.perform(DesktopActionRequest("browser.back", at: at))
+        try await settle(page) { $0.url == first && $0.canGoForward }
+        _ = try router.perform(DesktopActionRequest("browser.reload", at: at))
+        try await settle(page) { $0.url == first && $0.title?.isEmpty == false && $0.title != loaded }
+        _ = try router.perform(DesktopActionRequest("browser.forward", at: at))
+        try await settle(page) { $0.url == second }
+
+        workspace.closePane(browser.id)
+        #expect(workspace.pages.view(for: tab, url: second) !== page)
+    }
+
+    /// Wait for WebKit to finish the navigation the condition describes.
+    private func settle(_ page: WKWebView, _ condition: (WKWebView) -> Bool) async throws {
+        for _ in 0..<200 where page.isLoading || !condition(page) { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(!page.isLoading && condition(page), "\(String(describing: page.url)) \(page.title ?? "")")
+    }
+
     @Test func remoteShellRefusalPreservesTheWorkspace() throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: "other"), router = WorkLinkRouter(), window = UUID()
         let store = registry.open(workKey, title: "Task", location: identity).multiplexer
@@ -900,6 +945,37 @@ struct DesktopPaneControlTests {
             try router.perform(DesktopActionRequest("pane.restore", at: target(pane, window: replacement)))
         }
         #expect(store.collapsedPaneIds.contains(pane.id))
+    }
+}
+/// Loopback pages titled with their load time, so a reload retitles the page.
+private final class LoopbackPages: @unchecked Sendable {
+    let listener: NWListener
+
+    init() async throws {
+        listener = try NWListener(using: .tcp, on: .any)
+        let html = "<script>document.title = performance.timeOrigin</script>"
+        let response = Data("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nCache-Control: no-store\r\nContent-Length: \(html.utf8.count)\r\nConnection: close\r\n\r\n\(html)".utf8)
+        listener.newConnectionHandler = { connection in
+            connection.start(queue: .global())
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { _, _, _, _ in
+                connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
+            }
+        }
+        try await withCheckedThrowingContinuation { (ready: CheckedContinuation<Void, Error>) in
+            listener.stateUpdateHandler = { state in
+                switch state {
+                case .ready: ready.resume()
+                case .failed(let error): ready.resume(throwing: error)
+                default: break
+                }
+            }
+            listener.start(queue: .global())
+        }
+        listener.stateUpdateHandler = nil
+    }
+
+    func url(_ path: String) -> URL {
+        URL(string: "http://127.0.0.1:\(listener.port?.rawValue ?? 0)/\(path)")!
     }
 }
 #endif

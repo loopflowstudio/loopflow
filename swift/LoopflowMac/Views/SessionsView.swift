@@ -53,6 +53,9 @@ struct ConsoleCommands: Commands {
             action("dashboard.working_tasks")
             action("shell.toggle")
             action("browser.toggle")
+            action("browser.back")
+            action("browser.forward")
+            action("browser.reload")
         }
     }
 
@@ -211,6 +214,7 @@ final class SessionsWorkspace {
             multiplexer.closeShell(tab.id)
         case .browser:
             guard let tab = pane.content.selectedBrowserTab else { multiplexer.close(paneId); return }
+            pages.release(tab.id)
             multiplexer.closeBrowserTab(tab.id)
         case .session:
             multiplexer.close(paneId)
@@ -330,6 +334,7 @@ final class SessionsWorkspace {
         return files(issue: issue, cwd: checkout, query: fileQuery, execution: execution)
     }
     let surfaces: GhosttySurfacePool
+    let pages = BrowserPages()
     private var surfaceClosed: AnyCancellable?
 
     private var retainedStore: SessionsStore?

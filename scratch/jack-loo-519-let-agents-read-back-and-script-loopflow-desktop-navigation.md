@@ -138,6 +138,7 @@ are CLI sugar for actions (`zoom` → `pane.zoom`, `run` → `shell.new`). Inven
 | `shell.new` | `command?` | ⌘T |
 | `shell.toggle` / `browser.toggle` | — | existing toggles |
 | `browser.files` / `browser.graph_log` / `browser.open` | — / — / `url` | menus |
+| `browser.back` / `browser.forward` / `browser.reload` | — | page toolbar, ⌘R |
 | `session.switch` | `session` | palette, inline open |
 
 Chrome (sidebar toggle, palette, themes) stays out. Positions follow whatever list
@@ -276,8 +277,11 @@ One PR; deepest deletion first.
    checks each is in the fixture. Docs (`docs/lf.md`, `swift/README.md`,
    architecture reference) rewritten; reference regenerated.
 
-   **Remaining before demo:** browser back/reload controls (`BrowserPageView` has
-   only swipe gestures; the plan's browser bullet promises back/reload).
+   Browser page controls (2026-10-24): `BrowserPages` retains one `WKWebView` per
+   URL tab (released on close); `BrowserPageView` shows Back/Forward/Reload above
+   it. `browser.back`/`browser.forward`/`browser.reload` act on the addressed web
+   tab; only reload has a key (⌘R) because ⌘[/⌘] are `navigate.*`. No verb maps to
+   them, so `VERB_ACTIONS` is unchanged.
 4. **Demo on Dev** (Jack).
 
 ## Done when
@@ -332,4 +336,4 @@ the doubled frame unless Jack picks a fix in the demo.
 - **`WKWebView` on macOS 15** needs no deployment-target change; SwiftUI
   `WebView` would need 26 and is not used.
 
-Check results (2026-10-24, after compress): `cargo test --lib commands::desktop selection_ designated_panes` + integration `dto_fixtures::desktop cli_discovery::desktop structured_help reference_matches` pass, clippy clean, Swift 14 focused suites pass; full Rust integration (`work_watch`, `cli_discovery`, `dto_fixtures`) deferred to gate.
+Check results (2026-10-24, after compress): `cargo test --lib commands::desktop selection_ designated_panes` + integration `dto_fixtures::desktop cli_discovery::desktop structured_help reference_matches` pass, clippy clean, Swift 14 focused suites pass; after browser controls `swift test --filter 'DesktopPaneControlTests|DTOFixtureTests'` (74) + `dto_fixtures::desktop` + `every_verb_names_a_registry_action` pass; full Rust integration (`work_watch`, `cli_discovery`, `dto_fixtures`) deferred to gate.

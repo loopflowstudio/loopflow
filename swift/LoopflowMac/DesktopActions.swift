@@ -6,6 +6,7 @@
 import AppKit
 import Loopflow
 import SwiftUI
+import WebKit
 
 /// A default key and the arguments pressing it supplies (⌘2 is `task.goto index=2`).
 struct DesktopKeyBinding: Equatable {
@@ -439,6 +440,24 @@ struct DesktopAction {
             }
             return try show(page, context)
         },
+        // ⌘[ and ⌘] stay Desktop navigation; the page's own Back and Forward are scriptable and in its toolbar.
+        DesktopAction("browser.back", "Web Page Back", scope: .pane, available: webPage) { context in
+            let page = try page(context)
+            guard page.canGoBack else { throw DesktopTargetError("The web page has nothing to go back to. Nothing changed.") }
+            page.goBack()
+            return nil
+        },
+        DesktopAction("browser.forward", "Web Page Forward", scope: .pane, available: webPage) { context in
+            let page = try page(context)
+            guard page.canGoForward else { throw DesktopTargetError("The web page has nothing to go forward to. Nothing changed.") }
+            page.goForward()
+            return nil
+        },
+        DesktopAction("browser.reload", "Reload Web Page", scope: .pane, keys: [.init(.character("r"), .command)],
+            available: webPage) { context in
+            try page(context).reload()
+            return nil
+        },
         DesktopAction("session.switch", "Switch Conversation", scope: .pane,
             arguments: [.init(name: "session", kind: .string, required: true)]) { context in
             let (workspace, _) = try context.addressed
@@ -452,6 +471,23 @@ struct DesktopAction {
             return DesktopActionOutcome(pane: workspace.multiplexer.sessionPane?.id, tab: nil)
         },
     ]
+
+    private static let webPage: (DesktopActionContext) -> Bool = { (try? webTab($0)) != nil }
+
+    /// The addressed browser tab when it is a web page; Files and Graph processes are not.
+    private static func webTab(_ context: DesktopActionContext) throws -> (SessionsWorkspace, id: String, url: URL) {
+        let (workspace, pane) = try context.addressed
+        guard case .browser(_, let tabs, let selected, _, _) = pane.content,
+              case .url(let id, let url)? = tabs.first(where: { $0.id == (context.tab ?? selected) }) else {
+            throw DesktopTargetError("The addressed tab is not a web page; nothing changed.")
+        }
+        return (workspace, id, url)
+    }
+
+    private static func page(_ context: DesktopActionContext) throws -> WKWebView {
+        let (workspace, id, url) = try webTab(context)
+        return workspace.pages.view(for: id, url: url)
+    }
 
     private static func show(_ tab: BrowserTab, _ context: DesktopActionContext) throws -> DesktopActionOutcome {
         let workspace = try context.task

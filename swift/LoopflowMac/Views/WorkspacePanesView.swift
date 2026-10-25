@@ -720,7 +720,7 @@ struct SessionPaneView: View {
                         Text(error.localizedDescription).textSelection(.enabled)
                     }
                 case .url(let id, let url):
-                    BrowserPageView(url: url).id(id)
+                    BrowserPageView(pages: workspace.pages, id: id, url: url).id(id)
                         .simultaneousGesture(TapGesture().onEnded { focusPane() })
                 case nil:
                     PaneEmptyState(title: "Nothing open", systemImage: "globe",

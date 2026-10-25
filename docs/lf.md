@@ -1130,6 +1130,7 @@ lf desktop capture -b shell:2 --trim | tail -3
 lf desktop send -t LOO-519 -b session 'add to the draft'
 lf desktop send-key -t LOO-519 -b session enter
 lf desktop do browser.open url=http://localhost:5173
+lf desktop do browser.reload -b browser
 lf desktop move -b browser --destination session --axis vertical
 lf desktop resize -b browser --toward session --ratio 0.4
 lf desktop hide -b shell; lf desktop restore -b shell

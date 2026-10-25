@@ -282,6 +282,29 @@
       "keys": []
     },
     {
+      "name": "browser.back",
+      "title": "Web Page Back",
+      "scope": "pane",
+      "arguments": [],
+      "keys": []
+    },
+    {
+      "name": "browser.forward",
+      "title": "Web Page Forward",
+      "scope": "pane",
+      "arguments": [],
+      "keys": []
+    },
+    {
+      "name": "browser.reload",
+      "title": "Reload Web Page",
+      "scope": "pane",
+      "arguments": [],
+      "keys": [
+        "⌘R"
+      ]
+    },
+    {
       "name": "session.switch",
       "title": "Switch Conversation",
       "scope": "pane",

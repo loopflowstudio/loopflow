@@ -14,4 +14,4 @@ reported `active` + "Move here"; observe-attach to that owner answered in 0.49 s
 The branch build runs on a stale Machine copy (`~/.lf/copies/45407719…`, in use by
 another process), so MTG-185 itself could not be connected by the branch build here.
 
-Check: `cargo test -p loopflow --test integration a_task_identifier_connects` + `--lib human_session` pass; clippy clean. Swift build deferred to gate/CI.
+Check: `cargo test -p loopflow --test integration a_task_identifier_connects` + `--lib human_session` (34) pass; clippy clean. Swift build deferred to gate/CI.

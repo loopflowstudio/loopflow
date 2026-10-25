@@ -1315,10 +1315,7 @@ fn session_is_resumable(store: &SqliteStore, dir: &Path) -> Result<bool> {
             time::OffsetDateTime::now_utc().unix_timestamp(),
         )?
         .context("Session disappeared")?;
-    Ok(matches!(
-        session_state(&summary),
-        SessionState::Active | SessionState::Detached
-    ))
+    Ok(summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live)
 }
 
 pub(crate) fn resume_native_session(

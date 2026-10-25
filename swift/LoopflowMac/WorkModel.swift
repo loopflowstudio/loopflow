@@ -142,7 +142,8 @@ final class WorkModel {
         reconcileSelectionRepository()
         switch navigation.destination {
         case .dashboard, .workingTasks: if let plan = selectedViewPlan { presentView(plan) }
-        case .work, .view, .entered: break
+        case .work: presentWaveTiles()
+        case .view, .entered: break
         }
     }
 
@@ -211,6 +212,7 @@ final class WorkModel {
         navigation.workspacePresentation = workspace.presentation
         navigation.selectedSessionId = workspace.presentation.selectedSessionId
         revealPrimaryConversation()
+        presentWaveTiles()
     }
 
     /// Observation can display an existing conversation without acquiring its provider.
@@ -2492,6 +2494,25 @@ extension WorkModel {
         selectDestination(.entered(from: board, work: work), recordingHistory: true)
     }
 
+    /// A Wave view's tiles: its Tasks in the shared order, beside its conversation.
+    func waveTiles(_ id: String) -> [WorkMemberRef] {
+        var seen = Set<WorkWorkspaceKey>()
+        return (builtInPlan(.wave(id))?.resolution.members ?? [])
+            .filter { $0.work.kind == .task && seen.insert($0.work).inserted }
+    }
+
+    func wavePlan(_ id: String) -> WorkViewPlan? { builtInPlan(.wave(id)) }
+
+    /// The Wave stays selected; its Tasks open after it, in tile order, so a
+    /// script addresses them as it does a Dashboard's.
+    private func presentWaveTiles() {
+        guard let registry = workspaceRegistry, case .work = navigation.destination,
+              let key = registry.selectedWork, key.kind == .wave, let plan = wavePlan(key.id) else { return }
+        let tiles = waveTiles(key.id).map(\.work)
+        openTiles(plan, tiles, in: registry)
+        registry.present(open: [key] + tiles)
+    }
+
     private func presentView(_ plan: WorkViewPlan) {
         guard let registry = workspaceRegistry else { return }
         // Working Tasks renders the repository plan's Tasks; its Waves stay in the sidebar.
@@ -2500,6 +2521,11 @@ extension WorkModel {
         } else {
             plan.projection.visible.map(\.work)
         }
+        openTiles(plan, open, in: registry)
+        registry.present(open: open)
+    }
+
+    private func openTiles(_ plan: WorkViewPlan, _ open: [WorkWorkspaceKey], in registry: SessionsWorkspaceRegistry) {
         for content in plan.contents where open.contains(content.work) {
             let entry = registry.workspace(for: content.work, title: content.title,
                 location: content.location.map { WorkspaceIdentity(machineId: $0.machineID, worktree: $0.cwd) })
@@ -2508,7 +2534,6 @@ extension WorkModel {
             }
             entry.startPersistence(query: query, repoPath: repoPath)
         }
-        registry.present(open: open)
     }
 
     func saveDashboard(id: String, expression: String, name: String, pinned: Bool, revision: Int64?) async {
@@ -2533,25 +2558,26 @@ extension WorkModel {
         }
     }
 
-    func arrangeDashboard(_ id: String, order: [WorkMemberRef], hidden: [WorkMemberRef], revision: Int64) async {
+    /// Hide or show a tile, as `lf desktop hide`/`show` do; its place is kept.
+    func setDashboardTile(_ id: String, member: WorkWorkspaceKey, hidden: Bool) async {
         guard !dashboardSaving, let repoPath else { return }
         dashboardSaving = true
         dashboardError = nil
         defer { dashboardSaving = false }
         do {
-            _ = try await query.saveDashboardArrangement(id: id, order: order, hidden: hidden, revision: revision, repoPath: repoPath)
+            _ = try await query.setDashboardTile(id: id, member: member, hidden: hidden, repoPath: repoPath)
             try await refreshDashboard(id, repoPath: repoPath)
         } catch { dashboardError = error.localizedDescription }
     }
 
     /// A tile drop: the dragged Work takes the target's place in the Dashboard's order.
-    func reorderDashboard(_ id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey, revision: Int64) async {
+    func reorderDashboard(_ id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey) async {
         guard member != target, !dashboardSaving, let repoPath else { return }
         dashboardSaving = true
         dashboardError = nil
         defer { dashboardSaving = false }
         do {
-            _ = try await query.reorderDashboard(id: id, member: member, to: target, revision: revision, repoPath: repoPath)
+            _ = try await query.reorderDashboard(id: id, member: member, to: target, repoPath: repoPath)
             try await refreshDashboard(id, repoPath: repoPath)
         } catch { dashboardError = error.localizedDescription }
     }

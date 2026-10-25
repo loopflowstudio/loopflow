@@ -98,3 +98,20 @@ realign, 2026-10-25; see git history.
   `-p` paths address panes in Task, Dashboard and Wave views; registry action names
   are the verbs; exit 2/3/4 from typed error codes. Memory is at its token limit
   (15996/16000), so the replacement must not grow the paragraph.
+
+## Implement slice 7, 2026-10-25 (assumptions, reversible)
+
+- **lf writes tile edits; Desktop only follows.** Desktop's socket `perform` is
+  synchronous and its record writes already shell out to lf, so a Desktop-side tile
+  action would call back into lf. The verbs resolve the tile from the live reading,
+  write through the store owners, and build the `applies_to: dashboard` receipt from
+  that reading; Desktop catches up through its Work stream.
+- **Tile edits use the current revision.** Hide/show/move are deltas on one member,
+  so a stale read cannot clobber another edit. Whole slot layouts keep `--revision`.
+- **`slots` folded into `layout query:ID`, not `resize`.** The slot editor adds,
+  removes and swaps slots, which no tile verb expresses; `resize` reweights the
+  innermost split between two tiles.
+- **Working Tasks and Wave views only `move`** (the shared Task order); hide, show and
+  resize there exit 1 and say to save a Dashboard.
+- **Wave view keeps its inventory** under the tiles; tiles never take window focus
+  (the window would otherwise switch to the Task). LOO-594 owns the real layout.

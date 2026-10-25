@@ -212,7 +212,13 @@ struct DTOFixtureTests {
         let receiptData = try JSONSerialization.data(withJSONObject: try #require(wire["receipt"]))
         let receipt = try JSONDecoder().decode(DesktopActionReceipt.self, from: receiptData)
         #expect(receipt.workspace?.layout.children.last?.children.last?.tabs.last?.url == "http://localhost:5173")
+        #expect(receipt.appliesTo == .window)
         #expect(try JSONDecoder().decode(DesktopActionReceipt.self, from: JSONEncoder().encode(receipt)) == receipt)
+        var missingScope = try #require(wire["receipt"] as? [String: Any])
+        missingScope.removeValue(forKey: "applies_to")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(DesktopActionReceipt.self, from: JSONSerialization.data(withJSONObject: missingScope))
+        }
     }
 
     @Test func desktopInspectionRetainsUnavailableWorkAndExactPanes() throws {

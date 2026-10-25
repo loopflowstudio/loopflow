@@ -425,7 +425,7 @@ pub struct Arrangement {
     pub mode: ArrangementMode,
 }
 
-/// An authored arrangement: what `lf desktop arrange` reads. The writer decides `mode`.
+/// An authored arrangement. The writer decides `mode`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ArrangementEdit {
@@ -601,6 +601,42 @@ impl SlotLayout {
         let mut slots = Vec::new();
         collect(&self.root, &mut slots);
         slots
+    }
+
+    /// `slot` takes `share` of the space it divides with `toward` at the innermost
+    /// split separating them; the split's other children keep their weights.
+    /// None when the two are the same slot or either is absent.
+    pub fn resized(&self, slot: usize, toward: usize, share: f64) -> Option<Self> {
+        fn contains(node: &SlotNode, slot: usize) -> bool {
+            match node {
+                SlotNode::Slot { slot: own } => *own == slot,
+                SlotNode::Split { children, .. } => {
+                    children.iter().any(|child| contains(child, slot))
+                }
+            }
+        }
+        fn resize(node: &mut SlotNode, slot: usize, toward: usize, share: f64) -> bool {
+            let SlotNode::Split {
+                weights, children, ..
+            } = node
+            else {
+                return false;
+            };
+            let a = children.iter().position(|child| contains(child, slot));
+            let b = children.iter().position(|child| contains(child, toward));
+            match (a, b) {
+                (Some(a), Some(b)) if a == b => resize(&mut children[a], slot, toward, share),
+                (Some(a), Some(b)) => {
+                    let total = weights[a] + weights[b];
+                    weights[a] = total * share;
+                    weights[b] = total * (1.0 - share);
+                    true
+                }
+                _ => false,
+            }
+        }
+        let mut layout = self.clone();
+        (slot != toward && resize(&mut layout.root, slot, toward, share)).then_some(layout)
     }
 
     /// Slots are numbered 0..n exactly once; every split has two or more children

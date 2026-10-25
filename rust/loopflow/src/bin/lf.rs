@@ -1491,13 +1491,15 @@ fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {
                 | loopflow::lf::DesktopCommand::Pin { .. }
                 | loopflow::lf::DesktopCommand::Unpin { .. }
                 | loopflow::lf::DesktopCommand::Rename { .. }
-                | loopflow::lf::DesktopCommand::Arrange { .. }
-                | loopflow::lf::DesktopCommand::Slots { .. }
-                | loopflow::lf::DesktopCommand::Order { .. }
                 | loopflow::lf::DesktopCommand::Layout { .. }
         })
     ) {
         return Ok(());
+    }
+    if let Some(Commands::Desktop { cmd }) = &cli.command {
+        if loopflow::lf::commands::desktop::names_saved_tile(cmd) {
+            return Ok(());
+        }
     }
     if matches!(cli.command, Some(Commands::Desktop { .. })) && !cli.context {
         loopflow::lf::commands::desktop::require_supported().inspect_err(|_| {

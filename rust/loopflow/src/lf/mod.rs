@@ -694,43 +694,16 @@ pub enum DesktopCommand {
         #[arg(long)]
         revision: u64,
     },
-    /// Replace a Dashboard's occurrence order and hidden members from JSON on stdin; prints the Dashboard as JSON
-    Arrange {
-        /// Dashboard name or query:ID
-        query: String,
-        /// The Dashboard's last read revision; a stale one writes nothing
-        #[arg(long)]
-        revision: i64,
-    },
-    /// Replace a Dashboard's slot layout from JSON on stdin; `null` restores the default
-    Slots {
-        /// Dashboard name or query:ID
-        query: String,
-        /// The Dashboard's last read revision; a stale one writes nothing
-        #[arg(long)]
-        revision: i64,
-    },
-    /// Move a member into another's place: the repository's Task order, or a Dashboard's with --query; prints the result as JSON
-    Order {
-        /// Member to move: task:<durable-id>, or wave:<durable-id> on a Dashboard
-        member: String,
-        /// Member whose place it takes
-        #[arg(long)]
-        to: String,
-        /// Dashboard whose order to edit instead of the repository's Task order
-        #[arg(long, requires = "revision")]
-        query: Option<String>,
-        /// The Dashboard's last read revision; a stale one writes nothing
-        #[arg(long, requires = "query")]
-        revision: Option<i64>,
-    },
-    /// Read portable pane intent as JSON, or save a complete revision-checked record from stdin
+    /// Read a Work's pane intent or a Dashboard's slots as JSON, or save a complete revision-checked record from stdin
     Layout {
-        /// repository, wave:<durable-id> or task:<durable-id>
+        /// repository, wave:<durable-id>, task:<durable-id> or query:ID
         work: String,
-        /// Replace the record from JSON on stdin instead of reading it
+        /// Replace the record from JSON on stdin instead of reading it (a Dashboard's: slots, null for the default)
         #[arg(long)]
         save: bool,
+        /// A Dashboard's last read revision; a stale one writes nothing
+        #[arg(long, requires = "save")]
+        revision: Option<i64>,
     },
 
     /// List the window's Tasks by position (as ⌘1–9 select them) and each Task's panes
@@ -855,12 +828,12 @@ pub enum DesktopCommand {
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
-    /// Hide a pane without closing its Session or process
+    /// Hide a pane without closing its Session or process; on a Dashboard, hide a tile from its shared record
     Hide {
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
-    /// Show a hidden pane without selecting Work or acquiring a client
+    /// Show a hidden pane without selecting Work or acquiring a client; on a Dashboard, a hidden tile
     Show {
         #[command(flatten)]
         target: DesktopTargetArgs,
@@ -875,19 +848,20 @@ pub enum DesktopCommand {
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
-    /// Move a pane beside another pane of the same Task
+    /// Move a pane beside another pane of the same Task; on a Dashboard or Wave view, a tile into another's place
     Move {
-        /// Pane to place it beside, as for -p
+        /// Pane to place it beside, or tile whose place it takes, as for -p
         #[arg(long)]
         destination: String,
+        /// Split axis for a pane; tiles take the destination's place
         #[arg(long, value_enum)]
-        axis: commands::desktop::DesktopSplitAxis,
+        axis: Option<commands::desktop::DesktopSplitAxis>,
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
-    /// Resize the divider between two panes; ratio is the addressed pane's share
+    /// Resize the divider between two panes or Dashboard tiles; ratio is the addressed one's share
     Resize {
-        /// The other pane, as for -p
+        /// The other pane or tile, as for -p
         #[arg(long)]
         toward: String,
         #[arg(long)]
@@ -936,9 +910,10 @@ pub enum DesktopCommand {
 }
 
 /// Which part of the view on screen a command acts on. `-p` is a path: a pane
-/// (`session`, `shell`, `browser`, `shell:2`), a Dashboard tile (`3`, `LOO-519`),
-/// or `TILE/PANE`. Root `--task`/`--wave` set the base view; without either, a
-/// command acts on the terminal it runs in (`LF_TERMINAL_ID`).
+/// (`session`, `shell`, `browser`, `shell:2`), a Dashboard or Wave view tile (`3`,
+/// `LOO-519`), or `TILE/PANE`. `query:ID/TILE` and `working-tasks/TILE` name a
+/// saved record's tile by Work key without Desktop. Root `--task`/`--wave` set the
+/// base view; without either, a command acts on the terminal it runs in (`LF_TERMINAL_ID`).
 #[derive(Args, Debug, Clone, Default)]
 pub struct DesktopTargetArgs {
     /// Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix

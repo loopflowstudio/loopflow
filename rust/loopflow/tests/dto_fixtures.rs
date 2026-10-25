@@ -742,7 +742,17 @@ fn desktop_actions_name_an_exact_window_and_report_the_next_reading() {
     let receipt: DesktopActionReceipt = serde_json::from_value(value["receipt"].clone()).unwrap();
     assert_eq!(serde_json::to_value(&receipt).unwrap(), value["receipt"]);
     assert_eq!(receipt.tab.as_deref(), Some("page-1"));
-    for field in ["action", "destination", "history", "observed_at"] {
+    assert_eq!(
+        receipt.applies_to,
+        loopflow::lf::commands::desktop::DesktopAppliesTo::Window
+    );
+    for field in [
+        "action",
+        "destination",
+        "history",
+        "observed_at",
+        "applies_to",
+    ] {
         let mut missing = value["receipt"].clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(

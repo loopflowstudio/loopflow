@@ -1454,44 +1454,76 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
             .unwrap();
         child.wait_with_output().unwrap()
     };
-    let mut arrangement = plan.arrangement.clone();
-    arrangement
-        .hide(&arrangement.order[0].clone(), true)
-        .unwrap();
-    let arranged = invoke_input(
-        &["desktop", "arrange", "backlog", "--revision", "3"],
-        &serde_json::to_string(&arrangement.to_edit()).unwrap(),
-    );
+    // Tile verbs aimed at a saved record's tile edit it without Desktop.
+    let tile = format!("query:backlog/task:{}", plan.arrangement.order[0].work.id);
+    let hidden = invoke(&["desktop", "hide", "-p", &tile]);
     assert!(
-        arranged.status.success(),
+        hidden.status.success(),
         "{}",
-        String::from_utf8_lossy(&arranged.stderr)
+        String::from_utf8_lossy(&hidden.stderr)
     );
     let arranged: loopflow::work::selection::Dashboard =
-        serde_json::from_slice(&arranged.stdout).unwrap();
+        serde_json::from_slice(&hidden.stdout).unwrap();
     assert!(arranged.arrangement.project().visible.is_empty());
     assert_eq!(arranged.arrangement.order.len(), 1);
     // Hiding never changes whether the order is automatic.
     assert_eq!(arranged.arrangement.mode, plan.arrangement.mode);
-    let invalid = loopflow::work::selection::Arrangement::automatic(&[]);
-    assert!(!invoke_input(
-        &["desktop", "arrange", "backlog", "--revision", "4"],
-        &serde_json::to_string(&invalid.to_edit()).unwrap(),
-    )
-    .status
-    .success());
-    // The writer owns mode; input naming it is rejected rather than ignored.
-    assert!(!invoke_input(
-        &["desktop", "arrange", "backlog", "--revision", "4"],
-        &serde_json::to_string(&arranged.arrangement).unwrap(),
-    )
-    .status
-    .success());
+    // A hidden tile is no longer shown, so hiding it again names nothing.
+    let again = invoke(&["desktop", "hide", "-p", &tile]);
+    assert_eq!(again.status.code(), Some(3));
+    let order = defaults.resolution.task_ids();
+    // Working Tasks keeps only the shared order: nothing to size.
+    let sized = invoke(&[
+        "desktop",
+        "resize",
+        "-p",
+        &format!("working-tasks/task:{}", order[0]),
+        "--toward",
+        &format!("task:{}", order[1]),
+        "--ratio",
+        "0.6",
+    ]);
+    assert_eq!(sized.status.code(), Some(1));
+    let moved = invoke(&[
+        "desktop",
+        "move",
+        "-p",
+        &format!("working-tasks/task:{}", order[order.len() - 1]),
+        "--destination",
+        &format!("task:{}", order[0]),
+    ]);
+    assert!(
+        moved.status.success(),
+        "{}",
+        String::from_utf8_lossy(&moved.stderr)
+    );
+    let moved: Vec<String> = serde_json::from_slice(&moved.stdout).unwrap();
+    assert_eq!(moved[0], order[order.len() - 1]);
     let reopened = invoke(&["desktop", "view", "query:backlog", "--plan"]);
     let reopened: loopflow::work::selection::ViewPlan =
         serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened.arrangement, arranged.arrangement);
     assert_eq!(reopened.saved_revision, Some(arranged.revision));
+    let revision = arranged.revision.to_string();
+    let slots = invoke_input(
+        &[
+            "desktop",
+            "layout",
+            "query:backlog",
+            "--save",
+            "--revision",
+            &revision,
+        ],
+        "null",
+    );
+    assert!(
+        slots.status.success(),
+        "{}",
+        String::from_utf8_lossy(&slots.stderr)
+    );
+    let read = invoke(&["desktop", "layout", "query:backlog"]);
+    let read: loopflow::work::selection::Dashboard = serde_json::from_slice(&read.stdout).unwrap();
+    assert_eq!((read.slots, read.revision), (None, arranged.revision + 1));
     let mut layout: loopflow::work::selection::WorkPaneLayout =
         serde_json::from_str(include_str!("../../../tests/fixtures/dto/pane_layout.json")).unwrap();
     layout.revision = 0;

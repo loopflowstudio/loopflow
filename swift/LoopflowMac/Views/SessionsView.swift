@@ -1217,7 +1217,12 @@ struct SessionsContentView: View {
                             .equatable()
                             .frame(width: geometry.size.width * 0.62)
                         Divider()
-                        WaveTaskInventory(model: model, waveID: key.id)
+                        VStack(spacing: 0) {
+                            WaveTiles(model: model, workspaces: workspaces, sessions: store, waveID: key.id)
+                                .frame(height: geometry.size.height * 0.62)
+                            Divider()
+                            WaveTaskInventory(model: model, waveID: key.id)
+                        }
                     }
                 }
             } else if terminals {

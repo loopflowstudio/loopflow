@@ -152,16 +152,19 @@ public struct DesktopActionReceipt: Codable, Sendable, Equatable {
     public let tab: String?
     public let workspace: DesktopWorkspaceInspection?
     public let observedAt: Int64
+    public let appliesTo: DesktopAppliesTo
 
     public init(repository: String, window: String, action: String, destination: DesktopDestination, history: DesktopHistory,
-                pane: String?, tab: String?, workspace: DesktopWorkspaceInspection?, observedAt: Int64) {
+                pane: String?, tab: String?, workspace: DesktopWorkspaceInspection?, observedAt: Int64, appliesTo: DesktopAppliesTo) {
         self.repository = repository; self.window = window; self.action = action
         self.destination = destination; self.history = history
         self.pane = pane; self.tab = tab; self.workspace = workspace; self.observedAt = observedAt
+        self.appliesTo = appliesTo
     }
     enum CodingKeys: String, CodingKey {
         case repository, window, action, destination, history, pane, tab, workspace
         case observedAt = "observed_at"
+        case appliesTo = "applies_to"
     }
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
@@ -174,7 +177,15 @@ public struct DesktopActionReceipt: Codable, Sendable, Equatable {
         try values.encode(tab, forKey: .tab)
         try values.encode(workspace, forKey: .workspace)
         try values.encode(observedAt, forKey: .observedAt)
+        try values.encode(appliesTo, forKey: .appliesTo)
     }
+}
+
+/// Whether a verb changed its window or a Dashboard's shared record, which every
+/// window showing it follows.
+public enum DesktopAppliesTo: String, Codable, Sendable, Equatable {
+    case window
+    case dashboard
 }
 
 /// What a window shows, as its sidebar, crumbs and tile clicks select it.

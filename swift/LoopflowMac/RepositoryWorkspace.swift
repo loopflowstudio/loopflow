@@ -279,7 +279,7 @@ final class WorkLinkRouter {
         return DesktopActionReceipt(repository: request.repository, window: request.window, action: request.action,
             destination: window.destination, history: window.history, pane: outcome.pane, tab: outcome.tab,
             workspace: work.flatMap { work in window.workspaces.first { $0.work == work } },
-            observedAt: Int64(Date().timeIntervalSince1970))
+            observedAt: Int64(Date().timeIntervalSince1970), appliesTo: .window)
     }
 
     /// Resolve and read synchronously; no client acquisition or focus fallback.

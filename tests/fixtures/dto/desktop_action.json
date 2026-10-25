@@ -528,6 +528,7 @@
       "zoomed_pane": "browser",
       "hidden_panes": []
     },
-    "observed_at": 1791652805
+    "observed_at": 1791652805,
+    "applies_to": "window"
   }
 }

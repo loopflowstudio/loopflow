@@ -1132,8 +1132,9 @@ reads and steers Dev. Elsewhere they address the installed app; set
 running Desktop serves `$LF_HOME/run/desktop/<bundle-id>.sock` to the same user
 only; the socket lives and dies with the app.
 
-`desktop view --plan`, `query`, `pin`/`unpin`, `rename`, `arrange`, `slots`,
-`order` and `layout` work without macOS and print JSON. Plans contain
+`desktop view --plan`, `query`, `pin`/`unpin`, `rename`, `layout`, and tile
+verbs naming a saved record (`lf desktop hide -p query:ID/task:ID`) work without
+macOS and print JSON. Plans contain
 shared selection/arrangement intent and current Work evidence, including explicit
 missing primary Sessions or locations. They acquire no client and do not describe
 native mounted panes. Query edits use the saved revision; `query:ID` reopens the
@@ -1196,12 +1197,21 @@ lf desktop reload -p browser
 lf desktop move -p browser --destination session --axis vertical
 lf desktop resize -p browser --toward session --ratio 0.4
 lf desktop hide -p shell; lf desktop show -p shell
+lf desktop move -p 3 --destination 1         # on a Dashboard: tile 3 takes tile 1's place
 ```
 
 `-p` is a path from the view on screen: a pane (`session`, `shell`, `browser`), a
-tab (`shell:2`, `browser:1`), a Dashboard tile (`3`, `LOO-519`), or `TILE/PANE`.
-On a Dashboard a lone part names a tile first; on a Task it names a pane, and a
-tile part picks a Task by its ⌘N place. Each part resolves in order, stopping at
+tab (`shell:2`, `browser:1`), a tile (`3`, `LOO-519`), or `TILE/PANE`. Dashboards
+and Wave views have tiles: a Wave view shows its conversation beside its Tasks.
+There a lone part names a tile first; on a Task it names a pane, and a
+tile part picks a Task by its ⌘N place.
+
+`hide`, `show`, `move` and `resize` aimed at a tile edit the shared record, so
+every window showing it and the next launch agree: a saved Dashboard's
+arrangement and slots, or the repository's Task order on Working Tasks and Wave
+views (which only `move`). Receipts say `applies_to: dashboard`; pane verbs say
+`window`. `-p query:ID/task:ID` or `-p working-tasks/task:ID` edits the record
+without Desktop. Each part resolves in order, stopping at
 the first kind that matches: full ID, case-insensitive label, 1-based position,
 then ID suffix of four or more characters. Ambiguous or absent targets list the
 choices and change nothing.

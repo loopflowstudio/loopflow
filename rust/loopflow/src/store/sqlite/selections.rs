@@ -968,6 +968,47 @@ mod tests {
     }
 
     #[test]
+    fn resizing_two_slots_reweights_only_the_split_between_them() {
+        use crate::work::selection::{SlotLayout, SlotNode};
+        let golden = SlotLayout::golden();
+        // Slots 1 and 2 share the inner top split; the bottom band and slot 0 keep theirs.
+        let resized = golden.resized(1, 2, 0.75).unwrap();
+        let SlotNode::Split { children, .. } = &resized.root else {
+            panic!("golden root splits");
+        };
+        let SlotNode::Split {
+            children: top,
+            weights: top_weights,
+            ..
+        } = &children[0]
+        else {
+            panic!("golden top splits");
+        };
+        assert_eq!(top_weights, &[0.618, 1.0 - 0.618]);
+        let SlotNode::Split { weights, .. } = &top[1] else {
+            panic!("slots 1 and 2 split");
+        };
+        assert_eq!(weights, &[1.5, 0.5]);
+        assert_eq!(children[1], golden_band(&golden));
+        // Slots 0 and 5 meet only at the root.
+        let SlotNode::Split { weights, .. } = &golden.resized(0, 5, 0.5).unwrap().root else {
+            panic!("golden root splits");
+        };
+        assert_eq!(weights, &[0.5, 0.5]);
+        assert!(golden.resized(3, 3, 0.5).is_none());
+        assert!(golden.resized(3, 9, 0.5).is_none());
+    }
+
+    fn golden_band(
+        layout: &crate::work::selection::SlotLayout,
+    ) -> crate::work::selection::SlotNode {
+        match &layout.root {
+            crate::work::selection::SlotNode::Split { children, .. } => children[1].clone(),
+            crate::work::selection::SlotNode::Slot { .. } => unreachable!("golden root splits"),
+        }
+    }
+
+    #[test]
     fn dashboard_slots_round_trip_survive_query_edits_and_reject_invalid_layouts() {
         use crate::work::selection::{SlotLayout, SlotNode, SplitAxis};
         let (_dir, store, repo) = fixture();

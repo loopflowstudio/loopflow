@@ -103,6 +103,17 @@ pub struct DesktopActionReceipt {
     pub tab: Option<String>,
     pub workspace: Option<DesktopWorkspaceInspection>,
     pub observed_at: i64,
+    pub applies_to: DesktopAppliesTo,
+}
+
+/// Whether a verb changed this window or a Dashboard's shared record, which every
+/// window showing it follows.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DesktopAppliesTo {
+    Window,
+    Dashboard,
 }
 
 /// What the window shows, as the sidebar, crumbs and tile clicks select it.
@@ -409,11 +420,11 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
     {
         ["desktop", "state"] => Some(schema::<DesktopInspection>()),
         ["desktop", "view"] => Some(schema::<DesktopViewResult<'_>>()),
-        ["desktop", "query" | "pin" | "unpin" | "arrange" | "slots"] => {
+        ["desktop", "query" | "pin" | "unpin"] => {
             Some(schema::<crate::work::selection::Dashboard>())
         }
-        ["desktop", "order"] => Some(schema::<DesktopOrderResult>()),
-        ["desktop", "layout"] => Some(schema::<Option<crate::work::selection::WorkPaneLayout>>()),
+        ["desktop", "layout"] => Some(schema::<DesktopLayoutRecord>()),
+        ["desktop", "hide" | "show" | "move" | "resize"] => Some(schema::<DesktopTileOutput>()),
         ["open"] => Some(schema::<super::open::OpenReport>()),
         ["desktop", "ls"] => Some(schema::<DesktopWindowInspection>()),
         ["desktop", "actions"] => Some(schema::<Vec<DesktopActionDescriptor>>()),
@@ -460,11 +471,12 @@ enum DesktopViewResult<'a> {
     Opening(&'a DesktopOpening),
 }
 
-/// The repository's Task order after a move, or the Dashboard edited with --query.
+/// `layout` reads and writes a Work's pane intent or a Dashboard's slot layout.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
-enum DesktopOrderResult {
-    Tasks(Vec<String>),
+enum DesktopLayoutRecord {
+    Work(Option<crate::work::selection::WorkPaneLayout>),
+    /// Its `slots`; null is the default layout.
     Dashboard(Box<crate::work::selection::Dashboard>),
 }
 
@@ -648,7 +660,7 @@ fn work_key(repository: &crate::durable::RepositoryId, selector: &str) -> Result
 
 fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
-    use crate::work::selection::{ArrangementEdit, DashboardId, WorkPaneLayout};
+    use crate::work::selection::{DashboardId, WorkPaneLayout};
     if let DesktopCommand::Query { expression, .. } = command {
         crate::work::selection::Selection::parse(expression, None)?;
     }
@@ -660,10 +672,19 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
         work, save: false, ..
     } = command
     {
-        println!(
-            "{}",
-            serde_json::to_string(&reader.sqlite.pane_layout(&work_key(&repository, work)?)?)?
-        );
+        let record = match work.strip_prefix("query:") {
+            Some(id) => DesktopLayoutRecord::Dashboard(Box::new(
+                reader
+                    .sqlite
+                    .read_dashboard(&repository, &DashboardId(id.into()))?
+                    .ok_or(crate::store::StoreError::NotFound)?
+                    .saved,
+            )),
+            None => {
+                DesktopLayoutRecord::Work(reader.sqlite.pane_layout(&work_key(&repository, work)?)?)
+            }
+        };
+        println!("{}", serde_json::to_string(&record)?);
         return Ok(());
     }
     drop(reader);
@@ -730,60 +751,25 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
                 )?)?
             }
         }
-        DesktopCommand::Arrange {
-            query, revision, ..
-        } => {
-            let id = dashboard_id(query);
-            let reading = store
-                .read_dashboard(&repository, &id)?
-                .ok_or(crate::store::StoreError::NotFound)?;
-            // The shared writer validates the order against current membership and decides mode.
-            let edit: ArrangementEdit = serde_json::from_reader(std::io::stdin().lock())?;
-            serde_json::to_value(store.save_dashboard(
-                &repository,
-                &id,
-                Some(*revision),
-                &reading.saved.selection,
-                &edit,
-            )?)?
-        }
-        DesktopCommand::Slots {
-            query, revision, ..
-        } => {
+        DesktopCommand::Layout {
+            work,
+            save: true,
+            revision,
+        } if work.starts_with("query:") => {
+            let revision = revision.ok_or_else(|| {
+                DesktopError::Argument(
+                    "Saving a Dashboard's slots needs --revision from its last read; nothing changed."
+                        .into(),
+                )
+            })?;
             let slots: Option<crate::work::selection::SlotLayout> =
                 serde_json::from_reader(std::io::stdin().lock())?;
             serde_json::to_value(store.set_dashboard_slots(
                 &repository,
-                &dashboard_id(query),
-                *revision,
+                &dashboard_id(work),
+                revision,
                 slots.as_ref(),
             )?)?
-        }
-        DesktopCommand::Order {
-            member,
-            to,
-            query: Some(query),
-            revision: Some(revision),
-            ..
-        } => serde_json::to_value(DesktopOrderResult::Dashboard(Box::new(
-            store.reorder_dashboard(
-                &repository,
-                &dashboard_id(query),
-                *revision,
-                &work_key(&repository, member)?,
-                &work_key(&repository, to)?,
-            )?,
-        )))?,
-        DesktopCommand::Order { member, to, .. } => {
-            let (member, to) = (work_key(&repository, member)?, work_key(&repository, to)?);
-            if member.kind != WorkWorkspaceKind::Task || to.kind != WorkWorkspaceKind::Task {
-                bail!("the repository order holds Tasks; pass --query to order a Dashboard");
-            }
-            serde_json::to_value(DesktopOrderResult::Tasks(store.reorder_task(
-                &repository,
-                &member.id,
-                &to.id,
-            )?))?
         }
         DesktopCommand::Layout {
             work, save: true, ..
@@ -811,9 +797,6 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
         | DesktopCommand::Pin { .. }
         | DesktopCommand::Unpin { .. }
         | DesktopCommand::Rename { .. }
-        | DesktopCommand::Arrange { .. }
-        | DesktopCommand::Slots { .. }
-        | DesktopCommand::Order { .. }
         | DesktopCommand::Layout { .. } => return saved_intent(cli, command),
         DesktopCommand::View {
             expression,
@@ -824,6 +807,9 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
     }
     // Arguments are checked before Desktop is contacted.
     let verb = Verb::parse(command)?;
+    if let Some(request) = named_tile(&verb) {
+        return edit_named_tile(cli, request);
+    }
     require_supported()?;
     let json = cli.json || verb.target.json;
     let mut desktop = DesktopConnection::open()?;
@@ -898,6 +884,11 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             wait(desktop, WaitTarget::of(window, pane), *timeout, json)
         }
         VerbKind::Action { name, args } => {
+            if let Some(request) =
+                scope.tile_request(window, name, verb.target.pane.as_deref(), args)?
+            {
+                return edit_shown_tile(window, request, json);
+            }
             let descriptor = window
                 .actions
                 .iter()
@@ -933,6 +924,13 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
                             let peer = scope.peer(pane, selector).map_err(DesktopError::target)?;
                             args.insert(key.into(), peer);
                         }
+                    }
+                    if name == "move" && !args.contains_key("axis") {
+                        return Err(DesktopError::Argument(
+                            "Moving a pane needs --axis horizontal or vertical; nothing changed."
+                                .into(),
+                        )
+                        .into());
                     }
                     if matches!(name.as_str(), "send" | "send-key") {
                         args.insert("surface".into(), pane.surface()?);
@@ -1128,10 +1126,9 @@ impl Verb {
             } => (
                 action(
                     "move",
-                    vec![
-                        ("destination", destination.clone()),
-                        ("axis", axis.as_str().to_owned()),
-                    ],
+                    std::iter::once(("destination", destination.clone()))
+                        .chain(axis.map(|axis| ("axis", axis.as_str().to_owned())))
+                        .collect(),
                 ),
                 target.clone(),
             ),
@@ -1156,9 +1153,6 @@ impl Verb {
             | DesktopCommand::Pin { .. }
             | DesktopCommand::Unpin { .. }
             | DesktopCommand::Rename { .. }
-            | DesktopCommand::Arrange { .. }
-            | DesktopCommand::Slots { .. }
-            | DesktopCommand::Order { .. }
             | DesktopCommand::Layout { .. } => unreachable!("saved intent is not a live verb"),
         };
         Ok(Self { kind, target })
@@ -1219,6 +1213,323 @@ fn perform(
         println!("{}", receipt.destination);
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Tiles: on a Dashboard or Wave view, hide/show/move/resize aimed at a tile edit
+// the view's shared record, which every window showing it follows. A pane part
+// (`-p 2/shell`) addresses the pane inside the tile instead.
+// ---------------------------------------------------------------------------
+
+const TILE_VERBS: &[&str] = &["hide", "show", "move", "resize"];
+
+/// The shared record behind a view's tiles: a saved Dashboard's arrangement and
+/// slots, or the repository's one Task order (Working Tasks and Wave views).
+#[derive(Debug, Clone, PartialEq)]
+enum TileBoard {
+    Dashboard(crate::work::selection::DashboardId),
+    Tasks,
+}
+
+impl TileBoard {
+    /// A path's first part naming a record without Desktop: `query:ID` or `working-tasks`.
+    fn parse(part: &str) -> Option<Self> {
+        if part == "working-tasks" {
+            return Some(Self::Tasks);
+        }
+        part.strip_prefix("query:")
+            .map(|id| Self::Dashboard(crate::work::selection::DashboardId(id.into())))
+    }
+
+    fn shown(window: &DesktopWindowInspection) -> Result<Self> {
+        match &window.destination {
+            DesktopDestination::Dashboard { id } => Ok(Self::Dashboard(
+                crate::work::selection::DashboardId(id.clone()),
+            )),
+            DesktopDestination::View { .. } => Err(DesktopError::Target(
+                "This query is unsaved; save it as a Dashboard to arrange its tiles. Nothing changed."
+                    .into(),
+            )
+            .into()),
+            _ => Ok(Self::Tasks),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum TileEdit {
+    Hide,
+    Show,
+    /// Take `to`'s place in the order.
+    Move {
+        to: WorkWorkspaceKey,
+    },
+    /// The tile's share of the space it divides with `toward`.
+    Resize {
+        toward: WorkWorkspaceKey,
+        ratio: f64,
+    },
+}
+
+impl TileEdit {
+    fn parse(
+        name: &str,
+        args: &std::collections::BTreeMap<String, String>,
+        peer: impl Fn(&str) -> Result<WorkWorkspaceKey>,
+    ) -> Result<Self> {
+        let arg = |key: &str| {
+            args.get(key).ok_or_else(|| {
+                DesktopError::Argument(format!("{name} needs --{key}; nothing changed."))
+            })
+        };
+        Ok(match name {
+            "hide" => Self::Hide,
+            "show" => Self::Show,
+            "move" => Self::Move {
+                to: peer(arg("destination")?)?,
+            },
+            "resize" => Self::Resize {
+                toward: peer(arg("toward")?)?,
+                ratio: arg("ratio")?.parse()?,
+            },
+            _ => unreachable!("{name} is not a tile verb"),
+        })
+    }
+}
+
+/// A tile verb's output: Desktop-free edits print the record they wrote.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum DesktopTileRecord {
+    Dashboard(Box<crate::work::selection::Dashboard>),
+    /// The repository's Task order.
+    Tasks(Vec<String>),
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum DesktopTileOutput {
+    Verb(DesktopVerbResult),
+    Record(DesktopTileRecord),
+}
+
+/// A tile verb naming a saved record's tile, which edits it without Desktop.
+pub fn names_saved_tile(command: &crate::lf::DesktopCommand) -> bool {
+    use crate::lf::DesktopCommand;
+    let (DesktopCommand::Hide { target }
+    | DesktopCommand::Show { target }
+    | DesktopCommand::Move { target, .. }
+    | DesktopCommand::Resize { target, .. }) = command
+    else {
+        return false;
+    };
+    target
+        .pane
+        .as_deref()
+        .and_then(|path| path.split_once('/'))
+        .is_some_and(|(board, _)| TileBoard::parse(board).is_some())
+}
+
+/// `-p query:ID/TILE` or `-p working-tasks/TILE`, tiles named by Work key.
+fn named_tile(
+    verb: &Verb,
+) -> Option<(
+    TileBoard,
+    &str,
+    &str,
+    &std::collections::BTreeMap<String, String>,
+)> {
+    let VerbKind::Action { name, args } = &verb.kind else {
+        return None;
+    };
+    if !TILE_VERBS.contains(&name.as_str()) {
+        return None;
+    }
+    let (board, tile) = verb.target.pane.as_deref()?.split_once('/')?;
+    Some((TileBoard::parse(board)?, tile, name, args))
+}
+
+fn edit_named_tile(
+    cli: &crate::lf::Cli,
+    (board, tile, name, args): (
+        TileBoard,
+        &str,
+        &str,
+        &std::collections::BTreeMap<String, String>,
+    ),
+) -> Result<()> {
+    let repository = {
+        let reader = crate::store::read_existing_registry()?
+            .ok_or(crate::store::StoreError::NotFound)
+            .context("Work registry is unavailable")?;
+        selection_repository(cli, &reader.sqlite)?
+    };
+    let key = |selector: &str| work_key(&repository, selector);
+    let edit = TileEdit::parse(name, args, key)?;
+    let record = edit_tiles(&repository, &board, &key(tile)?, &edit)?;
+    println!(
+        "{}",
+        serde_json::to_string(&DesktopTileOutput::Record(record))?
+    );
+    Ok(())
+}
+
+fn edit_shown_tile(
+    window: &DesktopWindowInspection,
+    (board, member, edit, name): (TileBoard, WorkWorkspaceKey, TileEdit, &str),
+    json: bool,
+) -> Result<()> {
+    let repository = crate::durable::RepositoryId::parse(&window.repository)?;
+    edit_tiles(&repository, &board, &member, &edit)?;
+    let observed_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs() as i64);
+    let result = DesktopVerbResult {
+        receipt: DesktopActionReceipt {
+            repository: window.repository.clone(),
+            window: window.window.clone(),
+            action: name.into(),
+            destination: window.destination.clone(),
+            history: window.history.clone(),
+            pane: None,
+            tab: None,
+            workspace: None,
+            observed_at,
+            applies_to: DesktopAppliesTo::Dashboard,
+        },
+        target: DesktopResolution {
+            window: window.window.clone(),
+            work: Some(member),
+            pane: None,
+            tab: None,
+            rule: DesktopTargetRule::Pane,
+        },
+    };
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&DesktopTileOutput::Verb(result))?
+        );
+    } else if let Some(work) = &result.target.work {
+        // A full ID, so the line can be passed back as -p.
+        println!("{}", work.id);
+    }
+    Ok(())
+}
+
+/// One writer for every tile edit, through the shared record's own owners; the
+/// read and write use its current revision.
+fn edit_tiles(
+    repository: &crate::durable::RepositoryId,
+    board: &TileBoard,
+    member: &WorkWorkspaceKey,
+    edit: &TileEdit,
+) -> Result<DesktopTileRecord> {
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let absent = |work: &WorkWorkspaceKey| -> anyhow::Error {
+        DesktopError::Target(format!("{} is not a tile here; nothing changed.", work.id)).into()
+    };
+    let id = match board {
+        TileBoard::Tasks => {
+            let TileEdit::Move { to } = edit else {
+                bail!("Working Tasks and Wave views keep only the shared Task order; save a Dashboard to hide or size tiles. Nothing changed.");
+            };
+            if member.kind != WorkWorkspaceKind::Task || to.kind != WorkWorkspaceKind::Task {
+                return Err(DesktopError::Argument(
+                    "The shared order holds Tasks; nothing changed.".into(),
+                )
+                .into());
+            }
+            return Ok(DesktopTileRecord::Tasks(
+                store.reorder_task(repository, &member.id, &to.id).map_err(
+                    |error| match error {
+                        crate::store::StoreError::NotFound => absent(member),
+                        error => error.into(),
+                    },
+                )?,
+            ));
+        }
+        TileBoard::Dashboard(id) => id,
+    };
+    let reading = store
+        .read_dashboard(repository, id)?
+        .ok_or_else(|| DesktopError::Target(format!("No Dashboard {}; nothing changed.", id.0)))?;
+    let revision = reading.saved.revision;
+    let mut arrangement = reading.arrangement.clone();
+    let save = |arrangement: &crate::work::selection::Arrangement| {
+        store.save_dashboard(
+            repository,
+            id,
+            Some(revision),
+            &reading.saved.selection,
+            &arrangement.to_edit(),
+        )
+    };
+    let dashboard = match edit {
+        TileEdit::Move { to } => {
+            if arrangement.winner(to).is_none() {
+                return Err(absent(to));
+            }
+            store
+                .reorder_dashboard(repository, id, revision, member, to)
+                .map_err(|error| match error {
+                    crate::store::StoreError::NotFound => absent(member),
+                    error => error.into(),
+                })?
+        }
+        TileEdit::Hide => {
+            let index = arrangement.winner(member).ok_or_else(|| absent(member))?;
+            let shown = arrangement.order[index].clone();
+            arrangement.hide(&shown, true)?;
+            save(&arrangement)?
+        }
+        TileEdit::Show => {
+            let hidden = arrangement
+                .hidden
+                .iter()
+                .filter(|hidden| hidden.work == *member)
+                .cloned()
+                .collect::<Vec<_>>();
+            if hidden.is_empty() {
+                return Err(DesktopError::Target(format!(
+                    "{} is not hidden on this Dashboard; nothing changed.",
+                    member.id
+                ))
+                .into());
+            }
+            for occurrence in &hidden {
+                arrangement.hide(occurrence, false)?;
+            }
+            save(&arrangement)?
+        }
+        TileEdit::Resize { toward, ratio } => {
+            let slots = reading
+                .saved
+                .slots
+                .clone()
+                .unwrap_or_else(crate::work::selection::SlotLayout::golden);
+            let count = slots.slots().len();
+            let visible = arrangement.project().visible;
+            // Tiles fill slots in order, one page per `count` tiles.
+            let slot = |work: &WorkWorkspaceKey| {
+                visible
+                    .iter()
+                    .position(|shown| shown.work == *work)
+                    .map(|index| index % count)
+                    .ok_or_else(|| absent(work))
+            };
+            let resized = slots
+                .resized(slot(member)?, slot(toward)?, *ratio)
+                .ok_or_else(|| {
+                    DesktopError::Target(format!(
+                        "{} and {} fill the same slot; nothing changed.",
+                        member.id, toward.id
+                    ))
+                })?;
+            store.set_dashboard_slots(repository, id, revision, Some(&resized))?
+        }
+    };
+    Ok(DesktopTileRecord::Dashboard(Box::new(dashboard)))
 }
 
 // ---------------------------------------------------------------------------
@@ -1688,25 +1999,73 @@ impl<'a> Scope<'a> {
         }
     }
 
-    /// The window shows a Dashboard (saved, Working Tasks or an unsaved query):
-    /// its tiles are the view's parts.
+    /// The window shows tiles: a Dashboard (saved, Working Tasks or an unsaved
+    /// query) or a Wave view, whose Tasks are tiles beside its conversation.
     fn shows_board(window: &DesktopWindowInspection) -> bool {
         matches!(
-            window.destination,
+            &window.destination,
             DesktopDestination::Dashboard { .. }
                 | DesktopDestination::WorkingTasks
                 | DesktopDestination::View { .. }
-        )
+        ) || Self::wave_view(window).is_some()
     }
 
-    /// A tile: on a Dashboard its members in slot order, else the sidebar's Tasks (⌘N).
-    fn tile(
+    fn wave_view(window: &DesktopWindowInspection) -> Option<&WorkWorkspaceKey> {
+        match &window.destination {
+            DesktopDestination::Work { work } if work.kind == WorkWorkspaceKind::Wave => Some(work),
+            _ => None,
+        }
+    }
+
+    /// A tile verb aimed at a tile with no pane part (`-p 3`, `-p LOO-519/`).
+    fn tile_request(
+        &self,
+        window: &'a DesktopWindowInspection,
+        name: &'a str,
+        path: Option<&str>,
+        args: &std::collections::BTreeMap<String, String>,
+    ) -> Result<Option<(TileBoard, WorkWorkspaceKey, TileEdit, &'a str)>> {
+        if !TILE_VERBS.contains(&name) || !Self::shows_board(window) {
+            return Ok(None);
+        }
+        let tile = match path.map(|path| path.split_once('/')) {
+            Some(Some((tile, ""))) => tile,
+            Some(None) => match path.filter(|path| self.tile_work(window, path).is_ok()) {
+                Some(tile) => tile,
+                None => return Ok(None),
+            },
+            _ => return Ok(None),
+        };
+        let work = |selector: &str| {
+            self.tile_work(window, selector)
+                .cloned()
+                .map_err(DesktopError::target)
+        };
+        let member = work(tile)?;
+        let board = TileBoard::shown(window)?;
+        Ok(Some((
+            board,
+            member,
+            TileEdit::parse(name, args, work)?,
+            name,
+        )))
+    }
+
+    /// A tile's Work: on a Dashboard or Wave view its tiles in slot order, else
+    /// the sidebar's Tasks (⌘N).
+    fn tile_work(
         &self,
         window: &'a DesktopWindowInspection,
         selector: &str,
-    ) -> Result<&'a DesktopWorkspaceInspection> {
+    ) -> Result<&'a WorkWorkspaceKey> {
+        let wave = Self::wave_view(window);
         let tiles: Vec<&WorkWorkspaceKey> = if Self::shows_board(window) {
-            window.open_work.iter().collect()
+            // A Wave view's own conversation is open beside its tiles.
+            window
+                .open_work
+                .iter()
+                .filter(|work| Some(*work) != wave)
+                .collect()
         } else {
             window.list.iter().map(|entry| &entry.work).collect()
         };
@@ -1737,7 +2096,16 @@ impl<'a> Scope<'a> {
                     .unwrap_or_else(|| work.id.clone())
             },
         )?;
-        let work = tiles[index];
+        Ok(tiles[index])
+    }
+
+    /// A tile's workspace, for addressing the panes inside it.
+    fn tile(
+        &self,
+        window: &'a DesktopWindowInspection,
+        selector: &str,
+    ) -> Result<&'a DesktopWorkspaceInspection> {
+        let work = self.tile_work(window, selector)?;
         window
             .workspaces
             .iter()
@@ -2748,9 +3116,7 @@ mod tests {
             .collect::<Vec<_>>();
         let cli = <crate::lf::Cli as clap::CommandFactory>::command();
         let desktop = cli.find_subcommand("desktop").unwrap();
-        let saved = [
-            "view", "query", "pin", "unpin", "rename", "arrange", "slots", "order", "layout",
-        ];
+        let saved = ["view", "query", "pin", "unpin", "rename", "layout"];
         for verb in desktop.get_subcommands().map(clap::Command::get_name) {
             if saved.contains(&verb) || super::READING_VERBS.contains(&verb) {
                 continue;

@@ -1,7 +1,6 @@
 # LOO-519 — Agents read back and script Desktop navigation
 
-Status: **v2 implemented; three v2 items and the Dev demo remain** (realigned
-2026-10-25). Jack Heart's concept review (2026-10-24) set the scope: **A**, a
+Status: **v2 implemented; the Dev demo remains** (implement, 2026-10-25). Jack Heart's concept review (2026-10-24) set the scope: **A**, a
 Rex-aligned `lf desktop` CLI, plus **B**, designated session/shell/browser panes.
 Jack's v2 direction (2026-10-25, concept review of PR #1677) replaced the Apple-event
 transport and the `-t`/`-b`/`do` surface; this plan describes v2 only. v1 text lives
@@ -100,17 +99,27 @@ tile's doubled border. Exact flag spellings follow the compiled CLI.
 - `lf desktop view <expr> --plan` derives the plan without opening Desktop (LOO-497
   reachability check).
 
+## What exists (slice 7, 2026-10-25)
+
+- **Wave view:** the Wave's conversation, its Tasks as tiles (`WaveTiles`, the Wave
+  plan's slots) and the inventory below them. `open_work` is the Wave then its tiles;
+  `-p N` and `TILE/PANE` address them as on a Dashboard. Tiles never take the
+  window's focus, so the Wave stays selected.
+- **Tile verbs edit the shared record, written by lf, not Desktop:** `hide`/`show`/
+  `move`/`resize` aimed at a tile (no pane part) write a saved Dashboard's arrangement
+  or slots, or the repository Task order on Working Tasks and Wave views (`move`
+  only; the others exit 1). Each edit uses the record's current revision. Desktop
+  follows through its Work stream. Receipts carry `applies_to: window | dashboard`.
+- **`-p query:ID/task:ID` and `-p working-tasks/task:ID`** name a saved record's tile
+  by Work key and edit it without Desktop, on any platform; Desktop's own tile drags
+  and hide buttons use them. `layout query:ID [--save --revision N]` reads or writes
+  a Dashboard's slots (the slot editor's add/remove/swap).
+- Deleted: `lf desktop arrange`, `slots`, `order`, `DesktopOrderResult`,
+  `RegistryQuery.saveDashboardArrangement`, `WorkModel.arrangeDashboard`/`hideInDashboard`.
+
 ## Remaining
 
-1. **Wave view, simplest version:** its conversation pane plus its Tasks as tiles,
-   addressable with `-p` like a Dashboard. Today `.wave` is a destination without
-   tiles.
-2. **Dashboard pane verbs on the shared record:** `hide`/`show`/`move`/`resize`
-   targeting tiles edit the Dashboard; receipts gain `applies_to` (DTO, both
-   fixtures, Rust and Swift fixture tests). Nothing implements `applies_to` yet.
-3. **Fold `arrange`, `slots`, `order` into those verbs** and delete the three
-   subcommands, their docs and `documented_commands` entries in the same diff.
-4. **Demo on Dev** (Jack).
+1. **Demo on Dev** (Jack).
 
 ## Done when
 
@@ -135,9 +144,8 @@ reference_matches_the_compiled_cli`; `cargo clippy --all-targets -- -D warnings`
 `scripts/test_desktop.sh --filter 'DesktopServerTests|DesktopPaneControlTests|DTOFixtureTests|WorkNavigationTests|WorkspaceRetentionTests|DashboardWorkspaceTests|WorkDestinationTests'`.
 Demo/review (Jack): Dev targeting, inline conversation, doubled frame, pane feel.
 
-Last check (2026-10-25, compress): `--lib commands::desktop` (11), clippy, Swift
-`WorkNavigationTests|DesktopServerTests|DesktopPaneControlTests` (66) pass; full
-integration deferred to gate.
+Last check (2026-10-25, implement slice 7): `--lib commands::desktop selection
+resizing_two_slots` (74) pass; integration and Swift suites below.
 
 ## Exclusions
 

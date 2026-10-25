@@ -77,7 +77,7 @@ struct DashboardWorkspaceTests {
         let moved = try plan(["task_c", "task_a", "task_b"])
         let query = RegistryQuery { args, _ in
             switch args {
-            case ["desktop", "order", "task:task_c", "--to", "task:task_a"]: return #"["task_c","task_a","task_b"]"#
+            case ["desktop", "move", "-p", "working-tasks/task:task_c", "--destination", "task:task_a"]: return #"["task_c","task_a","task_b"]"#
             case ["desktop", "view", "--plan", "--json"]: return moved
             default: throw RegistryQueryError("Unexpected command \(args)")
             }
@@ -138,7 +138,7 @@ struct DashboardWorkspaceTests {
         let query = RegistryQuery { args, _ in
             switch args {
             // Rust applies the same move as the repository order and decides the mode.
-            case ["desktop", "order", "task:task_c", "--to", "task:task_a", "--query", "picked", "--revision", "3"]:
+            case ["desktop", "move", "-p", "query:picked/task:task_c", "--destination", "task:task_a"]:
                 return String(decoding: try loadFixtureData("dashboard.json"), as: UTF8.self)
             case ["desktop", "view", "query:picked", "--plan", "--json"]: return moved
             default: throw RegistryQueryError("Unexpected command \(args)")
@@ -147,7 +147,7 @@ struct DashboardWorkspaceTests {
         let model = WorkModel(query: query, repoPath: "/repo")
         model.applySelectionPlans([try JSONDecoder().decode(WorkViewPlan.self, from: Data(initial.utf8))], reason: "")
         let key = { WorkWorkspaceKey(repository: repo, kind: .task, id: $0) }
-        await model.reorderDashboard("picked", member: key("task_c"), to: key("task_a"), revision: 3)
+        await model.reorderDashboard("picked", member: key("task_c"), to: key("task_a"))
         #expect(model.dashboardError == nil)
         let dashboard = try #require(model.dashboard("picked"))
         #expect(dashboard.arrangement.order.map(\.work.id) == ["task_c", "task_a", "task_b"])

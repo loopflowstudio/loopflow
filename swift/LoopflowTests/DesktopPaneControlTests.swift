@@ -160,13 +160,13 @@ struct DesktopPaneControlTests {
         model.selectDashboard("review")
         #expect(throws: DesktopTargetError.self) { try perform("dashboard.enter", ["task": "absent"]) }
         #expect(model.navigation.destination == .dashboard("review"))
-        #expect(try perform("dashboard.enter", ["task": "b"]).destination == .zoomed(from: .dashboard("review"), work: b))
+        #expect(try perform("dashboard.enter", ["task": "b"]).destination == .entered(from: .dashboard("review"), work: b))
         let back = try perform("navigate.back")
         #expect(back.destination == .dashboard(id: "review"))
         #expect(back.history.forward == 1)
-        #expect(try perform("navigate.forward").destination == .zoomed(from: .dashboard("review"), work: b))
+        #expect(try perform("navigate.forward").destination == .entered(from: .dashboard("review"), work: b))
         #expect(try perform("dashboard.working_tasks").destination == .workingTasks)
-        #expect(try perform("dashboard.enter", ["task": "A"]).destination == .zoomed(from: .workingTasks, work: a))
+        #expect(try perform("dashboard.enter", ["task": "A"]).destination == .entered(from: .workingTasks, work: a))
         #expect(try perform("task.goto", ["index": "2"]).destination == .work(b))
         #expect(throws: DesktopTargetError.self) { try perform("task.goto", ["index": "3"]) }
         #expect(throws: DesktopArgumentError.self) { try perform("task.goto", ["index": "two"]) }

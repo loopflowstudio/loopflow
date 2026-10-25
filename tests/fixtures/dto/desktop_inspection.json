@@ -13,7 +13,7 @@
       "window": "55555555-5555-5555-5555-555555555555",
       "path": "/repo",
       "destination": {
-        "kind": "zoomed",
+        "kind": "entered",
         "from": {
           "dashboard": "attention"
         },

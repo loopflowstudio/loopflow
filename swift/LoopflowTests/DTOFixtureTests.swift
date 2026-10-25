@@ -226,7 +226,7 @@ struct DTOFixtureTests {
             try JSONDecoder().decode(DesktopInspection.self, from: JSONSerialization.data(withJSONObject: missingOpenings))
         }
         let window = try #require(report.windows.first)
-        #expect(window.destination == .zoomed(from: .dashboard("attention"), work: try #require(window.workspaces.first).work))
+        #expect(window.destination == .entered(from: .dashboard("attention"), work: try #require(window.workspaces.first).work))
         #expect(window.history == DesktopHistory(back: 1, forward: 0))
         #expect(report.windows[1].destination == .workingTasks)
         #expect(window.reading == "unavailable")

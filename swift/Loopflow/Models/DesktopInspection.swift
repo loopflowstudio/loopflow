@@ -171,10 +171,10 @@ public enum DesktopDestination: Codable, Sendable, Equatable {
     /// An unsaved query; the window's `view` carries its plan.
     case view(selection: WorkSelection)
     /// A Dashboard member entered as full Work; back returns to its Dashboard.
-    case zoomed(from: DesktopBoard, work: WorkWorkspaceKey)
+    case entered(from: DesktopBoard, work: WorkWorkspaceKey)
 
     private enum CodingKeys: String, CodingKey { case kind, work, id, selection, from }
-    private enum Kind: String, Codable { case work, dashboard, view, zoomed; case workingTasks = "working_tasks" }
+    private enum Kind: String, Codable { case work, dashboard, view, entered; case workingTasks = "working_tasks" }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -183,8 +183,8 @@ public enum DesktopDestination: Codable, Sendable, Equatable {
         case .dashboard: self = .dashboard(id: try values.decode(String.self, forKey: .id))
         case .workingTasks: self = .workingTasks
         case .view: self = .view(selection: try values.decode(WorkSelection.self, forKey: .selection))
-        case .zoomed: self = .zoomed(from: try values.decode(DesktopBoard.self, forKey: .from),
-                                     work: try values.decode(WorkWorkspaceKey.self, forKey: .work))
+        case .entered: self = .entered(from: try values.decode(DesktopBoard.self, forKey: .from),
+                                      work: try values.decode(WorkWorkspaceKey.self, forKey: .work))
         }
     }
 
@@ -201,8 +201,8 @@ public enum DesktopDestination: Codable, Sendable, Equatable {
         case .view(let selection):
             try values.encode(Kind.view, forKey: .kind)
             try values.encode(selection, forKey: .selection)
-        case .zoomed(let from, let work):
-            try values.encode(Kind.zoomed, forKey: .kind)
+        case .entered(let from, let work):
+            try values.encode(Kind.entered, forKey: .kind)
             try values.encode(from, forKey: .from)
             try values.encode(work, forKey: .work)
         }

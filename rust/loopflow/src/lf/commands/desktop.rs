@@ -114,7 +114,7 @@ pub enum DesktopDestination {
         selection: crate::work::selection::Selection,
     },
     /// A Dashboard member entered as full Work; back returns to its Dashboard.
-    Zoomed {
+    Entered {
         from: DesktopBoard,
         work: WorkWorkspaceKey,
     },
@@ -1961,7 +1961,7 @@ impl std::fmt::Display for DesktopDestination {
             Self::Dashboard { id } => write!(f, "query:{id}"),
             Self::WorkingTasks => write!(f, "working-tasks"),
             Self::View { .. } => write!(f, "unsaved view"),
-            Self::Zoomed { from, work } => write!(f, "{} entered from {from}", selector(work)),
+            Self::Entered { from, work } => write!(f, "{} entered from {from}", selector(work)),
         }
     }
 }

@@ -142,7 +142,7 @@ final class WorkModel {
         reconcileSelectionRepository()
         switch navigation.destination {
         case .dashboard, .workingTasks: if let plan = selectedViewPlan { presentView(plan) }
-        case .work, .view, .zoomed: break
+        case .work, .view, .entered: break
         }
     }
 
@@ -766,8 +766,8 @@ final class WorkModel {
         case .dashboard(let id): return .dashboard(id: id)
         case .view(let plan): return .view(selection: plan.selection)
         case .workingTasks: return .workingTasks
-        case .zoomed(.saved(let id), let work): return .zoomed(from: .dashboard(id), work: key(work))
-        case .zoomed(.workingTasks, let work): return .zoomed(from: .workingTasks, work: key(work))
+        case .entered(.saved(let id), let work): return .entered(from: .dashboard(id), work: key(work))
+        case .entered(.workingTasks, let work): return .entered(from: .workingTasks, work: key(work))
         }
     }
 
@@ -2455,9 +2455,9 @@ extension WorkModel {
     private func selectDestination(_ destination: WorkNavigation.Destination, recordingHistory: Bool = false) {
         switch destination {
         case .work(let work): select(work, preservingOpening: false, recordingHistory: recordingHistory)
-        case .zoomed(let board, let work):
+        case .entered(let board, let work):
             select(work, preservingOpening: false, recordingHistory: recordingHistory)
-            navigation.destination = .zoomed(from: board, work: work)
+            navigation.destination = .entered(from: board, work: work)
         case .dashboard, .view, .workingTasks:
             if recordingHistory, navigation.destination != destination {
                 navigation.backStack.append(navigation.destination)
@@ -2488,8 +2488,8 @@ extension WorkModel {
             .filter { $0.work.kind == .task && seen.insert($0.work).inserted }
     }
 
-    func zoom(into work: WorkReference, from board: WorkNavigation.Board) {
-        selectDestination(.zoomed(from: board, work: work), recordingHistory: true)
+    func enter(_ work: WorkReference, from board: WorkNavigation.Board) {
+        selectDestination(.entered(from: board, work: work), recordingHistory: true)
     }
 
     private func presentView(_ plan: WorkViewPlan) {
@@ -2610,7 +2610,7 @@ extension WorkModel {
 extension WorkModel {
     var selectedViewPlan: WorkViewPlan? {
         switch navigation.destination {
-        case .work, .zoomed: nil
+        case .work, .entered: nil
         case .dashboard(let id): dashboard(id)
         case .view(let plan): plan
         case .workingTasks: builtInPlan(.repository)

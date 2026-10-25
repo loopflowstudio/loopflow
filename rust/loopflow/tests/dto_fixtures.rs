@@ -1177,7 +1177,7 @@ fn desktop_state_retains_outer_and_inner_layouts() {
     let window = &reading.windows[0];
     assert_eq!(
         window.destination,
-        loopflow::lf::commands::desktop::DesktopDestination::Zoomed {
+        loopflow::lf::commands::desktop::DesktopDestination::Entered {
             from: loopflow::lf::commands::desktop::DesktopBoard::Dashboard("attention".into()),
             work: window.workspaces[0].work.clone(),
         }

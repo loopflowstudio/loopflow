@@ -287,7 +287,7 @@ struct DesktopAction {
                 }
             }
             guard let member else { throw DesktopTargetError("\(selector) is not shown on this Dashboard. Nothing changed.") }
-            model.zoomTile(member, plan: plan, workingTasks: workingTasks, origin: nil)
+            model.enterTile(member, plan: plan, workingTasks: workingTasks, origin: nil)
             return nil
         },
     ]

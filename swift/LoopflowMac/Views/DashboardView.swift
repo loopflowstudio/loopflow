@@ -278,7 +278,7 @@ struct DashboardTile: View {
     }
 
     private func zoom() {
-        model.zoomTile(member, plan: plan, workingTasks: workingTasks, origin: frame.rect)
+        model.enterTile(member, plan: plan, workingTasks: workingTasks, origin: frame.rect)
     }
 }
 
@@ -288,7 +288,7 @@ final class TileFrame {
     var rect: CGRect?
 }
 
-/// Grows a zoomed member's full Work out of its tile. A transform, so the
+/// Grows an entered member's full Work out of its tile. A transform, so the
 /// terminals inside lay out once at full size rather than on every frame.
 struct ZoomFromTile: ViewModifier, Animatable {
     nonisolated static let space = "work-content"
@@ -323,11 +323,11 @@ extension AnyTransition {
 }
 
 extension WorkModel {
-    func zoomTile(_ member: WorkMemberRef, plan: WorkViewPlan, workingTasks: Bool, origin: CGRect?) {
+    func enterTile(_ member: WorkMemberRef, plan: WorkViewPlan, workingTasks: Bool, origin: CGRect?) {
         let board: WorkNavigation.Board? = plan.dashboardID.map { .saved($0) } ?? (workingTasks ? .workingTasks : nil)
         guard let board, let work = member.work.reference else { return select(member.work.reference) }
         navigation.zoomOrigin = origin
-        withAnimation(FocusSizing.animation) { zoom(into: work, from: board) }
+        withAnimation(FocusSizing.animation) { enter(work, from: board) }
     }
 
     /// Hide or restore occurrences. Rust decides the mode; hiding never touches the order.

@@ -282,14 +282,16 @@ One PR; deepest deletion first.
    it. `browser.back`/`browser.forward`/`browser.reload` act on the addressed web
    tab; only reload has a key (⌘R) because ⌘[/⌘] are `navigate.*`. No verb maps to
    them, so `VERB_ACTIONS` is unchanged.
-4. **Concept review (2026-10-24): one meaning for zoom.** The same `state` reply
+4. **One meaning for zoom — implemented 2026-10-24.** The same `state` reply
    says `destination: zoomed` for a Dashboard member entered as full Work and
    `zoomed: true` for a pane filling its Task (`pane.zoom`, Rex's `zoom`). An agent
    reading the oracle cannot tell them apart by name. Rename the destination to
    `entered {from, work}`, matching `dashboard.enter` and the text `ls` already
    prints ("entered from"): Rust `DesktopDestination::Zoomed`, Swift
    `DesktopDestination`/`WorkDestination.zoomed`, the inspection fixture and its
-   tests. Zoom then means only the pane.
+   tests. Zoom then means only the pane. Done: wire kind `entered`;
+   `WorkModel.enter(_:from:)`/`enterTile` replace `zoom(into:)`/`zoomTile`; the
+   tile-growth transition (`ZoomFromTile`, `zoomOrigin`) keeps its visual name.
 5. **Demo on Dev** (Jack).
 
 ## Done when
@@ -346,4 +348,4 @@ the doubled frame unless Jack picks a fix in the demo.
 - **`WKWebView` on macOS 15** needs no deployment-target change; SwiftUI
   `WebView` would need 26 and is not used.
 
-Check results (2026-10-24, after compress): `cargo test --lib commands::desktop selection_ designated_panes` + integration `dto_fixtures::desktop cli_discovery::desktop structured_help reference_matches` pass, clippy clean, Swift 14 focused suites pass; after browser controls `swift test --filter 'DesktopPaneControlTests|DTOFixtureTests'` (74) + `dto_fixtures::desktop` + `every_verb_names_a_registry_action` pass; full Rust integration (`work_watch`, `cli_discovery`, `dto_fixtures`) deferred to gate.
+Check results (2026-10-24, after compress): `cargo test --lib commands::desktop selection_ designated_panes` + integration `dto_fixtures::desktop cli_discovery::desktop structured_help reference_matches` pass, clippy clean, Swift 14 focused suites pass; after browser controls `swift test --filter 'DesktopPaneControlTests|DTOFixtureTests'` (74) + `dto_fixtures::desktop` + `every_verb_names_a_registry_action` pass; full Rust integration (`work_watch`, `cli_discovery`, `dto_fixtures`) deferred to gate. After the `entered` rename: `dto_fixtures::desktop` (4), `--lib commands::desktop` (9), clippy, Swift `DTOFixtureTests|WorkDestinationTests|DesktopPaneControlTests|WorkNavigationTests` (166) pass.

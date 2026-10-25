@@ -1046,7 +1046,7 @@ lf desktop state --json | jq '.windows[0] | {destination, history}'
 Every gesture is one registry action; keys, menus, the Keyboard Shortcuts window
 and `do` all perform it, and pane verbs below are sugar for one (`zoom` is
 `pane.zoom`, `run` is `shell.new`). `state` reports each window's `destination`
-(`work`, `dashboard`, `working_tasks`, `view` or `zoomed` with the Dashboard it
+(`work`, `dashboard`, `working_tasks`, `view` or `entered` with the Dashboard it
 was entered `from`), `history` counts, the sidebar `list` and `actions`. A receipt
 carries the destination and affected workspace the next `state` reports. `ls`
 renders the same reading. `dashboard.enter` requires a member of the shown

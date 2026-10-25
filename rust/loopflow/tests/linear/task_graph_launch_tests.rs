@@ -2058,7 +2058,7 @@ fn task_ship_holds_while_paused_and_defers_to_a_live_ship() {
 }
 
 #[test]
-fn task_ship_stop_returns_the_task_to_working_and_ends_its_ship() {
+fn task_ship_stop_withdraws_the_approval_and_ends_its_ship() {
     let task = shipping_task();
     fs::write(task.home.path().join("hold"), "").unwrap();
     let mut first = command(
@@ -2078,7 +2078,8 @@ fn task_ship_stop_returns_the_task_to_working_and_ends_its_ship() {
     assert!(stopped.contains("INF-123 stopped shipping"), "{stopped}");
     assert!(!first.wait().unwrap().success());
     fs::remove_file(task.home.path().join("hold")).unwrap();
-    assert_eq!(task.state(), "working");
+    // Approval withdrawn, it stands at its stage again.
+    assert_eq!(task.state(), "active");
     let again = task.run(&["--task", "INF-123", "ship", "--stop"]);
     let again = String::from_utf8_lossy(&again.stdout);
     assert!(again.contains("INF-123 is not shipping"), "{again}");
@@ -2125,7 +2126,7 @@ fn task_ship_takes_a_mid_ship_merge_on_to_verify_instead_of_completing() {
     let first = command(
         task.repo.path(),
         task.home.path(),
-        &["-b", "--task", "INF-123", "ship", "verified"],
+        &["-b", "ship", "INF-123", "--graph", "verified"],
     )
     .stdin(std::process::Stdio::null())
     .stdout(std::process::Stdio::piped())
@@ -2210,14 +2211,15 @@ fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
     let output = task.run(&["-b", "--task", "INF-123", "ship"]);
     assert!(!output.status.success());
     assert_eq!(stand_ins(&task).len(), 1);
-    assert_eq!(task.state(), "shipping");
+    // Approved with its ship process exited, it is idle until the restart.
+    assert_eq!(task.state(), "idle");
     // Reads right after the failure leave the restart waiting its minute.
     for _ in 0..3 {
         task.ok(&["task", "list"]);
     }
     std::thread::sleep(Duration::from_secs(2));
     assert_eq!(stand_ins(&task).len(), 1);
-    assert_eq!(task.state(), "shipping");
+    assert_eq!(task.state(), "idle");
     // The shipping reason names the stand-in's failure and the wait.
     let shown = task.run(&["wave", "show", "--json"]);
     let shown = String::from_utf8_lossy(&shown.stdout);

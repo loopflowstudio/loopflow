@@ -454,13 +454,22 @@ fn map_machine_row(row: &rusqlite::Row<'_>) -> StoreResult<Machine> {
     })
 }
 
-/// Completion, abandonment, pause and shipping are durable; whether an open
-/// Task has started follows its Workflow.
+/// Completion, abandonment and pause are durable. An open Task's state follows
+/// what it is doing: a Graph runs for it while its route carrier or ship process
+/// has not exited, and the Ship it approval (`shipped_at`) makes that run shipping.
+/// Approved with nothing running, it is idle until recovery restarts its ship process.
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
-        "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' WHEN {t}.planning_completed=1 THEN 'done' WHEN {t}.paused=1 THEN 'paused' WHEN {t}.shipped_at IS NOT NULL THEN 'shipping' ELSE COALESCE((
-            SELECT CASE WHEN wf.edge IS NULL AND wf.node='start' THEN 'unstarted' ELSE 'working' END
-            FROM task_workflows wf WHERE wf.task_id={t}.id),'unstarted') END"
+        "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' \
+         WHEN {t}.planning_completed=1 THEN 'done' \
+         WHEN {t}.paused=1 THEN 'paused' \
+         WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id={t}.ship_lf_process_id \
+             OR lp.id=(SELECT wf.lf_process_id FROM task_workflows wf WHERE wf.task_id={t}.id AND wf.edge IS NOT NULL))) \
+         THEN CASE WHEN {t}.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END \
+         WHEN {t}.shipped_at IS NULL AND EXISTS(SELECT 1 FROM task_workflows wf WHERE wf.task_id={t}.id \
+             AND wf.edge IS NULL AND wf.node NOT IN ('start','end')) THEN 'active' \
+         WHEN {t}.worktree IS NULL THEN 'unstarted' \
+         ELSE 'idle' END"
     )
 }
 

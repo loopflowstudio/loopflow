@@ -231,10 +231,10 @@ branch and Task PR record when present; they do not require a running Task Graph
 
 ```bash
 nohup lf ship &   # run the Task's remaining steps to merge and completion
-lf ship --stop    # back to working; disarms auto-merge it armed
+lf ship --stop    # withdraw it; disarms auto-merge it armed
 ```
 
-`lf ship` moves the Task from working to shipping, stands in for you at each
+`lf ship` (or `lf ship ISSUE`) makes the Task shipping, stands in for you at each
 Workflow stage, running its skill headless, and stays in the foreground until
 the Task completes. On a branch with no Task it first creates one for the branch
 and its checkout. A second `lf ship` while one runs exits 0; `lf task pause`

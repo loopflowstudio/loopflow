@@ -107,12 +107,18 @@ pub enum SelectionFilter {
 #[serde(rename_all = "snake_case")]
 pub enum SelectionState {
     Open,
+    /// Session axis: a Task Session's turn ended and it is ready for the person.
     Available,
-    Running,
+    /// Session axis: a Task Session is mid-turn.
+    Busy,
     Blocked,
-    Paused,
-    Shipping,
+    /// Task axis: the Task's own state, as `TaskState` derives it.
+    Unstarted,
     Idle,
+    Active,
+    Moving,
+    Shipping,
+    Paused,
     Backlog,
     Done,
 }
@@ -369,13 +375,20 @@ impl Selection {
                                     .unavailable
                                     .push(format!("Task {} state is unavailable", item.name));
                             }
-                            // The repository lists started work; a Wave lists all its
-                            // uncompleted Tasks, so unstarted ones can offer Start.
-                            // Shipping Tasks leave both for `state:shipping`.
+                            // The repository lists Working Tasks: idle, active or
+                            // moving. A Wave lists all its uncompleted Tasks, so
+                            // unstarted ones can offer Start. Shipping Tasks leave
+                            // both for `state:shipping`.
                             in_scope
                                 && !item.states.contains(&SelectionState::Shipping)
                                 && match wave {
-                                    None => item.open == Some(true),
+                                    None => [
+                                        SelectionState::Idle,
+                                        SelectionState::Active,
+                                        SelectionState::Moving,
+                                    ]
+                                    .iter()
+                                    .any(|state| item.states.contains(state)),
                                     Some(_) => {
                                         item.open.is_some()
                                             && !item.states.contains(&SelectionState::Done)

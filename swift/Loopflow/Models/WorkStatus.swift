@@ -43,15 +43,19 @@ public enum WorkStatus: Codable, Sendable, Hashable {
     }
 }
 
-/// A Task's lifecycle: unstarted → working → shipping → done, or abandoned.
-/// Pause is a hold over working or shipping, shown in their place.
+/// A Task's state, derived in Rust from its checkout, stage, a running Graph
+/// and the Ship it approval. A Session's available/busy is a separate axis.
 public enum TaskState: String, Codable, Sendable, Hashable {
     case paused
-    /// No Workflow taken up, or still at its start.
+    /// No checkout yet.
     case unstarted
-    /// Past start, with a person still to take part.
-    case working
-    /// Handed off: it finishes on its own, through every remaining step, to merge.
+    /// A checkout, no Graph running, not at a stage.
+    case idle
+    /// At an interactive stage, in its Task Session.
+    case active
+    /// A Graph runs, with a stage ahead that stops for a person.
+    case moving
+    /// A Graph runs and no stage ahead stops it; it finishes on its own to merge.
     case shipping
     case done
     case abandoned

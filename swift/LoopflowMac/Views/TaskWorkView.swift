@@ -246,7 +246,7 @@ struct TaskShipControl: View {
                 Button("Stop shipping") { Task { await model.stopShipping(task) } }
                     .buttonStyle(WorkOutlineButtonStyle())
                     .disabled(acting || readingUnavailable != nil)
-                    .help("lf --task \(task.task.identifier) ship --stop: return it to working and disarm auto-merge")
+                    .help("lf --task \(task.task.identifier) ship --stop: withdraw it and disarm auto-merge")
                     .accessibilityIdentifier("task-ship-stop")
             } else if !(task.task.isTerminal || task.runtime?.status.isTerminal == true) {
                 let refusal = readingUnavailable ?? task.shipControl.unavailable
@@ -499,10 +499,11 @@ struct TaskHeading: View {
     /// Linear's planning state never overrides it. What shipping is doing
     /// now reads in the Workflow bar.
     var state: String {
-        if task.shipping != nil { return "Shipping" }
         switch task.runtime?.status {
         case .paused: return "Paused"
-        case .working: return "Working"
+        case .idle: return "Idle"
+        case .active: return "Active"
+        case .moving: return "Moving"
         case .shipping: return "Shipping"
         case .done: return "Done"
         case .abandoned: return "Abandoned"

@@ -3327,7 +3327,7 @@ mod tests {
         let missing = LocalProgressEvidenceState::Missing;
         // A removed checkout alone does not reopen settled work.
         assert!(!unresolved(TaskState::Done, none, missing, true));
-        assert!(unresolved(TaskState::Working, none, missing, true));
+        assert!(unresolved(TaskState::Moving, none, missing, true));
         // Blocked describes a stopped failed Graph, not a live Process. Later
         // Task completion must not make that retained history current forever.
         assert!(!unresolved(
@@ -3337,7 +3337,7 @@ mod tests {
             false
         ));
         assert!(unresolved(
-            TaskState::Working,
+            TaskState::Moving,
             review.as_ref(),
             missing,
             false
@@ -3373,7 +3373,7 @@ mod tests {
     fn task_condition_distinguishes_clear_work_from_external_waits() {
         let runtime = TaskRuntimeSnapshot {
             work_id: "task-1".to_string(),
-            status: TaskState::Working,
+            status: TaskState::Moving,
             reason: "ready".to_string(),
             updated_at: "2026-07-21T00:00:00Z".to_string(),
             provider: "codex".to_string(),

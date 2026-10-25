@@ -1,9 +1,9 @@
-//! `lf ship`: someone hands a Task off once, and its remaining graph runs to
-//! `end` with no one at hand. Shipping is the Task's lifecycle state between
-//! working and done; this Machine's ship process carries it there. At each
-//! stage a headless stand-in runs the stage's skill and decides the route.
-//! Pause holds it, Stop returns it to working, and a ship process that died is
-//! started again.
+//! `lf ship`: someone approves a Task once, and its remaining graph runs to
+//! `end` with no one at hand. The approval is stored; the Task reads shipping
+//! while this Machine's ship process carries it there, and idle when that
+//! process exited. At each stage a headless stand-in runs the stage's skill and
+//! decides the route. Pause holds it, Stop withdraws the approval, and a ship
+//! process that died is started again.
 
 use serde::{Deserialize, Serialize};
 
@@ -54,7 +54,7 @@ pub enum ShipStep {
     /// Take this edge, or run it again when it stopped.
     Edge(String),
     Paused,
-    /// Someone stopped shipping; the Task is working again.
+    /// Someone stopped shipping; the approval is withdrawn.
     Stopped,
     /// The Task reached `end`, completed, or was abandoned.
     Finished,
@@ -137,7 +137,7 @@ pub(crate) fn shipping_snapshot(
     failure: Option<&(i64, String)>,
     landing: Option<&PrLanding>,
 ) -> Option<ShippingSnapshot> {
-    if !matches!(status, TaskState::Shipping | TaskState::Paused) {
+    if status.is_terminal() {
         return None;
     }
     let restart = failure.map(|(failed_at, error)| (restart_due(shipping, *failed_at), error));
@@ -312,7 +312,7 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
     })
 }
 
-/// Return a shipping Task to working: stop its ship process and take back any
+/// Withdraw a Task's Ship it approval: stop its ship process and take back any
 /// merge request Loopflow armed on GitHub. Returns false when it was not shipping.
 pub fn ship_stop(issue: &str, note: Option<&str>) -> OpsResult<bool> {
     let (task, stopped) = block_on_task(async {
@@ -476,8 +476,15 @@ pub fn ship_next(issue: &str) -> OpsResult<ShipStep> {
         match store.sqlite.task_state(&task.id).map_err(task_error)? {
             TaskState::Paused => return Ok(ShipStep::Paused),
             TaskState::Done | TaskState::Abandoned => return Ok(ShipStep::Finished),
-            TaskState::Shipping => {}
-            TaskState::Unstarted | TaskState::Working => return Ok(ShipStep::Stopped),
+            _ => {}
+        }
+        if store
+            .sqlite
+            .task_shipping(&task.id)
+            .map_err(task_error)?
+            .is_none()
+        {
+            return Ok(ShipStep::Stopped);
         }
         let workflow = store
             .sqlite
@@ -588,7 +595,9 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
         let store = task_store().await?;
         let now = crate::store::rows::now_unix();
         for (id, shipping) in store.sqlite.local_shipping_tasks().map_err(task_error)? {
-            if store.sqlite.task_state(&id).map_err(task_error)? != TaskState::Shipping
+            let state = store.sqlite.task_state(&id).map_err(task_error)?;
+            if state.is_terminal()
+                || state == TaskState::Paused
                 || carrier_evidence(&store.sqlite, &shipping) != ProcessIdentityEvidence::Dead
             {
                 continue;

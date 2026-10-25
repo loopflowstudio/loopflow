@@ -17,7 +17,8 @@ ordinary focus leaves the primary Session as its face.
 
 Repository scope comes from the current repository or `--repo`/`--repository`.
 The bounded syntax supports `wave:`, `task:`, `query:`, `kind:task|wave`, and
-`state:open|available|running|blocked|paused|idle|backlog|done`. Whitespace means
+`state:open|available|busy|blocked|unstarted|idle|active|moving|shipping|paused|backlog|done`
+(`available`, `busy`, `blocked` read Task Sessions; the rest the Task). Whitespace means
 AND; OR and parentheses compose expressions. Quote values containing spaces.
 Repository is never a predicate. Task IDs, issue identifiers and unambiguous
 `task:#123` references resolve to canonical Work. Explicit queries can select

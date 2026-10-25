@@ -319,7 +319,8 @@ Ship the Task: run every remaining step to merge and completion, standing in at 
 
 | Argument | What it does |
 |---|---|
-| `<graph>` | Take up this graph in place of the Task's remaining steps |
+| `<issue>` | issue |
+| `--graph` | Take up this graph in place of the Task's remaining steps |
 | `--reason` | Why, kept in the Task's history |
 | `--stop` | Stop shipping: end the ship process and disarm auto-merge it armed Default: false. |
 | `--help / -h` | Print help (see more with '--help') |

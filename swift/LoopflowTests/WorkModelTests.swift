@@ -996,7 +996,7 @@ struct WorkModelStreamTests {
         try await eventually { preview() == "Summary · brief" }
         await feed.send(try sessionFrame(4, turn: "New turn output"))
         try await eventually { preview() == "New turn output" }
-        model.navigation.sidebarFilter = .running
+        model.navigation.sidebarFilter = .busy
         #expect(model.sidebarTaskIDs == ["preview-task"])
         await feed.fail(RegistryQueryError("reader exited"))
         try await eventually { model.sessions.errorMessage == "reader exited" }

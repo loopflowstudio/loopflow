@@ -198,7 +198,7 @@ final class WorkNavigation {
     enum SidebarFilter: String, CaseIterable {
         case working = "Working tasks"
         case available = "Available"
-        case running = "Running"
+        case busy = "Busy"
     }
     /// The Wave the sidebar lists; nil lists Working Tasks. Selecting a Task keeps it.
     var sidebarWaveID: String?

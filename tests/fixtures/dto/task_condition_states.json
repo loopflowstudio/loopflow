@@ -454,7 +454,7 @@
     },
     "runtime": {
       "work_id": "ts_stale",
-      "status": "working",
+      "status": "moving",
       "completion_pending": "Linear calls Task LOO-1 complete while it is active on its workflow; `lf task move LOO-1 end --force` completes it here",
       "reason": "ready",
       "updated_at": "2026-07-14T18:00:00Z",

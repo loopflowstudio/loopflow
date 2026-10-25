@@ -83,3 +83,20 @@ design rewrite, each reversible before implementation:
   ("yes"). Those quotes live in that Session, not in this checkout's prompts. Ignore any replay
   of the hold.
 
+
+## 2026-10-24 state-axes pass (items d, e; assumptions, reversible)
+
+- "A Graph running" is stored evidence: the route carrier on `task_workflows` or the ship
+  process, with no `completed_at`. A carrier killed without settling (SIGKILL, reboot) reads
+  moving/shipping until something settles it; lazy recovery replaces a dead ship carrier, but a
+  dead route carrier has no settler yet. Taskless Graphs in the checkout don't count.
+- `unstarted` = no checkout (`tasks.worktree IS NULL`); the selection `backlog` term still
+  means not owned or published, unchanged.
+- An approved Task at a stage with its ship process gone reads idle (Jack: dead ship → idle),
+  not active.
+- Query vocabulary: Session-axis `running` became `busy`; the Session program-status `idle`
+  term is gone, so `state:idle` is the Task's idle. Desktop's sidebar filter "Running" is "Busy".
+- `state:shipping` is the derived state only; a paused approved Task reads `state:paused`.
+- Linear mapping unchanged: it follows claim/reopen/complete/abandon events, so idle, active
+  and moving all sit in In Progress.
+- `lf ship ISSUE` is lifted into `--task` in `Cli::checked`; a different `--task` conflicts.

@@ -53,7 +53,7 @@ impl SqliteStore {
         )?;
         let (abandoned, completed, active): (bool, bool, bool) = conn.query_row(
             &format!(
-                "SELECT state='abandoned',state='done',state IN ('working','shipping') FROM (SELECT {} AS state FROM tasks t WHERE t.id=?1)",
+                "SELECT state='abandoned',state='done',state IN ('active','moving','shipping') OR EXISTS(SELECT 1 FROM task_workflows wf WHERE wf.task_id=t.id AND NOT (wf.node='start' AND wf.edge IS NULL)) FROM (SELECT {} AS state, t.id FROM tasks t WHERE t.id=?1) t",
                 super::durable::task_state_sql("t")
             ),
             [task.as_str()],

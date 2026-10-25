@@ -213,6 +213,21 @@ impl Cli {
                 clap::Error::raw(clap::error::ErrorKind::ArgumentConflict, error.to_string())
             })?;
         }
+        // `lf ship ISSUE` selects its Task as `--task` does.
+        if let Some(Commands::Ship { issue, .. }) = &mut self.command {
+            if let Some(issue) = issue.take() {
+                if self.task.as_ref().is_some_and(|task| task != &issue) {
+                    return Err(clap::Error::raw(
+                        clap::error::ErrorKind::ArgumentConflict,
+                        format!(
+                            "conflicting Task selections: {} and {issue}\n",
+                            self.task.as_deref().unwrap_or_default()
+                        ),
+                    ));
+                }
+                self.task = Some(issue);
+            }
+        }
         // Work routing consumes the same explicit selector in either flag position.
         if let Some(Commands::Session {
             cmd: SessionCommand::Connect { connection, .. },
@@ -392,10 +407,12 @@ pub enum Commands {
     ///
     /// Runs in the foreground until the Task reaches its end; background it
     /// yourself (`nohup lf ship &`). A second `lf ship` while one runs exits 0.
-    /// `--stop` returns a shipping Task to working and takes back its merge request.
+    /// With no ISSUE, ships the checkout's Task, or a new one for its branch.
+    /// `--stop` withdraws the approval and takes back its merge request.
     Ship {
+        issue: Option<String>,
         /// Take up this graph in place of the Task's remaining steps
-        #[arg(conflicts_with = "stop")]
+        #[arg(long, conflicts_with = "stop")]
         graph: Option<String>,
         /// Why, kept in the Task's history
         #[arg(long)]

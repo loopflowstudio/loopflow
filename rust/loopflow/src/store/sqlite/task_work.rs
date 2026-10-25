@@ -1144,7 +1144,7 @@ mod tests {
         store.set_task_paused(&task, false).unwrap();
         assert_eq!(
             store.task_state(&task).unwrap(),
-            crate::durable::TaskState::Unstarted
+            crate::durable::TaskState::Idle
         );
         assert_eq!(store.workflow(&task).unwrap().unwrap(), before);
         assert_eq!(
@@ -1183,10 +1183,19 @@ mod tests {
         // Shipping again keeps when it began.
         let again = store.ship_task(&task, &by, "again").unwrap();
         assert_eq!(again.shipped_at, shipping.shipped_at);
-        // Stop returns it to working, where it stands.
+        // Stop withdraws the approval; the route still running keeps it moving.
         assert_eq!(store.stop_shipping(&task, "stop").unwrap(), Some(shipping));
-        assert_eq!(state(), crate::durable::TaskState::Working);
+        assert_eq!(state(), crate::durable::TaskState::Moving);
         assert_eq!(store.stop_shipping(&task, "stop").unwrap(), None);
+        // Approved again with nothing running, it is idle until its ship process restarts.
+        store.ship_task(&task, &by, "again").unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE processes SET completed_at=2 WHERE id=?1", [&by])
+            .unwrap();
+        assert_eq!(state(), crate::durable::TaskState::Idle);
     }
 
     #[test]

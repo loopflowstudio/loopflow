@@ -130,12 +130,26 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         } else if !started {
             states.insert(SelectionState::Backlog);
         }
-        if state == crate::durable::TaskState::Paused {
-            states.insert(SelectionState::Paused);
-        }
-        // Pause holds a handoff without ending it.
-        if !state.is_terminal() && super::task_work::shipping_in(conn, &task.id)?.is_some() {
-            states.insert(SelectionState::Shipping);
+        match state {
+            crate::durable::TaskState::Unstarted => {
+                states.insert(SelectionState::Unstarted);
+            }
+            crate::durable::TaskState::Idle => {
+                states.insert(SelectionState::Idle);
+            }
+            crate::durable::TaskState::Active => {
+                states.insert(SelectionState::Active);
+            }
+            crate::durable::TaskState::Moving => {
+                states.insert(SelectionState::Moving);
+            }
+            crate::durable::TaskState::Shipping => {
+                states.insert(SelectionState::Shipping);
+            }
+            crate::durable::TaskState::Paused => {
+                states.insert(SelectionState::Paused);
+            }
+            crate::durable::TaskState::Done | crate::durable::TaskState::Abandoned => {}
         }
         let mut activity_known = true;
         for session in sessions_by_task.get(&task.id).into_iter().flatten() {
@@ -153,13 +167,10 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
                 for report in &status.records {
                     match report.state {
                         crate::program_status::State::Working => {
-                            states.insert(SelectionState::Running);
+                            states.insert(SelectionState::Busy);
                         }
                         crate::program_status::State::Blocked => {
                             states.insert(SelectionState::Blocked);
-                        }
-                        crate::program_status::State::Idle => {
-                            states.insert(SelectionState::Idle);
                         }
                         _ => {}
                     }
@@ -923,6 +934,10 @@ mod tests {
             "task_22222222222222222222222222222222",
             "task_33333333333333333333333333333333",
         );
+        // Paused Tasks aren't Working; resumed, FIX-1 is idle in its checkout.
+        store
+            .set_task_paused(&crate::durable::TaskId::parse(one).unwrap(), false)
+            .unwrap();
         assert_eq!(
             store.view_plan(&repo, None).unwrap().resolution.task_ids(),
             [one, two]
@@ -947,7 +962,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute_batch(&format!(
-                "INSERT INTO task_events(task_id,kind_json,created_at) VALUES('{three}','{{\"kind\":\"started\"}}',2); INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here) VALUES('own_33333333333333333333333333333333','{three}','recorded',NULL,NULL,2,2000,1);"
+                "INSERT INTO task_events(task_id,kind_json,created_at) VALUES('{three}','{{\"kind\":\"started\"}}',2); INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here) VALUES('own_33333333333333333333333333333333','{three}','recorded',NULL,NULL,2,2000,1); UPDATE tasks SET worktree='/repo/fix-3' WHERE id='{three}';"
             ))
             .unwrap();
         assert_eq!(
@@ -1530,7 +1545,7 @@ mod tests {
                 .unwrap()
                 .members
                 .len(),
-            4
+            3
         );
     }
 
@@ -1538,7 +1553,7 @@ mod tests {
     fn stale_conversations_leave_task_activity_known() {
         let (_dir, store, repo) = fixture();
         let task = "task_22222222222222222222222222222222";
-        let running = Selection::parse("state:running", None).unwrap();
+        let running = Selection::parse("state:busy", None).unwrap();
         for id in ["never-attached", "before-boot"] {
             store.test_session(id, &crate::session_record::new_artifact_key());
             store
@@ -1701,6 +1716,12 @@ mod tests {
         ))
         .unwrap();
         crate::store::migrations::upgrade_from_draft(&conn, "saved_selections");
+        // The idle Task has a checkout; the paused one isn't Working.
+        conn.execute(
+            "UPDATE tasks SET worktree='/repo/fix-2' WHERE issue_identifier='FIX-2'",
+            [],
+        )
+        .unwrap();
         drop(conn);
         let store = SqliteStore {
             conn: std::sync::Arc::new(std::sync::Mutex::new(
@@ -1710,7 +1731,7 @@ mod tests {
         let repo = RepositoryId::parse("repo_11111111111111111111111111111111").unwrap();
         let selection = selection();
         let result = store.resolve_selection(&repo, &selection).unwrap();
-        assert_eq!(result.members.len(), 4);
+        assert_eq!(result.members.len(), 3);
         let id = DashboardId::new();
         let saved = store
             .save_dashboard(
@@ -1742,7 +1763,7 @@ mod tests {
         let id = DashboardId::new();
         let result = store.resolve_selection(&repo, &selection).unwrap();
         assert!(result.unavailable.is_empty());
-        assert_eq!(result.members.len(), 4); // Two Waves, paused and idle Tasks.
+        assert_eq!(result.members.len(), 3); // Two Waves and the idle Task; paused isn't Working.
         assert_eq!(
             result
                 .members
@@ -1750,10 +1771,7 @@ mod tests {
                 .filter(|member| member.work.kind == WorkWorkspaceKind::Task)
                 .map(|member| member.work.id.as_str())
                 .collect::<Vec<_>>(),
-            [
-                "task_11111111111111111111111111111111",
-                "task_22222222222222222222222222222222"
-            ]
+            ["task_22222222222222222222222222222222"]
         );
         let hidden = result.members[0].clone();
         let mut arrangement = Arrangement::automatic(&result.members);
@@ -1888,8 +1906,8 @@ mod tests {
             .unwrap();
         let current = store.read_dashboard(&repo, &nested_id).unwrap().unwrap();
         assert!(current.resolution.unavailable.is_empty());
-        assert_eq!(current.arrangement.order.len(), 3);
-        assert_eq!(current.saved.arrangement.order.len(), 4); // Reading does not write.
+        assert_eq!(current.arrangement.order.len(), 2);
+        assert_eq!(current.saved.arrangement.order.len(), 3); // Reading does not write.
     }
 
     #[test]
@@ -1897,7 +1915,7 @@ mod tests {
         let (_dir, store, repo) = fixture();
         let _snapshot = store.read_snapshot().unwrap();
         let result = store.resolve_selection(&repo, &selection()).unwrap();
-        assert_eq!(result.members.len(), 4);
+        assert_eq!(result.members.len(), 3);
         let missing = RepositoryId::new();
         assert!(store.resolve_selection(&missing, &selection()).is_err());
     }

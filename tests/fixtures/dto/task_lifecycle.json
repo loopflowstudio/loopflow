@@ -3216,7 +3216,7 @@
                       "label": "mini"
                     }
                   },
-                  "status": "working",
+                  "status": "moving",
                   "updated_at": "2026-10-08T23:28:31Z",
                   "work_id": "task_2bf8aab6a1c1455d84665ba72ef2fc8a"
                 },
@@ -3463,7 +3463,7 @@
             "label": "mini"
           }
         },
-        "status": "working",
+        "status": "moving",
         "updated_at": "2026-10-08T23:28:31Z",
         "work_id": "task_2bf8aab6a1c1455d84665ba72ef2fc8a"
       },
@@ -3632,7 +3632,7 @@
         "project": "provider-destination",
         "project_id": "proj_a0b7b80262214dc6b24c91242560d139",
         "provider": "codex",
-        "status": "working",
+        "status": "moving",
         "task_id": "task_2bf8aab6a1c1455d84665ba72ef2fc8a",
         "updated_at": [
           2026,

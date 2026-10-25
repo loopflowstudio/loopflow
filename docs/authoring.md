@@ -275,7 +275,7 @@ take part in the Task conversation. Everything between stages runs on its own.
 ```bash
 lf task run DES-123            # start: runs kickoff up to review-design
 lf task run DES-123 pursue     # at review-design: build it, up to demo
-lf ship                        # from anywhere: run every remaining step to merge
+lf ship DES-123                # run every remaining step to merge (no ISSUE: this checkout's Task)
 lf task status DES-123         # stage, or the route it is on
 lf task workflow move DES-123 review-design    # go back without running anything
 ```
@@ -290,10 +290,25 @@ builtin `research`, ends with a route into `end` that runs nothing.
 
 `lf ship` runs the remaining steps in the foreground, with a headless agent
 standing in for you at each stage: it runs the stage's skill, decides advance or
-repeat, and records why in the Task history. A Task is `unstarted`, `working`,
-`shipping`, then `done` (or `abandoned`); `paused` holds working or shipping.
-Shipping begins with `lf ship` or with any route into `end`, and
-`lf ship --stop` returns it to working. A PR merged while shipping, by anyone,
+repeat, and records why in the Task history. `lf ship DES-123 --graph deliver`
+takes up another graph first.
+
+A Task's state follows what it is doing:
+
+| State | When |
+|---|---|
+| `unstarted` | no checkout yet |
+| `idle` | a checkout, no Graph running, not at a stage |
+| `active` | at a stage, in its Task Session |
+| `moving` | a Graph runs, with a stage ahead that stops for you |
+| `shipping` | a Graph runs and no stage ahead stops it |
+| `paused` · `done` · `abandoned` | held, completed, dropped |
+
+Ship it (`lf ship`, or any route into `end`) approves stand-ins at the remaining
+stages; the Task reads shipping while its ship process runs, and idle with the
+failure and next restart when it exited. `lf ship --stop` withdraws the approval.
+Working Tasks are the idle, active and moving ones. A Session is separately
+`available` (its turn ended) or `busy`. A PR merged while shipping, by anyone,
 sends the Task to its last stage before `end` (`verify`) once; with no such
 stage it completes. Verify finishes into `end` or fixes forward as a new PR.
 

@@ -320,7 +320,7 @@ fn two_people_share_one_repository() {
 
     // 2. Lee takes the Task over on Maya's branch, so it keeps one PR.
     pair.ok(Lee, &["task", "claim", &task]);
-    pair.ok(Lee, &["task", "run", &task, "takeover"]);
+    pair.ok(Lee, &["-b", "task", "run", &task, "takeover"]);
     let taken = pair.json(Lee, &["task", "status", &task, "--json"]);
     assert_eq!(taken["execution"]["branch"], branch, "{taken}");
     assert_eq!(

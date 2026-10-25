@@ -27,6 +27,9 @@ Choose what is worth implementing before allocating work. Incident findings may
 justify prevention, more investigation, or no further work. Preserve unresolved
 evidence and distinguish proposals from accepted scope. Reuse existing Tasks for
 the same outcome; do not create a prevention project merely to fill a Graph step.
+Before filing work against specific files, list the open PRs that change them
+(`gh pr list --json number,title,headRefName,files`) and name each overlapping
+PR, its Task and any choice it reserves for a person in the new brief.
 When no useful change remains, record that decision and finish.
 
 A standalone invocation need not already have a Task. Use the existing-design

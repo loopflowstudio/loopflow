@@ -404,3 +404,21 @@ availability" (renamed `moving`), dead ship process: "i would say idle". Operato
 - Stale assertions from the state axes fixed (0966cc00ce): with a checkout and nothing running
   a Task reads idle, at a stage active, with a live Graph moving.
 
+
+## Sync with main #1678–#1683 (2026-10-25)
+
+- Landing policy now follows main's #1680 (LOO-584): `decide_merge` is the one decision for
+  landing and release. A person's dequeue or disabled auto-merge blocks the landing, naming
+  who and when (`Withdrawn`); this replaces the branch's re-arm after a manual removal, which
+  answers open item 1's manual-dequeue question the way Jack landed it. The branch's
+  `Dequeued`, `classify_dequeue` and `describe_drop` are deleted.
+- Kept from the branch: a drop with no failing check (`merge-request (…)`, a queue eviction
+  other than `failed_checks`/`merge_conflict`, such as a timeout) re-arms the requested head
+  once, without an agent, before a repair, and records it in Task history. A queue removal
+  that leaves auto-merge on reads as no merge request (`live_request`), so `rearm_github`
+  re-enqueues it. Failed-check and conflict evictions go straight to repair: each merge-group
+  run is its own incident, so re-arming them would loop without ever repairing.
+- Main's "same failed run again blocks" became the branch's backoff: that incident's next
+  repair attempt.
+- #1678's interrupt cursor reaches the Task run's Graph child through `spawn_task_child`;
+  `unresolved_processes` lives in `task_execution.rs` (`task_automation.rs` stays deleted).

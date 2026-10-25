@@ -45,6 +45,8 @@ pub enum NestedCursor {
 pub enum SkillOutcome {
     Completed,
     Waiting,
+    /// Someone interrupted the Task; the Graph starts nothing further.
+    Interrupted,
     Decided(GraphVerdict),
     Routed(String),
     Blocked(String),
@@ -54,6 +56,7 @@ pub enum SkillOutcome {
 pub enum GraphOutcome {
     Completed,
     Waiting,
+    Interrupted,
     Blocked(String),
     /// The runner reached this stage, where a person takes part; the slice
     /// before it is complete.
@@ -148,6 +151,7 @@ impl<E: SkillExecutor> GraphRunner<E> {
         match outcome {
             SkillOutcome::Completed => settle_step(items, cursor),
             SkillOutcome::Waiting => Ok(Some(GraphOutcome::Waiting)),
+            SkillOutcome::Interrupted => Ok(Some(GraphOutcome::Interrupted)),
             SkillOutcome::Blocked(reason) => Ok(Some(GraphOutcome::Blocked(reason))),
             SkillOutcome::Decided(verdict) => {
                 cursor.leaf_mut().progress.verdict = Some(verdict);

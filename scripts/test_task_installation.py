@@ -83,6 +83,26 @@ def _prepare_image(image: str) -> None:
         raise SystemExit(f"{failure} Docker image acquisition timed out.") from None
 
 
+def _wait_for_docker() -> None:
+    """Wait out a busy daemon; fail before creating resources when it stays stuck."""
+    # Hosted runners can stall the daemon briefly, e.g. right after a large cache restore.
+    deadline = time.monotonic() + 120
+    while True:
+        try:
+            subprocess.run(
+                ["docker", "info", "--format", "{{.ServerVersion}}"], check=True, timeout=10
+            )
+            return
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+            if time.monotonic() >= deadline:
+                raise SystemExit(
+                    "Infrastructure failure: Docker did not respond within 120 seconds; "
+                    "no proof container was created."
+                ) from None
+        print("Docker is not answering yet; retrying in 5 seconds.", flush=True)
+        time.sleep(5)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", default="docker.io/library/rust:trixie")
@@ -99,13 +119,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
-    # Fail before creating resources when the shared container service is stuck.
-    try:
-        subprocess.run(["docker", "info", "--format", "{{.ServerVersion}}"], check=True, timeout=10)
-    except subprocess.TimeoutExpired:
-        raise SystemExit(
-            "Docker did not respond within 10 seconds; no proof container was created."
-        ) from None
+    _wait_for_docker()
     _prepare_image(args.image)
     mounts = [
         "type=volume,source=loopflow-task-proof-target,target=/source/target",

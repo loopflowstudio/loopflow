@@ -1604,6 +1604,117 @@ fn a_held_command_stops_the_task_run_without_repeating_the_graph() {
     assert!(!String::from_utf8_lossy(&output.stderr).contains("starting it again"));
 }
 
+fn interrupt_rows(home: &Path) -> i64 {
+    rusqlite::Connection::open(home.join("loopflow.db"))
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM task_events WHERE json_extract(kind_json,'$.kind')='interrupt'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+#[test]
+fn an_interrupt_during_an_operation_stops_the_graph_before_its_next_step() {
+    let task = WorkflowTask::new();
+    for (path, content) in [
+        (
+            ".lf/graphs/interrupting.yaml",
+            "- cmd: task interrupt INF-123\n- cmd: task sync --plan\n",
+        ),
+        (
+            ".lf/workflows/interrupted.yaml",
+            "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: interrupting}\n",
+        ),
+    ] {
+        fs::write(task.repo.path().join(path), content).unwrap();
+    }
+    task.select_workflow("interrupted");
+    let output = task.run(&["-b", "task", "run", "INF-123", "interrupted"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(130), "{stdout}\n{stderr}");
+    assert!(
+        stdout.contains("INF-123: stopped Graph interrupting"),
+        "{stdout}"
+    );
+    assert!(!stderr.contains("starting it again"), "{stderr}");
+    let graphs = support::recorded_graphs(task.home.path());
+    assert_eq!(graphs.len(), 1);
+    assert_eq!(graphs[0].1.len(), 1, "the second step never started");
+    let workflow = task.workflow();
+    let chose = workflow["history"].as_array().unwrap().last().unwrap();
+    assert_eq!(
+        attempts(task.home.path(), chose["lf_process_id"].as_str().unwrap()).len(),
+        1
+    );
+}
+
+#[test]
+fn interrupting_an_idle_task_records_nothing_and_says_so() {
+    let task = WorkflowTask::new();
+    let before = interrupt_rows(task.home.path());
+    let output = task.run(&["task", "interrupt", "INF-123", "--json"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(receipt["receipt"]["kind"], "no_live_run");
+    assert_eq!(interrupt_rows(task.home.path()), before);
+}
+
+#[test]
+fn interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_stop() {
+    let task = WorkflowTask::new();
+    let mut waiter = command(
+        task.repo.path(),
+        task.home.path(),
+        &["task", "wait", "INF-123", "--timeout", "60s"],
+    )
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    let db = task.home.path().join("loopflow.db");
+    let open = |db: &Path| -> i64 {
+        rusqlite::Connection::open(db)
+            .ok()
+            .and_then(|conn| {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM processes WHERE completed_at IS NULL AND command LIKE '%\"wait\"%'",
+                    [],
+                    |row| row.get(0),
+                )
+                .ok()
+            })
+            .unwrap_or(0)
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while open(&db) == 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let before = interrupt_rows(task.home.path());
+    let output = task.run(&["task", "interrupt", "INF-123"]);
+    waiter.kill().unwrap();
+    waiter.wait().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("interrupt recorded for Process"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("stopped"), "{stdout}");
+    assert_eq!(interrupt_rows(task.home.path()), before + 1);
+}
+
 #[test]
 fn a_graph_that_fails_with_retained_edits_is_not_started_again() {
     // LOO-578: starting a Graph over on top of a checkout-update stash strands

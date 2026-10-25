@@ -230,6 +230,27 @@ impl super::SqliteStore {
             .map_err(StoreError::from)
     }
 
+    /// Each repair's Process, its start and its recorded end, in Unix seconds.
+    /// Only an incident's latest attempt is retained.
+    pub(crate) fn pr_repair_lifetimes(
+        &self,
+        repo: &str,
+        pr_number: u32,
+    ) -> StoreResult<Vec<(crate::id::LfProcessId, i64, Option<i64>)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT ci.repair_lf_process_id, p.started_at,
+                    COALESCE(ci.repair_finished_at, p.completed_at)
+             FROM ci_incidents ci JOIN processes p ON p.id=ci.repair_lf_process_id
+             WHERE ci.repo=?1 AND ci.pr_number=?2",
+        )?;
+        let rows = statement.query_map(params![repo, i64::from(pr_number)], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
     pub(crate) fn ci_incidents_since(
         &self,
         since: OffsetDateTime,

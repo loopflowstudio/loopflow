@@ -93,9 +93,11 @@ lf task run INF-123 --reason "provider credentials repaired"
 active PR. It never continues an earlier Graph; a stopped one leaves its
 Processes as history. Unknown liveness stays
 unknown. A Task Steer is a Task comment; the running Graph receives new
-comments when possible and the next Skill seed always reads them. `task interrupt` ends the
-active boundary so the next one re-reads direction. Neither command's receipt
-proves that the provider applied the direction.
+comments when possible and the next Skill seed always reads them. `task interrupt` stops a
+running Graph: an agent step ends at once, an operation finishes and nothing
+follows, and its Task run exits 130 without starting the Graph again. With
+nothing live it records nothing and says so. A Steer's receipt does not prove
+that the provider applied the direction.
 
 During new-Task placement, status reports the declared worktree as initializing.
 If creation does not finish, status keeps the Task identity and names the exact

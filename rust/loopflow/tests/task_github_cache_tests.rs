@@ -206,13 +206,18 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
     let previous_interrupt = runtime
         .block_on(task.store.latest_interrupt_id(&work))
         .unwrap();
-    let interrupt = task_interrupt("INF-123").expect("interrupt remains local and durable");
+    let interrupt = task_interrupt("INF-123").expect("interrupt control stays local");
     assert!(matches!(interrupt.observation, Observation::NotRequired));
-    assert!(
+    assert_eq!(
+        serde_json::to_value(&interrupt.receipt).unwrap()["kind"],
+        "no_live_run"
+    );
+    assert_eq!(
         runtime
             .block_on(task.store.latest_interrupt_id(&work))
-            .unwrap()
-            > previous_interrupt
+            .unwrap(),
+        previous_interrupt,
+        "an idle Task records no interrupt"
     );
     let cached = task_status(repo.path(), Some("INF-123"))
         .expect("cached status succeeds")
@@ -284,13 +289,18 @@ fn rest_failure_is_retained_while_local_controls_continue() {
     let previous_interrupt = runtime
         .block_on(task.store.latest_interrupt_id(&work))
         .unwrap();
-    let interrupt = task_interrupt("INF-123").expect("interrupt survives REST failure");
+    let interrupt = task_interrupt("INF-123").expect("interrupt control survives REST failure");
     assert!(matches!(interrupt.observation, Observation::NotRequired));
-    assert!(
+    assert_eq!(
+        serde_json::to_value(&interrupt.receipt).unwrap()["kind"],
+        "no_live_run"
+    );
+    assert_eq!(
         runtime
             .block_on(task.store.latest_interrupt_id(&work))
-            .unwrap()
-            > previous_interrupt
+            .unwrap(),
+        previous_interrupt,
+        "an idle Task records no interrupt"
     );
     let cached = task_status(repo.path(), Some("INF-123"))
         .expect("cached degraded status succeeds")

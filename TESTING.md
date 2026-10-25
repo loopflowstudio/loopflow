@@ -204,6 +204,9 @@ provider must neither satisfy a missing fixture nor receive a test launch.
 ## Quick Reference
 
 ```bash
+lf sync                                                # refresh main and integrate it into this worktree
+uv run python scripts/install.py local                 # build only under local-bin/
+LF_HOME="$(mktemp -d)" local-bin/lf wave list --json   # run a disposable experiment
 uv run pytest python/tests/test_gate_bounded.py        # one Python behavior
 uv run python scripts/resource_envelope.py             # attribute local disk pressure
 uv run python scripts/check_architecture.py            # architecture owners and vocabulary

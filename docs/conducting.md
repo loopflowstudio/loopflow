@@ -156,7 +156,7 @@ lf session connect <id>                   # start or resume the selected convers
 Open a Session in the app or CLI to return to its provider-native conversation.
 Task workspace shells run directly in the app's terminal.
 
-See the [Sessions lifecycle](../README.md#sessions) for opening and replacing
+See the [Sessions lifecycle](lf.md#inspect-and-continue) for opening and replacing
 conversations.
 Use `lf comment` to save a Task steer,
 and `lf --task` for another agent perspective.

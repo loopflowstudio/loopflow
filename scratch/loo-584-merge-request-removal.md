@@ -1,6 +1,6 @@
 # LOO-584: landing and release agree on who removed a PR's merge request
 
-Status: draft (kickoff 2026-10-25). Stacks on LOO-583 (PR #1679). Source:
+Status: implemented 2026-10-25, slices 1–4; gate pending. Stacks on LOO-583 (PR #1679). Source:
 LOO-583's 5-whys, Prevention 1–3 (git `4ea55cba4a~1:scratch/loo-583-merge-queue-eviction.md`).
 
 ## Problem
@@ -201,7 +201,7 @@ Survive: `OpsError::ManualMergeRemoval` (cron accounting/history read it),
 
 From `rust/`, with inherited `LF_*` unset and `< /dev/null`:
 
-- `cargo test -p loopflow --lib -- ops::pr ops::pr_landing ops::ci_watch`. The table
+- `cargo test -p loopflow --lib -- ops::pr ops::ci_watch ops::release::tests::merge_request_removals`. The table
   test `merge_request_removals_decide_landing_and_release_alike` covers manual
   dequeue, manual disable, `failed_checks` eviction, repair disarm (inside and outside
   a window), merged, and no event. It asserts the landing observation and the
@@ -216,14 +216,15 @@ From `rust/`, with inherited `LF_*` unset and `< /dev/null`:
 
 ## Slices (one PR)
 
-1. **This slice:** `pr.rs` reader + repair windows (store query in
-   `ci_incidents.rs`) + exact run lookup, with the table test over reader output.
-2. Shared decision in `classify_github_observation` (`Withdrawn`, ByLoopflow/Unknown
-   head-check fallthrough). Delete the landing special cases.
-3. Release maps from the shared decision. Delete its classification, re-arm and
-   `armed_at`. Repair and extend `release_tests`.
-4. ci-fix.md: one line for `merge-request (<cause>)`: verify checks, then `lf arm`.
+All four slices are in the working diff. Notes from implementation:
 
-Check results: kickoff 2026-10-25, `cargo test --test release_tests
-release_run_waits_out_a_repair_disarm` FAILED on base 4ea55cba4a (stale query name
-from LOO-583); owner: this branch, or #1679 if it fixes first.
+- `decide_merge` (pr_landing.rs) takes lazy removal and head-check readers, so the
+  table test `ops::release::tests::merge_request_removals_decide_landing_and_release_alike`
+  covers both callers with no IO. It lives in release.rs to reach `release_wait`.
+- `process_ci_fix` takes the confirming observation's `CiCheck`s, so it no longer
+  re-reads the merge gate or the eviction for URLs.
+- Release resume arms on Manual/Unknown only (`arm_resumed_release`); see questions.md.
+- `ReleasePrWait::NeedsRepair` carries the decided head, so a repair that moved the
+  head does not trip `fetch_release_branch`'s expected-head check.
+
+Check results (2026-10-25): focused lib tests (59) and release_tests `release_run_{repairs_an_eviction,reconciles,waits_for_queued,rearms_a_dropped,repairs_failed_checks,waits_out_a_repair_disarm}` pass; clippy/fmt clean. Full affected suites: gate.

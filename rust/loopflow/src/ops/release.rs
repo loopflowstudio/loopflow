@@ -1380,13 +1380,13 @@ fn release_run_inner(
                         ))
                     })?;
                     progress.status(&format!("Resuming release PR #{}...", pr.number));
+                    arm_resumed_release(&main_repo, pr.number, head_sha, progress, lock)?;
                     finish_release_pr(
                         &main_repo,
                         &wt_name,
                         PreparedRelease {
                             pr_number: pr.number,
                             head_sha: head_sha.to_string(),
-                            armed_at: chrono::Utc::now(),
                         },
                         &target,
                         &version,
@@ -2511,8 +2511,6 @@ fn expand_publisher_command(repo: &Path, publisher: &[String]) -> Vec<String> {
 struct PreparedRelease {
     pr_number: u64,
     head_sha: String,
-    /// When this run last armed the PR. A person's later dequeue stops the run.
-    armed_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[allow(clippy::too_many_arguments)] // Exact release selection and both held mutation capabilities.
@@ -2619,7 +2617,45 @@ fn prepare_release_in_worktree(
     Ok(PreparedRelease {
         pr_number: pr.number,
         head_sha,
-        armed_at: chrono::Utc::now(),
+    })
+}
+
+/// The repository identity and PR number Loopflow records landings under.
+fn landing_pr(repo: &Path, pr_number: u64) -> OpsResult<(crate::repository::RepoId, u32)> {
+    let repo_id = crate::repository::RepoId::discover(repo)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let number = u32::try_from(pr_number).map_err(|_| {
+        OpsError::Message(format!("pull request #{pr_number} exceeds supported range"))
+    })?;
+    Ok((repo_id, number))
+}
+
+/// Running the release again is how a person resumes after their own dequeue
+/// or disable, and arms a PR nothing has explained. Repair, eviction and merge
+/// removals stay with the shared merge decision.
+fn arm_resumed_release(
+    repo: &Path,
+    pr_number: u64,
+    head_sha: &str,
+    progress: &impl Progress,
+    lock: &ReleaseLock,
+) -> OpsResult<()> {
+    if crate::ops::pr::observe_merge_request(repo, pr_number)?.is_some() {
+        return Ok(());
+    }
+    let (repo_id, number) = landing_pr(repo, pr_number)?;
+    if !matches!(
+        crate::ops::pr_landing::read_merge_request_removal(repo, repo_id.as_str(), number)?,
+        crate::ops::pr::MergeRequestRemoval::Manual { .. }
+            | crate::ops::pr::MergeRequestRemoval::Unknown
+    ) {
+        return Ok(());
+    }
+    progress.status(&format!(
+        "Re-arming release PR #{pr_number} for exact-head auto-merge..."
+    ));
+    crate::ops::pr::enable_auto_merge(repo, pr_number, None, head_sha, &|command| {
+        lock.inherit(command)
     })
 }
 
@@ -2647,14 +2683,7 @@ fn finish_release_pr(
 ) -> OpsResult<String> {
     let release_branch = release_branch_name(main_repo, worktree_name)?;
     loop {
-        match wait_for_pr_merge(
-            main_repo,
-            prepared.pr_number,
-            &prepared.head_sha,
-            &mut prepared.armed_at,
-            progress,
-            lock,
-        )? {
+        match wait_for_pr_merge(main_repo, prepared.pr_number, &prepared.head_sha, progress)? {
             ReleasePrWait::Merged(commit) => {
                 if let Some((path, _)) = list_porcelain(main_repo)?
                     .into_iter()
@@ -2770,11 +2799,12 @@ fn finish_release_pr(
                     }
                 };
             }
-            ReleasePrWait::NeedsRepair => {
+            ReleasePrWait::NeedsRepair(head_sha) => {
                 progress.status(&format!(
-                    "Release PR #{} has failed required checks; reconciling CI repair...",
+                    "Release PR #{} needs a CI repair; reconciling it...",
                     prepared.pr_number
                 ));
+                prepared.head_sha = head_sha;
                 fetch_release_branch(main_repo, &release_branch, &prepared.head_sha, lock)?;
                 let lease = acquire_worktree_lease_wait(
                     main_repo,
@@ -2794,12 +2824,9 @@ fn finish_release_pr(
                 })?;
                 let options = release_land_options(None);
                 let _context = ReleaseWorktreeContext::enter();
-                let reconciled = crate::ops::pr_landing::reconcile_armed_pr(
+                match crate::ops::pr_landing::reconcile_armed_pr(
                     &wt.path, &options, &pr, lock, &lease,
-                );
-                // Repair re-arms through Loopflow; the removals it makes are not a person's.
-                prepared.armed_at = chrono::Utc::now();
-                match reconciled {
+                ) {
                     Ok(landing) => {
                         wait_for_release_repair(&landing)?;
                         if let Some(commit) = landing.merge_commit {
@@ -2860,17 +2887,6 @@ fn wait_for_release_repair(landing: &crate::pr_landing::PrLanding) -> OpsResult<
         thread::sleep(Duration::from_millis(100));
     }
     Ok(())
-}
-
-fn release_repair_running(repo: &Path, pr_number: u64) -> OpsResult<bool> {
-    let repo_id = crate::repository::RepoId::discover(repo)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let pr_number = u32::try_from(pr_number).map_err(|_| {
-        OpsError::Message(format!("pull request #{pr_number} exceeds supported range"))
-    })?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = runtime.block_on(crate::ops::pr_landing::landing_store())?;
-    crate::ops::pr_landing::repair_running(&store, repo_id.as_str(), pr_number)
 }
 
 fn fetch_release_branch(
@@ -3712,20 +3728,50 @@ fn current_release_pr(prs: Vec<GhReleasePr>) -> Option<GhReleasePr> {
     prs.into_iter().find(|pr| pr.state != "CLOSED")
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum ReleasePrWait {
     Merged(String),
     NeedsIntegration(String),
-    NeedsRepair,
+    /// The shared merge decision found a failure on this head for ci-fix.
+    NeedsRepair(String),
+}
+
+/// Release follows the landing's merge decision; `None` keeps polling.
+fn release_wait(
+    pr: &crate::ops::pr::PrInfo,
+    observation: crate::ops::pr_landing::LandingObservation,
+) -> OpsResult<Option<ReleasePrWait>> {
+    use crate::ops::pr_landing::LandingObservation;
+    match observation {
+        LandingObservation::Merged { merge_commit, .. } => {
+            Ok(Some(ReleasePrWait::Merged(merge_commit)))
+        }
+        LandingObservation::Closed { .. } => Err(OpsError::Message(format!(
+            "{} was closed without merging",
+            pr.url
+        ))),
+        LandingObservation::Withdrawn {
+            at, actor, queued, ..
+        } => Err(OpsError::ManualMergeRemoval {
+            pr_number: pr.number,
+            actor,
+            at,
+            queued,
+        }),
+        LandingObservation::Failing { head_sha, .. } => {
+            Ok(Some(ReleasePrWait::NeedsRepair(head_sha)))
+        }
+        LandingObservation::Pending { .. } | LandingObservation::Passing { .. } => Ok(None),
+    }
 }
 
 fn wait_for_pr_merge(
     repo: &Path,
     pr_number: u64,
     head_sha: &str,
-    armed_at: &mut chrono::DateTime<chrono::Utc>,
     progress: &impl Progress,
-    lock: &ReleaseLock,
 ) -> OpsResult<ReleasePrWait> {
+    let (repo_id, number) = landing_pr(repo, pr_number)?;
     let started = Instant::now();
     let timeout = Duration::from_secs(60 * 60);
     let poll = Duration::from_secs(10);
@@ -3736,28 +3782,26 @@ fn wait_for_pr_merge(
         let view = observation.pr;
         let request = observation.request;
 
-        match view.state.as_str() {
-            "merged" => {
-                let commit = view.merge_commit.ok_or_else(|| {
-                    OpsError::Message(format!(
-                        "PR #{pr_number} is merged but merge commit is unavailable"
-                    ))
-                })?;
-                return Ok(ReleasePrWait::Merged(commit));
-            }
-            "closed" => {
-                let url = view.url;
-                return Err(OpsError::Message(format!(
-                    "{url} was closed without merging"
-                )));
-            }
-            _ => {}
-        }
-
-        if crate::ops::pr::merge_needs_integration(view.merge_state.as_deref(), request.as_ref()) {
+        if view.state == "open"
+            && crate::ops::pr::merge_needs_integration(
+                view.merge_state.as_deref(),
+                request.as_ref(),
+            )
+        {
             return Ok(ReleasePrWait::NeedsIntegration(
                 view.merge_state.expect("integration state matched"),
             ));
+        }
+
+        let decided = crate::ops::pr_landing::decide_merge(
+            view.clone(),
+            head_sha,
+            request,
+            || crate::ops::pr_landing::read_merge_request_removal(repo, repo_id.as_str(), number),
+            |head| merge_gate_state(repo, pr_number, head),
+        )?;
+        if let Some(wait) = release_wait(&view, decided)? {
+            return Ok(wait);
         }
 
         if started.elapsed() >= timeout {
@@ -3765,45 +3809,6 @@ fn wait_for_pr_merge(
                 reason: format!("release PR #{pr_number} is still awaiting merge"),
                 continuation: format!("resume PR #{pr_number} at the next configured firing"),
             });
-        }
-
-        if request.is_none() {
-            if release_repair_running(repo, pr_number)? {
-                // A CI repair disarms before it moves the head and re-arms after
-                // it publishes. Its removal is not a person's, and re-arming the
-                // old head would race its push.
-                if attempt.is_multiple_of(6) {
-                    progress.status(&format!(
-                        "Release PR #{pr_number} is paused for an active CI repair..."
-                    ));
-                }
-                attempt += 1;
-                thread::sleep(poll);
-                continue;
-            }
-            if let Some(removal) =
-                crate::ops::pr::manual_merge_removal_since(repo, pr_number, *armed_at)?
-            {
-                return Err(OpsError::ManualMergeRemoval {
-                    pr_number,
-                    actor: removal.actor,
-                    at: removal.at,
-                    queued: removal.queued,
-                });
-            }
-            progress.status(&format!(
-                "Re-arming release PR #{pr_number} for exact-head auto-merge..."
-            ));
-            crate::ops::pr::enable_auto_merge(repo, pr_number, None, head_sha, &|command| {
-                lock.inherit(command)
-            })?;
-            *armed_at = chrono::Utc::now();
-        }
-
-        if !matches!(request, Some(crate::ops::pr::MergeRequest::Queued(_)))
-            && merge_gate_state(repo, pr_number, head_sha)?.is_some_and(|reading| reading.failing)
-        {
-            return Ok(ReleasePrWait::NeedsRepair);
         }
 
         if attempt.is_multiple_of(6) {
@@ -5346,6 +5351,200 @@ fn run_output(repo: &Path, command: &str, args: &[&str]) -> OpsResult<Output> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn merge_request_removals_decide_landing_and_release_alike() {
+        use crate::ops::pr::{MergeGateReading, MergeRequestRemoval, PrInfo, RepairWindow};
+        use crate::ops::pr_landing::{decide_merge, LandingObservation};
+        use crate::work::task::CiCheck;
+        use serde_json::json;
+
+        #[derive(Debug, PartialEq)]
+        enum Release {
+            Stops,
+            Polls,
+            Repairs,
+        }
+        let at = |time: &str| time.parse::<chrono::DateTime<chrono::Utc>>().unwrap();
+        let window = |start: &str, end: Option<&str>| RepairWindow {
+            start: at(start),
+            end: end.map(at),
+        };
+        // PR #1654: Jack disabled auto-merge, later dequeued the queued release,
+        // and the queue finally removed it as merged.
+        let disabled = json!({"__typename": "AutoMergeDisabledEvent",
+            "createdAt": "2026-10-22T18:56:59Z", "reason": "Manually disabled by user",
+            "reasonCode": "manually_disabled", "actor": {"login": "jacklionheart"}});
+        let dequeued = json!({"__typename": "RemovedFromMergeQueueEvent",
+            "createdAt": "2026-10-22T20:13:13Z", "reason": "manual",
+            "actor": {"login": "jacklionheart"}});
+        let merged = json!({"__typename": "RemovedFromMergeQueueEvent",
+            "createdAt": "2026-10-22T20:23:15Z", "reason": "merged",
+            "actor": {"login": "github-merge-queue"}});
+        // PR #1676: the merge-group run failed on a runner fault and the queue
+        // removed the PR; a second entry later hit a conflict and ran nothing.
+        let armed =
+            json!({"__typename": "AutoMergeEnabledEvent", "createdAt": "2026-10-25T05:40:31Z"});
+        let added =
+            json!({"__typename": "AddedToMergeQueueEvent", "createdAt": "2026-10-25T05:50:32Z"});
+        let evicted = json!({"__typename": "RemovedFromMergeQueueEvent",
+            "createdAt": "2026-10-25T06:02:33Z", "reason": "failed_checks",
+            "actor": {"login": "github-merge-queue"}});
+        let readded =
+            json!({"__typename": "AddedToMergeQueueEvent", "createdAt": "2026-10-25T06:10:00Z"});
+        let conflicted = json!({"__typename": "RemovedFromMergeQueueEvent",
+            "createdAt": "2026-10-25T06:15:00Z", "reason": "merge_conflict"});
+        let run = "https://github.com/loopflowstudio/loopflow/actions/runs/40166998506";
+
+        let failing = |name: &str, url: Option<&str>| LandingObservation::Failing {
+            head_sha: "head".into(),
+            failing_checks: vec![CiCheck {
+                name: name.into(),
+                url: url.map(str::to_string),
+            }],
+        };
+        let pending = LandingObservation::Pending {
+            head_sha: "head".into(),
+        };
+        let withdrawn = |time: &str, queued| LandingObservation::Withdrawn {
+            head_sha: "head".into(),
+            at: at(time),
+            actor: Some("jacklionheart".into()),
+            queued,
+        };
+        let cases = [
+            (
+                "manual dequeue",
+                vec![disabled.clone(), dequeued.clone()],
+                vec![],
+                false,
+                withdrawn("2026-10-22T20:13:13Z", true),
+                Release::Stops,
+            ),
+            (
+                "manual disable",
+                vec![disabled.clone()],
+                vec![],
+                false,
+                withdrawn("2026-10-22T18:56:59Z", false),
+                Release::Stops,
+            ),
+            (
+                "repair disarm inside its window",
+                vec![disabled.clone()],
+                vec![window("2026-10-22T18:50:00Z", Some("2026-10-22T19:00:00Z"))],
+                false,
+                failing("merge-request (repair-disarmed)", None),
+                Release::Repairs,
+            ),
+            (
+                "disarm while a repair runs and checks are pending",
+                vec![disabled.clone()],
+                vec![window("2026-10-22T18:50:00Z", None)],
+                true,
+                pending.clone(),
+                Release::Polls,
+            ),
+            (
+                "disarm outside every repair window",
+                vec![disabled.clone()],
+                vec![window("2026-10-22T18:00:00Z", Some("2026-10-22T18:30:00Z"))],
+                false,
+                withdrawn("2026-10-22T18:56:59Z", false),
+                Release::Stops,
+            ),
+            (
+                "merged by the queue",
+                vec![disabled.clone(), dequeued.clone(), merged.clone()],
+                vec![],
+                false,
+                pending.clone(),
+                Release::Polls,
+            ),
+            (
+                "failed_checks eviction",
+                vec![armed.clone(), added.clone(), evicted.clone()],
+                vec![],
+                false,
+                failing("merge-queue (failed_checks)", Some(run)),
+                Release::Repairs,
+            ),
+            (
+                "merge_conflict eviction after a failed_checks one",
+                vec![
+                    armed.clone(),
+                    added.clone(),
+                    evicted.clone(),
+                    readded,
+                    conflicted,
+                ],
+                vec![],
+                false,
+                failing("merge-queue (merge_conflict)", None),
+                Release::Repairs,
+            ),
+            (
+                "latest event is an arm",
+                vec![disabled.clone(), armed.clone()],
+                vec![],
+                false,
+                failing("merge-request (unexplained)", None),
+                Release::Repairs,
+            ),
+            (
+                "no event",
+                vec![],
+                vec![],
+                false,
+                failing("merge-request (unexplained)", None),
+                Release::Repairs,
+            ),
+        ];
+        let pr = PrInfo {
+            url: "https://github.com/loopflowstudio/loopflow/pull/1676".into(),
+            number: 1676,
+            state: "open".into(),
+            branch: "release".into(),
+            merge_commit: None,
+            merged_at: None,
+            head_sha: Some("head".into()),
+            merge_state: Some("clean".into()),
+        };
+        for (name, nodes, repairs, checks_pending, landing, release) in cases {
+            let timeline = serde_json::to_vec(&json!({"data": {"repository": {
+                "pullRequest": {"timelineItems": {"nodes": nodes}}}}}))
+            .unwrap();
+            // Only the eviction's own queue entry produced a run.
+            let runs = |entry: chrono::DateTime<chrono::Utc>, removed| {
+                assert!(entry < removed, "{name}");
+                Ok((entry == at("2026-10-25T05:50:32Z")).then(|| run.to_string()))
+            };
+            let removal: MergeRequestRemoval =
+                crate::ops::pr::removal_from_timeline(&timeline, &repairs, runs).unwrap();
+            let observed = decide_merge(
+                pr.clone(),
+                "head",
+                None,
+                || Ok(removal),
+                |_| {
+                    Ok(Some(MergeGateReading {
+                        failing: false,
+                        pending: checks_pending,
+                        failing_leaves: Vec::new(),
+                    }))
+                },
+            )
+            .unwrap();
+            assert_eq!(observed, landing, "{name}");
+            let waited = match release_wait(&pr, observed) {
+                Err(OpsError::ManualMergeRemoval { .. }) => Release::Stops,
+                Ok(None) => Release::Polls,
+                Ok(Some(ReleasePrWait::NeedsRepair(head))) if head == "head" => Release::Repairs,
+                other => panic!("{name}: {other:?}"),
+            };
+            assert_eq!(waited, release, "{name}");
+        }
+    }
 
     #[test]
     fn withdrawn_release_pr_does_not_block_the_version() {

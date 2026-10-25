@@ -131,6 +131,14 @@ pub fn run_task_edge_for(cli: &Cli, issue: &str, edge: &str, checkout: &Path) ->
             && store
                 .child_process_after(&process, mark)?
                 .is_some_and(|child| matches!(store.graph_process(child.as_str()), Ok(Some(_))));
+        if failed {
+            if let Some(stash) = crate::ops::checkout::retained_edits(checkout)? {
+                eprintln!(
+                    "Route {edge} failed with the checkout's edits retained in stash {stash}; this Task run stops here. Restore them with `git stash apply --index {stash}`."
+                );
+                return Err(crate::process::CommandExit(1).into());
+            }
+        }
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {
                 eprintln!("Route {edge} failed {attempt} times; this Task run stops here.");

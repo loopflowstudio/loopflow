@@ -23,7 +23,7 @@ use crate::ops::{
     create_or_update_pr, current_pr, finish_arm_after_sync, finish_submit_after_sync, plan_sync,
     preview_release_notes, recover_sync, release_bump, release_check, release_notes,
     release_publish, release_run, release_status, release_tag, submit, sync_class_name,
-    sync_strategy_name, sync_with_recovery, AbandonOptions, CommitOptions, CronHost, CronOutcome,
+    sync_strategy_name, sync_with_plan, AbandonOptions, CommitOptions, CronHost, CronOutcome,
     CronSource, CronSpec, LandOptions, PrOptions, Progress, SyncOptions, SystemLaunchctl,
 };
 use crate::prompt::process::prepare_process_prompt;
@@ -418,11 +418,13 @@ pub(crate) fn run_sync_in(
         .map(|branch| format!("origin/{branch}"));
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
     let default_target = if on_main { upstream } else { default.clone() };
-    let plan = plan_sync(
-        repo_root,
-        stacked_onto.as_deref().or(onto).or(Some(&default_target)),
-        fork_base.clone(),
-    )?;
+    let target = stacked_onto.as_deref().or(onto).unwrap_or(&default_target);
+    if !plan_only {
+        crate::git::fetch_tracking_ref(repo_root, target)?;
+    }
+    // Classify once, against the tree holding the caller's edits. This plan
+    // runs and is the one the metric records.
+    let plan = plan_sync(repo_root, Some(target), fork_base.clone())?;
     if plan_only {
         print_sync_plan(&plan);
         return Ok(());
@@ -432,12 +434,16 @@ pub(crate) fn run_sync_in(
         push: !manual && !on_main,
         fork_base,
     };
+    let avoidable = is_avoidable_sync_class(&plan.class);
     let (verification, agent_launched) = if manual {
-        (sync_with_recovery(repo_root, &options, progress)?, false)
+        (
+            sync_with_plan(repo_root, &options, plan.clone(), progress)?,
+            false,
+        )
     } else {
         let recovery_config = load_config_or_default(Some(repo_root));
         crate::ops::checkout::with_preserved_edits(repo_root, || {
-            match sync_with_recovery(repo_root, &options, progress) {
+            match sync_with_plan(repo_root, &options, plan.clone(), progress) {
                 Ok(verification) => Ok((verification, false)),
                 Err(OpsError::SyncConflict {
                     onto,
@@ -449,7 +455,7 @@ pub(crate) fn run_sync_in(
                         &onto,
                         &detail,
                         recovery,
-                        is_avoidable_sync_class(&plan.class),
+                        avoidable,
                         progress,
                         &recovery_config,
                     )
@@ -545,9 +551,7 @@ fn resolve_sync_conflict(
 fn is_avoidable_sync_class(class: &crate::ops::SyncClass) -> bool {
     matches!(
         class,
-        crate::ops::SyncClass::StaleEmpty
-            | crate::ops::SyncClass::ScratchOnly
-            | crate::ops::SyncClass::GeneratedOnly
+        crate::ops::SyncClass::StaleEmpty | crate::ops::SyncClass::ScratchOnly
     )
 }
 
@@ -560,7 +564,6 @@ mod sync_performance_tests {
     fn disposable_sync_classes_make_an_agent_launch_a_repair_incident() {
         assert!(is_avoidable_sync_class(&SyncClass::StaleEmpty));
         assert!(is_avoidable_sync_class(&SyncClass::ScratchOnly));
-        assert!(is_avoidable_sync_class(&SyncClass::GeneratedOnly));
         assert!(!is_avoidable_sync_class(&SyncClass::CleanAuthored));
         assert!(!is_avoidable_sync_class(&SyncClass::Protected));
     }

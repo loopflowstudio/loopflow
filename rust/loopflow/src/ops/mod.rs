@@ -81,8 +81,8 @@ pub use run::{
 pub(crate) use sync::{abort_sync_after_authorization, continue_sync_after_authorization};
 pub use sync::{
     abort_sync_for_resolution, continue_sync_for_resolution, plan_sync, recover_sync,
-    sync_class_name, sync_strategy_name, sync_with_recovery, SyncClass, SyncOptions, SyncPlan,
-    SyncRecovery, SyncStrategy, SyncVerification,
+    sync_class_name, sync_strategy_name, sync_with_plan, sync_with_recovery, SyncClass,
+    SyncOptions, SyncPlan, SyncRecovery, SyncStrategy, SyncVerification,
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
 pub use util::normalize_wave_name;

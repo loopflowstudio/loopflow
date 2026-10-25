@@ -1460,6 +1460,42 @@ fn a_held_command_stops_the_task_run_without_repeating_the_graph() {
 }
 
 #[test]
+fn a_graph_that_fails_with_retained_edits_is_not_started_again() {
+    // LOO-578: starting a Graph over on top of a checkout-update stash strands
+    // the edits it holds more deeply with every attempt.
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123", "gated"]);
+    let checkout = task.repo.path();
+    fs::write(checkout.join("work.txt"), "unrestored\n").unwrap();
+    let message = format!("lf checkout update: caller edits in {}", checkout.display());
+    let pushed = std::process::Command::new("git")
+        .args(["stash", "push", "--include-untracked", "-m", &message])
+        .current_dir(checkout)
+        .status()
+        .unwrap();
+    assert!(pushed.success());
+    let stash = String::from_utf8(
+        std::process::Command::new("git")
+            .args(["rev-parse", "refs/stash"])
+            .current_dir(checkout)
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+
+    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "gate"]));
+    assert!(error.contains(stash.trim()), "{error}");
+    assert!(!error.contains("starting it again"), "{error}");
+    let stopped = task.workflow();
+    let chose = stopped["history"].as_array().unwrap().last().unwrap();
+    assert_eq!(
+        attempts(task.home.path(), chose["lf_process_id"].as_str().unwrap()),
+        ["failed"]
+    );
+}
+
+#[test]
 fn completion_is_independent_of_workflow_readiness() {
     let task = WorkflowTask::new();
     assert_eq!(task.state(), "unstarted");

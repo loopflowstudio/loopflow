@@ -1546,18 +1546,29 @@ pub(super) fn retain_history_in(
             return Err(invalid("artifact belongs to another conversation"));
         }
         let key = format!("{}:{}", observation.artifact_key, observation.source);
-        let payload = serde_json::to_string(&observation.payload)?;
+        let mut payload = serde_json::to_string(&observation.payload)?;
         let saved: Option<String> = conn.query_row(
             "SELECT payload FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
             params![session.id,key], |row| row.get(0)).optional()?;
         if let Some(saved) = saved {
-            if saved != payload {
+            if saved == payload {
+                continue;
+            }
+            // A usage stream keeps one row; a later observation replaces it.
+            let merged = serde_json::from_str(&saved).ok().and_then(|saved| {
+                crate::session_record::merge_usage_observation(&saved, &observation.payload)
+            });
+            let Some(merged) = merged else {
                 return Err(invalid(format!(
                     "input {} has conflicting {} evidence",
                     observation.artifact_key, observation.source
                 )));
-            }
-            continue;
+            };
+            payload = serde_json::to_string(&merged)?;
+            conn.execute(
+                "DELETE FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
+                params![session.id, key],
+            )?;
         }
         conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
             VALUES(?1,'observed',?2,?3,?4,?5,?6,?7)",

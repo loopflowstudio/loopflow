@@ -901,6 +901,13 @@ fn command_tree_only_aliases_resume_to_connect() {
             assert_eq!(aliases, ["resume"]);
         }
         for arg in command.get_arguments() {
+            // Loaded 0.14.14 cron jobs pass `--flow`; LOO-574 removes the alias.
+            if command.get_name() == "run"
+                && arg.get_long() == Some("graph")
+                && arg.get_all_aliases() == Some(vec!["flow"])
+            {
+                continue;
+            }
             assert!(
                 arg.get_all_aliases().unwrap_or_default().is_empty(),
                 "{arg}"

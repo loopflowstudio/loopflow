@@ -173,6 +173,8 @@ pub struct ObligationSegment {
     #[serde(alias = "home_id")]
     pub machine_id: MachineId,
     pub wave: String,
+    // 0.14.14 obligations say "flow"; LOO-574 removes the alias.
+    #[serde(alias = "flow")]
     pub graph: String,
     pub schedule: String,
     pub timezone: String,
@@ -360,7 +362,7 @@ pub(crate) fn record_overlap(
     receipt: &CronReceipt,
 ) -> OpsResult<String> {
     let _lock = lock(home)?;
-    let mut record = read(home)?
+    let mut record = read(home, &receipt.repo)?
         .into_iter()
         .find(|r| r.id == obligation)
         .ok_or_else(|| failure(format!("missing release obligation {obligation}")))?;
@@ -424,7 +426,7 @@ pub(crate) fn preflight_failure(
     receipt: &CronReceipt,
 ) -> OpsResult<()> {
     let _lock = lock(home)?;
-    let mut record = read(home)?
+    let mut record = read(home, &receipt.repo)?
         .into_iter()
         .find(|r| r.id == obligation)
         .ok_or_else(|| failure("preflight obligation missing"))?;
@@ -500,7 +502,43 @@ fn save(home: &Path, obligation: &ObligationSegment) -> OpsResult<()> {
     Ok(())
 }
 
-pub(super) fn read(home: &Path) -> OpsResult<Vec<ObligationSegment>> {
+/// Rewrite 0.14.14 obligations, which name their job `flow`, in the current shape.
+/// Each keeps its file, id and recorded history.
+pub(super) fn upgrade(home: &Path) -> OpsResult<()> {
+    let dir = directory(home);
+    if !dir.exists() {
+        return Ok(());
+    }
+    let _lock = lock(home)?;
+    for entry in fs::read_dir(&dir)? {
+        let path = entry?.path();
+        if path.extension().is_none_or(|e| e != "json") {
+            continue;
+        }
+        let bytes = fs::read(&path)?;
+        let legacy = serde_json::from_slice::<serde_json::Value>(&bytes)
+            .is_ok_and(|document| document.get("flow").is_some());
+        if !legacy {
+            continue;
+        }
+        // An unreadable record stays as it is; its own reader names it.
+        let Ok(record) = serde_json::from_slice::<ObligationSegment>(&bytes) else {
+            continue;
+        };
+        if path.file_stem().and_then(|s| s.to_str()) == Some(record.id.as_str()) {
+            save(home, &record)?;
+        }
+    }
+    Ok(())
+}
+
+/// One repository's obligations. Segments never link across repositories, so a
+/// record naming another repository is skipped before it is parsed in full; an
+/// unreadable record that may be this repository's still fails with its path.
+/// Records name their repository canonically; one that no longer resolves
+/// matches its recorded path.
+pub(super) fn read(home: &Path, repo: &Path) -> OpsResult<Vec<ObligationSegment>> {
+    let repo = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
     let dir = directory(home);
     if !dir.exists() {
         return Ok(Vec::new());
@@ -511,8 +549,18 @@ pub(super) fn read(home: &Path) -> OpsResult<Vec<ObligationSegment>> {
         if path.extension().is_none_or(|e| e != "json") {
             continue;
         }
-        let record: ObligationSegment = serde_json::from_slice(&fs::read(&path)?)
-            .map_err(|e| failure(format!("invalid cron obligation {}: {e}", path.display())))?;
+        let invalid = |e: serde_json::Error| {
+            failure(format!("invalid cron obligation {}: {e}", path.display()))
+        };
+        let document: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path)?).map_err(invalid)?;
+        if document["repo"]
+            .as_str()
+            .is_some_and(|owner| Path::new(owner) != repo)
+        {
+            continue;
+        }
+        let record: ObligationSegment = serde_json::from_value(document).map_err(invalid)?;
         if record.schema_version != 1
             || path.file_stem().and_then(|s| s.to_str()) != Some(record.id.as_str())
         {
@@ -530,23 +578,18 @@ pub(super) fn read(home: &Path) -> OpsResult<Vec<ObligationSegment>> {
                 (
                     prior.clone(),
                     r.activated_at,
-                    r.repo.clone(),
                     r.wave.clone(),
                     r.graph.clone(),
                 )
             })
         })
         .collect();
-    for (prior, boundary, repo, wave, graph) in replacements {
+    for (prior, boundary, wave, graph) in replacements {
         let previous = result
             .iter_mut()
             .find(|r| r.id == prior)
             .ok_or_else(|| failure(format!("missing predecessor obligation {prior}")))?;
-        if previous.repo != repo
-            || previous.wave != wave
-            || previous.graph != graph
-            || previous.activated_at > boundary
-        {
+        if previous.wave != wave || previous.graph != graph || previous.activated_at > boundary {
             return Err(failure("invalid obligation replacement boundary"));
         }
         previous.closed_at = Some(previous.closed_at.map_or(boundary, |end| end.min(boundary)));
@@ -715,8 +758,8 @@ pub(crate) fn observe(
         .map_err(|e| failure(format!("invalid timezone: {e}")))?;
     let _lock = lock(&spec.host.lf_home)?;
     let repo = spec.working_directory.canonicalize()?;
-    let mut records = read(&spec.host.lf_home)?;
-    records.retain(|r| r.repo == repo && r.wave == spec.wave && r.graph == spec.graph);
+    let mut records = read(&spec.host.lf_home, &repo)?;
+    records.retain(|r| r.wave == spec.wave && r.graph == spec.graph);
     if let Some(current) = records.iter().find(|r| {
         r.closed_at.is_none()
             && r.machine_id == spec.host.machine_id
@@ -780,13 +823,8 @@ pub(crate) fn observe(
 
 pub(crate) fn close(spec: &CronSpec, now: i64) -> OpsResult<()> {
     let _lock = lock(&spec.host.lf_home)?;
-    let repo = spec.working_directory.canonicalize()?;
-    for mut record in read(&spec.host.lf_home)? {
-        if record.repo == repo
-            && record.wave == spec.wave
-            && record.graph == spec.graph
-            && record.closed_at.is_none()
-        {
+    for mut record in read(&spec.host.lf_home, &spec.working_directory)? {
+        if record.wave == spec.wave && record.graph == spec.graph && record.closed_at.is_none() {
             record.closed_at = Some(now);
             materialize(&mut record, now)?;
             save(&spec.host.lf_home, &record)?;
@@ -804,8 +842,8 @@ pub fn history(
 ) -> OpsResult<Vec<ObligationSegment>> {
     let repo = repo.canonicalize()?;
     let _lock = directory(home).exists().then(|| lock(home)).transpose()?;
-    let mut records = read(home)?;
-    records.retain(|r| r.repo == repo && r.wave == wave);
+    let mut records = read(home, &repo)?;
+    records.retain(|r| r.wave == wave);
     for record in &mut records {
         materialize(record, now)?;
     }
@@ -887,7 +925,7 @@ pub(crate) fn begin(
     receipt: &CronReceipt,
 ) -> OpsResult<Option<String>> {
     let _lock = lock(home)?;
-    let mut records = read(home)?;
+    let mut records = read(home, &receipt.repo)?;
     let execution = records
         .iter()
         .position(|r| r.id == obligation)
@@ -1003,7 +1041,7 @@ pub(crate) fn begin(
 
 pub(crate) fn finish_process(home: &Path, receipt: &CronReceipt) -> OpsResult<()> {
     let _lock = lock(home)?;
-    let mut records = read(home)?;
+    let mut records = read(home, &receipt.repo)?;
     let Some(owner) = records.iter().position(|r| {
         r.opportunities
             .iter()
@@ -1098,13 +1136,14 @@ fn rejected_settlement(
 
 pub(crate) fn settle(
     home: &Path,
+    repo: &Path,
     receipt_id: &str,
     outcome: ScheduledReleaseOutcome,
     verification: &[VerificationEvidence],
     now: i64,
 ) -> OpsResult<()> {
     let _lock = lock(home)?;
-    for mut record in read(home)? {
+    for mut record in read(home, repo)? {
         let Some(opportunity) = record.opportunities.iter_mut().find(|o| {
             o.attempts
                 .iter()
@@ -1161,6 +1200,47 @@ pub(crate) fn settle(
     )))
 }
 
+/// Settle a scheduled attempt that stopped with `error`. A person's merge-queue
+/// dequeue or auto-merge disable is their intervention in the opportunity.
+pub(crate) fn settle_error(
+    home: &Path,
+    repo: &Path,
+    target: &str,
+    receipt_id: &str,
+    error: &OpsError,
+    verification: &[VerificationEvidence],
+    now: i64,
+) -> OpsResult<()> {
+    if let OpsError::ManualMergeRemoval {
+        pr_number,
+        actor,
+        queued,
+        ..
+    } = error
+    {
+        let actor = actor.as_deref().unwrap_or("an unknown person");
+        let operation = if *queued {
+            format!("{actor} removed release PR #{pr_number} from the merge queue")
+        } else {
+            format!("{actor} took release PR #{pr_number} off auto-merge")
+        };
+        record_intervention(home, repo, target, &operation)?;
+    }
+    let outcome = match error {
+        OpsError::ReleaseDeferred {
+            reason,
+            continuation,
+        } => ScheduledReleaseOutcome::Deferred {
+            reason: reason.clone(),
+            continuation: continuation.clone(),
+        },
+        _ => ScheduledReleaseOutcome::Failed {
+            cause: error.to_string(),
+        },
+    };
+    settle(home, repo, receipt_id, outcome, verification, now)
+}
+
 pub(crate) fn receipt_context(
     home: &Path,
     repo: &Path,
@@ -1168,7 +1248,7 @@ pub(crate) fn receipt_context(
 ) -> OpsResult<ObligationSegment> {
     let repo = repo.canonicalize()?;
     let _lock = lock(home)?;
-    let records = read(home)?;
+    let records = read(home, &repo)?;
     let record = records
         .iter()
         .find(|r| {
@@ -1214,9 +1294,14 @@ pub(crate) fn execution_context<'a>(
     Err(failure("release attempt missing"))
 }
 
-pub(crate) fn overlap_continuation(home: &Path, receipt_id: &str, now: i64) -> OpsResult<String> {
+pub(crate) fn overlap_continuation(
+    home: &Path,
+    repo: &Path,
+    receipt_id: &str,
+    now: i64,
+) -> OpsResult<String> {
     let _lock = lock(home)?;
-    let records = read(home)?;
+    let records = read(home, repo)?;
     for record in &records {
         if let Some(opportunity) = record.opportunities.iter().find(|o| {
             o.coalesced_into.is_none()
@@ -1260,9 +1345,14 @@ fn retry_continuation(
     ))
 }
 
-pub(crate) fn record_target(home: &Path, receipt_id: &str, target: &str) -> OpsResult<()> {
+pub(crate) fn record_target(
+    home: &Path,
+    repo: &Path,
+    receipt_id: &str,
+    target: &str,
+) -> OpsResult<()> {
     let _lock = lock(home)?;
-    for mut record in read(home)? {
+    for mut record in read(home, repo)? {
         if let Some(attempt) = record
             .opportunities
             .iter_mut()
@@ -1284,11 +1374,12 @@ pub(crate) fn record_target(home: &Path, receipt_id: &str, target: &str) -> OpsR
 /// Reserve recovery with the original observations in the same atomic write.
 pub(crate) fn record_telemetry(
     home: &Path,
+    repo: &Path,
     receipt_id: &str,
     telemetry: &TelemetryPrerequisite,
 ) -> OpsResult<()> {
     let _lock = lock(home)?;
-    for mut record in read(home)? {
+    for mut record in read(home, repo)? {
         let Some(attempt) = record
             .opportunities
             .iter_mut()
@@ -1335,8 +1426,7 @@ pub(crate) fn record_intervention(
     operation: &str,
 ) -> OpsResult<()> {
     let _lock = lock(home)?;
-    let repo = repo.canonicalize()?;
-    for mut record in read(home)?.into_iter().filter(|r| r.repo == repo) {
+    for mut record in read(home, repo)? {
         let mut changed = false;
         for opportunity in &mut record.opportunities {
             if opportunity.coalesced_into.is_none()
@@ -1363,12 +1453,13 @@ pub(crate) fn record_intervention(
 
 pub(crate) fn authorize_replacement(
     home: &Path,
+    repo: &Path,
     receipt_id: &str,
     rejected: &ReleaseSelection,
     inspection: VerificationEvidence,
 ) -> OpsResult<()> {
     let _lock = lock(home)?;
-    for mut record in read(home)? {
+    for mut record in read(home, repo)? {
         let Some(opportunity) = record.opportunities.iter_mut().find(|o| {
             o.attempts
                 .last()
@@ -1396,9 +1487,14 @@ pub(crate) fn authorize_replacement(
     Err(failure("release attempt no longer owns the opportunity"))
 }
 
-pub(crate) fn select(home: &Path, receipt_id: &str, selection: ReleaseSelection) -> OpsResult<()> {
+pub(crate) fn select(
+    home: &Path,
+    repo: &Path,
+    receipt_id: &str,
+    selection: ReleaseSelection,
+) -> OpsResult<()> {
     let _lock = lock(home)?;
-    for mut record in read(home)? {
+    for mut record in read(home, repo)? {
         let Some(opportunity) = record.opportunities.iter_mut().find(|o| {
             o.attempts
                 .last()
@@ -1439,12 +1535,19 @@ pub(crate) fn select(home: &Path, receipt_id: &str, selection: ReleaseSelection)
 #[cfg(test)]
 mod tests {
     use super::{
-        begin, close, finish_process, history, observe, read, select, settle, ReleaseSelection,
-        ScheduledReleaseOutcome,
+        begin, close, finish_process, history, observe, select, settle, ObligationSegment,
+        ReleaseSelection, ScheduledReleaseOutcome,
     };
     use crate::durable::{CronReceiptId, MachineId};
-    use crate::ops::{parse_schedule, CronHost, CronOutcome, CronReceipt, CronSource, CronSpec};
+    use crate::ops::{
+        parse_schedule, CronHost, CronOutcome, CronReceipt, CronSource, CronSpec, OpsResult,
+    };
     use std::path::Path;
+
+    /// Fixture homes live inside the repository their obligations name.
+    fn read(home: &Path) -> OpsResult<Vec<ObligationSegment>> {
+        super::read(home, home.parent().unwrap())
+    }
 
     #[test]
     fn released_obligation_keeps_its_activation_and_identity() {
@@ -1529,9 +1632,10 @@ mod tests {
                 commit: "original".into(),
                 workflow_run_id: Some(42),
             };
-            select(&home, wake.id.as_str(), candidate.clone()).unwrap();
+            select(&home, temp.path(), wake.id.as_str(), candidate.clone()).unwrap();
             settle(
                 &home,
+                temp.path(),
                 wake.id.as_str(),
                 ScheduledReleaseOutcome::Failed {
                     cause: "required verification failed".into(),
@@ -1589,11 +1693,14 @@ mod tests {
                     .id,
                 successor
             );
-            assert!(
-                super::overlap_continuation(&home, retry.id.as_str(), retry.started_at)
-                    .unwrap()
-                    .contains("next configured release due 302400")
-            );
+            assert!(super::overlap_continuation(
+                &home,
+                temp.path(),
+                retry.id.as_str(),
+                retry.started_at
+            )
+            .unwrap()
+            .contains("next configured release due 302400"));
             // Time passing and re-entry cannot expand this execution's frozen coverage.
             let mut reentry = retry.clone();
             reentry.started_at += 86400;
@@ -1637,8 +1744,10 @@ mod tests {
                     })
                     .collect(),
             };
-            super::record_telemetry(&home, recovered.id.as_str(), &telemetry).unwrap();
-            assert!(super::record_telemetry(&home, retry.id.as_str(), &telemetry).is_err());
+            super::record_telemetry(&home, temp.path(), recovered.id.as_str(), &telemetry).unwrap();
+            assert!(
+                super::record_telemetry(&home, temp.path(), retry.id.as_str(), &telemetry).is_err()
+            );
             let published = ScheduledReleaseOutcome::Published {
                 tag: candidate.tag.clone(),
                 commit: candidate.commit.clone(),
@@ -1646,6 +1755,7 @@ mod tests {
             };
             assert!(settle(
                 &home,
+                temp.path(),
                 wake.id.as_str(),
                 published.clone(),
                 &[],
@@ -1654,6 +1764,7 @@ mod tests {
             .is_err());
             settle(
                 &home,
+                temp.path(),
                 recovered.id.as_str(),
                 published.clone(),
                 &[],
@@ -1662,6 +1773,7 @@ mod tests {
             .unwrap();
             settle(
                 &home,
+                temp.path(),
                 recovered.id.as_str(),
                 published,
                 &[],
@@ -1670,6 +1782,7 @@ mod tests {
             .unwrap();
             assert!(settle(
                 &home,
+                temp.path(),
                 retry.id.as_str(),
                 ScheduledReleaseOutcome::Failed {
                     cause: "late interrupted writer".into(),
@@ -1736,6 +1849,7 @@ mod tests {
         let old_owner = begin(&home, &first, &wake).unwrap().unwrap();
         select(
             &home,
+            temp.path(),
             wake.id.as_str(),
             ReleaseSelection {
                 tag: "v1.2.3".into(),
@@ -1782,7 +1896,8 @@ mod tests {
             if now == 208800 {
                 assert!(original[0].next_due_at < now);
             }
-            let continuation = super::overlap_continuation(home, wake.id.as_str(), now).unwrap();
+            let continuation =
+                super::overlap_continuation(home, temp.path(), wake.id.as_str(), now).unwrap();
             assert!(
                 continuation.contains(&format!("next configured release due {next}")),
                 "{continuation}"
@@ -1807,7 +1922,8 @@ mod tests {
         let physical = super::record_overlap(home, &id, &receipt(&job, 300000)).unwrap();
         assert!(physical.contains("closed at 122401"));
         assert!(!physical.contains("next configured release due"));
-        let continuation = super::overlap_continuation(home, wake.id.as_str(), 300000).unwrap();
+        let continuation =
+            super::overlap_continuation(home, temp.path(), wake.id.as_str(), 300000).unwrap();
         assert!(continuation.contains("closed at 122401"));
         assert!(continuation.contains(&format!("lf cron disposition {owner}")));
         assert!(continuation.contains(job.host.machine_id.as_str()));
@@ -1835,7 +1951,8 @@ mod tests {
         let wake = receipt(&job, now);
         begin(&job.host.lf_home, &id, &wake).unwrap();
         let continuation =
-            super::overlap_continuation(&job.host.lf_home, wake.id.as_str(), now).unwrap();
+            super::overlap_continuation(&job.host.lf_home, temp.path(), wake.id.as_str(), now)
+                .unwrap();
         assert!(
             continuation.contains(&format!("next configured release due {next}")),
             "{continuation}"
@@ -1860,7 +1977,7 @@ mod tests {
                 commit: "exact-candidate".into(),
                 workflow_run_id: Some(42),
             };
-            select(&home, wake.id.as_str(), candidate).unwrap();
+            select(&home, temp.path(), wake.id.as_str(), candidate).unwrap();
             let original = read(&home).unwrap().remove(0);
             let closed = 2 * 86400 + 36001;
             match change {
@@ -1901,6 +2018,7 @@ mod tests {
                 );
                 disposition(
                     &home,
+                    temp.path(),
                     &job.wave,
                     subject,
                     TaskId::new(),
@@ -1910,6 +2028,7 @@ mod tests {
                 .unwrap();
                 disposition(
                     &home,
+                    temp.path(),
                     &job.wave,
                     subject,
                     TaskId::new(),
@@ -1931,6 +2050,7 @@ mod tests {
             if change == "home" {
                 assert!(disposition(
                     &job.host.lf_home,
+                    temp.path(),
                     &job.wave,
                     &owner,
                     TaskId::new(),
@@ -1942,6 +2062,7 @@ mod tests {
             // An operation already executing still owns its exact final write.
             settle(
                 &home,
+                temp.path(),
                 wake.id.as_str(),
                 ScheduledReleaseOutcome::Published {
                     tag: "v1.2.3".into(),
@@ -1954,6 +2075,7 @@ mod tests {
             .unwrap();
             assert!(disposition(
                 &home,
+                temp.path(),
                 &job.wave,
                 &owner,
                 TaskId::new(),
@@ -2087,19 +2209,39 @@ mod tests {
             current_receipts: Vec::new(),
             recovery_receipt: Some(CronReceiptId::new()),
         };
-        super::record_telemetry(&spec.host.lf_home, wake.id.as_str(), &prerequisite).unwrap();
-        super::record_telemetry(&spec.host.lf_home, wake.id.as_str(), &prerequisite).unwrap();
+        super::record_telemetry(
+            &spec.host.lf_home,
+            temp.path(),
+            wake.id.as_str(),
+            &prerequisite,
+        )
+        .unwrap();
+        super::record_telemetry(
+            &spec.host.lf_home,
+            temp.path(),
+            wake.id.as_str(),
+            &prerequisite,
+        )
+        .unwrap();
         let mut replacement = prerequisite.clone();
         replacement.recovery_receipt = Some(CronReceiptId::new());
-        assert!(
-            super::record_telemetry(&spec.host.lf_home, wake.id.as_str(), &replacement).is_err()
-        );
+        assert!(super::record_telemetry(
+            &spec.host.lf_home,
+            temp.path(),
+            wake.id.as_str(),
+            &replacement
+        )
+        .is_err());
         let next = receipt(&spec, 36002);
         begin(&spec.host.lf_home, &id, &next).unwrap();
         let before = read(&spec.host.lf_home).unwrap();
-        assert!(
-            super::record_telemetry(&spec.host.lf_home, wake.id.as_str(), &prerequisite).is_err()
-        );
+        assert!(super::record_telemetry(
+            &spec.host.lf_home,
+            temp.path(),
+            wake.id.as_str(),
+            &prerequisite
+        )
+        .is_err());
         let after = read(&spec.host.lf_home).unwrap();
         assert_eq!(after, before);
         let attempts = &after[0].opportunities[0].attempts;
@@ -2125,9 +2267,10 @@ mod tests {
             commit: "prepared".into(),
             workflow_run_id: None,
         };
-        select(home, first.id.as_str(), rejected.clone()).unwrap();
+        select(home, temp.path(), first.id.as_str(), rejected.clone()).unwrap();
         settle(
             home,
+            temp.path(),
             first.id.as_str(),
             ScheduledReleaseOutcome::Failed {
                 cause: "packaged preflight rejected".into(),
@@ -2139,7 +2282,7 @@ mod tests {
         let failed = read(home).unwrap()[0].opportunities[0].attempts[0].clone();
         let retry = receipt(&spec, 36003);
         assert_eq!(begin(home, &id, &retry).unwrap(), Some(owner.clone()));
-        assert!(select(home, retry.id.as_str(), successor.clone()).is_err());
+        assert!(select(home, temp.path(), retry.id.as_str(), successor.clone()).is_err());
         let proof = super::VerificationEvidence {
             name: "release-source-inspection".into(),
             subject: "rejected".into(),
@@ -2147,19 +2290,31 @@ mod tests {
             evidence_path: temp.path().join("inspection"),
             sha256: "digest".into(),
         };
-        super::authorize_replacement(home, retry.id.as_str(), &rejected, proof.clone()).unwrap();
+        super::authorize_replacement(
+            home,
+            temp.path(),
+            retry.id.as_str(),
+            &rejected,
+            proof.clone(),
+        )
+        .unwrap();
         // Interrupted after authorization, before successor selection: still resume the old owner.
         let next = receipt(&spec, 122401);
         assert_eq!(begin(home, &id, &next).unwrap(), Some(owner));
-        assert!(
-            super::authorize_replacement(home, retry.id.as_str(), &rejected, proof.clone())
-                .is_err()
-        );
-        assert!(select(home, retry.id.as_str(), successor.clone()).is_err());
-        assert!(select(home, next.id.as_str(), successor.clone()).is_err());
-        super::authorize_replacement(home, next.id.as_str(), &rejected, proof).unwrap();
-        select(home, next.id.as_str(), successor.clone()).unwrap();
-        assert!(select(home, next.id.as_str(), rejected).is_err());
+        assert!(super::authorize_replacement(
+            home,
+            temp.path(),
+            retry.id.as_str(),
+            &rejected,
+            proof.clone()
+        )
+        .is_err());
+        assert!(select(home, temp.path(), retry.id.as_str(), successor.clone()).is_err());
+        assert!(select(home, temp.path(), next.id.as_str(), successor.clone()).is_err());
+        super::authorize_replacement(home, temp.path(), next.id.as_str(), &rejected, proof)
+            .unwrap();
+        select(home, temp.path(), next.id.as_str(), successor.clone()).unwrap();
+        assert!(select(home, temp.path(), next.id.as_str(), rejected).is_err());
         let record = read(home).unwrap().remove(0);
         let attempts = &record.opportunities[0].attempts;
         assert_eq!(attempts[0], failed);
@@ -2220,6 +2375,7 @@ mod tests {
         let owner = begin(&spec.host.lf_home, &id, &first).unwrap();
         select(
             &spec.host.lf_home,
+            temp.path(),
             first.id.as_str(),
             ReleaseSelection {
                 tag: "v1.2.3".into(),
@@ -2265,6 +2421,7 @@ mod tests {
         begin(&spec.host.lf_home, &id, &first).unwrap();
         settle(
             &spec.host.lf_home,
+            temp.path(),
             first.id.as_str(),
             ScheduledReleaseOutcome::Failed {
                 cause: "verification".into(),
@@ -2292,6 +2449,7 @@ mod tests {
         ));
         assert!(settle(
             &spec.host.lf_home,
+            temp.path(),
             first.id.as_str(),
             ScheduledReleaseOutcome::Running,
             &[],
@@ -2348,6 +2506,7 @@ mod tests {
         }];
         settle(
             &spec.host.lf_home,
+            temp.path(),
             wake.id.as_str(),
             outcome.clone(),
             &verification,
@@ -2356,6 +2515,7 @@ mod tests {
         .unwrap();
         settle(
             &spec.host.lf_home,
+            temp.path(),
             wake.id.as_str(),
             outcome.clone(),
             &verification,
@@ -2364,6 +2524,7 @@ mod tests {
         .unwrap();
         assert!(settle(
             &spec.host.lf_home,
+            temp.path(),
             wake.id.as_str(),
             ScheduledReleaseOutcome::Failed {
                 cause: "late result".into()
@@ -2377,6 +2538,7 @@ mod tests {
         conflicting[0].passed = false;
         assert!(settle(
             &spec.host.lf_home,
+            temp.path(),
             wake.id.as_str(),
             outcome.clone(),
             &conflicting,
@@ -2408,15 +2570,54 @@ mod tests {
         assert_eq!(begin(&spec.host.lf_home, &id, &repeat).unwrap(), None);
     }
     #[test]
+    fn an_unreadable_obligation_stops_only_its_own_repository() {
+        let temp = tempfile::tempdir().unwrap();
+        let ours = temp.path().join("ours");
+        let theirs = temp.path().join("theirs");
+        std::fs::create_dir_all(&ours).unwrap();
+        std::fs::create_dir_all(&theirs).unwrap();
+        let theirs = theirs.canonicalize().unwrap();
+        let mut spec = spec(&ours);
+        spec.host.lf_home = temp.path().join("home");
+        let home = spec.host.lf_home.clone();
+        let id = observe(&spec, 0, 0, "UTC").unwrap();
+        let first = receipt(&spec, 36000);
+        begin(&home, &id, &first).unwrap();
+        super::record_target(&home, &ours, first.id.as_str(), "default").unwrap();
+        let malformed = super::directory(&home).join("malformed.json");
+        std::fs::write(
+            &malformed,
+            serde_json::to_vec(&serde_json::json!({"repo": theirs, "flow": "release-run"}))
+                .unwrap(),
+        )
+        .unwrap();
+
+        super::record_intervention(&home, &ours, "default", "manual release run").unwrap();
+        let error = super::record_intervention(&home, &theirs, "default", "manual release run")
+            .unwrap_err();
+
+        let record = super::read(&home, &ours).unwrap().remove(0);
+        assert_eq!(record.opportunities[0].interventions.len(), 1);
+        assert!(error.to_string().contains("malformed.json"), "{error}");
+    }
+
+    #[test]
     fn manual_repair_and_trigger_provenance_survive_automatic_retry() {
         let temp = tempfile::tempdir().unwrap();
         let spec = spec(temp.path());
         let id = observe(&spec, 0, 0, "UTC").unwrap();
         let first = receipt(&spec, 36000);
         begin(&spec.host.lf_home, &id, &first).unwrap();
-        super::record_target(&spec.host.lf_home, first.id.as_str(), "default").unwrap();
+        super::record_target(
+            &spec.host.lf_home,
+            temp.path(),
+            first.id.as_str(),
+            "default",
+        )
+        .unwrap();
         settle(
             &spec.host.lf_home,
+            temp.path(),
             first.id.as_str(),
             ScheduledReleaseOutcome::Failed {
                 cause: "missing check".into(),
@@ -2450,6 +2651,62 @@ mod tests {
             requests[0].error.as_deref(),
             Some("ambiguous launchctl failure")
         );
+    }
+
+    #[test]
+    fn a_manual_dequeue_is_an_intervention_in_only_its_scheduled_opportunity() {
+        let temp = tempfile::tempdir().unwrap();
+        let spec = spec(temp.path());
+        let home = &spec.host.lf_home;
+        let id = observe(&spec, 0, 0, "UTC").unwrap();
+        let stopped = receipt(&spec, 36000);
+        begin(home, &id, &stopped).unwrap();
+        super::record_target(home, temp.path(), stopped.id.as_str(), "default").unwrap();
+        let error = crate::ops::OpsError::ManualMergeRemoval {
+            pr_number: 1700,
+            actor: Some("jack-heart".into()),
+            at: chrono::DateTime::from_timestamp(36030, 0).unwrap(),
+            queued: true,
+        };
+        super::settle_error(
+            home,
+            temp.path(),
+            "default",
+            stopped.id.as_str(),
+            &error,
+            &[],
+            36060,
+        )
+        .unwrap();
+        let next = receipt(&spec, 86400 + 36000);
+        begin(home, &id, &next).unwrap();
+        super::record_target(home, temp.path(), next.id.as_str(), "default").unwrap();
+        super::settle_error(
+            home,
+            temp.path(),
+            "default",
+            next.id.as_str(),
+            &crate::ops::OpsError::Message("release verification failed".into()),
+            &[],
+            86400 + 36060,
+        )
+        .unwrap();
+
+        let record = read(home).unwrap().remove(0);
+        let operations: Vec<_> = record.opportunities[0]
+            .interventions
+            .iter()
+            .map(|i| i.operation.as_str())
+            .collect();
+        assert_eq!(
+            operations,
+            ["jack-heart removed release PR #1700 from the merge queue"]
+        );
+        assert!(matches!(
+            record.opportunities[0].attempts[0].outcome,
+            ScheduledReleaseOutcome::Failed { .. }
+        ));
+        assert!(record.opportunities[1].interventions.is_empty());
     }
 
     #[test]

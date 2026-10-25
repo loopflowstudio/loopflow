@@ -454,9 +454,13 @@ pub(crate) const SILENCE_SECONDS: i64 = 600;
 /// accounts, provider sessions, usage, how each turn ended, and each silence
 /// longer than [`SILENCE_SECONDS`]. Provider text already lives in the
 /// provider's own transcript.
+///
+/// A usage stream is cumulative, so history keeps one row per stream and turn
+/// at its first event's position; the store merges each later observation in.
 #[derive(Debug, Default)]
 struct RetainedHistory {
     previous: Option<OffsetDateTime>,
+    usage_streams: HashMap<String, u64>,
 }
 
 impl RetainedHistory {
@@ -473,14 +477,181 @@ impl RetainedHistory {
                     serde_json::json!({"since": since.unix_timestamp(), "observed_at": at.unix_timestamp()}),
                 )
             });
-        let fact = retained_in_history(&event.event).then(|| {
-            (
-                format!("events.jsonl:{}", event.seq),
-                serde_json::json!(event),
-            )
-        });
+        let position = match &event.event {
+            CaptureEvent::Usage {
+                provider,
+                attempt_key,
+                turn_key,
+                usage_stream_id,
+                ..
+            } => *self
+                .usage_streams
+                .entry(identity([provider, attempt_key, turn_key, usage_stream_id]))
+                .or_insert(event.seq),
+            _ => event.seq,
+        };
+        let fact = retained_in_history(&event.event)
+            .then(|| (format!("events.jsonl:{position}"), serde_json::json!(event)));
         silence.into_iter().chain(fact).collect()
     }
+}
+
+/// What one retained usage row measures: a provider's stream within one
+/// attempt's turn. A provider can continue one stream across turns.
+pub(crate) fn usage_identity(evidence: &serde_json::Value) -> Option<String> {
+    (evidence["type"] == "usage").then(|| {
+        identity(
+            ["provider", "attempt_key", "turn_key", "usage_stream_id"]
+                .map(|field| evidence[field].as_str().unwrap_or_default()),
+        )
+    })
+}
+
+fn identity(parts: [&str; 4]) -> String {
+    parts.join("\u{0}")
+}
+
+/// Merge a later observation of one usage stream into the retained one, as
+/// `{input_id, source, evidence}` observations. The reducer reads each stream's
+/// counters as their maximum, so the merged row keeps exactly what every
+/// observation added. `None` when either is not usage of the same
+/// [`usage_identity`].
+pub(crate) fn merge_usage_observation(
+    saved: &serde_json::Value,
+    later: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let read = |observation: &serde_json::Value| {
+        serde_json::from_value::<EventEnvelope>(observation["evidence"].clone()).ok()
+    };
+    let identity = usage_identity(&saved["evidence"])?;
+    if usage_identity(&later["evidence"])? != identity {
+        return None;
+    }
+    let (mut kept, next) = (read(saved)?, read(later)?);
+    let (
+        CaptureEvent::Usage {
+            model,
+            observation_seq,
+            start_known,
+            final_receipt,
+            usage,
+            ..
+        },
+        CaptureEvent::Usage {
+            model: next_model,
+            observation_seq: next_seq,
+            start_known: next_start_known,
+            final_receipt: next_final,
+            usage: next_usage,
+            ..
+        },
+    ) = (&mut kept.event, next.event)
+    else {
+        return None;
+    };
+    let max = |kept: &mut Option<u64>, next: Option<u64>| *kept = (*kept).max(next);
+    max(&mut usage.input_tokens, next_usage.input_tokens);
+    max(&mut usage.output_tokens, next_usage.output_tokens);
+    max(&mut usage.total_input_tokens, next_usage.total_input_tokens);
+    max(&mut usage.peak_input_tokens, next_usage.peak_input_tokens);
+    max(
+        &mut usage.context_window_tokens,
+        next_usage.context_window_tokens,
+    );
+    max(&mut usage.reasoning_tokens, next_usage.reasoning_tokens);
+    max(&mut usage.cache_read_tokens, next_usage.cache_read_tokens);
+    max(&mut usage.cache_write_tokens, next_usage.cache_write_tokens);
+    usage.cost_usd = match (usage.cost_usd, next_usage.cost_usd) {
+        (Some(kept), Some(next)) => Some(kept.max(next)),
+        (kept, next) => kept.or(next),
+    };
+    if next_usage.model.is_some() {
+        usage.model = next_usage.model;
+    }
+    if next_model.is_some() {
+        *model = next_model;
+    }
+    *observation_seq = (*observation_seq).max(next_seq);
+    *start_known &= next_start_known;
+    *final_receipt |= next_final;
+    kept.observed_at = kept.observed_at.max(next.observed_at);
+    let mut merged = saved.clone();
+    merged["evidence"] = serde_json::json!(kept);
+    Some(merged)
+}
+
+/// The key of a native usage receipt within its turn. OpenCode reports one
+/// counter per assistant message; every other provider one per turn.
+pub(crate) fn native_usage_key(payload: &serde_json::Value) -> String {
+    match payload["provider"].as_str() {
+        Some("opencode") => payload["message"]["id"].as_str().unwrap_or_default().into(),
+        _ => String::new(),
+    }
+}
+
+/// The key of native usage receipts that arrived after the thread's next turn
+/// began at `started`.
+pub(crate) fn late_usage_key(key: &str, started: i64) -> String {
+    format!("{key}:after:{started}")
+}
+
+/// Merge a later native usage receipt into the retained one. Codex reports
+/// thread-cumulative `total` and the latest request as `last`: the turn keeps
+/// its first receipt's baseline (`total - last`), the largest total of each
+/// counter, whether any counter ever went backwards, and its largest request.
+/// Other providers report the turn's or message's own cumulative counter.
+pub(crate) fn merge_native_usage(
+    saved: &serde_json::Value,
+    later: &serde_json::Value,
+) -> serde_json::Value {
+    let mut merged = later.clone();
+    if later.get("total").is_some() {
+        merged["baseline"] = native_baseline(saved);
+        merged["peakInputTokens"] = native_peak(saved).max(native_peak(later)).into();
+        let mut regressed = saved["regressed"] == true;
+        if let Some(totals) = merged["total"].as_object_mut() {
+            for (key, total) in totals {
+                if let Some(saved) = saved["total"][key.as_str()].as_u64() {
+                    regressed |= total.as_u64().is_some_and(|later| later < saved);
+                    *total = total
+                        .as_u64()
+                        .map_or(saved, |later| later.max(saved))
+                        .into();
+                }
+            }
+        }
+        if regressed {
+            merged["regressed"] = true.into();
+        }
+    }
+    if saved["final"] == true {
+        merged["final"] = true.into();
+    }
+    merged
+}
+
+/// Codex counters before the turn's first request.
+fn native_baseline(receipt: &serde_json::Value) -> serde_json::Value {
+    if receipt["baseline"].is_object() {
+        return receipt["baseline"].clone();
+    }
+    let total = receipt["total"].as_object().into_iter().flatten();
+    total
+        .filter_map(|(key, value)| {
+            let before = value
+                .as_u64()?
+                .checked_sub(receipt["last"][key].as_u64()?)?;
+            Some((key.clone(), serde_json::json!(before)))
+        })
+        .collect::<serde_json::Map<_, _>>()
+        .into()
+}
+
+/// The largest single Codex request in the turn.
+fn native_peak(receipt: &serde_json::Value) -> Option<u64> {
+    receipt["peakInputTokens"]
+        .as_u64()
+        .or(receipt["last"]["inputTokens"].as_u64())
 }
 
 /// The store's retention prune applies the same rule to earlier captures.
@@ -857,15 +1028,8 @@ fn recover_native_usage(
                     .max()
             })
         };
-        let baseline = |key: &str| {
-            prior_total(key).or_else(|| {
-                field(&first.payload, "total", key)?.checked_sub(field(
-                    &first.payload,
-                    "last",
-                    key,
-                )?)
-            })
-        };
+        let baseline =
+            |key: &str| prior_total(key).or_else(|| native_baseline(&first.payload)[key].as_u64());
         let known = start.is_some()
             && [
                 "inputTokens",
@@ -885,6 +1049,9 @@ fn recover_native_usage(
                 gaps += 1;
                 continue;
             };
+            if last.payload["regressed"] == true {
+                gaps += 1;
+            }
             let delta = |key: &str| field(&last.payload, "total", key)?.checked_sub(baseline(key)?);
             let gross = delta("inputTokens");
             let cached = delta("cachedInputTokens");
@@ -894,7 +1061,7 @@ fn recover_native_usage(
                     .and_then(|(gross, cached)| gross.checked_sub(cached)),
                 output_tokens: delta("outputTokens"),
                 total_input_tokens: gross,
-                peak_input_tokens: field(&last.payload, "last", "inputTokens"),
+                peak_input_tokens: native_peak(&last.payload),
                 context_window_tokens: last.payload["modelContextWindow"].as_u64(),
                 reasoning_tokens: delta("reasoningOutputTokens"),
                 cache_read_tokens: cached,
@@ -3859,6 +4026,76 @@ mod tests {
             serde_json::json!({"since": 1_790_000_100, "observed_at": 1_790_000_800})
         );
         assert_eq!(sources[1].0, "events.jsonl:2");
+    }
+
+    #[test]
+    fn history_keeps_one_row_per_usage_stream_with_what_every_observation_added() {
+        let home = tempfile::tempdir().unwrap();
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("store.db"))
+                .unwrap();
+        let input = super::new_artifact_key();
+        let session = store.test_session("conversation", &input);
+        let usage = |seq: u64, total: u64, peak: u64| EventEnvelope {
+            schema_version: SCHEMA_VERSION,
+            seq,
+            observed_at: OffsetDateTime::from_unix_timestamp(1_790_000_000 + seq as i64).unwrap(),
+            event: CaptureEvent::Usage {
+                usage_stream_id: "stream".into(),
+                provider: "claude".into(),
+                model: None,
+                attempt_key: "attempt".into(),
+                turn_key: "turn".into(),
+                observation_seq: seq,
+                counter_kind: "cumulative".into(),
+                start_known: true,
+                final_receipt: seq == 6,
+                usage: Box::new(TurnUsage {
+                    total_input_tokens: Some(total),
+                    output_tokens: Some(total / 10),
+                    peak_input_tokens: Some(peak),
+                    ..TurnUsage::default()
+                }),
+            },
+        };
+        let mut history = RetainedHistory::default();
+        // The middle request is the turn's largest; the last carries its totals.
+        for event in [usage(2, 100, 100), usage(4, 400, 300), usage(6, 500, 100)] {
+            for (source, evidence) in history.admit(&event) {
+                assert_eq!(source, "events.jsonl:2");
+                store
+                    .retain_session_observation(
+                        &session,
+                        &crate::session::SessionObservation {
+                            artifact_key: input.clone(),
+                            source: source.clone(),
+                            observed_at: 1,
+                            task_id: None,
+                            wave_id: None,
+                            payload: serde_json::json!({"input_id":input,"source":source,"evidence":evidence}),
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+        assert_eq!(store.input_events(&input).unwrap().len(), 1);
+        // A provider can continue the stream into the next turn: that turn keeps its own row.
+        let mut next_turn = usage(8, 600, 100);
+        if let CaptureEvent::Usage { turn_key, .. } = &mut next_turn.event {
+            *turn_key = "next".into();
+        }
+        assert_eq!(history.admit(&next_turn)[0].0, "events.jsonl:8");
+        let usage = store.input_history(&input).unwrap().usage;
+        assert_eq!(
+            (
+                usage.streams,
+                usage.final_streams,
+                usage.total_input_tokens,
+                usage.output_tokens,
+                usage.peak_input_tokens
+            ),
+            (1, 1, Some(500), Some(50), Some(300))
+        );
     }
 
     #[test]

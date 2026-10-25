@@ -95,7 +95,7 @@ ones. Every visible pane has a Work owner by construction.
   shell at a time.
 - **browser** — tabs: `files` (the Task's Files view, which keeps its own document
   tabs and drafts), `graph-log`, and URL tabs (`WKWebView`; http/https only,
-  back/reload, no address bar beyond the URL). Files and Graph log stop being pane kinds.
+  Back/Forward/Reload and a read-only address). Files and Graph log stop being pane kinds.
 
 Wave and repository workspaces have only the session pane (shell and browser
 already require a Task). `empty` panes and free splitting are gone.
@@ -255,8 +255,8 @@ One PR; deepest deletion first.
    `MultiplexerStore(taskId:)` builds the designated tree with stable pane IDs
    `session`, `shell`, `browser` (migrated layouts keep theirs). Close hides a
    pane; ⌘W closes the selected shell/browser tab and the last tab hides the pane.
-   Opening a conversation switches the session pane in place. `BrowserPageView`
-   is a `WKWebView` with swipe back/forward only.
+   Opening a conversation switches the session pane in place. URL tabs are
+   `WKWebView`s (page controls under slice 3).
 2. **Action registry — implemented 2026-10-24.** `LoopflowMac/DesktopActions.swift`
    holds every action (name, title, scope, args, default `DesktopKeyBinding`s,
    `available`, `perform`); `DesktopActionMonitor`, View/File menus, Keyboard

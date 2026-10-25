@@ -10,29 +10,20 @@ and then read settled state. `-b` still waits for the Graph and its arrival.
 Repair: tests that read state after a run now use `lf -b task run`. Tests that exercise detaching
 (task_graph_launch_tests) or refusals and no-Graph edges are unchanged.
 
-Verification (12-step Graph probe to widen the window, CPU saturated with `yes` per core, 5 rounds × 2 tests):
-- before (bare `task run`): 10/10 failed, same lines 3823/3919 as CI
-- after (`-b`): 0/10 failed
-- unmodified tests, loaded, before fix: 0/20 failed locally (window too narrow to hit without the probe)
-- `cargo test --lib local_planning`: 39 passed, 1 failed, `store::sqlite::children::…task_labels_and_generated_names…`
-  ("capture does not belong to a recorded Session in this Machine"). Deterministic here, untouched by this diff,
-  green on main CI: looks local to this machine, left to CI.
-- `cargo test --test two_people`: ok. clippy -D warnings: ok.
-
-After rebasing onto `385b6a66ea` (2026-10-25), the conflict with #1679's poll loop (`a0ef70f1e7`) was resolved
-by keeping `-b` and deleting the loop. The same probe on the rebased branch gives 10/10 failures before
-(at :3823 and :3927) and 0/10 after. These tests compile into the lib target (`src/lib.rs` `#[path]`), so
-run them as `cargo test -p loopflow --lib local_planning::<name>`. A `--test integration` filter matches
-nothing. Keep the probe at 12 steps: at 40 steps both reads land mid-edge and agree, which hides the race.
+Verification on the rebased branch (12-step Graph probe to widen the window, CPU saturated with `yes`
+per core, 5 rounds × 2 tests): bare `task run` 10/10 failed at the CI lines (:3823, :3927); `-b` 0/10.
+Unmodified tests never failed locally without the probe (0/20). Keep the probe at 12 steps: at 40 both
+reads land mid-edge and agree, hiding the race. These tests compile into the lib target (`src/lib.rs`
+`#[path]`): run `cargo test -p loopflow --lib local_planning::<name>`; a `--test integration` filter
+matches nothing. `cargo test --test two_people` ok; clippy ok. One unrelated lib failure
+(`store::sqlite::children::…task_labels_and_generated_names…`, "capture does not belong to a recorded
+Session in this Machine") is deterministic on this machine, green on main CI: left to CI.
 
 ## Why it happened (5 whys)
 
 **Affected.** PR #1679 (LOO-583) went red in CI and spent a ci-fix round; PR #1678 (LOO-579) was
 evicted from the merge queue (`failed_checks`, run 40173940518) and re-armed by hand. Both have
-since merged. **Recovery:** main (`385b6a66ea`) still races at `workflow_defaults_follow_task_wave_and_repository`
-(bare `task run` at :3915 and :3973), `waveless_task_lifecycle`'s standalone runs (:3864–3865) and
-`two_people`'s takeover. This branch fixes all four, is unpublished (no PR), and must rebase onto main,
-where it conflicts with `a0ef70f1e7`'s poll loop.
+since merged.
 
 1. **Why did the assertions see a different `history`?** The tests read `task workflow show` while the
    edge's Graph had not yet written its arrival. Evidence: the CI diffs differ only in `history`;
@@ -72,32 +63,18 @@ the failing line, not to the class it belongs to.
 - Unanswered: whether other commands that went "returns once running" (if any) have the same test
   exposure. Only `task run` was checked.
 
-### Prevention (proposed, not approved)
+### Prevention
 
-1. **Converge on one waiting form.** After the rebase, keep `-b` in `waveless_task_lifecycle` and
-   delete `a0ef70f1e7`'s poll loop, so no hand-rolled deadline remains. Proof: the probe run from
-   Verification above, 0/10 failures.
-   The Task brief asked for a shared fixture helper, but `-b` is already the product's
-   waited form and needs no helper.
-2. **Name the rule where tests are written.** One line in AGENTS.md's Rust-tests list: "A test that
-   reads state a run writes uses the waited form (`lf -b task run`); bare `task run` returns once the
-   Graph registers." This is cheap, and it's the place the #1675 author and later test writers read.
-3. **Callers inventory for return-point changes.** When a PR changes when a command returns, grep
-   its argv in `rust/loopflow/tests/` as well as docs/skills (`grep -rn '"task", "run"'`). This would
-   have caught all four sites in #1675. A process note for implement/gate, not code.
-4. **ci-fix sweeps the class.** When ci-fix diagnoses a race, it should grep for sibling call sites
-   of the same pattern before committing. Proof would be a replay of #1679's failure with that
-   prompt; unmeasured. Weigh against ci-fix's mandate to stay narrow.
-5. Not proposed: a test-only delay knob in `task run` to widen the window in CI. It reshapes
-   production code for tests, and the probe already shows the race on demand.
+Done here: `-b` is the one waiting form (the #1679 poll loop is deleted; the Task brief's shared
+fixture helper is unnecessary), and AGENTS.md's Rust-tests list names the rule and the
+`grep -rn '"task", "run"' rust/loopflow/tests/` inventory for return-point changes.
 
-## Execution decision (launch-plan, 2026-10-25)
+## Deferred, not filed
 
-Done on this branch: rebase plus poll-loop deletion (prevention 1), and the AGENTS.md Rust-tests rule
-naming `lf -b task run` and the `grep -rn '"task", "run"' rust/loopflow/tests/` inventory (preventions 2–3).
-
-Deferred, not filed:
-- ci-fix sweeping sibling call sites (prevention 4): unmeasured and pulls against ci-fix's narrow
-  mandate. File only if another race repair stops at one line.
+- ci-fix grepping sibling call sites when it diagnoses a race: unmeasured (proof would be a replay of
+  #1679's failure) and pulls against ci-fix's narrow mandate. File only if another race repair stops
+  at one line.
 - Auditing every bare `task run` in `global_commands.rs`, and other "returns once running" commands:
   no failure evidence; the AGENTS.md rule covers new callers.
+- Not proposed: a test-only delay knob in `task run`. It reshapes production code for tests, and the
+  probe already shows the race on demand.

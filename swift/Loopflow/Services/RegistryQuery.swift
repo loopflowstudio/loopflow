@@ -22,16 +22,10 @@ public struct RegistryQueryError: LocalizedError, Sendable {
 /// wave); machine-wide reads such as `lf wave list` ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
-/// Starts an `lf` argv that runs as long as its work does and returns once it
-/// is under way, throwing an immediate refusal. A transport without one waits
-/// for the command through its `RegistryRunner`.
-public typealias RegistryStarter = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> Void
-
 public struct RegistryQuery: Sendable {
     public private(set) var remoteMachine: String?
     private var run: RegistryRunner
     private var runWithInput: @Sendable ([String], String?, String) async throws -> String
-    private let start: RegistryStarter?
     private let observeFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)?
     private let observeWork: (@Sendable () async throws -> WorkObservation)?
 
@@ -41,12 +35,10 @@ public struct RegistryQuery: Sendable {
         },
         watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
         watchWork: (@Sendable () async throws -> WorkObservation)? = nil,
-        start: RegistryStarter? = nil,
         run: @escaping RegistryRunner
     ) {
         self.runWithInput = runWithInput
         self.run = run
-        self.start = start
         self.observeFiles = watchFiles
         self.observeWork = watchWork
     }
@@ -115,9 +107,6 @@ public struct RegistryQuery: Sendable {
         }, watchFiles: { [observeFiles] args, _ in
             guard let observeFiles else { throw RegistryQueryError("Live file observation is unavailable on this transport") }
             return try await observeFiles(prefix + args, nil)
-        }, start: { [run, start] args, _ in
-            if let start { try await start(prefix + args, nil) }
-            else { _ = try await run(prefix + args, nil) }
         }) { [run] args, _ in
             try await run(prefix + args, nil)
         }
@@ -362,26 +351,18 @@ public struct RegistryQuery: Sendable {
         try await run(["graph", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Run a fresh Graph for the Task headless, placing it when needed. Without
-    /// `graph`, Rust takes the Task's edge or its Project's workflow.
+    /// Start a fresh Graph for the Task, placing it when needed; returns once it
+    /// runs. Without `graph`, Rust takes the Task's edge or its Project's workflow.
     public func runTask(issue: String, graph: String?, cwd: String?) async throws {
-        var args = ["-b", "task", "run", issue]
+        var args = ["task", "run", issue]
         if let graph { args.append(graph) }
-        if let start {
-            try await start(args, cwd)
-        } else {
-            _ = try await run(args, cwd)
-        }
+        _ = try await run(args, cwd)
     }
 
     /// Reopen every conversation on this Machine that a restart or crash cut off,
     /// each in its own owner with no viewer; panes attach when they show it.
     public func resumeInterrupted() async throws {
-        if let start {
-            try await start(["resume", "--all"], nil)
-        } else {
-            _ = try await run(["resume", "--all"], nil)
-        }
+        _ = try await run(["resume", "--all"], nil)
     }
 
     /// Put the Task at a node of its Workflow without running anything.

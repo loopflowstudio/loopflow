@@ -33,8 +33,7 @@ pub enum OpsError {
         reason: String,
         continuation: String,
     },
-    /// A person dequeued the release PR or disabled its auto-merge after this
-    /// run armed it.
+    /// A person dequeued the release PR or disabled its auto-merge.
     #[error(
         "release PR #{pr_number} was {} by {} at {}; the release stops. Run `lf release run` to resume.",
         if *.queued { "removed from the merge queue" } else { "taken off auto-merge" },

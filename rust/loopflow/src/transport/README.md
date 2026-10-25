@@ -11,7 +11,8 @@ Ctrl+] detaches a viewer. Ctrl+C in an attached terminal reaches the running
 program. A Task step's live controls (`/status`, `/interrupt`, `/detach`,
 messages) are shown to each controlling viewer as it attaches; headless output
 and observers never see them. Closing a terminal leaves execution, provider requests and capture
-settlement with the detached owner. Observing takes no input claim; a controlling
+settlement with the detached owner; `lf session list` shows its Session as
+`detached` and `lf connect` reattaches it. Observing takes no input claim; a controlling
 attachment revokes the previous viewer's input token. `--if-free` refuses when
 another viewer controls input. Desktop uses it for restoration; it never displaces
 a viewer just because a pane becomes visible. `session attach --prepare --json`

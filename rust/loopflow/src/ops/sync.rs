@@ -25,7 +25,6 @@ pub struct SyncOptions {
 pub enum SyncClass {
     StaleEmpty,
     ScratchOnly,
-    GeneratedOnly,
     CleanAuthored,
     Protected,
 }
@@ -117,11 +116,10 @@ pub fn plan_sync(
         (SyncClass::ScratchOnly, SyncStrategy::ResetToBase)
     } else if unique_commits == 0 && changed_files.is_empty() {
         (SyncClass::StaleEmpty, SyncStrategy::ResetToBase)
-    } else if has_non_scratch_changes {
-        (SyncClass::CleanAuthored, SyncStrategy::MergeTarget)
-    } else if scratch_only || generated_only(repo, comparison_base)? {
-        (SyncClass::GeneratedOnly, SyncStrategy::ResetToBase)
     } else {
+        // The branch's own commits are work, whatever they touch. Callers can
+        // stash edits before syncing, so a commit that looks disposable here
+        // may be the base those hidden edits were written against.
         (SyncClass::CleanAuthored, SyncStrategy::MergeTarget)
     };
     // Stacked children retain their history when integrating the parent.
@@ -176,7 +174,20 @@ pub fn sync_with_recovery(
             target_sha,
         });
     }
-    start_owned_sync(repo, options, false, progress)
+    start_owned_sync(repo, options, None, false, progress)
+}
+
+/// Execute a plan the caller classified before hiding the checkout's edits,
+/// with its target already fetched. Planning again on the cleaned tree would
+/// judge the branch without its work, and record one strategy while running
+/// another.
+pub fn sync_with_plan(
+    repo: &Path,
+    options: &SyncOptions,
+    plan: &SyncPlan,
+    progress: &impl Progress,
+) -> OpsResult<SyncVerification> {
+    start_owned_sync(repo, options, Some(plan), false, progress)
 }
 
 /// Delivery must not publish an empty tree, even for an unmanaged branch.
@@ -185,7 +196,7 @@ pub(crate) fn sync_for_delivery(
     options: &SyncOptions,
     progress: &impl Progress,
 ) -> OpsResult<SyncVerification> {
-    start_owned_sync(repo, options, true, progress)
+    start_owned_sync(repo, options, None, true, progress)
 }
 
 /// Continue a local sync after its conflict paths have been resolved.
@@ -248,14 +259,22 @@ pub fn recover_sync(
 fn start_owned_sync(
     repo: &Path,
     options: &SyncOptions,
+    plan: Option<&SyncPlan>,
     require_changes: bool,
     progress: &impl Progress,
 ) -> OpsResult<SyncVerification> {
     let mut operation = begin_sync_operation(repo, &options.onto)?;
     let tracked_dirty = tracked_dirty_state(repo)?;
-    fetch_target(repo, &options.onto)?;
+    let planned;
+    let plan = match plan {
+        Some(plan) => plan,
+        None => {
+            fetch_target(repo, &options.onto)?;
+            planned = plan_sync(repo, Some(&options.onto), options.fork_base.clone())?;
+            &planned
+        }
+    };
     let target_sha = rev_parse(repo, &options.onto)?;
-    let plan = plan_sync(repo, Some(&options.onto), options.fork_base.clone())?;
     operation.pin_target(target_sha.clone())?;
     revalidate_start(repo, operation.owner())?;
 
@@ -268,7 +287,7 @@ fn start_owned_sync(
     validate_fork_base(repo, options.fork_base.as_deref())?;
 
     if matches!(plan.strategy, SyncStrategy::ResetToBase) {
-        reset_to_base(repo, &plan, progress)?;
+        reset_to_base(repo, plan, progress)?;
         return finish_sync(repo, operation, &expected, options.push);
     }
     if matches!(plan.strategy, SyncStrategy::Noop) {
@@ -771,20 +790,6 @@ fn dirty_paths(repo: &Path) -> OpsResult<Vec<PathBuf>> {
         .collect())
 }
 
-fn generated_only(repo: &Path, base_ref: &str) -> OpsResult<bool> {
-    let stdout = git(repo, &["log", "--format=%s", &format!("{base_ref}..HEAD")])?;
-    let subjects = stdout
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .collect::<Vec<_>>();
-    Ok(!subjects.is_empty()
-        && subjects.iter().all(|subject| {
-            subject.starts_with("checkpoint:")
-                || subject.starts_with("wip:")
-                || subject.contains("generated")
-        }))
-}
-
 fn is_protected_path(path: &Path) -> bool {
     path.starts_with(Path::new(".lf/wave"))
         || path.starts_with(Path::new(".lf/skills"))
@@ -796,7 +801,6 @@ pub fn sync_class_name(class: &SyncClass) -> &'static str {
     match class {
         SyncClass::StaleEmpty => "stale_empty",
         SyncClass::ScratchOnly => "scratch_only",
-        SyncClass::GeneratedOnly => "generated_only",
         SyncClass::CleanAuthored => "clean_authored",
         SyncClass::Protected => "protected",
     }

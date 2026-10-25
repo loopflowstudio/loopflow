@@ -91,8 +91,9 @@ lf --repo ./another-checkout list
 lf --task EXP-12 skill design       # contribute in the Task's checkout
 lf --wt csv-export : "Add CSV export"
 lf --wave exports : "Review the goal" # add context in the current directory
-lf -b task run EXP-12       # place the Task, run its default
-lf -b task run EXP-12 pursue # take the workflow edge that runs pursue
+lf task run EXP-12          # place the Task, start its default, return once it runs
+lf task run EXP-12 pursue   # take the workflow edge that runs pursue
+lf -b task run EXP-12       # the same, waiting until its Graph ends
 lf task run EXP-12 end       # take an edge that runs nothing
 lf task workflow move EXP-12 demo     # put the Task at a node, running nothing
 lf --task EXP-12 graph incident # run a Graph without moving the Task
@@ -266,7 +267,7 @@ lf graph customize pursue                # print its local source path
 A Graph whose process died leaves its Processes as history. No command resumes it. To change direction or recover:
 
 ```bash
-lf task interrupt EXP-12             # end the active provider turn
+lf task interrupt EXP-12             # stop its running Graph
 lf task status EXP-12                # the latest Graph and all Task work
 lf graph show ID --processes --json   # one Graph's steps, by its Graph process ID
 lf -b task run EXP-12       # run fresh work
@@ -594,7 +595,7 @@ lf connect                         # this repository's one ongoing conversation
 lf connect --wave growth            # open a Wave's primary conversation
 lf connect --task EXP-12 --prepare  # prepare a Task conversation without launching
 lf --task EXP-12 skill task-session # another conversation about that Task
-lf connect SESSION                 # continue this exact conversation
+lf connect SESSION                 # continue this exact conversation, or a Task identifier
 lf connect --fresh                 # fresh conversation for the same scope
 lf context --task EXP-12 --json     # effective context limits, sources and usage
 lf wt timing                        # how long real `lf wt list` runs took here
@@ -609,7 +610,8 @@ explicit client closes stay quiet. These observations never settle a turn.
 
 `lf connect` opens the repository, Wave or Task's ongoing conversation for this
 checkout, creating one when absent. `resume` is an exact alias. Explicit `--repo`,
-`--wave`, `--task`, or a Session ID overrides the checkout's scope. An unassociated
+`--wave`, `--task`, or a Session ID overrides the checkout's scope; a Task identifier
+in place of the Session ID opens that Task's, as `--task` does. An unassociated
 linked checkout continues the conversation last opened there; ordinary `lf`
 starts a new one. First creation uses the matching scope's session skill, including its
 operating instructions. Reopening keeps those instructions and native history.
@@ -633,7 +635,8 @@ the Task's checkout when none exists. The others stay open, and listing Sessions
 never picks or starts one.
 
 Use `lf connect` in the Task checkout, or `lf connect SESSION`,
-to reopen the same conversation after a failed terminal launch. Retained native
+to reopen the same conversation after a failed terminal launch. A Session whose
+terminal closed while its agent runs lists as `detached`; connecting reattaches it. Retained native
 history survives retries. A recorded interactive provider observed dead can reopen
 without manual repair; a live or unknown provider cannot be started twice.
 Explicitly connecting to a replaced Session preserves its history and leaves
@@ -748,7 +751,9 @@ past already-merged history, including squash merges. PR operations also work on
 ordinary branches without creating a Task.
 Arm and bare land return after recording delivery. `--wait-and-fix` observes and repairs
 its PR every 15 seconds until verified merge, closure, a concrete blocker or
-interruption, including with Desktop closed. Elapsed time never ends the wait or
+interruption, including with Desktop closed. Only a person's dequeue or disabled
+auto-merge blocks it; a queue eviction or other dropped request becomes a CI
+incident whose repair re-arms. Elapsed time never ends the wait or
 triggers a rerun. Interruption leaves the intent intact. Repeating land for a merged
 Task PR with no new work succeeds and reports whether Task completion remains.
 With new work, the same command prepares its next PR.

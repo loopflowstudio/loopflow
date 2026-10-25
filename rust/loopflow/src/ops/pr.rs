@@ -776,22 +776,193 @@ fn parse_pr_merge(output: &[u8]) -> OpsResult<PrMergeObservation> {
     })
 }
 
-/// A person's removal of a PR's merge request: a manual merge-queue dequeue or
-/// a manually disabled auto-merge.
+/// A person dequeued a PR or disabled its auto-merge.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ManualMergeRemoval {
+pub(crate) struct ManualRemoval {
     pub at: chrono::DateTime<chrono::Utc>,
     pub actor: Option<String>,
+    /// Removed from the merge queue rather than taken off auto-merge.
     pub queued: bool,
 }
 
-/// The latest manual removal of `number`'s merge request after `since`.
-pub(crate) fn manual_merge_removal_since(
+/// Why an open PR has no merge request, read from its latest merge-request event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MergeRequestRemoval {
+    Manual(ManualRemoval),
+    /// A Loopflow CI repair disarmed it while repairing this PR.
+    ByLoopflow,
+    /// GitHub's queue dropped it; `run_url` is the merge-group run for this entry.
+    Evicted {
+        reason: String,
+        run_url: Option<String>,
+    },
+    /// The queue removed it because it merged; the PR read has not caught up.
+    Merged,
+    /// No timeline event explains the missing request.
+    Unknown,
+}
+
+/// The lifetime of one CI repair on a PR; `end` is absent while it still runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepairWindow {
+    pub start: chrono::DateTime<chrono::Utc>,
+    pub end: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl RepairWindow {
+    fn contains(&self, at: chrono::DateTime<chrono::Utc>) -> bool {
+        self.start <= at && self.end.is_none_or(|end| at <= end)
+    }
+}
+
+/// GitHub runs every removal with the same token, so actor and reason cannot
+/// tell Loopflow from a person; only Loopflow's own repair windows can.
+pub(crate) fn merge_request_removal(
     repo: &Path,
     number: u64,
-    since: chrono::DateTime<chrono::Utc>,
-) -> OpsResult<Option<ManualMergeRemoval>> {
-    let query = "query LoopflowPrMergeRemovals($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){timelineItems(last:20,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT,AUTO_MERGE_DISABLED_EVENT]){nodes{__typename ... on RemovedFromMergeQueueEvent{createdAt reason actor{login}} ... on AutoMergeDisabledEvent{createdAt reason reasonCode actor{login}}}}}}}";
+    repairs: &[RepairWindow],
+) -> OpsResult<MergeRequestRemoval> {
+    removal_from_events(
+        merge_request_events(repo, number)?,
+        repairs,
+        |added, removed| merge_group_run(repo, number, added, removed),
+    )
+}
+
+fn removal_from_events(
+    mut events: Vec<MergeRequestEvent>,
+    repairs: &[RepairWindow],
+    run: impl FnOnce(
+        chrono::DateTime<chrono::Utc>,
+        chrono::DateTime<chrono::Utc>,
+    ) -> OpsResult<Option<String>>,
+) -> OpsResult<MergeRequestRemoval> {
+    events.sort_by_key(|event| event.created_at);
+    let Some(latest) = events.last() else {
+        return Ok(MergeRequestRemoval::Unknown);
+    };
+    let manual = match latest.typename.as_str() {
+        "RemovedFromMergeQueueEvent" => match latest.reason.as_deref() {
+            Some("manual") => true,
+            Some("merged") => return Ok(MergeRequestRemoval::Merged),
+            reason => {
+                let reason = reason.unwrap_or("unknown").to_string();
+                // The run tested this queue entry: from its addition to its removal.
+                let added = events
+                    .iter()
+                    .rev()
+                    .find(|event| event.typename == "AddedToMergeQueueEvent")
+                    .map(|event| event.created_at);
+                let run_url = match added {
+                    Some(added) => run(added, latest.created_at)?,
+                    None => None,
+                };
+                return Ok(MergeRequestRemoval::Evicted { reason, run_url });
+            }
+        },
+        "AutoMergeDisabledEvent" => latest.reason_code.as_deref() == Some("manually_disabled"),
+        _ => false,
+    };
+    if !manual {
+        return Ok(MergeRequestRemoval::Unknown);
+    }
+    if repairs
+        .iter()
+        .any(|window| window.contains(latest.created_at))
+    {
+        return Ok(MergeRequestRemoval::ByLoopflow);
+    }
+    Ok(MergeRequestRemoval::Manual(ManualRemoval {
+        at: latest.created_at,
+        actor: latest.actor.as_ref().map(|actor| actor.login.clone()),
+        queued: latest.typename == "RemovedFromMergeQueueEvent",
+    }))
+}
+
+/// The non-successful merge-group run GitHub created for `number` between its
+/// queue entry and its removal.
+fn merge_group_run(
+    repo: &Path,
+    number: u64,
+    added: chrono::DateTime<chrono::Utc>,
+    removed: chrono::DateTime<chrono::Utc>,
+) -> OpsResult<Option<String>> {
+    #[derive(Deserialize)]
+    struct Runs {
+        workflow_runs: Vec<Run>,
+    }
+    #[derive(Deserialize)]
+    struct Run {
+        head_branch: Option<String>,
+        conclusion: Option<String>,
+        html_url: String,
+    }
+    let time =
+        |at: chrono::DateTime<chrono::Utc>| at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let output = Command::new("gh")
+        .args([
+            "api",
+            &format!(
+                "repos/{{owner}}/{{repo}}/actions/runs?event=merge_group&per_page=100&created={}..{}",
+                time(added),
+                time(removed)
+            ),
+        ])
+        .current_dir(repo)
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: format!("gh api [merge-group runs for pull request #{number}]"),
+            stderr: stderr_from_output(&output),
+        });
+    }
+    let runs: Runs = serde_json::from_slice(&output.stdout)
+        .map_err(|error| OpsError::Parse(format!("failed to parse merge-group runs: {error}")))?;
+    // GitHub lists newest first; queue branches are gh-readonly-queue/<base>/pr-<n>-<sha>.
+    let marker = format!("/pr-{number}-");
+    Ok(runs
+        .workflow_runs
+        .into_iter()
+        .find(|run| {
+            run.head_branch
+                .as_deref()
+                .is_some_and(|branch| branch.contains(&marker))
+                && run.conclusion.as_deref().is_some_and(|c| c != "success")
+        })
+        .map(|run| run.html_url))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MergeRequestEvent {
+    #[serde(rename = "__typename")]
+    typename: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+    reason: Option<String>,
+    reason_code: Option<String>,
+    actor: Option<MergeRequestActor>,
+}
+
+#[derive(Deserialize)]
+struct MergeRequestActor {
+    login: String,
+}
+
+/// Read a recorded `LoopflowPrMergeRequestEvents` response as the reader would.
+#[cfg(test)]
+pub(crate) fn removal_from_timeline(
+    timeline: &[u8],
+    repairs: &[RepairWindow],
+    run: impl FnOnce(
+        chrono::DateTime<chrono::Utc>,
+        chrono::DateTime<chrono::Utc>,
+    ) -> OpsResult<Option<String>>,
+) -> OpsResult<MergeRequestRemoval> {
+    removal_from_events(parse_merge_request_events(timeline)?, repairs, run)
+}
+
+fn merge_request_events(repo: &Path, number: u64) -> OpsResult<Vec<MergeRequestEvent>> {
+    let query = "query LoopflowPrMergeRequestEvents($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){timelineItems(last:20,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT,AUTO_MERGE_DISABLED_EVENT,AUTO_MERGE_ENABLED_EVENT,ADDED_TO_MERGE_QUEUE_EVENT]){nodes{__typename ... on RemovedFromMergeQueueEvent{createdAt reason actor{login}} ... on AutoMergeDisabledEvent{createdAt reason reasonCode actor{login}} ... on AutoMergeEnabledEvent{createdAt} ... on AddedToMergeQueueEvent{createdAt}}}}}}";
     let output = Command::new("gh")
         .args([
             "api",
@@ -813,54 +984,16 @@ pub(crate) fn manual_merge_removal_since(
             stderr: stderr_from_output(&output),
         });
     }
-    parse_manual_merge_removal(&output.stdout, since)
+    parse_merge_request_events(&output.stdout)
 }
 
-fn parse_manual_merge_removal(
-    output: &[u8],
-    since: chrono::DateTime<chrono::Utc>,
-) -> OpsResult<Option<ManualMergeRemoval>> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Removal {
-        #[serde(rename = "__typename")]
-        typename: String,
-        created_at: chrono::DateTime<chrono::Utc>,
-        reason: Option<String>,
-        reason_code: Option<String>,
-        actor: Option<Actor>,
-    }
-    #[derive(Deserialize)]
-    struct Actor {
-        login: String,
-    }
+fn parse_merge_request_events(output: &[u8]) -> OpsResult<Vec<MergeRequestEvent>> {
     let response: serde_json::Value = serde_json::from_slice(output)
         .map_err(|error| OpsError::Parse(format!("failed to parse PR timeline: {error}")))?;
-    let removals: Vec<Removal> = serde_json::from_value(
+    serde_json::from_value(
         response["data"]["repository"]["pullRequest"]["timelineItems"]["nodes"].clone(),
     )
-    .map_err(|error| OpsError::Parse(format!("failed to parse PR timeline: {error}")))?;
-    Ok(removals
-        .into_iter()
-        .filter(|removal| removal.created_at > since)
-        .filter_map(|removal| {
-            let queued = match removal.typename.as_str() {
-                "RemovedFromMergeQueueEvent" => true,
-                "AutoMergeDisabledEvent" => false,
-                _ => return None,
-            };
-            let manual = if queued {
-                removal.reason.as_deref() == Some("manual")
-            } else {
-                removal.reason_code.as_deref() == Some("manually_disabled")
-            };
-            manual.then(|| ManualMergeRemoval {
-                at: removal.created_at,
-                actor: removal.actor.map(|actor| actor.login),
-                queued,
-            })
-        })
-        .max_by_key(|removal| removal.at))
+    .map_err(|error| OpsError::Parse(format!("failed to parse PR timeline: {error}")))
 }
 
 pub(crate) fn observe_merge_request(repo: &Path, number: u64) -> OpsResult<Option<MergeRequest>> {
@@ -2068,48 +2201,6 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 mod tests {
     use std::ffi::OsString;
     use std::os::unix::fs::PermissionsExt;
-    #[test]
-    fn only_a_manual_removal_after_the_run_armed_stops_a_release() {
-        // PR #1654's timeline: Jack disabled auto-merge, later dequeued the
-        // queued release, and GitHub's merge queue finally removed it as merged.
-        let timeline = serde_json::to_vec(&serde_json::json!({"data": {"repository": {
-        "pullRequest": {"timelineItems": {"nodes": [
-            {"__typename": "AutoMergeDisabledEvent", "createdAt": "2026-10-22T18:56:59Z",
-             "reason": "Manually disabled by user", "reasonCode": "manually_disabled",
-             "actor": {"login": "jacklionheart"}},
-            {"__typename": "RemovedFromMergeQueueEvent", "createdAt": "2026-10-22T20:13:13Z",
-             "reason": "manual", "actor": {"login": "jacklionheart"}},
-            {"__typename": "RemovedFromMergeQueueEvent", "createdAt": "2026-10-22T20:23:15Z",
-             "reason": "merged", "actor": {"login": "github-merge-queue"}}
-        ]}}}}}))
-        .unwrap();
-        let at = |time: &str| time.parse::<chrono::DateTime<chrono::Utc>>().unwrap();
-
-        let dequeued = super::parse_manual_merge_removal(&timeline, at("2026-10-22T20:12:44Z"))
-            .unwrap()
-            .unwrap();
-        assert_eq!(dequeued.at, at("2026-10-22T20:13:13Z"));
-        assert_eq!(dequeued.actor.as_deref(), Some("jacklionheart"));
-        assert!(dequeued.queued);
-        // Removals before this run armed, and GitHub's own, never stop it.
-        assert_eq!(
-            super::parse_manual_merge_removal(&timeline, at("2026-10-22T20:13:19Z")).unwrap(),
-            None
-        );
-        let only_disabled = serde_json::to_vec(&serde_json::json!({"data": {"repository": {
-        "pullRequest": {"timelineItems": {"nodes": [
-            {"__typename": "AutoMergeDisabledEvent", "createdAt": "2026-10-22T18:56:59Z",
-             "reason": "Manually disabled by user", "reasonCode": "manually_disabled",
-             "actor": {"login": "jacklionheart"}}
-        ]}}}}}))
-        .unwrap();
-        let disabled =
-            super::parse_manual_merge_removal(&only_disabled, at("2026-10-22T18:53:31Z"))
-                .unwrap()
-                .unwrap();
-        assert!(!disabled.queued);
-    }
-
     #[test]
     fn merge_policy_uses_allowed_methods_and_rejects_disabled_preferences() {
         use crate::config::MergeMethod;

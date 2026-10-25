@@ -88,7 +88,7 @@ lf -b task run <ID>                                   # its own worktree and bra
 lf resume --task <ID>                                 # its conversation, whenever you want it
 ```
 
-Or ask your agent: *"Use lf to split this into Tasks and run them."*
+Or ask your agent: *"Split this into Tasks and run them with lf."*
 
 ## Needs
 

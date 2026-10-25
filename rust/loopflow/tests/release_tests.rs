@@ -1184,7 +1184,7 @@ if [ -f "$state/merged-$number" ]; then
   status=MERGED
   merge="{{\"oid\":\"$(cat "$state/merged-$number")\"}}"
 fi
-result=$(printf '{{"id":"PR_release","isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null,"mergedAt":null,"number":%s,"state":"%s","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":%s,"headRefOid":"%s","headRefName":"%s","baseRefName":"main","url":"https://example.com/pr/%s","title":"Release","body":"Release notes","statusCheckRollup":[]}}' "$number" "$status" "$merge" "$head" "$branch" "$number")
+result=$(printf '{{"id":"PR_release","isMergeQueueEnabled":false,"isInMergeQueue":false,"autoMergeRequest":null,"mergeQueueEntry":null,"mergedAt":null,"number":%s,"state":"%s","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":%s,"headRefOid":"%s","headRefName":"%s","baseRefName":"main","url":"https://example.com/pr/%s","title":"Release","body":"Release notes","statusCheckRollup":[]}}' "$number" "$status" "$merge" "$head" "$branch" "$number")
 if [ "$2" = list ]; then printf '[%s]\n' "$result";
 elif [ "$1 $2" = "api graphql" ]; then printf '{{"data":{{"repository":{{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true,"pullRequest":%s}}}}}}\n' "$result";
 else printf '%s\n' "$result"; fi

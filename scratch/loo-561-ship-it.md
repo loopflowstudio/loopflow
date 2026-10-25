@@ -238,6 +238,14 @@ Settled (2026-10-22):
 - Eighth concept review (2026-10-24, after "At <stage> · yours" and `routes(_:)`): nothing to
   change. The header's routes exclude any route into `end`, which hides verify's pass route.
   That's the open Complete-at-verify question in Remaining 1, and it stays Jack's.
+- Ninth concept review (2026-10-24, after the state axes, `lf ship ISSUE` and main #1668):
+  nothing to change. The built states match Jack's two axes and his Working list. The manual-
+  dequeue question is not settled by any accepted decision: Stop shipping is the only accepted
+  stop, and "it shouldnt ever need me" doesn't say whether Loopflow overrides a person's GitHub
+  action. Either answer is small. `classify_dequeue` already receives `manual` /
+  `manually_disabled`, so "stop" is one arm there plus `unship_in`. The built re-arm stands until
+  re-demo. The Session query's `blocked` term (a provider-reported waiting prompt) sits beside
+  available/busy, but it's existing attention code and outside this Task's scope.
 
 4. **Post-merge `verify`: built 2026-10-24 (see above); the shape below is the reference.** The hold steer of 2026-10-22
    was the operator's, posted under Jack's name while the shape was in discussion; Jack then

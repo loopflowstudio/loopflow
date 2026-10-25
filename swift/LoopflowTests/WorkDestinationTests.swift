@@ -1775,7 +1775,10 @@ struct WorkDestinationTests {
         let task = try #require(snapshot.waves.first?.tasks.items.first)
         let exact = try oneTask(data, taskId: task.id)
         let barrier = LinkedDestinationBarrier()
-        let (model, _) = destinationModel(query: RegistryQuery { _, _ in
+        // The bound workspace restores its pane layout through this query too;
+        // only the Task read may hold the barrier.
+        let (model, _) = destinationModel(query: RegistryQuery { args, _ in
+            guard args.contains("--task") else { throw RegistryQueryError("Only the Task read is delayed") }
             await barrier.wait("read")
             if fails { throw RegistryQueryError("Delayed failure") }
             return exact
@@ -1869,7 +1872,13 @@ private actor LinkedDestinationBarrier {
     private var pending: [String: CheckedContinuation<Void, Never>] = [:]
     func contains(_ key: String) -> Bool { pending[key] != nil }
     func wait(_ key: String) async {
-        await withCheckedContinuation { pending[key] = $0 }
+        await withCheckedContinuation { continuation in
+            // Replacing a waiter would strand it forever; fail the test instead.
+            if let earlier = pending.updateValue(continuation, forKey: key) {
+                Issue.record("Two reads are waiting at barrier \"\(key)\"")
+                earlier.resume()
+            }
+        }
     }
     func release(_ key: String) { pending.removeValue(forKey: key)?.resume() }
 }

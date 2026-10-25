@@ -67,6 +67,11 @@ definitions and defaults apply. Put literal skill arguments after `--`.
 Use `lf connect SESSION -a codex` to continue the same Session on another provider
 from its saved conversation history. Missing history leaves the Session unchanged.
 
+`lf -a opencode` opens OpenCode 2's full-screen terminal against a private,
+authenticated server. Resume keeps the native conversation and refreshes Loopflow
+context. Interrupted OpenCode work requires explicit subsequent input; Loopflow
+never inserts an automatic continuation prompt.
+
 ## Run a Graph interactively
 
 ```bash
@@ -226,7 +231,15 @@ INFO detail, on stderr. Codex Sessions start through the provider protocol and a
 native terminal. Prompts and instructions stay off the command line. Conversation
 capture requires no hook approval; context refresh uses stable launch hooks.
 Review new or changed declarations with Codex’s `/hooks`; headless runs skip
-untrusted hooks. Loopflow writes no hook trust. It pre-accepts Claude's folder
+untrusted hooks until reviewed in that provider profile. Approval is scoped to
+the provider's config home, so another account/profile or a changed executable
+path may need review again. Codex hashes declarations, not executable contents.
+Claude interactive hooks also require workspace trust, potentially once per
+folder; `claude -p` treats the workspace as trusted. Loopflow follows the
+providers' [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks)
+and [Claude workspace trust](https://code.claude.com/docs/en/hooks#workspace-trust)
+policies; unchanged declarations cannot remove Claude's folder trust requirement.
+Loopflow writes no hook trust. It pre-accepts Claude's folder
 trust only for the exact worktrees it created (`lf`, Task checkouts,
 `lf wt create`) by writing that path's `hasTrustDialogAccepted` entry in the
 config the launched child reads; the main checkout, hand-made worktrees and
@@ -254,7 +267,7 @@ lf graph customize pursue                # print its local source path
 A Graph whose process died leaves its Processes as history. No command resumes it. To change direction or recover:
 
 ```bash
-lf task interrupt EXP-12             # end the active provider turn
+lf task interrupt EXP-12             # stop its running Graph
 lf task status EXP-12                # the latest Graph and all Task work
 lf graph show ID --processes --json   # one Graph's steps, by its Graph process ID
 lf -b task run EXP-12       # run fresh work
@@ -266,7 +279,14 @@ Startup and compaction deliver current Wave memory and scratch as a capped
 conversation block: whole files, marked start excerpts and readable source paths.
 Compaction also restores the saved active skill. Task direction and summaries
 remain complete private reference files. Codex terminal first turns travel through
-its protocol after the terminal connects.
+its protocol after the terminal connects. Codex reconnects select the Session's
+saved thread. Saved initial input survives terminal exit and can retry an explicit
+rejection. Unacknowledged input is not replayed.
+Startup, resume and compaction hooks refresh reference context from the Session's
+saved launch sources. Hook declarations stay identical across Tasks and Sessions
+for the same lf executable and Machine. Each native launch gets its own context
+file through `LF_CONTEXT_DELIVERY`; Codex app-server threads use separate native
+thread bindings because hooks inherit the server's environment.
 Claude reads its first turn from stdin, then uses the terminal for keyboard input.
 OpenCode first turns still use argv; a first turn exceeding its argument cap is
 refused before spawning the provider.
@@ -327,7 +347,9 @@ prefixed with `lf-` or `task_` (for example, `abcd`, `lf-abcd`, `task_abcd`).
 Hex digits are case-insensitive. Ambiguous prefixes list matching Task IDs;
 add digits to select one. Full IDs and Linear ticket aliases still work.
 Ticket aliases are case-insensitive: `loo-498`, `Loo-498`, and `LOO-498`
-select the same Task. Output retains the recorded spelling.
+select the same Task. Output retains the recorded spelling. The same holds
+for `TASK_…`, `SESSION_…` and uppercased Linear UUIDs. Provider conversation IDs,
+names, slugs and paths stay exactly as written.
 Displayed local selectors start at seven digits and extend when needed; retain
 full IDs in automation.
 
@@ -573,7 +595,7 @@ lf connect                         # this repository's one ongoing conversation
 lf connect --wave growth            # open a Wave's primary conversation
 lf connect --task EXP-12 --prepare  # prepare a Task conversation without launching
 lf --task EXP-12 skill task-session # another conversation about that Task
-lf connect SESSION                 # continue this exact conversation
+lf connect SESSION                 # continue this exact conversation, or a Task identifier
 lf connect --fresh                 # fresh conversation for the same scope
 lf context --task EXP-12 --json     # effective context limits, sources and usage
 lf wt timing                        # how long real `lf wt list` runs took here
@@ -588,7 +610,8 @@ explicit client closes stay quiet. These observations never settle a turn.
 
 `lf connect` opens the repository, Wave or Task's ongoing conversation for this
 checkout, creating one when absent. `resume` is an exact alias. Explicit `--repo`,
-`--wave`, `--task`, or a Session ID overrides the checkout's scope. An unassociated
+`--wave`, `--task`, or a Session ID overrides the checkout's scope; a Task identifier
+in place of the Session ID opens that Task's, as `--task` does. An unassociated
 linked checkout continues the conversation last opened there; ordinary `lf`
 starts a new one. First creation uses the matching scope's session skill, including its
 operating instructions. Reopening keeps those instructions and native history.
@@ -612,7 +635,8 @@ the Task's checkout when none exists. The others stay open, and listing Sessions
 never picks or starts one.
 
 Use `lf connect` in the Task checkout, or `lf connect SESSION`,
-to reopen the same conversation after a failed terminal launch. Retained native
+to reopen the same conversation after a failed terminal launch. A Session whose
+terminal closed while its agent runs lists as `detached`; connecting reattaches it. Retained native
 history survives retries. A recorded interactive provider observed dead can reopen
 without manual repair; a live or unknown provider cannot be started twice.
 Explicitly connecting to a replaced Session preserves its history and leaves
@@ -626,6 +650,27 @@ recovery before a headless run can be stopped and resumed.
 Session connect, rename and bind take the durable Session ID shown by
 `lf session list`. Capture keys and history prefixes select retained inputs for
 inspection and replay; they do not select these Session actions.
+
+```bash
+lf session rename SESSION "Release notes"
+lf session bind SESSION --task INF-123
+lf -b connect SESSION --message "Continue"    # headless turn in the saved Session workspace
+```
+
+New Session names use a short excerpt of the request, or the invoked skill when
+no request was supplied. Task conversations use the Task title when no specific
+purpose was supplied. Names you assign survive reconnects and suggestions.
+Interactive terminal titles use the Session name, with the Task identifier first
+and a short purpose for Task work. In cmux, the attached workspace and tab follow
+`lf session rename`; other terminals pick up a changed name on reconnect.
+
+Bind assigns an unbound conversation to one Task permanently, including a done Task.
+Headless continuation reads the saved workspace's context and native history,
+even from another directory, without re-running the original skill.
+
+A Task's primary conversation is admitted lazily on its owner's Machine, on first
+connect. Wave admission saves the Wave and repository conversations. Admission
+starts no provider and marks no Task Started; the first input connecting reserves does.
 
 | Scope | One finite pass | Ongoing conversation |
 | --- | --- | --- |
@@ -706,7 +751,9 @@ past already-merged history, including squash merges. PR operations also work on
 ordinary branches without creating a Task.
 Arm and bare land return after recording delivery. `--wait-and-fix` observes and repairs
 its PR every 15 seconds until verified merge, closure, a concrete blocker or
-interruption, including with Desktop closed. Elapsed time never ends the wait or
+interruption, including with Desktop closed. Only a person's dequeue or disabled
+auto-merge blocks it; a queue eviction or other dropped request becomes a CI
+incident whose repair re-arms. Elapsed time never ends the wait or
 triggers a rerun. Interruption leaves the intent intact. Repeating land for a merged
 Task PR with no new work succeeds and reports whether Task completion remains.
 With new work, the same command prepares its next PR.
@@ -852,6 +899,14 @@ Use shortcuts: `lf land`, `lf ps`, and `lf history list`.
 Omit owners or abbreviate command names when the result is unique. Ambiguous
 shortcuts list their matching command paths. Exact commands take precedence
 over authored definitions; `lf skill NAME` and `lf graph NAME` select a kind.
+A same-named Graph takes precedence in untyped execution; an invalid Graph
+reports an error, so use `lf skill NAME` to select the skill.
+
+| Built-in | What it does |
+| --- | --- |
+| `pr-review` | Builds an HTML walkthrough of the important code in this PR |
+| `testing-audit` | Finds low-value tests and redundant verification, then improves the workflow |
+| `token-compress` | Fits a complete artifact to an explicit token budget without truncating it |
 
 Help and catalog reads launch no agent. The [command reference](lf-reference.md)
 names canonical owners and arguments. [Authoring](authoring.md) explains workflows;
@@ -1330,6 +1385,29 @@ Interactive add offers to install a missing `lf`; an existing installation stays
 untouched. Status reports connection failures and recovery commands without prompting.
 Connections are reused for 60 idle seconds through Loopflow's private SSH socket.
 See [machine connections](architecture/machines.md) for repository paths and version checks.
+
+### Own and rent Machines
+
+```bash
+lf pool add lab && lf machine add jack@mini --pool lab        # machines you own
+lf account token claude jack@example.com                      # once a year: Claude for rented machines
+lf ondemand add code --provider runpod --vcpus 8 --memory-gb 16 --max 1 --max-usd-per-hour 0.40
+lf task run LOO-570 --pool lab --rent code --quote            # where it would run, the most it could cost
+lf task run LOO-570 --pool lab --rent code                    # a free lab machine, else rent one
+lf machine end code-1                                         # give a rented machine back now
+```
+
+Renting reads `RUNPOD_API_KEY` from the environment (`doppler run -- lf …`).
+A rented machine gets GitHub forwarded and every Claude account with a stored
+long-lived token (`claude setup-token`, approved once in the account's Chrome
+profile; API keys are refused). A rented machine's own guardian deletes it at
+its deadline or when its budget runs out. The end of a forwarded `lf task run`,
+and the scheduled `lf task reconcile`, give back drained machines: first their
+Sessions and Processes are copied here (`lf session list` shows them "from
+code-1", `lf history show` opens one), then the pod is deleted. A failed copy or
+unpushed work refuses every give-back but `--force`. `lf ondemand list` never
+ends a machine. See [own and rent Machines](architecture/machines.md#own-and-rent-machines)
+for pools, rentals and give-back.
 
 ### Pause a Task without discarding work
 

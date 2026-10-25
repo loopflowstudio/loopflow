@@ -11,6 +11,10 @@ use crate::process::LfProcess;
 /// one Graph can share notes under it. It configures nothing in lf.
 pub(crate) const GRAPH_ID_ENV: &str = "LF_GRAPH_ID";
 
+/// The Task's latest interrupt when its Task run began. Each Graph attempt
+/// compares later interrupts against it; steps never inherit it.
+pub(crate) const TASK_INTERRUPT_CURSOR_ENV: &str = "LF_TASK_INTERRUPT_CURSOR";
+
 /// One step its Graph process started.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GraphProcessStep {

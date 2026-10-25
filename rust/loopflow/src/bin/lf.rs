@@ -718,12 +718,7 @@ fn print_task_control(
     if json {
         println!("{}", serde_json::to_string_pretty(result)?);
     } else {
-        println!(
-            "{} → {} ({})",
-            result.receipt.label(),
-            result.issue_id,
-            result.receipt.action(),
-        );
+        println!("{}", result.receipt.summary(&result.issue_id));
         match &result.observation {
             loopflow::work::task::Observation::Cached { observed_at } => {
                 println!("PR observation: cached from {observed_at}");

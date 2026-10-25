@@ -2416,7 +2416,7 @@ Read the thread or publish a comment; agent comments default to progress
 
 ## lf task interrupt
 
-Interrupt the active provider turn
+Stop the Task's running Graph or Task run and its scheduled automation
 
 | Argument | What it does |
 |---|---|

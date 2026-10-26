@@ -45,8 +45,8 @@ Installed lf 0.14.15, one reader with a repo scope, idle window:
 One idle reader used ≈48 s CPU per 60 s. Revisions advance ~0.5/s each for
 planning and sessions, so the reader is correctly woken; the projections are too
 expensive. Individual statements are fast, so indexes are not the main gap:
-statement counts are. PR #1692 covers the one known scan (agent_sessions by
-execution owner).
+statement counts are. The one known scan (agent_sessions by execution owner)
+is indexed on main by #1692; this branch has not yet taken it.
 
 An orphaned reader (pid 5210, from an exited Loopflow Dev.app) had run for 3h37m
 at 99% CPU: a descendant still held its stdin open, which was the only stop

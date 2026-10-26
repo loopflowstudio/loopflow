@@ -11,8 +11,9 @@ struct WorkNavigator: View {
     @State private var actionTaskID: String?
     @FocusState private var focusedWork: WorkReference?
     @State private var focusMemory = SidebarResponderMemory()
-    /// The clicked Wave or Dashboard row's label moves into the list header.
+    /// The clicked Dashboard row's label moves into the list header.
     @Namespace private var scopeTitle
+    @State private var wavesHeight = WorkNavigator.collapsedWavesHeight
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var listTitle: String {
@@ -34,13 +35,8 @@ struct WorkNavigator: View {
         }
     }
 
-    private var wavesHeading: String {
-        if case .wave = model.navigation.sidebarScope { return "SUBWAVES" }
-        return "WAVES"
-    }
-
     private var rowOrder: [WorkReference] {
-        model.sidebarTaskIDs.map { .task(id: $0) } + model.sidebarWaves.map { .wave(id: $0.wave.id) }
+        model.sidebarTaskIDs.map { .task(id: $0) } + model.visibleRoadmaps.map { .wave(id: $0.wave.id) }
     }
 
     private func moveFocus(_ direction: MoveCommandDirection) {
@@ -99,35 +95,13 @@ struct WorkNavigator: View {
                             }
                         }.font(Typography.body(11)).padding(10)
                     }
-                    if !model.sidebarWaves.isEmpty {
-                        Text(wavesHeading).font(Typography.code(10))
-                            .foregroundStyle(palette.textSecondary).padding(10).padding(.top, 8)
-                    }
-                    ForEach(model.sidebarWaves, id: \.wave.id) { wave in
-                        Button { model.select(.wave(id: wave.wave.id)) } label: {
-                            HStack {
-                                Image(systemName: "water.waves")
-                                Text(wave.wave.displayName).lineLimit(1)
-                                    .matchedGeometryEffect(id: WorkNavigation.SidebarScope.wave(wave.wave.id), in: scopeTitle)
-                                Spacer()
-                                if let reason = wave.tasks.unavailableReason {
-                                    Image(systemName: "exclamationmark.triangle").help(reason)
-                                } else {
-                                    Text("\(wave.tasks.items.count)")
-                                        .font(Typography.code(10)).help("\(wave.tasks.items.count) Tasks")
-                                }
-                            }.font(Typography.body(13)).padding(10)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(model.isSelected(.wave(id: wave.wave.id)) ? palette.surface : .clear,
-                                            in: RoundedRectangle(cornerRadius: 6))
-                        }.buttonStyle(.plain)
-                            .focused($focusedWork, equals: .wave(id: wave.wave.id))
-                            .accessibilityLabel("\(wave.wave.displayName), \(wave.tasks.items.count) Tasks")
-                            .accessibilityIdentifier("work-wave-\(wave.wave.id)")
-                    }
                     if scope == .repository { DashboardSidebar(model: model, scopeTitle: scopeTitle) }
                 }.padding(8)
                 .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: scope)
+            }
+            if !model.visibleRoadmaps.isEmpty {
+                Divider()
+                waveSection
             }
         }
         .foregroundStyle(palette.text).background(palette.surfaceMuted)
@@ -164,6 +138,57 @@ struct WorkNavigator: View {
         .renderFlash()
         .onExitCommand { focusedWork = nil; focusMemory.restore() }
         .onDisappear { if focusedWork != nil { focusMemory.restore() } }
+    }
+
+    /// Pinned below the Task list so any Wave is a click away however far the
+    /// list scrolls; it starts about three rows tall.
+    private var waveSection: some View {
+        let expanded = model.navigation.sidebarWavesExpanded
+        return VStack(alignment: .leading, spacing: 0) {
+            Button { model.navigation.sidebarWavesExpanded.toggle() } label: {
+                HStack {
+                    Text("WAVES")
+                    Spacer()
+                    Image(systemName: expanded ? "chevron.down" : "chevron.up")
+                }.font(Typography.code(10)).foregroundStyle(palette.textSecondary).padding(10)
+                    .contentShape(Rectangle())
+            }.buttonStyle(.plain)
+                .help(expanded ? "Show fewer Waves" : "Show all Waves")
+                .accessibilityIdentifier("work-waves-toggle")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(model.visibleRoadmaps, id: \.wave.id) { waveRow($0) }
+                }.padding([.horizontal, .bottom], 8)
+            }
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
+                wavesHeight = height
+            }
+            .frame(maxHeight: expanded ? wavesHeight : min(wavesHeight, Self.collapsedWavesHeight))
+        }
+    }
+
+    private static let collapsedWavesHeight: CGFloat = 130
+
+    private func waveRow(_ wave: WaveRoadmap) -> some View {
+        Button { model.select(.wave(id: wave.wave.id)) } label: {
+            HStack {
+                Image(systemName: "water.waves")
+                Text(wave.wave.displayName).lineLimit(1)
+                Spacer()
+                if let reason = wave.tasks.unavailableReason {
+                    Image(systemName: "exclamationmark.triangle").help(reason)
+                } else {
+                    Text("\(wave.tasks.items.count)")
+                        .font(Typography.code(10)).help("\(wave.tasks.items.count) Tasks")
+                }
+            }.font(Typography.body(13)).padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(model.isSelected(.wave(id: wave.wave.id)) ? palette.surface : .clear,
+                            in: RoundedRectangle(cornerRadius: 6))
+        }.buttonStyle(.plain)
+            .focused($focusedWork, equals: .wave(id: wave.wave.id))
+            .accessibilityLabel("\(wave.wave.displayName), \(wave.tasks.items.count) Tasks")
+            .accessibilityIdentifier("work-wave-\(wave.wave.id)")
     }
 
     private func taskRow(_ id: String, slotHint: String?) -> some View {
@@ -470,7 +495,8 @@ private struct WorkTaskList<Content: View>: View {
         ScrollView { content }
             .scrollPosition($position)
             // A new scope's header is at the top, even after clicking a row far down.
-            .onChange(of: navigation.sidebarScope) { position.scrollTo(edge: .top) }
+            // Deferred: scrolling in the update that swaps the rows kept the old offset.
+            .onChange(of: navigation.sidebarScope) { Task { position.scrollTo(edge: .top) } }
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 max(0, geometry.contentOffset.y + geometry.contentInsets.top)
             } action: { _, offset in navigation.sidebarScrollOffset = offset }

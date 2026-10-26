@@ -14,6 +14,19 @@ Jack Heart's Mac. Design: `scratch/loo-576-show-the-selected-wave-or-dashboards-
   a Dashboard back to Working Tasks (screenshot: `loopflow › Working Tasks`).
 - "can we test for any extra re-rendering with any of this stuff"
 
+- "now when i click a wave my scroll bar stays, but thats weird because i want to
+  go to Prouct, whichis now at the top" → the scope's scroll-to-top ran in the
+  same update that swapped the rows and was lost; it now runs one turn later.
+- "I also think Waves needs a permanent, expandable section in the left par[t] …
+  so that there is scrolling with the working tasks … Starts Rather small, but
+  like 3 waves can show in that region" → **Built, awaiting Jack's look:** a WAVES
+  section pinned under the Task list with its own scroll, about three rows tall;
+  its chevron expands it to every Wave (state on `WorkNavigation.sidebarWavesExpanded`).
+  Proposals made in building it, not yet confirmed by Jack: it sits at the bottom;
+  it always lists the repository's Waves, the selected one highlighted, so a
+  Wave's label no longer slides into the header (Dashboards still do); the
+  in-list SUBWAVES and Dashboard Wave-member rows are gone from the Task list.
+
 ## Measured on real data (Instruments SwiftUI trace, attached to Loopflow Dev)
 
 Jack Heart doubted the fixture harness ("might be better to use the 'real' data"), so
@@ -34,7 +47,9 @@ Dashboard ↔ ‹ loopflow, Wave ↔ back and plain Task selections. Load averag
 - After: 0 hitches over 50 ms and three 140–230 ms stalls, plus one 7.15 s hang at
   0:32 (likely attach under load). Unconfirmed whether Jack clicked during this
   recording; a repeat with clicks and Jack's feel are still owed.
-- Traces: scratchpad `trace2/` (before) and `trace3/` (after), not retained in the repo.
+- 18:06 retry (load ~12, `trace4/`): no hitches, one 415 ms microhang at 2:26 and
+  no recorded SwiftUI updates, so Jack likely did not click during it. Still owed.
+- Traces: scratchpad `trace2/` (before), `trace3/` and `trace4/` (after), not retained in the repo.
 
 ## Unrelated rough edges seen in the screenshot
 

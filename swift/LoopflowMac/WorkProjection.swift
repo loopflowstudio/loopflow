@@ -331,6 +331,8 @@ final class WorkNavigation {
         showsNavigator.toggle()
     }
     var sidebarWidth: CGFloat = 240
+    /// The pinned Waves section shows about three rows until expanded.
+    var sidebarWavesExpanded = false
     /// Restores the sidebar when it is rebuilt. Written every scrolled frame, so
     /// unobserved: tracking it re-rendered every sidebar row per frame.
     @ObservationIgnored var sidebarScrollOffset: CGFloat = 0

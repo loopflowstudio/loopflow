@@ -1,8 +1,7 @@
 # LOO-610 — The lf CLI, top down
 
 Status: **decided slice in progress** (2026-10-26): `lf ops` group and `lf repo`
-dissolution implemented on this branch; `wave cron` deletion in a parallel
-worktree, to merge. Deviations recorded in `scratch/questions.md`. Source: `docs/lf-reference.md` at main `1b137b8f2d` (26 top-level
+dissolution and `wave cron` deletion implemented on this branch. Deviations recorded in `scratch/questions.md`. Source: `docs/lf-reference.md` at main `1b137b8f2d` (26 top-level
 commands, ~230 subcommands, 24 root flags), `lf --help`, the builtin catalog,
 LOO-601's branch (hidden `__` commands) and LOO-602's accepted tracking decisions.
 
@@ -503,6 +502,7 @@ planning and CI views still load.
   based on a newer main) and exited before merging it. The operator saved the
   patch, interrupted the Graph during compress, merged it (4 conflicts) and
   deleted the then-orphaned `ops/cron*` and `tests/scheduled_release_tests.rs`.
-  Nothing has been compiled since the merge. Remaining: build, clippy, fix
-  fallout, regenerate `docs/lf-reference.md`, Swift build, affected tests.
-  Do the work in this checkout; do not delegate to side worktrees.
+  Compress pass then removed the cron-only release-lock intervention test and
+  its `release_history.json` fixture, cron mentions in docs, and stale
+  `repo comment`/`repo identity`/`repo refresh` calls in tests and e2e scripts.
+  Remaining: Swift build, gate.

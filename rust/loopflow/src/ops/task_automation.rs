@@ -150,9 +150,6 @@ pub fn status(repo: &Path) -> OpsResult<AutomationStatus> {
                 detail: landing.blocked_reason,
             })
             .collect();
-        Ok(AutomationStatus {
-            tasks,
-            deliveries,
-        })
+        Ok(AutomationStatus { tasks, deliveries })
     })
 }

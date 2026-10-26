@@ -2641,7 +2641,7 @@ fn execute_command(
             loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment)
         }
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
-        Some(Commands::Ops { cmd }) => dispatch_ops(cmd, &cli, args),
+        Some(Commands::Ops { cmd }) => dispatch_ops(cmd, cli, args),
         Some(Commands::Self_ {
             cmd:
                 loopflow::lf::SelfCommand::SyncSkills {

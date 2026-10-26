@@ -1161,8 +1161,7 @@ lf machine list                               # each Machine with the defaults n
 The setting lives in Machine-local SQLite `scope_defaults`, keyed by Wave or repository, and is copied to the
 person's other added Machines over `lf --machine`; an unreachable Machine gets a
 warning and a later rerun. Resolution for an unowned Task walks its Wave, its parent
-Waves, its repository, then this Machine, so single-Machine use needs no setup. Cron install reads
-the same resolver. A scope's Session Machine is a separate setting with the same
+Waves, its repository, then this Machine, so single-Machine use needs no setup. A scope's Session Machine is a separate setting with the same
 resolution (`--session`; `--tasks` sets only the Tasks'). Setting it completes the
 old Machine's Wave primary Session and admits a fresh one on the new Machine; native
 provider history stays behind. `lf session connect --wave <w>`, bare connects that

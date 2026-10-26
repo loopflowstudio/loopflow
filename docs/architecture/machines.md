@@ -118,8 +118,8 @@ repository identity, and is copied to the
 person's other added Machines over `lf --machine`, so the laptop launches there and
 mini receives the runs. An unreachable Machine gets a warning; rerun later.
 Resolution for an unowned Task walks its Wave, its parent Waves, its repository, then this Machine,
-so single-Machine use needs no setup. Cron install and `lf wave show`'s `machine`
-field read the same resolver.
+so single-Machine use needs no setup. `lf wave show`'s `machine` field reads the
+same resolver.
 
 Setting the Session Machine moves the Wave Session: the old Machine completes its Wave primary
 Session and the new Machine admits a fresh one (fresh Wave context, as with

@@ -2592,7 +2592,6 @@ mod tests {
         for removed in ["start", "stop", "pause", "resume", "chat", "reply"] {
             assert!(command.find_subcommand(removed).is_none());
         }
-        assert!(Cli::try_parse_from(["lf", "repo", "webhook", "serve"]).is_err());
         assert!(command.find_subcommand("repo").is_none());
         assert!(
             Cli::try_parse_from(["lf", "wave", "new-chapter", "October", "--plan", "p.json"])

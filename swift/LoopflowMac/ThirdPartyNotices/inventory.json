@@ -1,6 +1,6 @@
 {
   "inputs": {
-    "Cargo.lock": "56a7b23c6073040f59b25a9a4ced04bf7888ff29cc46cd8567ad105efde819f2",
+    "Cargo.lock": "49f68779c01960da02cca0e2c34a42d4f7e54b19614083198664f2dc7f3e4656",
     "swift/GhosttyKitPatches/0001-command-blocks.patch": "304566cfebd53802689026ba72271297c1487a661f979b9986fe25c5dd6f3e11",
     "swift/GhosttyKitPatches/0002-embedded-login-session.patch": "a487a5fbbed854105bfacde7eb5885313fa45ae5cb8cfb7887af56ae41595288",
     "swift/GhosttyKitPatches/0003-program-status.patch": "4f658df88384d38dc9b4f044ee1099190698e3d7e5a71c36b26c479af69170d8",
@@ -876,15 +876,6 @@
       }
     },
     {
-      "id": "cron@0.17.0",
-      "scope": "lf",
-      "license": "MIT OR Apache-2.0",
-      "source": {
-        "url": "https://static.crates.io/crates/cron/cron-0.17.0.crate",
-        "sha256": "a5dcd6f69605c2956916ce24e8af637b754964c9a83f4662d3a2361654cdba09"
-      }
-    },
-    {
       "id": "crossbeam-deque@0.8.6",
       "scope": "lf",
       "license": "MIT OR Apache-2.0",
@@ -1749,48 +1740,12 @@
       }
     },
     {
-      "id": "phf@0.11.3",
-      "scope": "lf",
-      "license": "MIT",
-      "source": {
-        "url": "https://static.crates.io/crates/phf/phf-0.11.3.crate",
-        "sha256": "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078"
-      }
-    },
-    {
       "id": "phf@0.12.1",
       "scope": "lf",
       "license": "MIT",
       "source": {
         "url": "https://static.crates.io/crates/phf/phf-0.12.1.crate",
         "sha256": "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
-      }
-    },
-    {
-      "id": "phf_generator@0.11.3",
-      "scope": "lf",
-      "license": "MIT",
-      "source": {
-        "url": "https://static.crates.io/crates/phf_generator/phf_generator-0.11.3.crate",
-        "sha256": "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
-      }
-    },
-    {
-      "id": "phf_macros@0.11.3",
-      "scope": "lf",
-      "license": "MIT",
-      "source": {
-        "url": "https://static.crates.io/crates/phf_macros/phf_macros-0.11.3.crate",
-        "sha256": "f84ac04429c13a7ff43785d75ad27569f2951ce0ffd30a3321230db2fc727216"
-      }
-    },
-    {
-      "id": "phf_shared@0.11.3",
-      "scope": "lf",
-      "license": "MIT",
-      "source": {
-        "url": "https://static.crates.io/crates/phf_shared/phf_shared-0.11.3.crate",
-        "sha256": "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5"
       }
     },
     {
@@ -1872,15 +1827,6 @@
       "source": {
         "url": "https://static.crates.io/crates/rand/rand-0.10.3.crate",
         "sha256": "65c9fb96cbc91e3478eaae79a69fcd3f1ae4ad052e471fe6732fff548984b4af"
-      }
-    },
-    {
-      "id": "rand@0.8.6",
-      "scope": "lf",
-      "license": "MIT OR Apache-2.0",
-      "source": {
-        "url": "https://static.crates.io/crates/rand/rand-0.8.6.crate",
-        "sha256": "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
       }
     },
     {
@@ -2703,15 +2649,6 @@
       }
     },
     {
-      "id": "winnow@0.7.15",
-      "scope": "lf",
-      "license": "MIT",
-      "source": {
-        "url": "https://static.crates.io/crates/winnow/winnow-0.7.15.crate",
-        "sha256": "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
-      }
-    },
-    {
       "id": "writeable@0.6.2",
       "scope": "lf",
       "license": "Unicode-3.0",
@@ -2802,5 +2739,5 @@
       }
     }
   ],
-  "notices_sha256": "7a4466c11dfc696be2359b11b1f8047afc8465984dcfea5f5f5aed751970c175"
+  "notices_sha256": "4780c2aad2614b11c491a59e90b5b0ec54f366a022e69614e9e765321b589053"
 }

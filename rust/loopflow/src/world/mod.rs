@@ -10,7 +10,7 @@
 //! Session from its transcript and echoes each input line, so Sessions open live
 //! without an account or network; a `gh` answers pull-request reads from files
 //! under `github/pulls/` and refuses everything else, so nothing run inside a
-//! World reaches GitHub; a `launchctl` records cron jobs instead of loading them.
+//! World reaches GitHub; a `launchctl` records launchd jobs instead of loading them.
 
 pub mod recipes;
 

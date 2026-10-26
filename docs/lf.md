@@ -153,7 +153,7 @@ last owner. `lf task status` prints the log as `Oct 21 14:02  claim  Lee on lee-
 and `lf wave show`, `lf task list` and `lf wave status` name each Task's owner.
 
 ```bash
-lf machine public lee-mbp        # teammates see this name on your claims and crons
+lf machine public lee-mbp        # teammates see this name on your claims
 lf machine public off            # private again: they see only the Machine id
 ```
 
@@ -505,7 +505,7 @@ What travels between you: the plan (Tasks, Projects, KRs, comments, ownership
 notes), committed repository files (`.lf/config.yaml`, each Wave's `GOAL.md` and
 `MEMORY.md`, Skills, Graphs, Workflows) and pull requests. What stays on each
 Machine: Sessions and their history, Graph runs and Workflow position, checkouts
-and scratch, usage, accounts and routes, and installed crons. Each of you has
+and scratch, usage, accounts and routes. Each of you has
 your own conversation for a Wave or a Task.
 
 - **Names.** Claims compare your Git `user.email`, lowercased. `lf user` sets

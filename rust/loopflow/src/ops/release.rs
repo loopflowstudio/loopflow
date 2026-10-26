@@ -942,7 +942,14 @@ fn release_run_single(
 ) -> OpsResult<ReleaseRunOutcome> {
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
     let lock = ReleaseLock::acquire(&main_repo, &target.name)?;
-    release_run_inner(&main_repo, version_input, target_name, progress, &lock, None)
+    release_run_inner(
+        &main_repo,
+        version_input,
+        target_name,
+        progress,
+        &lock,
+        None,
+    )
 }
 
 fn release_run_inner(
@@ -1014,13 +1021,7 @@ fn release_run_inner(
                         )));
                     } else {
                         progress.status(&format!("Resuming incomplete release {tag}..."));
-                        return resume_existing_release(
-                            &main_repo,
-                            tag,
-                            &target,
-                            progress,
-                            lock,
-                        );
+                        return resume_existing_release(&main_repo, tag, &target, progress, lock);
                     }
                 }
             } else if target.publisher.is_empty()
@@ -1028,13 +1029,7 @@ fn release_run_inner(
                 && !release_completion_satisfied(&main_repo, tag, &target)?
             {
                 progress.status(&format!("Resuming release completion for {tag}..."));
-                return resume_existing_release(
-                    &main_repo,
-                    tag,
-                    &target,
-                    progress,
-                    lock,
-                );
+                return resume_existing_release(&main_repo, tag, &target, progress, lock);
             }
         }
 
@@ -1043,13 +1038,7 @@ fn release_run_inner(
             let tag = target_tag(&target, &version);
             if remote_tag_sha(&main_repo, &tag)?.is_some() {
                 progress.status(&format!("Resuming release completion for {tag}..."));
-                return resume_existing_release(
-                    &main_repo,
-                    &tag,
-                    &target,
-                    progress,
-                    lock,
-                );
+                return resume_existing_release(&main_repo, &tag, &target, progress, lock);
             }
         }
 
@@ -1079,13 +1068,7 @@ fn release_run_inner(
         let new_tag = target_tag(&target, &version);
         if remote_tag_sha(&main_repo, &new_tag)?.is_some() {
             progress.status(&format!("Resuming release completion for {new_tag}..."));
-            return resume_existing_release(
-                &main_repo,
-                &new_tag,
-                &target,
-                progress,
-                lock,
-            );
+            return resume_existing_release(&main_repo, &new_tag, &target, progress, lock);
         }
 
         let latest_candidate = find_latest_candidate_workflow(&main_repo, &new_tag, &target)?;
@@ -1291,13 +1274,7 @@ fn release_run_inner(
                 continue;
             }
         }
-        return finish_candidate(
-            &main_repo,
-            &candidate,
-            &target,
-            progress,
-            lock,
-        );
+        return finish_candidate(&main_repo, &candidate, &target, progress, lock);
     }
 }
 
@@ -1309,13 +1286,7 @@ fn resume_existing_release(
     lock: &ReleaseLock,
 ) -> OpsResult<ReleaseRunOutcome> {
     let candidate = release_candidate_for_tag(repo, tag, target)?;
-    finish_candidate(
-        repo,
-        &candidate,
-        target,
-        progress,
-        lock,
-    )
+    finish_candidate(repo, &candidate, target, progress, lock)
 }
 
 fn checked_candidate_tag(repo: &Path, candidate: &ReleaseCandidate) -> OpsResult<Option<String>> {

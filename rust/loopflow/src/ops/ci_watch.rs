@@ -20,8 +20,8 @@ use time::OffsetDateTime;
 use crate::pr_landing::{PrLanding, PrLandingState};
 use crate::store::SharedStore;
 
-use super::launchd::Launchctl;
 use super::error::{OpsError, OpsResult};
+use super::launchd::Launchctl;
 use super::pr::{GhCheck, MergeGateReading};
 
 const INTERVAL: Duration = Duration::from_secs(60);

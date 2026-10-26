@@ -1,6 +1,6 @@
 # LOO-614 — Read conversations from harness transcripts and show what is retained
 
-Status: **implemented, pending gate** (2026-10-26). Jack Heart's steer
+Status: **implemented, gated** (2026-10-26). Jack Heart's steer
 (LOO-602 decision 6, 2026-10-26) removed the `loopflow` state and any copy. Product direction is accepted:
 LOO-602 decision 4 (Jack Heart, 2026-10-26), design at
 `../loopflow.loo-602-top-down-what/scratch/loo-602-tracking.md` §4 and §7.4.
@@ -268,8 +268,7 @@ the summary's `facts only` count includes Sessions that never recorded a
 thread (499 Claude) as well as removed ones; decision 6's binary accepts
 this, and `lf history show` gives the reason per conversation.
 
-Remaining: gate (affected suites, clippy, fmt, CLI reference regeneration,
-Swift tests via CI), demo on Jack's machine.
+Remaining: demo on Jack's machine.
 
 ## Done when
 
@@ -303,3 +302,4 @@ With inherited `LF_*` unset and `< /dev/null`:
 - `UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration reference_matches_the_compiled_cli`.
 
 Check: `cargo clippy -p loopflow --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- transcript conversation_log provider_conversation history_transcript session_history` → 18 passed; gone Claude conversations now print the cleanupPeriodDays policy (`cargo test -p loopflow --lib -- transcript history_transcript` → 10 passed). Integration suites and Swift → gate/CI.
+Gate: `cargo fmt --check` + `cargo clippy --all-targets -D warnings` clean; `cargo test --lib -- transcript history conversation_log provider_conversation session_events` 111 passed; `--test integration -- reference_matches_the_compiled_cli history dto` 57 passed; `scripts/test_desktop.sh --filter RetentionCardTests` 3 passed. Full matrix → CI.

@@ -249,8 +249,11 @@ impl SqliteStore {
     pub(crate) fn task_checkouts(&self) -> StoreResult<Vec<TaskCheckout>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
+        let identifiers = TaskIdentifiers::read(&conn)?;
         let mut statement = conn.prepare(TASK_CHECKOUT_COLUMNS)?;
-        let rows = statement.query_map([], |row| map_task_checkout(&conn, row))?;
+        let rows = statement.query_map([], |row| {
+            map_task_checkout(row, |id| Ok(identifiers.short(id)))
+        })?;
         rows.map(|row| row.map_err(StoreError::from)).collect()
     }
 
@@ -505,11 +508,13 @@ impl SqliteStore {
         tasks_where(&conn, wave_id, &super::durable::task_open_sql("t"))
     }
 
-    /// Closed Tasks of one repository (and Wave), newest first, `limit` at a time.
+    /// Closed Tasks of one repository (and Wave), newest first, `limit` at a
+    /// time, back to those closed at `since` (RFC 3339, UTC, whole seconds).
     pub fn closed_tasks_page(
         &self,
         repository: &crate::durable::RepositoryId,
         wave_id: Option<&WaveId>,
+        since: Option<&str>,
         after: Option<&TaskId>,
         limit: usize,
     ) -> StoreResult<ClosedTaskPage> {
@@ -525,6 +530,7 @@ impl SqliteStore {
             "{TASK_COLUMNS} WHERE t.repository_id=?1 AND {wave} AND NOT {open} AND {TASK_VISIBLE}
              AND (?3 IS NULL OR ({TASK_CLOSED_AT},t.id) < (
                 SELECT {TASK_CLOSED_AT},t.id FROM tasks t WHERE t.id=?3))
+             AND (?5 IS NULL OR {TASK_CLOSED_AT}>=?5)
              ORDER BY {TASK_CLOSED_AT} DESC, t.id DESC LIMIT ?4"
         );
         let identifiers = TaskIdentifiers::read(&conn)?;
@@ -535,7 +541,8 @@ impl SqliteStore {
                     repository.as_str(),
                     wave_id.map(WaveId::as_str),
                     after.map(TaskId::as_str),
-                    limit as i64 + 1
+                    limit as i64 + 1,
+                    since
                 ],
                 |row| map_listed_task_row(&identifiers, row),
             )?
@@ -549,6 +556,43 @@ impl SqliteStore {
                 .clone()
         });
         Ok(ClosedTaskPage { tasks, next })
+    }
+
+    /// Open Tasks of one repository whose title or identifier contains `text`,
+    /// ignoring case, optionally within one Wave and one Project (its ID,
+    /// provider ID, slug or name).
+    pub fn open_tasks_matching(
+        &self,
+        repository: &crate::durable::RepositoryId,
+        text: &str,
+        wave_id: Option<&WaveId>,
+        project: Option<&str>,
+    ) -> StoreResult<Vec<Task>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
+        let open = super::durable::task_open_sql("t");
+        let query = format!(
+            "{TASK_COLUMNS} WHERE t.repository_id=?1 AND {open} AND {TASK_VISIBLE}
+             AND (instr(lower(t.issue_title),?2) OR instr(lower(t.issue_identifier),?2)
+                OR instr(lower(t.id),?2))
+             AND (?3 IS NULL OR p.wave_id=?3)
+             AND (?4 IS NULL OR ?4 IN (p.id,p.external_project_id,p.project_slug)
+                OR lower(p.project_name)=lower(?4))"
+        );
+        let identifiers = TaskIdentifiers::read(&conn)?;
+        let mut statement = conn.prepare(&query)?;
+        let tasks = statement
+            .query_map(
+                params![
+                    repository.as_str(),
+                    text.to_lowercase(),
+                    wave_id.map(WaveId::as_str),
+                    project
+                ],
+                |row| map_listed_task_row(&identifiers, row),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(tasks)
     }
 
     /// How many Tasks of a Wave are open, in one statement.
@@ -1402,7 +1446,7 @@ pub(super) fn task_checkout_in(
     conn.query_row(
         &format!("{TASK_CHECKOUT_COLUMNS} AND id=?1"),
         [task.as_str()],
-        |row| map_task_checkout(conn, row),
+        |row| map_task_checkout(row, |id| short_task_id(conn, id)),
     )
     .optional()
     .map_err(Into::into)
@@ -1411,9 +1455,12 @@ pub(super) fn task_checkout_in(
 const TASK_CHECKOUT_COLUMNS: &str = "SELECT id, worktree, checkout_machine_id
     FROM tasks WHERE worktree IS NOT NULL";
 
-fn map_task_checkout(conn: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskCheckout> {
+fn map_task_checkout(
+    row: &rusqlite::Row<'_>,
+    short: impl FnOnce(&TaskId) -> StoreResult<Option<String>>,
+) -> rusqlite::Result<TaskCheckout> {
     let task_id = TaskId::from_raw(row.get::<_, String>(0)?);
-    let issue_identifier = short_task_id(conn, &task_id)
+    let issue_identifier = short(&task_id)
         .map_err(|error| invalid_column(0, error))?
         .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
     let machine: Option<String> = row.get(2)?;

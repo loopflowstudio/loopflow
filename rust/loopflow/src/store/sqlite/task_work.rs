@@ -154,17 +154,23 @@ pub(super) fn graphs_of_task(
     )
 }
 
-/// Each Task's most recently launched Graph, for every Task in one reading.
+/// Each of `tasks`' most recently launched Graph, for all of them in one reading.
 fn latest_task_graphs(
     conn: &rusqlite::Connection,
+    tasks: &[&TaskId],
 ) -> StoreResult<HashMap<TaskId, crate::ops::graph_process::GraphProcess>> {
     let mut latest = HashMap::new();
     let mut query = conn.prepare(&format!(
         "SELECT task_id, graph FROM ({}) pairs
          ORDER BY (SELECT e.rowid FROM processes e WHERE e.id=pairs.graph)",
-        task_graph_pairs(conn, "SELECT id,worktree,checkout_machine_id FROM tasks")?
+        task_graph_pairs(
+            conn,
+            "SELECT id,worktree,checkout_machine_id FROM tasks
+             WHERE id IN (SELECT value FROM json_each(?1))"
+        )?
     ))?;
-    for row in query.query_map([], |row| {
+    let ids = serde_json::to_string(&tasks.iter().map(|id| id.as_str()).collect::<Vec<_>>())?;
+    for row in query.query_map([&ids], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })? {
         let (task, graph) = row?;
@@ -728,12 +734,13 @@ impl SqliteStore {
         })
     }
 
-    /// Each Task's most recently launched Graph, read for every Task at once.
+    /// Each of `tasks`' most recently launched Graph, read for all of them at once.
     pub(crate) fn latest_task_graphs(
         &self,
+        tasks: &[&TaskId],
     ) -> StoreResult<HashMap<TaskId, crate::ops::graph_process::GraphProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        latest_task_graphs(&conn)
+        latest_task_graphs(&conn, tasks)
     }
 
     /// Every Graph among the Task's work, oldest first.
@@ -971,7 +978,7 @@ mod tests {
         for id in &graphs {
             store.record_graph_process(id, &graph).unwrap();
         }
-        let latest = store.latest_task_graphs().unwrap();
+        let latest = store.latest_task_graphs(&[&task, &sibling, &idle]).unwrap();
         for id in [&task, &sibling, &idle] {
             assert_eq!(
                 latest.get(id),

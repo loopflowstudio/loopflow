@@ -10,24 +10,56 @@ to store queries.
 ## Decisions
 
 - Jack Heart, 2026-10-26: completed Tasks leave the live planning part for a
-  paged history read. The planning stream carries incomplete Tasks only, so the
+  paged history read. Planning carries incomplete Tasks only, so the
   per-reading Task set no longer grows with history (Jack's store: 229 of 771).
 - Jack Heart, 2026-10-26: "we should focus on incomplete tasks and make
-  searching among them fast and easy". The API centers on incomplete Tasks;
-  searching among them by title, identifier, Wave, Project and state is a
-  first-class read, scoped and indexed for the p99 goal. Completed Tasks stay
-  behind the paged history read.
+  searching among them fast and easy". Search is `lf task list [query]`
+  (identifier/title; `--wave`, `--project`, `--state`), not a separate
+  `lf task search`.
+- Jack Heart, 2026-10-26 (concept review, option B): the live API is `--watch`
+  on the ordinary reads; the command a client types one-shot is the one it
+  streams. One open-Task row, `RoadmapTask`, shared by `lf task list --json`
+  and planning; closed pages use it too. Wave detail becomes Task rows
+  filtered by `--wave` plus the Wave's own fields.
+- Jack Heart, 2026-10-26: delete `lf monitor work`. Desktop runs one process
+  per watch (`lf task list --watch`, `lf session list --watch`,
+  `lf task status <id> --watch`, the live-process read); each watch is
+  internally consistent, panes no longer share one snapshot. The watch
+  machinery moves out of `work_watch.rs` into the shared reads; the monitor,
+  its part vocabulary and its Desktop transport go in the change that moves
+  Desktop over.
+- Jack Heart, 2026-10-26: `lf history` is Session history: Session records
+  (turns, usage, Processes they ran, `show`, replay) tagged with Task/Wave/
+  Project; `--task/--wave/--project` filter by tag. Work changes no Session
+  made (sync completion/moves, Workflow moves) live on the Task (`lf task
+  status`, comments, Workflow history), not in `lf history`.
+- Monitor parts, from those decisions: work_activity → `lf history [--wave|
+  --project|--task] --since --watch`; task_history → deleted (`lf task status`
+  already returns `task_work`); peer_planning → per-Task `task.sync` on rows,
+  repository sync stays `lf repo planning status` read on open.
+- LOO-594 alignment (Jack Heart, 2026-10-26): the standup Done column is one
+  read, `lf task list --done --wave W --since <7d|RFC3339>`, bounded and
+  indexed. Both branches touch TaskHistoryFilter(.swift/Tests) and
+  DTOFixtureTests: keep one filter; whichever lands second rebases.
 
 ## Direction
 
-`lf monitor work --watch --json` is the API. A client writes scope requests
-(NDJSON on stdin) and reads parts (NDJSON on stdout): `planning`,
-`peer_planning`, `sessions`, `task`, `task_history`, `wave`, `work_activity`,
-`activity`, plus `heartbeat` and `checkpoint`. Every body is the wire type the
-matching one-shot `--json` read prints, so a herdr/tmux client can start with
-one-shot reads and move to the stream unchanged. Desktop already runs one reader
-per window. Remaining Desktop reads either move into a part, stay as explicit
-user-action reads, or are deleted.
+`--watch` on `lf task list`, `lf session list`, `lf task status <id>` and the
+live-process read: NDJSON, one full frame when the result changes; stdin can
+change the query/scope; ends on stdin close or parent exit. One implementation
+reusing the reader machinery (revisions, rest, checkpoint). Order: Graph
+execution batched (done), `lf task list [query]` (done), `--watch`, then
+Desktop moves over and `lf monitor work` is deleted.
+
+Proposed usage (README draft, lands with `--watch`):
+
+```sh
+lf task list                         # open Tasks in this repository
+lf task list loo-60 --json           # identifier or title contains "loo-60"
+lf task list --wave infra --state active
+lf task list --done --wave infra --since 7d   # closed in the last week
+lf task list --watch --json          # a frame each time the list changes
+```
 
 ## Measured on Jack's store (10.3 GB, 762 Tasks, 6,248 Sessions, 944k Processes)
 
@@ -72,6 +104,19 @@ signal.
   identifier in one statement (`TaskIdentifiers`). Per-Task reads now delegate
   to the same batch SQL (acquisition, planning sync, ownership log). Measured:
   5 Tasks 164 → 42 statements, 10 Tasks 309 → 42.
+- Graph execution is read once per reading over the scope's latest Graphs
+  (`GraphExecutionFacts`: steps in one statement, captured inputs through one
+  recursive CTE, receipts of unfinished Processes); the entry takes the Task's
+  own Wave instead of re-deriving the Task. `task_checkouts` resolves
+  identifiers with `TaskIdentifiers`. Planning statements stay flat as Tasks
+  with checkouts and Graphs are added.
+- `lf task list [query] [--wave] [--project] [--state]`: open Tasks from one
+  store filter (`open_tasks_matching`) instead of a whole roadmap, as
+  `RoadmapTask` rows in plan order.
+- `lf task list --done --since <7d|24h|30m|RFC3339>` bounds closed pages by
+  closing time (LOO-594's standup Done column is one read). Not indexed: the
+  filter scans the repository's closed Tasks (~540 on Jack's store), which
+  needs no migration.
 - Desktop: WavesView reads `planning.roadmap.waves[].projects` instead of one
   `lf wave status` per Wave. Deleted dead `RegistryQuery` reads.
 
@@ -104,25 +149,23 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
 
 ## Remaining work
 
-1. Graph execution is still per Task with a Graph: `graph_entry`,
-   `process_input` (recursive CTE) and process evidence. Batch over the
-   reading's latest Graphs. Tasks without Graphs cost nothing per Task now.
-2. Task search (decided): `lf task search <text> [--wave] [--project]
-   [--state] --json` over open Tasks, returning plan rows, plus a `search`
-   field in the stream's scope request. No index planned: open Tasks are ~230
-   rows and are scanned once per reading.
-3. Sessions: incremental or paged rows instead of 5.7 MB per reading;
-   replace the 2 s clock with the activity part's liveness change.
+1. `--watch` on `lf task list`, `lf session list`, `lf task status <id>` and
+   the live-process read, reusing the `work_watch.rs` reader machinery.
+2. Move Desktop onto those watches; Wave detail becomes `RoadmapTask` rows
+   filtered by `--wave` (closed pages switch from `wave status` rows to
+   `RoadmapTask` with it); delete `lf monitor work`, its parts and transport,
+   and the task_history part. work_activity → `lf history --since --watch`.
+3. Sessions: incremental or paged rows instead of 5.7 MB per reading.
 4. `lf task status`: 5k statements / 20 connections for one Task; reuse
-   `TaskDetailFacts` for its Task.
-5. Delete Desktop duplicates listed above; add catalog and machine parts.
-6. Per-part durations in `heartbeat` so clients see p99 directly.
+   `TaskDetailFacts` and `GraphExecutionFacts` for its Task.
+5. Delete remaining Desktop duplicates; catalog and machine reads.
 
 ## Delete — do not maintain
 
 - Done: `RegistryQuery.plan/waves(repoPath:)/userName/taskFiles/repositoryWaves`,
   WavesView per-Wave `lf wave status`.
-- Next: `taskComments` read, `allWaves` after createWave, no-stream-only reads
+- Next: `lf monitor work` (`work_watch.rs` parts vocabulary, Desktop
+  transport), task_history part, `taskComments` read, `allWaves` after createWave, no-stream-only reads
   (`roadmap`, `sessionPage`, `peerPlanningStatus`, `workActivity`) if the
   one-shot transport is not kept for remote Machines.
 
@@ -134,4 +177,7 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
 - `cargo test --lib -- waves task_ownership planning_sync children`: 53 passed; `chapter_deletion_stays_absent…` passes once its surviving Task is started rather than completed.
 - `scripts/test_desktop.sh --filter 'TaskHistoryFilterTests|DTOFixtureTests|RegistryQueryTests'`: 72 passed (Done view paging).
 - `docs/lf-reference.md` regenerated for `task list --done/--after/--limit`; `reference_matches_the_compiled_cli` passes.
+- `cargo test --test integration -- task_list_query planning_statements lifecycle_world`: passed (Graph batching, `task list [query]`, `--done --since`); `--test two_people`: passed.
+- `cargo test --lib -- local_planning wave_resolution_matrix task_execution graph_inventory task_work`: 58 passed, 1 failed — `store::tests::separate_task_worktree_tracks_and_collapses_its_parent_pr` needs a global Git `user.email` the test HOME lacks; untouched code, left to CI (which sets one).
+- `cargo clippy --all-targets -- -D warnings`: clean; `docs/lf-reference.md` regenerated.
 - Live p99 A/B with an installed build: deferred to gate/demo.

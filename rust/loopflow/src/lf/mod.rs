@@ -1378,13 +1378,25 @@ pub struct SyncArgs {
 pub enum TaskCommand {
     /// List the open Tasks in the selected repository
     List {
+        /// Only Tasks whose title or identifier contains this text
+        #[arg(conflicts_with = "done")]
+        query: Option<String>,
         #[arg(long)]
         wave: Option<String>,
+        /// Project ID, provider ID, slug or name
+        #[arg(long, conflicts_with = "done")]
+        project: Option<String>,
+        /// Only Tasks in this state
+        #[arg(long, conflicts_with = "done", value_parser = ["paused", "not_ready", "ready", "active"])]
+        state: Option<String>,
         #[arg(long)]
         json: bool,
         /// Page closed (done or abandoned) Tasks instead, most recently closed first
         #[arg(long)]
         done: bool,
+        /// Only Tasks closed since then: 7d, 24h, 30m or RFC3339
+        #[arg(long, requires = "done")]
+        since: Option<String>,
         /// Previous page's `next` Task; keep the same filters
         #[arg(long, requires = "done")]
         after: Option<String>,

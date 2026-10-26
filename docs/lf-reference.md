@@ -2037,9 +2037,13 @@ List the open Tasks in the selected repository
 
 | Argument | What it does |
 |---|---|
+| `<query>` | Only Tasks whose title or identifier contains this text |
 | `--wave` | wave |
+| `--project` | Project ID, provider ID, slug or name |
+| `--state` | Only Tasks in this state |
 | `--json` | json Default: false. |
 | `--done` | Page closed (done or abandoned) Tasks instead, most recently closed first Default: false. |
+| `--since` | Only Tasks closed since then: 7d, 24h, 30m or RFC3339 |
 | `--after` | Previous page's `next` Task; keep the same filters |
 | `--limit` | Closed Tasks per page Default: 50. |
 | `--help / -h` | Print help |

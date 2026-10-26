@@ -4,12 +4,13 @@
 use serde::{Deserialize, Serialize};
 
 use crate::durable::GraphProcessDetail;
-use crate::durable::TaskId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::graph_process::GraphProcess;
 use crate::session::GraphProcessSummaryState;
 use crate::session_record::activity::{self, Activity};
+use crate::store::sqlite::{entry_of, GraphExecutionFacts};
 use crate::store::{SharedStore, StoreResult};
+use crate::work::task::Task;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -34,23 +35,21 @@ pub struct TaskExecutionSnapshot {
 
 pub(crate) async fn task_execution(
     store: &SharedStore,
-    task_id: &TaskId,
+    task: &Task,
 ) -> StoreResult<TaskExecutionSnapshot> {
-    Ok(task_execution_and_graph(store, task_id).await?.0)
+    let graph = store.sqlite.task_graphs(&task.id)?.pop();
+    let facts = store.sqlite.graph_execution_facts(&graph)?;
+    Ok(execution_of_latest_graph(task, graph.as_ref(), &facts)
+        .await?
+        .0)
 }
 
-/// Execution and the Graph record read from the same Processes.
-pub(crate) async fn task_execution_and_graph(
-    store: &SharedStore,
-    task_id: &TaskId,
-) -> StoreResult<(TaskExecutionSnapshot, Option<GraphProcessDetail>)> {
-    execution_of_latest_graph(store, store.sqlite.task_graphs(task_id)?.pop()).await
-}
-
-/// Execution and the Graph record of a Task whose latest Graph is already read.
+/// Execution and the Graph record of a Task whose latest Graph is already
+/// read, from facts read once for every Graph of the reading.
 pub(crate) async fn execution_of_latest_graph(
-    store: &SharedStore,
-    graph: Option<GraphProcess>,
+    task: &Task,
+    graph: Option<&GraphProcess>,
+    facts: &GraphExecutionFacts,
 ) -> StoreResult<(TaskExecutionSnapshot, Option<GraphProcessDetail>)> {
     let Some(graph) = graph else {
         return Ok((
@@ -64,25 +63,31 @@ pub(crate) async fn execution_of_latest_graph(
             None,
         ));
     };
-    let entry = store.sqlite.graph_entry(&graph)?;
+    let entry = entry_of(graph, Some(task.id.clone()), task.wave_id.clone())?;
     let evidence = |process: &crate::process::LfProcess| match process.completed_at {
         Some(_) => ProcessIdentityEvidence::Dead,
-        None => crate::journal::process_evidence(&store.sqlite, &process.id),
+        None => crate::journal::recorded_process_evidence(
+            process,
+            &match facts.receipts.get(&process.id) {
+                Some(path) if process.kind != crate::process::ProcessKind::Agent => {
+                    crate::journal::read_process_receipt(path)
+                }
+                _ => Ok(None),
+            },
+            crate::journal::process_identity_evidence,
+        ),
     };
     let step = graph.latest().map(|step| &step.process);
-    let input = match step {
-        Some(step) => store.sqlite.process_input(&step.id)?,
-        None => None,
-    };
+    let input = step.and_then(|step| facts.inputs.get(&step.id));
     let mut snapshot = project_execution(
-        &graph,
+        graph,
         entry.summary.state,
         evidence(&graph.process),
         step.map_or(ProcessIdentityEvidence::Dead, evidence),
     );
-    snapshot.captured = input.as_ref().map(|(_, _, captured)| *captured);
+    snapshot.captured = input.map(|(_, _, captured)| *captured);
     if snapshot.state == TaskExecutionState::Running {
-        if let Some((_, input, captured)) = &input {
+        if let Some((_, input, captured)) = input {
             match activity::read(&crate::store::lf_home_dir(), input).await {
                 Activity::Stalled => {
                     snapshot.state = TaskExecutionState::Stalled;

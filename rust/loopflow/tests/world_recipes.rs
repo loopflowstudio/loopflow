@@ -135,6 +135,16 @@ fn lifecycle_world_reports_each_state() {
             "Shipped last quarter"
         ]
     );
+    // A standup's Done column: one bounded read.
+    let week = built.lf(&["task", "list", "--done", "--since", "7d", "--json"]);
+    let shipped: Vec<&str> = week["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task["task"]["name"].as_str().unwrap())
+        .filter(|name| name.starts_with("Shipped"))
+        .collect();
+    assert_eq!(shipped, ["Shipped yesterday", "Shipped this week"]);
     for name in &closed_names {
         assert!(
             !tasks.iter().any(|task| task["task"]["name"] == *name),
@@ -192,6 +202,38 @@ fn lifecycle_world_reports_each_state() {
         .collect();
     standalone.sort_unstable();
     assert_eq!(standalone, ["Standalone fix", "Standalone idea"]);
+}
+
+#[test]
+fn task_list_query_finds_open_tasks_only() {
+    let built = Built::new("lifecycle");
+    let search = |args: &[&str]| {
+        let found = built.lf(&[&["task", "list"], args, &["--json"]].concat());
+        found
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|task| task["task"].clone())
+            .collect::<Vec<_>>()
+    };
+    let names = |args: &[&str]| {
+        let mut names: Vec<String> = search(args)
+            .iter()
+            .map(|task| task["name"].as_str().unwrap().to_owned())
+            .collect();
+        names.sort_unstable();
+        names
+    };
+    // Every "Shipped" Task is done, so the query leaves it to `--done`.
+    assert!(names(&["shipped"]).is_empty());
+    assert_eq!(
+        names(&["STANDALONE"]),
+        ["Standalone fix", "Standalone idea"]
+    );
+    assert_eq!(names(&["", "--state", "paused"]), ["Paused mid-flight"]);
+    let paused = &search(&["paused mid"])[0];
+    let identifier = paused["identifier"].as_str().unwrap().to_lowercase();
+    assert_eq!(names(&[&identifier]), ["Paused mid-flight"]);
 }
 
 #[test]

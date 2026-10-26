@@ -3599,7 +3599,7 @@ async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSn
         .work_status(&work)
         .await
         .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
-    let execution = crate::ops::task_execution::task_execution(store, &task.id)
+    let execution = crate::ops::task_execution::task_execution(store, &task)
         .await
         .map_err(task_error)?;
     let work_set = store.sqlite.task_work(&task.id).map_err(task_error)?;
@@ -4444,8 +4444,12 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         });
     if let Some(graph) = graph {
         let name = graph.name.clone();
+        let facts = store
+            .sqlite
+            .graph_execution_facts([&graph])
+            .map_err(task_error)?;
         let (execution, _) =
-            crate::ops::task_execution::execution_of_latest_graph(store, Some(graph))
+            crate::ops::task_execution::execution_of_latest_graph(task, Some(&graph), &facts)
                 .await
                 .map_err(task_error)?;
         let step = execution.step.unwrap_or_default();

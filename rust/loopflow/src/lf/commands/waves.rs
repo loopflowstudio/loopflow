@@ -752,31 +752,28 @@ pub fn show(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) -> Re
     })
 }
 
-pub fn list_tasks(repo: &Path, wave: Option<&str>, json: bool) -> Result<()> {
+/// What `lf task list` narrows the repository's open Tasks to. Empty text
+/// matches every Task.
+#[derive(Debug, Clone, Copy)]
+pub struct TaskQuery<'a> {
+    /// Contained in the title or identifier, ignoring case.
+    pub text: &'a str,
+    pub wave: Option<&'a str>,
+    /// Project ID, provider ID, slug or name.
+    pub project: Option<&'a str>,
+    /// `TaskState` label: paused, not_ready, ready or active.
+    pub state: Option<&'a str>,
+}
+
+/// `lf task list`: the repository's open Tasks matching `query`, as the plan
+/// gives them.
+pub fn list_tasks(repo: &Path, query: &TaskQuery<'_>, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        let Some(store) = crate::store::read_existing_registry()?.map(std::sync::Arc::new) else {
-            if json {
-                println!("[]");
-            }
-            return Ok(());
+        let tasks = match crate::store::read_existing_registry()?.map(std::sync::Arc::new) {
+            Some(store) => open_tasks(&store, repo, query).await?,
+            None => Vec::new(),
         };
-        let waves = store.list_waves(None).await?;
-        let roadmap = roadmap_snapshot(&store, waves, true, None, Some(repo), now()).await?;
-        let mut tasks = match roadmap.tasks {
-            Evidence::Ok { items, .. } => items,
-            Evidence::Unavailable { reason } => return Err(anyhow!(reason)),
-        };
-        if let Some(name) = wave {
-            let wave = crate::work::wave::context::resolve_managed_wave(
-                Some(&store),
-                Some(repo),
-                Some(name),
-                None,
-            )
-            .await?;
-            tasks.retain(|task| task.task.wave_id.as_deref() == Some(wave.id().as_str()));
-        }
         if json {
             println!("{}", serde_json::to_string(&tasks)?);
         } else {
@@ -793,6 +790,58 @@ pub fn list_tasks(repo: &Path, wave: Option<&str>, json: bool) -> Result<()> {
     })
 }
 
+/// The open Tasks `query` selects, read from the store's filter rather than
+/// from a whole plan, in plan order.
+async fn open_tasks(
+    store: &SharedStore,
+    repo: &Path,
+    query: &TaskQuery<'_>,
+) -> Result<Vec<RoadmapTask>> {
+    let canonical = crate::repository::CanonicalRepo::discover(repo)?;
+    let Some(repository) = store.sqlite.repository_id(&canonical.to_string())? else {
+        return Ok(Vec::new());
+    };
+    let wave = match query.wave {
+        Some(name) => Some(
+            crate::work::wave::context::resolve_managed_wave(
+                Some(store),
+                Some(repo),
+                Some(name),
+                None,
+            )
+            .await?,
+        ),
+        None => None,
+    };
+    let tasks = store.sqlite.open_tasks_matching(
+        &repository,
+        query.text,
+        wave.as_ref().map(Wave::id),
+        query.project,
+    )?;
+    let shared = SharedTaskReads::read(store).await?;
+    let (details, _) = snapshot_tasks(
+        store,
+        store.list_projects(None).await?,
+        tasks,
+        false,
+        false,
+        &shared,
+    )
+    .await?;
+    Ok(details
+        .into_iter()
+        .filter(|task| {
+            query.state.is_none_or(|state| {
+                task.runtime
+                    .as_ref()
+                    .is_some_and(|runtime| runtime.status.label() == state)
+            })
+        })
+        .map(roadmap_task)
+        .collect())
+}
+
 /// `lf task list --done --json`: one page of closed Tasks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClosedTaskPageSnapshot {
@@ -807,6 +856,7 @@ pub struct ClosedTaskPageSnapshot {
 pub fn list_closed_tasks(
     repo: &Path,
     wave: Option<&str>,
+    since: Option<&str>,
     after: Option<&str>,
     limit: usize,
     json: bool,
@@ -814,7 +864,7 @@ pub fn list_closed_tasks(
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let page = match crate::store::read_existing_registry()?.map(std::sync::Arc::new) {
-            Some(store) => closed_task_page(&store, repo, wave, after, limit).await?,
+            Some(store) => closed_task_page(&store, repo, wave, since, after, limit).await?,
             None => ClosedTaskPageSnapshot {
                 tasks: Vec::new(),
                 next: None,
@@ -832,7 +882,7 @@ pub fn list_closed_tasks(
                 );
             }
             if let Some(next) = &page.next {
-                println!("more: lf task list --done --after {next}");
+                println!("more: lf task list --done --after {next} (keep the same filters)");
             }
         }
         Ok(())
@@ -843,9 +893,19 @@ async fn closed_task_page(
     store: &SharedStore,
     repo: &Path,
     wave: Option<&str>,
+    since: Option<&str>,
     after: Option<&str>,
     limit: usize,
 ) -> Result<ClosedTaskPageSnapshot> {
+    let since = since
+        .map(|since| -> Result<String> {
+            let since = super::util::parse_since(since, now())?
+                .to_offset(time::UtcOffset::UTC)
+                .replace_nanosecond(0)
+                .expect("zero nanoseconds are valid");
+            Ok(format_time(since).expect("a UTC timestamp formats as RFC 3339"))
+        })
+        .transpose()?;
     let canonical = crate::repository::CanonicalRepo::discover(repo)?;
     let Some(repository) = store.sqlite.repository_id(&canonical.to_string())? else {
         return Ok(ClosedTaskPageSnapshot {
@@ -876,6 +936,7 @@ async fn closed_task_page(
     let page = store.sqlite.closed_tasks_page(
         &repository,
         wave.as_ref().map(Wave::id),
+        since.as_deref(),
         after.as_ref(),
         limit,
     )?;
@@ -1012,7 +1073,6 @@ struct SharedTaskReads {
     checkouts: Vec<crate::store::sqlite::TaskCheckout>,
     machines: Vec<crate::durable::Machine>,
     local_machine: crate::durable::MachineId,
-    latest_graphs: HashMap<crate::durable::TaskId, crate::ops::graph_process::GraphProcess>,
 }
 
 impl SharedTaskReads {
@@ -1024,7 +1084,6 @@ impl SharedTaskReads {
             checkouts,
             machines: store.machines().await?,
             local_machine,
-            latest_graphs: store.sqlite.latest_task_graphs()?,
         })
     }
 }
@@ -1377,12 +1436,8 @@ fn snapshot_task_details(
                         let Some(task) = requests.get(index) else {
                             return details;
                         };
-                        let detail = runtime.block_on(snapshot_task_detail(
-                            store,
-                            task,
-                            probe_pr_empty,
-                            reads,
-                        ));
+                        let detail =
+                            runtime.block_on(snapshot_task_detail(task, probe_pr_empty, reads));
                         details.push((index, detail));
                     }
                 })
@@ -1405,11 +1460,18 @@ struct DetailReads<'a> {
     /// Each Task's own Workflow, else its Wave's or repository's default, with
     /// that source; a default is resolved once per Wave and repository.
     workflows: HashMap<crate::durable::TaskId, (String, &'static str)>,
+    /// Each Task's latest Graph and what its execution reads, asked once.
+    graphs: HashMap<crate::durable::TaskId, crate::ops::graph_process::GraphProcess>,
+    execution: crate::store::sqlite::GraphExecutionFacts,
 }
 
 impl<'a> DetailReads<'a> {
     fn read(store: &SharedStore, tasks: &[&Task], shared: &'a SharedTaskReads) -> Result<Self> {
         let facts = store.sqlite.task_detail_facts(tasks)?;
+        let graphs = store
+            .sqlite
+            .latest_task_graphs(&tasks.iter().map(|task| &task.id).collect::<Vec<_>>())?;
+        let execution = store.sqlite.graph_execution_facts(graphs.values())?;
         let mut defaults = HashMap::<_, Option<(String, &'static str)>>::new();
         let mut workflows = HashMap::new();
         for task in tasks {
@@ -1430,6 +1492,8 @@ impl<'a> DetailReads<'a> {
             shared,
             facts,
             workflows,
+            graphs,
+            execution,
         })
     }
 }
@@ -1448,7 +1512,6 @@ fn unavailable_task(task: &Task, status: TaskState) -> UnavailableTaskEvidence {
 }
 
 async fn snapshot_task_detail(
-    store: &SharedStore,
     task: &Task,
     probe_pr_empty: bool,
     reads: &DetailReads<'_>,
@@ -1459,8 +1522,9 @@ async fn snapshot_task_detail(
     let active = pr.as_ref().filter(|pr| pr.is_active());
     let observed_at = now();
     let (execution, graph_record) = crate::ops::task_execution::execution_of_latest_graph(
-        store,
-        shared.latest_graphs.get(&task.id).cloned(),
+        task,
+        reads.graphs.get(&task.id),
+        &reads.execution,
     )
     .await?;
     let status = *facts
@@ -2708,7 +2772,7 @@ mod tests {
         let task = store.get_task(&task.id).await.unwrap().unwrap();
         let shared = super::SharedTaskReads::read(&store).await.unwrap();
         let reads = super::DetailReads::read(&store, &[&task], &shared).unwrap();
-        let detail = super::snapshot_task_detail(&store, &task, false, &reads)
+        let detail = super::snapshot_task_detail(&task, false, &reads)
             .await
             .unwrap();
         let workspace = detail.reference.workspace.unwrap();
@@ -2721,7 +2785,7 @@ mod tests {
             .unwrap();
         let shared = super::SharedTaskReads::read(&store).await.unwrap();
         let reads = super::DetailReads::read(&store, &[&task], &shared).unwrap();
-        let detail = super::snapshot_task_detail(&store, &task, false, &reads)
+        let detail = super::snapshot_task_detail(&task, false, &reads)
             .await
             .unwrap();
         let workspace = detail.reference.workspace.unwrap();

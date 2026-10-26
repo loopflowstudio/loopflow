@@ -531,7 +531,7 @@ struct DesktopHeadlessTests {
     }
 
     @Test("Loading, unavailable, empty and selected Work have distinct content")
-    func workStates() throws {
+    func workStates() async throws {
         let query = RegistryQuery { _, _ in throw RegistryQueryError("Unexpected external read") }
         let model = WorkModel(query: query)
         let view = WorkSurfaceView(model: model)
@@ -576,6 +576,8 @@ struct DesktopHeadlessTests {
         try navigator.inspect()
             .find(viewWithAccessibilityIdentifier: "work-wave-\(wave.id)").button().tap()
 
+        // The clicked row darkens before the selection moves it.
+        for _ in 0..<50 where model.selection != .wave(id: wave.id) { try await Task.sleep(for: .milliseconds(20)) }
         #expect(model.selection == .wave(id: wave.id))
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-detail-wave")
         let title = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string()

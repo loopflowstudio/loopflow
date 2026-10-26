@@ -53,14 +53,17 @@ final class PortfolioRepoState {
     /// the write must land there too — a GOAL.md written into a worktree is a
     /// wave no reader ever finds.
     func createWave(name: String) async throws {
+        try await Self.createWave(name: name, repoPath: repo.url.path)
+        await refresh()
+    }
+
+    static func createWave(name: String, repoPath: String) async throws {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             throw PortfolioRepoError.emptyWaveName
         }
-
-        let repoURL = repo.url
         try await Task.detached {
-            let waveDir = URL(fileURLWithPath: WaveOrigin.resolve(repoURL.path), isDirectory: true)
+            let waveDir = URL(fileURLWithPath: WaveOrigin.resolve(repoPath), isDirectory: true)
                 .appendingPathComponent(".lf/wave", isDirectory: true)
                 .appendingPathComponent(trimmed, isDirectory: true)
             let goalURL = waveDir.appendingPathComponent("GOAL.md", isDirectory: false)
@@ -73,8 +76,6 @@ final class PortfolioRepoState {
             let memoryURL = waveDir.appendingPathComponent("MEMORY.md", isDirectory: false)
             try "".write(to: memoryURL, atomically: true, encoding: .utf8)
         }.value
-
-        await refresh()
     }
 
     /// Re-read this repo's waves. Discovery is a query, not a stream: `lf wave list`

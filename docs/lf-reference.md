@@ -54,6 +54,8 @@ Open Loopflow or run its CLI
 | `--docs` | Docs paths, globs, or directories to include in context |
 | `--clipboard / -c` | Include clipboard content in prompt Default: false. |
 | `--agent / -a` | Override agents named in Tasks, Graphs and skills, including child commands (claude, codex, opencode, pi; harness[:model]) Applies everywhere. |
+| `--skill-input` | Read the skill and its arguments from this captured invocation file, as a Graph step does |
+| `--output-schema` | Require the final answer to match this JSON schema, as a deciding Graph step does |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
@@ -71,6 +73,7 @@ Open Loopflow or run its CLI
 | `--wave` | Add Wave context and identity without changing the working directory |
 | `--task` | Execute in this Task's checkout |
 | `--wt` | Execute in an existing worktree by name or branch |
+| `--cwd` | Run in this directory; Work still comes from `--task` or `--wave` |
 | `--help / -h` | Print help |
 | `--version / -V` | Print version |
 
@@ -434,17 +437,6 @@ Reclaim finished worktrees and build output, dead receipts, old backups, store c
 | `--keep-days` | Keep captures and logs modified within this many days Default: 7. |
 | `--help / -h` | Print help |
 
-## lf disk rotate
-
-Remove the oldest backups, store copies, captures and logs until ~/.lf fits its disk_budget
-
-| Argument | What it does |
-|---|---|
-| `--dry-run` | Show what would be removed without removing anything Default: false. |
-| `--json` | json Default: false. |
-| `--quiet / -q` | Print nothing; removals are still logged to ~/.lf/logs/disk.log Default: false. |
-| `--help / -h` | Print help |
-
 ## lf :
 
 Run an inline prompt
@@ -460,6 +452,16 @@ Inspect and continue Sessions
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf session serve
+
+Run the process a Session lives in while terminals come and go
+
+| Argument | What it does |
+|---|---|
+| `--terminal` | Relay the execution to an attached terminal Default: false. |
+| `<argv>` | The command this process executes |
 | `--help / -h` | Print help |
 
 ## lf session attach
@@ -910,6 +912,7 @@ Watch this repository's PR checks and start a ci-fix when a recorded landing fai
 | `--uninstall` | Remove the background service Default: false. |
 | `--status` | Show whether a watcher is live, its last poll, and what it started Default: false. |
 | `--json` | Emit the status as JSON Default: false. |
+| `--parent-pid` | Stop when the process with this PID exits, as Desktop's watcher does |
 | `--help / -h` | Print help |
 
 ## lf repo reteam
@@ -954,6 +957,17 @@ Install the latest Loopflow at login and weekly by default (macOS launchd)
 | Argument | What it does |
 |---|---|
 | `<frequency>` | Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time) Default: weekly. |
+| `--help / -h` | Print help |
+
+## lf self sync-skills
+
+Export skills and Graphs into native vendor Skills directories
+
+| Argument | What it does |
+|---|---|
+| `--yes / -y` | Confirm writes under ~/ without prompting Default: false. |
+| `--no-prune` | Keep stale loopflow-generated skills Default: false. |
+| `--repo` | Export repository definitions into this checkout instead of home Default: false. |
 | `--help / -h` | Print help |
 
 ## lf portfolio

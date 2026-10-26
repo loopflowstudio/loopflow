@@ -11,7 +11,8 @@ use tokio::net::UnixStream;
 use tokio::sync::oneshot;
 use tokio_tungstenite::{tungstenite::protocol::Role, tungstenite::Message, WebSocketStream};
 
-use super::codex_history::History;
+use super::codex::CodexStream;
+use super::fact_writer::FactWriter;
 use crate::id::LfProcessId;
 use crate::session::SessionEventKind;
 use crate::store::sqlite::SqliteStore;
@@ -99,15 +100,20 @@ async fn stalled_dispatch() {
             .unwrap();
     });
     ready.await.unwrap();
-    let mut history = History::default();
+    let mut history = CodexStream::new(FactWriter::new(
+        store.clone(),
+        "conversation".into(),
+        Some(attachment.clone()),
+        None,
+        Default::default(),
+    ));
     history
-        .record(
-            &store,
-            "conversation",
-            Some(&attachment),
-            None,
+        .inbound(
             &json!({"method":"turn/started","params":{"threadId":"thread","turn":{"id":"turn"}}}),
+            None,
         )
+        .await
+        .1
         .unwrap();
     // A distinct connection proves the Machine's WAL writer is also free, not
     // merely this SqliteStore's mutex.

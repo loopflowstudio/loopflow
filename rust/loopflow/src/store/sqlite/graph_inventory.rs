@@ -170,12 +170,12 @@ fn process_inputs(
     let rows = conn
         .prepare(
             "WITH RECURSIVE delegated(root,id,serves) AS (
-                 SELECT id,id,CASE WHEN json_valid(command) THEN json_extract(command,'$[1]')='__transport-serve' END
+                 SELECT id,id,CASE WHEN json_valid(command) THEN json_extract(command,'$[1]')='session' AND json_extract(command,'$[2]')='serve' END
                  FROM processes WHERE id IN (SELECT value FROM json_each(?1))
                  UNION
-                 SELECT d.root,p.id,CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='__transport-serve' END
+                 SELECT d.root,p.id,CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='session' AND json_extract(p.command,'$[2]')='serve' END
                  FROM processes p JOIN delegated d ON p.parent_lf_process_id=d.id
-                 WHERE d.serves OR (CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='__transport-serve' END))
+                 WHERE d.serves OR (CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='session' AND json_extract(p.command,'$[2]')='serve' END))
              SELECT d.root,c.session_id,c.receipt_key,MAX(c.seq) FROM delegated d
              JOIN session_events c ON c.lf_process_id=d.id
              WHERE c.kind='captured' GROUP BY d.root",
@@ -466,7 +466,7 @@ mod tests {
             process(
                 &transport,
                 Some(&step),
-                &["lf", "__transport-serve", "--", "lf"],
+                &["lf", "session", "serve", "--", "lf"],
             );
             process(&served, Some(&transport), &["lf", "--skill-input", "in"]);
             // A command the agent ran is not the step's own capture.

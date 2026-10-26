@@ -257,11 +257,11 @@ struct DesktopAction {
         DesktopAction("goto", "Working Task", arguments: [.init(name: "index", kind: .integer, required: true)],
             keys: (1...9).map { .init(.character(Character(String($0))), .command, args: ["index": String($0)]) }) { context in
             let index = try context.integer("index")
-            let ids = context.model.workingTaskIDs
+            let ids = context.model.sidebarTaskIDs
             guard ids.indices.contains(index - 1) else {
-                throw DesktopTargetError("Working Tasks has no position \(index); it has \(ids.count). Nothing changed.")
+                throw DesktopTargetError("The sidebar has no Task at position \(index); it has \(ids.count). Nothing changed.")
             }
-            context.model.select(.task(id: ids[index - 1]))
+            context.model.selectSidebarTask(slot: index - 1)
             return nil
         },
         DesktopAction("next", "Next Task", keys: [.init(.tab, .control)]) { try cycle($0, by: 1) },
@@ -290,12 +290,8 @@ struct DesktopAction {
     ]
 
     private static func cycle(_ context: DesktopActionContext, by offset: Int) throws -> DesktopActionOutcome? {
-        let model = context.model
-        let ids = model.workingTaskIDs
-        guard !ids.isEmpty else { throw DesktopTargetError("There are no Working Tasks. Nothing changed.") }
-        let index = ids.firstIndex { model.isSelected(.task(id: $0)) }
-        let next = index.map { ($0 + offset + ids.count) % ids.count } ?? (offset > 0 ? 0 : ids.count - 1)
-        model.select(.task(id: ids[next]))
+        guard !context.model.sidebarTaskIDs.isEmpty else { throw DesktopTargetError("The sidebar shows no Tasks. Nothing changed.") }
+        context.model.cycleSidebarTask(offset)
         return nil
     }
 

@@ -1,6 +1,6 @@
 //! Task CI repair holds and incident-owned repair admission.
 
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 
 use crate::durable::TaskId;
 use crate::id::LfProcessId;
@@ -12,7 +12,6 @@ use super::SqliteStore;
 #[derive(Debug)]
 pub(crate) struct RepairReservation {
     pub process: Option<LfProcessId>,
-    pub session: Option<String>,
     pub retries: u32,
     pub finished: Option<i64>,
     pub conclusion: Option<String>,
@@ -52,40 +51,32 @@ impl SqliteStore {
 
     pub(crate) fn repair_reservation(&self, identity: &str) -> StoreResult<RepairReservation> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row("SELECT repair_lf_process_id,repair_session_id,repair_retries,repair_finished_at,repair_error,repair_conclusion FROM ci_incidents WHERE identity=?1", [identity], |row| Ok(RepairReservation {
-            process: row.get(0)?, session: row.get(1)?, retries: row.get(2)?, finished: row.get(3)?, error: row.get(4)?, conclusion: row.get(5)?,
+        Ok(conn.query_row("SELECT repair_lf_process_id,repair_retries,repair_finished_at,repair_error,repair_conclusion FROM ci_incidents WHERE identity=?1", [identity], |row| Ok(RepairReservation {
+            process: row.get(0)?, retries: row.get(1)?, finished: row.get(2)?, error: row.get(3)?, conclusion: row.get(4)?,
         }))?)
     }
 
+    /// Reserve an incident's repair for `process`; the run it launches takes
+    /// the reservation over, and settlement records the Session it opened.
     pub(crate) fn reserve_repair(
         &self,
         identity: &str,
         generation: u64,
         process: &LfProcessId,
         retry: bool,
-        session: crate::session::LfSession,
+        task: Option<&TaskId>,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        if let Some(task) = &session.task_id {
+        if let Some(task) = task {
             if super::durable::task_state_in(&tx, task)? == crate::durable::TaskState::Paused {
                 return Err(StoreError::InvalidAuthority(
                     "Task is paused; CI repair is held".into(),
                 ));
             }
         }
-        let session = match super::sessions::session_in(&tx, &session.id)? {
-            Some(mut existing) if retry => {
-                existing.artifact_key = Some(crate::session_record::new_artifact_key());
-                existing.input_published = false;
-                super::sessions::replace_input_in(&tx, &mut existing, Some(process))?;
-                existing
-            }
-            Some(existing) => existing,
-            None => super::sessions::reserve_session_in(&tx, session, Some(process))?,
-        };
-        let changed = tx.execute("UPDATE ci_incidents SET repair_lf_process_id=?3,repair_session_id=?5,repair_retries=repair_retries+?4,repair_finished_at=NULL,repair_error=NULL,claimed_landing_generation=?2
-            WHERE identity=?1 AND EXISTS(SELECT 1 FROM pr_landings p WHERE p.id=ci_incidents.landing_id AND p.generation=?2 AND p.state IN ('watching','repairing','blocked'))",params![identity,generation as i64,process.as_str(),retry,session.id])? == 1;
+        let changed = tx.execute("UPDATE ci_incidents SET repair_lf_process_id=?3,repair_session_id=NULL,repair_retries=repair_retries+?4,repair_finished_at=NULL,repair_error=NULL,claimed_landing_generation=?2
+            WHERE identity=?1 AND EXISTS(SELECT 1 FROM pr_landings p WHERE p.id=ci_incidents.landing_id AND p.generation=?2 AND p.state IN ('watching','repairing','blocked'))",params![identity,generation as i64,process.as_str(),retry])? == 1;
         if changed {
             tx.commit()?;
         }
@@ -101,38 +92,29 @@ impl SqliteStore {
         Ok(self.conn.lock().expect("store mutex poisoned").execute("UPDATE ci_incidents SET repair_lf_process_id=?3,responded_at=COALESCE(responded_at,?4) WHERE identity=?1 AND repair_lf_process_id=?2 AND repair_finished_at IS NULL", params![identity,launcher.as_str(),worker.as_str(),time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64])? == 1)
     }
 
+    /// Settle an exited run: the Session and input it captured, if any, and
+    /// its conclusion or the reason it reached none.
     pub(crate) fn finish_repair(
         &self,
         identity: &str,
         process: &LfProcessId,
+        captured: Option<(&str, Option<i64>)>,
         error: Option<&str>,
         conclusion: Option<&str>,
-        captured: Option<i64>,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        if tx.execute("UPDATE ci_incidents SET repair_finished_at=?3,repair_error=?4,repair_conclusion=?5 WHERE identity=?1 AND repair_lf_process_id=?2",params![identity,process.as_str(),now,error,conclusion])? != 1 {
-            return Err(StoreError::InvalidAuthority("repair reservation changed before completion".into()));
+        let (session, capture) = captured.unzip();
+        let capture = capture.flatten();
+        if tx.execute("UPDATE ci_incidents SET repair_finished_at=?3,repair_error=?4,repair_conclusion=?5,repair_session_id=?6 WHERE identity=?1 AND repair_lf_process_id=?2 AND repair_finished_at IS NULL",params![identity,process.as_str(),now,error,conclusion,session])? == 0 {
+            // Another check already settled this run.
+            return Ok(());
         }
         if conclusion.is_some() {
-            tx.execute("UPDATE agent_sessions SET completed_at=?3 WHERE id=(SELECT repair_session_id FROM ci_incidents WHERE identity=?1) AND current_capture=?2 AND completed_at IS NULL", params![identity,captured,now])?;
+            tx.execute("UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND current_capture=?2 AND completed_at IS NULL", params![session,capture,now])?;
         }
         tx.commit()?;
         Ok(())
-    }
-
-    pub(crate) fn incident_landing(&self, identity: &str) -> StoreResult<Option<String>> {
-        Ok(self
-            .conn
-            .lock()
-            .expect("store mutex poisoned")
-            .query_row(
-                "SELECT landing_id FROM ci_incidents WHERE identity=?1",
-                [identity],
-                |row| row.get(0),
-            )
-            .optional()?
-            .flatten())
     }
 }

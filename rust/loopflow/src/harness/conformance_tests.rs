@@ -1,14 +1,13 @@
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
-use tokio::sync::mpsc;
 
-use super::claude_mapping::{self, ReaderState};
-use super::codex::{process_notification, process_rpc_error, NotificationState};
-use super::{opencode_history::History, opencode_mapping};
+use super::claude_decode::ClaudeDecoder;
+use super::codex_decode::{rpc_error, CodexDecoder};
+use super::fact::{Decoded, ProviderFact};
+use super::fact_writer::FactWriter;
+use super::opencode_decode::{OpenCodeDecoder, Snapshot};
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use crate::id::AgentSessionId;
 
@@ -23,43 +22,37 @@ fn read_trace_lines(file_name: &str) -> Vec<String> {
         .collect()
 }
 
-fn drain_events(
-    rx: &mut mpsc::UnboundedReceiver<ConversationEvent>,
-    out: &mut Vec<ConversationEvent>,
-) {
-    while let Ok(event) = rx.try_recv() {
-        out.push(event);
-    }
-}
-
 fn replay_claude_trace(file_name: &str) -> (Vec<ConversationEvent>, Option<AgentSessionId>) {
-    let (tx, mut rx) = mpsc::unbounded_channel();
     let mut events = Vec::new();
-    let mut state = ReaderState::default();
+    let mut decoder = ClaudeDecoder::default();
+    let mut session_id = None;
     let mut saw_turn_completed = false;
 
-    for line in read_trace_lines(file_name) {
+    'lines: for line in read_trace_lines(file_name) {
         if line.trim().is_empty() {
             continue;
         }
-        // process_line reports the result status; the reader (mirrored here)
-        // owns the terminal TurnCompleted.
-        let result = claude_mapping::process_line(&line, "turn_trace", &tx, &mut state);
-        drain_events(&mut rx, &mut events);
-        if let Some(status) = result {
-            saw_turn_completed = true;
-            events.push(ConversationEvent::TurnCompleted {
-                turn_id: "turn_trace".to_string(),
-                status,
-            });
-            break;
+        // The decoder reports the provider turn's end; the reader (mirrored
+        // here) owns the terminal TurnCompleted.
+        for decoded in decoder.decode(&line, "turn_trace").unwrap() {
+            match decoded {
+                Decoded::Display(event) => events.push(event),
+                Decoded::Fact(ProviderFact::SessionObserved(id)) => session_id = Some(id),
+                Decoded::Fact(ProviderFact::TurnCompleted { status, .. }) => {
+                    saw_turn_completed = true;
+                    events.push(ConversationEvent::TurnCompleted {
+                        turn_id: "turn_trace".to_string(),
+                        status,
+                    });
+                    break 'lines;
+                }
+                Decoded::Fact(_) => {}
+            }
         }
     }
 
-    let session_id = state.take_agent_session();
-
     if !saw_turn_completed {
-        for item in state.drain_open_items(Lifecycle::Failed) {
+        for item in decoder.drain_open_items(Lifecycle::Failed) {
             events.push(ConversationEvent::ItemCompleted {
                 turn_id: "turn_trace".to_string(),
                 item,
@@ -78,16 +71,10 @@ fn replay_codex_trace(file_name: &str) -> Vec<ConversationEvent> {
     replay_codex_lines(read_trace_lines(file_name))
 }
 
-/// Replay codex app-server lines through the production notification
-/// dispatch (`codex::process_notification`), so traces pin real behavior.
+/// Replay codex app-server lines through the production decoder, so traces
+/// pin real behavior. Unawaited error responses display as the live reader's.
 fn replay_codex_lines(lines: Vec<String>) -> Vec<ConversationEvent> {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut state = NotificationState::new(
-        Arc::new(AtomicBool::new(false)),
-        Arc::new(Mutex::new(None)),
-        Arc::new(Mutex::new(None)),
-        None,
-    );
+    let mut decoder = CodexDecoder::default();
     let mut events = Vec::new();
 
     for line in lines {
@@ -96,22 +83,15 @@ fn replay_codex_lines(lines: Vec<String>) -> Vec<ConversationEvent> {
         }
 
         let value: Value = serde_json::from_str(&line).expect("trace line should be valid json");
-        let method = value
-            .get("method")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        if method.is_empty() {
-            // Response frame; error responses map to harness error events,
-            // mirroring the live reader.
-            if let Some(error) = value.get("error") {
-                process_rpc_error(error, &tx);
-                drain_events(&mut rx, &mut events);
-            }
-            continue;
+        events.extend(decoder.decode(&value, None).into_iter().filter_map(
+            |decoded| match decoded {
+                Decoded::Display(event) => Some(event),
+                Decoded::Fact(_) => None,
+            },
+        ));
+        if let (None, Some(error)) = (value.get("method"), value.get("error")) {
+            events.push(rpc_error(error));
         }
-        let params = value.get("params").cloned().unwrap_or_else(|| json!({}));
-        process_notification(method, &params, &mut state, &tx);
-        drain_events(&mut rx, &mut events);
     }
 
     events
@@ -367,6 +347,27 @@ fn codex_rpc_error_response_maps_to_error_event() {
     ));
 }
 
+/// Display events from one OpenCode snapshot, recording its facts.
+fn opencode_display(
+    decoder: &mut OpenCodeDecoder,
+    writer: &mut FactWriter,
+    messages: &[Value],
+) -> Vec<ConversationEvent> {
+    let Snapshot { decoded, .. } = decoder.messages(messages);
+    tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap()
+        .block_on(writer.write(&decoded))
+        .unwrap();
+    decoded
+        .into_iter()
+        .filter_map(|decoded| match decoded {
+            Decoded::Display(event) => Some(event),
+            Decoded::Fact(_) => None,
+        })
+        .collect()
+}
+
 // Synthetic native message shapes follow the isolated OpenCode 2.0.32 proof.
 // Status/SSE alone supplies neither a native completion nor measured usage.
 #[test]
@@ -391,24 +392,26 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
         let attachment = store
             .claim_session_attachment(&session, None, &process, false)
             .unwrap();
-        let mut history = History::new(Some((store.clone(), session.clone(), attachment)));
-        let request = history.request().unwrap();
+        let mut writer = FactWriter::new(
+            store.clone(),
+            session.clone(),
+            Some(attachment),
+            None,
+            Default::default(),
+        );
         let agent_session = AgentSessionId::from(session.as_str());
-        let mut display = opencode_mapping::ReaderState::new(agent_session.clone(), None);
+        let mut decoder = OpenCodeDecoder::new(agent_session.clone(), None);
+        let request = decoder.request(false);
+        writer.outbound(&request).unwrap();
         let user = json!({"id":request,"type":"user","text":"request","time":{"created":0}});
         let mut message = json!({"id":"assistant","type":"assistant","time":{"created":1},
             "content":[{"id":"tool","type":"tool","name":"shell",
                 "state":{"status":"running","input":{"command":"echo ok"}}}]});
-        let messages = [user.clone(), message.clone()];
-        let observed = history.observe(&agent_session, &messages).unwrap();
-        let started = observed.events;
-        assert!(
-            matches!(&started[..], [ConversationEvent::TurnStarted { turn_id }] if turn_id == &request)
-        );
-        let tools = display.observe_messages(&observed.messages);
-        assert!(
-            matches!(&tools[..], [ConversationEvent::ItemStarted {turn_id, item: ConversationItem::Command {status: Lifecycle::Running, ..}}] if turn_id == &request)
-        );
+        let started = opencode_display(&mut decoder, &mut writer, &[user.clone(), message.clone()]);
+        assert!(matches!(&started[..], [
+                ConversationEvent::TurnStarted { turn_id },
+                ConversationEvent::ItemStarted {turn_id: tool_turn, item: ConversationItem::Command {status: Lifecycle::Running, ..}},
+            ] if turn_id == &request && tool_turn == &request));
 
         assert!(store
             .session_history(&session, 0, 0)
@@ -426,27 +429,20 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
             message["cost"] = json!(0.5);
         }
         let messages = [user.clone(), message.clone()];
-        let observed = history.observe(&agent_session, &messages).unwrap();
-        let output = display.observe_messages(&observed.messages);
+        let output = opencode_display(&mut decoder, &mut writer, &messages);
         assert!(output.iter().any(|event| matches!(event, ConversationEvent::ItemCompleted {turn_id,item:ConversationItem::Command {output:Some(text),exit_code:Some(0),..}} if turn_id == &request && text == "ok")));
         assert!(output.iter().any(|event| matches!(event, ConversationEvent::TextDelta {turn_id,content} if turn_id == &request && content == "Final answer")));
-        assert!(display.observe_messages(&observed.messages).is_empty());
+        assert!(opencode_display(&mut decoder, &mut writer, &messages).is_empty());
         let idle = json!({"id":"idle","type":"idle","outcome":"succeeded","time":{"created":4}});
-        let completion = history
-            .observe(
-                &agent_session,
-                &[user.clone(), message.clone(), idle.clone()],
-            )
-            .unwrap()
-            .events;
+        let completion = opencode_display(
+            &mut decoder,
+            &mut writer,
+            &[user.clone(), message.clone(), idle.clone()],
+        );
         assert!(
             matches!(&completion[..], [ConversationEvent::TurnCompleted {turn_id,status:Lifecycle::Completed}] if turn_id == &request)
         );
-        assert!(history
-            .observe(&agent_session, &[user, message, idle])
-            .unwrap()
-            .events
-            .is_empty());
+        assert!(opencode_display(&mut decoder, &mut writer, &[user, message, idle]).is_empty());
         let usage = store.input_history(input.as_str()).unwrap().usage;
         assert_eq!(usage.input_tokens, measured);
         assert_eq!(usage.output_tokens, measured.map(|_| 5));
@@ -456,25 +452,26 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
 
 #[test]
 fn opencode_native_error_completes_only_its_request() {
-    let mut history = History::default();
-    let request = history.request().unwrap();
+    let mut decoder = OpenCodeDecoder::new("session".into(), None);
+    let request = decoder.request(false);
     let user = json!({"id":request,"type":"user","text":"request"});
     let message = json!({"id":"assistant","type":"assistant","time":{"created":1,"completed":2},
         "error":{"message":"provider rejected request"},"content":[]});
     let idle = json!({"id":"idle","type":"idle","outcome":"failed","time":{"created":3},"error":{"message":"provider rejected request"}});
-    let events = history
-        .observe(
-            &"session".into(),
-            &[user.clone(), message.clone(), idle.clone()],
-        )
-        .unwrap()
-        .events;
+    let display = |decoder: &mut OpenCodeDecoder, messages: &[Value]| -> Vec<ConversationEvent> {
+        decoder
+            .messages(messages)
+            .decoded
+            .into_iter()
+            .filter_map(|decoded| match decoded {
+                Decoded::Display(event) => Some(event),
+                Decoded::Fact(_) => None,
+            })
+            .collect()
+    };
+    let events = display(&mut decoder, &[user.clone(), message.clone(), idle.clone()]);
     assert!(
         matches!(&events[..], [ConversationEvent::TurnStarted {turn_id}, ConversationEvent::Error {message,..}, ConversationEvent::TurnCompleted {turn_id:completed,status:Lifecycle::Failed}] if turn_id == &request && completed == &request && message == "provider rejected request")
     );
-    assert!(history
-        .observe(&"session".into(), &[user, message, idle])
-        .unwrap()
-        .events
-        .is_empty());
+    assert!(display(&mut decoder, &[user, message, idle]).is_empty());
 }

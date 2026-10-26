@@ -15,7 +15,9 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use super::agent_process::AttachmentOwner;
-use super::pi_mapping::Turn;
+use super::fact::{Decoded, ProviderFact, ProviderTurn};
+use super::fact_writer::FactWriter;
+use super::pi_decode::Turn;
 use super::{Harness, HarnessError, RawProviderEvent, SendCurrentOutcome};
 use crate::agent::AgentConfig;
 use crate::chat::types::{ConversationEvent, Lifecycle};
@@ -32,8 +34,27 @@ struct Response {
 #[derive(Debug, Default)]
 struct State {
     turn: Option<Turn>,
+    /// Writes what this process's turns establish; present once started.
+    writer: Option<FactWriter>,
     responses: HashMap<String, oneshot::Sender<Response>>,
     dead: bool,
+}
+
+impl State {
+    /// Record a turn's facts and hand back its display events.
+    fn record(&mut self, decoded: Vec<Decoded>) -> Result<Vec<ConversationEvent>> {
+        self.writer
+            .as_mut()
+            .ok_or_else(|| anyhow!("Pi has not started"))?
+            .record(&decoded)?;
+        Ok(decoded
+            .into_iter()
+            .filter_map(|decoded| match decoded {
+                Decoded::Display(event) => Some(event),
+                Decoded::Fact(_) => None,
+            })
+            .collect())
+    }
 }
 
 #[derive(Debug)]
@@ -191,6 +212,14 @@ impl PiHarness {
             .stderr(Stdio::piped());
         let mut child = super::agent_process::spawn(command, None, &owner)
             .with_context(|| crate::agent::missing_agent_message("pi"))?;
+        let (store, session, attachment) = owner;
+        self.state.lock().expect("Pi state lock poisoned").writer = Some(FactWriter::new(
+            store,
+            session,
+            Some(attachment),
+            None,
+            Default::default(),
+        ));
         self.stdin = child.stdin.take();
         let stdout = child.stdout.take().expect("Pi stdout was piped");
         self.stderr = child
@@ -198,7 +227,7 @@ impl PiHarness {
             .take()
             .map(|stderr| super::common::spawn_stderr_logger(stderr, "pi"));
         self.child = Some(child);
-        self.reader = Some(self.spawn_reader(stdout, owner));
+        self.reader = Some(self.spawn_reader(stdout));
         let info = self.request(json!({"type":"get_state"})).await?;
         let file = info["sessionFile"]
             .as_str()
@@ -211,22 +240,19 @@ impl PiHarness {
             );
         }
         self.session = Some(file.into());
-        let (store, session, attachment) = self.owner()?;
-        store.record_session_agent_session(
-            &session,
-            &attachment,
-            self.session.as_ref().expect("Pi session was observed"),
-        )?;
+        self.state
+            .lock()
+            .expect("Pi state lock poisoned")
+            .record(vec![ProviderFact::SessionObserved(file.into()).into()])?;
         Ok(())
     }
 
-    fn spawn_reader(&self, stdout: ChildStdout, owner: AttachmentOwner) -> JoinHandle<()> {
+    fn spawn_reader(&self, stdout: ChildStdout) -> JoinHandle<()> {
         let state = self.state.clone();
         let events = self.events.clone();
         let raw = self.raw.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
-            let mut activity = super::activity_tracker::SessionActivityTracker::default();
             let outcome: Result<()> = async {
                 while let Some(line) = lines.next_line().await? {
                     if let Some(raw) = &raw {
@@ -256,14 +282,8 @@ impl PiHarness {
                         }
                     }
                     if let Some(turn) = state.turn.as_mut() {
-                        let mapped = turn.event(&value);
-                        let (store, session, attachment) = &owner;
-                        let signals = super::pi_history::signals(&value, &mapped);
-                        activity.record(store, session, attachment, signals);
-                        let thread = store.session_thread(session)?;
-                        if let Some(thread) = thread {
-                            super::pi_history::record(store, session, &thread, &mapped)?;
-                        }
+                        let decoded = turn.event(&value);
+                        let mapped = state.record(decoded)?;
                         let complete = mapped.iter().any(|e| {
                             matches!(e, ConversationEvent::TurnCompleted { .. })
                         });
@@ -281,20 +301,11 @@ impl PiHarness {
             state.dead = true;
             state.responses.clear();
             if let Some(mut turn) = state.turn.take() {
-                let mapped = turn.finish(Lifecycle::Failed);
-                let (store, session, attachment) = &owner;
-                if let Ok(Some(thread)) = store.session_thread(session) {
-                    if let Err(error) = super::pi_history::record(store, session, &thread, &mapped)
-                    {
-                        tracing::warn!(%error, "could not retain Pi failure");
-                    }
+                let decoded = turn.finish(Lifecycle::Failed);
+                let mapped = display(&decoded);
+                if let Err(error) = state.record(decoded) {
+                    tracing::warn!(%error, "could not retain Pi failure");
                 }
-                activity.record(
-                    store,
-                    session,
-                    attachment,
-                    vec![super::activity_tracker::Signal::Yielded(false)],
-                );
                 for event in mapped {
                     let _ = events.send(event);
                 }
@@ -352,17 +363,20 @@ impl Harness for PiHarness {
             if state.turn.is_some() {
                 return Err(HarnessError::TurnAlreadyInProgress.into());
             }
-            let (store, session, attachment) = self.owner()?;
             let thread = self
                 .session
-                .as_ref()
+                .clone()
                 .ok_or_else(|| anyhow!("Pi has not started"))?;
-            store.record_session_turn_origin(
+            let turn = ProviderTurn {
                 thread,
-                &id,
-                &store.session_turn_origin(&session, &attachment)?,
-            )?;
-            state.turn = Some(Turn::new(id.clone()));
+                turn: id.clone(),
+            };
+            state.record(vec![ProviderFact::TurnAnswered {
+                turn: turn.clone(),
+                request: id.clone(),
+            }
+            .into()])?;
+            state.turn = Some(Turn::new(turn));
         }
         let message = match self.seed.take().filter(|s| !s.is_empty()) {
             Some(seed) if content.is_empty() => seed,
@@ -384,21 +398,15 @@ impl Harness for PiHarness {
                 Ok(())
             });
         if let Err(error) = result {
-            if let Some(mut turn) = self
-                .state
-                .lock()
-                .expect("Pi state lock poisoned")
-                .turn
-                .take()
-            {
-                let mapped = turn.finish(Lifecycle::Failed);
-                let (store, session, _) = self.owner()?;
-                if let Some(thread) = &self.session {
-                    super::pi_history::record(&store, &session, thread, &mapped)?;
+            let mapped = {
+                let mut state = self.state.lock().expect("Pi state lock poisoned");
+                match state.turn.take() {
+                    Some(mut turn) => state.record(turn.finish(Lifecycle::Failed))?,
+                    None => Vec::new(),
                 }
-                for event in mapped {
-                    let _ = self.events.send(event);
-                }
+            };
+            for event in mapped {
+                let _ = self.events.send(event);
             }
             return Err(error);
         }
@@ -485,4 +493,94 @@ impl Harness for PiHarness {
         }
         Ok(())
     }
+}
+
+fn display(decoded: &[Decoded]) -> Vec<ConversationEvent> {
+    decoded
+        .iter()
+        .filter_map(|decoded| match decoded {
+            Decoded::Display(event) => Some(event.clone()),
+            Decoded::Fact(_) => None,
+        })
+        .collect()
+}
+
+/// The native extension is an owned provider callback, fenced like context delivery.
+pub fn native_event() -> anyhow::Result<()> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::io::stdin()
+        .take(32 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() <= 32 * 1024 * 1024,
+        "Pi native event exceeds 32 MiB"
+    );
+    let value: Value = serde_json::from_slice(&bytes)?;
+    let adapter: crate::steer::SteerAdapter =
+        serde_json::from_str(&std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)?)?;
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    observe_native(&store, &adapter, &value)
+}
+
+fn observe_native(
+    store: &crate::store::sqlite::SqliteStore,
+    adapter: &crate::steer::SteerAdapter,
+    value: &Value,
+) -> anyhow::Result<()> {
+    let file = value["sessionFile"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Pi did not report a session file"))?;
+    anyhow::ensure!(
+        std::path::Path::new(file).is_absolute(),
+        "Pi session file must be absolute"
+    );
+    let thread = AgentSessionId::from(file);
+    let startup = value["type"] == "session_start";
+    store.with_provider_context(adapter, file, startup, || {
+        let attachment = store.session_attachment(&adapter.session)?.ok_or_else(|| {
+            crate::store::StoreError::InvalidAuthority("Pi has no attachment".into())
+        })?;
+        let mut writer = FactWriter::new(
+            store.clone(),
+            adapter.session.to_string(),
+            Some(attachment),
+            None,
+            Default::default(),
+        );
+        writer.record(&[ProviderFact::SessionObserved(thread.clone()).into()])?;
+        let session = store
+            .session(&adapter.session)?
+            .ok_or_else(|| crate::store::StoreError::InvalidData("Pi Session missing".into()))?;
+        let input = session
+            .input_key()
+            .map_err(|e| crate::store::StoreError::InvalidData(e.to_string()))?
+            .clone();
+        let source = format!("pi-native:{}", uuid::Uuid::new_v4());
+        store.retain_session_observation(
+            &session,
+            &crate::session::SessionObservation {
+                artifact_key: input.clone(),
+                source: source.clone(),
+                observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+                task_id: session.task_id.clone(),
+                wave_id: session.wave_id.clone(),
+                payload: json!({"input_id":input,"source":source,"evidence":value}),
+            },
+        )?;
+        if startup {
+            crate::session_record::write_provider_session(
+                &crate::session_record::capture_dir(&input)
+                    .map_err(|e| crate::store::StoreError::InvalidData(e.to_string()))?,
+                &thread,
+                None,
+            )
+            .map_err(|e| crate::store::StoreError::InvalidData(e.to_string()))?;
+            return Ok(());
+        }
+        let decoded = super::pi_decode::native(&thread, value)
+            .map_err(|e| crate::store::StoreError::InvalidData(e.to_string()))?;
+        writer.record(&decoded)
+    })?;
+    Ok(())
 }

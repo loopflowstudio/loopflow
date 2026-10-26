@@ -1,6 +1,6 @@
 # LOO-611 — Keep only Session facts in the store, with one usage record per turn
 
-Status: **implemented, awaiting gate** (2026-10-26). Product decisions are Jack
+Status: **implemented, merged with v0.14.16 (`df2ddac71e`), published for review** (2026-10-26). Product decisions are Jack
 Heart's LOO-602 decisions 1–2 (accepted 2026-10-26, design in the LOO-602
 checkout `scratch/loo-602-tracking.md`). This Task absorbs `5b0109`. The
 inspection-Process expiry stays with LOO-615. Raw stream capture
@@ -70,9 +70,15 @@ while it runs, from its single native row.
 - Native usage upserts are DELETE + INSERT (`session_events.rs` `record_event_in`), so an insert-only `usage` trigger still advances.
 - Migrations are SQL only, with no Rust data step. Conversion of existing rows
   must be expressible in SQL.
-- `v0.14.16`, which carries the LOO-570 prune, is unpublished (installed:
-  0.14.15). Jack's store has not been pruned: `session_events` has 2.54M
-  `events.jsonl` observation rows. A full-scan probe over them takes about 55 s.
+- `v0.14.16`, which carries the LOO-570 prune, was cut on main as
+  `df2ddac71e` (#1695, 2026-10-26). It released the `designated_panes`,
+  `index_session_transport` and `session_turn_events` drafts as
+  `0.14.16.002_release.sql`, and it is not yet tagged or installed (installed:
+  0.14.15). This branch is one commit behind it. Jack's store has not been
+  pruned: `session_events` has 2.54M `events.jsonl` observation rows. A
+  full-scan probe over them takes about 55 s. The released index
+  `session_turn_events` covers `kind='usage'` rows, so it serves the
+  native-only usage reader.
 
 ## Chosen approach
 
@@ -85,11 +91,11 @@ call:
 ```rust
 // session_record.rs
 enum CaptureFact {            // closed set; no text, no ConversationEvent
-    AttemptStarted { provider, model, account_id, attempt_key },
-    AttemptFinished { attempt_key, outcome },
-    AccountSelected { attempt_key, account_id },
-    ProviderSession { attempt_key, agent_session },
-    TurnEnded(TurnEnd),       // Completed{turn_id,status} | Error{code,message,evidence}
+    ProviderAttemptStarted { provider, model, account_id, attempt_key },
+    ProviderAttemptFinished { attempt_key, outcome },
+    ProviderAccountSelected { attempt_key, account_id },
+    ProviderSessionObserved { attempt_key, agent_session },
+    Conversation { event: TurnEnd }, // TurnCompleted{turn_id,status} | Error{code,message,evidence}
     Silence { since },
 }
 store.record_capture_fact(&session, input, seq, at, &fact)
@@ -226,6 +232,10 @@ readers and retention opt-in (decision 4). `ProviderFact` decoders (decision 7).
   (`prune_keeps_facts_records_silences…`: keep its Process assertions;
   `prune_merges_usage_recorded_per_observation…`).
 - `claude_history.rs` raw `usage` receipt.
+- `CaptureEvent` is write-only (the activity reader only needs its time):
+  its stream identity (`usage_stream_id`, `observation_seq`, `counter_kind`,
+  `start_known`, `SessionCapture.usage_seq`) and the never-written
+  `Text`/`ToolUse`/`Result`/`Handoff` variants are deleted (compress pass).
 - Tests that seed observed `usage` rows (`session_events.rs`, `revisions.rs`
   around the `input:events.jsonl:*` fixtures, and `session_record.rs` reducer
   tests over recorder usage). Each one either becomes a native-row test or is
@@ -251,8 +261,12 @@ All five slices are written: `ClaudeUsage` shared by mapping and history;
 `native_usage` + `reduce_usage` over native rows only; `CaptureFact` written
 synchronously by `SessionCapture` (recorder thread is file-only); draft
 `session_facts_only.sql` with fixture `session_facts_only_released.sql`;
-retention capture pass deleted. Remaining: gate's clone probe (migration time,
-`lf usage` parity) and the full affected suites.
+retention capture pass deleted. The compress pass (uncommitted at realign) also
+dropped the `CaptureEvent` stream identity.
+
+Remaining:
+- Gate's clone probe (migration time, `lf usage` parity) and the full affected
+  suites.
 
 ## Done when
 
@@ -277,4 +291,6 @@ retention capture pass deleted. Remaining: gate's clone probe (migration time,
   migration time recorded (< 120 s or sequence after v0.14.16), then the demo
   queries above, with before/after `lf usage --json` totals equal.
 
-Check: `cargo clippy --all-targets -D warnings` clean; `cargo test --lib -- session_record session_events revisions retention claude_history session_facts_only` pass (2026-10-26). Deferred to gate: clone probe (migration time, `lf usage` parity), integration suite incl. `tests/linear/work_watch.rs`. `pi_turns_resume…` failed once under machine load, passed alone.
+Check: `cargo clippy -p loopflow --all-targets -D warnings` clean; `cargo test --lib -- session_record claude_history session_events retention revisions` 74 pass (2026-10-26, after compress). `planning_lookup_tests::provider_revisions_and_change_receipts…` fails its 5 s Linear refresh deadline, even when run alone; it has no session-history path, so gate decides. Deferred to gate: clone probe (migration time, `lf usage` parity), integration suite incl. `tests/linear/work_watch.rs`.
+
+Concept review (2026-10-26): implementation matches Jack's decisions 1–2 — typed `CaptureFact` is the only capture store write, native `kind='usage'` rows are the one usage record (shape-dispatched, no `claude` raw branch), triggers name only `kind='usage'`. Residual `CaptureEvent` usage/transcript variants feed `events.jsonl` only (decision 3). The migration-time fallback is already settled by sequencing. No design change, no open product choice.

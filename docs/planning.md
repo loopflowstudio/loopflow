@@ -126,6 +126,13 @@ The repository connects to a Linear Team (`lf repo connect --team-key EXP`). Tas
 take Linear's identifiers, like `EXP-12`. Waves map to Initiatives and each Wave's
 Projects to Linear Projects; see [Waves](waves.md).
 
+Task comments in Linear reach the Task's next useful boundary: before a Graph step,
+after an agent turn, when showing planning, and before a Linear write. Team checks
+share ten-second freshness. Only Desktop and `--watch` keep a slow clock, backing
+off while nothing changes; idle agents do not poll. Teams without live Tasks make
+no acquisition requests. A rate limit pauses requests across repositories in the
+same Home until reset, retaining pending writes.
+
 ### Asana
 
 Every Task lives in the team project named after the repository; Loopflow creates

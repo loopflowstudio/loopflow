@@ -175,7 +175,7 @@ Work. Connect missing logins in the foreground with `lf machine connect`; work
 uses credentials resident on its Machine.
 
 When evidence invalidates an attempt on a Task you own, `lf task interrupt <issue>`
-its live execution and discuss the changed direction in the Task conversation.
+stops its live execution and discuss the changed direction in the Task conversation.
 The stopped Graph stays as history; Task, worktree and PR identity are unchanged.
 
 ## Diagnose execution and auth

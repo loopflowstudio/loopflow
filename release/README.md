@@ -196,8 +196,10 @@ retain the target lock. During preparation they retain the checkout lease too,
 so a surviving command keeps that checkout available until it exits. Preparation
 stages, commits and pushes with both locks retained by Git children, then shared
 PR finalization creates the review surface
-with the release title and notes. Re-arming a dropped request retains the target
-lock while waiting for merge.
+with the release title and notes. Resuming a release re-arms a PR whose request
+a person removed, retaining the target lock. While waiting, release follows the
+landing's merge decision: only a person's dequeue or disable stops it; an
+eviction or other dropped request goes to CI repair, which re-arms.
 CI repair keeps the same landing and reserved Session/Process. Release-owned
 repairs inherit both locks through a direct child launch, so a surviving repair
 continues to exclude publication and checkout removal after controller death.

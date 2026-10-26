@@ -75,3 +75,28 @@ def test_backoff_cannot_extend_download_deadline(monkeypatch):
 
     with pytest.raises(SystemExit, match="Registry rate limit persisted"):
         installation._prepare_image(IMAGE)
+
+
+def test_slow_docker_daemon_is_waited_out(monkeypatch, capsys):
+    # Run 40166998506: the daemon stalled right after the Cargo cache restore.
+    stalled = subprocess.TimeoutExpired(["docker", "info"], 10)
+    monkeypatch.setattr(
+        installation.subprocess,
+        "run",
+        Mock(side_effect=[stalled, stalled, subprocess.CompletedProcess([], 0)]),
+    )
+    monkeypatch.setattr(installation.time, "sleep", lambda _: None)
+
+    installation._wait_for_docker()
+
+    assert "Docker is not answering yet" in capsys.readouterr().out
+
+
+def test_stuck_docker_daemon_is_bounded_infrastructure_failure(monkeypatch):
+    stalled = subprocess.TimeoutExpired(["docker", "info"], 10)
+    monkeypatch.setattr(installation.subprocess, "run", Mock(side_effect=stalled))
+    monkeypatch.setattr(installation.time, "monotonic", Mock(side_effect=[0, 60, 130]))
+    monkeypatch.setattr(installation.time, "sleep", lambda _: None)
+
+    with pytest.raises(SystemExit, match="Infrastructure failure: Docker did not respond"):
+        installation._wait_for_docker()

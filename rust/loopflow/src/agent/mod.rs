@@ -1349,7 +1349,11 @@ fn _run_harness_once(
                                 }
                             }
                             ConversationEvent::TurnCompleted { status, .. } => {
-                                exit_code = Some(if status == Lifecycle::Completed { 0 } else { 1 });
+                                exit_code = Some(match status {
+                                    Lifecycle::Completed => 0,
+                                    Lifecycle::Interrupted => 130,
+                                    _ => 1,
+                                });
                             }
                             _ => {}
                         }

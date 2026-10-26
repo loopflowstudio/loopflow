@@ -11,7 +11,8 @@ Ctrl+] detaches a viewer. Ctrl+C in an attached terminal reaches the running
 program. A Task step's live controls (`/status`, `/interrupt`, `/detach`,
 messages) are shown to each controlling viewer as it attaches; headless output
 and observers never see them. Closing a terminal leaves execution, provider requests and capture
-settlement with the detached owner. Observing takes no input claim; a controlling
+settlement with the detached owner; `lf session list` shows its Session as
+`detached` and `lf connect` reattaches it. Observing takes no input claim; a controlling
 attachment revokes the previous viewer's input token. `--if-free` refuses when
 another viewer controls input. Desktop uses it for restoration; it never displaces
 a viewer just because a pane becomes visible. `session attach --prepare --json`
@@ -24,7 +25,8 @@ command and attach when shown. Ended execution needs explicit resume.
 never recorded an exit and is gone from the OS, as after a reboot, crash or kill.
 Leaving through the provider or detaching records an exit, so those never qualify.
 Each resumes through ordinary `lf resume` in a new owner with no viewer; its
-interrupted turn is flagged, not replayed.
+interrupted turn is flagged, not replayed. It reports each Session it resumes or
+skips. Desktop runs it at launch.
 
 A Session nobody views ends after `session.end_detached_after` (default `24h`,
 `off` disables it), counted from when its last viewer left. Owners from builds

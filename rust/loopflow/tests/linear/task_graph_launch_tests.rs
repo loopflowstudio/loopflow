@@ -815,6 +815,192 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
     }
 }
 
+#[test]
+fn task_run_returns_while_its_graph_keeps_running() {
+    let task = WorkflowTask::new();
+    task.repo.create_file(
+        ".lf/graphs/held.yaml",
+        "- cmd: __telemetry-scorecard\n- cmd: task sync --plan\n",
+    );
+    task.repo.create_file(
+        ".lf/workflows/held.yaml",
+        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: held}\n  - {from: review, to: end}\n",
+    );
+    task.repo.create_file(
+        "scripts/lifecycle_scorecard.py",
+        r#"
+import json
+import os
+from pathlib import Path
+import time
+
+home = Path(os.environ['LF_HOME'])
+while not (home / 'release').exists():
+    time.sleep(.02)
+print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}))
+"#,
+    );
+    task.select_workflow("held");
+    let home = task.home.path();
+    let (out, returned, release) = (
+        home.join("launcher.out"),
+        home.join("returned"),
+        home.join("release"),
+    );
+    // A launching shell that keeps living after `lf task run` returns.
+    let mut shell = Command::new("/bin/sh");
+    for (name, _) in
+        std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
+    {
+        shell.env_remove(name);
+    }
+    std::os::unix::process::CommandExt::process_group(&mut shell, 0);
+    let mut shell = shell
+        .arg("-c")
+        .arg(format!(
+            "'{}' task run INF-123 > '{}' 2>&1 < /dev/null; touch '{}'; sleep 600",
+            loopflow_test_support::lf_binary(),
+            out.display(),
+            returned.display()
+        ))
+        .current_dir(task.repo.path())
+        .env("LF_HOME", home)
+        .env("LF_BIN", loopflow_test_support::lf_binary())
+        .env("HTTPS_PROXY", "http://127.0.0.1:1")
+        .env("HTTP_PROXY", "http://127.0.0.1:1")
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !returned.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "lf task run never returned: {}",
+            fs::read_to_string(&out).unwrap_or_default()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let printed = fs::read_to_string(&out).unwrap();
+    let graph = printed
+        .split("Graph process ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .unwrap_or_else(|| panic!("no Graph process named: {printed}"))
+        .to_string();
+    assert!(printed.contains(&format!("graph-{graph}.log")), "{printed}");
+    assert!(
+        printed.contains("follow: lf task status INF-123"),
+        "{printed}"
+    );
+    // Returned while the first step is still held.
+    let graphs = task.status()["work"]["graph_processes"].clone();
+    assert_eq!(graphs[0]["id"], graph.as_str());
+    assert_eq!(graphs[0]["state"], "current");
+    // The launching shell and everything in its process group go away.
+    let killed = Command::new("kill")
+        .args(["-KILL", "--", &format!("-{}", shell.id())])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    shell.wait().unwrap();
+    fs::write(&release, "").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let graphs = task.status()["work"]["graph_processes"].clone();
+        if graphs[0]["state"] != "current" {
+            assert_eq!(graphs[0]["state"], "completed", "{graphs}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "Graph never finished");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    let steps: i64 = db
+        .query_row(
+            "SELECT count(*) FROM processes WHERE parent_lf_process_id=?1",
+            [&graph],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(steps >= 2, "the second step never ran: {steps}");
+    // The owner writes the arrival after its Graph exits.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while task.workflow()["position"] != at("review") {
+        assert!(Instant::now() < deadline, "{}", task.workflow());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let status = task.run(&["task", "status", "INF-123"]);
+    let status = String::from_utf8_lossy(&status.stdout);
+    let log = home
+        .canonicalize()
+        .unwrap()
+        .join("logs")
+        .join(format!("graph-{graph}.log"));
+    assert!(
+        status.contains(&format!("Graph: {graph}"))
+            && status.contains(&format!("log: {}", log.display())),
+        "{status}"
+    );
+    // The step that ran after the launcher was gone wrote to the log.
+    let written = fs::read_to_string(&log).unwrap();
+    assert!(written.contains("op: task sync --plan"), "{written}");
+}
+
+#[test]
+fn a_skill_edges_process_names_the_log_its_run_printed() {
+    let task = WorkflowTask::new();
+    task.repo
+        .create_file(".lf/skills/held-skill.md", "Hold the edge.");
+    task.repo.create_file(
+        ".lf/workflows/skilled.yaml",
+        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: held-skill}\n  - {from: review, to: end}\n",
+    );
+    task.select_workflow("skilled");
+    let printed = task.run(&["task", "run", "INF-123"]);
+    let printed = String::from_utf8_lossy(&printed.stdout);
+    let process = printed
+        .split("running as Process ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .unwrap_or_else(|| panic!("no Process named: {printed}"))
+        .to_string();
+    assert!(
+        printed.contains("follow: lf task status INF-123"),
+        "{printed}"
+    );
+    let log = task
+        .home
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("logs")
+        .join(format!("graph-{process}.log"));
+    let status = task.run(&["task", "status", "INF-123"]);
+    let status = String::from_utf8_lossy(&status.stdout);
+    let line = status
+        .lines()
+        .find(|line| line.contains(&format!("Process: {process}")))
+        .unwrap_or_else(|| panic!("no Process line: {status}"));
+    assert!(
+        line.ends_with(&format!("log: {}", log.display())),
+        "{status}"
+    );
+}
+
+#[test]
+fn a_refused_bare_task_run_returns_its_refusal() {
+    let task = WorkflowTask::new();
+    let output = command(
+        task.repo.path(),
+        task.home.path(),
+        &["task", "run", "missing-task", "proof"],
+    )
+    .stdin(std::process::Stdio::null())
+    .output()
+    .unwrap();
+    assert!(!refusal(output).is_empty());
+    assert!(support::recorded_graphs(task.home.path()).is_empty());
+}
+
 /// A registered Task whose repository defines the Graphs and workflows below.
 struct WorkflowTask {
     repo: TestRepo,
@@ -1462,6 +1648,153 @@ fn a_held_command_stops_the_task_run_without_repeating_the_graph() {
     assert_eq!(workflow["position"]["kind"], "edge");
     assert_eq!(workflow["position"]["running"], false);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("starting it again"));
+}
+
+fn interrupt_rows(home: &Path) -> i64 {
+    rusqlite::Connection::open(home.join("loopflow.db"))
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM task_events WHERE json_extract(kind_json,'$.kind')='interrupt'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+#[test]
+fn an_interrupt_during_an_operation_stops_the_graph_before_its_next_step() {
+    let task = WorkflowTask::new();
+    for (path, content) in [
+        (
+            ".lf/graphs/interrupting.yaml",
+            "- cmd: task interrupt INF-123\n- cmd: task sync --plan\n",
+        ),
+        (
+            ".lf/workflows/interrupted.yaml",
+            "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: interrupting}\n",
+        ),
+    ] {
+        fs::write(task.repo.path().join(path), content).unwrap();
+    }
+    task.select_workflow("interrupted");
+    let output = task.run(&["-b", "task", "run", "INF-123", "interrupted"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(130), "{stdout}\n{stderr}");
+    assert!(
+        stdout.contains("INF-123: stopped Graph interrupting"),
+        "{stdout}"
+    );
+    assert!(!stderr.contains("starting it again"), "{stderr}");
+    let graphs = support::recorded_graphs(task.home.path());
+    assert_eq!(graphs.len(), 1);
+    assert_eq!(graphs[0].1.len(), 1, "the second step never started");
+    let workflow = task.workflow();
+    let chose = workflow["history"].as_array().unwrap().last().unwrap();
+    assert_eq!(
+        attempts(task.home.path(), chose["lf_process_id"].as_str().unwrap()).len(),
+        1
+    );
+}
+
+#[test]
+fn interrupting_an_idle_task_records_nothing_and_says_so() {
+    let task = WorkflowTask::new();
+    let before = interrupt_rows(task.home.path());
+    let output = task.run(&["task", "interrupt", "INF-123", "--json"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(receipt["receipt"]["kind"], "no_live_run");
+    assert_eq!(interrupt_rows(task.home.path()), before);
+}
+
+#[test]
+fn interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_stop() {
+    let task = WorkflowTask::new();
+    let mut waiter = command(
+        task.repo.path(),
+        task.home.path(),
+        &["task", "wait", "INF-123", "--timeout", "60s"],
+    )
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    let db = task.home.path().join("loopflow.db");
+    let open = |db: &Path| -> i64 {
+        rusqlite::Connection::open(db)
+            .ok()
+            .and_then(|conn| {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM processes WHERE completed_at IS NULL AND command LIKE '%\"wait\"%'",
+                    [],
+                    |row| row.get(0),
+                )
+                .ok()
+            })
+            .unwrap_or(0)
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while open(&db) == 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let before = interrupt_rows(task.home.path());
+    let output = task.run(&["task", "interrupt", "INF-123"]);
+    waiter.kill().unwrap();
+    waiter.wait().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("interrupt recorded for Process"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("stopped"), "{stdout}");
+    assert_eq!(interrupt_rows(task.home.path()), before + 1);
+}
+
+#[test]
+fn a_graph_that_fails_with_retained_edits_is_not_started_again() {
+    // LOO-578: starting a Graph over on top of a checkout-update stash strands
+    // the edits it holds more deeply with every attempt.
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123", "gated"]);
+    let checkout = task.repo.path();
+    fs::write(checkout.join("work.txt"), "unrestored\n").unwrap();
+    let message = format!("lf checkout update: caller edits in {}", checkout.display());
+    let pushed = std::process::Command::new("git")
+        .args(["stash", "push", "--include-untracked", "-m", &message])
+        .current_dir(checkout)
+        .status()
+        .unwrap();
+    assert!(pushed.success());
+    let stash = String::from_utf8(
+        std::process::Command::new("git")
+            .args(["rev-parse", "refs/stash"])
+            .current_dir(checkout)
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+
+    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "gate"]));
+    assert!(error.contains(stash.trim()), "{error}");
+    assert!(!error.contains("starting it again"), "{error}");
+    let stopped = task.workflow();
+    let chose = stopped["history"].as_array().unwrap().last().unwrap();
+    assert_eq!(
+        attempts(task.home.path(), chose["lf_process_id"].as_str().unwrap()),
+        ["failed"]
+    );
 }
 
 #[test]

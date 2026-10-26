@@ -188,7 +188,7 @@ struct TaskFilesTests {
         store.search = "NOTES"
         #expect(store.scratchPaths == ["scratch/notes.md"])
         #expect(store.changedPaths.isEmpty)
-        store.selectFile("scratch/notes.md", mode: .file)
+        store.selectFile("scratch/notes.md", mode: .edit)
         #expect(store.navigator == .closed)
         #expect(store.selectedDocument === document)
         #expect(document.text == "draft")
@@ -203,6 +203,56 @@ struct TaskFilesTests {
         store.togglePinnedNavigator()
         #expect(store.navigator == .closed)
         #expect(document.text == "draft")
+    }
+
+    @Test func scratchPageWritesTakeOnlyStaleAttention() {
+        let now = Date()
+        func follow(_ path: String = "scratch/explore.html", selection: String? = "scratch/plan.md",
+                    page: TaskFilesStore.Page = .files, mode: TaskFilesStore.Mode = .read, dirty: Bool = false,
+                    auto: Bool = false, idle: TimeInterval? = 10) -> TaskFilesStore.Follow {
+            TaskFilesStore.follow(path, selection: selection, page: page, mode: mode, dirty: dirty,
+                autoSelected: auto,
+                lastInteraction: idle.map { now.addingTimeInterval(-$0) }, now: now)
+        }
+        #expect(TaskFilesStore.isScratchPage("scratch/explore.html"))
+        #expect(TaskFilesStore.isScratchPage("scratch/notes/plan.MD"))
+        #expect(!TaskFilesStore.isScratchPage("scratch/data.json"))
+        #expect(!TaskFilesStore.isScratchPage("docs/plan.md"))
+        // The page already showing reloads in place.
+        #expect(follow(selection: "scratch/explore.html") == .reload)
+        // Stale attention: nothing selected, a followed page, or Files untouched.
+        #expect(follow(selection: nil, mode: .edit) == .select)
+        #expect(follow(auto: true) == .select)
+        #expect(follow(idle: TaskFilesStore.quietInterval) == .select)
+        #expect(follow(idle: nil) == .select)
+        // Fresh or engaged attention keeps the view; the page waits in a tab.
+        #expect(follow() == .openTab)
+        #expect(follow(mode: .edit, auto: true) == .openTab)
+        #expect(follow(mode: .diff, idle: 600) == .openTab)
+        #expect(follow(dirty: true, auto: true) == .openTab)
+        #expect(follow(selection: "scratch/explore.html", page: .task, idle: 600) == .select)
+    }
+
+    @Test func readModeRendersHTMLAsAPageAndMarkdownAsBlocks() async throws {
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { _, _ in "{}" })
+        #expect(store.mode == .read)
+        for (path, text) in [("scratch/explore.html", "<h1>Three visions</h1>"), ("scratch/plan.md", "# Plan")] {
+            let document = store.document(path)
+            await document.reconcile(TaskFileSnapshot(recoveries: [], issueIdentifier: "TEST-1", taskId: "task-files",
+                path: path, content: text, state: .text, revision: text, readOnlyReason: nil, sizeBytes: UInt64(text.utf8.count)))
+            store.selection = path
+            #expect(store.rendersSelection)
+        }
+        let page = TaskFileReadingView(document: store.document("scratch/explore.html"), baseURL: nil)
+        #expect(throws: Never.self) { try page.inspect().find(viewWithAccessibilityIdentifier: "files-rendered-html") }
+        let note = TaskFileReadingView(document: store.document("scratch/plan.md"), baseURL: nil)
+        #expect(try note.inspect().find(MarkdownBlocks.self).actualView().source == "# Plan")
+        // Edit is a mode you switch into; other files read as text.
+        store.mode = .edit
+        #expect(!store.rendersSelection)
+        store.mode = .read
+        store.selection = "Cargo.toml"
+        #expect(!store.rendersSelection)
     }
 
     @Test func diskWinsOverlapKeepsOtherLocalEditsAndUndoNeverRevertsDisk() async {
@@ -739,7 +789,7 @@ struct TaskFilesTests {
         store.selection = "new.txt"
         _ = store.document("new.txt")
         store.selection = original.path
-        store.mode = .file
+        store.mode = .edit
         #expect(store.selectedDocument?.editor === editor)
         #expect(editor.selectedRange() == selection)
         #expect(document.text == edited)

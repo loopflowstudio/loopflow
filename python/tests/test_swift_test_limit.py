@@ -31,6 +31,10 @@ with open(path, "w") as stream:
                                  start_new_session=True)
         open(sys.argv[3], "w").write(str(child.pid))
         time.sleep(600)
+    if sys.argv[1] == "leak":
+        sys.stdout.write("Test hangs() started.\\n")
+        sys.stdout.write("SWIFT TASK CONTINUATION MISUSE: wait(_:) leaked its continuation\\n")
+        sys.stdout.flush()
     emit(stream, {"kind": "event", "payload": {"kind": "testEnded", "testID": test}})
 sys.exit(int(sys.argv[2]))
 """
@@ -74,3 +78,9 @@ def test_given_event_stream_path_is_kept(tmp_path: Path) -> None:
 
     records = [json.loads(line) for line in path.read_text().splitlines()]
     assert records[-1]["payload"]["kind"] == "testEnded"
+
+
+def test_leaked_continuation_fails_a_passing_run_and_names_its_test(capsys) -> None:
+    assert swift_test_limit.run(_command("leak", 0)) == 1
+
+    assert "hangs() leaked a continuation" in capsys.readouterr().err

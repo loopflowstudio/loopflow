@@ -37,6 +37,23 @@ Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`
 On a Mac, the installer adds that directory to new zsh terminals and prints an
 `export PATH=...` line for the current one. `lf init` sets up a repository.
 
+Or install with cargo:
+
+```bash
+cargo install --git https://github.com/loopflowstudio/loopflow --bin lf
+```
+
+```bash
+lf install                       # update to the latest published release, from any directory
+LF_INSTALL_CLI_ONLY=1 lf install # update the CLI while keeping Desktop and its clients running
+lf schedule                      # check at login and weekly (macOS)
+lf schedule daily                # also accepts weekly, hourly, 5min
+```
+
+Run `lf install` from any checkout, including a Task checkout. Promotion checks
+the candidate release against the installed database before changing it.
+Use `lf sync` inside a repository to update its checkout.
+
 ### Before you install
 
 | You need | For |
@@ -103,7 +120,13 @@ lf debug -c                            # fix it
 ```bash
 lf                         # ask a question or start work
 lf operate                 # review and operate the repository’s open work
+lf repo-operate            # canonical name for the same skill
+lf --wave designer wave-operate  # operate one Wave
 ```
+
+Bare `lf` starts the general-purpose terminal conversation. On canonical main, it
+first carries local commits and uncommitted files into an author-scoped sibling
+worktree so the conversation cannot dirty main.
 
 ### Inline prompts
 
@@ -173,10 +196,17 @@ Start from a Task; Loopflow creates and retains its worktree.
 
 ```bash
 lf task create --wave <wave> --title "add OAuth login"
-lf -b task run <issue-id> &
+lf task run <issue-id>
 lf task status <issue-id>
 lf comment <issue-id> "support passkeys too"
 lf wait <issue-id> --until terminal
+```
+
+Turn a reviewed design into work without another planning subsystem:
+
+```bash
+lf design                  # author and review one design
+lf launch-plan             # keep the core here; launch independent Tasks
 ```
 
 ### Skills chain

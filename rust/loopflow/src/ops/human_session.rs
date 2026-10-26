@@ -95,6 +95,24 @@ impl<'a> SessionTarget<'a> {
     }
 }
 
+/// A Task identifier where a Session id belongs names that Task's ongoing
+/// conversation, as `--task` does. An exact Session id wins.
+pub(super) async fn resolve_target<'a>(
+    store: &SharedStore,
+    target: SessionTarget<'a>,
+) -> Result<SessionTarget<'a>> {
+    let SessionTarget::Session(id) = target else {
+        return Ok(target);
+    };
+    if store.session(id).await?.is_some() {
+        return Ok(target);
+    }
+    Ok(match store.sqlite.resolve_task_id(id, None)? {
+        Some(_) => SessionTarget::Task(id),
+        None => target,
+    })
+}
+
 /// Resolve physical checkout ownership without admitting a conversation.
 pub(crate) async fn connection_scope(
     store: &SharedStore,
@@ -197,6 +215,7 @@ pub(crate) async fn select_connection(
     fresh: bool,
 ) -> Result<String> {
     use crate::session::PrimaryScope;
+    let target = resolve_target(store, target).await?;
     if let SessionTarget::Session(id) = target {
         return Ok(id.to_owned());
     }
@@ -224,6 +243,8 @@ pub enum SessionState {
     /// Passive metadata has no trustworthy live/closed observation.
     Unknown,
     Active,
+    /// Its agent runs, but no terminal shows it.
+    Detached,
     Closed,
 }
 
@@ -245,10 +266,14 @@ pub struct SessionAction {
 pub(crate) fn session_actions(state: SessionState) -> Vec<SessionAction> {
     use SessionActionKind::{MoveHere, Open};
     let active_client = state == SessionState::Active;
+    let (label, help) = match state {
+        SessionState::Detached => ("Reconnect", "Show the running Session in this terminal"),
+        _ => ("Open here", "Open this Session in a terminal"),
+    };
     let mut actions = vec![(
         Open,
-        "Open here",
-        "Open this Session in a terminal",
+        label,
+        help,
         active_client
             .then_some("This Session is active in another terminal; use Move here to transfer it"),
     )];
@@ -330,6 +355,11 @@ pub enum SessionAvailability {
 
 fn session_state(session: &crate::session::SessionSummary) -> SessionState {
     match session.agent_process_evidence {
+        crate::journal::ProcessIdentityEvidence::Live
+            if session.interactive && session.unviewed =>
+        {
+            SessionState::Detached
+        }
         crate::journal::ProcessIdentityEvidence::Live => SessionState::Active,
         crate::journal::ProcessIdentityEvidence::Dead => SessionState::Closed,
         crate::journal::ProcessIdentityEvidence::Unknown => SessionState::Unknown,
@@ -1285,7 +1315,7 @@ fn session_is_resumable(store: &SqliteStore, dir: &Path) -> Result<bool> {
             time::OffsetDateTime::now_utc().unix_timestamp(),
         )?
         .context("Session disappeared")?;
-    Ok(session_state(&summary) == SessionState::Active)
+    Ok(summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live)
 }
 
 pub(crate) fn resume_native_session(
@@ -1655,6 +1685,7 @@ mod tests {
             vec![
                 super::SessionState::Unknown,
                 super::SessionState::Active,
+                super::SessionState::Detached,
                 super::SessionState::Closed
             ]
         );
@@ -1722,6 +1753,7 @@ mod tests {
             agent_process_evidence: crate::journal::ProcessIdentityEvidence::Unknown,
             available: false,
             terminal_id: None,
+            unviewed: false,
             task_terminal: false,
             task_primary: false,
             task_ids: vec![task.clone()],
@@ -2115,7 +2147,7 @@ mod tests {
         // Captures from before node keys carried a leaf index and scalar visit.
         let old: SessionGraphStep = serde_json::from_value(serde_json::json!({
             "task_id": null, "task_pr_id": null, "invocation_id": "process_old",
-            "flow": "review", "step": "review-design", "iteration": 3, "step_index": 1
+            "flow": "review", "step": "explore", "iteration": 3, "step_index": 1
         }))
         .unwrap();
         assert_eq!((old.node, old.key, old.iterations), (None, None, None));
@@ -2182,7 +2214,7 @@ mod tests {
                 cwd: home.path().into(),
                 repo: None,
                 worktree: None,
-                skill: Some("review-design".into()),
+                skill: Some("explore".into()),
                 subjects: Vec::new(),
                 graph: crate::session_record::SessionGraphMembership::Independent,
                 work: None,

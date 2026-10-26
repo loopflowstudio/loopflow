@@ -190,6 +190,7 @@ When editing Rust tests:
 - `unwrap()` is fine in tests
 - Use `#[test]` for unit tests in the same file
 - Integration tests go in `tests/` directory
+- A test that reads state a run writes uses the waited form, `lf -b task run`; bare `task run` returns once the Graph registers. A change to when a command returns inventories its test callers too (`grep -rn '"task", "run"' rust/loopflow/tests/`).
 - Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`.
 - Mock via closures or `#[cfg(test)]`, not factory traits or extra abstractions
 - Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
@@ -198,6 +199,7 @@ When editing Rust tests:
 - Library and integration fixtures that mutate process environment share `loopflow_test_support::env_lock`; per-suite locks cannot isolate library modules.
 - `SqliteStore::open_ephemeral` includes the build's draft migrations; do not replay
   those drafts with `apply_migration_for_test`.
+- Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` (standalone binaries included) for the old name.
 - Tests that redirect process-wide stdout/stderr descriptors run in isolated child processes, never in the shared test runner.
 - Native library fixtures use `TestLedgerGuard` so invocation and capture share a store. Pin blocking workers with `journal::with_test_ledger`; thread-local fixture selection does not follow `LF_HOME`.
 

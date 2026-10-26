@@ -12,8 +12,9 @@ struct LocalLfError: LocalizedError {
 enum LocalWaveAgentLauncher {
     /// Run a filed Task on its workflow. `lf task run` owns Workflow selection,
     /// worktree placement and Graph selection; the app does not reproduce them.
-    static func runTask(repoPath: String, issue: String) throws {
-        try startLf(taskRunArguments(issue: issue), cwd: WaveOrigin.resolve(repoPath))
+    /// It returns once the Task's Graph is running, which keeps on without the app.
+    static func runTask(repoPath: String, issue: String) async throws {
+        _ = try await queryLf(["task", "run", issue], cwd: WaveOrigin.resolve(repoPath))
     }
 
     /// Ensure Task Work and its checkout without running a Graph; returns
@@ -35,10 +36,6 @@ enum LocalWaveAgentLauncher {
                 errorDescription: "lf task checkout returned an invalid receipt: \(error.localizedDescription)"
             )
         }
-    }
-
-    static func taskRunArguments(issue: String) -> [String] {
-        ["-b", "task", "run", issue]
     }
 
     /// Use the app's bundled CLI, or the pinned helper inside an offline clone.
@@ -85,36 +82,6 @@ enum LocalWaveAgentLauncher {
         }
         return result.stdout
     }
-
-    /// Start an `lf` command that runs for as long as its work does, such as
-    /// `lf -b task run`, and leave it running as this app's child. A refusal
-    /// exits within moments and is thrown; later output stays in lf's own logs.
-    static func startLf(_ subargs: [String], cwd: String?) throws {
-        let process = queryProcess([try controlLfPath()] + subargs, cwd: cwd)
-        let log = FileManager.default.temporaryDirectory
-            .appendingPathComponent("loopflow-start-\(UUID().uuidString).log")
-        FileManager.default.createFile(atPath: log.path, contents: nil)
-        let output = try FileHandle(forWritingTo: log)
-        defer { try? output.close() }
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = output
-        process.standardError = output
-        do { try process.run() } catch {
-            throw LocalLfError(errorDescription: "Failed to spawn: lf \(subargs.joined(separator: " "))")
-        }
-        let deadline = Date().addingTimeInterval(startRefusalWindow)
-        while process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
-        guard !process.isRunning, process.terminationStatus != 0 else { return }
-        let detail = (try? String(contentsOf: log, encoding: .utf8))?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        try? FileManager.default.removeItem(at: log)
-        throw LocalLfError(errorDescription: detail.isEmpty
-            ? "lf \(subargs.joined(separator: " ")) failed (\(process.terminationStatus))"
-            : detail)
-    }
-
-    /// How long a started command is watched for an immediate refusal.
-    private static let startRefusalWindow: TimeInterval = 3
 
     // MARK: - Process plumbing
 
@@ -186,7 +153,9 @@ enum LocalWaveAgentLauncher {
             // closing a query must not signal a provider or a process group.
             if process.isRunning {
                 _ = Darwin.kill(process.processIdentifier, SIGKILL)
-                process.waitUntilExit()
+                // Not waitUntilExit: it parks this cooperative thread's run
+                // loop, which nothing wakes once the task has hopped threads.
+                while process.isRunning { usleep(1000) }
             }
             for handle in [out, err, stdout.fileHandleForWriting, stderr.fileHandleForWriting,
                            stdin?.fileHandleForReading, stdin?.fileHandleForWriting].compactMap({ $0 }) {
@@ -239,7 +208,15 @@ enum LocalWaveAgentLauncher {
             // An inherited pipe in a descendant cannot hold a completed query
             // open. The child's buffered output has been drained at this point.
             if !running, outputDrained, diagnosticsDrained { break }
-            try await Task.sleep(for: .milliseconds(10))
+            // Wake as soon as a pipe is ready; a fixed sleep drains one pipe
+            // buffer per tick, too slow for a large response to beat the deadline.
+            var ready = [pollfd(fd: out.fileDescriptor, events: Int16(POLLIN), revents: 0),
+                         pollfd(fd: err.fileDescriptor, events: Int16(POLLIN), revents: 0)]
+            if let handle = writer {
+                ready.append(pollfd(fd: handle.fileDescriptor, events: Int16(POLLOUT), revents: 0))
+            }
+            _ = Darwin.poll(&ready, nfds_t(ready.count), 10)
+            await Task.yield()
         }
         if process.terminationStatus == 0, sent != draft.count {
             throw LocalLfError(errorDescription: "Could not send draft to lf: \(inputError ?? "request exited before reading the draft")")

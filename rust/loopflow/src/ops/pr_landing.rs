@@ -26,7 +26,8 @@ use crate::work::task::{CiCheck, CiIncident};
 use super::error::{OpsError, OpsResult};
 use super::land::LandOptions;
 use super::pr::{
-    merge_gate_state, merge_needs_integration, observe_pr_merge, MergeRequest, PrInfo,
+    merge_gate_state, merge_needs_integration, merge_request_removal, observe_pr_merge,
+    ManualRemoval, MergeGateReading, MergeRequest, MergeRequestRemoval, PrInfo, RepairWindow,
 };
 
 #[derive(Debug, serde::Deserialize)]
@@ -60,8 +61,10 @@ fn parse_repair_conclusion(answer: &str) -> OpsResult<RepairConclusion> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LandingObservation {
-    Unarmed {
+    /// A person removed the PR's merge request.
+    Withdrawn {
         head_sha: String,
+        removal: ManualRemoval,
     },
     Pending {
         head_sha: String,
@@ -85,7 +88,7 @@ pub(crate) enum LandingObservation {
 impl LandingObservation {
     fn head_sha(&self) -> &str {
         match self {
-            Self::Unarmed { head_sha }
+            Self::Withdrawn { head_sha, .. }
             | Self::Pending { head_sha }
             | Self::Passing { head_sha }
             | Self::Failing { head_sha, .. }
@@ -102,8 +105,54 @@ pub(crate) type ObservePr = Arc<dyn Fn(&PrLanding) -> OpsResult<LandingObservati
 pub(crate) type RepairCi = Arc<dyn Fn(&PrLanding, &CiIncident) -> OpsResult<()> + Send + Sync>;
 
 fn observe_github(landing: &PrLanding) -> OpsResult<LandingObservation> {
-    let observation = observe_pr_merge(&landing.worktree, u64::from(landing.pr_number))?;
-    classify_github_observation(landing, observation.pr, observation.request)
+    let number = u64::from(landing.pr_number);
+    let observation = observe_pr_merge(&landing.worktree, number)?;
+    decide_merge(
+        observation.pr,
+        &landing.observed_head_sha,
+        observation.request,
+        || read_merge_request_removal(&landing.worktree, &landing.repo, landing.pr_number),
+        |head| merge_gate_state(&landing.worktree, number, head),
+    )
+}
+
+/// Why this PR has no merge request, judged against its recorded CI repairs.
+pub(crate) fn read_merge_request_removal(
+    worktree: &Path,
+    repo: &str,
+    pr_number: u32,
+) -> OpsResult<MergeRequestRemoval> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let store = runtime.block_on(landing_store())?;
+    merge_request_removal(
+        worktree,
+        u64::from(pr_number),
+        &repair_windows(&store, repo, pr_number)?,
+    )
+}
+
+/// The lifetimes of this PR's CI repairs. A repair with no recorded end is
+/// still repairing only while its Process lives.
+fn repair_windows(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<Vec<RepairWindow>> {
+    let at = |seconds: i64| chrono::DateTime::from_timestamp(seconds, 0);
+    Ok(store
+        .sqlite
+        .pr_repair_lifetimes(repo, pr_number)
+        .map_err(repair_error)?
+        .into_iter()
+        .filter_map(|(process, started, ended)| {
+            let start = at(started)?;
+            match ended {
+                Some(ended) => Some(RepairWindow {
+                    start,
+                    end: Some(at(ended)?),
+                }),
+                None => (crate::journal::process_evidence(&store.sqlite, &process)
+                    != crate::journal::ProcessIdentityEvidence::Dead)
+                    .then_some(RepairWindow { start, end: None }),
+            }
+        })
+        .collect())
 }
 
 fn ci_fix(
@@ -112,59 +161,91 @@ fn ci_fix(
     Arc::new(move |landing, incident| admit_ci_fix(landing, incident, release.as_deref()))
 }
 
-fn classify_github_observation(
-    landing: &PrLanding,
+/// The one decision over a PR read, its merge-request removal and its head
+/// checks. Each reader runs only when the decision needs it.
+pub(crate) fn decide_merge(
     pr: PrInfo,
+    fallback_head: &str,
     request: Option<MergeRequest>,
+    removal: impl FnOnce() -> OpsResult<MergeRequestRemoval>,
+    checks: impl FnOnce(&str) -> OpsResult<Option<MergeGateReading>>,
 ) -> OpsResult<LandingObservation> {
-    let head_sha = pr
-        .head_sha
-        .unwrap_or_else(|| landing.observed_head_sha.clone());
+    let head_sha = pr.head_sha.unwrap_or_else(|| fallback_head.to_string());
     match pr.state.as_str() {
         "merged" => {
             let merge_commit = pr.merge_commit.ok_or_else(|| {
                 OpsError::Message(format!(
                     "GitHub reports pull request #{} merged without a merge commit",
-                    landing.pr_number
+                    pr.number
                 ))
             })?;
-            Ok(LandingObservation::Merged {
+            return Ok(LandingObservation::Merged {
                 head_sha,
                 merge_commit,
-            })
+            });
         }
-        "closed" => Ok(LandingObservation::Closed { head_sha }),
+        "closed" => return Ok(LandingObservation::Closed { head_sha }),
+        _ => {}
+    }
+    // An open PR without a merge request is waiting on whatever removed it. A
+    // removal no person made leaves the head checks to decide; with nothing
+    // failing, the missing request itself is the failure a repair re-arms.
+    let unarmed = match request {
         // The queue checks an integrated commit. Its membership takes precedence
         // over the original PR head's mergeability and check results.
-        _ if matches!(request, Some(MergeRequest::Queued(_))) => {
-            Ok(LandingObservation::Pending { head_sha })
-        }
-        _ if request.is_none() => Ok(LandingObservation::Unarmed { head_sha }),
-        _ if merge_needs_integration(pr.merge_state.as_deref(), request.as_ref()) => {
-            Ok(LandingObservation::Failing {
+        Some(MergeRequest::Queued(_)) => return Ok(LandingObservation::Pending { head_sha }),
+        Some(_) => None,
+        None => match removal()? {
+            MergeRequestRemoval::Manual(removal) => {
+                return Ok(LandingObservation::Withdrawn { head_sha, removal })
+            }
+            MergeRequestRemoval::Merged => return Ok(LandingObservation::Pending { head_sha }),
+            MergeRequestRemoval::Evicted { reason, run_url } => {
+                return Ok(LandingObservation::Failing {
+                    head_sha,
+                    failing_checks: vec![CiCheck {
+                        name: format!("merge-queue ({reason})"),
+                        url: run_url,
+                    }],
+                })
+            }
+            MergeRequestRemoval::ByLoopflow => Some("repair-disarmed"),
+            MergeRequestRemoval::Unknown => Some("unexplained"),
+        },
+    };
+    if merge_needs_integration(pr.merge_state.as_deref(), request.as_ref()) {
+        return Ok(LandingObservation::Failing {
+            head_sha,
+            failing_checks: vec![CiCheck {
+                name: "required-integration".into(),
+                url: None,
+            }],
+        });
+    }
+    match checks(&head_sha)? {
+        Some(reading) if reading.failing => Ok(LandingObservation::Failing {
+            head_sha,
+            failing_checks: reading
+                .failing_leaves
+                .into_iter()
+                .map(|check| CiCheck {
+                    name: check.name,
+                    url: check.url,
+                })
+                .collect(),
+        }),
+        Some(reading) if reading.pending => Ok(LandingObservation::Pending { head_sha }),
+        Some(_) => Ok(match unarmed {
+            Some(cause) => LandingObservation::Failing {
                 head_sha,
                 failing_checks: vec![CiCheck {
-                    name: "required-integration".into(),
+                    name: format!("merge-request ({cause})"),
                     url: None,
                 }],
-            })
-        }
-        _ => match merge_gate_state(&landing.worktree, u64::from(landing.pr_number), &head_sha)? {
-            Some(reading) if reading.failing => Ok(LandingObservation::Failing {
-                head_sha,
-                failing_checks: reading
-                    .failing_leaves
-                    .into_iter()
-                    .map(|check| CiCheck {
-                        name: check.name,
-                        url: check.url,
-                    })
-                    .collect(),
-            }),
-            Some(reading) if reading.pending => Ok(LandingObservation::Pending { head_sha }),
-            Some(_) => Ok(LandingObservation::Passing { head_sha }),
-            None => Ok(LandingObservation::Pending { head_sha }),
-        },
+            },
+            None => LandingObservation::Passing { head_sha },
+        }),
+        None => Ok(LandingObservation::Pending { head_sha }),
     }
 }
 
@@ -441,24 +522,23 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
         Ok::<_, OpsError>((store, landing, incident, captured))
     })?;
     let result = (|| {
-        let observation = observe_github(&landing)?;
-        let matching = match observation {
+        let checks = match observe_github(&landing)? {
             LandingObservation::Failing {
                 head_sha,
                 failing_checks,
-            } => {
-                head_sha == incident.failed_head_sha
-                    && ci_incident(&landing, &failing_checks, OffsetDateTime::now_utc()).identity
-                        == incident.identity
+            } if head_sha == incident.failed_head_sha
+                && ci_incident(&landing, &failing_checks, OffsetDateTime::now_utc()).identity
+                    == incident.identity =>
+            {
+                failing_checks
             }
-            _ => false,
+            _ => {
+                return Err(repair_error(
+                    "PR evidence changed before repair; next check will reconcile it",
+                ))
+            }
         };
-        if !matching {
-            return Err(repair_error(
-                "PR evidence changed before repair; next check will reconcile it",
-            ));
-        }
-        process_ci_fix(&store, &landing, &incident)
+        process_ci_fix(&store, &landing, &incident, &checks)
     })();
     let (conclusion, failure) = match &result {
         Ok(RepairConclusion::Published(_)) => (Some("published"), None),
@@ -486,32 +566,19 @@ fn process_ci_fix(
     store: &SharedStore,
     landing: &PrLanding,
     incident: &CiIncident,
+    checks: &[CiCheck],
 ) -> OpsResult<RepairConclusion> {
     let skill = load_skill("ci-fix", &landing.worktree)
         .map_err(|error| OpsError::Message(format!("ci-fix skill not found: {error}")))?
         .content
         .ok_or_else(|| OpsError::Message("ci-fix skill has no content".to_string()))?;
-    let urls = merge_gate_state(
-        &landing.worktree,
-        u64::from(landing.pr_number),
-        &incident.failed_head_sha,
-    )
-    .ok()
-    .flatten()
-    .map(|reading| {
-        reading
-            .failing_leaves
-            .into_iter()
-            .filter_map(|check| check.url.map(|url| (check.name, url)))
-            .collect::<std::collections::BTreeMap<_, _>>()
-    })
-    .unwrap_or_default();
-    let checks = incident
-        .failure_set
+    // The checks that matched this incident carry its URLs, including the
+    // merge-group run of a queue eviction.
+    let checks = checks
         .iter()
-        .map(|name| match urls.get(name) {
-            Some(url) => format!("- {name} ({url})"),
-            None => format!("- {name}"),
+        .map(|check| match &check.url {
+            Some(url) => format!("- {} ({url})", check.name),
+            None => format!("- {}", check.name),
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -945,11 +1012,21 @@ async fn reconcile_claimed(
                 .map_err(|error| OpsError::Message(error.to_string()))?;
             resume_watching(store, landing, head_sha).await
         }
-        LandingObservation::Unarmed { .. } => {
+        LandingObservation::Withdrawn { removal, .. } => {
+            let actor = removal.actor.as_deref().unwrap_or("someone");
+            let number = landing.pr_number;
+            let removed = if removal.queued {
+                format!("{actor} removed #{number} from the merge queue")
+            } else {
+                format!("{actor} disabled auto-merge on #{number}")
+            };
             block_landing(
                 store,
                 landing,
-                "pull request has no auto-merge request; run lf arm to resume landing".into(),
+                format!(
+                    "{removed} at {}; run lf arm to resume landing",
+                    removal.at.to_rfc3339()
+                ),
             )
             .await
         }
@@ -961,7 +1038,7 @@ async fn reconcile_claimed(
             // Publication can expose a new head before its repair worker exits.
             // Keep observing that worker's landing rather than admitting a new
             // incident against the checkout it still owns.
-            if repair_running(store, landing)? {
+            if repair_running(store, &landing.repo, landing.pr_number)? {
                 return Ok(());
             }
             let incident = ci_incident(landing, &failing_checks, now);
@@ -1282,11 +1359,11 @@ pub(crate) async fn repair_landing(store: SharedStore, landing: PrLanding) -> Op
     reconcile_pr_landing(store, landing, Arc::new(observe_github), Some(ci_fix(None))).await
 }
 
-/// Whether a repair worker for this landing is running now.
-pub(crate) fn repair_running(store: &SharedStore, landing: &PrLanding) -> OpsResult<bool> {
+/// Whether a repair worker for this PR is running now, whichever landing reserved it.
+pub(crate) fn repair_running(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<bool> {
     Ok(store
         .sqlite
-        .landing_repair_processes(&landing.id)
+        .pr_repair_processes(repo, pr_number)
         .map_err(repair_error)?
         .iter()
         .any(|process| repair_live(store, Some(process))))
@@ -1434,11 +1511,13 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        classify_github_observation, reconcile_pr_landing, wait_for_landing, LandingObservation,
+        ci_incident, decide_merge, reconcile_pr_landing, wait_for_landing, LandingObservation,
         ObservePr, RepairCi,
     };
     use crate::ops::error::{OpsError, OpsResult};
-    use crate::ops::pr::{MergeRequest, PrInfo};
+    use crate::ops::pr::{
+        ManualRemoval, MergeGateReading, MergeRequest, MergeRequestRemoval, PrInfo,
+    };
     use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::{SharedStore, StorageConfig};
     use crate::work::task::CiCheck;
@@ -1470,15 +1549,29 @@ mod tests {
         (landing, pr)
     }
 
+    fn unexplained() -> OpsResult<MergeRequestRemoval> {
+        Ok(MergeRequestRemoval::Unknown)
+    }
+
+    fn green(_: &str) -> OpsResult<Option<MergeGateReading>> {
+        Ok(Some(MergeGateReading {
+            failing: false,
+            pending: false,
+            failing_leaves: Vec::new(),
+        }))
+    }
+
     #[test]
     fn queued_landing_waits_for_integration_instead_of_requiring_sync() {
         let (landing, mut pr) = github_landing_fixture();
         for merge_state in ["behind", "dirty", "clean"] {
             pr.merge_state = Some(merge_state.to_string());
-            let observed = classify_github_observation(
-                &landing,
+            let observed = decide_merge(
                 pr.clone(),
+                &landing.observed_head_sha,
                 Some(MergeRequest::Queued("queue-entry".to_string())),
+                unexplained,
+                green,
             )
             .unwrap();
             assert_eq!(
@@ -1493,17 +1586,17 @@ mod tests {
     #[test]
     fn dequeued_landing_resumes_ordinary_integration_and_authorization_checks() {
         let (landing, pr) = github_landing_fixture();
-        let observed =
-            classify_github_observation(&landing, pr.clone(), Some(MergeRequest::Auto)).unwrap();
+        let observed = decide_merge(
+            pr,
+            &landing.observed_head_sha,
+            Some(MergeRequest::Auto),
+            unexplained,
+            green,
+        )
+        .unwrap();
         assert!(
             matches!(observed, LandingObservation::Failing { failing_checks, .. }
             if failing_checks[0].name == "required-integration")
-        );
-        assert_eq!(
-            classify_github_observation(&landing, pr, None).unwrap(),
-            LandingObservation::Unarmed {
-                head_sha: "pr-head".to_string()
-            }
         );
     }
 
@@ -1513,10 +1606,12 @@ mod tests {
         pr.state = "merged".to_string();
         pr.merge_commit = Some("integrated-head".to_string());
         assert_eq!(
-            classify_github_observation(
-                &landing,
+            decide_merge(
                 pr.clone(),
-                Some(MergeRequest::Queued("queue-entry".to_string()))
+                &landing.observed_head_sha,
+                Some(MergeRequest::Queued("queue-entry".to_string())),
+                unexplained,
+                green,
             )
             .unwrap(),
             LandingObservation::Merged {
@@ -1526,7 +1621,7 @@ mod tests {
         );
         pr.state = "closed".to_string();
         assert_eq!(
-            classify_github_observation(&landing, pr, None).unwrap(),
+            decide_merge(pr, &landing.observed_head_sha, None, unexplained, green).unwrap(),
             LandingObservation::Closed {
                 head_sha: "pr-head".to_string()
             }
@@ -1668,17 +1763,104 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revoked_merge_intent_blocks_without_launching_a_repair() {
+    async fn a_persons_dequeue_blocks_naming_them_without_launching_a_repair() {
         let (_directory, store, landing) = fixture().await;
-        let script = script(vec![LandingObservation::Unarmed {
+        let script = script(vec![LandingObservation::Withdrawn {
             head_sha: "head".into(),
+            removal: ManualRemoval {
+                at: "2026-10-22T20:13:13Z".parse().unwrap(),
+                actor: Some("jacklionheart".into()),
+                queued: true,
+            },
         }]);
         assert!(check(store.clone(), landing.clone(), &script)
             .await
             .is_err());
         let blocked = store.get_pr_landing(&landing.id).await.unwrap().unwrap();
         assert_eq!(blocked.state, PrLandingState::Blocked);
+        assert_eq!(
+            blocked.blocked_reason.as_deref(),
+            Some(
+                "jacklionheart removed #248 from the merge queue at 2026-10-22T20:13:13+00:00; \
+                 run lf arm to resume landing"
+            )
+        );
         assert_eq!(*script.repairs.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn repair_disarm_keeps_landing_until_the_repair_rearms_and_merges() {
+        let (_directory, store, landing) = fixture().await;
+        let incident = ci_incident(
+            &landing,
+            &[CiCheck {
+                name: "rust".into(),
+                url: None,
+            }],
+            OffsetDateTime::now_utc(),
+        );
+        store.observe_ci_incident(&incident).await.unwrap();
+        // A reservation whose Process has no recorded death is a live repair.
+        {
+            let conn = store.sqlite.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000577','fixture',?1)",
+                [OffsetDateTime::now_utc().unix_timestamp()],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE ci_incidents SET repair_lf_process_id='00000000-0000-4000-8000-000000000577' WHERE identity=?1",
+                [&incident.identity],
+            )
+            .unwrap();
+        }
+        // The repair's own disarm leaves a green head without a merge request;
+        // a check confirms a failure with a second read.
+        let disarmed = LandingObservation::Failing {
+            head_sha: "head".into(),
+            failing_checks: vec![CiCheck {
+                name: "merge-request (repair-disarmed)".into(),
+                url: None,
+            }],
+        };
+        let script = script(vec![disarmed.clone(), disarmed, merged()]);
+        let paused = check(store.clone(), landing, &script).await.unwrap();
+        assert_eq!(paused.state, PrLandingState::Watching);
+        assert!(paused.blocked_reason.is_none());
+        let landed = check(store, paused, &script).await.unwrap();
+        assert_eq!(landed.state, PrLandingState::Merged);
+        assert_eq!(*script.repairs.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn each_merge_group_run_that_evicts_a_head_admits_its_own_repair() {
+        let (_directory, store, landing) = fixture().await;
+        let evicted = |run: &str| LandingObservation::Failing {
+            head_sha: "head".into(),
+            failing_checks: vec![CiCheck {
+                name: "merge-queue (failed_checks)".into(),
+                url: Some(format!("https://github.com/o/r/actions/runs/{run}")),
+            }],
+        };
+        // A check confirms a failure with a second read.
+        let script = script(vec![
+            evicted("A"),
+            evicted("A"),
+            evicted("A"),
+            evicted("A"),
+            evicted("B"),
+            evicted("B"),
+        ]);
+        let repaired = check(store.clone(), landing, &script).await.unwrap();
+        assert_eq!(*script.repairs.lock().unwrap(), 1);
+        // The same run again is the evidence that repair already answered.
+        assert!(check(store.clone(), repaired.clone(), &script)
+            .await
+            .is_err());
+        assert_eq!(*script.repairs.lock().unwrap(), 1);
+        let blocked = store.get_pr_landing(&repaired.id).await.unwrap().unwrap();
+        check(store, blocked, &script).await.unwrap();
+        assert_eq!(*script.repairs.lock().unwrap(), 2);
     }
 
     #[tokio::test]

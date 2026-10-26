@@ -106,6 +106,7 @@ pub(crate) async fn explain_connect(
 ) -> SessionConnectExplanation {
     use crate::session::PrimaryScope;
     let selected = async {
+        let target = super::resolve_target(store, target).await?;
         if let super::SessionTarget::Session(id) = target {
             return Ok((None, Some(id.to_string())));
         }

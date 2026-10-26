@@ -898,9 +898,11 @@ impl RawTerminal {
 impl Drop for RawTerminal {
     fn drop(&mut self) {
         if let Some(original) = self.original {
+            // Discard input the viewer never forwarded, such as mouse reports
+            // queued while it waited on the owner; the shell would run them.
             // SAFETY: restores attributes previously read from stdin.
             unsafe {
-                libc::tcsetattr(0, libc::TCSANOW, &original);
+                libc::tcsetattr(0, libc::TCSAFLUSH, &original);
             }
             let _ = self.output.stdout.write_all(b"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?1049l\x1b[?25h\x1b[0m");
         }
@@ -910,8 +912,13 @@ impl Drop for RawTerminal {
 fn send(socket: &mut UnixStream, request: &Request) -> Result<()> {
     let mut bytes = serde_json::to_vec(request)?;
     bytes.push(b'\n');
-    socket.write_all(&bytes)?;
-    Ok(())
+    // A write timeout reports EAGAIN on macOS, which names no cause.
+    socket.write_all(&bytes).map_err(|error| match error.kind() {
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => anyhow::anyhow!(
+            "Execution owner stopped reading requests; outcome is unknown and later input was not delivered"
+        ),
+        _ => error.into(),
+    })
 }
 
 pub(crate) fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<()> {

@@ -49,7 +49,6 @@ def _stage_build_artifacts(root: Path) -> None:
         "<key>CFBundleName</key><string>Loopflow</string>"
         "</dict></plist>\n"
     )
-    (swift_loopflow / "Loopflow.sdef").write_text("<dictionary/>")
     (swift_loopflow / "AppIcon.icns").write_bytes(b"icns-fake")
 
     cargo_rel = root / "target" / "release"

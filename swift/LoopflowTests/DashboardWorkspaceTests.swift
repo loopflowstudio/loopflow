@@ -77,7 +77,7 @@ struct DashboardWorkspaceTests {
         let moved = try plan(["task_c", "task_a", "task_b"])
         let query = RegistryQuery { args, _ in
             switch args {
-            case ["desktop", "order", "task:task_c", "--to", "task:task_a"]: return #"["task_c","task_a","task_b"]"#
+            case ["desktop", "move", "-p", "working-tasks/task:task_c", "--destination", "task:task_a"]: return #"["task_c","task_a","task_b"]"#
             case ["desktop", "view", "--plan", "--json"]: return moved
             default: throw RegistryQueryError("Unexpected command \(args)")
             }
@@ -138,7 +138,7 @@ struct DashboardWorkspaceTests {
         let query = RegistryQuery { args, _ in
             switch args {
             // Rust applies the same move as the repository order and decides the mode.
-            case ["desktop", "order", "task:task_c", "--to", "task:task_a", "--query", "picked", "--revision", "3"]:
+            case ["desktop", "move", "-p", "query:picked/task:task_c", "--destination", "task:task_a"]:
                 return String(decoding: try loadFixtureData("dashboard.json"), as: UTF8.self)
             case ["desktop", "view", "query:picked", "--plan", "--json"]: return moved
             default: throw RegistryQueryError("Unexpected command \(args)")
@@ -147,7 +147,7 @@ struct DashboardWorkspaceTests {
         let model = WorkModel(query: query, repoPath: "/repo")
         model.applySelectionPlans([try JSONDecoder().decode(WorkViewPlan.self, from: Data(initial.utf8))], reason: "")
         let key = { WorkWorkspaceKey(repository: repo, kind: .task, id: $0) }
-        await model.reorderDashboard("picked", member: key("task_c"), to: key("task_a"), revision: 3)
+        await model.reorderDashboard("picked", member: key("task_c"), to: key("task_a"))
         #expect(model.dashboardError == nil)
         let dashboard = try #require(model.dashboard("picked"))
         #expect(dashboard.arrangement.order.map(\.work.id) == ["task_c", "task_a", "task_b"])
@@ -241,10 +241,11 @@ struct DashboardWorkspaceTests {
         let work = try #require(registry.retained(key))
         let pane = try #require(work.multiplexer.pane(forSessionId: "primary"))
         work.multiplexer.setCollapsed(paneId: pane.id, collapsed: true)
+        let layout = work.multiplexer.layout
         model.applySelectionPlans([plan], reason: "")
         #expect(work.multiplexer.pane(forSessionId: "primary") == pane)
         #expect(work.multiplexer.collapsedPaneIds.contains(pane.id))
-        #expect(work.multiplexer.layout.allPanes.count == 1)
+        #expect(work.multiplexer.layout == layout)
     }
 
     @Test func dashboardFocusPreservesQueryGeometryAndRetainedWork() throws {
@@ -267,9 +268,9 @@ struct DashboardWorkspaceTests {
         let window = UUID()
         let target = DesktopPaneTarget(repository: "repo", window: window.uuidString, work: b,
             pane: pane.id, incarnation: pane.incarnation, tab: nil)
-        _ = try registry.controlPane(.init(target: target, action: .focus), model: model)
+        _ = try DesktopAction.perform(DesktopActionRequest("focus", at: target), model: model, workspaces: registry)
         let state = model.inspectDesktop(repository: "repo", window: window, workspaces: registry)
-        #expect(state.selectionKind == "dashboard")
+        #expect(state.destination == .dashboard(id: "review"))
         #expect(state.view == plan)
         #expect(registry.selectedWork == b)
         #expect(state.openWork == [a, b])
@@ -304,8 +305,7 @@ struct DashboardWorkspaceTests {
         let link = try #require(URL(string: "loopflow://open?repo=/repo&view=\(encoded)"))
         await model.receiveWorkLink(.view(expression: expression, address: link.absoluteString))
         let state = model.inspectDesktop(repository: plan.repository, window: UUID(), workspaces: registry)
-        #expect(state.selectionKind == "dashboard")
-        #expect(state.selectionId == (saved ? "picked" : nil))
+        #expect(state.destination == (saved ? .dashboard(id: "picked") : .view(selection: plan.selection)))
         #expect(model.navigation.showsSelection)
         #expect(model.navigation.palette == nil)
         #expect(state.view == plan)
@@ -334,7 +334,7 @@ struct DashboardWorkspaceTests {
         source.multiplexer.newShell(command: ["never-launch"], location: location)
         let oldShell = try #require(source.multiplexer.focusedPane.content.selectedShell)
         source.multiplexer.newShell(command: ["never-launch"], location: location)
-        source.toggleFiles()
+        source.toggleBrowser()
         let originalFiles = source.files(issue: source.key.id, cwd: "/task")
         originalFiles.selection = "old.txt"
         originalFiles.selection = "second.txt"
@@ -352,7 +352,7 @@ struct DashboardWorkspaceTests {
         await server.waitForRead()
         workspace.multiplexer.newShell(command: ["new-shell"], location: location)
         let fresh = try #require(workspace.multiplexer.focusedPane.content.selectedShell)
-        workspace.toggleFiles()
+        workspace.toggleBrowser()
         let files = workspace.files(issue: workspace.key.id, cwd: "/task")
         files.selection = "new.txt"
         let document = files.document("new.txt")

@@ -1,6 +1,9 @@
 //! Command observation is durable even when no agent work starts.
 #![cfg(unix)]
 
+#[allow(dead_code)] // Linked for its inherited provider-home scrub.
+mod support;
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Child, Command};

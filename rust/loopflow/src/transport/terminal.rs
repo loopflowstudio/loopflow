@@ -43,13 +43,11 @@ pub(super) fn snapshot(screen: &vt100::Screen) -> Vec<u8> {
         // the owner's output flows from the cursor as any command's would.
         return bytes;
     } else {
-        bytes.extend(b"\x1b[?1049l\x1b[3J\x1b[H\x1b[2J");
-        for offset in (1..=history.scrollback()).rev() {
-            history.set_scrollback(offset);
-            if let Some(row) = history.rows_formatted(0, history.size().1).next() {
-                bytes.extend(row);
-                bytes.extend(b"\r\n");
-            }
+        // Only the owner's visible screen is redrawn. The viewer's screen
+        // scrolls into its own scrollback first, so nothing it showed is
+        // erased: a screen's height of newlines blanks it from any cursor row.
+        for _ in 0..screen.size().0 {
+            bytes.extend(b"\r\n");
         }
     }
     bytes.extend(screen.state_formatted());
@@ -61,6 +59,36 @@ fn untouched(screen: &vt100::Screen, history: &vt100::Screen) -> bool {
     history.scrollback() == 0
         && screen.cursor_position() == (0, 0)
         && screen.contents().trim().is_empty()
+}
+
+/// Whether output written to a viewer's terminal left it on the alternate
+/// screen. Leaving it is restored on exit only when it is still entered: in
+/// xterm-family terminals 1049-reset also restores the cursor saved on entry,
+/// which moves the cursor above whatever was printed since.
+#[derive(Debug, Default)]
+pub(super) struct AlternateScreen {
+    pub entered: bool,
+    tail: Vec<u8>,
+}
+
+impl AlternateScreen {
+    pub fn observe(&mut self, bytes: &[u8]) {
+        let mut window = std::mem::take(&mut self.tail);
+        window.extend_from_slice(bytes);
+        for (i, _) in window.iter().enumerate().filter(|(_, b)| **b == 0x1b) {
+            let rest = &window[i..];
+            for mode in [b"\x1b[?1049".as_slice(), b"\x1b[?1047", b"\x1b[?47"] {
+                match rest.strip_prefix(mode).and_then(|r| r.first()) {
+                    Some(b'h') => self.entered = true,
+                    Some(b'l') => self.entered = false,
+                    _ => {}
+                }
+            }
+        }
+        // Keep a sequence split across writes.
+        let start = window.len().saturating_sub(7);
+        self.tail = window[start..].to_vec();
+    }
 }
 
 /// Reports may be inserted only between complete terminal sequences and UTF-8
@@ -136,7 +164,7 @@ impl Boundary {
 
 #[cfg(test)]
 mod tests {
-    use super::{snapshot, Boundary, Queries};
+    use super::{snapshot, AlternateScreen, Boundary, Queries};
 
     #[test]
     fn attaching_before_the_owner_draws_leaves_the_viewer_terminal_alone() {
@@ -145,10 +173,38 @@ mod tests {
         let mut drawn = vt100::Parser::new(24, 80, 2000);
         drawn.process(b"Error: no stock\r\n");
         let bytes = snapshot(drawn.screen());
-        assert!(bytes.windows(4).any(|w| w == b"\x1b[2J"), "{bytes:?}");
         let mut restored = vt100::Parser::new(24, 80, 2000);
         restored.process(&bytes);
         assert_eq!(restored.screen().contents().trim(), "Error: no stock");
+    }
+
+    #[test]
+    fn redrawing_shows_the_owner_screen_and_keeps_the_viewers_scrollback() {
+        let mut owner = vt100::Parser::new(24, 80, 2000);
+        for line in 0..30 {
+            owner.process(format!("owner {line}\r\n").as_bytes());
+        }
+        let mut viewer = vt100::Parser::new(24, 80, 2000);
+        viewer.process(b"$ ls\r\nnotes.md\r\n$ lf resume\r\n");
+        viewer.process(&snapshot(owner.screen()));
+        assert_eq!(viewer.screen().contents(), owner.screen().contents());
+        viewer.screen_mut().set_scrollback(usize::MAX);
+        let scrollback = viewer.screen().contents();
+        assert!(
+            scrollback.starts_with("$ ls\nnotes.md\n$ lf resume"),
+            "{scrollback}"
+        );
+        assert!(!scrollback.contains("owner 0\n"), "{scrollback}");
+    }
+
+    #[test]
+    fn alternate_screen_follows_the_last_mode_change_across_writes() {
+        let mut screen = AlternateScreen::default();
+        screen.observe(b"frame\x1b[?10");
+        screen.observe(b"49hmore");
+        assert!(screen.entered);
+        screen.observe(b"\x1b[?1049lbye\x1b[?1049h\x1b[?1049l");
+        assert!(!screen.entered);
     }
 
     #[test]

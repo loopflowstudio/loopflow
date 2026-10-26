@@ -19,6 +19,17 @@ use time::OffsetDateTime;
 
 pub mod ambient;
 
+/// Agent shells such as Codex export the developer's real provider home
+/// (`CODEX_HOME=~/.codex`). An `lf` fixture child that inherits it would swap
+/// fixture logins into that home, so every test binary drops both variables
+/// before `main`, while no other thread can read the environment. Fixtures
+/// that need a provider home set one explicitly.
+#[ctor::ctor(unsafe)]
+fn scrub_inherited_provider_homes() {
+    env::remove_var("CODEX_HOME");
+    env::remove_var("CLAUDE_CONFIG_DIR");
+}
+
 #[cfg(unix)]
 #[allow(dead_code)] // Shared native provider fixture compiled into multiple test crates.
 pub fn install_native_codex(bin: &Path) {
@@ -204,8 +215,6 @@ pub struct EnvGuard {
     previous_home: Option<String>,
     previous_lf_home: Option<OsString>,
     previous_lf_bin: Option<OsString>,
-    previous_codex_home: Option<OsString>,
-    previous_claude_home: Option<OsString>,
     _ambient: ambient::EnvGuard,
     _bin: TempDir,
     _lf_home: TempDir,
@@ -263,9 +272,7 @@ impl EnvGuard {
         }
         // A shared launch signs its provider's native home in as the routed
         // account; that home must never be the developer's own.
-        let previous_codex_home = env::var_os("CODEX_HOME");
         env::set_var("CODEX_HOME", lf_home.path().join("native-codex"));
-        let previous_claude_home = env::var_os("CLAUDE_CONFIG_DIR");
         env::set_var("CLAUDE_CONFIG_DIR", lf_home.path().join("native-claude"));
         Self {
             _lock: lock,
@@ -273,8 +280,6 @@ impl EnvGuard {
             previous_home,
             previous_lf_home,
             previous_lf_bin,
-            previous_codex_home,
-            previous_claude_home,
             _ambient: ambient,
             _bin: bin,
             _lf_home: lf_home,
@@ -309,14 +314,9 @@ impl Drop for EnvGuard {
             Some(prev) => env::set_var("LF_HOME", prev),
             None => env::remove_var("LF_HOME"),
         }
-        match &self.previous_codex_home {
-            Some(prev) => env::set_var("CODEX_HOME", prev),
-            None => env::remove_var("CODEX_HOME"),
-        }
-        match &self.previous_claude_home {
-            Some(prev) => env::set_var("CLAUDE_CONFIG_DIR", prev),
-            None => env::remove_var("CLAUDE_CONFIG_DIR"),
-        }
+        // The pre-main scrub left no provider home to restore.
+        env::remove_var("CODEX_HOME");
+        env::remove_var("CLAUDE_CONFIG_DIR");
     }
 }
 

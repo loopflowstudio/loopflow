@@ -698,41 +698,55 @@ fn planning_sync_preserves_delivery_and_losing_values() {
 }
 
 #[test]
-fn desktop_pane_command_requires_an_exact_content_occurrence() {
-    use loopflow::lf::commands::desktop::DesktopPaneCommand;
-    let json = include_str!("../../../tests/fixtures/dto/desktop_pane_commands.json");
-    let requests: Vec<DesktopPaneCommand> = serde_json::from_str(json).unwrap();
+fn desktop_actions_name_an_exact_window_and_report_the_next_reading() {
+    use loopflow::lf::commands::desktop::{
+        DesktopActionDescriptor, DesktopActionReceipt, DesktopActionRequest,
+    };
+    let json = include_str!("../../../tests/fixtures/dto/desktop_action.json");
+    let value: serde_json::Value = serde_json::from_str(json).unwrap();
+    let actions: Vec<DesktopActionDescriptor> =
+        serde_json::from_value(value["actions"].clone()).unwrap();
+    assert_eq!(serde_json::to_value(&actions).unwrap(), value["actions"]);
+    assert!(actions.iter().any(|action| action.name == "goto"
+        && action.keys.len() == 9
+        && action.arguments[0].required));
+    let requests: Vec<DesktopActionRequest> =
+        serde_json::from_value(value["requests"].clone()).unwrap();
+    assert_eq!(serde_json::to_value(&requests).unwrap(), value["requests"]);
+    assert!(requests[0].pane.is_none());
     assert_eq!(
-        serde_json::to_value(&requests).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
+        requests[2].pane.as_ref().unwrap().tab.as_deref(),
+        Some("shell-tab")
     );
-    for request in &requests {
-        let wire = serde_json::to_value(request).unwrap();
-        for field in wire["action"].as_object().unwrap().keys() {
-            let mut missing = wire.clone();
-            missing["action"].as_object_mut().unwrap().remove(field);
-            assert!(serde_json::from_value::<DesktopPaneCommand>(missing).is_err());
-        }
+    for field in ["repository", "window", "action", "args"] {
+        let mut missing = value["requests"][2].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<DesktopActionRequest>(missing).is_err(),
+            "{field}"
+        );
     }
-    let request = &requests[0];
+    let receipt: DesktopActionReceipt = serde_json::from_value(value["receipt"].clone()).unwrap();
+    assert_eq!(serde_json::to_value(&receipt).unwrap(), value["receipt"]);
+    assert_eq!(receipt.tab.as_deref(), Some("page-1"));
     assert_eq!(
-        request.action,
-        loopflow::lf::commands::desktop::DesktopPaneAction::Hide
+        receipt.applies_to,
+        loopflow::lf::commands::desktop::DesktopAppliesTo::Window
     );
-    assert_eq!(request.target.incarnation, "occurrence-session-pane");
-    let wire = serde_json::to_value(request).unwrap();
-    assert_eq!(
-        wire,
-        serde_json::from_str::<serde_json::Value>(json).unwrap()[0]
-    );
-    for field in ["repository", "window", "work", "pane", "incarnation"] {
-        let mut missing = wire.clone();
-        missing["target"].as_object_mut().unwrap().remove(field);
-        assert!(serde_json::from_value::<DesktopPaneCommand>(missing).is_err());
+    for field in [
+        "action",
+        "destination",
+        "history",
+        "observed_at",
+        "applies_to",
+    ] {
+        let mut missing = value["receipt"].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<DesktopActionReceipt>(missing).is_err(),
+            "{field}"
+        );
     }
-    let mut missing = wire;
-    missing.as_object_mut().unwrap().remove("action");
-    assert!(serde_json::from_value::<DesktopPaneCommand>(missing).is_err());
 }
 
 #[test]
@@ -1135,19 +1149,6 @@ fn task_files_frames_preserve_checkout_identity_and_heartbeat() {
 }
 
 #[test]
-fn desktop_pane_receipt_returns_the_affected_identity() {
-    use loopflow::lf::commands::desktop::DesktopPaneReceipt;
-    let json = include_str!("../../../tests/fixtures/dto/desktop_pane_receipt.json");
-    let receipt: DesktopPaneReceipt = serde_json::from_str(json).unwrap();
-    assert_eq!(receipt.pane, "created-pane");
-    assert_eq!(receipt.work.repository, receipt.repository);
-    assert_eq!(
-        serde_json::to_value(&receipt).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
-    );
-}
-
-#[test]
 fn paused_task_state_is_unfinished() {
     let state: TaskState = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/task_deferred.json"
@@ -1177,6 +1178,14 @@ fn desktop_state_retains_outer_and_inner_layouts() {
     ))
     .unwrap();
     let window = &reading.windows[0];
+    assert_eq!(
+        window.destination,
+        loopflow::lf::commands::desktop::DesktopDestination::Entered {
+            from: loopflow::lf::commands::desktop::DesktopBoard::Dashboard("attention".into()),
+            work: window.workspaces[0].work.clone(),
+        }
+    );
+    assert_eq!(window.history.back, 1);
     assert_eq!(window.open_work, [window.workspaces[0].work.clone()]);
     assert_eq!(window.workspaces[0].layout.ratio, Some(0.6));
     assert_eq!(window.workspaces[0].hidden_panes, ["files-pane"]);

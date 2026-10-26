@@ -142,7 +142,8 @@ final class WorkModel {
         reconcileSelectionRepository()
         switch navigation.destination {
         case .dashboard, .workingTasks: if let plan = selectedViewPlan { presentView(plan) }
-        case .work, .view, .zoomed: break
+        case .work: presentWaveTiles()
+        case .view, .entered: break
         }
     }
 
@@ -211,13 +212,14 @@ final class WorkModel {
         navigation.workspacePresentation = workspace.presentation
         navigation.selectedSessionId = workspace.presentation.selectedSessionId
         revealPrimaryConversation()
+        presentWaveTiles()
     }
 
     /// Observation can display an existing conversation without acquiring its provider.
     func revealPrimaryConversation() {
         guard let registry = workspaceRegistry, let key = registry.selectedWork,
               key.kind != .task, let workspace = registry.retained(key),
-              workspace.multiplexer.focusedPane.content == .empty,
+              workspace.multiplexer.sessionPane?.sessionId == nil,
               let record = sessions.value?.first(where: {
                   key.kind == .repository ? $0.primaryScope == "repository"
                       : $0.primaryScope == "wave" && $0.waveId == key.id
@@ -561,11 +563,8 @@ final class WorkModel {
         } else { sessionPane = layout.allPanes.first { $0.sessionId == destination.record.id } }
         var panes = [PaneState]()
         if let sessionPane { panes.append(sessionPane) }
-        if destination.showsChanges,
-           let pane = layout.allPanes.first(where: {
-               if case .files(let task, _, _) = $0.content { return task == destination.task.id }
-               return false
-           }) { panes.append(pane) }
+        if destination.showsChanges, let pane = layout.pane(of: .browser),
+           pane.content.selectedBrowserTab == .files { panes.append(pane) }
         guard panes.count == (destination.showsChanges ? 2 : 1) else {
             taskOpening = taskOpening.map { DesktopOpening(url: $0.url, status: .failed, reason: "Opening panes are no longer available.") }
             return
@@ -738,11 +737,45 @@ final class WorkModel {
         case .failed: reading = "unavailable"
         }
         return DesktopWindowInspection(repository: repository, window: window.uuidString,
-            path: repoPath, selectionKind: navigation.showsSelection ? "dashboard" : workspaces.selectedWork?.kind.rawValue,
-            selectionId: navigation.showsSelection ? navigation.dashboardID : workspaces.selectedWork?.id,
+            path: repoPath, destination: desktopDestination(repository: repository), history: desktopHistory,
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
-            supportedOperations: ["state", "view", "query", "arrange", "layout", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files", "graph-log", "read", "text", "key"], workspaces: workspaces.inspect(), openWork: workspaces.openWork, view: selectedViewPlan, opening: selectionOpening ?? taskOpening)
+            list: desktopList(repository: workspaceRepository ?? repository),
+            actions: DesktopAction.all.map(\.descriptor), workspaces: workspaces.inspect(), openWork: workspaces.openWork, view: selectedViewPlan, opening: selectionOpening ?? taskOpening)
+    }
+
+    /// The Working Tasks ⌘1–9 select, in that order.
+    func desktopList(repository: String) -> [DesktopListEntry] {
+        workingTaskIDs.enumerated().map { index, id in
+            let task = task(id: id)?.task
+            return DesktopListEntry(position: index + 1,
+                work: WorkWorkspaceKey(repository: repository, kind: .task, id: task?.id ?? id),
+                identifier: task?.task.identifier, title: task?.task.name ?? id)
+        }
+    }
+
+    /// The window's destination with durable Work keys, as `lf desktop state` reports it.
+    func desktopDestination(repository: String) -> DesktopDestination {
+        func key(_ work: WorkReference?) -> WorkWorkspaceKey {
+            let repository = workspaceRepository ?? repository
+            guard let work else { return WorkWorkspaceKey(repository: repository, kind: .repository, id: repository) }
+            return work.kind == .task
+                ? WorkWorkspaceKey(repository: repository, kind: .task, id: task(id: work.id)?.task.id ?? work.id)
+                : WorkWorkspaceKey(repository: repository, kind: .wave, id: work.id)
+        }
+        switch navigation.destination {
+        case .work(let work): return .work(key(work))
+        case .dashboard(let id): return .dashboard(id: id)
+        case .view(let plan): return .view(selection: plan.selection)
+        case .workingTasks: return .workingTasks
+        case .entered(.saved(let id), let work): return .entered(from: .dashboard(id), work: key(work))
+        case .entered(.workingTasks, let work): return .entered(from: .workingTasks, work: key(work))
+        case .entered(.wave(let id), let work): return .entered(from: .wave(id), work: key(work))
+        }
+    }
+
+    var desktopHistory: DesktopHistory {
+        DesktopHistory(back: navigation.backStack.count, forward: navigation.forwardStack.count)
     }
 
     private func inspectSelectedTask() -> DesktopTaskInspection? {
@@ -1689,19 +1722,6 @@ final class WorkModel {
         await workspace.openPrimaryConversation(wave: wave, store: store, registry: workspaceRegistry)
     }
 
-    func selectWorkingTask(slot: Int) {
-        guard workingTaskIDs.indices.contains(slot) else { return }
-        select(.task(id: workingTaskIDs[slot]))
-    }
-
-    func cycleWorkingTask(_ offset: Int) {
-        let ids = workingTaskIDs
-        guard !ids.isEmpty else { return }
-        let index = ids.firstIndex { isSelected(.task(id: $0)) }
-        let next = index.map { ($0 + offset + ids.count) % ids.count } ?? (offset > 0 ? 0 : ids.count - 1)
-        select(.task(id: ids[next]))
-    }
-
     func goBack() {
         guard let previous = navigation.backStack.popLast() else { return }
         navigation.forwardStack.append(navigation.destination)
@@ -2448,9 +2468,9 @@ extension WorkModel {
     private func selectDestination(_ destination: WorkNavigation.Destination, recordingHistory: Bool = false) {
         switch destination {
         case .work(let work): select(work, preservingOpening: false, recordingHistory: recordingHistory)
-        case .zoomed(let board, let work):
+        case .entered(let board, let work):
             select(work, preservingOpening: false, recordingHistory: recordingHistory)
-            navigation.destination = .zoomed(from: board, work: work)
+            navigation.destination = .entered(from: board, work: work)
         case .dashboard, .view, .workingTasks:
             if recordingHistory, navigation.destination != destination {
                 navigation.backStack.append(navigation.destination)
@@ -2481,8 +2501,27 @@ extension WorkModel {
             .filter { $0.work.kind == .task && seen.insert($0.work).inserted }
     }
 
-    func zoom(into work: WorkReference, from board: WorkNavigation.Board) {
-        selectDestination(.zoomed(from: board, work: work), recordingHistory: true)
+    func enter(_ work: WorkReference, from board: WorkNavigation.Board) {
+        selectDestination(.entered(from: board, work: work), recordingHistory: true)
+    }
+
+    /// A Wave view's tiles: its Tasks in the shared order, beside its conversation.
+    func waveTiles(_ id: String) -> [WorkMemberRef] {
+        var seen = Set<WorkWorkspaceKey>()
+        return (builtInPlan(.wave(id))?.resolution.members ?? [])
+            .filter { $0.work.kind == .task && seen.insert($0.work).inserted }
+    }
+
+    func wavePlan(_ id: String) -> WorkViewPlan? { builtInPlan(.wave(id)) }
+
+    /// The Wave stays selected; its Tasks open after it, in tile order, so a
+    /// script addresses them as it does a Dashboard's.
+    private func presentWaveTiles() {
+        guard let registry = workspaceRegistry, case .work = navigation.destination,
+              let key = registry.selectedWork, key.kind == .wave, let plan = wavePlan(key.id) else { return }
+        let tiles = waveTiles(key.id).map(\.work)
+        openTiles(plan, tiles, in: registry)
+        registry.present(open: [key] + tiles)
     }
 
     private func presentView(_ plan: WorkViewPlan) {
@@ -2493,15 +2532,19 @@ extension WorkModel {
         } else {
             plan.projection.visible.map(\.work)
         }
+        openTiles(plan, open, in: registry)
+        registry.present(open: open)
+    }
+
+    private func openTiles(_ plan: WorkViewPlan, _ open: [WorkWorkspaceKey], in registry: SessionsWorkspaceRegistry) {
         for content in plan.contents where open.contains(content.work) {
             let entry = registry.workspace(for: content.work, title: content.title,
                 location: content.location.map { WorkspaceIdentity(machineId: $0.machineID, worktree: $0.cwd) })
-            if let primary = content.primarySession, entry.multiplexer.pane(forSessionId: primary) == nil {
-                entry.multiplexer.show(.session(id: primary, location: entry.location), focus: false)
+            if let primary = content.primarySession, entry.multiplexer.sessionPane?.sessionId == nil {
+                entry.multiplexer.load(sessionId: primary, location: entry.location, focus: false)
             }
             entry.startPersistence(query: query, repoPath: repoPath)
         }
-        registry.present(open: open)
     }
 
     func saveDashboard(id: String, expression: String, name: String, pinned: Bool, revision: Int64?) async {
@@ -2526,25 +2569,26 @@ extension WorkModel {
         }
     }
 
-    func arrangeDashboard(_ id: String, order: [WorkMemberRef], hidden: [WorkMemberRef], revision: Int64) async {
+    /// Hide or show a tile, as `lf desktop hide`/`show` do; its place is kept.
+    func setDashboardTile(_ id: String, member: WorkWorkspaceKey, hidden: Bool) async {
         guard !dashboardSaving, let repoPath else { return }
         dashboardSaving = true
         dashboardError = nil
         defer { dashboardSaving = false }
         do {
-            _ = try await query.saveDashboardArrangement(id: id, order: order, hidden: hidden, revision: revision, repoPath: repoPath)
+            _ = try await query.setDashboardTile(id: id, member: member, hidden: hidden, repoPath: repoPath)
             try await refreshDashboard(id, repoPath: repoPath)
         } catch { dashboardError = error.localizedDescription }
     }
 
     /// A tile drop: the dragged Work takes the target's place in the Dashboard's order.
-    func reorderDashboard(_ id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey, revision: Int64) async {
+    func reorderDashboard(_ id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey) async {
         guard member != target, !dashboardSaving, let repoPath else { return }
         dashboardSaving = true
         dashboardError = nil
         defer { dashboardSaving = false }
         do {
-            _ = try await query.reorderDashboard(id: id, member: member, to: target, revision: revision, repoPath: repoPath)
+            _ = try await query.reorderDashboard(id: id, member: member, to: target, repoPath: repoPath)
             try await refreshDashboard(id, repoPath: repoPath)
         } catch { dashboardError = error.localizedDescription }
     }
@@ -2603,7 +2647,7 @@ extension WorkModel {
 extension WorkModel {
     var selectedViewPlan: WorkViewPlan? {
         switch navigation.destination {
-        case .work, .zoomed: nil
+        case .work, .entered: nil
         case .dashboard(let id): dashboard(id)
         case .view(let plan): plan
         case .workingTasks: builtInPlan(.repository)

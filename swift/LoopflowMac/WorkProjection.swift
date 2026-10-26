@@ -271,12 +271,13 @@ final class WorkNavigation {
         /// The default Dashboard: the Working Tasks plan as a grid of slots.
         case workingTasks
         /// One Dashboard member shown as full Work; the trail returns through its Dashboard.
-        case zoomed(from: Board, work: WorkReference)
+        case entered(from: Board, work: WorkReference)
     }
-    /// A Dashboard a member can be zoomed from: a saved one or Working Tasks.
+    /// A view a tile can be entered from: a saved Dashboard, Working Tasks or a Wave view.
     enum Board: Equatable {
         case saved(String)
         case workingTasks
+        case wave(String)
     }
     static let workingTasksTitle = "Working Tasks"
     var destination: Destination = .work(nil)
@@ -284,7 +285,7 @@ final class WorkNavigation {
         get {
             switch destination {
             case .work(let work): work
-            case .zoomed(_, let work): work
+            case .entered(_, let work): work
             case .dashboard, .view, .workingTasks: nil
             }
         }
@@ -292,23 +293,23 @@ final class WorkNavigation {
     }
     var showsSelection: Bool {
         switch destination {
-        case .work, .zoomed: false
+        case .work, .entered: false
         case .dashboard, .view, .workingTasks: true
         }
     }
     var dashboardID: String? {
         if case .dashboard(let id) = destination { return id }; return nil
     }
-    /// The Dashboard the breadcrumb passes through, shown or zoomed from.
+    /// The Dashboard the breadcrumb passes through, shown or entered from.
     var trailBoard: Board? {
         switch destination {
         case .dashboard(let id): .saved(id)
         case .workingTasks: .workingTasks
-        case .zoomed(let board, _): board
+        case .entered(let board, _): board
         case .work, .view: nil
         }
     }
-    /// Where the zoomed member's tile sat, in `ZoomFromTile.space`; read once
+    /// Where the entered member's tile sat, in `ZoomFromTile.space`; read once
     /// by the transition that grows the full Work out of it.
     @ObservationIgnored var zoomOrigin: CGRect?
     /// Repository-local visits; nil names the repository conversation.

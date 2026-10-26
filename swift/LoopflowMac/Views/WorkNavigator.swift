@@ -288,6 +288,11 @@ struct WorkBreadcrumbs: View {
             case .workingTasks:
                 Button(WorkNavigation.workingTasksTitle) { model.selectWorkingTasksDashboard() }
                     .lineLimit(1).fixedSize().disabled(model.navigation.destination == .workingTasks)
+            case .wave(let id):
+                Button(model.breadcrumb?.wave?.roadmap.wave.displayName ?? id) {
+                    model.select(.wave(id: id))
+                    model.navigation.content = .terminals
+                }.lineLimit(1).fixedSize()
             case nil: EmptyView()
             }
             if model.navigation.trailBoard != nil, model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }

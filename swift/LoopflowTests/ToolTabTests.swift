@@ -25,14 +25,14 @@ struct ToolTabTests {
         let filesPane = try #require(store.showBrowser(.files, location: location))
         let files = TaskFilesStore(issue: work.id, cwd: location.worktree)
         files.autosave = false
-        files.selectFile("first.txt", mode: .file)
+        files.selectFile("first.txt", mode: .edit)
         let document = files.document("first.txt")
         await document.reconcile(TaskFileSnapshot(recoveries: [], issueIdentifier: work.id, taskId: work.id,
             path: "first.txt", content: "base", state: .text, revision: "base-revision", readOnlyReason: nil, sizeBytes: 4))
         document.editor.string = "unsaved draft"
-        files.selectFile("second.txt", mode: .file)
+        files.selectFile("second.txt", mode: .edit)
         let tabs = files.tabs
-        files.selectFile("first.txt", mode: .file)
+        files.selectFile("first.txt", mode: .edit)
         #expect(files.tabs == tabs)
         #expect(files.document("first.txt") === document)
         #expect(document.text == "unsaved draft")

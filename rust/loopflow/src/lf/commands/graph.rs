@@ -1211,7 +1211,7 @@ mod tests {
         fs::create_dir_all(&graphs).unwrap();
         fs::write(
             graphs.join("choice.yaml"),
-            "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - step:\n              id: revise_choice\n              name: implement\n          - step:\n              id: review_choice\n              name: review-design\n              human: true\n",
+            "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - step:\n              id: revise_choice\n              name: implement\n          - step:\n              id: review_choice\n              name: explore\n              human: true\n",
         )
         .unwrap();
         let graph = crate::graph::load_graph("choice", repo.path()).unwrap();
@@ -1220,7 +1220,7 @@ mod tests {
         let items = crate::graph::compile_graph(&graph, repo.path()).unwrap();
         assert!(render_pipeline_lines(&items)
             .iter()
-            .any(|line| line.contains("review-design [review:review_choice]")));
+            .any(|line| line.contains("explore [review:review_choice]")));
     }
 
     #[test]

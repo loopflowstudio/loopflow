@@ -304,6 +304,64 @@ final class TaskFilesStore {
         selection = path
         self.mode = mode
         dismissNavigator()
+        noteInteraction()
+    }
+
+    // MARK: Following scratch writes
+
+    /// What a scratch page write does to the view.
+    enum Follow: Equatable { case reload, select, openTab }
+
+    /// How long Files may go untouched before a write may take the view.
+    static let quietInterval: TimeInterval = 120
+
+    /// Pages agents present for review: Markdown and HTML under `scratch/`.
+    static func isScratchPage(_ path: String) -> Bool {
+        path.hasPrefix("scratch/") && isRenderable(path)
+    }
+
+    static func isRenderable(_ path: String) -> Bool {
+        ["md", "html"].contains((path as NSString).pathExtension.lowercased())
+    }
+
+    /// A write takes the view only from stale attention: nothing selected, a
+    /// document that was itself followed, or Files untouched for the quiet
+    /// interval. Editing, diffing or a draft keep it.
+    static func follow(_ path: String, selection: String?, page: Page, mode: Mode, dirty: Bool,
+                       autoSelected: Bool, lastInteraction: Date?, now: Date) -> Follow {
+        if selection == path, page == .files { return .reload }
+        guard selection != nil else { return .select }
+        if mode != .read || dirty { return .openTab }
+        guard !autoSelected, let lastInteraction else { return .select }
+        return now.timeIntervalSince(lastInteraction) >= quietInterval ? .select : .openTab
+    }
+
+    /// The selection came from a write, not from you.
+    private(set) var autoSelected = false
+    @ObservationIgnored private var lastInteraction: Date?
+
+    /// You selected, scrolled, clicked or switched something in Files.
+    func noteInteraction() {
+        lastInteraction = .now
+        autoSelected = false
+    }
+
+    private func follow(_ path: String) {
+        let outcome = Self.follow(path, selection: selection, page: page, mode: mode,
+            dirty: selectedDocument?.dirty == true, autoSelected: autoSelected,
+            lastInteraction: lastInteraction, now: .now)
+        switch outcome {
+        case .reload: break
+        case .select:
+            page = .files
+            selection = path
+            mode = .read
+            autoSelected = true
+        case .openTab:
+            if !tabs.contains(where: { $0.path == path }) {
+                tabs.append(WorkFileTab(id: UUID().uuidString, path: path))
+            }
+        }
     }
 
     var scratchPaths: [String] {
@@ -318,8 +376,14 @@ final class TaskFilesStore {
         search.isEmpty || path.localizedCaseInsensitiveContains(search)
     }
     enum Mode: String, CaseIterable {
+        case read = "Read"
+        case edit = "Edit"
         case diff = "Diff"
-        case file = "File"
+    }
+
+    /// Read mode shows Markdown and HTML rendered; other text stays in the editor.
+    var rendersSelection: Bool {
+        mode == .read && selection.map(Self.isRenderable) == true
     }
 
     let issue: String
@@ -366,7 +430,7 @@ final class TaskFilesStore {
                                  baseRevision: revision, baseContent: base, text: document.text)
         }.sorted { $0.path < $1.path }
     }
-    var mode = Mode.file
+    var mode = Mode.read
     private(set) var changes: TaskChangesSnapshot?
     private(set) var isRefreshingChanges = false
     private(set) var changesError: String?
@@ -469,6 +533,12 @@ final class TaskFilesStore {
             let ignored = self.query.remoteMachine == nil ? await self.ignoredPaths(changed) : []
             guard !Task.isCancelled else { return }
             comparisonChanged = comparisonChanged || changed.contains { !ignored.contains($0) }
+            // A page an agent writes under scratch/ is retained like an open
+            // document, so the re-read below brings it to you or into a tab.
+            for path in changed where Self.isScratchPage(path) && self.documents[path] == nil {
+                _ = self.document(path)
+                self.observation?.watch(path)
+            }
             // Re-read retained documents even when another file or terminal is visible.
             for (path, document) in self.documents where changed.contains(where: {
                 $0.isEmpty || $0 == path || path.hasPrefix($0 + "/")
@@ -482,6 +552,7 @@ final class TaskFilesStore {
                         return
                     }
                     await document.reconcile(next)
+                    if Self.isScratchPage(path), next.state == .text { self.follow(path) }
                 } catch { self.error = error.localizedDescription }
             }
             guard !Task.isCancelled, comparisonChanged else { return }
@@ -590,7 +661,10 @@ final class TaskFilesStore {
             let changes = try await query.taskChanges(issue: issue, base: "parent", cwd: cwd)
             guard !Task.isCancelled, generation == refreshGeneration else { return }
             self.changes = changes
-            if selection == nil { selection = changes.scratch.first ?? changes.files.first?.path }
+            if selection == nil, let first = changes.scratch.first ?? changes.files.first?.path {
+                selection = first
+                autoSelected = true
+            }
             changesError = nil
         } catch {
             guard !Task.isCancelled, generation == refreshGeneration else { return }

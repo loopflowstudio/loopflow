@@ -580,7 +580,7 @@ struct DesktopPerformanceTests {
                 try await wait(window) { files.changedPaths.first == "notes.txt" }
                 files.navigator = .dropdown
                 try pressElement("notes.txt", in: window, property: "Label")
-                files.mode = .file
+                files.mode = .edit
                 try await wait(window) { files.selectedDocument?.snapshot != nil }
                 let document = try #require(files.selectedDocument)
                 document.editor.insertText("Preserved draft", replacementRange: NSRange(location: 0, length: document.editor.string.utf16.count))

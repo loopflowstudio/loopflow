@@ -290,16 +290,12 @@ impl ClaudeHarness {
                     // backgrounded tasks run, the last owed result stays open:
                     // Claude's own next turn answers it.
                     state = ReaderState::default();
-                    let settled = if history.activity.has_background() {
-                        let _ = pending_results.try_update(
-                            Ordering::SeqCst,
-                            Ordering::SeqCst,
-                            |pending| (pending > 1).then(|| pending - 1),
-                        );
-                        false
-                    } else {
-                        pending_results.fetch_sub(1, Ordering::SeqCst) <= 1
-                    };
+                    let background = history.activity.has_background();
+                    let settled = pending_results
+                        .try_update(Ordering::SeqCst, Ordering::SeqCst, |pending| {
+                            (pending > 1 || !background).then(|| pending - 1)
+                        })
+                        .is_ok_and(|owed| owed <= 1);
                     if settled {
                         pending_results.store(0, Ordering::SeqCst);
                         let _ = events.send(ConversationEvent::TurnCompleted {
@@ -1060,6 +1056,17 @@ mod tests {
             config.session_attachment = Some((id.into(), attachment));
             config
         }
+
+        /// The text of each Output event recorded for a Session.
+        fn outputs(&self, id: &str) -> Vec<serde_json::Value> {
+            self.store
+                .session_history(id, 0, 0)
+                .unwrap()
+                .into_iter()
+                .filter(|event| event.kind == crate::session::SessionEventKind::Output)
+                .map(|event| event.payload["text"].clone())
+                .collect()
+        }
     }
 
     #[tokio::test]
@@ -1149,14 +1156,7 @@ done
 
         assert_eq!(status, Lifecycle::Completed);
         assert!(survived, "the provider ran until its tasks finished");
-        let outputs: Vec<_> = claude
-            .store
-            .session_history("step", 0, 0)
-            .unwrap()
-            .into_iter()
-            .filter(|event| event.kind == crate::session::SessionEventKind::Output)
-            .map(|event| event.payload["text"].clone())
-            .collect();
+        let outputs = claude.outputs("step");
         assert_eq!(outputs, vec![serde_json::json!("FINISHED")]);
     }
 
@@ -1195,14 +1195,7 @@ cat > /dev/null
         harness.stop().await.unwrap();
 
         assert_eq!(status, Lifecycle::Completed);
-        let outputs: Vec<_> = claude
-            .store
-            .session_history("step", 0, 0)
-            .unwrap()
-            .into_iter()
-            .filter(|event| event.kind == crate::session::SessionEventKind::Output)
-            .map(|event| event.payload["text"].clone())
-            .collect();
+        let outputs = claude.outputs("step");
         assert_eq!(outputs.last(), Some(&serde_json::json!("FINISHED")));
     }
 

@@ -241,6 +241,13 @@ final class GhosttyManager: ObservableObject {
                 let total = action.action.search_total.total
                 Task { @MainActor [weak view] in view?.searchBar.receive(total: total) }
                 return true
+            case GHOSTTY_ACTION_COMMAND_FINISHED:
+                let code = action.action.command_finished.exit_code
+                Task { @MainActor [weak view] in
+                    view?.finished += 1
+                    view?.lastExitStatus = code < 0 ? nil : Int(code)
+                }
+                return true
             case GHOSTTY_ACTION_SEARCH_SELECTED:
                 let selected = action.action.search_selected.selected
                 Task { @MainActor [weak view] in view?.searchBar.receive(selected: selected) }
@@ -358,6 +365,7 @@ final class GhosttyManager: ObservableObject {
     func createSurface(
         workingDirectory: String,
         command: String? = nil,
+        initialInput: String? = nil,
         view: GhosttyMetalView
     ) -> ghostty_surface_t? {
         guard let app, case .ready = state else { return nil }
@@ -372,14 +380,12 @@ final class GhosttyManager: ObservableObject {
 
         return workingDirectory.withCString { wdPtr in
             surfaceConfig.working_directory = wdPtr
-
-            if let command {
-                return command.withCString { cmdPtr in
-                    surfaceConfig.command = cmdPtr
+            return withOptionalCString(command) { cmdPtr in
+                surfaceConfig.command = cmdPtr
+                return withOptionalCString(initialInput) { inputPtr in
+                    surfaceConfig.initial_input = inputPtr
                     return ghostty_surface_new(app, &surfaceConfig)
                 }
-            } else {
-                return ghostty_surface_new(app, &surfaceConfig)
             }
         }
     }
@@ -391,6 +397,11 @@ final class GhosttyManager: ObservableObject {
         for (_, config) in themeConfigs.values { ghostty_config_free(config) }
         if let baseline { ghostty_config_free(baseline) }
     }
+}
+
+private func withOptionalCString<Result>(_ text: String?, _ body: (UnsafePointer<CChar>?) -> Result) -> Result {
+    guard let text else { return body(nil) }
+    return text.withCString { body($0) }
 }
 
 #else

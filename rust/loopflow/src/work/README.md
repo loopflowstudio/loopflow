@@ -83,9 +83,10 @@ belong to their existing native owners.
 ```sh
 lf desktop pin attention --revision 2
 lf desktop rename query:attention Available --revision 3
-lf desktop arrange attention --revision 4 < arrangement.json
-lf desktop slots attention --revision 5 < slots.json   # null restores the default slots
-lf desktop order task:task_33333333333333333333333333333333 --to task:task_11111111111111111111111111111111 --query attention --revision 6
+lf desktop hide -p query:attention/task:task_33333333333333333333333333333333
+lf desktop move -p query:attention/task:task_33333333333333333333333333333333 --destination task:task_11111111111111111111111111111111
+lf desktop move -p working-tasks/task:task_33333333333333333333333333333333 --destination task:task_11111111111111111111111111111111
+lf desktop layout query:attention --save --revision 6 < slots.json   # null restores the default slots
 lf desktop layout task:task_22222222222222222222222222222222
 lf desktop layout task:task_22222222222222222222222222222222 --save < panes.json
 ```
@@ -100,9 +101,13 @@ Pin/unpin and Dashboard rename require the current Dashboard revision. Task rena
 `task:ID` and the Task's revision, writing through the existing Task edit owner.
 Wave renaming remains `lf wave rename`. All saved-intent commands work headless.
 
-`arrange` accepts `{"order": [...], "hidden": [...]}`; the writer decides `mode`
-and rejects input naming it. `order --query` applies the repository order's move (the
-dragged member takes the target's place) to a Dashboard's visible occurrences.
+`hide`, `show`, `move` and `resize` aimed at a tile edit the shared record: a
+Dashboard's arrangement and slots, or the repository's one Task order behind
+Working Tasks and Wave views. `-p query:ID/TILE` and `-p working-tasks/TILE` name
+the tile by Work key and need no Desktop; `-p 3` names the third tile of the view
+on screen. Each edit reads the current revision; `move` gives the tile the
+destination's place, hiding keeps its position and never changes `mode`, and
+`resize` reweights the innermost slot split between two tiles.
 `layout --save` accepts `WorkPaneLayout` JSON with revision zero on creation or the last returned revision on update. It preserves pane IDs,
 content locations, focus, zoom, hidden panes and file drafts together. A draft
 carries its recorded Machine/checkout, relative path, base revision, base text and

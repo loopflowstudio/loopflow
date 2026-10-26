@@ -47,6 +47,12 @@ const ACTIVITY_CLOCK: Duration = Duration::from_secs(2);
 /// Agents record usage every few seconds. Token totals are read this often
 /// at most, however often they move.
 const USAGE_REST: Duration = Duration::from_secs(10);
+/// A part spends at most this share of the reader's time projecting: after a
+/// reading that took `d`, its next change- or clock-driven reading waits until
+/// `BUSY_SHARE × d` has passed since that reading began. On a store where a
+/// projection takes seconds, a busy writer no longer keeps the reader at a full
+/// core; scope changes, refreshes and confirmations still read at once.
+const BUSY_SHARE: u32 = 5;
 const MAX_FRAME: usize = 64 * 1024 * 1024;
 const MAX_REQUEST: usize = 16 * 1024;
 const WORK_ACTIVITY_WINDOW: i64 = 7 * 24 * 3600;
@@ -299,6 +305,8 @@ impl Part {
 struct PartState {
     read_at: Option<StoreRevisions>,
     read_on: Option<Instant>,
+    /// How long the last reading took.
+    cost: Duration,
     sent: Option<[u8; 32]>,
     force: bool,
     /// Something it reads outside the store changed.
@@ -320,6 +328,10 @@ impl PartState {
                 >= CHECK
                     .saturating_mul(1 << (self.failures - 1).min(16))
                     .min(RETRY_CAP)
+    }
+
+    fn rest(&self) -> Duration {
+        self.cost.saturating_mul(BUSY_SHARE)
     }
 }
 
@@ -661,20 +673,20 @@ impl Reader {
         let Some(read_on) = state.read_on else {
             return true;
         };
+        let changed = match (state.read_at, revisions) {
+            (Some(old), Some(new)) => {
+                part.changed(old, new)
+                    && (checkpoint || !part.rests(old, new) || now - read_on >= USAGE_REST)
+            }
+            (None, None) => false,
+            _ => true,
+        };
+        // Confirmation cannot defer a failed, throttled or resting database reading.
+        let rested = checkpoint || now - read_on >= state.rest();
         state.force
-            || state.stale
-            // Confirmation cannot defer a failed or throttled database reading.
             || (checkpoint && state.failures > 0)
             || state.retry_due(read_on, now)
-            || match (state.read_at, revisions) {
-                (Some(old), Some(new)) => {
-                    part.changed(old, new)
-                        && (checkpoint || !part.rests(old, new) || now - read_on >= USAGE_REST)
-                }
-                (None, None) => false,
-                _ => true,
-            }
-            || now - read_on >= part.clock()
+            || (rested && (state.stale || changed || now - read_on >= part.clock()))
     }
 
     /// When the next clock-driven reading is due.
@@ -683,9 +695,16 @@ impl Reader {
             .into_iter()
             .filter(|part| part.selected(&self.scope))
             .filter_map(|part| {
-                let clock = part.clock();
-                let read_on = self.parts.get(&part)?.read_on?;
-                Some((read_on + clock).saturating_duration_since(now))
+                let state = self.parts.get(&part)?;
+                let read_on = state.read_on?;
+                // A change that arrives while a part rests is read when the rest ends.
+                let rest_end = read_on + state.rest();
+                let wake = if rest_end > now {
+                    rest_end
+                } else {
+                    read_on + part.clock().max(state.rest())
+                };
+                Some(wake.saturating_duration_since(now))
             })
             .min()
             .unwrap_or(CHECK)
@@ -974,8 +993,11 @@ pub(super) fn run(watch: bool) -> Result<()> {
     };
 
     // These threads belong to the foreground command and end with it. Closing
-    // stdin is the only way a parent stops the reader.
+    // stdin stops the reader, and so does its parent's exit: a descendant that
+    // inherited the pipe can hold stdin open long after the parent is gone.
     if watch {
+        #[cfg(unix)]
+        let parent = std::os::unix::process::parent_id();
         let input = shared.clone();
         std::thread::spawn(move || read_requests(&input));
         let changes = shared.clone();
@@ -996,6 +1018,11 @@ pub(super) fn run(watch: bool) -> Result<()> {
         std::thread::spawn(move || loop {
             std::thread::sleep(HEARTBEAT);
             let mut mailbox = lock(&heartbeat);
+            #[cfg(unix)]
+            if std::os::unix::process::parent_id() != parent {
+                mailbox.closed = true;
+                heartbeat.1.notify_all();
+            }
             if mailbox.closed {
                 break;
             }
@@ -1097,6 +1124,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
                 let send = state.force || state.sent != Some(identity);
                 state.read_at = revisions;
                 state.read_on = Some(now);
+                state.cost = now.elapsed();
                 state.force = false;
                 state.stale = false;
                 state.failures = if reason.is_some() {
@@ -1305,6 +1333,43 @@ mod tests {
         assert!(due(3, 4));
         assert!(!due(40, 59));
         assert!(due(40, 60));
+    }
+
+    #[test]
+    fn a_slow_part_rests_before_rereading_a_change_but_not_a_confirmation() {
+        let read_on = Instant::now();
+        let read_at = revisions(1, 1, 1, 1);
+        let mut reader = super::Reader {
+            database: Default::default(),
+            store: None,
+            refused: None,
+            scope: Default::default(),
+            parts: Default::default(),
+            checkouts: Default::default(),
+            watched_at: None,
+            quiet: None,
+            runtime: tokio::runtime::Runtime::new().unwrap(),
+            planning_sync: None,
+        };
+        reader.parts.insert(
+            Part::Planning,
+            PartState {
+                read_at: Some(read_at),
+                read_on: Some(read_on),
+                cost: Duration::from_secs(2),
+                ..Default::default()
+            },
+        );
+        let changed = Some(revisions(2, 1, 1, 1));
+        let at = |secs| read_on + Duration::from_secs(secs);
+        assert!(!reader.due(Part::Planning, changed, at(3), false));
+        assert!(reader.due(Part::Planning, changed, at(3), true));
+        assert!(reader.due(Part::Planning, changed, at(10), false));
+        assert!(!reader.due(Part::Planning, Some(read_at), at(10), false));
+        // The loop wakes when the rest ends rather than spinning until then.
+        assert_eq!(reader.next_clock(at(9)), Duration::from_secs(1));
+        reader.parts.get_mut(&Part::Planning).unwrap().force = true;
+        assert!(reader.due(Part::Planning, changed, at(3), false));
     }
 
     #[test]

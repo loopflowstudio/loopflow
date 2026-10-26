@@ -541,18 +541,6 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("Wave plan uses the same chapter as status")
-    func planUsesChapterSnapshot() async throws {
-        let json = String(decoding: try loadFixtureData("wave_detail.json"), as: UTF8.self)
-        let query = RegistryQuery { args, _ in
-            #expect(args == ["wave", "status", "infrastructure", "--json"])
-            return json
-        }
-        let plan = try await query.plan(wave: "infrastructure", objective: "Make releases boring.", cwd: "/fixture")
-        #expect(plan.currentProject?.current == true)
-        #expect(plan.currentProject?.krs.count == 1)
-    }
-
     @Test("Work Activity fixture preserves proof links and typed facts")
     func workActivityFixturePreservesProof() throws {
         let data = try loadFixtureData("work_activity_snapshot.json")

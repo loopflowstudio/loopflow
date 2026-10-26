@@ -192,6 +192,14 @@ public struct RegistryQuery: Sendable {
         return snapshots.map { $0.toWave() }
     }
 
+    /// One page of a Wave's closed Tasks, most recently closed first. The
+    /// Wave's status carries only its open Tasks.
+    public func closedTasks(wave: String, after: String? = nil, cwd: String) async throws -> ClosedTaskPage {
+        var args = ["task", "list", "--done", "--wave", wave, "--json"]
+        if let after { args += ["--after", after] }
+        return try Self.decode(ClosedTaskPage.self, from: await run(args, cwd))
+    }
+
     /// One Wave's Project/Task work and recorded execution state.
     public func status(wave: String, cwd: String?) async throws
         -> WaveDetailSnapshot {
@@ -659,6 +667,12 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
             retirementReason: retirementReason
         )
     }
+}
+
+/// `lf task list --done --json`: closed Tasks and the Task to continue after.
+public struct ClosedTaskPage: Decodable, Sendable, Hashable {
+    public let tasks: [WaveTaskWork]
+    public let next: String?
 }
 
 public struct RoadmapSnapshot: Decodable, Sendable, Hashable {

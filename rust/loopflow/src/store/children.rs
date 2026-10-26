@@ -120,6 +120,14 @@ impl Store {
         .await
     }
 
+    pub async fn list_open_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
+        let wave_id = wave_id.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.list_open_tasks(wave_id.as_ref())
+        })
+        .await
+    }
+
     pub async fn stack_task_placement(&self, task: &Task, parent: &TaskPrId) -> StoreResult<()> {
         let task = task.clone();
         let parent = parent.clone();

@@ -66,6 +66,19 @@ struct TaskHistoryFilterTests {
         filter.includes(row.task, condition: row.condition, now: now)
     }
 
+    @Test func closedPagesJoinOpenTasksOnceAndReachTheirRange() throws {
+        let page = try JSONDecoder().decode(ClosedTaskPage.self, from: Data(contentsOf: fixtures.appendingPathComponent("closed_task_page.json")))
+        var history = ClosedTaskHistory()
+        history.append(page)
+        // A Task that closed between readings stays a single row.
+        #expect(history.merged(after: page.tasks).count == 1)
+        #expect(history.merged(after: []).map(\.id) == page.tasks.map(\.id))
+        let closedAt = try #require(TaskHistoryFilter.completionDate("2026-07-14T18:30:00Z"))
+        #expect(history.reaches(closedAt.addingTimeInterval(1)))
+        #expect(!history.reaches(closedAt.addingTimeInterval(-1)))
+        #expect(history.next == page.next)
+    }
+
     @Test func rollingBoundariesAndValidation() throws {
         var filter = TaskHistoryFilter()
         filter.showCompleted = true

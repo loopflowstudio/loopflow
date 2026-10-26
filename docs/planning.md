@@ -2,7 +2,8 @@
 
 ```bash
 lf task create --title "Fix the parser" --notes "Quoted input loses escapes"
-lf task list
+lf task list              # open Tasks
+lf task list --done       # closed ones, newest first, a page at a time
 lf capture-tasks          # talk it through; the session files the Tasks
 ```
 

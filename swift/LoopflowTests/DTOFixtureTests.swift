@@ -662,6 +662,15 @@ struct DTOFixtureTests {
 
     }
 
+    @Test("closed Task page carries Wave status rows and their continuation")
+    func closedTaskPageCarriesRowsAndContinuation() throws {
+        let page = try JSONDecoder().decode(ClosedTaskPage.self, from: loadFixtureData("closed_task_page.json"))
+        let task = try #require(page.tasks.first)
+        #expect(task.task.isSuccessful)
+        #expect(task.task.completedAt == "2026-07-14T18:30:00Z")
+        #expect(page.next == task.id)
+    }
+
     @Test("metric portfolio fixture preserves every closed evidence payload")
     func metricPortfolioFixturePreservesEvidence() throws {
         let data = try loadFixtureData("metric_portfolio.json")

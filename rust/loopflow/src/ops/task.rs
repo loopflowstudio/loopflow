@@ -1623,22 +1623,14 @@ fn task_configuration_refusal(task: &Task, skill: Option<&crate::graph::Skill>) 
     .map(|error| error.to_string())
 }
 
-pub(crate) async fn task_process_refusal(
-    store: &SharedStore,
+/// Why the Task cannot start a process: its configuration, else a
+/// non-resumable failure as its latest event.
+pub(crate) fn task_process_refusal_after(
     task: &Task,
-) -> crate::store::StoreResult<Option<String>> {
-    if let Some(refusal) = task_configuration_refusal(task, None) {
-        return Ok(Some(refusal));
-    }
-    persisted_task_process_refusal(store, task).await
-}
-
-async fn persisted_task_process_refusal(
-    store: &SharedStore,
-    task: &Task,
-) -> crate::store::StoreResult<Option<String>> {
-    let event = store.latest_task_event(&task.id).await?;
-    Ok(task_event_process_refusal(event.as_ref()).map(str::to_string))
+    latest: Option<&crate::work::task::TaskEvent>,
+) -> Option<String> {
+    task_configuration_refusal(task, None)
+        .or_else(|| task_event_process_refusal(latest).map(str::to_string))
 }
 
 pub(crate) fn task_event_process_refusal(
@@ -1672,7 +1664,18 @@ pub(crate) async fn task_worktree_blocker(
         .latest_task_event(&task.id)
         .await
         .map_err(|error| task_error(format!("failed to read Task worktree state: {error}")))?;
-    if let Some(event) = event {
+    task_worktree_blocker_after(task, event.as_ref())
+}
+
+/// `task_worktree_blocker` for a Task whose latest event is already read.
+pub(crate) fn task_worktree_blocker_after(
+    task: &Task,
+    latest: Option<&crate::work::task::TaskEvent>,
+) -> OpsResult<Option<TaskWorktreeBlocker>> {
+    if task.worktree.is_none() {
+        return Ok(None);
+    }
+    if let Some(event) = latest {
         if let TaskEventKind::WorktreeInitializing { branch, path, .. }
         | TaskEventKind::CheckoutInitializing { branch, path, .. } = &event.kind
         {
@@ -3342,12 +3345,15 @@ pub(crate) fn completion_pending(store: &SharedStore, task: &Task) -> OpsResult<
         .sqlite
         .task_completion_pending(&task.id)
         .map_err(task_error)?
-        .map(|(_, reason)| {
-            format!(
-                "Completion pending: {reason}. Retry: lf task complete {}",
-                task.identifier
-            )
-        }))
+        .map(|(_, reason)| completion_pending_text(task, &reason)))
+}
+
+/// How a pending completion request reads, with its retry.
+pub(crate) fn completion_pending_text(task: &Task, reason: &str) -> String {
+    format!(
+        "Completion pending: {reason}. Retry: lf task complete {}",
+        task.identifier
+    )
 }
 
 async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -> OpsResult<()> {

@@ -110,9 +110,41 @@ fn lifecycle_world_reports_each_state() {
     let built = Built::new("lifecycle");
     let shown = built.lf(&["wave", "show", "--all", "--json"]);
     let tasks = shown["tasks"]["items"].as_array().unwrap();
+    // The plan holds open Tasks; closed ones page in from the history read.
+    let closed_page = built.lf(&["task", "list", "--done", "--limit", "3", "--json"]);
+    let mut closed = closed_page["tasks"].as_array().unwrap().clone();
+    let after = closed_page["next"].as_str().unwrap();
+    let rest = built.lf(&["task", "list", "--done", "--after", after, "--json"]);
+    assert!(rest["next"].is_null());
+    closed.extend(rest["tasks"].as_array().unwrap().iter().cloned());
+    let closed_names: Vec<&str> = closed
+        .iter()
+        .map(|task| task["task"]["name"].as_str().unwrap())
+        .collect();
+    // Most recently closed first.
+    assert_eq!(
+        closed_names
+            .iter()
+            .filter(|name| name.starts_with("Shipped"))
+            .copied()
+            .collect::<Vec<_>>(),
+        [
+            "Shipped yesterday",
+            "Shipped this week",
+            "Shipped last fortnight",
+            "Shipped last quarter"
+        ]
+    );
+    for name in &closed_names {
+        assert!(
+            !tasks.iter().any(|task| task["task"]["name"] == *name),
+            "closed {name} is in the plan"
+        );
+    }
     let task = |name: &str| {
         tasks
             .iter()
+            .chain(&closed)
             .find(|task| task["task"]["name"] == name)
             .unwrap_or_else(|| panic!("{name} is missing"))
     };

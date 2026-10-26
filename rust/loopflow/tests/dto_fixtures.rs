@@ -1202,3 +1202,19 @@ fn desktop_state_retains_outer_and_inner_layouts() {
         reading
     );
 }
+
+#[test]
+fn closed_task_pages_round_trip_plan_rows_and_their_continuation() {
+    use loopflow::lf::commands::waves::ClosedTaskPageSnapshot;
+    let fixture = include_str!("../../../tests/fixtures/dto/closed_task_page.json");
+    let page: ClosedTaskPageSnapshot = serde_json::from_str(fixture).unwrap();
+    assert_eq!(
+        page.tasks[0].task.completed_at.as_deref(),
+        Some("2026-07-14T18:30:00Z")
+    );
+    assert_eq!(page.next.as_deref(), Some(page.tasks[0].task.id.as_str()));
+    assert_eq!(
+        serde_json::to_value(&page).unwrap(),
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+    );
+}

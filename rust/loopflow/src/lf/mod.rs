@@ -1376,12 +1376,21 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
-    /// List every Task in the selected repository
+    /// List the open Tasks in the selected repository
     List {
         #[arg(long)]
         wave: Option<String>,
         #[arg(long)]
         json: bool,
+        /// Page closed (done or abandoned) Tasks instead, most recently closed first
+        #[arg(long)]
+        done: bool,
+        /// Previous page's `next` Task; keep the same filters
+        #[arg(long, requires = "done")]
+        after: Option<String>,
+        /// Closed Tasks per page
+        #[arg(long, requires = "done", default_value_t = 50)]
+        limit: usize,
     },
 
     /// Pause future Task execution without stopping live processes

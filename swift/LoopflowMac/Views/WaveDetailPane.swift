@@ -115,6 +115,8 @@ private struct WavePlanView: View {
     @State private var reading = WaveDetailReading()
     @State private var historyFilter = TaskHistoryFilter()
     @State private var historyNow = Date()
+    /// Closed Tasks, paged in only while completed Tasks are shown.
+    @State private var closed = ClosedTaskHistory()
     // True until the first live read resolves. It gates the loading affordance,
     // so an empty plan during the pre-snapshot window reads as loading.
     @State private var isAwaitingDetail = true
@@ -147,6 +149,7 @@ private struct WavePlanView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(palette.background)
+        .task(id: historyFilter) { await loadClosed(more: false) }
         .onChange(of: streamed?.sequence, initial: true) { _, _ in
             if AppTestMode.current() == .mockWaves {
                 applyMockDetail()
@@ -167,6 +170,27 @@ private struct WavePlanView: View {
             reading.recordFailure(RegistryQueryError(streamed.reason ?? "Wave status unavailable"))
         }
         isAwaitingDetail = false
+    }
+
+    /// Pages closed Tasks while completed ones are shown: back to the range's
+    /// start, or one more page on request.
+    private func loadClosed(more: Bool) async {
+        guard historyFilter.showCompleted, AppTestMode.current() != .mockWaves else {
+            closed = ClosedTaskHistory()
+            return
+        }
+        if !more { closed = ClosedTaskHistory() }
+        closed.isLoading = true
+        defer { closed.isLoading = false }
+        let since = historyFilter.days == 0 ? nil : Date().addingTimeInterval(-Double(historyFilter.days) * 86_400)
+        do {
+            repeat {
+                let page = try await RegistryQueryLocal.shared.closedTasks(wave: wave.id, after: closed.next, cwd: wave.repo)
+                closed.append(page)
+            } while !more && closed.next != nil && since.map { !closed.reaches($0) } ?? false
+        } catch {
+            closed.error = "Completed Tasks unavailable: \(error.localizedDescription)"
+        }
     }
 
     private var displayedPlan: WavePlan { reading.plan(cached: plan) }
@@ -236,7 +260,7 @@ private struct WavePlanView: View {
                     WorkSectionHeading("Tasks")
                     Text(reason).foregroundStyle(palette.warning)
                 case .available(let inventory, let truncated):
-                    let tasks = inventory.filter {
+                    let tasks = closed.merged(after: inventory).filter {
                         historyFilter.includes($0.task, condition: $0.condition, now: historyNow)
                     }
                     WorkSectionHeading(title: "Tasks", count: tasks.count) {
@@ -246,6 +270,14 @@ private struct WavePlanView: View {
                     if truncated { Text("Planning is partial; more Tasks exist.") }
                     if tasks.isEmpty { Text("No current Tasks").foregroundStyle(palette.textSecondary) }
                     ForEach(tasks) { task in WaveTaskWorkView(task: task, selectedTaskID: $selectedTaskID) }
+                    if historyFilter.showCompleted {
+                        if let error = closed.error {
+                            Text(error).foregroundStyle(palette.warning)
+                        } else if closed.next != nil {
+                            Button("Older completed Tasks") { Task { await loadClosed(more: true) } }
+                                .disabled(closed.isLoading)
+                        }
+                    }
                 }
             } else {
                 WorkSectionHeading("Tasks")

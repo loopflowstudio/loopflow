@@ -111,3 +111,7 @@ members, two Shell tabs, two Files tabs, selected-tab identities and file-draft
 base recovery. Shell identity is independent of its tool pane; saved intent never
 asserts a live native process. `view_plan.json` includes query discovery
 metadata, independent Dashboard identity and portable tile-face intent.
+
+`closed_task_page.json` pins `lf task list --done --json`: one page of closed
+Tasks as `lf wave status` Task rows, most recently closed first, and the `next` Task to pass as
+`--after`. Open Tasks come from the plan; closed ones only from these pages.

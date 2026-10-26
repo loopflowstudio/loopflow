@@ -46,7 +46,7 @@ One idle reader used ≈48 s CPU per 60 s. Revisions advance ~0.5/s each for
 planning and sessions, so the reader is correctly woken; the projections are too
 expensive. Individual statements are fast, so indexes are not the main gap:
 statement counts are. The one known scan (agent_sessions by execution owner)
-is indexed on main by #1692; this branch has not yet taken it.
+is indexed by #1692, merged into this branch.
 
 An orphaned reader (pid 5210, from an exited Loopflow Dev.app) had run for 3h37m
 at 99% CPU: a descendant still held its stdin open, which was the only stop
@@ -54,19 +54,26 @@ signal.
 
 ## This change
 
-- The reader exits when its parent does (checked each heartbeat), not only when
-  stdin closes. Verified in a real run: 0.14.15 still running 8 s after its
-  parent is killed while a sibling holds stdin; the branch build exits after 1.5 s.
-- A part's change- or clock-driven reading waits until `BUSY_SHARE` (5) × its last
-  reading's duration has passed. Scope changes, refresh and checkpoint still
-  read at once. From the timings above, planning on Jack's store drops from
-  ~23 readings/min (~37 s busy) to ≤ 7.5 (~12 s); a change can show up to ~8 s
-  late (from ~2.5 s). Unit-tested. Not A/B'd live: see check results.
-- Desktop: WavesView took each Wave's Projects from one `lf wave status` per Wave
-  on every planning frame. It now reads `planning.roadmap.waves[].projects`,
-  which is the same `project_planning` result.
-- Deleted `RegistryQuery.plan`, `waves(repoPath:)`, `userName`, `taskFiles`,
-  `repositoryWaves` (no callers left) and their exclusive tests.
+- Reader exits with its parent (checked each heartbeat), not only on stdin
+  close. Verified live: 0.14.15 outlives a killed parent; the branch exits in 1.5 s.
+- A part's change- or clock-driven reading waits `BUSY_SHARE` (5) × its last
+  reading's duration. Scope changes, refresh and checkpoint read at once.
+- Incomplete-Task scope: planning (`wave show`), `wave status` and `lf task list`
+  read open Tasks only (`list_open_tasks`, `task_open_sql`); an exact
+  `--task` lookup still finds a closed one. `lf task list --done [--wave]
+  [--after ID] [--limit N] --json` pages closed (done or abandoned) Tasks, most
+  recently closed first, as `wave status` Task rows (`closed_task_page.json`).
+  Desktop's Wave Done view pages them in while "completed" is on (back to the
+  range start; "Older completed Tasks" for more). `active_tasks` is one count.
+- Task details are read once per reading over the Tasks in scope
+  (`TaskDetailFacts`, `store/sqlite/task_details.rs`): state, active and parent
+  PR, completion request, issue URL, owner, acquisition, latest event, steers,
+  Workflow name, planning sync, repository paths; list reads resolve every
+  identifier in one statement (`TaskIdentifiers`). Per-Task reads now delegate
+  to the same batch SQL (acquisition, planning sync, ownership log). Measured:
+  5 Tasks 164 → 42 statements, 10 Tasks 309 → 42.
+- Desktop: WavesView reads `planning.roadmap.waves[].projects` instead of one
+  `lf wave status` per Wave. Deleted dead `RegistryQuery` reads.
 
 ## Plan per read
 
@@ -97,27 +104,19 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
 
 ## Remaining work
 
-1. Incomplete-Task scope (decided): planning, `wave show` and `wave status`
-   select open Tasks only (`task_open_sql`); add the paged completed-Task read
-   (`lf task list --done --page`, sketch) and move Desktop's Done views to it
-   in the same change so nothing disappears. One cut, no flag.
-2. Task search (decided): one read over incomplete Tasks matching title,
-   identifier, Wave, Project and state, returning `RoadmapTask` rows. Index
-   `tasks(repository_id)` partial on the open predicate plus the identifier;
-   titles are short enough to scan once the set is ~200 rows. Sketch:
-   `lf task search <text> [--wave] [--project] [--state] --json`, and a
-   `search` field in the stream's scope request for live results.
-3. Planning/Wave Task details: replace per-Task reads (`active_task_pr`,
-   `task_state`, `completion_pending`, `task_ownership`, Graph execution) with
-   one query per concern over the Tasks in scope. Target: statements per
-   reading independent of Task count; p99 < 250 ms on Jack's store.
-4. Sessions: incremental or paged rows instead of 5.7 MB per reading;
-   replace the 2 s clock with the activity part's liveness change
-   (`observe_quiet` already covers the time-based Waiting threshold).
-5. `lf task status`: 5k statements / 20 connections for one Task.
-6. Delete Desktop duplicates listed above; add catalog and machine parts.
-7. Per-part durations in `heartbeat` so clients see p99 directly (shared with
-   the performance-measurement Task).
+1. Graph execution is still per Task with a Graph: `graph_entry`,
+   `process_input` (recursive CTE) and process evidence. Batch over the
+   reading's latest Graphs. Tasks without Graphs cost nothing per Task now.
+2. Task search (decided): `lf task search <text> [--wave] [--project]
+   [--state] --json` over open Tasks, returning plan rows, plus a `search`
+   field in the stream's scope request. No index planned: open Tasks are ~230
+   rows and are scanned once per reading.
+3. Sessions: incremental or paged rows instead of 5.7 MB per reading;
+   replace the 2 s clock with the activity part's liveness change.
+4. `lf task status`: 5k statements / 20 connections for one Task; reuse
+   `TaskDetailFacts` for its Task.
+5. Delete Desktop duplicates listed above; add catalog and machine parts.
+6. Per-part durations in `heartbeat` so clients see p99 directly.
 
 ## Delete — do not maintain
 
@@ -129,8 +128,10 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
 
 ## Check results
 
-- `cargo test -p loopflow --lib work_watch`: 29 passed after compress. clippy/fmt clean.
-- `scripts/test_desktop.sh --filter 'RegistryQueryTests|DTOFixtureTests'`: 63 passed.
-- Live A/B of the rest: not possible here. Dev builds without drafts re-exec the
-  installed lf on the shared home (`installation.rs`), and a cloned home has no
-  writers. Deferred to gate/demo with an installed candidate.
+- `cargo test -p loopflow --lib work_watch`: 29 passed (first slice).
+- `scripts/test_desktop.sh --filter 'RegistryQueryTests|DTOFixtureTests'`: 63 passed (first slice).
+- `cargo test --test integration -- planning_statements closed_task_pages lifecycle_world`: 3 passed (open-Task slice; statements flat 2 → 6 Tasks).
+- `cargo test --lib -- waves task_ownership planning_sync children`: 53 passed; `chapter_deletion_stays_absent…` passes once its surviving Task is started rather than completed.
+- `scripts/test_desktop.sh --filter 'TaskHistoryFilterTests|DTOFixtureTests|RegistryQueryTests'`: 72 passed (Done view paging).
+- `docs/lf-reference.md` regenerated for `task list --done/--after/--limit`; `reference_matches_the_compiled_cli` passes.
+- Live p99 A/B with an installed build: deferred to gate/demo.

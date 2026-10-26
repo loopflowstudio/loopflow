@@ -2033,12 +2033,15 @@ Concrete work and Task lifecycle
 
 ## lf task list
 
-List every Task in the selected repository
+List the open Tasks in the selected repository
 
 | Argument | What it does |
 |---|---|
 | `--wave` | wave |
 | `--json` | json Default: false. |
+| `--done` | Page closed (done or abandoned) Tasks instead, most recently closed first Default: false. |
+| `--after` | Previous page's `next` Task; keep the same filters |
+| `--limit` | Closed Tasks per page Default: 50. |
 | `--help / -h` | Print help |
 
 ## lf task pause

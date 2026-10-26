@@ -929,7 +929,7 @@ impl SqliteStore {
                     AND origin.provider_turn=e.provider_turn AND origin.kind='started'
                 LEFT JOIN processes attached ON attached.id=origin.lf_process_id
                 WHERE ?7 IS NULL AND e.kind IN ('started','usage','completed','output')
-                    AND origin.captured_event IS NULL
+                    AND COALESCE(origin.captured_event,e.captured_event) IS NULL
                 GROUP BY e.session_id,e.provider_thread,e.provider_turn)
                 , eligible AS MATERIALIZED (
                 SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,thread,turn, SUM(ended IS NULL) OVER () AS unfinished,
@@ -1555,7 +1555,7 @@ pub(super) fn retain_history_in(
             return Err(invalid("artifact belongs to another conversation"));
         }
         let key = format!("{}:{}", observation.artifact_key, observation.source);
-        let mut payload = serde_json::to_string(&observation.payload)?;
+        let payload = serde_json::to_string(&observation.payload)?;
         let saved: Option<String> = conn.query_row(
             "SELECT payload FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
             params![session.id,key], |row| row.get(0)).optional()?;
@@ -1563,21 +1563,10 @@ pub(super) fn retain_history_in(
             if saved == payload {
                 continue;
             }
-            // A usage stream keeps one row; a later observation replaces it.
-            let merged = serde_json::from_str(&saved).ok().and_then(|saved| {
-                crate::session_record::merge_usage_observation(&saved, &observation.payload)
-            });
-            let Some(merged) = merged else {
-                return Err(invalid(format!(
-                    "input {} has conflicting {} evidence",
-                    observation.artifact_key, observation.source
-                )));
-            };
-            payload = serde_json::to_string(&merged)?;
-            conn.execute(
-                "DELETE FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
-                params![session.id, key],
-            )?;
+            return Err(invalid(format!(
+                "input {} has conflicting {} evidence",
+                observation.artifact_key, observation.source
+            )));
         }
         conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
             VALUES(?1,'observed',?2,?3,?4,?5,?6,?7)",

@@ -3334,6 +3334,143 @@ mod tests {
         assert_eq!(activity, (100, 1, None));
     }
 
+    #[test]
+    fn session_facts_only_folds_stream_usage_into_native_turns_and_keeps_facts() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "session_facts_only");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/session_facts_only_released.sql"
+        ))
+        .unwrap();
+        conn.execute_batch(&current_draft_sql("session_facts_only"))
+            .unwrap();
+        let usage = |thread: &str, turn: &str| -> (serde_json::Value, Option<i64>) {
+            conn.query_row(
+                "SELECT payload,captured_event FROM session_events
+                 WHERE kind='usage' AND provider_thread=?1 AND provider_turn=?2",
+                [thread, turn],
+                |row| {
+                    Ok((
+                        serde_json::from_str(&row.get::<_, String>(0)?).unwrap(),
+                        row.get(1)?,
+                    ))
+                },
+            )
+            .unwrap()
+        };
+        // A matched Claude receipt takes the stream's final usage, with cost.
+        let (matched, _) = usage("claude-thread", "matched");
+        assert_eq!(matched["final"], true);
+        assert_eq!(matched["usage"]["cost_usd"], 0.25);
+        assert_eq!(matched["usage"]["context_window_tokens"], 200000);
+        // An unmatched one is converted from Claude's raw result usage.
+        let (raw, _) = usage("claude-thread", "raw");
+        assert_eq!(
+            raw,
+            serde_json::json!({"provider":"claude","final":true,"usage":{"input_tokens":3,
+                "output_tokens":4,"total_input_tokens":10,"cache_read_tokens":5,"cache_write_tokens":2}})
+        );
+        // Stream-only turns get their native row, kept with their capture.
+        let (stream_only, captured) = usage("claude-thread", "stream-only");
+        assert_eq!(stream_only["usage"]["cost_usd"], 0.5);
+        assert_eq!(captured, Some(1));
+        let (codex, _) = usage("codex-thread", "codex-turn");
+        assert_eq!(codex["provider"], "codex");
+        assert_eq!(codex["usage"]["input_tokens"], 40);
+        let (native_codex, _) = usage("codex-thread", "native-codex");
+        assert_eq!(native_codex["total"]["inputTokens"], 30);
+        let usage_rows: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM session_events WHERE kind='usage'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(usage_rows, 5, "usage without a provider thread is dropped");
+
+        let stream: Vec<i64> = conn
+            .prepare(
+                "SELECT seq FROM session_events WHERE kind='observed'
+                 AND instr(receipt_key,':events.jsonl:')>0 ORDER BY seq",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(stream, [3, 8, 10, 31, 32]);
+        let silences: Vec<(String, String)> = conn
+            .prepare(
+                "SELECT receipt_key,json_extract(payload,'$.evidence') FROM session_events
+                 WHERE instr(receipt_key,':silence:')>0",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            silences,
+            [(
+                "run_00000000000000000000000000000001:silence:3".to_string(),
+                r#"{"since":1020,"observed_at":1900}"#.to_string()
+            )]
+        );
+        let exec: Option<String> = conn
+            .query_row(
+                "SELECT json_extract(payload,'$.evidence.exec') FROM session_events
+                 WHERE receipt_key LIKE '%:manifest.json'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exec, None);
+
+        let triggers: String = conn
+            .query_row(
+                "SELECT group_concat(sql,char(10)) FROM sqlite_master WHERE type='trigger'
+                 AND (name LIKE 'store_revision_session_events_%' OR name='store_revision_usage_insert')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(triggers.matches("CREATE TRIGGER").count(), 4);
+        for transcript in [
+            "events.jsonl",
+            "provider_output",
+            "conversation",
+            "evidence",
+        ] {
+            assert!(!triggers.contains(transcript), "{transcript} in {triggers}");
+        }
+        let revision = |domain: &str| -> i64 {
+            conn.query_row(
+                "SELECT revision FROM store_revisions WHERE domain=?1",
+                [domain],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let (sessions, usage_revision) = (revision("sessions"), revision("usage"));
+        conn.execute(
+            "UPDATE session_events SET payload=payload WHERE provider_turn='raw'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            revision("sessions"),
+            sessions,
+            "usage is not a Session change"
+        );
+        conn.execute(
+            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+             VALUES('conversation','claude-thread','next','usage','',3000,'{}')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(revision("usage"), usage_revision + 1);
+    }
+
     pub(crate) fn apply_before_current_draft(conn: &rusqlite::Connection, name: &str) {
         if _draft_is_canonical(name) {
             apply_before_draft(conn, name);

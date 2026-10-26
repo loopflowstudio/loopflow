@@ -20,6 +20,13 @@ pub(super) struct ReaderState {
     /// Vendor session id from the turn's `system` event; the harness drains
     /// it for `--resume` and persistence.
     agent_session: Option<AgentSessionId>,
+    usage: ClaudeUsage,
+}
+
+/// One Claude turn's usage as it accumulates. The live display and the native
+/// usage row both read it, so they report the same numbers.
+#[derive(Debug, Default)]
+pub(super) struct ClaudeUsage {
     /// Largest effective input observed for each model in this turn. Assistant
     /// events repeat usage snapshots, so retaining maxima also deduplicates them.
     peak_input_by_model: HashMap<String, u64>,
@@ -104,6 +111,21 @@ impl ReaderState {
 
     pub(super) fn take_agent_session(&mut self) -> Option<AgentSessionId> {
         self.agent_session.take()
+    }
+}
+
+impl ClaudeUsage {
+    /// The turn's cumulative usage after an `assistant` event.
+    pub(super) fn assistant(&mut self, event: &Value) -> Option<TurnUsage> {
+        self.observe_assistant_pressure(event);
+        self.observe_assistant_usage(event)
+    }
+
+    /// The turn's final usage from its `result`; the next turn starts fresh.
+    pub(super) fn result(&mut self, event: &Value) -> Option<TurnUsage> {
+        let usage = map_turn_usage(event, self.take_peak_pressure(event));
+        *self = Self::default();
+        usage
     }
 
     fn observe_assistant_pressure(&mut self, value: &Value) {
@@ -385,7 +407,7 @@ pub(super) fn process_line(
 
         "result" => {
             flush_text_delta_parser(events, state, turn_id);
-            let usage = map_turn_usage(event, state);
+            let usage = state.usage.result(event);
             let status = if event
                 .get("is_error")
                 .and_then(Value::as_bool)
@@ -432,8 +454,7 @@ pub(super) fn process_line(
         // Claude emits "assistant" events with full message content.
         // These contain tool_use blocks and text blocks.
         "assistant" => {
-            state.observe_assistant_pressure(event);
-            if let Some(usage) = state.observe_assistant_usage(event) {
+            if let Some(usage) = state.usage.assistant(event) {
                 let _ = events.send(ConversationEvent::UsageCheckpoint {
                     turn_id: turn_id.to_string(),
                     usage,
@@ -460,7 +481,7 @@ fn add_optional(total: &mut Option<u64>, value: Option<u64>) {
     }
 }
 
-fn map_turn_usage(event: &Value, state: &mut ReaderState) -> Option<TurnUsage> {
+fn map_turn_usage(event: &Value, peak: Option<(u64, u64)>) -> Option<TurnUsage> {
     let input_tokens = event.pointer("/usage/input_tokens").and_then(Value::as_u64);
     let cache_read_tokens = event
         .pointer("/usage/cache_read_input_tokens")
@@ -468,9 +489,8 @@ fn map_turn_usage(event: &Value, state: &mut ReaderState) -> Option<TurnUsage> {
     let cache_write_tokens = event
         .pointer("/usage/cache_creation_input_tokens")
         .and_then(Value::as_u64);
-    let (peak_input_tokens, context_window_tokens) = state
-        .take_peak_pressure(event)
-        .map_or((None, None), |(input, window)| (Some(input), Some(window)));
+    let (peak_input_tokens, context_window_tokens) =
+        peak.map_or((None, None), |(input, window)| (Some(input), Some(window)));
     let receipt = TurnUsage {
         input_tokens,
         output_tokens: event

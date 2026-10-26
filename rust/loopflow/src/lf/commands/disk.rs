@@ -400,13 +400,13 @@ fn render_clean(report: &CleanReport) -> String {
             report.process_receipts
         ));
     }
-    if let Some(store) = report.store.as_ref().filter(|store| {
-        store.captures + store.usage_rows + store.closed_processes + store.processes > 0
-    }) {
+    if let Some(store) = report
+        .store
+        .as_ref()
+        .filter(|store| store.usage_rows + store.closed_processes + store.processes > 0)
+    {
         out.push_str(&format!(
-            "pruned {} stream rows from {} captures, {} usage rows and {} inspection Processes from the store; closed {} dead Processes{}\n",
-            store.stream_rows,
-            store.captures,
+            "pruned {} usage rows and {} inspection Processes from the store; closed {} dead Processes{}\n",
             store.usage_rows,
             store.processes,
             store.closed_processes,

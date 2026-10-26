@@ -184,6 +184,7 @@ impl ClaudeHarness {
                 requests: self.requests.clone(),
                 pending: VecDeque::new(),
                 activity: Default::default(),
+                usage: Default::default(),
             },
         );
         self.stderr_task = Some(spawn_stderr_logger(stderr, "claude_harness"));

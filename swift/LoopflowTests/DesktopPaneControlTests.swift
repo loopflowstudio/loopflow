@@ -172,14 +172,15 @@ struct DesktopPaneControlTests {
         #expect(try perform("forward").destination == .entered(from: .dashboard("review"), work: b))
         #expect(try perform("working-tasks").destination == .workingTasks)
         #expect(try perform("enter", ["tile": "a"]).destination == .entered(from: .workingTasks, work: a))
-        #expect(try perform("goto", ["index": "2"]).destination == .work(b))
+        // A sidebar Task on the open board keeps the board in the path, as its tile does.
+        #expect(try perform("goto", ["index": "2"]).destination == .entered(from: .workingTasks, work: b))
         #expect(throws: DesktopTargetError.self) { try perform("goto", ["index": "3"]) }
         #expect(throws: DesktopArgumentError.self) { try perform("goto", ["index": "two"]) }
         #expect(throws: DesktopArgumentError.self) { try perform("goto") }
         #expect(throws: DesktopArgumentError.self) { try perform("goto", ["index": "1", "extra": "x"]) }
         #expect(throws: DesktopArgumentError.self) { try perform("navigate.sideways") }
-        #expect(try perform("next").destination == .work(a))
-        #expect(try perform("previous").destination == .work(b))
+        #expect(try perform("next").destination == .entered(from: .workingTasks, work: a))
+        #expect(try perform("previous").destination == .entered(from: .workingTasks, work: b))
         // A Wave view's Tasks are tiles too; back returns to the Wave.
         model.select(.wave(id: wave))
         #expect(try perform("enter", ["tile": "b"]).destination == .entered(from: .wave(wave), work: b))

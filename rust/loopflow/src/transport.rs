@@ -204,7 +204,7 @@ pub(crate) fn start(
         .open(logs.join("transport.log"))
         .with_context(|| format!("Cannot open execution transport log in {}", logs.display()))?;
     let mut command = Command::new(std::env::current_exe()?);
-    command.arg("__transport-serve");
+    command.args(["session", "serve"]);
     if terminal {
         command.arg("--terminal");
     }

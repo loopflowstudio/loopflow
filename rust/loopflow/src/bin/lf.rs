@@ -8,6 +8,7 @@ use clap::Parser;
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
+use loopflow::context_block::ContextMoment;
 use loopflow::definition::DefinitionKind;
 use loopflow::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
 use loopflow::lf::{
@@ -531,12 +532,9 @@ struct CwdGuard(std::path::PathBuf);
 
 impl CwdGuard {
     fn enter(path: &Path) -> anyhow::Result<Self> {
-        if !path.is_absolute() {
-            anyhow::bail!("bound Work cwd must be absolute: {}", path.display());
-        }
         let previous = std::env::current_dir()?;
-        std::env::set_current_dir(path)
-            .map_err(|error| anyhow::anyhow!("enter bound Work cwd {}: {error}", path.display()))?;
+        std::env::set_current_dir(previous.join(path))
+            .map_err(|error| anyhow::anyhow!("enter {}: {error}", path.display()))?;
         Ok(Self(previous))
     }
 }
@@ -966,9 +964,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             issue,
             state == "on",
         )?),
-        TaskCommand::Repair { incident, launcher } => {
-            Ok(loopflow::ops::pr_landing::run_repair(incident, launcher)?)
-        }
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
         TaskCommand::Workflow { cmd } => match cmd {
             loopflow::lf::TaskWorkflowCommand::Move {
@@ -1651,6 +1646,13 @@ fn run() -> anyhow::Result<()> {
         .as_ref()
         .map(|id| CwdGuard::enter(&loopflow::lf::commands::work_route::repository_path(id)?))
         .transpose()?;
+    // With `--task`, Work binding enters this directory instead of its checkout.
+    let _cwd = cli
+        .cwd
+        .as_deref()
+        .filter(|_| cli.task.is_none())
+        .map(CwdGuard::enter)
+        .transpose()?;
     let reads_work = cli.may_launch_agent()
         || cli.task.is_some()
         || cli.wave.is_some()
@@ -1659,10 +1661,19 @@ fn run() -> anyhow::Result<()> {
             Some(
                 Commands::Task { .. }
                     | Commands::Wave { .. }
-                    | Commands::Session { .. }
                     | Commands::Repo { .. }
-                    | Commands::ContextBlock { .. }
+                    | Commands::ContextBlock {
+                        moment: ContextMoment::Start
+                            | ContextMoment::Compact
+                            | ContextMoment::Tool
+                            | ContextMoment::Stop,
+                        ..
+                    }
             )
+        )
+        || matches!(
+            &cli.command,
+            Some(Commands::Session { cmd }) if !matches!(cmd, loopflow::lf::SessionCommand::Serve { .. })
         );
     if reads_work
         && !cli.context
@@ -2400,20 +2411,20 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // Task run/checkout own preparation above; ordinary invocations bind existing
     // Work. Admit this Process at the directory reached, even if binding fails.
     let mut _work_declaration = None;
-    let mut _bound_cwd = None;
+    let mut _task_cwd = None;
     let placement = (|| -> anyhow::Result<Option<loopflow::ops::WorkBinding>> {
         if let Some(task) = cli.task.as_ref() {
             let directory = loopflow::repo::working_directory()?;
             let repo = selected_task_repository(&cli, &directory, Some(task))?;
             let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
             std::env::remove_var(loopflow::lf::TASK_SOURCE_ENV);
-            if let Some(cwd) = cli.bound_cwd.clone() {
+            if let Some(cwd) = cli.cwd.clone() {
                 binding.cwd = cwd;
             }
             if cli.agent.is_none() {
                 cli.agent = binding.agent.clone();
             }
-            _bound_cwd = Some(CwdGuard::enter(&binding.cwd)?);
+            _task_cwd = Some(CwdGuard::enter(&binding.cwd)?);
             _work_declaration = Some(EnvGuard::set(
                 loopflow::lf::WORK_DECLARATION_ENV,
                 format!("task:{}", binding.work.id()),
@@ -2486,9 +2497,6 @@ fn execute_command(
     binding: Option<&loopflow::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
     match &cli.command {
-        Some(Commands::TransportServe { terminal, argv }) => {
-            loopflow::transport::serve(argv, *terminal)
-        }
         Some(Commands::Clone { .. }) => unreachable!("clone dispatch precedes admission"),
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
@@ -2506,13 +2514,25 @@ fn execute_command(
         Some(Commands::Config {
             cmd: loopflow::lf::ConfigCommand::User { json },
         }) => loopflow::lf::commands::config::print_user(*json),
-        Some(Commands::PiEvent) => loopflow::harness::pi_history::native_event(),
-        Some(Commands::ToolLifeline { path, provider_pid }) => {
-            loopflow::harness::agent_process::guard_tool_lifeline(path, *provider_pid)
-        }
-        Some(Commands::ContextBlock { delivery, moment }) => {
-            loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment)
-        }
+        // Neither Pi callback reads hook JSON; a tool group's stdin is the command's.
+        Some(Commands::ContextBlock {
+            moment: ContextMoment::PiEvent,
+            ..
+        }) => loopflow::harness::pi_history::native_event(),
+        Some(Commands::ContextBlock {
+            moment: ContextMoment::ToolGroup,
+            lifeline,
+            provider_pid,
+            ..
+        }) => loopflow::harness::agent_process::guard_tool_lifeline(
+            lifeline
+                .as_deref()
+                .expect("clap requires --lifeline for tool-group"),
+            provider_pid.expect("clap requires --provider-pid with --lifeline"),
+        ),
+        Some(Commands::ContextBlock {
+            delivery, moment, ..
+        }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
         Some(Commands::Account {
             cmd,
@@ -2672,9 +2692,6 @@ fn execute_command(
         Some(Commands::Context { json, wave, task }) => {
             loopflow::lf::commands::context::run(*json, wave.as_deref(), task.as_deref())
         }
-        Some(Commands::TelemetryScorecard { json }) => in_repo_runtime(args, |repo| {
-            loopflow::ops::run_telemetry_scorecard(repo, *json).map_err(Into::into)
-        }),
         Some(Commands::Self_ {
             cmd: loopflow::lf::SelfCommand::Doctor { json, planning },
         }) => {
@@ -2970,7 +2987,7 @@ mod tests {
     }
 
     #[test]
-    fn bound_cwd_is_entered_for_the_invocation_and_restored_afterward() {
+    fn cwd_is_entered_for_the_invocation_and_restored_afterward() {
         let _lock = PROCESS_STATE_LOCK.lock().unwrap();
         let previous = std::env::current_dir().unwrap();
         let directory = tempfile::tempdir().unwrap();

@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import math
+import os
 import sqlite3
 import subprocess
 import sys
@@ -23,11 +23,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="emit structured JSON")
     parser.add_argument(
-        "--envelope",
-        action="store_true",
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument(
         "--repo",
         type=Path,
         default=Path.cwd(),
@@ -36,14 +31,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--database",
         type=Path,
-        required=True,
-        help="read this Rust-resolved Loopflow Machine database",
+        default=Path(os.environ.get("LF_HOME") or Path.home() / ".lf") / "loopflow.db",
+        help="Loopflow Machine database (default: $LF_HOME/loopflow.db)",
     )
     parser.add_argument(
         "--history",
         type=Path,
         required=True,
-        help="SessionHistory JSON supplied by the shared history reader",
+        help="Session history JSON from `lf history usage --json --days 0`",
     )
     return parser.parse_args(argv)
 
@@ -572,12 +567,6 @@ def print_report(report: Mapping[str, Any], output: TextIO = sys.stdout) -> None
             print(f"  {row['reason']}", file=output)
 
 
-def format_report(report: Mapping[str, Any]) -> str:
-    output = io.StringIO()
-    print_report(report, output)
-    return output.getvalue()
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
@@ -594,18 +583,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (FileNotFoundError, OSError, ValueError, sqlite3.Error) as error:
         print(f"lifecycle-scorecard: {error}", file=sys.stderr)
         return 1
-    if args.envelope:
-        print(
-            json.dumps(
-                {
-                    "report": report,
-                    "metric_observations": [],
-                    "text": format_report(report),
-                },
-                sort_keys=True,
-            )
-        )
-    elif args.json:
+    if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
         print_report(report)

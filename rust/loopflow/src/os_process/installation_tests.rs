@@ -215,7 +215,7 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
     // The gate's exec keeps the Graph's handoff: the step runs inside its owner.
     let redelegated: i64 = connection
         .query_row(
-            r#"SELECT count(*) FROM graph_process_steps s JOIN processes c ON c.parent_lf_process_id=s.lf_process_id WHERE c.command LIKE '%"__transport-serve"%'"#,
+            r#"SELECT count(*) FROM graph_process_steps s JOIN processes c ON c.parent_lf_process_id=s.lf_process_id WHERE c.command LIKE '%"session","serve"%'"#,
             [],
             |row| row.get(0),
         )

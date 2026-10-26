@@ -121,5 +121,37 @@ Status (2026-10-25): 1 is built in LOO-600 (`ClaudeHarness` reads
    argues against, and it would only catch git-shaped symptoms of (3).
 
 Useful next action: whoever continues LOO-596 finishes the merge as listed under
-Recovery. Separately, a small Task for prevention 1 (with 2 as the stopgap) on
-the infrastructure wave.
+Recovery. Prevention 1 and the contract form of 2 are built in LOO-600.
+
+## Concept review (LOO-600, 2026-10-25)
+
+Accepted model, as built: a headless Claude step is done when Claude is settled,
+not at its first `result`. Background tasks count as open work in Session
+activity, so the Session reads as working while they run. That is visibility
+only; nothing enforces it. Interrupt and stop still kill the process, and the
+reader closes the turn as Interrupted, so a held turn can always be recovered.
+
+Consequence the design did not name: a background command that never exits
+(dev server, watcher, `tail -f`) now holds the step open until someone interrupts
+it. Before LOO-600 the step ended and the command died with the process. Waiting
+is correct under "settled = idle". Adding a timeout or having lf reap the shells
+would be the kind of guard AGENTS.md's Flexibility section rules out (and Jack
+ruled out lf reaping step process trees on 2026-10-25), so it is not an open choice.
+The agent just needs to know the rule.
+
+Built (ea10f7ffc3): `rust/loopflow/src/builtins/surfaces/headless.md` says the
+run ends when your turn ends with no background commands running, so stop any
+long-lived background process you started (servers, watchers) before you answer.
+It states the contract the code enforces and replaces the conditional stopgap in
+prevention 2. `format_prompt_default_components_has_headless_surface` in
+`prompt/mod.rs` and the prompt goldens cover the line.
+
+Deliberate change: the held turn's interim `result` text ("I'll pick up when
+they report") is not saved as Session Output. Only the settled answer is, which
+matches the acceptance criterion that the step's answer is the second one. Its
+usage is still recorded.
+
+Re-reviewed after compress (e589466ef3): the folded counter and the shared test
+helper don't change the model. Nothing to change.
+
+Open product choices: none.

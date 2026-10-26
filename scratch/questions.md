@@ -1,12 +1,12 @@
 # LOO-600 questions and assumptions
 
-Status: acceptance 1 and 3 met; acceptance 2's stopgap not needed (signal exists).
+Status: acceptance 1 and 3 met; acceptance 2 met as the headless.md contract line.
 
 - 2026-10-25: a live `claude -p --input-format stream-json` probe shows stdout carries
   `system/background_tasks_changed` (full task set), `task_started`, `task_updated`,
   `task_notification`, then Claude's own `init` + second `result`. So the code fix
-  landed and the `headless.md` stopgap was not added (Task says "until that lands, or if
-  no signal").
+  landed; `headless.md` now states the resulting contract (stop long-lived background
+  processes before answering) rather than the conditional stopgap.
 - Steer accepted while background tasks run (realign, 2026-10-25): the first version
   skipped every result under background, so the steer's result was never counted and
   the runner turn hung until the process died. Now a result under background
@@ -21,3 +21,5 @@ Status: acceptance 1 and 3 met; acceptance 2's stopgap not needed (signal exists
   full `harness::` run at load average ~111 and passed alone; unrelated to this diff.
 
 Check: `cargo test -p loopflow --lib harness::claude` 41 pass (new steer test fails/hangs without the fix); clippy clean.
+Check: `cargo test -p loopflow --lib format_prompt_default_components_has_headless_surface` pass (headless.md background-process line).
+Check (compress): reader result counter folded into one `try_update`; test output helper shared. `harness::claude` 41 pass; clippy clean.

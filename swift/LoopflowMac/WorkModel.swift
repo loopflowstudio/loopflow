@@ -1669,7 +1669,7 @@ final class WorkModel {
     func select(_ requested: WorkReference?) {
         if let requested, requested.kind == .task, let board = navigation.trailBoard,
            taskIDs(on: board).contains(task(id: requested.id)?.task.id ?? requested.id) {
-            return zoom(into: requested, from: board)
+            return enter(requested, from: board)
         }
         select(requested, preservingOpening: false)
     }
@@ -1702,11 +1702,12 @@ final class WorkModel {
         selectionPlans.value?.first { $0.dashboardID == nil && $0.selection.expression == expression }
     }
 
-    /// A Dashboard's visible Tasks in arrangement order; Working Tasks in plan order.
+    /// A Dashboard's visible Tasks in arrangement order; Working Tasks and a Wave's in plan order.
     private func taskIDs(on board: WorkNavigation.Board) -> [String] {
         switch board {
         case .workingTasks: workingTaskIDs
         case .saved(let id): taskIDs(in: dashboard(id)?.projection.visible ?? [])
+        case .wave(let id): taskIDs(in: waveTiles(id))
         }
     }
 

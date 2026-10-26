@@ -1131,14 +1131,26 @@ pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResu
         [task.id.as_str()],
         |row| row.get(0),
     )?;
-    if crate::linear::terminal_reason(state.as_deref()).is_some()
-        && !super::durable::task_state_in(conn, &task.id)?.is_started()
-    {
+    // Upstream cancellation stops a Task that hasn't set out; one under way keeps going.
+    if crate::linear::terminal_reason(state.as_deref()).is_some() && !under_way(conn, task)? {
         return Err(StoreError::InvalidAuthority(
             "terminal planning state cannot start work; its execution history is preserved".into(),
         ));
     }
     Ok(())
+}
+
+/// Open, not deferred, and past its Workflow's `start`.
+fn under_way(conn: &Connection, task: &Task) -> StoreResult<bool> {
+    Ok(!matches!(
+        super::durable::task_state_in(conn, &task.id)?,
+        TaskState::Deferred | TaskState::Done | TaskState::Abandoned
+    ) && conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1 \
+             AND NOT (node='start' AND edge IS NULL))",
+        [task.id.as_str()],
+        |row| row.get(0),
+    )?)
 }
 
 /// Planning ownership remains relevant when finishing already completed work.

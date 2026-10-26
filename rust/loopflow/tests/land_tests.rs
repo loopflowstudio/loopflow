@@ -2000,12 +2000,41 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
             .env("LF_TEST_REPAIR_LAUNCHES", &launches);
         cmd
     };
-    // The waiter never gives up on its own; reap it if an assertion fails.
-    struct Waiter(std::process::Child);
+    // The waiter never gives up on its own, and its run is owned by a detached
+    // transport server. Reap that run's process group (the Graph and its landing
+    // step) when the test returns early or an assertion fails; otherwise it
+    // polls the fake `gh` forever.
+    struct Waiter(std::process::Child, std::path::PathBuf);
     impl Drop for Waiter {
         fn drop(&mut self) {
             let _ = self.0.kill();
             let _ = self.0.wait();
+            let Ok(db) = rusqlite::Connection::open(&self.1) else {
+                return;
+            };
+            let pids: Vec<i64> = db
+                .prepare("SELECT pid FROM processes WHERE completed_at IS NULL AND pid IS NOT NULL")
+                .and_then(|mut rows| rows.query_map([], |row| row.get(0))?.collect())
+                .unwrap_or_default();
+            for pid in pids {
+                // Only a process still running this build's `lf`, never a reused pid.
+                let ours = Command::new("ps")
+                    .args(["-o", "args=", "-p", &pid.to_string()])
+                    .output()
+                    .is_ok_and(|ps| {
+                        String::from_utf8_lossy(&ps.stdout).starts_with(env!("CARGO_BIN_EXE_lf"))
+                    });
+                if !ours {
+                    continue;
+                }
+                let pid = pid as libc::pid_t;
+                // SAFETY: kill has no memory preconditions. The pid runs this
+                // build's `lf` for this home, and a run's leader heads its own group.
+                unsafe {
+                    libc::kill(-pid, libc::SIGKILL);
+                    libc::kill(pid, libc::SIGKILL);
+                }
+            }
         }
     }
     let out = home.path().join("run.stdout");
@@ -2017,6 +2046,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
             .stderr(fs::File::create(&err).unwrap())
             .spawn()
             .unwrap(),
+        home.path().join("loopflow.db"),
     );
     let read = || {
         (

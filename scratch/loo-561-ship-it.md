@@ -3,7 +3,8 @@
 Status (2026-10-24): design accepted (Jack Heart, 2026-10-21/22); every accepted slice is built
 and committed, including the 2026-10-24 pass (Workflow bar, ship-restart backoff, post-merge
 verify) and the second pass (Task/Session state axes, `lf ship ISSUE`). What's left: re-demo
-on the branch build, and gate (see Remaining).
+on the branch build, and gate (see Remaining). Re-demo 3 accepted (2026-10-26); gate ran 2026-10-26
+(see Gate).
 Main merged at 936afed62c (2026-10-24, #1667/#1668). This Task's schema draft is
 `store/migrations/drafts/ship_it.sql`; main's unreleased `pools_and_rentals.sql` (#1653) sits
 beside it and touches none of the same tables (main's #1655 rewrite released in `0.14.15.002`).
@@ -460,3 +461,26 @@ and names its cause, Stop shipping, `lf ship ISSUE` returning vs foreground.
   failures only in the shared runner (planning_lookup 21/21, task_planning and os_process pass
   alone). Open: `world_recipes::lifecycle_world_reports_each_state` reads the upstream-canceled
   Task idle, not shipping (Linear-cancel area; not checked on the prior head).
+
+## Gate (2026-10-26, on a4fef44e47 + gate fixes)
+
+- Fixed: a Linear-canceled Task launched again (state-axes regression). `require_task_planning`
+  admitted any Task with a checkout; it is back to main's rule: open, not deferred, and past its
+  Workflow's `start` (`under_way`). `every_task_launch_runs_in_the_foreground_under_the_same_checks` passes.
+- Fixed: `waited_task_landing` leaked its run on every early return (the `failed_startup` case
+  always): the run lives under a detached `__transport-serve`, so killing the client left the
+  Graph and `pr land --wait-and-fix` polling the fake `gh` forever. Eleven groups, some two days
+  old, were burning CPU on this Mac. The fixture now kills the process group of every unfinished
+  Process its home recorded, after checking each pid still runs this build's `lf`.
+- Stale tests: `lifecycle_world_reports_each_state` expects the approved, finished canceled Task
+  to read idle (state axes); main's #1678 interrupt test moved off `.lf/workflows/` to a graph
+  with an `interactive:` stage; its stopped Graph is the Workflow graph's name.
+- Shared-runner timeouts named: in the 24-min lib run (load average 100–144 from other
+  worktrees' builds and tests), `planning_lookup` and `task_planning` each hit the production 5 s
+  planning-refresh deadline; both pass alone. Not this branch's code; CI owns the full run.
+- Checks: fmt/clippy clean; lib `workflow graph:: pr_landing ops::pr::tests ship` 263/265 (the two
+  deadline timeouts above, pass alone); lib `task_graph_launch_tests` 41/41; integration
+  `task_workflow task_graph_launch dto_fixtures land_tests graph_help_validates world_recipes
+  documented_commands` 81/81; Swift `DTOFixture|WorkModelTests|WorkNavigation|DesktopHeadless`
+  139 ok. Hosted merge-queue run left to CI/ship.
+

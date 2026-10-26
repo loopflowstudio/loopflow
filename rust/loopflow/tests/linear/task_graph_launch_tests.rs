@@ -1624,8 +1624,8 @@ fn an_interrupt_during_an_operation_stops_the_graph_before_its_next_step() {
             "- cmd: task interrupt INF-123\n- cmd: task sync --plan\n",
         ),
         (
-            ".lf/workflows/interrupted.yaml",
-            "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: interrupting}\n",
+            ".lf/graphs/interrupted.yaml",
+            "- graph: interrupting\n- interactive: {name: demo, id: review}\n",
         ),
     ] {
         fs::write(task.repo.path().join(path), content).unwrap();
@@ -1636,7 +1636,7 @@ fn an_interrupt_during_an_operation_stops_the_graph_before_its_next_step() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(130), "{stdout}\n{stderr}");
     assert!(
-        stdout.contains("INF-123: stopped Graph interrupting"),
+        stdout.contains("INF-123: stopped Graph interrupted"),
         "{stdout}"
     );
     assert!(!stderr.contains("starting it again"), "{stderr}");

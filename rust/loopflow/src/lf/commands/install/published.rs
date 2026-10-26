@@ -23,14 +23,12 @@ pub fn latest() -> Result<()> {
         .error_for_status()?;
     let tag = release_tag(response.url().path())?;
     let directory = install_dir()?;
-    let applications = std::env::var_os("LF_APPLICATIONS_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/Applications"));
+    let app = super::app_destination()?;
     let cli_only = std::env::var("LF_INSTALL_CLI_ONLY").as_deref() == Ok("1");
     if is_current(
         &directory,
         &tag,
-        (cfg!(target_os = "macos") && !cli_only).then_some(applications.as_path()),
+        (cfg!(target_os = "macos") && !cli_only).then_some(app.as_path()),
     ) {
         println!("Published release {tag} is already installed.");
         return Ok(());
@@ -63,7 +61,7 @@ fn release_tag(path: &str) -> Result<String> {
     Ok(tag.to_string())
 }
 
-fn install_dir() -> Result<PathBuf> {
+pub(super) fn install_dir() -> Result<PathBuf> {
     if let Some(directory) = std::env::var_os("LF_INSTALL_DIR").filter(|value| !value.is_empty()) {
         let directory = PathBuf::from(directory);
         let directory = match directory.strip_prefix("~") {
@@ -85,7 +83,7 @@ fn install_dir() -> Result<PathBuf> {
     Ok(home.join(".local/bin"))
 }
 
-fn is_current(directory: &Path, tag: &str, applications: Option<&Path>) -> bool {
+fn is_current(directory: &Path, tag: &str, app: Option<&Path>) -> bool {
     let version = tag.trim_start_matches('v');
     if !["lf"].iter().all(|name| {
         inspect(&directory.join(name), &["--version"]).is_some_and(|output| {
@@ -102,7 +100,7 @@ fn is_current(directory: &Path, tag: &str, applications: Option<&Path>) -> bool 
             preview["candidate"]["authority"] == "published"
                 && preview["verdict"]["kind"] == "promote"
         });
-    published && applications.is_none_or(|root| has_release_app(root, version))
+    published && app.is_none_or(|app| has_release_app(app, version))
 }
 
 // Installed binaries can be stale or broken; update detection must not hang.
@@ -125,8 +123,8 @@ fn inspect(program: &Path, args: &[&str]) -> Option<Output> {
     })
 }
 
-fn has_release_app(applications: &Path, version: &str) -> bool {
-    let contents = applications.join("Loopflow.app/Contents");
+fn has_release_app(app: &Path, version: &str) -> bool {
+    let contents = app.join("Contents");
     let info = inspect(
         Path::new("/usr/bin/plutil"),
         &[
@@ -349,7 +347,13 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         binary(&temp.path().join("lf"), "lf", "published");
         let applications = temp.path().join("Applications");
-        let current = || is_current(temp.path(), "v9.9.9", Some(&applications));
+        let current = || {
+            is_current(
+                temp.path(),
+                "v9.9.9",
+                Some(&applications.join("Loopflow.app")),
+            )
+        };
         assert!(!current());
         let contents = applications.join("Loopflow.app/Contents");
         fs::create_dir_all(contents.join("MacOS")).unwrap();

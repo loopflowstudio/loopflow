@@ -255,7 +255,7 @@ Loopflow drives an AI coding tool and needs one installed. The error names
 the install command. For Claude Code:
 
 ```bash
-npm install -g @anthropic-ai/claude-code
+lf install agent claude    # the official native installer; no npm needed
 lf account connect claude
 ```
 

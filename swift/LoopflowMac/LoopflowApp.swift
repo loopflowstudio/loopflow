@@ -40,9 +40,11 @@ struct LoopflowApp: App {
         // by Wave launchers can find git and agent CLIs that live in
         // Homebrew or ~/.local/bin.
         enrichProcessPathForGUILaunch()
-        // A reboot leaves interrupted Sessions behind; bring them all back unasked.
+        // A reboot leaves interrupted Sessions behind; bring them all back unasked,
+        // once this copy is the activated installation.
         if AppTestMode.current() == nil {
             Task.detached(priority: .utility) {
+                await AppActivation.shared.untilActivated()
                 do {
                     try await RegistryQueryLocal.shared.resumeInterrupted()
                 } catch {

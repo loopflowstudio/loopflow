@@ -165,6 +165,8 @@ struct WorkNavigator: View {
     private func waveRow(scope: WorkNavigation.SidebarScope, name: String, icon: String?,
                          count: Int, unavailableReason: String?) -> some View {
         let reference: WorkReference? = if case .wave(let id) = scope { .wave(id: id) } else { nil }
+        let state: SidebarSelection = model.navigation.destination == .work(reference) ? .shown
+            : model.navigation.sidebarScope == scope ? .containing : .none
         return Button { model.select(reference) } label: {
             HStack {
                 if let icon { Image(systemName: icon) }
@@ -177,8 +179,8 @@ struct WorkNavigator: View {
                 }
             }.font(Typography.body(13)).padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(model.navigation.sidebarScope == scope ? palette.surface : .clear,
-                            in: RoundedRectangle(cornerRadius: 6))
+                .foregroundStyle(state == .shown ? palette.workSelectedText : palette.text)
+                .background(SidebarSelectionShape(state: state))
                 // The whole row clicks, as a Task row does, not only its text.
                 .contentShape(RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain)
@@ -216,9 +218,7 @@ struct WorkNavigator: View {
         .foregroundStyle(selected ? palette.workSelectedText : otherWave ? palette.textSecondary : palette.text)
         .background {
             Button { model.select(.task(id: id)) } label: {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(selected ? palette.workSelectedFill : Color.clear)
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(selected ? palette.selectionEdge : .clear))
+                SidebarSelectionShape(state: selected ? .shown : .none)
                     .contentShape(Rectangle())
             }.buttonStyle(.plain).focused($focusedWork, equals: .task(id: id)).accessibilityLabel(title)
                 .accessibilityAddTraits(selected ? .isSelected : [])
@@ -532,6 +532,27 @@ private struct FocusedWork: ViewModifier {
 
     func body(content: Content) -> some View {
         if let reference { content.focused(focus, equals: reference) } else { content }
+    }
+}
+
+/// One rule for every sidebar row: the row whose Work fills the center pane is
+/// shown; the Wave or Dashboard containing it, when that isn't itself shown, is
+/// containing. Nothing else is marked.
+enum SidebarSelection {
+    case none, containing, shown
+}
+
+struct SidebarSelectionShape: View {
+    let state: SidebarSelection
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 6)
+        switch state {
+        case .none: shape.fill(Color.clear)
+        case .containing: shape.fill(palette.surface)
+        case .shown: shape.fill(palette.workSelectedFill).overlay(shape.strokeBorder(palette.selectionEdge))
+        }
     }
 }
 

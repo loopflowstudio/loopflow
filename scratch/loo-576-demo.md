@@ -45,6 +45,19 @@ Jack Heart's Mac. Design: `scratch/loo-576-show-the-selected-wave-or-dashboards-
   where `‹ loopflow` was and replaces it; a selected Wave's row leaves the Waves
   section and slides up under it. Repository and Wave rows are one
   `waveRow(scope:name:count:unavailableReason:)`. Dashboards keep their title header.
+- Jack: "maybe try no wave icon by loopflow … so that its indented basically" →
+  built: the repository row has no icon, so Wave names sit indented under it.
+- Jack asked to drop the titlebar crumbs, then "you know what, just keep the
+  breadcrumbs" → reverted; the titlebar is unchanged. His idea to make the titlebar
+  about the center pane and give the sidebar its height is not pursued.
+- Jack: "the areas around the names need to be clickable for waves, just like
+  tasks" → built: whole Wave, repository and Dashboard rows click.
+- Jack: "selection presentation between waves and tasks should be more unified,
+  and more principled about when it is different" → **Proposed rule, built:** the
+  row whose Work fills the center pane is *shown* (the Task row's selected fill,
+  edge and text); the Wave or Dashboard containing it, when not itself shown, is
+  *containing* (the quiet surface fill). Nothing else is marked. One
+  `SidebarSelectionShape` draws both for Task, Wave, repository and Dashboard rows.
 - **Open:** Jack: "we think of waveless tasks as assigned to the repo." Today the
   repository row shows Working Tasks (the repository's working Tasks, any Wave), not the
   waveless Tasks. Undecided whether selecting it should list waveless Tasks, with

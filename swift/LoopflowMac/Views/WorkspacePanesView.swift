@@ -181,6 +181,10 @@ enum PaneGeometry {
     static let cornerRadius = CornerRadius.md
     // Nested curves share a center at the workspace's lower corners.
     static let workspaceCornerRadius = cornerRadius + spacing
+    /// Square where the workspace meets the sidebar under the titlebar.
+    static let workspaceShape = UnevenRoundedRectangle(
+        topLeadingRadius: 0, bottomLeadingRadius: workspaceCornerRadius,
+        bottomTrailingRadius: workspaceCornerRadius, topTrailingRadius: workspaceCornerRadius)
 }
 
 private struct MultiplexerNodeView: View {

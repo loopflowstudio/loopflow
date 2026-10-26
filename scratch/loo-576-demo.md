@@ -26,6 +26,21 @@ Jack Heart's Mac. Design: `scratch/loo-576-show-the-selected-wave-or-dashboards-
   it always lists the repository's Waves, the selected one highlighted, so a
   Wave's label no longer slides into the header (Dashboards still do); the
   in-list SUBWAVES and Dashboard Wave-member rows are gone from the Task list.
+- Follow-ups from Jack, all built: "divider should be draggable … no chevron, just
+  drag" (the line above the Waves section drags its height; starts ~3 rows);
+  "drop the Working Tasks and Waves headers" (both gone; a Wave or Dashboard
+  scope keeps its title); "there also needs to be a default wave which is the
+  repo" (the repository row tops the Waves section and returns to Working Tasks;
+  it has no edit or delete); "we show an on-hover + for wave creation" (authors
+  `.lf/wave/<name>/` through the one `PortfolioRepoState.createWave` writer).
+- Jack: "the top left rounded edge is weird to me, make it straight, and also make
+  that border subtler … like the edge of a shadow that has a gradient fade from
+  dark to light." → the workspace's top-leading corner is square and the sidebar
+  divider is a dark-to-clear gradient. Interpretation of which edge, pending his look.
+- **Open:** Jack: "we think of waveless tasks as assigned to the repo." Today the
+  repository row shows Working Tasks (all repositories' working Tasks), not the
+  waveless Tasks. Undecided whether selecting it should list waveless Tasks, with
+  Working Tasks becoming an ordinary Dashboard scope.
 
 ## Measured on real data (Instruments SwiftUI trace, attached to Loopflow Dev)
 

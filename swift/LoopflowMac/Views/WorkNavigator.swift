@@ -13,7 +13,7 @@ struct WorkNavigator: View {
     @State private var focusMemory = SidebarResponderMemory()
     /// The clicked Dashboard row's label moves into the list header.
     @Namespace private var scopeTitle
-    @State private var wavesHeight = WorkNavigator.collapsedWavesHeight
+    @State private var wavesHeight: CGFloat = 130
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var listTitle: String {
@@ -70,12 +70,14 @@ struct WorkNavigator: View {
                             .help("Back to Working Tasks")
                             .accessibilityIdentifier("work-sidebar-back")
                     }
-                    HStack {
-                        Text(listTitle.uppercased()).lineLimit(1)
-                            .matchedGeometryEffect(id: scope, in: scopeTitle)
-                        Spacer()
-                        Text("\(taskIDs.count)")
-                    }.font(Typography.code(10)).foregroundStyle(palette.textSecondary).padding(10)
+                    if scope != .repository {
+                        HStack {
+                            Text(listTitle.uppercased()).lineLimit(1)
+                                .matchedGeometryEffect(id: scope, in: scopeTitle)
+                            Spacer()
+                            Text("\(taskIDs.count)")
+                        }.font(Typography.code(10)).foregroundStyle(palette.textSecondary).padding(10)
+                    }
                     // ⌘N counts the rows on screen; sidebar Task IDs are already unique.
                     ForEach(Array(taskIDs.enumerated()), id: \.element) { index, id in
                         taskRow(id, slotHint: index < 9 ? "⌘\(index + 1)" : nil)
@@ -99,10 +101,8 @@ struct WorkNavigator: View {
                 }.padding(8)
                 .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: scope)
             }
-            if !model.visibleRoadmaps.isEmpty {
-                Divider()
-                waveSection
-            }
+            WaveSectionDivider(navigation: model.navigation)
+            waveSection
         }
         .foregroundStyle(palette.text).background(palette.surfaceMuted)
         .accessibilityIdentifier("work-navigator")
@@ -141,33 +141,38 @@ struct WorkNavigator: View {
     }
 
     /// Pinned below the Task list so any Wave is a click away however far the
-    /// list scrolls; it starts about three rows tall.
+    /// list scrolls; it starts about three rows tall and its divider drags.
     private var waveSection: some View {
-        let expanded = model.navigation.sidebarWavesExpanded
-        return VStack(alignment: .leading, spacing: 0) {
-            Button { model.navigation.sidebarWavesExpanded.toggle() } label: {
-                HStack {
-                    Text("WAVES")
-                    Spacer()
-                    Image(systemName: expanded ? "chevron.down" : "chevron.up")
-                }.font(Typography.code(10)).foregroundStyle(palette.textSecondary).padding(10)
-                    .contentShape(Rectangle())
-            }.buttonStyle(.plain)
-                .help(expanded ? "Show fewer Waves" : "Show all Waves")
-                .accessibilityIdentifier("work-waves-toggle")
-            ScrollView {
-                VStack(alignment: .leading, spacing: 5) {
-                    ForEach(model.visibleRoadmaps, id: \.wave.id) { waveRow($0) }
-                }.padding([.horizontal, .bottom], 8)
-            }
-            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
-                wavesHeight = height
-            }
-            .frame(maxHeight: expanded ? wavesHeight : min(wavesHeight, Self.collapsedWavesHeight))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 5) {
+                repositoryRow
+                ForEach(model.visibleRoadmaps, id: \.wave.id) { waveRow($0) }
+            }.padding(8)
         }
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
+            wavesHeight = height
+        }
+        .frame(height: min(wavesHeight, model.navigation.sidebarWavesHeight))
+        .modifier(NewWaveOnHover(model: model))
     }
 
-    private static let collapsedWavesHeight: CGFloat = 130
+    /// The repository is the default Wave: its Working Tasks.
+    private var repositoryRow: some View {
+        let name = model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository"
+        return Button { model.select(nil) } label: {
+            HStack {
+                Image(systemName: "folder")
+                Text(name).lineLimit(1)
+                Spacer()
+            }.font(Typography.body(13)).padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(model.navigation.sidebarScope == .repository ? palette.surface : .clear,
+                            in: RoundedRectangle(cornerRadius: 6))
+        }.buttonStyle(.plain)
+            .help("Working Tasks")
+            .accessibilityLabel("\(name), Working Tasks")
+            .accessibilityIdentifier("work-wave-repository")
+    }
 
     private func waveRow(_ wave: WaveRoadmap) -> some View {
         Button { model.select(.wave(id: wave.wave.id)) } label: {
@@ -476,6 +481,75 @@ extension WorkJumpScope {
         case .repository: "repository"
         case .wave(let id): "wave-" + id
         }
+    }
+}
+
+/// A + appears while the pointer is over the Waves section; it names and authors a Wave.
+/// Hover state lives here so crossing the section re-renders only the button.
+private struct NewWaveOnHover: ViewModifier {
+    let model: WorkModel
+    @Environment(\.palette) private var palette
+    @State private var hovering = false
+    @State private var naming = false
+    @State private var name = ""
+    @State private var error: String?
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { hovering = $0 }
+            .overlay(alignment: .topTrailing) {
+                Button { naming = true } label: { Image(systemName: "plus").padding(6).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
+                    .padding(.top, 12).padding(.trailing, 12)
+                    .opacity(hovering || naming ? 1 : 0)
+                    .help("New Wave")
+                    .accessibilityLabel("New Wave")
+                    .accessibilityIdentifier("work-new-wave")
+                    .popover(isPresented: $naming, arrowEdge: .trailing) { form }
+            }
+    }
+
+    private var form: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("Wave name", text: $name).onSubmit(create).frame(width: 200)
+            if let error { Text(error).font(Typography.body(11)).foregroundStyle(palette.warning) }
+            HStack { Spacer(); Button("Create", action: create).keyboardShortcut(.defaultAction) }
+        }.padding(12)
+    }
+
+    private func create() {
+        guard let repoPath = model.repoPath else { return }
+        Task {
+            do {
+                try await PortfolioRepoState.createWave(name: name, repoPath: repoPath)
+                naming = false
+                name = ""
+                error = nil
+                await model.refreshPlanning()
+            } catch let failure {
+                error = failure.localizedDescription
+            }
+        }
+    }
+}
+
+/// Drags the pinned Waves section taller or shorter.
+private struct WaveSectionDivider: View {
+    let navigation: WorkNavigation
+    @Environment(\.palette) private var palette
+    @State private var start: CGFloat?
+
+    var body: some View {
+        Rectangle().fill(palette.border).frame(height: 1)
+            .frame(maxWidth: .infinity).padding(.vertical, 3)
+            .contentShape(Rectangle())
+            .onHover { if $0 { NSCursor.resizeUpDown.push() } else { NSCursor.pop() } }
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                if start == nil { start = navigation.sidebarWavesHeight }
+                navigation.sidebarWavesHeight = max(44, (start ?? navigation.sidebarWavesHeight) - value.translation.height)
+            }.onEnded { _ in start = nil })
+            .accessibilityLabel("Waves height")
+            .accessibilityIdentifier("work-waves-divider")
     }
 }
 

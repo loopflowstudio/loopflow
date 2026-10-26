@@ -1309,9 +1309,9 @@ struct SessionsContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: PaneGeometry.workspaceCornerRadius))
+        .clipShape(PaneGeometry.workspaceShape)
         .overlay {
-            RoundedRectangle(cornerRadius: PaneGeometry.workspaceCornerRadius).strokeBorder(palette.borderActive, lineWidth: 1).allowsHitTesting(false)
+            PaneGeometry.workspaceShape.strokeBorder(palette.borderActive, lineWidth: 1).allowsHitTesting(false)
         }
         .accessibilityIdentifier("work-workspace-\(key.id)")
     }
@@ -1476,7 +1476,9 @@ private struct SidebarDivider: View {
     @State private var start: CGFloat?
 
     var body: some View {
-        Rectangle().fill(palette.border).frame(width: 5)
+        // A shadow's edge: dark against the sidebar, fading into the workspace.
+        LinearGradient(colors: [palette.border, palette.border.opacity(0)], startPoint: .leading, endPoint: .trailing)
+            .frame(width: 5)
             .contentShape(Rectangle())
             .onHover { if $0 { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
             .gesture(DragGesture(minimumDistance: 0).onChanged { value in

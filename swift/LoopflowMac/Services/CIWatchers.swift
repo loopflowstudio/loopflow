@@ -28,7 +28,7 @@ final class CIWatchers {
 
     /// `--parent-pid` stops the watcher if the app dies without quitting.
     nonisolated static func command(lfPath: String, parentPID: Int32) -> [String] {
-        [lfPath, "repo", "ci", "watch", "--parent-pid", String(parentPID)]
+        [lfPath, "ci", "watch", "--parent-pid", String(parentPID)]
     }
 
     var watchedRepos: Set<String> { Set(watchers.keys) }

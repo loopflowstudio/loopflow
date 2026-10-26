@@ -82,7 +82,7 @@ pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult
         if let Some(common) = common.as_ref().filter(|_| locator.is_none()) {
             if !retained_checkout_matches(conn, repo)? {
                 return Err(StoreError::InvalidData(format!(
-                "{repo} retains repository {id} but has no Git locator; establish the original checkout with `lf repo identity --bind {id}`, or recover the moved checkout with `lf repo identity --relocate {id}`"
+                "{repo} retains repository {id} but has no Git locator; establish the original checkout with `lf repository --bind {id}`, or recover the moved checkout with `lf repository --relocate {id}`"
                 )));
             }
             crate::repository::location::write_locator(common, &id)
@@ -98,7 +98,7 @@ pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult
                 .optional()?;
             if path.as_deref() != Some(repo) {
                 return Err(StoreError::InvalidData(
-                    "Git locator conflicts with retained Work; reconcile with `lf repo identity`"
+                    "Git locator conflicts with retained Work; reconcile with `lf repository`"
                         .into(),
                 ));
             }

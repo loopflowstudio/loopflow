@@ -183,7 +183,7 @@ lf wave status <wave>
 If PM is not bound and Linear is connected, offer the explicit binding command:
 
 ```bash
-lf repo connect <wave>
+lf wave connect <wave>
 ```
 
 The first Wave establishes the repository Team and defaults its key from the
@@ -214,8 +214,8 @@ Tasks select an explicit Workflow, then their Wave default, then repository `wor
 
 If no current Project exists, report that planning gap. Establishing a chapter
 requires accepted repository-wide direction and plan dispositions: preview with
-`lf repo new-chapter <name> --dry-run --json`, then apply with
-`lf repo new-chapter <name> --json` to apply those dispositions. Every Wave
+`lf wave new-chapter --all <name> --dry-run --json`, then apply with
+`lf wave new-chapter --all <name> --json` to apply those dispositions. Every Wave
 participates; do not rotate the repository merely to initialize one Wave. A Wave
 with no Projects receives an empty plan unless an authored Planned successor
 supplies its content. Workflow defaults remain on the Wave or repository. Existing successors and predecessors

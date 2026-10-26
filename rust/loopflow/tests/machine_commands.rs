@@ -319,7 +319,7 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
     let repo = loopflow_test_support::TestRepo::new();
     let path = repo.path().canonicalize().unwrap();
     let identity = fixture
-        .command(&["repo", "identity"])
+        .command(&["config", "repository"])
         .current_dir(&path)
         .output()
         .unwrap();

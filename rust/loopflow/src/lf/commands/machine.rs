@@ -11,8 +11,12 @@ use crate::lf::MachineCommand;
 use crate::store::Store;
 
 pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
-    if let MachineCommand::End { label, force } = cmd {
-        return super::rental::end(label, *force);
+    // Rentals own their runtimes, so they dispatch before this one opens.
+    match cmd {
+        MachineCommand::End { label, force } => return super::rental::end(label, *force),
+        MachineCommand::Pool { cmd } => return super::rental::run_pool(cmd),
+        MachineCommand::Ondemand { cmd } => return super::rental::run_ondemand(cmd, batch),
+        _ => {}
     }
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(run_async(cmd, batch))?;
@@ -239,7 +243,11 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             unreachable!("credential commands dispatch before opening the store")
         }
         MachineCommand::Use { .. } => unreachable!("machine use dispatches with its repository"),
-        MachineCommand::End { .. } => unreachable!("machine end dispatches before the store opens"),
+        MachineCommand::End { .. }
+        | MachineCommand::Pool { .. }
+        | MachineCommand::Ondemand { .. } => {
+            unreachable!("machine end, pool and ondemand dispatch before the store opens")
+        }
     }
     Ok(())
 }

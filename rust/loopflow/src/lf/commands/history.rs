@@ -115,6 +115,15 @@ pub enum HistoryCommand {
         #[arg(long)]
         context: bool,
     },
+    /// Measure this codebase: lines and tokens per directory (tracked files only)
+    Tokens {
+        /// Emit as JSON
+        #[arg(long)]
+        json: bool,
+        /// Walk git history instead: the codebase's size on each day it changed
+        #[arg(long, value_name = "DAYS")]
+        days: Option<u32>,
+    },
     /// Launch a new execution from an immutable captured provider request
     Replay {
         /// Captured input identity or an unambiguous displayed prefix
@@ -151,6 +160,7 @@ fn parse_cursor(value: &str) -> Result<LfProcessCursor, String> {
 
 pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
     match command {
+        HistoryCommand::Tokens { json, days } => super::tokens::run(*json, *days),
         HistoryCommand::Replay { run } => super::replay::run(run),
         HistoryCommand::Export { since } => export(since),
         HistoryCommand::Usage {

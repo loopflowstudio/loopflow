@@ -11,7 +11,7 @@ use crate::git::{current_branch, get_default_branch};
 use crate::graph::load_skill;
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::output::{column_width, Colors};
-use crate::lf::{CronCommand, PrCommand, ReleaseCommand, RepoCommand, WtCommand};
+use crate::lf::{CiCommand, CronCommand, PrCommand, ReleaseCommand, WtCommand};
 use crate::naming::git_user;
 use crate::ops::branch_prune::{
     prune_branches, BranchCopy, EntryStatus as BranchPruneStatus, TaskBranches,
@@ -861,10 +861,10 @@ pub fn connect_wave(
         // ambient still uses the shared validating resolver.
         let name = if let Some(raw) = explicit {
             crate::ops::normalize_wave_name(raw)
-                .ok_or_else(|| anyhow!("repo connect requires a non-empty wave name"))?
+                .ok_or_else(|| anyhow!("wave connect requires a non-empty wave name"))?
         } else {
             ambient_wave(None)?
-                .ok_or_else(|| anyhow!("cannot determine wave; run `lf repo connect <name>`"))?
+                .ok_or_else(|| anyhow!("cannot determine wave; run `lf wave connect <name>`"))?
         };
         vec![name]
     };
@@ -928,100 +928,29 @@ pub fn sync_planning(
     Ok(())
 }
 
-pub fn refresh_status(wave: Option<&str>) -> Result<String> {
+/// Refresh shared planning before `wave status --sync` reads it: the Wave from
+/// Linear, or the repository's Git planning ref, whose exchange is per repository.
+/// Returns the Wave a Linear refresh resolved.
+pub fn refresh_status(wave: Option<&str>) -> Result<Option<String>> {
     let repo = crate::repo::working_directory()?;
+    if crate::lf::commands::planning::plans_through_git(&repo)? {
+        crate::lf::commands::planning::refresh(&repo)?;
+        return Ok(None);
+    }
     let wave =
         planning_wave(&repo, wave)?.ok_or_else(|| anyhow::anyhow!("Select a Wave to refresh"))?;
     tokio::runtime::Runtime::new()?.block_on(crate::ops::linear::refresh_wave(&repo, &wave))?;
-    Ok(wave)
+    Ok(Some(wave))
 }
 
-pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
-    match cmd {
-        RepoCommand::Identity {
-            bind,
-            relocate,
-            path,
-            json,
-        } => crate::lf::commands::work_route::identity(
-            bind.as_ref(),
-            relocate.as_ref(),
-            *path,
-            *json,
-        ),
-
-        RepoCommand::Comment { message, .. } => crate::lf::commands::waves::comment(None, message),
-        RepoCommand::Planning { cmd } => crate::lf::commands::planning::run(cmd),
-        RepoCommand::Connect {
-            wave,
-            all,
-            team_key,
-            team_name,
-        } => {
-            let repo = crate::repo::working_directory()?;
-            connect_wave(
-                &repo,
-                wave.as_deref(),
-                *all,
-                team_key.as_deref(),
-                team_name.as_deref(),
-            )
-        }
-        RepoCommand::Refresh { wave, all } => {
-            let repo = crate::repo::working_directory()?;
-            if crate::lf::commands::planning::plans_through_git(&repo)? {
-                return crate::lf::commands::planning::refresh(&repo);
-            }
-            sync_planning(&repo, wave.as_deref(), *all, false, false)
-        }
-        RepoCommand::NewChapter {
-            name,
-            plan,
-            dry_run,
-            json,
-        } => {
-            let repo = crate::repo::working_directory()?;
-            let rotation = crate::ops::chapter::new_chapter(&repo, name, plan, None, *dry_run)?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&rotation)?);
-            } else {
-                println!("Chapter {}", rotation.name);
-                for wave in rotation.waves {
-                    println!(
-                        "  {} → {} ({})",
-                        wave.wave, rotation.name, wave.successor_id
-                    );
-                    for task in wave.tasks {
-                        println!(
-                            "    {}  {:?}  {}",
-                            task.task.identifier, task.disposition, task.reason
-                        );
-                    }
-                }
-            }
-            Ok(())
-        }
-        RepoCommand::Release { cmd } => run_release(cmd),
-        RepoCommand::Tokens { json, days } => crate::lf::commands::tokens::run(*json, *days),
-        RepoCommand::Ci { cmd: Some(cmd), .. } => ci_watch_cmd(cmd),
-        RepoCommand::Ci {
-            cmd: None,
-            since,
-            wave,
-            repo,
-            json,
-        } => crate::lf::commands::ci::run(since, wave.as_deref(), repo.as_deref(), *json),
-        RepoCommand::Reteam { apply } => {
-            let repo = crate::repo::working_directory()?;
-            let result = crate::ops::linear::reteam(
-                &repo,
-                &crate::ops::linear::LinearReteamOptions { apply: *apply },
-                &CliProgress,
-            )?;
-            print_pm_reteam_result(&result);
-            Ok(())
-        }
-    }
+pub fn reteam(repo: &std::path::Path, apply: bool) -> Result<()> {
+    let result = crate::ops::linear::reteam(
+        repo,
+        &crate::ops::linear::LinearReteamOptions { apply },
+        &CliProgress,
+    )?;
+    print_pm_reteam_result(&result);
+    Ok(())
 }
 
 fn print_pm_reteam_result(result: &crate::ops::linear::LinearReteamResult) {
@@ -1090,9 +1019,9 @@ fn print_pm_sync_result(result: &crate::ops::linear::LinearSyncResult) {
     }
 }
 
-fn ci_watch_cmd(cmd: &crate::lf::CiCommand) -> Result<()> {
+pub fn ci_watch_cmd(cmd: &CiCommand) -> Result<()> {
     use crate::ops::ci_watch;
-    let crate::lf::CiCommand::Watch {
+    let CiCommand::Watch {
         once,
         install,
         uninstall,

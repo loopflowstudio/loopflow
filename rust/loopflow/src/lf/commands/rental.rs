@@ -775,7 +775,7 @@ fn prepare(
         .ok_or_else(|| anyhow!("{} has no directory name", repo.display()))?;
     let q = super::ssh::sh_quote;
     let script = format!(
-        "{} && mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || gh repo clone {origin} {dir} || git clone {origin} {dir}; }} && cd {dir} && lf repo identity --bind {id}",
+        "{} && mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || gh repo clone {origin} {dir} || git clone {origin} {dir}; }} && cd {dir} && lf repository --bind {id}",
         super::machine::REMOTE_PATH,
         dir = q(directory),
         origin = q(&origin),

@@ -149,7 +149,7 @@ fn telemetry_history_does_not_imply_release_coverage() {
         .unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
         command
-            .args(["repo", "release", "history", "--wave", "infrastructure"])
+            .args(["release", "history", "--wave", "infrastructure"])
             .current_dir(repo.path());
         let output = command.output().unwrap();
         assert!(output.status.success(), "{output:?}");
@@ -207,7 +207,6 @@ fn closed_release_history_records_repair_without_settling_or_transferring_work()
     let history = || {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
             .args([
-                "repo",
                 "release",
                 "history",
                 "--wave",
@@ -267,7 +266,6 @@ fn closed_release_history_records_repair_without_settling_or_transferring_work()
     assert_eq!(fs::read(&path).unwrap(), original);
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
-            "repo",
             "release",
             "history",
             "--wave",
@@ -297,7 +295,6 @@ fn closed_release_history_records_repair_without_settling_or_transferring_work()
     fs::write(&path, &retained).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
-            "repo",
             "release",
             "history",
             "--wave",
@@ -1222,7 +1219,6 @@ exit 0
                 assert_eq!(history.summary.unresolved, 0);
                 let output = Command::new(env!("CARGO_BIN_EXE_lf"))
                     .args([
-                        "repo",
                         "release",
                         "history",
                         "--wave",
@@ -1383,7 +1379,6 @@ exit 0
         if scenario == "release-overlap" {
             let output = Command::new(env!("CARGO_BIN_EXE_lf"))
                 .args([
-                    "repo",
                     "release",
                     "history",
                     "--wave",

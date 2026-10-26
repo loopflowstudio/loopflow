@@ -1872,7 +1872,7 @@ fi"#;
         assert_eq!(state, "watching");
         // The scheduled check observes delivery; the watcher starts repairs.
         let check: &[&str] = if repair {
-            &["repo", "ci", "watch", "--once"]
+            &["ci", "watch", "--once"]
         } else {
             &["pr", "reconcile"]
         };

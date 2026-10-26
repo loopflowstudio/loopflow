@@ -65,13 +65,22 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 .context("Session has no retained execution")?;
             crate::transport::attach(&owner, *observe, !*if_free)
         }
-        SessionCommand::Steer { id, message } => {
+        SessionCommand::Steer { id, message, .. } => {
             let store = open_shared_store().await?;
+            let author = crate::config::participant_name()?
+                .unwrap_or_else(|| "attribution unresolved".into());
+            let Some(id) = id else {
+                let root = crate::repo::find_repo_root()?;
+                let repo = crate::repository::CanonicalRepo::discover(&root)?;
+                let steer = store
+                    .sqlite
+                    .save_repository_steer(&repo, &author, message)?;
+                println!("Saved {}", steer.id);
+                return Ok(());
+            };
             let session = crate::ops::human_session::session_by_id(&store, id)
                 .await?
                 .context("Session not found")?;
-            let author = crate::config::participant_name()?
-                .unwrap_or_else(|| "attribution unresolved".into());
             let steer = store
                 .sqlite
                 .save_session_steer(&session.id, &author, message)?;

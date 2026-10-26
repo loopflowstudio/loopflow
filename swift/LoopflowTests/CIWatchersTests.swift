@@ -21,7 +21,7 @@ struct CIWatchersTests {
     @Test("Desktop runs the same command a person would")
     func commandShape() {
         #expect(CIWatchers.command(lfPath: "/Applications/Loopflow.app/Contents/MacOS/lf", parentPID: 42) == [
-            "/Applications/Loopflow.app/Contents/MacOS/lf", "repo", "ci", "watch", "--parent-pid", "42",
+            "/Applications/Loopflow.app/Contents/MacOS/lf", "ci", "watch", "--parent-pid", "42",
         ])
     }
 

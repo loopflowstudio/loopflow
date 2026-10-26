@@ -188,7 +188,7 @@ async fn select_scope(
 fn repository_id(store: &SqliteStore, repo: &CanonicalRepo) -> anyhow::Result<RepositoryId> {
     store
         .repository_id(&repo.to_string())?
-        .ok_or_else(|| anyhow!("repository identity unavailable; run `lf repo identity`"))
+        .ok_or_else(|| anyhow!("repository identity unavailable; run `lf repository`"))
 }
 
 fn describe(store: &SqliteStore, machine: &MachineId) -> anyhow::Result<String> {

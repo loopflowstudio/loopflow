@@ -363,7 +363,7 @@ measurement lives in reviewed `.lf/wave/<wave>/metrics/*.md` contracts, not a
 | Field | What it does |
 |-------|-------------|
 | `agent` | Preferred agent harness/model |
-| `linear.initiative` | Linear Initiative id backing the wave (written by `lf repo connect`) |
+| `linear.initiative` | Linear Initiative id backing the wave (written by `lf wave connect`) |
 
 Schedules live in the repository configuration as ordinary command arguments;
 see [Schedule ordinary commands](lf.md#schedule-ordinary-commands).

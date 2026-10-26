@@ -30,7 +30,7 @@ enum WaveForm {
 
 struct Cmd {
     id: &'static str,
-    /// Subcommand path for the completeness guard (e.g. `["repo", "refresh"]`).
+    /// Subcommand path for the completeness guard (e.g. `["wave", "connect"]`).
     path: &'static [&'static str],
     /// Full args after `lf` (subcommand path + extra flags/values).
     base_args: &'static [&'static str],
@@ -65,7 +65,7 @@ const SESSION_TARGETS: &[&[&str]] = &[&["session", "connect"]];
 
 /// Membership changes name an explicit destination and preserve execution context.
 /// `machine use` names the Wave whose default it sets, else applies to the checkout.
-const MEMBERSHIP_TARGETS: &[&[&str]] = &[&["task", "move"], &["machine", "use"]];
+const MEMBERSHIP_TARGETS: &[&[&str]] = &[&["task", "move"], &["ops", "machine", "use"]];
 
 /// Commands whose optional `--wave` filters recorded results instead of
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
@@ -73,7 +73,7 @@ const MEMBERSHIP_TARGETS: &[&[&str]] = &[&["task", "move"], &["machine", "use"]]
 const FILTER_ONLY: &[&[&str]] = &[
     &["task", "list"],
     &["history"],
-    &["repo", "ci"],
+    &["ops", "ci"],
     &["wave", "cron", "list"],
     &["wave", "cron", "publish"],
     &["wave", "cron", "unpublish"],
@@ -133,18 +133,11 @@ const COMMANDS: &[Cmd] = &[
     },
     // ── Mutations ────────────────────────────────────────────────────────
     Cmd {
-        id: "repo connect",
-        path: &["repo", "connect"],
-        base_args: &["repo", "connect"],
+        id: "wave connect",
+        path: &["wave", "connect"],
+        base_args: &["wave", "connect"],
         wave_form: WaveForm::Positional,
         global_default: false,
-    },
-    Cmd {
-        id: "repo refresh",
-        path: &["repo", "refresh"],
-        base_args: &["repo", "refresh"],
-        wave_form: WaveForm::Positional,
-        global_default: true,
     },
     Cmd {
         id: "task create",

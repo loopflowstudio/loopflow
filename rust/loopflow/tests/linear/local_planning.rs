@@ -258,8 +258,9 @@ fn stored_rotation_commits_all_waves_and_serializes_new_work() {
     }
     let path = home.path().join("rotation.json");
     let args = [
-        "repo",
+        "wave",
         "new-chapter",
+        "--all",
         "Next",
         "--plan",
         path.to_str().unwrap(),

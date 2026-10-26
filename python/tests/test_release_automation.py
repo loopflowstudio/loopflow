@@ -194,7 +194,7 @@ def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
     config = yaml.safe_load((ROOT / ".lf/config.yaml").read_text())
     assert "crons" not in config
     assert yaml.safe_load((ROOT / ".lf/graphs/release-run.yaml").read_text()) == [
-        {"cmd": "repo release run patch"}
+        {"cmd": "release run patch"}
     ]
 
     assert config["release"]["targets"]["default"]["publisher"] == [

@@ -178,33 +178,35 @@ impl Cli {
                     ..
                 }
             ),
-            Some(Commands::Commit { message, .. }) => message.is_none(),
-            Some(Commands::Sync(args)) => !args.plan && !args.abort && !args.manual,
-            Some(Commands::Pr { cmd }) => matches!(
-                cmd,
-                Some(
-                    PrCommand::Open { .. }
-                        | PrCommand::Publish { .. }
-                        | PrCommand::Submit { .. }
-                        | PrCommand::Arm { .. }
-                        | PrCommand::Land { .. }
-                )
-            ),
-            Some(Commands::Repo { cmd }) => matches!(
-                cmd,
-                RepoCommand::Release {
-                    cmd: ReleaseCommand::Run { .. }
+            Some(Commands::Ops { cmd }) => match cmd {
+                OpsCommand::Commit { message, .. } => message.is_none(),
+                OpsCommand::Sync(args) => !args.plan && !args.abort && !args.manual,
+                OpsCommand::Pr { cmd } => matches!(
+                    cmd,
+                    Some(
+                        PrCommand::Open { .. }
+                            | PrCommand::Publish { .. }
+                            | PrCommand::Submit { .. }
+                            | PrCommand::Arm { .. }
+                            | PrCommand::Land { .. }
+                    )
+                ),
+                OpsCommand::Release { cmd } => matches!(
+                    cmd,
+                    ReleaseCommand::Run { .. }
                         | ReleaseCommand::Bump { .. }
                         | ReleaseCommand::Notes { .. }
-                } | RepoCommand::Ci {
-                    cmd: Some(CiCommand::Watch {
+                ),
+                OpsCommand::Ci { cmd, .. } => matches!(
+                    cmd,
+                    Some(CiCommand::Watch {
                         status: false,
                         uninstall: false,
                         ..
-                    }),
-                    ..
-                }
-            ),
+                    })
+                ),
+                _ => false,
+            },
             Some(_) => false,
         }
     }
@@ -273,12 +275,15 @@ impl Cli {
             return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
                 "root --json requires --context or --explain; use the command's own --json when available\n"));
         }
-        if let Some(Commands::Account {
-            cmd,
-            provider,
-            cached,
-            details,
-            json,
+        if let Some(Commands::Ops {
+            cmd:
+                OpsCommand::Account {
+                    cmd,
+                    provider,
+                    cached,
+                    details,
+                    json,
+                },
         }) = &self.command
         {
             if let Some(misuse) =
@@ -422,35 +427,16 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: crate::data_clone::CloneCommand,
     },
-    /// Pull request lifecycle
-    Pr {
+    /// Software delivery and the environment work runs in: PRs, CI, releases,
+    /// commits, worktrees, Machines and provider accounts
+    Ops {
         #[command(subcommand)]
-        cmd: Option<PrCommand>,
+        cmd: OpsCommand,
     },
-    /// Worktree operations
-    Wt {
-        #[command(subcommand)]
-        cmd: WtCommand,
-    },
-    /// Merge upstream into the current branch (default: main or stack parent)
-    Sync(SyncArgs),
     /// Manage working notes
     Scratch {
         #[command(subcommand)]
         cmd: ScratchCommand,
-    },
-    /// Commit changes
-    Commit {
-        #[arg(short = 'm', long = "message")]
-        message: Option<String>,
-        /// Push the branch after committing
-        #[arg(short = 'p', long = "push")]
-        push: bool,
-        #[arg(long = "no-add")]
-        no_add: bool,
-        /// Commit only these paths, preserving other staged and unstaged edits
-        #[arg(value_name = "PATH", conflicts_with_all = ["no_add", "push"])]
-        paths: Vec<String>,
     },
 
     /// Show waiting, blocked, active, and finished work with next actions
@@ -509,27 +495,6 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: SessionCommand,
     },
-    /// Refresh account access and capacity, or manage logins and routing
-    Account {
-        #[command(subcommand)]
-        cmd: Option<AccountCommand>,
-        /// Limit observations to one provider
-        provider: Option<crate::provider_auth::Provider>,
-        /// Inspect cached evidence without contacting providers
-        #[arg(long)]
-        cached: bool,
-        /// Include credential sources, browser choices, and timestamps
-        #[arg(long)]
-        details: bool,
-        /// Emit the account overview as one JSON document
-        #[arg(long)]
-        json: bool,
-    },
-    /// Repository releases, source measurement, CI evidence, and provider administration
-    Repo {
-        #[command(subcommand)]
-        cmd: RepoCommand,
-    },
     /// Manage the installed Loopflow release and exported skills
     #[command(name = "self")]
     Self_ {
@@ -554,21 +519,6 @@ pub enum Commands {
     Desktop {
         #[command(subcommand)]
         cmd: DesktopCommand,
-    },
-    /// Name and connect to machines
-    Machine {
-        #[command(subcommand)]
-        cmd: MachineCommand,
-    },
-    /// Group machines you own; a pool takes new work only on a free machine
-    Pool {
-        #[command(subcommand)]
-        cmd: PoolCommand,
-    },
-    /// Rent machines from a provider within a limit and an hourly price
-    Ondemand {
-        #[command(subcommand)]
-        cmd: OndemandCommand,
     },
     /// Bridge new Discord messages to finite Wave Sessions
     Discord {
@@ -639,6 +589,79 @@ pub enum Commands {
     /// External: skill/graph name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+/// Software delivery and the environment work runs in.
+#[derive(Subcommand, Debug)]
+pub enum OpsCommand {
+    /// Pull request lifecycle
+    Pr {
+        #[command(subcommand)]
+        cmd: Option<PrCommand>,
+    },
+    /// Release operations (run, check, notes, bump, tag, status)
+    Release {
+        #[command(subcommand)]
+        cmd: ReleaseCommand,
+    },
+    /// Show how failed CI is detected, repaired, and landed across this Machine
+    Ci {
+        #[command(subcommand)]
+        cmd: Option<CiCommand>,
+        /// Relative window (7d, 24h, 30m) or RFC3339 start
+        #[arg(long, default_value = "7d")]
+        since: String,
+        /// Scope to one Wave
+        #[arg(long)]
+        wave: Option<String>,
+        /// Scope to one GitHub owner/repo
+        #[arg(long)]
+        repo: Option<String>,
+        /// Emit the complete incident report as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Commit changes
+    Commit {
+        #[arg(short = 'm', long = "message")]
+        message: Option<String>,
+        /// Push the branch after committing
+        #[arg(short = 'p', long = "push")]
+        push: bool,
+        #[arg(long = "no-add")]
+        no_add: bool,
+        /// Commit only these paths, preserving other staged and unstaged edits
+        #[arg(value_name = "PATH", conflicts_with_all = ["no_add", "push"])]
+        paths: Vec<String>,
+    },
+    /// Merge upstream into the current branch (default: main or stack parent)
+    Sync(SyncArgs),
+    /// Worktree operations
+    Wt {
+        #[command(subcommand)]
+        cmd: WtCommand,
+    },
+    /// Name, connect, pool and rent Machines
+    Machine {
+        #[command(subcommand)]
+        cmd: MachineCommand,
+    },
+    /// Refresh account access and capacity, or manage logins and routing
+    Account {
+        #[command(subcommand)]
+        cmd: Option<AccountCommand>,
+        /// Limit observations to one provider
+        provider: Option<crate::provider_auth::Provider>,
+        /// Inspect cached evidence without contacting providers
+        #[arg(long)]
+        cached: bool,
+        /// Include credential sources, browser choices, and timestamps
+        #[arg(long)]
+        details: bool,
+        /// Emit the account overview as one JSON document
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1022,8 +1045,17 @@ pub enum SessionCommand {
         #[arg(long, requires = "prepare")]
         json: bool,
     },
-    /// Save a steer for this Session without starting a turn
-    Steer { id: String, message: String },
+    /// Save a steer for this Session, or with --repo for the repository's Sessions,
+    /// without starting a turn
+    #[command(allow_missing_positional = true)]
+    Steer {
+        #[arg(required_unless_present = "repo_steer", conflicts_with = "repo_steer")]
+        id: Option<String>,
+        message: String,
+        /// Steer the current repository's Sessions
+        #[arg(long = "repo", id = "repo_steer")]
+        repo: bool,
+    },
     /// Inspect steer delivery or retry delivery
     Steers {
         id: String,
@@ -1181,10 +1213,15 @@ pub enum WaveCommand {
         #[arg(long, required = true)]
         steer: bool,
     },
-    /// Rotate this Wave using its exact destination in a retained chapter plan
+    /// Rotate this Wave, or every Wave with --all, to the named Project plan
+    #[command(allow_missing_positional = true)]
     NewChapter {
-        wave: String,
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        wave: Option<String>,
         name: String,
+        /// Advance every Wave in this repository
+        #[arg(long)]
+        all: bool,
         #[arg(long)]
         plan: PathBuf,
         #[arg(long)]
@@ -1254,6 +1291,25 @@ pub enum WaveCommand {
         /// The complete plan as JSON
         #[arg(long)]
         plan: std::path::PathBuf,
+    },
+    /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
+    Connect {
+        /// Wave name (auto-detected if omitted)
+        wave: Option<String>,
+        /// Recursively initialize every Wave under .lf/wave/
+        #[arg(long, conflicts_with = "wave")]
+        all: bool,
+        /// Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name.
+        #[arg(long = "team-key")]
+        team_key: Option<String>,
+        /// Repository Team display name. Defaults to the repository name.
+        #[arg(long = "team-name")]
+        team_name: Option<String>,
+    },
+    /// Reconcile linked Waves to the repository's Linear Team
+    Reteam {
+        #[arg(long)]
+        apply: bool,
     },
 }
 
@@ -1996,104 +2052,6 @@ pub enum PlanningCommand {
     },
 }
 
-#[derive(Subcommand, Debug)]
-pub enum RepoCommand {
-    /// Establish or print this repository's selected planning identity
-    Identity {
-        /// Associate this checkout with a repository identity, retaining prior IDs
-        #[arg(long)]
-        bind: Option<crate::durable::RepositoryId>,
-        /// Reconnect retained Work after a move predating its Git locator
-        #[arg(long, conflicts_with = "bind")]
-        relocate: Option<crate::durable::RepositoryId>,
-        /// Print the selected repository's current local directory
-        #[arg(long, conflicts_with = "json")]
-        path: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Save a steer for associated Sessions without starting a turn
-    Comment {
-        message: String,
-        #[arg(long, required = true)]
-        steer: bool,
-    },
-    /// Inspect planning synchronization and personal identity
-    Planning {
-        #[command(subcommand)]
-        cmd: PlanningCommand,
-    },
-    /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
-    Connect {
-        /// Wave name (auto-detected if omitted)
-        wave: Option<String>,
-        /// Recursively initialize every Wave under .lf/wave/
-        #[arg(long, conflicts_with = "wave")]
-        all: bool,
-        /// Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name.
-        #[arg(long = "team-key")]
-        team_key: Option<String>,
-        /// Repository Team display name. Defaults to the repository name.
-        #[arg(long = "team-name")]
-        team_name: Option<String>,
-    },
-    /// Refresh shared planning now: Linear per Wave, or the repository's Git
-    /// planning ref (Git ignores the Wave selection; its exchange is per repository)
-    Refresh {
-        wave: Option<String>,
-        #[arg(long, conflicts_with = "wave")]
-        all: bool,
-    },
-
-    /// Advance every Wave to the named Project plan
-    NewChapter {
-        name: String,
-        #[arg(long)]
-        plan: PathBuf,
-        #[arg(long)]
-        dry_run: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Release operations (run, check, notes, bump, tag, status)
-    Release {
-        #[command(subcommand)]
-        cmd: ReleaseCommand,
-    },
-    /// Measure this codebase: lines and tokens per directory (tracked files only)
-    Tokens {
-        /// Emit as JSON
-        #[arg(long)]
-        json: bool,
-        /// Walk git history instead: the codebase's size on each day it changed
-        #[arg(long, value_name = "DAYS")]
-        days: Option<u32>,
-    },
-    /// Show how failed CI is detected, repaired, and landed across this Machine
-    Ci {
-        #[command(subcommand)]
-        cmd: Option<CiCommand>,
-        /// Relative window (7d, 24h, 30m) or RFC3339 start
-        #[arg(long, default_value = "7d")]
-        since: String,
-        /// Scope to one Wave
-        #[arg(long)]
-        wave: Option<String>,
-        /// Scope to one GitHub owner/repo
-        #[arg(long)]
-        repo: Option<String>,
-        /// Emit the complete incident report as JSON
-        #[arg(long)]
-        json: bool,
-    },
-
-    /// Reconcile linked Waves to the repository's Linear Team
-    Reteam {
-        #[arg(long)]
-        apply: bool,
-    },
-}
-
 /// Manage the installed artifacts and exported skills.
 #[derive(Debug, Subcommand)]
 pub enum SelfCommand {
@@ -2133,6 +2091,25 @@ pub enum ConfigCommand {
     User {
         #[arg(long)]
         json: bool,
+    },
+    /// Establish or print this repository's selected planning identity
+    Repository {
+        /// Associate this checkout with a repository identity, retaining prior IDs
+        #[arg(long)]
+        bind: Option<crate::durable::RepositoryId>,
+        /// Reconnect retained Work after a move predating its Git locator
+        #[arg(long, conflicts_with = "bind")]
+        relocate: Option<crate::durable::RepositoryId>,
+        /// Print the selected repository's current local directory
+        #[arg(long, conflicts_with = "json")]
+        path: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect planning synchronization and personal identity
+    Planning {
+        #[command(subcommand)]
+        cmd: PlanningCommand,
     },
 }
 
@@ -2227,6 +2204,16 @@ pub enum MachineCommand {
         /// Delete even though it holds unpushed work, which is lost
         #[arg(long)]
         force: bool,
+    },
+    /// Group machines you own; a pool takes new work only on a free machine
+    Pool {
+        #[command(subcommand)]
+        cmd: PoolCommand,
+    },
+    /// Rent machines from a provider within a limit and an hourly price
+    Ondemand {
+        #[command(subcommand)]
+        cmd: OndemandCommand,
     },
 }
 
@@ -2621,12 +2608,12 @@ mod tests {
         }
         assert!(command.find_subcommand("op").is_none());
         let literal = crate::lf::navigation::normalize_args(
-            ["lf", "wt", "create", "csv-export"]
+            ["lf", "ops", "wt", "create", "csv-export"]
                 .map(String::from)
                 .to_vec(),
         )
         .unwrap();
-        assert_eq!(literal, ["lf", "wt", "create", "csv-export"]);
+        assert_eq!(literal, ["lf", "ops", "wt", "create", "csv-export"]);
         assert!(Cli::try_parse_from(literal).is_ok());
         assert!(command
             .find_subcommand("task")
@@ -2640,29 +2627,57 @@ mod tests {
             assert!(command.find_subcommand(removed).is_none());
         }
         assert!(Cli::try_parse_from(["lf", "repo", "webhook", "serve"]).is_err());
+        assert!(command.find_subcommand("repo").is_none());
+        assert!(
+            Cli::try_parse_from(["lf", "wave", "new-chapter", "October", "--plan", "p.json"])
+                .is_err()
+        );
+        assert!(Cli::try_parse_from(["lf", "session", "steer", "keep attribution"]).is_err());
+        assert!(
+            Cli::try_parse_from(["lf", "session", "steer", "session_1", "m", "--repo"]).is_err()
+        );
         assert!(Cli::try_parse_from(["lf", "wave", "serve", "product"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wave", "place", "product", "mini"]).is_err());
         assert!(Cli::try_parse_from(["lf", "task", "admission", "LOO-1"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wave", "machine", "product", "mini"]).is_err());
         assert!(Cli::try_parse_from(["lf", "task", "handoff", "LOO-1", "mini"]).is_err());
         assert!(
-            Cli::try_parse_from(["lf", "machine", "use", "mini", "product", "--repo"]).is_err()
-        );
-        assert!(
-            Cli::try_parse_from(["lf", "machine", "use", "mini", "--task", "LOO-1", "--repo"])
+            Cli::try_parse_from(["lf", "ops", "machine", "use", "mini", "product", "--repo"])
                 .is_err()
         );
+        assert!(Cli::try_parse_from([
+            "lf", "ops", "machine", "use", "mini", "--task", "LOO-1", "--repo"
+        ])
+        .is_err());
         for args in [
             vec!["lf", "list"],
             vec!["lf", "wave", "list", "--json"],
-            vec!["lf", "pr", "checks"],
-            vec!["lf", "repo", "refresh", "product"],
-            vec!["lf", "repo", "refresh", "--all"],
+            vec!["lf", "ops", "pr", "checks"],
+            vec![
+                "lf",
+                "wave",
+                "new-chapter",
+                "--all",
+                "October",
+                "--plan",
+                "p.json",
+            ],
+            vec![
+                "lf",
+                "wave",
+                "new-chapter",
+                "product",
+                "October",
+                "--plan",
+                "p.json",
+            ],
+            vec!["lf", "session", "steer", "--repo", "keep attribution"],
+            vec!["lf", "session", "steer", "session_1", "keep attribution"],
             vec!["lf", "wave", "rename", "product", "--title", "Product"],
-            vec!["lf", "machine", "use", "mini"],
-            vec!["lf", "machine", "use", "mini", "product"],
-            vec!["lf", "machine", "use", "mini", "--repo"],
-            vec!["lf", "machine", "use", "mini", "--task", "LOO-1"],
+            vec!["lf", "ops", "machine", "use", "mini"],
+            vec!["lf", "ops", "machine", "use", "mini", "product"],
+            vec!["lf", "ops", "machine", "use", "mini", "--repo"],
+            vec!["lf", "ops", "machine", "use", "mini", "--task", "LOO-1"],
             vec!["lf", "discord", "serve", "product"],
             vec!["lf", "self", "doctor", "--planning", "--json"],
             vec!["lf", "wave", "status", "product", "--sync"],
@@ -2681,7 +2696,7 @@ mod tests {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }
         assert!(Cli::try_parse_from(["lf", "wave", "status", "--no-sync"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "wt", "list", "--full"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "wt", "list", "--full"]).is_err());
     }
 
     #[test]
@@ -2717,7 +2732,7 @@ mod tests {
                 cmd: crate::lf::SelfCommand::Install { cmd: None }
             })
         ));
-        assert!(Cli::try_parse_from(["lf", "machine", "install"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "machine", "install"]).is_err());
         assert!(Cli::try_parse_from(["lf", "self", "install", "schedule"]).is_ok());
         assert!(Cli::try_parse_from(["lf", "self", "install", "status"]).is_err());
         assert!(Cli::try_parse_from(["lf", "self", "install", "preflight"]).is_ok());
@@ -2740,16 +2755,16 @@ mod tests {
             })
         ));
         assert!(Cli::try_parse_from(["lf", "wave", "probe", "product", "--json"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "pr", "checks", "--logs"]).is_ok());
-        assert!(Cli::try_parse_from(["lf", "machine", "probe", "product"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "wt", "ci"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "pr", "checks", "--logs"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "ops", "machine", "probe", "product"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "wt", "ci"]).is_err());
     }
 
     #[test]
     fn chapter_commands_require_retained_plan_and_task_creation_needs_no_project_selector() {
         let preview = Cli::try_parse_from([
             "lf",
-            "repo",
+            "wave",
             "new-chapter",
             "two",
             "--plan",
@@ -2760,8 +2775,8 @@ mod tests {
         .unwrap();
         assert!(matches!(
             preview.command,
-            Some(Commands::Repo {
-                cmd: RepoCommand::NewChapter { dry_run: true, .. }
+            Some(Commands::Wave {
+                cmd: WaveCommand::NewChapter { dry_run: true, .. }
             })
         ));
         let task = Cli::try_parse_from([
@@ -2803,7 +2818,7 @@ mod tests {
     fn ci_report_accepts_machine_wide_filters() {
         let cli = Cli::try_parse_from([
             "lf",
-            "repo",
+            "ops",
             "ci",
             "--since",
             "24h",
@@ -2816,7 +2831,7 @@ mod tests {
         .expect("parse CI report");
         assert!(matches!(
             cli.command,
-            Some(Commands::Repo { cmd: RepoCommand::Ci {
+            Some(Commands::Ops { cmd: OpsCommand::Ci {
                 cmd: None,
                 since,
                 wave: Some(wave),
@@ -2884,19 +2899,29 @@ mod tests {
 
     #[test]
     fn account_use_takes_its_provider_before_the_verb() {
-        let cli =
-            Cli::try_parse_from(["lf", "account", "codex", "use", "jack@loopflow.studio"]).unwrap();
-        assert!(matches!(cli.command, Some(Commands::Account {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "ops",
+            "account",
+            "codex",
+            "use",
+            "jack@loopflow.studio",
+        ])
+        .unwrap();
+        assert!(
+            matches!(cli.command, Some(Commands::Ops { cmd: OpsCommand::Account {
             cmd: Some(AccountCommand::Use { email }),
             provider: Some(crate::provider_auth::Provider::Codex),
             ..
-        }) if email == "jack@loopflow.studio"));
+        } }) if email == "jack@loopflow.studio")
+        );
     }
 
     #[test]
     fn auth_set_accepts_ordered_service_profiles() {
         let cli = Cli::try_parse_from([
             "lf",
+            "ops",
             "account",
             "set",
             "linear",
@@ -2906,11 +2931,14 @@ mod tests {
             "Personal",
         ])
         .unwrap();
-        assert!(matches!(cli.command, Some(Commands::Account {
-            cmd: Some(AccountCommand::Set { email: None, chrome_profile, .. }), ..
-        }) if chrome_profile == ["Work", "Personal"]));
         assert!(
-            Cli::try_parse_from(["lf", "account", "set", "linear", "--clear-cooldown"]).is_err()
+            matches!(cli.command, Some(Commands::Ops { cmd: OpsCommand::Account {
+            cmd: Some(AccountCommand::Set { email: None, chrome_profile, .. }), ..
+        } }) if chrome_profile == ["Work", "Personal"])
+        );
+        assert!(
+            Cli::try_parse_from(["lf", "ops", "account", "set", "linear", "--clear-cooldown"])
+                .is_err()
         );
     }
 
@@ -2918,6 +2946,7 @@ mod tests {
     fn auth_connect_addresses_an_account_and_optional_bootstrap_venue() {
         let cli = Cli::try_parse_from([
             "lf",
+            "ops",
             "account",
             "connect",
             "claude",
@@ -2930,14 +2959,14 @@ mod tests {
         assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
-            Some(Commands::Account {
+            Some(Commands::Ops { cmd: OpsCommand::Account {
                 cmd: Some(AccountCommand::Connect {
                     provider,
                     email: Some(email),
                     chrome_profile: Some(chrome_profile),
                     ..
                 }), ..
-            }) if provider == "claude"
+            } }) if provider == "claude"
                 && email == "operator@"
                 && chrome_profile == "Profile 9"
         ));
@@ -2947,6 +2976,7 @@ mod tests {
     fn service_auth_accepts_a_remembered_chrome_profile() {
         let cli = Cli::try_parse_from([
             "lf",
+            "ops",
             "account",
             "connect",
             "linear",
@@ -2955,9 +2985,9 @@ mod tests {
         ])
         .unwrap();
         assert!(
-            matches!(cli.command, Some(Commands::Account { cmd: Some(AccountCommand::Connect {
+            matches!(cli.command, Some(Commands::Ops { cmd: OpsCommand::Account { cmd: Some(AccountCommand::Connect {
             provider, email: None, chrome_profile: Some(profile), ..
-        }), .. }) if provider == "linear" && profile == "Work")
+        }), .. } }) if provider == "linear" && profile == "Work")
         );
     }
 
@@ -2965,6 +2995,7 @@ mod tests {
     fn auth_connect_sources_are_exclusive() {
         assert!(Cli::try_parse_from([
             "lf",
+            "ops",
             "account",
             "connect",
             "claude",
@@ -2972,13 +3003,15 @@ mod tests {
             "--import"
         ])
         .is_ok());
-        assert!(Cli::try_parse_from(["lf", "account", "connect", "codex", "--api-key"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["lf", "ops", "account", "connect", "codex", "--api-key"]).is_ok()
+        );
         for flags in [
             vec!["--import", "--api-key"],
             vec!["--import", "--chrome-profile", "Work"],
         ] {
             assert!(Cli::try_parse_from(
-                ["lf", "account", "connect", "claude", "a@example.com"]
+                ["lf", "ops", "account", "connect", "claude", "a@example.com"]
                     .into_iter()
                     .chain(flags)
             )
@@ -2990,6 +3023,7 @@ mod tests {
     fn auth_set_accepts_provider_specific_billing_and_routing_state() {
         let cli = Cli::try_parse_from([
             "lf",
+            "ops",
             "account",
             "set",
             "codex",
@@ -3008,7 +3042,7 @@ mod tests {
         assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
-            Some(Commands::Account {
+            Some(Commands::Ops { cmd: OpsCommand::Account {
                 cmd: Some(AccountCommand::Set {
                     provider,
                     email: Some(email),
@@ -3020,7 +3054,7 @@ mod tests {
                     clear_paid_through: false,
                     ..
                 }), ..
-            }) if provider == "codex"
+            } }) if provider == "codex"
                 && email == "loopflow-eng@"
                 && login_email == "engineering@example.com"
                 && routing == "automatic"
@@ -3031,9 +3065,9 @@ mod tests {
 
     #[test]
     fn pm_init_accepts_positional_wave() {
-        let cli = Cli::try_parse_from(["lf", "repo", "connect", "pm"]).expect("parse");
-        let Some(Commands::Repo {
-            cmd: RepoCommand::Connect { wave, all, .. },
+        let cli = Cli::try_parse_from(["lf", "wave", "connect", "pm"]).expect("parse");
+        let Some(Commands::Wave {
+            cmd: WaveCommand::Connect { wave, all, .. },
         }) = cli.command
         else {
             panic!("expected pm init command");
@@ -3129,23 +3163,27 @@ mod tests {
 
     #[test]
     fn landing_wait_and_fix_is_explicit_and_serial_dispositions_are_rejected() {
-        let land = Cli::try_parse_from(["lf", "pr", "land", "--wait-and-fix"])
+        let land = Cli::try_parse_from(["lf", "ops", "pr", "land", "--wait-and-fix"])
             .expect("parse waited landing");
         assert!(matches!(
             land.command,
-            Some(Commands::Pr {
-                cmd: Some(PrCommand::Land {
-                    wait_and_fix: true,
-                    ..
-                })
+            Some(Commands::Ops {
+                cmd: OpsCommand::Pr {
+                    cmd: Some(PrCommand::Land {
+                        wait_and_fix: true,
+                        ..
+                    })
+                }
             })
         ));
-        assert!(Cli::try_parse_from(["lf", "pr", "land", "--wait"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "pr", "land", "--wait"]).is_err());
         for command in ["land", "arm", "submit"] {
-            assert!(Cli::try_parse_from(["lf", "pr", command, "-c"]).is_err());
-            assert!(Cli::try_parse_from(["lf", "pr", command, "--next", "follow-up"]).is_err());
+            assert!(Cli::try_parse_from(["lf", "ops", "pr", command, "-c"]).is_err());
+            assert!(
+                Cli::try_parse_from(["lf", "ops", "pr", command, "--next", "follow-up"]).is_err()
+            );
         }
-        assert!(Cli::try_parse_from(["lf", "pr", "next"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "pr", "next"]).is_err());
     }
 
     #[test]
@@ -3394,38 +3432,38 @@ mod tests {
         let loop_cli = Cli::try_parse_from(["lf", "loop", "infrastructure"])
             .expect("unknown names remain eligible for skill discovery");
         assert!(matches!(loop_cli.command, Some(Commands::External(_))));
-        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--stack"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--child"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "wt", "up"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "wt", "down"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "pr", "stack"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "wt", "create", "child", "--stack"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "wt", "create", "child", "--child"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "wt", "up"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "wt", "down"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "pr", "stack"]).is_err());
     }
 
     #[test]
     fn sync_manual_recovery_modes_are_explicit_and_exclusive() {
-        let manual = Cli::try_parse_from(["lf", "sync", "--manual", "origin/main"])
+        let manual = Cli::try_parse_from(["lf", "ops", "sync", "--manual", "origin/main"])
             .expect("parse manual sync");
         assert!(matches!(
             manual.command,
-            Some(Commands::Sync(SyncArgs {
+            Some(Commands::Ops { cmd: OpsCommand::Sync(SyncArgs {
                 manual: true,
                 continue_sync: false,
                 abort: false,
                 onto: Some(ref onto),
                 ..
-            })) if onto == "origin/main"
+            }) }) if onto == "origin/main"
         ));
 
-        assert!(Cli::try_parse_from(["lf", "sync", "--continue", "--abort"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "sync", "--plan", "--manual"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "sync", "--continue", "--abort"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "ops", "sync", "--plan", "--manual"]).is_err());
     }
 
     #[test]
     fn pm_init_accepts_all_flag() {
-        let cli = Cli::try_parse_from(["lf", "repo", "connect", "--all"]).expect("parse");
-        let Some(Commands::Repo {
+        let cli = Cli::try_parse_from(["lf", "wave", "connect", "--all"]).expect("parse");
+        let Some(Commands::Wave {
             cmd:
-                RepoCommand::Connect {
+                WaveCommand::Connect {
                     wave,
                     all,
                     team_key,
@@ -3446,7 +3484,7 @@ mod tests {
     fn pm_init_accepts_team_key_and_name() {
         let cli = Cli::try_parse_from([
             "lf",
-            "repo",
+            "wave",
             "connect",
             "product",
             "--team-key",
@@ -3455,9 +3493,9 @@ mod tests {
             "Product",
         ])
         .expect("parse");
-        let Some(Commands::Repo {
+        let Some(Commands::Wave {
             cmd:
-                RepoCommand::Connect {
+                WaveCommand::Connect {
                     team_key,
                     team_name,
                     ..
@@ -3473,18 +3511,18 @@ mod tests {
 
     #[test]
     fn pm_reteam_defaults_to_dry_run() {
-        let cli = Cli::try_parse_from(["lf", "repo", "reteam"]).expect("parse");
-        let Some(Commands::Repo {
-            cmd: RepoCommand::Reteam { apply },
+        let cli = Cli::try_parse_from(["lf", "wave", "reteam"]).expect("parse");
+        let Some(Commands::Wave {
+            cmd: WaveCommand::Reteam { apply },
         }) = cli.command
         else {
             panic!("expected pm reteam command");
         };
         assert!(!apply);
 
-        let cli = Cli::try_parse_from(["lf", "repo", "reteam", "--apply"]).expect("parse apply");
-        let Some(Commands::Repo {
-            cmd: RepoCommand::Reteam { apply },
+        let cli = Cli::try_parse_from(["lf", "wave", "reteam", "--apply"]).expect("parse apply");
+        let Some(Commands::Wave {
+            cmd: WaveCommand::Reteam { apply },
         }) = cli.command
         else {
             panic!("expected pm reteam command");

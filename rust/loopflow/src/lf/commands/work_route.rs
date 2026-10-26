@@ -1,6 +1,6 @@
 //! Work chooses execution; SSH transports the ordinary command unchanged.
 use crate::durable::{RepositoryId, TaskExecutionRoute, TaskId};
-use crate::lf::{Cli, Commands, MachineCommand, SessionCommand, TaskCommand};
+use crate::lf::{Cli, Commands, MachineCommand, OpsCommand, SessionCommand, TaskCommand};
 use crate::store::sqlite::SqliteStore;
 use anyhow::{anyhow, Result};
 
@@ -11,7 +11,7 @@ pub fn identity(
     json: bool,
 ) -> Result<()> {
     let repo = crate::repository::CanonicalRepo::current()?
-        .ok_or_else(|| anyhow!("run `lf repo identity` in a repository"))?;
+        .ok_or_else(|| anyhow!("run `lf repository` in a repository"))?;
     let runtime = tokio::runtime::Runtime::new()?;
     let identity = runtime.block_on(async {
         let store = crate::store::open_store(&crate::store::storage_config_from_env()?).await?;
@@ -36,7 +36,7 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
         .map(|store| store.repository_path(id))
         .transpose()?
         .flatten()
-        .ok_or_else(|| anyhow!("repository plan {id} has no local checkout; run `lf repo identity --bind {id}` in its repository on this Machine"))?;
+        .ok_or_else(|| anyhow!("repository plan {id} has no local checkout; run `lf repository --bind {id}` in its repository on this Machine"))?;
     Ok(path.into())
 }
 
@@ -119,10 +119,14 @@ fn launch_task(cli: &Cli) -> Option<&str> {
         Some(Commands::Task {
             cmd: TaskCommand::Claim { issue, .. } | TaskCommand::Unclaim { issue, .. },
         }) => Some(issue.as_str()),
-        Some(Commands::Machine {
-            cmd: MachineCommand::Use {
-                task: Some(task), ..
-            },
+        Some(Commands::Ops {
+            cmd:
+                OpsCommand::Machine {
+                    cmd:
+                        MachineCommand::Use {
+                            task: Some(task), ..
+                        },
+                },
         }) => Some(task.as_str()),
         _ => cli.task.as_deref(),
     }
@@ -133,15 +137,18 @@ fn launch_task(cli: &Cli) -> Option<&str> {
 /// `--tasks` set the worktree's Wave or repository instead.
 fn worktree_task(cli: &Cli) -> Result<Option<String>> {
     let bare = match &cli.command {
-        Some(Commands::Machine {
+        Some(Commands::Ops {
             cmd:
-                MachineCommand::Use {
-                    wave: None,
-                    task: None,
-                    repo: false,
-                    session: false,
-                    tasks: false,
-                    ..
+                OpsCommand::Machine {
+                    cmd:
+                        MachineCommand::Use {
+                            wave: None,
+                            task: None,
+                            repo: false,
+                            session: false,
+                            tasks: false,
+                            ..
+                        },
                 },
         }) => true,
         Some(Commands::Session {
@@ -200,8 +207,10 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
         cli.command,
         Some(Commands::Task {
             cmd: TaskCommand::Claim { .. } | TaskCommand::Unclaim { .. }
-        }) | Some(Commands::Machine {
-            cmd: MachineCommand::Use { .. }
+        }) | Some(Commands::Ops {
+            cmd: OpsCommand::Machine {
+                cmd: MachineCommand::Use { .. }
+            }
         })
     ) {
         // Ownership needs no checkout on the writer; name the exact Task in place.
@@ -361,7 +370,7 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
     }
     if cli.repository.is_none() {
         let repository = repository
-        .ok_or_else(|| anyhow!("{scope} runs on Machine {machine}; run `lf repo identity` here so it can address the repository"))?;
+        .ok_or_else(|| anyhow!("{scope} runs on Machine {machine}; run `lf repository` here so it can address the repository"))?;
         forwarded.splice(0..0, ["--repository".into(), repository.to_string()]);
     }
     super::ssh::run(machine.as_str(), false, cli, &forwarded, None)?;

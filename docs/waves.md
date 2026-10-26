@@ -110,8 +110,8 @@ track remaining implementation and acceptance.
 
 ```bash
 lf wave show --json
-lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run
-lf repo new-chapter 2026-10 --plan scratch/chapter.json
+lf wave new-chapter --all 2026-10 --plan scratch/chapter.json --dry-run
+lf wave new-chapter --all 2026-10 --plan scratch/chapter.json
 ```
 
 The Wave's SQLite selection references its accepted Project by UUID. Status and roadmap
@@ -340,7 +340,7 @@ lf wave rename <wave-id> --repo ../moved-repository
 Relocation preserves the Wave UUID, Linear projection, authored files and Work. It protects unmerged authored work and uses a receipt to finish
 filesystem cleanup after the locator commits. It does not move historical Wave
 journals or Machine-local execution history. Source and target PM Teams must match; use
-`lf repo reteam` for a provider ownership change.
+`lf reteam` for a provider ownership change.
 
 See [Machines and processes](architecture/machines.md) and
 [Security](security.md#understand-account-authority-over-ssh).
@@ -374,13 +374,13 @@ are planned. See [Choose planning synchronization](lf.md#choose-planning-synchro
 
 With Linear, a Wave maps to an Initiative, its Project for each Chapter maps to
 a Linear Project, and each Task maps to an Issue. The chapter name groups the
-current Projects. Connect once — `lf repo connect` links or creates the Wave Initiative and establishes one
+current Projects. Connect once — `lf wave connect` links or creates the Wave Initiative and establishes one
 repository Team in `.lf/config.yaml`. Every Wave reuses that Team and issue-key
 namespace. Don't paste ids by hand.
 
 ```bash
-lf repo connect infra --team-key LOO # first Wave establishes the repo Team
-lf repo connect --all                  # all nested Waves reuse it
+lf wave connect infra --team-key LOO # first Wave establishes the repo Team
+lf wave connect --all                  # all nested Waves reuse it
 lf refresh infra              # refresh the local SQLite snapshot (Git planning: the whole repository)
 lf wave status infra                   # deterministic cache-only read
 lf task create --wave infra --title "Daemon data integrity"

@@ -30,8 +30,8 @@ and offers Retry while retaining the cached plan and independent conversation.
 For coordinated chapters, plan KRs first and retain exact destination IDs:
 
 ```bash
-lf repo new-chapter October --plan scratch/chapter-plan.json --dry-run --json
-lf repo new-chapter October --plan scratch/chapter-plan.json --json
+lf wave new-chapter --all October --plan scratch/chapter-plan.json --dry-run --json
+lf wave new-chapter --all October --plan scratch/chapter-plan.json --json
 ```
 
 Use `lf wave new-chapter <wave> October --plan scratch/chapter-plan.json` for one
@@ -123,8 +123,8 @@ selection, including an explicit import of old Desktop membership before shared
 configuration exists. `lf portfolio import PATH…` performs that one-time import;
 an existing shared selection takes precedence.
 
-Read `lf repo identity` on one Machine, then use
-`lf repo identity --bind repo_ID` on the peer, even when both already have Work.
+Read `lf repository` on one Machine, then use
+`lf repository --bind repo_ID` on the peer, even when both already have Work.
 Binding selects the shared repository identity and retains prior IDs as local
 locators. Work IDs, provider lookup, pending edits and execution stay unchanged.
 It does not connect, select, fetch or publish planning. An ID already locating
@@ -451,7 +451,7 @@ previously deleted issue. Ordinary sync never makes that choice.
 For an uncertain saved state or field update, `lf task sync <task> --retry-updates`
 retries that saved intention after reading Linear again. Observed conflicts still
 win; this flag does not retry deletion or allocate another issue.
-`lf repo connect <wave>` saves the repository Team and selects Linear, overriding
+`lf wave connect <wave>` saves the repository Team and selects Linear, overriding
 a Git preference in `~/.lf/config.yaml`.
 
 ```bash
@@ -540,7 +540,7 @@ your own conversation for a Wave or a Task.
 ```bash
 lf list wave                       # authored goals, including unconnected Waves
 lf account connect linear
-lf repo connect --all --team-key EXP # connect goals and choose the Task prefix
+lf wave connect --all --team-key EXP # connect goals and choose the Task prefix
 lf task create --wave exports --title "Add CSV export"
 lf checkout <task-id>               # use the ID printed at creation
 lf task run <task-id>
@@ -1339,17 +1339,17 @@ Names and quoted `~/` paths resolve on the selected Machine, using its own
 `repo_root`; they are not expanded on the caller. Explicit `./` paths are relative
 to the remote login directory. `--forward-agent` requires `--machine`.
 
-`lf repo identity` establishes or prints the selected repository plan's opaque ID
+`lf repository` establishes or prints the selected repository plan's opaque ID
 (`--json` returns `id` and `locators`, the retained Machine-local IDs). It also works before creating any Waves
 or Tasks. `--repository ID` selects that registered plan's local path, including on
 an explicitly selected Machine. Neither operation joins plans by code remote or
 changes a Machine's saved repository.
 
 ```sh
-lf repo identity                         # enroll before moving the directory
+lf repository                           # enroll before moving the directory
 mv ../project ../renamed-project
 cd ../renamed-project
-lf repo identity                         # reconnect the same Work
+lf repository                           # reconnect the same Work
 ```
 
 The Git common directory retains a Machine-scoped locator. Reopening a moved
@@ -1360,8 +1360,8 @@ values. Desktop reuses the repository's window and Session surfaces.
 
 After upgrading, a retained local Task's linked checkout and branch can establish
 the original Git directory automatically. Otherwise, establish its identity with
-`lf repo identity --bind repo_ID` before moving it. If it has already moved, run
-`lf repo identity --relocate repo_ID` from the new location. Ambiguous or reused
+`lf repository --bind repo_ID` before moving it. If it has already moved, run
+`lf repository --relocate repo_ID` from the new location. Ambiguous or reused
 paths require explicit recovery. A copied Git directory cannot
 replace its still-present source. Remote URLs and directory names never merge Work.
 Open the moved checkout before reusing its old path. Experimental Machines keep separate locators; disposable data

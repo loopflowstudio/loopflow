@@ -140,6 +140,10 @@ impl Command {
         {
             self.command = self.args.remove(0);
         }
+        // `lf repo` dissolved; its commands keep their names under new owners.
+        if self.command == "repo" && !self.args.is_empty() {
+            self.command = self.args.remove(0);
+        }
         // Captured commands keep their arguments, but use the current owner.
         if self.command == "monitor"
             && self
@@ -158,7 +162,8 @@ impl Command {
             "doctor" | "install" => Some("self"),
             "ps" | "top" => Some("monitor"),
             "usage" | "replay" => Some("history"),
-            "release" | "tokens" | "ci" => Some("repo"),
+            "release" | "ci" => Some("ops"),
+            "tokens" => Some("history"),
             "cron" => Some("wave"),
             _ => None,
         };

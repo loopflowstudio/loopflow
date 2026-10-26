@@ -619,8 +619,7 @@ struct RegistryQueryTests {
         let json = try String(contentsOf: fixture, encoding: .utf8)
         let query = RegistryQuery { args, cwd in
             #expect(cwd == "/tmp/repo")
-            if args == ["repo", "refresh", "infrastructure"] { return "" }
-            #expect(args == ["wave", "status", "infrastructure", "--json"])
+            #expect(args == ["wave", "status", "infrastructure", "--json", "--sync"])
             return json
         }
         let plan = try await query.plan(wave: "infrastructure", objective: "Ship it.", cwd: "/tmp/repo", sync: true)

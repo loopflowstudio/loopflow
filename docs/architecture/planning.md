@@ -6,7 +6,7 @@ lf task status INF-124 --json
 lf checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
 lf task run INF-124
-lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run
+lf wave new-chapter --all 2026-10 --plan scratch/chapter.json --dry-run
 ```
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
@@ -321,8 +321,8 @@ its terminal outcome and error. Swift retains command transport feedback only.
 ## Rotate the plan, preserve the work
 
 ```bash
-lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run --json
-lf repo new-chapter 2026-10 --plan scratch/chapter.json --json
+lf wave new-chapter --all 2026-10 --plan scratch/chapter.json --dry-run --json
+lf wave new-chapter --all 2026-10 --plan scratch/chapter.json --json
 lf wave new-chapter product 2026-10 --plan scratch/chapter.json --json
 ```
 

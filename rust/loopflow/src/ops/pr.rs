@@ -3169,13 +3169,13 @@ Body:
 ## Usage
 
 ```bash
-lf repo connect
+lf wave connect
 ```"#;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
                 title: "pm: add linear provider".to_string(),
-                body: "## Usage\n\n```bash\nlf repo connect\n```".to_string(),
+                body: "## Usage\n\n```bash\nlf wave connect\n```".to_string(),
             })
         );
     }

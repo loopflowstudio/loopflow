@@ -122,7 +122,7 @@ stays pending until Loopflow finds the item, rather than creating a second one.
 
 ### Linear
 
-The repository connects to a Linear Team (`lf repo connect --team-key EXP`). Tasks
+The repository connects to a Linear Team (`lf wave connect --team-key EXP`). Tasks
 take Linear's identifiers, like `EXP-12`. Waves map to Initiatives and each Wave's
 Projects to Linear Projects; see [Waves](waves.md).
 

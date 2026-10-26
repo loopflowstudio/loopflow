@@ -2089,7 +2089,7 @@ fn _valid_task_url(value: &str) -> bool {
 
 fn _missing_task_pr_url(task: &Task) -> OpsError {
     task_error(format!(
-        "Task {} has no valid provider URL in the cached PM snapshot. Run `lf repo refresh` before publishing this Task PR",
+        "Task {} has no valid provider URL in the cached PM snapshot. Run `lf wave status --sync` before publishing this Task PR",
         task.identifier,
     ))
 }

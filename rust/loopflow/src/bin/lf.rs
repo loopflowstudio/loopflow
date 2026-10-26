@@ -1584,29 +1584,14 @@ impl std::io::Write for DiagnosticLog {
 }
 
 fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {
-    // Reads and saved-layout edits run on any platform.
     // Desktop pane control refuses before repository lookup or preparation.
     // Opening chooses its destination per platform in `lf open`.
-    if matches!(
-        cli.command,
-        Some(Commands::Desktop {
-            cmd: loopflow::lf::DesktopCommand::View { .. }
-                | loopflow::lf::DesktopCommand::Query { .. }
-                | loopflow::lf::DesktopCommand::Pin { .. }
-                | loopflow::lf::DesktopCommand::Unpin { .. }
-                | loopflow::lf::DesktopCommand::Rename { .. }
-                | loopflow::lf::DesktopCommand::Arrange { .. }
-                | loopflow::lf::DesktopCommand::Slots { .. }
-                | loopflow::lf::DesktopCommand::Order { .. }
-                | loopflow::lf::DesktopCommand::Layout { .. }
-        })
-    ) {
-        return Ok(());
-    }
-    if matches!(cli.command, Some(Commands::Desktop { .. })) && !cli.context {
-        loopflow::lf::commands::desktop::require_supported().inspect_err(|_| {
-            journal::mark_effect_free_read();
-        })?;
+    if let Some(Commands::Desktop { cmd }) = &cli.command {
+        if !cli.context && !loopflow::lf::commands::desktop::runs_without_desktop(cmd) {
+            loopflow::lf::commands::desktop::require_supported().inspect_err(|_| {
+                journal::mark_effect_free_read();
+            })?;
+        }
     }
     Ok(())
 }

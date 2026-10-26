@@ -54,7 +54,7 @@ lf --task INF-123 research "write scratch/api.md"    # independent conversation
 lf task run INF-123                                  # start built-in Task automation
 lf comment INF-123 "take the smaller approach"    # post a Task comment
 lf task status INF-123 --json                        # inspect durable state
-lf wait INF-123 --until terminal                # block until it settles
+lf task wait INF-123 --until terminal                   # block until it settles
 ```
 
 ## The owners

@@ -873,7 +873,6 @@ printf '%s' "$answer" > "$LF_HOME/$step.answer"
         let mut command = lf_command(repo.path(), home.path(), &flags, Some(&path));
         command
             .args(["-a", "claude"])
-            .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("ANTHROPIC_API_KEY")
             .stdin(Stdio::from(slave))
             .stdout(Stdio::from(log.try_clone().unwrap()))

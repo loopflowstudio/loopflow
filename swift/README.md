@@ -156,7 +156,7 @@ checks; `lf ci watch --status` shows its last poll and what it started.
 ⇧⌘E         show / hide Files
 ⌘⌥←/→/↑/↓   focus the visual neighbor
 ⌘⇧Return    zoom the focused pane
-⌘W / ⌘⇧T    close / restore a pane
+⌘W / ⌘⇧T    close the selected tab / undo close
 ⌘F          find in the focused terminal
 ```
 
@@ -223,7 +223,14 @@ colors however Desktop was opened.
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
 
-**View → Toggle Files** opens a Task's checkout as a pane beside the
+A Task workspace holds three designated panes — session, shell and browser —
+arranged freely by dragging, zoom and hide; Wave and repository workspaces hold
+only the session pane. The session pane shows one conversation and switches when
+another opens. ⌘T adds a shell tab. The browser's tabs are the Task's Files, its
+Graph processes and http(s) pages. ⌘W closes the selected tab, or hides the pane.
+⇧⌘T puts the last closed tab back where it was, its shell still running.
+
+**View → Toggle Files** shows a Task's checkout in the browser pane beside the
 retained terminal. Expand folders to read one page of up to 500 entries;
 **Load more** continues the directory and **Show ignored** includes ignored paths.
 Tracked, unchanged and untracked files remain available without an active PR.
@@ -247,7 +254,7 @@ view; the page then opens as a tab beside it.
 Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
 Changing Work assignment leaves the recorded checkout Machine and path intact.
-Files panes retain their opening location through Close/Undo, including a first open
+The browser retains its opening location through Close/Undo, including a first open
 without a Session link. New shell tabs use the Task's recorded location;
 existing tabs and file drafts keep their original locations.
 Unknown or changed owners stay unavailable without redirecting retained drafts.
@@ -848,39 +855,55 @@ never prepare another checkout. The CLI transports native Session argv over SSH,
 keeping the owner's data directory and explicit takeover behavior. Local panes and
 drafts remain retained; no remote planning tree or execution record is imported.
 
-`lf --task LOO-427 desktop hide --pane "$pane"` and `lf --task LOO-427 desktop restore --pane "$pane"`
-change retained pane visibility. Focus, move, resize and zoom use that same
-exact-target path through the registry and multiplexer; see the
-[CLI examples](../docs/lf.md#desktop-navigation). `--repo`/`--task` select Work;
-`--pane` selects a pane ID from inspection or a creation receipt. Without it,
-the verified caller terminal wins within selected Work, otherwise one eligible
-pane is required; ambiguity lists choices and does nothing. Surface/window/content tokens are internal.
-Move retains the pane itself,
-including its content occurrence and surface key; it never closes/reopens a client.
-Shell creation adds and selects a tab at the Task's recorded location. Each tab
-retains its location through arrangement and Close/Undo; restored intent does not
-restart a process. Session panes capture their recorded location; changed readings invalidate old pane targets without changing focus. Unknown locations never open a local replacement. Arrangement preserves selection except explicit focus;
-zoom does not redirect input to an unselected pane. Window/content replacement
-rejects stale targets, including the second target of a move or resize. Mutation replies
-identify the affected pane directly; shell creation also returns its new `tab`.
-They are not native-rendering proof. `--pane shell:ID` targets an exact shell even
-when another tab is selected. Files and Graph-log reveal retained companions without
-changing focus or zoom. They reuse existing panes for the named Task; its recorded checkout must
-match. Remote shells run on the recorded execution Machine; changed or missing checkouts
-refuse launch without opening a local shell. Disconnects never replay shell commands.
+Every Desktop gesture is a `DesktopAction` in `LoopflowMac/DesktopActions.swift`:
+name (the `lf desktop` verb), title, arguments, default keys and `perform`.
+`DesktopActionMonitor`, the View and File menus, the Keyboard Shortcuts window and
+the Desktop socket look actions up there; nothing else mutates navigation or panes.
+Keys and menus act on the shown workspace's focused pane; a socket request names an
+exact window and pane, and `lf desktop` resolves those from one inspection (see the
+[CLI examples](../docs/lf.md#desktop-navigation)).
 
-`lf --task LOO-427 desktop read --pane "$pane" --region selection --json`
-validates the retained pane and native surface without following focus or retiring
-an exited surface. Missing surfaces and nonterminal panes are explicit unavailable
-results, not empty text. The verified lf3 reader writes directly into the requested
-byte bound; Swift copies only that UTF-8 prefix. `screen` reads the viewport,
+`DesktopServer` (`LoopflowMac/DesktopServer.swift`) binds
+`$LF_HOME/run/desktop/<bundle-id>.sock` at launch (0700 directory, 0600 socket,
+same-uid peers, a stale file unlinked) and answers newline-delimited JSON:
+`inspect`, `perform`, `read_text` and `events`. It serves only `lf desktop` and
+hosts no Sessions. An unknown action or bad argument throws `DesktopArgumentError`
+(code `argument`, exit 2); a stale or missing target throws `DesktopTargetError`
+(`target`, exit 3); another API version answers `version`. The receipt carries the
+window's destination and the affected workspace in the same MainActor turn, so it
+equals the next inspection. `events` sends the whole reading, then every quarter
+second while subscribed, the windows whose reading changed.
+
+Move retains the pane itself, including its content occurrence and surface key;
+it never closes/reopens a client. `run` adds and selects a tab at the Task's
+recorded location without moving focus (⌘T passes `focus=true`); a `command` line
+is typed into the tab's own shell (Ghostty's initial input before the surface
+starts), so the tab outlives it. Shell tabs inspect `commands`: lines submitted and
+commands finished, from Ghostty's command-finished action, with the last status. Each tab
+retains its location through arrangement and Close/Undo; restored intent does not
+restart a process. Session panes capture their recorded location; changed
+readings invalidate old pane targets without changing focus. Unknown locations
+never open a local replacement. Window/content replacement rejects stale
+targets. `files`, `graph-log` and `browse` select browser
+tabs without changing focus or zoom. Each web page tab retains its `WKWebView`
+until the tab closes; `page-back`, `page-forward` and `reload`
+(⌘R, the page's toolbar) act on the addressed page. ⌘[ and ⌘] stay Desktop
+navigation. Remote shells run on the recorded execution
+Machine; changed or missing checkouts refuse launch without opening a local
+shell. Disconnects never replay shell commands.
+
+`lf desktop capture -p shell:1 --region selection --json` validates the retained
+pane and native surface without following focus or retiring an exited surface.
+Missing surfaces and nonterminal panes are explicit unavailable results, not
+empty text. The verified lf3 reader writes directly into the requested byte
+bound; Swift copies only that UTF-8 prefix. `screen` reads the viewport,
 `scrollback` the retained screen history, and `selection` the current text or
 command block (empty when nothing is selected). No unbounded extraction is used.
 Mounted extraction/draft acceptance and cross-machine composition remain unproved.
 
 ```sh
-lf --task LOO-427 desktop text --pane "$pane" -- 'add to the draft'
-lf --task LOO-427 desktop key --pane "$pane" enter
+lf desktop send -p session 'add to the draft'
+lf desktop send-key -p session enter
 ```
 
 Text preserves the draft and inserts at its cursor; Enter is separate. Control

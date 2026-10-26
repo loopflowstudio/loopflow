@@ -51,31 +51,28 @@ fn validate_sessions(
     work: &WorkWorkspaceKey,
     tree: &PaneTree,
 ) -> StoreResult<()> {
-    match tree {
-        PaneTree::Pane {
-            content: PaneIntent::Session { session_id, .. },
+    for (_, content) in tree.panes() {
+        let PaneIntent::Session {
+            session_id: Some(session_id),
             ..
-        } => {
-            let scope = match work.kind {
-                WorkWorkspaceKind::Repository => "s.primary_scope='repository'".to_string(),
-                WorkWorkspaceKind::Wave => "s.primary_scope='wave' AND s.wave_id=?3".to_string(),
-                WorkWorkspaceKind::Task => {
-                    format!("s.id IN ({})", super::super::task_work::session_ids("?3"))
-                }
-            };
-            let belongs: bool = conn.query_row(
-                &format!("SELECT EXISTS(SELECT 1 FROM agent_sessions s JOIN repository_plans r ON r.repo=coalesce(s.repo,(SELECT repo FROM waves WHERE id=s.wave_id)) WHERE r.id=?1 AND s.id=?2 AND ({scope}) AND ?3 IS NOT NULL)"),
-                params![work.repository,session_id,work.id], |row| row.get(0),
-            )?;
-            if !belongs {
-                return Err(invalid("Session is unavailable in this repository"));
+        } = content
+        else {
+            continue;
+        };
+        let scope = match work.kind {
+            WorkWorkspaceKind::Repository => "s.primary_scope='repository'".to_string(),
+            WorkWorkspaceKind::Wave => "s.primary_scope='wave' AND s.wave_id=?3".to_string(),
+            WorkWorkspaceKind::Task => {
+                format!("s.id IN ({})", super::super::task_work::session_ids("?3"))
             }
+        };
+        let belongs: bool = conn.query_row(
+            &format!("SELECT EXISTS(SELECT 1 FROM agent_sessions s JOIN repository_plans r ON r.repo=coalesce(s.repo,(SELECT repo FROM waves WHERE id=s.wave_id)) WHERE r.id=?1 AND s.id=?2 AND ({scope}) AND ?3 IS NOT NULL)"),
+            params![work.repository,session_id,work.id], |row| row.get(0),
+        )?;
+        if !belongs {
+            return Err(invalid("Session is unavailable in this repository"));
         }
-        PaneTree::Split { first, second, .. } => {
-            validate_sessions(conn, work, first)?;
-            validate_sessions(conn, work, second)?;
-        }
-        _ => {}
     }
     Ok(())
 }
@@ -98,9 +95,7 @@ impl SqliteStore {
         if prior.as_ref().map_or(0, |prior| prior.revision) != layout.revision {
             return Err(invalid("pane layout changed; read it again before editing"));
         }
-        if let Some(tree) = &layout.tree {
-            validate_sessions(&tx, &layout.work, tree)?;
-        }
+        validate_sessions(&tx, &layout.work, &layout.tree)?;
         let mut saved = layout.clone();
         saved.revision += 1;
         tx.execute("INSERT INTO work_pane_layouts(repository_id,kind,work_id,layout_json) VALUES(?1,?2,?3,?4) ON CONFLICT(repository_id,kind,work_id) DO UPDATE SET layout_json=excluded.layout_json",

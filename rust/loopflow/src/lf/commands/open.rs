@@ -857,9 +857,8 @@ pub(crate) fn desktop_bundle() -> String {
 }
 
 fn named_bundle(desktop: Option<&str>) -> &str {
-    // Released Desktop builds set "1"; LOO-571 removes that reading.
     desktop
-        .filter(|value| !value.is_empty() && *value != "1")
+        .filter(|value| !value.is_empty())
         .unwrap_or(DESKTOP_BUNDLE)
 }
 
@@ -1742,7 +1741,7 @@ mod tests {
 
     #[test]
     fn desktop_bundle_defaults_to_the_installed_app() {
-        for desktop in [None, Some(""), Some("1")] {
+        for desktop in [None, Some("")] {
             assert_eq!(named_bundle(desktop), DESKTOP_BUNDLE, "{desktop:?}");
         }
         assert_eq!(

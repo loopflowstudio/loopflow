@@ -473,19 +473,8 @@ fn context_explanation_works_outside_git_and_preserves_unavailable_registry() {
 fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
     let home = tempfile::tempdir().unwrap();
     for operation in [
-        "state",
-        "hide",
-        "restore",
-        "focus",
-        "move",
-        "resize",
-        "zoom",
-        "shell",
-        "files",
-        "graph-log",
-        "read",
-        "text",
-        "key",
+        "state", "ls", "actions", "events", "wait", "back", "hide", "show", "focus", "move",
+        "resize", "zoom", "run", "capture", "send", "send-key",
     ] {
         let output = command(
             home.path(),
@@ -500,21 +489,20 @@ fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
             ],
         )
         .args(match operation {
-            "state" => vec!["--json"],
-            "text" => vec!["--pane", "absent", "literal"],
-            "key" => vec!["--pane", "absent", "enter"],
-            "read" => vec!["--pane", "absent", "--region", "screen"],
-            "files" | "graph-log" => vec!["--pane", "absent"],
+            "state" | "ls" | "actions" | "events" | "back" => vec!["--json"],
+            "zoom" => vec!["-p", "absent", "--on"],
+            "send" => vec!["-p", "absent", "literal"],
+            "send-key" => vec!["-p", "absent", "enter"],
             "move" => vec![
-                "--pane",
+                "-p",
                 "absent",
                 "--destination",
                 "absent",
                 "--axis",
                 "horizontal",
             ],
-            "resize" => vec!["--pane", "absent", "--toward", "absent", "--ratio", "0.6"],
-            _ => vec!["--pane", "absent"],
+            "resize" => vec!["-p", "absent", "--toward", "absent", "--ratio", "0.6"],
+            _ => vec!["-p", "absent"],
         })
         .output()
         .unwrap();

@@ -61,28 +61,28 @@ public struct RegistryQuery: Sendable {
         try Self.decode(Dashboard.self, from: await run(["desktop", "rename", "query:" + id, name, "--revision", String(revision)], repoPath))
     }
 
-    /// Rust decides the arrangement's mode from the order it receives.
-    public func saveDashboardArrangement(id: String, order: [WorkMemberRef], hidden: [WorkMemberRef], revision: Int64, repoPath: String) async throws -> Dashboard {
-        let input = String(decoding: try JSONEncoder().encode(["order": order, "hidden": hidden]), as: UTF8.self)
-        return try Self.decode(Dashboard.self, from: await runWithInput(["desktop", "arrange", id, "--revision", String(revision)], repoPath, input))
+    /// Hide or show a Dashboard tile in its shared record; hiding keeps its place and mode.
+    public func setDashboardTile(id: String, member: WorkWorkspaceKey, hidden: Bool, repoPath: String) async throws -> Dashboard {
+        try Self.decode(Dashboard.self, from: await run(["desktop", hidden ? "hide" : "show", "-p", "query:\(id)/\(member.selector)"], repoPath))
     }
 
     /// Nil restores the default slot layout.
     public func saveDashboardSlots(id: String, slots: DashboardSlotLayout?, revision: Int64, repoPath: String) async throws -> Dashboard {
         let input = String(decoding: try JSONEncoder().encode(slots), as: UTF8.self)
-        return try Self.decode(Dashboard.self, from: await runWithInput(["desktop", "slots", id, "--revision", String(revision)], repoPath, input))
+        return try Self.decode(Dashboard.self, from: await runWithInput(["desktop", "layout", "query:" + id, "--save", "--revision", String(revision)], repoPath, input))
     }
 
     /// Move `member`'s tile into `target`'s place in a Dashboard's order, as the
     /// repository order's drop does; Rust applies the move and decides the mode.
-    public func reorderDashboard(id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey, revision: Int64, repoPath: String) async throws -> Dashboard {
-        try Self.decode(Dashboard.self, from: await run(["desktop", "order", member.selector, "--to", target.selector,
-            "--query", id, "--revision", String(revision)], repoPath))
+    public func reorderDashboard(id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey, repoPath: String) async throws -> Dashboard {
+        try Self.decode(Dashboard.self, from: await run(["desktop", "move", "-p", "query:\(id)/\(member.selector)",
+            "--destination", target.selector], repoPath))
     }
 
     /// Move a Working Tasks member into `target`'s place in the repository's one Task order.
     public func reorderTask(_ task: String, to target: String, repoPath: String) async throws -> [String] {
-        try Self.decode([String].self, from: await run(["desktop", "order", "task:" + task, "--to", "task:" + target], repoPath))
+        try Self.decode([String].self, from: await run(["desktop", "move", "-p", "working-tasks/task:" + task,
+            "--destination", "task:" + target], repoPath))
     }
 
     public func paneLayout(work: String, repoPath: String) async throws -> WorkPaneLayout? {

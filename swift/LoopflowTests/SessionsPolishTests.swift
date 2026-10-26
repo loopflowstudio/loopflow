@@ -61,7 +61,7 @@ struct SessionsPolishTests {
             name: .ghosttySurfaceClosed, object: TerminalIdentity.shell(tab.id, machineId: fixtureMachineId)
         )
 
-        #expect(fixtureWork(registry, fixtureWorkspace("/tmp/repo")).multiplexer.focusedPane.content == .empty)
+        #expect(fixtureWork(registry, fixtureWorkspace("/tmp/repo")).multiplexer.focusedPane.kind == .session)
         #expect(other.multiplexer.focusedPane.content.selectedShell?.location == other.location)
     }
 }

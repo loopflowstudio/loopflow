@@ -1102,174 +1102,24 @@ Rename a Dashboard or Task through its shared owner; prints the owner's record a
 | `--revision` | The target's last read revision; a stale one writes nothing |
 | `--help / -h` | Print help |
 
-## lf desktop arrange
-
-Replace a Dashboard's occurrence order and hidden members from JSON on stdin; prints the Dashboard as JSON
-
-| Argument | What it does |
-|---|---|
-| `<query>` | Dashboard name or query:ID |
-| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
-| `--help / -h` | Print help |
-
-## lf desktop slots
-
-Replace a Dashboard's slot layout from JSON on stdin; `null` restores the default
-
-| Argument | What it does |
-|---|---|
-| `<query>` | Dashboard name or query:ID |
-| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
-| `--help / -h` | Print help |
-
-## lf desktop order
-
-Move a member into another's place: the repository's Task order, or a Dashboard's with --query; prints the result as JSON
-
-| Argument | What it does |
-|---|---|
-| `<member>` | Member to move: task:<durable-id>, or wave:<durable-id> on a Dashboard |
-| `--to` | Member whose place it takes |
-| `--query` | Dashboard whose order to edit instead of the repository's Task order |
-| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
-| `--help / -h` | Print help |
-
 ## lf desktop layout
 
-Read portable pane intent as JSON, or save a complete revision-checked record from stdin
+Read a Work's pane intent or a Dashboard's slots as JSON, or save a complete revision-checked record from stdin
 
 | Argument | What it does |
 |---|---|
-| `<work>` | repository, wave:<durable-id> or task:<durable-id> |
-| `--save` | Replace the record from JSON on stdin instead of reading it Default: false. |
+| `<work>` | repository, wave:<durable-id>, task:<durable-id> or query:ID |
+| `--save` | Replace the record from JSON on stdin instead of reading it (a Dashboard's: slots, null for the default) Default: false. |
+| `--revision` | A Dashboard's last read revision; a stale one writes nothing |
 | `--help / -h` | Print help |
 
-## lf desktop text
+## lf desktop ls
 
-Insert literal text at an exact surface's cursor; never submits or clears a draft
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `<text>` | Unicode text without control characters (use key for Enter/Tab) |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop key
-
-Send one explicit key to an exact retained surface, without following focus
+List the window's Tasks by position (as ⌘1–9 select them) and each Task's panes
 
 | Argument | What it does |
 |---|---|
-| `--pane` | pane |
-| `<key>` | key |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop read
-
-Read bounded text from an exact retained surface, without following focus
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--region` | region |
-| `--max-bytes` | max bytes Default: 65536. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop hide
-
-Hide an exact retained pane without closing its Session or process
-
-| Argument | What it does |
-|---|---|
-| `--pane` | Pane ID; defaults to this terminal when verified, otherwise one eligible pane |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop restore
-
-Restore an exact hidden pane without selecting Work or acquiring a client
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop focus
-
-Focus an exact pane, opening its retained workspace when needed
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop shell
-
-Add and select a shell tab at the Task’s recorded location
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop files
-
-Show the recorded Task's files beside an exact pane, retaining drafts
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop graph-log
-
-Show the recorded Task's Graph processes beside an exact pane
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop move
-
-Move a retained pane after another pane in the same workspace
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--destination` | destination |
-| `--axis` | axis |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop resize
-
-Resize the divider between two exact panes; ratio is the target side's share
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--toward` | toward |
-| `--ratio` | ratio |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop zoom
-
-Zoom an exact retained pane without changing selection; --off unzooms it
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--off` | off Default: false. |
+| `--window` | Desktop window: ID, position or ID suffix (default: this terminal's window) |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1279,6 +1129,332 @@ Read actual windows and panes without launching, focusing, or acquiring clients
 
 | Argument | What it does |
 |---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop actions
+
+List the verbs Desktop performs, with their arguments and default keys
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop events
+
+Stream window, pane and destination changes; the first change is every window
+
+| Argument | What it does |
+|---|---|
+| `--json` | One change per line as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop wait
+
+Wait for a shell tab's command to finish (exits with its status), else for the pane to appear
+
+| Argument | What it does |
+|---|---|
+| `--for` | Longest wait, e.g. 30s, 5m (default: no limit) |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop back
+
+Go back, as ⌘[ and the crumb chevron do
+
+| Argument | What it does |
+|---|---|
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop forward
+
+Go forward, as ⌘] does
+
+| Argument | What it does |
+|---|---|
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop goto
+
+Show the window's Nth Working Task, as ⌘N does
+
+| Argument | What it does |
+|---|---|
+| `<index>` | index |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop next
+
+Show the next Working Task, as ⌃⇥ does
+
+| Argument | What it does |
+|---|---|
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop previous
+
+Show the previous Working Task, as ⌃⇧⇥ does
+
+| Argument | What it does |
+|---|---|
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop working-tasks
+
+Show the Working Tasks Dashboard
+
+| Argument | What it does |
+|---|---|
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop enter
+
+Enter a member of the shown Dashboard as full Work, as a tile click does
+
+| Argument | What it does |
+|---|---|
+| `<tile>` | Tile on the shown Dashboard or Wave view, as `-p` names it: position, ID, label or ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop send
+
+Insert literal text at a terminal's cursor (stdin when omitted); never submits
+
+| Argument | What it does |
+|---|---|
+| `<text>` | Unicode text without control characters (use send-key for Enter/Tab) |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop send-key
+
+Send one key to a terminal, without following focus
+
+| Argument | What it does |
+|---|---|
+| `<key>` | key |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop capture
+
+Print a terminal's text, without following focus
+
+| Argument | What it does |
+|---|---|
+| `--region` | region Default: screen. |
+| `--trim` | Drop trailing spaces and blank lines Default: false. |
+| `--max-bytes` | max bytes Default: 65536. |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop run
+
+Add a shell tab at the Task's location and type LINE into it, as if typed; focus stays put
+
+| Argument | What it does |
+|---|---|
+| `<line>` | One shell line, e.g. 'cargo test -p loopflow'; omitted opens an empty shell |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop zoom
+
+Zoom a pane, or return it to the layout, without changing selection
+
+| Argument | What it does |
+|---|---|
+| `--on` | on Default: false. |
+| `--off` | off Default: false. |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop focus
+
+Focus a pane, or the pane in a direction, opening its retained workspace when needed
+
+| Argument | What it does |
+|---|---|
+| `--direction` | direction |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop hide
+
+Hide a pane without closing its Session or process; on a Dashboard, hide a tile from its shared record
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop show
+
+Show a hidden pane without selecting Work or acquiring a client; on a Dashboard, a hidden tile
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop close
+
+Close a shell or browser tab, as ⌘W does; a session pane hides
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop reopen
+
+Undo the Task's last close, as ⇧⌘T does
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop move
+
+Move a pane beside another pane of the same Task; on a Dashboard or Wave view, a tile into another's place
+
+| Argument | What it does |
+|---|---|
+| `--destination` | Pane to place it beside, or tile whose place it takes, as for -p |
+| `--axis` | Split axis for a pane; tiles take the destination's place |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop resize
+
+Resize the divider between two panes or Dashboard tiles; ratio is the addressed one's share
+
+| Argument | What it does |
+|---|---|
+| `--toward` | The other pane or tile, as for -p |
+| `--ratio` | ratio |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop files
+
+Show the Task's Files in the browser
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop graph-log
+
+Show the Task's Graph processes in the browser
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop browse
+
+Open an http(s) page in a browser tab
+
+| Argument | What it does |
+|---|---|
+| `<url>` | url |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop page-back
+
+Go back in a web page
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop page-forward
+
+Go forward in a web page
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop reload
+
+Reload a web page, as ⌘R does
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop switch
+
+Show another of the Task's conversations in its session pane
+
+| Argument | What it does |
+|---|---|
+| `<session>` | Session ID |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

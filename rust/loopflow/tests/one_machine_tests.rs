@@ -1,5 +1,8 @@
 //! Explicit experiments preserve one Machine across real CLI processes.
 
+#[allow(dead_code)] // Linked for its inherited provider-home scrub.
+mod support;
+
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};

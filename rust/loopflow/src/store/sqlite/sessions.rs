@@ -35,18 +35,6 @@ const TURN_RUNNING: &str = "EXISTS(SELECT 1 FROM session_activity act
             WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done'))
     ELSE act.pending_input>0 OR (act.open_tools=0 AND act.yielded=1) END)";
 
-/// An execution owner the detached-Session policy may end.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct IdleSessionOwner {
-    pub id: crate::id::LfProcessId,
-    pub repo: Option<String>,
-    pub started_at: i64,
-    /// `None` from builds that never reported viewers.
-    pub viewed: Option<bool>,
-    /// When the last viewer left, or the owner started without one.
-    pub detached_at: Option<i64>,
-}
-
 const SESSION_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
     (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.created_at,s.request,s.interactive,s.repo,
     s.task_id,s.wave_id,", session_graph!(), " AS graph_lf_process_id,s.work_source,s.bound_at,
@@ -571,58 +559,48 @@ impl SqliteStore {
         )?)
     }
 
-    /// Record whether a viewer is attached to execution owner `owner`, and
-    /// when its last one left.
+    /// Record whether a viewer is attached to execution owner `owner`.
     pub(crate) fn record_owner_viewers(
         &self,
         owner: &crate::id::LfProcessId,
         viewed: bool,
-        at: i64,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE processes SET viewed=?2, detached_at=CASE WHEN ?2 THEN NULL ELSE ?3 END
-             WHERE id=?1",
-            params![owner.as_str(), viewed, at],
+            "UPDATE processes SET viewed=?2 WHERE id=?1",
+            params![owner.as_str(), viewed],
         )?;
         Ok(())
     }
 
-    /// Running execution owners whose every Session is a standalone interactive
-    /// conversation waiting for a person. A Graph step, a headless Run, or a turn
-    /// in progress keeps its owner off this list.
-    pub(crate) fn idle_session_owners(&self) -> StoreResult<Vec<IdleSessionOwner>> {
+    /// Whether every Session execution owner `owner` holds is a standalone
+    /// interactive conversation waiting for a person. A Graph step, a headless
+    /// Run, or a turn in progress keeps it running.
+    pub(crate) fn owner_waits_for_person(
+        &self,
+        owner: &crate::id::LfProcessId,
+    ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // A Graph started inside an owner, as from a terminal, holds its steps there.
-        let mut query = conn.prepare(&format!(
-            "WITH RECURSIVE graph_ancestors(id) AS (
-                 SELECT p.parent_lf_process_id FROM graph_processes f
-                     JOIN processes p ON p.id=f.lf_process_id
-                 UNION SELECT p.parent_lf_process_id FROM processes p
-                     JOIN graph_ancestors a ON p.id=a.id)
-             SELECT o.id, o.repo, o.started_at, o.viewed, o.detached_at FROM processes o
-             WHERE o.completed_at IS NULL AND o.kind='lf'
-             AND o.id NOT IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
-             AND EXISTS(SELECT 1 FROM agent_sessions s
-                 WHERE s.transport_lf_process_id=o.id AND s.completed_at IS NULL)
-             AND NOT EXISTS(SELECT 1 FROM agent_sessions s
-                 WHERE s.transport_lf_process_id=o.id
-                 AND (s.interactive=0 OR {SESSION_GRAPH} IS NOT NULL
-                     OR (s.completed_at IS NULL AND {TURN_RUNNING})))
-             ORDER BY o.started_at, o.id"
-        ))?;
-        let owners = query
-            .query_map([], |row| {
-                Ok(IdleSessionOwner {
-                    id: row.get(0)?,
-                    repo: row.get(1)?,
-                    started_at: row.get(2)?,
-                    viewed: row.get(3)?,
-                    detached_at: row.get(4)?,
-                })
-            })?
-            .collect::<rusqlite::Result<_>>()?;
-        Ok(owners)
+        // A Graph started inside an owner, as from a terminal, holds its steps
+        // there. CROSS JOIN seeds the walk from the few Graphs, not every Process.
+        Ok(conn.query_row(
+            &format!(
+                "WITH RECURSIVE graph_ancestors(id) AS (
+                     SELECT p.parent_lf_process_id FROM graph_processes f
+                         CROSS JOIN processes p ON p.id=f.lf_process_id
+                     UNION SELECT p.parent_lf_process_id FROM processes p
+                         JOIN graph_ancestors a ON p.id=a.id)
+                 SELECT ?1 NOT IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
+                 AND EXISTS(SELECT 1 FROM agent_sessions s
+                     WHERE s.transport_lf_process_id=?1 AND s.completed_at IS NULL)
+                 AND NOT EXISTS(SELECT 1 FROM agent_sessions s
+                     WHERE s.transport_lf_process_id=?1
+                     AND (s.interactive=0 OR {SESSION_GRAPH} IS NOT NULL
+                         OR (s.completed_at IS NULL AND {TURN_RUNNING})))"
+            ),
+            [owner.as_str()],
+            |row| row.get(0),
+        )?)
     }
 
     /// A Task's unfinished interactive conversations, each with its last opening.
@@ -909,8 +887,8 @@ impl SqliteStore {
                             WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started')) END AS ended, NULL AS thread, NULL AS turn
                 FROM session_events i JOIN agent_sessions s ON s.id=i.session_id
                 LEFT JOIN session_events latest_turn ON latest_turn.seq=(
-                    SELECT origin.seq FROM session_events origin
-                    WHERE origin.captured_event=i.seq AND origin.kind='started' ORDER BY origin.seq DESC LIMIT 1)
+                    SELECT origin.seq FROM session_events origin WHERE origin.session_id=i.session_id
+                    AND origin.captured_event=i.seq AND origin.kind='started' ORDER BY origin.seq DESC LIMIT 1)
                 LEFT JOIN processes attached ON attached.id=CASE WHEN latest_turn.seq IS NULL
                     THEN i.lf_process_id ELSE latest_turn.lf_process_id END
                 LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
@@ -920,16 +898,20 @@ impl SqliteStore {
                 WHERE i.kind='captured' AND (?7 IS NULL OR i.receipt_key=?7) AND
                     (?7 IS NOT NULL OR m.seq IS NOT NULL
                     OR (i.receipt_key=(SELECT receipt_key FROM session_events WHERE seq=s.current_capture) AND s.input_published=1)
-                    OR EXISTS(SELECT 1 FROM session_events origin WHERE origin.captured_event=i.seq AND origin.kind='started'))
+                    OR EXISTS(SELECT 1 FROM session_events origin WHERE origin.session_id=i.session_id
+                        AND origin.captured_event=i.seq AND origin.kind='started'))
                 UNION ALL
-                SELECT NULL,NULL,e.session_id,NULL,MIN(e.observed_at),origin.task_id,origin.wave_id,
-                    COALESCE(MAX(attached.completed_at),MAX(CASE WHEN e.kind='completed' THEN e.observed_at END)),e.provider_thread,e.provider_turn
-                FROM session_events e LEFT JOIN session_events origin
+                SELECT NULL,NULL,e.session_id,NULL,e.started,origin.task_id,origin.wave_id,
+                    COALESCE(MAX(attached.completed_at),e.completed),e.provider_thread,e.provider_turn
+                FROM (SELECT session_id,provider_thread,provider_turn,MIN(observed_at) AS started,
+                        MAX(CASE WHEN kind='completed' THEN observed_at END) AS completed
+                    FROM session_events WHERE ?7 IS NULL AND kind IN ('started','usage','completed','output')
+                    GROUP BY session_id,provider_thread,provider_turn) e
+                LEFT JOIN session_events origin
                     ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
                     AND origin.provider_turn=e.provider_turn AND origin.kind='started'
                 LEFT JOIN processes attached ON attached.id=origin.lf_process_id
-                WHERE ?7 IS NULL AND e.kind IN ('started','usage','completed','output')
-                    AND origin.captured_event IS NULL
+                WHERE origin.captured_event IS NULL
                 GROUP BY e.session_id,e.provider_thread,e.provider_turn)
                 , eligible AS MATERIALIZED (
                 SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,thread,turn, SUM(ended IS NULL) OVER () AS unfinished,

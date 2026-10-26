@@ -495,6 +495,52 @@ planning and CI views still load.
 | Planning surface | `repo` dissolved or slimmed per D5 | D5 |
 | Code host port (filed, local `985879`, Linear sync uncertain) | One code-host + CI port; a second host proves pr/land/ci/release end to end | LOO-610 `pr`/ops surface |
 
+## Concept review: the front door (2026-10-26, open)
+
+Walk: Jack comes back Monday. Experience wanted (1.0 promises: Task management
+that just works, Session management): see what needs him, what finished, what
+is running, and get into one of them.
+
+Today (verified 2026-10-26 on this machine):
+- `lf` alone starts a new `default` conversation (`bin/lf.rs:342`).
+- `lf monitor` prints ~200 lines: 125 finished, 58 stopped, 1 running; the
+  few that need a person are buried.
+- `lf session list --available` → "No Sessions"; `lf open --available` opens
+  them all; `lf wave status` / `lf task status` per scope.
+- `lf resume` (LOO-618) gets you into one, but only once you know which.
+
+Five readers answer "what needs me" and none is the obvious first command.
+
+Proposed (not accepted): one front door, the attention state "Available" as
+its spine.
+
+```
+lf                # what needs you, what's running, what finished since you left (this repo; --all for every repo)
+lf resume         # get back into the one you were in
+lf resume LOO-610 # or the one you picked
+lf : "…"          # start something new (today's bare `lf`)
+```
+
+Consequences: `monitor` (bare, `active`, `ps`, `top`) folds into bare `lf`
+plus `lf ps` for the process tree; `session list --available` and
+`open --available` become filters of the same read; Desktop's sidebar and the
+terminal front door are one query (`lf watch work`). "Since you left" needs a
+last-seen mark per person per scope (small fact, no new store shape).
+
+Open product choice (Jack): does bare `lf` stay "start a conversation", the
+way bare `claude`/`codex` do, or become "show my work"? Counterexample to the
+proposal: muscle memory from the harnesses, and agents trained on `lf` meaning
+"talk to me".
+
+## `ops` stays (Jack Heart, 2026-10-26)
+
+Considered splitting `ops` into `code` (commit, sync, wt, pr, ci, release) and
+`capacity` (machine, account). Jack: keep `ops` for now; fewer higher-level
+concepts is generally better.
+
+Resuming a Task's conversation stays one verb on the Session: `lf resume
+LOO-610` or `lf --task LOO-610 resume`; no `task resume` (proposed, follows D2).
+
 ## Run notes
 
 - 2026-10-26: the first pursue run's implement step handed the `wave cron`

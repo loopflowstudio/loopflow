@@ -9,6 +9,9 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::{File, OpenOptions};
+use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -21,7 +24,6 @@ use crate::pr_landing::{PrLanding, PrLandingState};
 use crate::store::SharedStore;
 
 use super::error::{OpsError, OpsResult};
-use super::launchd::Launchctl;
 use super::pr::{GhCheck, MergeGateReading};
 
 const INTERVAL: Duration = Duration::from_secs(60);
@@ -475,7 +477,7 @@ fn write_state(root: &Path, state: &CiWatchState) -> OpsResult<()> {
 pub fn status(repo: &Path) -> OpsResult<CiWatchStatus> {
     let root = crate::git::worktrees::main_repo_root(repo).map_err(error)?;
     let running = try_lock(&root)?.is_none();
-    let installed = service_path(&super::launchd::default_launch_agents_dir()?, &root).exists();
+    let installed = service_path(&default_launch_agents_dir()?, &root).exists();
     Ok(CiWatchStatus {
         running,
         installed,
@@ -778,9 +780,7 @@ pub struct WatchOptions {
 }
 
 fn parent_gone(options: &WatchOptions) -> bool {
-    options
-        .parent_pid
-        .is_some_and(|pid| !super::launchd::process_alive(pid))
+    options.parent_pid.is_some_and(|pid| !process_alive(pid))
 }
 
 /// Sleep in short steps so a vanished parent stops the watcher promptly.
@@ -891,7 +891,7 @@ fn service_path(launch_agents_dir: &Path, repo: &Path) -> PathBuf {
 }
 
 fn render_service(spec: &ServiceSpec) -> String {
-    let escape = super::launchd::xml_escape;
+    let escape = xml_escape;
     let log = spec.repo.join(".lf/logs/ci-watch.log");
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -903,7 +903,7 @@ fn render_service(spec: &ServiceSpec) -> String {
     <key>ProgramArguments</key>
     <array>
         <string>{lf_path}</string>
-        <string>repo</string>
+        <string>ops</string>
         <string>ci</string>
         <string>watch</string>
     </array>
@@ -941,16 +941,16 @@ fn render_service(spec: &ServiceSpec) -> String {
 pub fn install_service(
     launch_agents_dir: &Path,
     spec: &ServiceSpec,
-    launchctl: &dyn Launchctl,
+    launchctl: Launchctl,
 ) -> OpsResult<PathBuf> {
     std::fs::create_dir_all(launch_agents_dir)?;
     std::fs::create_dir_all(spec.repo.join(".lf/logs"))?;
     let path = service_path(launch_agents_dir, &spec.repo);
     if path.exists() {
-        let _ = launchctl.unload(&path);
+        let _ = launchctl("unload", &path);
     }
-    super::launchd::write_private_file(&path, render_service(spec).as_bytes())?;
-    launchctl.load(&path)?;
+    write_private_file(&path, render_service(spec).as_bytes())?;
+    launchctl("load", &path)?;
     Ok(path)
 }
 
@@ -958,15 +958,84 @@ pub fn install_service(
 pub fn uninstall_service(
     launch_agents_dir: &Path,
     repo: &Path,
-    launchctl: &dyn Launchctl,
+    launchctl: Launchctl,
 ) -> OpsResult<bool> {
     let path = service_path(launch_agents_dir, repo);
     if !path.exists() {
         return Ok(false);
     }
-    launchctl.unload(&path)?;
+    launchctl("unload", &path)?;
     std::fs::remove_file(&path)?;
     Ok(true)
+}
+
+/// Runs `launchctl <action> <plist>`; tests substitute a no-op.
+pub type Launchctl = fn(&str, &Path) -> OpsResult<()>;
+
+pub fn system_launchctl(action: &str, path: &Path) -> OpsResult<()> {
+    let output = Command::new("launchctl").arg(action).arg(path).output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(OpsError::CommandFailed {
+        command: format!("launchctl {action} {}", path.display()),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
+
+pub fn default_launch_agents_dir() -> OpsResult<PathBuf> {
+    let home =
+        dirs::home_dir().ok_or_else(|| OpsError::Message("no home directory".to_string()))?;
+    Ok(home.join("Library/LaunchAgents"))
+}
+
+pub fn resolve_lf_path() -> OpsResult<PathBuf> {
+    // The watcher follows future promotions; Sessions pin their own runtime.
+    if !crate::store::custom_home_selected() {
+        let gate = crate::installation::root()
+            .and_then(|root| {
+                crate::installation::entry_gate_path(&root, &crate::installation::ArtifactRole::Cli)
+            })
+            .map_err(error)?;
+        if gate.is_file() {
+            return Ok(gate);
+        }
+    }
+    std::env::current_exe().map_err(Into::into)
+}
+
+fn write_private_file(path: &Path, bytes: &[u8]) -> OpsResult<()> {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(path)?;
+    #[cfg(unix)]
+    {
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn process_alive(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    // SAFETY: signal 0 does not mutate the target; it only checks whether the
+    // process exists and is signalable by this user.
+    let result = unsafe { libc::kill(pid, 0) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 #[cfg(test)]
@@ -1204,15 +1273,8 @@ mod tests {
         );
     }
 
-    struct FakeLaunchctl;
-
-    impl Launchctl for FakeLaunchctl {
-        fn load(&self, _: &Path) -> OpsResult<()> {
-            Ok(())
-        }
-        fn unload(&self, _: &Path) -> OpsResult<()> {
-            Ok(())
-        }
+    fn no_launchctl(_: &str, _: &Path) -> OpsResult<()> {
+        Ok(())
     }
 
     #[test]
@@ -1225,16 +1287,16 @@ mod tests {
             lf_home: PathBuf::from("/home/.lf"),
             path_env: "/usr/bin".into(),
         };
-        let path = install_service(&agents, &spec, &FakeLaunchctl).unwrap();
+        let path = install_service(&agents, &spec, no_launchctl).unwrap();
         let plist = std::fs::read_to_string(&path).unwrap();
         assert!(plist.contains(
-            "<string>/usr/local/bin/lf</string>\n        <string>repo</string>\n        <string>ci</string>\n        <string>watch</string>"
+            "<string>/usr/local/bin/lf</string>\n        <string>ops</string>\n        <string>ci</string>\n        <string>watch</string>"
         ));
         assert!(plist.contains("<key>KeepAlive</key>\n    <true/>"));
         assert!(plist.contains("repo &amp; co</string>"));
-        assert!(uninstall_service(&agents, &spec.repo, &FakeLaunchctl).unwrap());
+        assert!(uninstall_service(&agents, &spec.repo, no_launchctl).unwrap());
         assert!(!path.exists());
-        assert!(!uninstall_service(&agents, &spec.repo, &FakeLaunchctl).unwrap());
+        assert!(!uninstall_service(&agents, &spec.repo, no_launchctl).unwrap());
     }
 
     /// GitHub as the watcher sees it: one open PR whose required check failed.

@@ -2732,6 +2732,7 @@ mod tests {
             "wave",
             "new-chapter",
             "two",
+            "--all",
             "--plan",
             "chapter.json",
             "--dry-run",

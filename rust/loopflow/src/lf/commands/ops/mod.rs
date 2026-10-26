@@ -24,7 +24,7 @@ use crate::ops::{
     preview_release_notes, recover_sync, release_bump, release_check, release_notes,
     release_publish, release_run, release_status, release_tag, submit, sync_class_name,
     sync_strategy_name, sync_with_plan, AbandonOptions, CommitOptions, LandOptions, PrOptions,
-    Progress, SyncOptions, SystemLaunchctl,
+    Progress, SyncOptions,
 };
 use crate::prompt::process::prepare_process_prompt;
 use crate::prompt::process::ContextSourceOverrides;
@@ -929,23 +929,23 @@ pub fn ci_watch_cmd(cmd: &CiCommand) -> Result<()> {
                 .filter(|path| !path.is_empty())
                 .ok_or_else(|| anyhow!("PATH is empty; cannot install an unattended CI watcher"))?;
             let path = ci_watch::install_service(
-                &crate::ops::default_launch_agents_dir()?,
+                &ci_watch::default_launch_agents_dir()?,
                 &ci_watch::ServiceSpec {
                     repo: main_repo_root(&repo)?,
-                    lf_path: crate::ops::resolve_lf_path()?,
+                    lf_path: ci_watch::resolve_lf_path()?,
                     lf_home: crate::store::lf_home_dir(),
                     path_env,
                 },
-                &SystemLaunchctl,
+                ci_watch::system_launchctl,
             )?;
             println!("installed {}", path.display());
             Ok(())
         }
         (_, true, _) => {
             let removed = ci_watch::uninstall_service(
-                &crate::ops::default_launch_agents_dir()?,
+                &ci_watch::default_launch_agents_dir()?,
                 &main_repo_root(&repo)?,
-                &SystemLaunchctl,
+                ci_watch::system_launchctl,
             )?;
             println!(
                 "{}",

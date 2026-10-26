@@ -217,12 +217,7 @@ fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
         return Outcome::Resolved;
     }
     // Connection may register the selected Wave.
-    if env.id == "explicit-unknown" && cmd.id == "repo connect" {
-        return Outcome::Resolved;
-    }
-    // The fixture plans through Git, whose refresh exchanges the whole
-    // repository: a Wave selection, stale or unknown, has no effect.
-    if cmd.id == "repo refresh" {
+    if env.id == "explicit-unknown" && cmd.id == "wave connect" {
         return Outcome::Resolved;
     }
 

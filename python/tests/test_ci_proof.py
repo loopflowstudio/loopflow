@@ -123,7 +123,7 @@ def test_actual_workflow_gate_requires_proof_and_successful_warming(
 
 @pytest.mark.parametrize("event", ["pull_request", "merge_group", "push"])
 @pytest.mark.parametrize("scratch", ["clear", "notes", "nested", "missing"])
-def test_checkpoint_defers_proof_but_queue_requires_clear_scratch(
+def test_review_prs_may_carry_scratch_but_queue_requires_it_clear(
     _ci_jobs: dict[str, dict], tmp_path: Path, event: str, scratch: str
 ) -> None:
     if scratch != "missing":
@@ -135,33 +135,25 @@ def test_checkpoint_defers_proof_but_queue_requires_clear_scratch(
         (tmp_path / "scratch/proofs").mkdir()
         (tmp_path / "scratch/proofs/.hidden").touch()
     step = _ci_jobs["scratch-clear"]["steps"][1]
-    output = tmp_path / "output"
     summary = tmp_path / "summary"
     result = subprocess.run(
         ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
         cwd=tmp_path,
-        env={
-            **os.environ,
-            "EVENT_NAME": event,
-            "GITHUB_OUTPUT": str(output),
-            "GITHUB_STEP_SUMMARY": str(summary),
-        },
+        env={**os.environ, "EVENT_NAME": event, "GITHUB_STEP_SUMMARY": str(summary)},
         capture_output=True,
         text=True,
     )
     if scratch == "clear":
         assert result.returncode == 0, result.stdout
-        assert output.read_text() == "candidate=true\n"
     elif event == "pull_request" and scratch != "missing":
         assert result.returncode == 0, result.stdout
-        assert output.read_text() == "candidate=false\n"
-        assert "hosted proof is deferred" in summary.read_text()
+        assert "::notice::" in result.stdout
+        assert "scratch/" in summary.read_text()
     else:
         assert result.returncode == 1, result.stdout
-        assert not output.exists()
 
 
-def test_matrix_only_runs_for_candidates_and_queue_cannot_skip_aggregate(
+def test_matrix_runs_regardless_of_scratch_and_aggregate_always_runs(
     _ci_jobs: dict[str, dict],
 ) -> None:
     jobs = _ci_jobs
@@ -169,15 +161,13 @@ def test_matrix_only_runs_for_candidates_and_queue_cannot_skip_aggregate(
     matrix = set(jobs) - classifiers - {"tests-result", "cancel-superseded"}
     assert set(jobs["tests-result"]["needs"]) == matrix | classifiers
     for name in matrix:
-        assert {"merge-proof", "scratch-clear"} <= set(jobs[name]["needs"])
-        assert "needs.scratch-clear.outputs.candidate == 'true'" in jobs[name]["if"]
+        assert "merge-proof" in jobs[name]["needs"]
+        assert "scratch-clear" not in jobs[name]["needs"]
+        assert "scratch-clear" not in jobs[name]["if"]
+    assert "outputs" not in jobs["scratch-clear"]
     # Only an explicit "false" skips the macOS jobs; a failed classifier still runs them.
     macos = {name for name in matrix if "macos-inputs" in jobs[name]["needs"]}
     assert macos == {"swift-test", "loopflow-ui-test", "macos-process-test"}
     for name in macos:
         assert "needs.macos-inputs.outputs.macos != 'false'" in jobs[name]["if"]
-    assert jobs["tests-result"]["if"] == (
-        "${{ always() && (github.event_name != 'pull_request' || "
-        "needs.scratch-clear.result != 'success' || "
-        "needs.scratch-clear.outputs.candidate != 'false') }}"
-    )
+    assert jobs["tests-result"]["if"] == "${{ always() }}"

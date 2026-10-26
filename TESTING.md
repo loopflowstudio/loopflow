@@ -1,24 +1,19 @@
 # Testing
 
-Publish checkpoints with working notes in `scratch/`; hosted CI defers the full
-matrix until scratch is clear. `lf pr submit`, `lf land`, and `lf pr land`
-clear committed scratch additions before pushing a landing candidate. Scratch-free PRs, including
-small changes and Dependabot updates, run the full test matrix in parallel.
+Every PR push runs the full test matrix in parallel, whether or not `scratch/`
+holds working notes. Scratch is a merge-time requirement: `lf pr submit`,
+`lf land`, and `lf pr land` clear committed scratch additions before the merge
+queue, and queue/main runs reject any that remain.
 Implement/compress only build changed code and run its focused test. Gate owns
 affected suites and automated acceptance once; see the verification cadence in
 [AGENTS.md](AGENTS.md#verification-cadence). Scratch keeps one check-result line.
 Required checks run unattended; defer unavailable checks to capable CI and
 leave people's judgment to demo/review. Neither blocks earlier Graph steps.
 
-For checkpoint PRs, `scratch-clear` reports deferred tests and `tests-result`
-and the matrix jobs skip. That is not a passing test result. The required merge
-queue always rejects scratch artifacts and runs full tests before merging.
-Missing scratch, classifier failures, and unexpected skipped candidate jobs
-still fail the aggregate. Restoring scratch on a later PR head defers its tests.
-
-The repository owns the `scratch-clear` classifier; the native CLI does not exempt
-a failing required check by name. Delivery cleanup preserves existing scratch
-content, so repositories retaining it must define their own candidate policy.
+On a PR, `scratch-clear` passes with a notice listing scratch files. A green PR
+`tests-result` therefore proves the tests, not that scratch is clear; the
+required merge queue still rejects scratch artifacts. Missing scratch,
+classifier failures, and skipped jobs without proof fail the aggregate.
 
 A new PR update cancels the previous CI run for that PR. Main and merge-group
 runs remain independent, except that a merge-queue entry's earlier runs are
@@ -73,8 +68,8 @@ Cache restoration alone never skips tests. After a merge, main can reuse a
 successful merge-group CI run for the identical SHA and workflow, linking that
 run in its summary. Missing or unreadable results trigger the full matrix. Main still
 restores the shared caches and runs each job whose cache misses; those jobs
-refresh their caches and must pass. Candidate PRs and merge groups always execute
-every check.
+refresh their caches and must pass. PRs and merge groups always execute every
+check.
 
 `uv run python scripts/test_task_installation.py --repository-upgrade`
 installs the checksum-verified 0.14.3 CLI, creates a Task checkout and Session,
@@ -633,7 +628,7 @@ Rust partitions wait for one shared build; the other suites run independently.
 | Job | Runner | Command |
 |-----|--------|---------|
 | `architecture-check` | ubuntu-latest | map every durable owner, public boundary, provider edge, and named shim; reject stale control vocabulary |
-| `scratch-clear` | ubuntu-latest | defer checkpoint PR tests; reject scratch artifacts on queue/main |
+| `scratch-clear` | ubuntu-latest | note scratch files on PRs; reject them on queue/main |
 | `rust-lint` | ubuntu-latest | `cargo fmt`, `cargo clippy --all-targets -- -D warnings` |
 | `rust-build` | ubuntu-latest | compile and archive Rust tests once |
 | `rust-test` | ubuntu-latest | five library and three integration partitions; partition zero proves quietness and checkout refresh |
@@ -646,7 +641,7 @@ Rust partitions wait for one shared build; the other suites run independently.
 | `macos-process-test` | macos-15 | deleted-executable and exact process-authority regression |
 | `loopflow-ui-test` | macos-26 | xcodegen + app/test-runner compile |
 
-Candidate and merge-group jobs must all pass for `tests-result` to pass. Both CI
+Every job must pass, or skip for lack of macOS inputs, for `tests-result` to pass. Both CI
 and the local runner collect every Rust test failure with `--no-fail-fast`.
 Ordinary integration modules are registered in `rust/loopflow/tests/integration.rs`
 and linked once. Add new modules there; Cargo auto-discovery is disabled. Dedicated

@@ -1,6 +1,6 @@
 # LOO-617: Run CI's test jobs on published PRs
 
-Status: draft plan (kickoff 2026-10-26). Direction accepted by Jack Heart
+Status: implemented 2026-10-26; hosted demo pending publication. Direction accepted by Jack Heart
 (2026-10-26): skipping CI test jobs on review PRs is not OK.
 
 ## Problem
@@ -109,4 +109,4 @@ Forbidden: a second switch (label, draft status, env flag) that re-skips tests o
   `swift-test` (not skipped); the merge queue would reject it until `lf land`
   clears scratch (covered by the merge_group cases in the Python test).
 
-Check result: (not yet run)
+Check result: `uv run pytest python/tests/test_ci_proof.py` 39 passed; actionlint not installed → CI; hosted demo → publish.

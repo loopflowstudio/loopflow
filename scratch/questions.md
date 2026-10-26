@@ -19,7 +19,7 @@
 - Note (2026-10-26): LOO-594's steer says "keep the closed row type as
   RoadmapTask", but closed pages return `wave status` rows (Swift
   `WaveTaskWork`) so Desktop can merge them with the Wave view's open rows.
-  They switch to `RoadmapTask` with Wave detail becoming Task rows (Remaining 3).
+  They switch to `RoadmapTask` with Wave detail becoming Task rows (Remaining 2).
 - Assumption: a graph's inventory entry in Task reads names the Task being read
   and its Wave, not `task_of_process`'s longest-worktree owner; they differ only
   for a Graph run in a nested Task checkout.

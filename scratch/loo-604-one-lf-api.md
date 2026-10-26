@@ -126,14 +126,14 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
 
 | Read | Answers | Desktop caller / cadence | Scope | Place in the API | Work needed |
 |---|---|---|---|---|---|
-| planning (`wave show --all`, `wave list --all --current`) | roadmap, current Waves, Dashboard plans | stream | M | part | set-based Task details (below) |
+| planning (`wave show --all`, `wave list --all --current`) | roadmap, current Waves, Dashboard plans | stream | M | `lf task list --watch` + Wave fields | open Tasks only, batched details and Graphs (done); `--watch` |
 | sessions (`session list --page`) | Session rows | stream (headless: false) | R | part | page or diff; drop 2 s blind clock once liveness is a signal |
-| task (`task status`) | TaskOverview, Graph processes, comments | stream | T | part | N+1 over Graphs; 20 connections |
-| task_history | TaskWork diagnostics | stream, on request | T | part | rename vs `usage --task` clash |
-| wave (`wave status`) | Wave detail | stream | W | part | shares planning's Task details |
-| work_activity (`history`) | 7-day activity | stream | W/P/T | part | |
+| task (`task status`) | TaskOverview, Graph processes, comments | stream | T | `lf task status <id> --watch` | 5k statements, 20 connections (Remaining 5) |
+| task_history | TaskWork diagnostics | stream, on request | T | deleted | duplicate of `task status`'s `task_work` |
+| wave (`wave status`) | Wave detail | stream | W | `lf task list --wave W --watch` + Wave fields | details batched (done); rows become `RoadmapTask` |
+| work_activity (`history`) | 7-day activity | stream | W/P/T | `lf history --since --watch` | Session records only; drop Work facts |
 | activity (`monitor top --json`) | live call trees | stream | M | part | shrinks with LOO-615 |
-| peer_planning (`planning status`) | sync receipts | stream | R | part | |
+| peer_planning (`planning status`) | sync receipts | stream | R | per-Task `task.sync` on rows; repo read on open | |
 | `wave status` ×N | Wave Projects | WavesView, every planning frame | W | deleted (this change) | |
 | `wave status` per Wave | historical Project lookup | `openHistoricalReference`, user action | W | stream `wave` or a Project lookup | check historical Projects are in roadmap |
 | `task comment` | comments | TaskCommentsView on appear | T | stream `task.comments` | delete |
@@ -155,10 +155,15 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
    filtered by `--wave` (closed pages switch from `wave status` rows to
    `RoadmapTask` with it); delete `lf monitor work`, its parts and transport,
    and the task_history part. work_activity → `lf history --since --watch`.
-3. Sessions: incremental or paged rows instead of 5.7 MB per reading.
-4. `lf task status`: 5k statements / 20 connections for one Task; reuse
+3. `lf history` becomes Session records only: `WorkActivityFact` keeps the
+   Session facts (input captured/completed, provider history) tagged with
+   Task/Wave/Project and drops `WorkCreated`, `Pr*` and `SteerIssued`, which
+   `lf task status`, comments and Workflow history already carry. Update
+   `work_activity_snapshot.json` and Desktop's activity view with it.
+4. Sessions: incremental or paged rows instead of 5.7 MB per reading.
+5. `lf task status`: 5k statements / 20 connections for one Task; reuse
    `TaskDetailFacts` and `GraphExecutionFacts` for its Task.
-5. Delete remaining Desktop duplicates; catalog and machine reads.
+6. Delete remaining Desktop duplicates; catalog and machine reads.
 
 ## Delete — do not maintain
 

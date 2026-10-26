@@ -254,7 +254,7 @@ struct DesktopAction {
             context.model.goForward()
             return nil
         },
-        DesktopAction("goto", "Sidebar Task", arguments: [.init(name: "index", kind: .integer, required: true)],
+        DesktopAction("goto", "Working Task", arguments: [.init(name: "index", kind: .integer, required: true)],
             keys: (1...9).map { .init(.character(Character(String($0))), .command, args: ["index": String($0)]) }) { context in
             let index = try context.integer("index")
             let ids = context.model.sidebarTaskIDs

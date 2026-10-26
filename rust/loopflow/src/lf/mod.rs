@@ -751,18 +751,18 @@ pub enum DesktopCommand {
         #[command(flatten)]
         target: DesktopWindowArgs,
     },
-    /// Show the window's Nth sidebar Task, as ⌘N does
+    /// Show the window's Nth Working Task, as ⌘N does
     Goto {
         index: u32,
         #[command(flatten)]
         target: DesktopWindowArgs,
     },
-    /// Show the next sidebar Task, as ⌃⇥ does
+    /// Show the next Working Task, as ⌃⇥ does
     Next {
         #[command(flatten)]
         target: DesktopWindowArgs,
     },
-    /// Show the previous sidebar Task, as ⌃⇧⇥ does
+    /// Show the previous Working Task, as ⌃⇧⇥ does
     Previous {
         #[command(flatten)]
         target: DesktopWindowArgs,

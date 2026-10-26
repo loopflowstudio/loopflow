@@ -1184,7 +1184,7 @@ Go forward, as ⌘] does
 
 ## lf desktop goto
 
-Show the window's Nth sidebar Task, as ⌘N does
+Show the window's Nth Working Task, as ⌘N does
 
 | Argument | What it does |
 |---|---|
@@ -1195,7 +1195,7 @@ Show the window's Nth sidebar Task, as ⌘N does
 
 ## lf desktop next
 
-Show the next sidebar Task, as ⌃⇥ does
+Show the next Working Task, as ⌃⇥ does
 
 | Argument | What it does |
 |---|---|
@@ -1205,7 +1205,7 @@ Show the next sidebar Task, as ⌃⇥ does
 
 ## lf desktop previous
 
-Show the previous sidebar Task, as ⌃⇧⇥ does
+Show the previous Working Task, as ⌃⇧⇥ does
 
 | Argument | What it does |
 |---|---|

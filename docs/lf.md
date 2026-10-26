@@ -1107,7 +1107,8 @@ or `entered` with the Dashboard it was entered `from`), `history` counts, the
 sidebar `list` and `actions`. A receipt carries the destination and affected
 workspace the next `state` reports, plus `target`: the full window, Work, pane and
 tab IDs it acted on and the `rule` that chose them (`pane`, `work`, `caller`,
-`binding` or `window`). Scripts pass those IDs back; positions are for people.
+`binding` or `window`). Scripts pass the Work ID back (`--task`, `-p LOO-519/…`);
+tabs are addressed by position (`-p shell:2`) until receipt tab IDs resolve.
 `ls` renders the same reading with short IDs. `enter` requires a member of the
 shown Dashboard; empty history or an absent position change nothing and exit 3.
 `events` streams changed windows whole, and closed window IDs, until interrupted.

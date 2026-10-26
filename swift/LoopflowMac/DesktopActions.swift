@@ -277,8 +277,8 @@ struct DesktopAction {
             let tiles: [WorkMemberRef]? = switch model.navigation.destination {
             case .workingTasks: model.workingTaskMembers
             case .dashboard, .view: model.selectedViewPlan?.projection.visible
-            case .work(let wave?) where wave.kind == .wave: model.waveTiles(wave.id)
-            case .work, .entered: nil
+            case .work: model.navigation.waveView.map { model.boardTiles($0) }
+            case .entered: nil
             }
             guard let tiles else { throw DesktopTargetError("This window shows no tiles. Nothing changed.") }
             guard let member = tiles.first(where: { $0.work.id == id }) else {
@@ -288,12 +288,12 @@ struct DesktopAction {
             return nil
         },
         DesktopAction("page", "Turn Wave Tasks to Page", arguments: [.init(name: "page", kind: .integer, required: true)],
-                      available: { $0.model.shownWaveID != nil }) { context in
+                      available: { $0.model.navigation.waveView != nil }) { context in
             let model = context.model
-            guard let wave = model.shownWaveID, let plan = model.wavePlan(wave) else {
+            guard let wave = model.navigation.waveView, let plan = model.boardPlan(wave) else {
                 throw DesktopTargetError("This window shows no Wave view. Nothing changed.")
             }
-            let pages = plan.slots.pages(model.waveTiles(wave)).count
+            let pages = plan.slots.pages(model.boardTiles(wave)).count
             guard let page = Int(try context.string("page")), (1...pages).contains(page) else {
                 throw DesktopArgumentError("page must be 1 to \(pages); nothing changed.")
             }
@@ -301,8 +301,8 @@ struct DesktopAction {
             return nil
         },
         DesktopAction("filter", "Set Wave Board Done Days", arguments: [.init(name: "days", kind: .integer, required: true)],
-                      available: { $0.model.shownWaveID != nil }) { context in
-            guard context.model.shownWaveID != nil else {
+                      available: { $0.model.navigation.waveView != nil }) { context in
+            guard context.model.navigation.waveView != nil else {
                 throw DesktopTargetError("This window shows no Wave board. Nothing changed.")
             }
             var filter = TaskHistoryFilter()

@@ -180,20 +180,32 @@ struct WorkNavigationTests {
         model.select(nil)
         #expect(model.navigation.sidebarScope == .repository)
         #expect(model.sidebarTaskIDs == model.workingTaskIDs)
-        model.selectSidebarTask(slot: 0)
-        #expect(model.navigation.destination == .work(.task(id: "issue-review")))
+        // The repository page is a Wave view, so its Tasks enter through it too.
+        model.selectSidebarTask(slot: 1)
+        #expect(model.navigation.destination == .entered(from: .repository, work: .task(id: "issue-now")))
+        #expect(model.navigation.wavePages[.repository] == 1)
+        #expect(model.desktopDestination(repository: "repo")
+            == .entered(from: .repository, work: .init(repository: "repo", kind: .task, id: "issue-now")))
     }
 
-    @Test("Inside a Wave, ⌘N counts the Wave's rows, not Working Tasks")
+    @Test("Inside a Wave view, ⌘N counts the Wave's rows and enters through the Wave on the Task's page")
     func waveScopeSlotsCountTheWave() throws {
         let model = try dashboardModel()
         model.select(.wave(id: "wave-1"))
         #expect(model.sidebarTaskIDs == ["issue-later", "issue-now"])
-        model.selectSidebarTask(slot: 0)
-        #expect(model.navigation.destination == .work(.task(id: "issue-later")))
+        // One slot per page in this fixture, so the page is the Task's position.
+        model.selectSidebarTask(slot: 1)
+        #expect(model.navigation.destination == .entered(from: .wave("wave-1"), work: .task(id: "issue-now")))
+        #expect(model.navigation.wavePages[.wave("wave-1")] == 1)
         #expect(model.navigation.sidebarScope == .wave("wave-1"))
+        model.selectSidebarTask(slot: 0)
+        #expect(model.navigation.destination == .entered(from: .wave("wave-1"), work: .task(id: "issue-later")))
+        #expect(model.navigation.wavePages[.wave("wave-1")] == 0)
         model.selectSidebarTask(slot: 5)
         #expect(model.selection == .task(id: "issue-later"))
+        model.goBack()
+        model.goBack()
+        #expect(model.navigation.destination == .work(.wave(id: "wave-1")))
         model.selectDashboard("review")
         #expect(model.navigation.sidebarWaveID == nil)
     }

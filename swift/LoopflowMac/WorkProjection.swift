@@ -214,7 +214,7 @@ final class WorkNavigation {
         return sidebarWaveID.map(SidebarScope.wave) ?? .repository
     }
     /// Each Wave view's footer page; it outlives entering a tile and coming back.
-    var wavePages: [String: Int] = [:]
+    var wavePages: [Board: Int] = [:]
     var showsSlotHints = false
     var sidebarFilter: SidebarFilter = .working
     var sidebarFocusRequested = false
@@ -284,11 +284,13 @@ final class WorkNavigation {
         /// One Dashboard member shown as full Work; the trail returns through its Dashboard.
         case entered(from: Board, work: WorkReference)
     }
-    /// A view a tile can be entered from: a saved Dashboard, Working Tasks or a Wave view.
-    enum Board: Equatable {
+    /// A view a tile can be entered from: a saved Dashboard, Working Tasks or a Wave
+    /// view, of a Wave or of the repository (its default Wave, over every Task).
+    enum Board: Hashable {
         case saved(String)
         case workingTasks
         case wave(String)
+        case repository
     }
     static let workingTasksTitle = "Working Tasks"
     var destination: Destination = .work(nil)
@@ -311,13 +313,23 @@ final class WorkNavigation {
     var dashboardID: String? {
         if case .dashboard(let id) = destination { return id }; return nil
     }
-    /// The Dashboard the breadcrumb passes through, shown or entered from.
+    /// The view the breadcrumb passes through, shown or entered from.
     var trailBoard: Board? {
         switch destination {
         case .dashboard(let id): .saved(id)
         case .workingTasks: .workingTasks
         case .entered(let board, _): board
-        case .work, .view: nil
+        case .work: waveView
+        case .view: nil
+        }
+    }
+
+    /// The Wave view on screen: a Wave's, or the repository page, which is the same view.
+    var waveView: Board? {
+        switch destination {
+        case .work(nil): .repository
+        case .work(let work?) where work.kind == .wave: .wave(work.id)
+        case .work, .entered, .dashboard, .view, .workingTasks: nil
         }
     }
     /// Where the entered member's tile sat, in `ZoomFromTile.space`; read once

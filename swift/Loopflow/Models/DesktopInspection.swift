@@ -270,20 +270,24 @@ public enum DesktopDestination: Codable, Sendable, Equatable {
     }
 }
 
-/// `{"dashboard": id}`, `{"wave": id}` or `"working_tasks"`, matching Rust's external tagging.
+/// `{"dashboard": id}`, `{"wave": id}`, `"working_tasks"` or `"repository"`, matching Rust's external tagging.
 public enum DesktopBoard: Codable, Sendable, Equatable {
     case dashboard(String)
     case workingTasks
     case wave(String)
+    /// The repository page, the default Wave's view.
+    case repository
 
     private enum CodingKeys: String, CodingKey { case dashboard, wave }
 
     public init(from decoder: Decoder) throws {
         if let name = try? decoder.singleValueContainer().decode(String.self) {
-            guard name == "working_tasks" else {
+            switch name {
+            case "working_tasks": self = .workingTasks
+            case "repository": self = .repository
+            default:
                 throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unknown board \(name)"))
             }
-            self = .workingTasks
         } else {
             let values = try decoder.container(keyedBy: CodingKeys.self)
             if let wave = try values.decodeIfPresent(String.self, forKey: .wave) { self = .wave(wave) }
@@ -302,6 +306,9 @@ public enum DesktopBoard: Codable, Sendable, Equatable {
         case .wave(let id):
             var values = encoder.container(keyedBy: CodingKeys.self)
             try values.encode(id, forKey: .wave)
+        case .repository:
+            var value = encoder.singleValueContainer()
+            try value.encode("repository")
         }
     }
 }

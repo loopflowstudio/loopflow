@@ -75,7 +75,7 @@ struct WorkSurfaceView: View {
             case nil:
                 ContentUnavailableView("Choose Work", systemImage: "list.bullet")
             case .wave:
-                if let selection = model.selection { WaveStandupBoard(model: model, waveID: selection.id) }
+                if let selection = model.selection { WaveStandupBoard(model: model, view: .wave(selection.id)) }
             case .project:
                 missingSelection
             case .task:

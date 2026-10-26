@@ -341,8 +341,11 @@ fn plan_in(
         }
         contents.push(content);
     }
-    // A Wave view's built-in plan fills its footer strip; every other plan starts golden.
-    let default_slots = if selection.id.0.starts_with(WAVE_DEFAULT_PREFIX) {
+    // A Wave view's built-in plan fills its footer strip, the repository's included
+    // (the repository page is its default Wave); saved and unsaved queries start golden.
+    let default_slots = if selection.id.0.starts_with(WAVE_DEFAULT_PREFIX)
+        || selection.id == repository_default().id
+    {
         SlotLayout::strip(3)
     } else {
         SlotLayout::golden()
@@ -992,8 +995,8 @@ mod tests {
         assert_eq!(*axis, SplitAxis::Vertical);
         assert_eq!(weights, &[1.0; 3]);
         assert_eq!(wave.slots.slots(), [0, 1, 2]);
-        // The repository default and saved Dashboards keep the golden default.
-        assert_eq!(plans[0].slots, SlotLayout::golden());
+        // The repository page is a Wave view too.
+        assert_eq!(plans[0].slots, SlotLayout::strip(3));
     }
 
     #[test]
@@ -1036,7 +1039,7 @@ mod tests {
         use crate::work::selection::{SlotLayout, SlotNode, SplitAxis};
         let (_dir, store, repo) = fixture();
         assert_eq!(
-            store.view_plan(&repo, None).unwrap().slots,
+            store.view_plan(&repo, Some("state:open")).unwrap().slots,
             SlotLayout::golden()
         );
         assert_eq!(SlotLayout::golden().slots().len(), 7);

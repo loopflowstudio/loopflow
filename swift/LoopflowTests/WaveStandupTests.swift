@@ -86,7 +86,7 @@ struct WaveStandupTests {
         let standup = WaveStandup(tasks: tasks, closed: tasks, doneDays: 7, now: now)
         #expect(standup.showsPeople)
         #expect(standup.active.compactMap(\.person?.initials) == ["JH", "AL"])
-        let text = standup.text(roadmap: try roadmap())
+        let text = standup.text(heading: WaveStandup.heading(try roadmap()))
         #expect(text.contains("A Task A · Jack Heart"))
         #expect(text.contains("Done (last 7 days) · 0\n  None"))
     }
@@ -96,7 +96,7 @@ struct WaveStandupTests {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering is passive") },
                               repoPath: roadmap.wave.repo)
         model.applyFixture(roadmap: .available(try snapshot()), waves: .available([]), workActivity: .loading, repos: [])
-        let board = WaveStandupBoard(model: model, waveID: roadmap.wave.id)
+        let board = WaveStandupBoard(model: model, view: .wave(roadmap.wave.id))
         #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string() == roadmap.wave.displayName)
         #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-metric-headline").text().string()
             == WaveMetricPortfolioPresentation(portfolio: roadmap.metricPortfolio).headline)
@@ -110,6 +110,22 @@ struct WaveStandupTests {
             #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-current-project").text().string()
                 .hasPrefix(project.name))
         }
+    }
+
+    @Test func repositoryPageIsTheSameBoardOverEveryRepositoryTask() throws {
+        let snapshot = try snapshot()
+        let repo = try roadmap().wave.repo
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering is passive") }, repoPath: repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let board = WaveStandupBoard(model: model, view: .repository)
+        #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string() == model.repositoryName)
+        // Unstarted backlog from every Wave, and none, is on the repository's board.
+        let standup = WaveStandup(tasks: model.visibleTasks, closed: model.visibleTasks, doneDays: 0, now: now)
+        #expect(!standup.backlog.isEmpty)
+        for row in standup.backlog.prefix(WaveStandupBoard.visibleRows) {
+            _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-row-\(row.id)")
+        }
+        #expect(throws: (any Error).self) { try board.inspect().find(viewWithAccessibilityIdentifier: "wave-current-project") }
     }
 
     private func snapshot() throws -> RoadmapSnapshot {

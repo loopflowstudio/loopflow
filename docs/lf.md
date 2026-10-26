@@ -1205,7 +1205,11 @@ lf desktop move -p 3 --destination 1         # on a Dashboard: tile 3 takes tile
 (`session`, `shell`, `browser`), a tab (`shell:2`, `browser:1`), a tile (`3`,
 `LOO-519`), or `TILE/PANE`. Dashboards and Wave views have tiles. A Wave view is
 a standup board (Done · Active · Backlog against the chapter's KRs) beside the
-Wave conversation, with its Tasks three to a page along the bottom. There a lone
+Wave conversation, with its Tasks three to a page along the bottom. The
+repository page is the same view: every repository Task on the board, unstarted
+backlog included, the repository conversation, and its Working Tasks as tiles.
+Selecting a sidebar Task from either view enters it through that view, so back
+returns to the board on the Task's page. There a lone
 part names a view part first, then a tile; on a Task it names a pane, and a tile
 part picks a Task by its ⌘N place.
 

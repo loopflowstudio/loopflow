@@ -180,6 +180,9 @@ pub enum DesktopBoard {
     WorkingTasks,
     /// A Wave view: its standup board and conversation above, its Tasks as tiles below.
     Wave(String),
+    /// The repository page, the default Wave's view: every repository Task on its
+    /// board, the repository conversation, its Working Tasks as tiles.
+    Repository,
 }
 
 /// Destinations back and forward reach, as the window's chevrons do.
@@ -2096,7 +2099,8 @@ impl<'a> Scope<'a> {
     }
 
     /// The window shows tiles: a Dashboard (saved, Working Tasks or an unsaved
-    /// query) or a Wave view, whose Tasks are tiles below its board and conversation.
+    /// query) or a Wave view (the repository page is one), whose Tasks are tiles
+    /// below its board and conversation.
     fn shows_board(window: &DesktopWindowInspection) -> bool {
         matches!(
             &window.destination,
@@ -2106,9 +2110,10 @@ impl<'a> Scope<'a> {
         ) || Self::wave_view(window).is_some()
     }
 
+    /// A Wave's view or the repository page, which is the same view over every Task.
     fn wave_view(window: &DesktopWindowInspection) -> Option<&WorkWorkspaceKey> {
         match &window.destination {
-            DesktopDestination::Work { work } if work.kind == WorkWorkspaceKind::Wave => Some(work),
+            DesktopDestination::Work { work } if work.kind != WorkWorkspaceKind::Task => Some(work),
             _ => None,
         }
     }
@@ -2888,6 +2893,7 @@ impl std::fmt::Display for DesktopBoard {
             Self::Dashboard(id) => write!(f, "query:{id}"),
             Self::WorkingTasks => write!(f, "working-tasks"),
             Self::Wave(id) => write!(f, "wave:{id}"),
+            Self::Repository => write!(f, "repository"),
         }
     }
 }
@@ -3221,6 +3227,18 @@ mod tests {
         assert!(entered(&inspection, "2")
             .unwrap_err()
             .contains("No tile at position 2"));
+        // The repository page is a Wave view: its conversation is not a tile either.
+        let repository = super::WorkWorkspaceKey {
+            kind: super::WorkWorkspaceKind::Repository,
+            id: task.repository.clone(),
+            ..task.clone()
+        };
+        let window = &mut inspection.windows[0];
+        window.destination = super::DesktopDestination::Work {
+            work: repository.clone(),
+        };
+        window.open_work = vec![repository, task.clone()];
+        assert_eq!(entered(&inspection, "1").unwrap(), task.id);
         let window = &mut inspection.windows[0];
         window.destination = super::DesktopDestination::WorkingTasks;
         window.open_work = vec![task.clone()];

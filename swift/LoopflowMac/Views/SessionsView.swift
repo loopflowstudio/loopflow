@@ -1209,41 +1209,25 @@ struct SessionsContentView: View {
                         if navigation.showsActivity { WorkActivityView(model: model).frame(minWidth: 230, maxWidth: 360) }
                     }
                 }
-            } else if key.kind == .wave, active {
-                // The standup board and the Wave conversation share the top band;
-                // the Wave's Tasks run along the bottom, golden proportions both ways.
+            } else if key.kind != .task, active, let view = navigation.waveView {
+                // A Wave view, the repository page included: the standup board and the
+                // conversation share the top band; the Tasks run along the bottom,
+                // golden proportions both ways.
                 GeometryReader { geometry in
                     VStack(spacing: 0) {
                         HStack(spacing: 0) {
-                            WaveStandupBoard(model: model, waveID: key.id)
+                            WaveStandupBoard(model: model, view: view)
                                 .frame(width: geometry.size.width * FocusSizing.golden)
                             Divider()
-                            WorkspacePanesView(workspace: entry, isFocused: navigation.palette == nil, sessions: store, model: model,
-                                onFocus: { pane, session in focusPane(pane, session: session, in: entry) })
-                                .equatable()
+                            conversationPanes(key, entry, isFocused: navigation.palette == nil)
                         }
                         .frame(height: geometry.size.height * FocusSizing.golden)
                         Divider()
-                        WaveTiles(model: model, workspaces: workspaces, sessions: store, waveID: key.id)
+                        WaveTiles(model: model, workspaces: workspaces, sessions: store, view: view)
                     }
                 }
             } else if terminals {
-                WorkspacePanesView(workspace: entry, isFocused: active && navigation.palette == nil, sessions: store, model: model,
-                    onFocus: { pane, session in focusPane(pane, session: session, in: entry) })
-                    .equatable()
-                    .overlay(alignment: .top) {
-                        if let error = entry.conversationError {
-                            HStack {
-                                Text(error).textSelection(.enabled)
-                                Button("Retry") {
-                                    if key.kind == .task, let work = key.reference { openTask(work) }
-                                    else if let work = key.reference { openWaveConversation(work) }
-                                    else { openRepositoryConversation() }
-                                }
-                            }.foregroundStyle(theme.palette.text)
-                                .padding(8).background(theme.terminal.background.color)
-                        }
-                    }
+                conversationPanes(key, entry, isFocused: active && navigation.palette == nil)
             } else if active {
                 HSplitView {
                     WorkSurfaceView(model: model, onOpenSession: openSession,
@@ -1261,6 +1245,26 @@ struct SessionsContentView: View {
             PaneGeometry.workspaceShape.strokeBorder(palette.borderActive, lineWidth: 1).allowsHitTesting(false)
         }
         .accessibilityIdentifier("work-workspace-\(key.id)")
+    }
+
+    /// A workspace's panes, with a retry when its conversation failed to open.
+    private func conversationPanes(_ key: WorkWorkspaceKey, _ entry: SessionsWorkspace, isFocused: Bool) -> some View {
+        WorkspacePanesView(workspace: entry, isFocused: isFocused, sessions: store, model: model,
+            onFocus: { pane, session in focusPane(pane, session: session, in: entry) })
+            .equatable()
+            .overlay(alignment: .top) {
+                if let error = entry.conversationError {
+                    HStack {
+                        Text(error).textSelection(.enabled)
+                        Button("Retry") {
+                            if key.kind == .task, let work = key.reference { openTask(work) }
+                            else if let work = key.reference { openWaveConversation(work) }
+                            else { openRepositoryConversation() }
+                        }
+                    }.foregroundStyle(theme.palette.text)
+                        .padding(8).background(theme.terminal.background.color)
+                }
+            }
     }
 
     @ViewBuilder

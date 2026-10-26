@@ -333,34 +333,41 @@ struct WorkBreadcrumbs: View {
                 model.navigation.content = .terminals
             }.lineLimit(1).fixedSize()
             WorkJumpSeparator(model: model, scope: .repository, label: "Waves and Dashboards")
-            if showWave, model.navigation.trailBoard == nil, let wave = model.breadcrumb?.wave {
-                Button(wave.roadmap.wave.displayName) {
-                    model.select(.wave(id: wave.roadmap.wave.id))
-                    model.navigation.content = .terminals
-                }.lineLimit(1).fixedSize()
-                WorkJumpSeparator(model: model, scope: .wave(wave.roadmap.wave.id), label: "Tasks in \(wave.roadmap.wave.displayName)")
+            // A Wave view in the trail, or the Wave of Work outside any board, heads
+            // the crumbs after the repository; the repository page adds none.
+            let board = model.navigation.trailBoard
+            if case .wave(let id) = board {
+                waveCrumb(id, name: model.wave(id: id)?.wave.displayName ?? id)
+            } else if showWave, board == nil || board == .repository, let wave = model.breadcrumb?.wave {
+                waveCrumb(wave.roadmap.wave.id, name: wave.roadmap.wave.displayName)
             }
-            switch model.navigation.trailBoard {
+            switch board {
             case .saved(let id):
                 Button(model.dashboard(id)?.name ?? id) { model.selectDashboard(id) }
                     .lineLimit(1).fixedSize().disabled(model.navigation.dashboardID == id)
+                if model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
             case .workingTasks:
                 Button(WorkNavigation.workingTasksTitle) { model.selectWorkingTasksDashboard() }
                     .lineLimit(1).fixedSize().disabled(model.navigation.destination == .workingTasks)
-            case .wave(let id):
-                Button(model.breadcrumb?.wave?.roadmap.wave.displayName ?? id) {
-                    model.select(.wave(id: id))
-                    model.navigation.content = .terminals
-                }.lineLimit(1).fixedSize()
-            case nil: EmptyView()
+                if model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
+            case .wave, .repository, nil: EmptyView()
             }
-            if model.navigation.trailBoard != nil, model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
             if let task = model.breadcrumb?.task {
                 TaskHeading(task: task.task)
             }
             if let target = model.machineTarget {
                 WorkMachineControl(model: model, target: target).padding(.leading, 6)
             }
+        }
+    }
+
+    private func waveCrumb(_ id: String, name: String) -> some View {
+        HStack(alignment: .center, spacing: 6) {
+            Button(name) {
+                model.select(.wave(id: id))
+                model.navigation.content = .terminals
+            }.lineLimit(1).fixedSize()
+            WorkJumpSeparator(model: model, scope: .wave(id), label: "Tasks in \(name)")
         }
     }
 }

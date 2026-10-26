@@ -69,14 +69,20 @@ struct WaveStandup: Equatable {
         return try? Date.ISO8601FormatStyle().parse(timestamp)
     }
 
-    /// The board as an agent reads it with `lf desktop capture -p board`.
-    func text(roadmap: WaveRoadmap) -> String {
+    /// A Wave's heading lines: name and status, objective, chapter Project and KRs.
+    static func heading(_ roadmap: WaveRoadmap) -> [String] {
         var lines = ["\(roadmap.wave.displayName) · \(roadmap.wave.status.label)"]
         if let objective = roadmap.wave.goal.split(separator: "\n").first { lines.append(String(objective)) }
         if let project = roadmap.currentProject {
             lines.append("\(project.name) · \(project.status.rawValue.capitalized)")
             lines += project.krs.map { "\($0.holds ? "✓" : "✗") \($0.text)" }
         }
+        return lines
+    }
+
+    /// The board as an agent reads it with `lf desktop capture -p board`.
+    func text(heading: [String]) -> String {
+        var lines = heading
         func column(_ title: String, _ rows: [Row]) {
             lines.append("")
             lines.append("\(title) · \(rows.count)")
@@ -104,36 +110,54 @@ enum WaveStandupDefaults {
 }
 
 /// Large enough to read across a room. A row opens its Task through the Wave, as a
-/// tile does, so Backlog is where unstarted Tasks are seen and started.
+/// tile does, so Backlog is where unstarted Tasks are seen and started. The
+/// repository page is the same board over every repository Task, without a chapter.
 struct WaveStandupBoard: View {
     let model: WorkModel
-    let waveID: String
+    /// `.wave(id)` or `.repository`.
+    let view: WorkNavigation.Board
     /// Rows a column shows before `+N more`; a 1440×900 window fits six without scrolling.
     static let visibleRows = 6
     @AppStorage(WaveStandupDefaults.doneDaysKey) private var doneDays = TaskHistoryFilter().days
     @Environment(\.palette) private var palette
     @State private var showRealignment = false
 
+    private var roadmap: WaveRoadmap? {
+        if case .wave(let id) = view { model.wave(id: id) } else { nil }
+    }
+
+    /// The Tasks the board buckets: the Wave's, or every Task in the repository.
+    private var evidence: WorkEvidence<RoadmapTask>? {
+        if let roadmap { return roadmap.tasks }
+        guard view == .repository, let tasks = model.roadmap.value?.tasks else { return nil }
+        guard case .available(_, let truncated) = tasks else { return tasks }
+        return .available(items: model.visibleTasks, truncated: truncated)
+    }
+
     var body: some View {
+        let scope = view == .repository ? "Repository" : "Wave"
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            if let roadmap = model.wave(id: waveID) {
+            if let roadmap {
                 header(roadmap)
                 chapter(roadmap)
                 ForEach(roadmap.unavailableTasks, id: \.taskId) { WavePlanningNotice(model: model, task: $0) }
-                if let error = model.roadmap.errorMessage {
-                    Text("Refresh failed · \(error)").foregroundStyle(palette.warning)
-                        .accessibilityIdentifier("wave-refresh-failed")
-                }
-                switch roadmap.tasks {
-                case .unavailable(let reason):
-                    Text("Wave planning unavailable · \(reason)").font(Typography.body(15))
-                        .foregroundStyle(palette.warning)
-                case .available(let tasks, let truncated):
-                    columns(WaveStandup(tasks: tasks, closed: tasks, doneDays: doneDays, now: .now))
-                    if truncated { Text("Planning is partial; more Tasks exist.").foregroundStyle(palette.warning) }
-                }
-            } else {
-                Text("Wave planning unavailable").font(Typography.body(15)).foregroundStyle(palette.warning)
+            } else if view == .repository {
+                Text(model.repositoryName).font(Typography.strong(24))
+                    .accessibilityIdentifier("wave-title")
+            }
+            if let error = model.roadmap.errorMessage {
+                Text("Refresh failed · \(error)").foregroundStyle(palette.warning)
+                    .accessibilityIdentifier("wave-refresh-failed")
+            }
+            switch evidence {
+            case .unavailable(let reason):
+                Text("\(scope) planning unavailable · \(reason)").font(Typography.body(15))
+                    .foregroundStyle(palette.warning)
+            case .available(let tasks, let truncated):
+                columns(WaveStandup(tasks: tasks, closed: tasks, doneDays: doneDays, now: .now))
+                if truncated { Text("Planning is partial; more Tasks exist.").foregroundStyle(palette.warning) }
+            case nil:
+                Text("\(scope) planning unavailable").font(Typography.body(15)).foregroundStyle(palette.warning)
             }
         }
         .padding(Spacing.xl)
@@ -141,7 +165,7 @@ struct WaveStandupBoard: View {
         .background(palette.background)
         .accessibilityIdentifier("wave-standup-board")
         .sheet(isPresented: $showRealignment) {
-            if let roadmap = model.wave(id: waveID) { ProjectRealignmentView(repo: roadmap.wave.repo) }
+            if let roadmap { ProjectRealignmentView(repo: roadmap.wave.repo) }
         }
     }
 
@@ -212,11 +236,7 @@ struct WaveStandupBoard: View {
     }
 
     private func open(_ row: WaveStandup.Row) {
-        if let tile = model.waveTiles(waveID).first(where: { $0.work.id == row.id }) {
-            model.enterTile(tile.work, origin: nil)
-        } else {
-            model.enter(.task(id: row.id), from: .wave(waveID))
-        }
+        withAnimation(FocusSizing.animation) { model.enter(.task(id: row.id), from: view) }
     }
 
     private func heading(_ title: String, _ count: Int) -> some View {

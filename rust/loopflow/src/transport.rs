@@ -858,6 +858,7 @@ struct RawTerminal {
     original: Option<libc::termios>,
     // Drop restores terminal modes before output announces any diagnostics.
     output: crate::terminal_output::TerminalOutput,
+    alternate: terminal::AlternateScreen,
 }
 impl RawTerminal {
     fn enter() -> Result<Self> {
@@ -866,6 +867,7 @@ impl RawTerminal {
             return Ok(Self {
                 original: None,
                 output,
+                alternate: Default::default(),
             });
         }
         // SAFETY: termios is initialized by tcgetattr before it is read.
@@ -892,17 +894,34 @@ impl RawTerminal {
         Ok(Self {
             original: Some(original),
             output,
+            alternate: Default::default(),
         })
+    }
+
+    fn write(&mut self, stream: u8, bytes: &[u8]) -> io::Result<()> {
+        self.alternate.observe(bytes);
+        if stream == 2 {
+            self.output.stderr.write_all(bytes)
+        } else {
+            self.output.stdout.write_all(bytes)
+        }
     }
 }
 impl Drop for RawTerminal {
     fn drop(&mut self) {
         if let Some(original) = self.original {
+            // Discard input the viewer never forwarded, such as mouse reports
+            // queued while it waited on the owner; the shell would run them.
             // SAFETY: restores attributes previously read from stdin.
             unsafe {
-                libc::tcsetattr(0, libc::TCSANOW, &original);
+                libc::tcsetattr(0, libc::TCSAFLUSH, &original);
             }
-            let _ = self.output.stdout.write_all(b"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?1049l\x1b[?25h\x1b[0m");
+            let _ = self.output.stdout.write_all(
+                b"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m",
+            );
+            if self.alternate.entered {
+                let _ = self.output.stdout.write_all(b"\x1b[?1049l");
+            }
         }
     }
 }
@@ -910,8 +929,13 @@ impl Drop for RawTerminal {
 fn send(socket: &mut UnixStream, request: &Request) -> Result<()> {
     let mut bytes = serde_json::to_vec(request)?;
     bytes.push(b'\n');
-    socket.write_all(&bytes)?;
-    Ok(())
+    // A write timeout reports EAGAIN on macOS, which names no cause.
+    socket.write_all(&bytes).map_err(|error| match error.kind() {
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => anyhow::anyhow!(
+            "Execution owner stopped reading requests; outcome is unknown and later input was not delivered"
+        ),
+        _ => error.into(),
+    })
 }
 
 pub(crate) fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<()> {
@@ -984,7 +1008,7 @@ pub(crate) fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<(
                             terminal = Some(RawTerminal::enter()?);
                         }
                         if let Some(terminal) = &mut terminal {
-                            terminal.output.stdout.write_all(&bytes)?;
+                            terminal.write(1, &bytes)?;
                         } else {
                             io::stdout().write_all(&bytes)?;
                             io::stdout().flush()?;
@@ -992,11 +1016,7 @@ pub(crate) fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<(
                     }
                     Response::Output { stream, bytes } => {
                         if let Some(terminal) = &mut terminal {
-                            if stream == 2 {
-                                terminal.output.stderr.write_all(&bytes)?;
-                            } else {
-                                terminal.output.stdout.write_all(&bytes)?;
-                            }
+                            terminal.write(stream, &bytes)?;
                         } else if stream == 2 {
                             io::stderr().write_all(&bytes)?;
                             io::stderr().flush()?;

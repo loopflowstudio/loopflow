@@ -9,22 +9,15 @@ extension Notification.Name {
     static let openSessions = Notification.Name("loopflow.openSessions")
 }
 
+/// Window chrome stays here; every Work gesture is a registry action.
 struct ConsoleCommandActions {
     let navigate: () -> Void
     let toggleSidebar: () -> Void
     let focusSidebar: () -> Void
     let focusTerminal: (() -> Void)?
-    let zoom: () -> Void
-    let focusPane: (SpatialDirection) -> Void
-    let back: () -> Void
-    let forward: () -> Void
-    let adjacent: (Int) -> Void
-    let slot: (Int) -> Void
-    let shell: (() -> Void)?
-    let files: (() -> Void)?
-    let newTerminal: (() -> Void)?
-    let close: () -> Void
-    let reopen: (() -> Void)?
+    /// The focused window's action context, read when a menu item is chosen.
+    let context: @MainActor () -> DesktopActionContext
+    let failed: @MainActor (Error) -> Void
 }
 
 private struct ConsoleCommandsKey: FocusedValueKey { typealias Value = ConsoleCommandActions }
@@ -39,11 +32,9 @@ struct ConsoleCommands: Commands {
     @FocusedValue(\.consoleActions) private var actions
     var body: some Commands {
         CommandGroup(after: .newItem) {
-            Button("New Terminal") { actions?.newTerminal?() }.keyboardShortcut("t")
-                .disabled(actions?.newTerminal == nil)
-            Button("Close Pane") { actions?.close() }.keyboardShortcut("w").disabled(actions == nil)
-            Button("Reopen Closed Pane") { actions?.reopen?() }.keyboardShortcut("t", modifiers: [.command, .shift])
-                .disabled(actions?.reopen == nil)
+            action("run")
+            action("close")
+            action("reopen")
             Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
         }
@@ -52,27 +43,41 @@ struct ConsoleCommands: Commands {
             Button("Toggle Sidebar") { actions?.toggleSidebar() }.keyboardShortcut("\\")
             Button("Focus Sidebar") { actions?.focusSidebar() }.disabled(actions == nil)
             Button("Focus Terminal") { actions?.focusTerminal?() }.disabled(actions?.focusTerminal == nil)
-            Button("Zoom Focused Pane") { actions?.zoom() }
-                .keyboardShortcut(.return, modifiers: [.command, .shift]).disabled(actions == nil)
-            Menu("Focus Pane") {
-                Button("Left") { actions?.focusPane(.left) }.keyboardShortcut(.leftArrow, modifiers: [.command, .option])
-                Button("Right") { actions?.focusPane(.right) }.keyboardShortcut(.rightArrow, modifiers: [.command, .option])
-                Button("Up") { actions?.focusPane(.up) }.keyboardShortcut(.upArrow, modifiers: [.command, .option])
-                Button("Down") { actions?.focusPane(.down) }.keyboardShortcut(.downArrow, modifiers: [.command, .option])
-            }.disabled(actions == nil)
-            Button("Back") { actions?.back() }.keyboardShortcut("[")
-            Button("Forward") { actions?.forward() }.keyboardShortcut("]")
-            Button("Next Task") { actions?.adjacent(1) }.keyboardShortcut(.tab, modifiers: .control)
-            Button("Previous Task") { actions?.adjacent(-1) }.keyboardShortcut(.tab, modifiers: [.control, .shift])
-            Menu("Working Tasks") {
-                ForEach(1...9, id: \.self) { slot in
-                    Button("Task \(slot)") { actions?.slot(slot - 1) }.keyboardShortcut(KeyEquivalent(Character(String(slot))))
+            action("zoom")
+            Menu("Focus Pane") { action("focus") }.disabled(actions == nil)
+            action("back")
+            action("forward")
+            action("next")
+            action("previous")
+            Menu("Working Tasks") { action("goto") }
+            action("working-tasks")
+            action("toggle-shell")
+            action("toggle-browser")
+            action("page-back")
+            action("page-forward")
+            action("reload")
+        }
+    }
+
+    /// One menu item per default key binding, titled and keyed from the registry.
+    @MainActor @ViewBuilder
+    private func action(_ name: String) -> some View {
+        if let action = try? DesktopAction.named(name) {
+            let bindings: [DesktopKeyBinding?] = action.keys.isEmpty ? [nil] : action.keys
+            ForEach(Array(bindings.enumerated()), id: \.offset) { _, binding in
+                let args = binding?.args ?? [:]
+                let title = args["index"].map { "Task \($0)" } ?? args["direction"]?.capitalized ?? action.title
+                let button = Button(title) {
+                    guard let actions else { return }
+                    do { try action.perform(actions.context().with(args: args)) } catch { actions.failed(error) }
+                }
+                .disabled(actions.map { action.available($0.context().with(args: args)) } != true)
+                if let binding {
+                    button.keyboardShortcut(binding.keyEquivalent, modifiers: binding.eventModifiers)
+                } else {
+                    button
                 }
             }
-            Button("Toggle Shell") { actions?.shell?() }.keyboardShortcut("`", modifiers: .control)
-                .disabled(actions?.shell == nil)
-            Button("Toggle Files") { actions?.files?() }.keyboardShortcut("e", modifiers: [.command, .shift])
-                .disabled(actions?.files == nil)
         }
     }
 }
@@ -92,8 +97,8 @@ extension PaneContent {
     var terminal: TerminalIdentity? {
         switch self {
         case .shell: selectedShell?.terminal
-        case .session(let id, let location, _): location.map { .session(id, machineId: $0.machineId) }
-        case .empty, .files, .graphLog: nil
+        case .session(let id?, let location, _): location.map { .session(id, machineId: $0.machineId) }
+        case .session(nil, _, _), .browser: nil
         }
     }
 }
@@ -146,47 +151,39 @@ final class SessionsWorkspace {
     var presentation = WorkNavigation.WorkspacePresentation()
     let localMachineId: String?
 
+    /// A Task's first conversation brings its Files into view once.
     func prepareTaskPanes(query: RegistryQuery = RegistryQueryLocal.shared) {
-        guard key.kind == .task, !didPrepareTaskPanes else { return }
-        let panes = multiplexer.layout.allPanes
-        guard panes.count == 1, let session = panes.first,
-              session.content != .empty, session.content.location != nil else { return }
+        guard key.kind == .task, !didPrepareTaskPanes,
+              let session = multiplexer.sessionPane, session.sessionId != nil, session.content.location != nil,
+              case .browser(_, let tabs, _, _, _)? = multiplexer.browserPane?.content, tabs.isEmpty else { return }
         didPrepareTaskPanes = true
-        let content = PaneContent.files(taskId: key.id,
-            location: session.content.location, execution: session.executionLocation)
+        guard let browser = multiplexer.showBrowser(.files, location: session.content.location,
+            execution: session.executionLocation, focus: false) else { return }
         // A location error is presented by the browser's normal error view.
-        _ = try? files(for: content, task: nil, query: query)
-        guard let browser = multiplexer.show(content, beside: session.id, focus: false) else { return }
-        multiplexer.updateRatio(between: session.id, and: browser.id, ratio: LayoutNode.goldenRatio)
+        _ = try? files(for: browser.content, task: nil, query: query)
     }
 
+    /// Add a shell tab at the Task's recorded location.
     @discardableResult
-    func newShell() throws -> PaneState? {
+    func newShell(command: [String]? = nil, focus: Bool = true) throws -> PaneState? {
         guard key.kind == .task else {
             throw RegistryQueryError("Shells belong to Tasks; no shell was opened.")
         }
         let (location, execution) = try shellLocation()
-        let command = try shellCommand(at: location, execution: execution)
-        return multiplexer.newShell(command: command, location: location, execution: execution)
-    }
-
-    var filesPane: PaneState? {
-        multiplexer.layout.allPanes.first { if case .files = $0.content { true } else { false } }
+        let argv = try command.map { try shellCommand($0, at: location, execution: execution) }
+            ?? shellCommand(at: location, execution: execution)
+        return multiplexer.newShell(command: argv, location: location, execution: execution, focus: focus)
     }
 
     func toggleShell() throws {
-        guard key.kind == .task else { return }
-        if let pane = multiplexer.shellPane { toggleTool(pane) }
-        else { try newShell() }
+        guard key.kind == .task, let pane = multiplexer.shellPane else { return }
+        if pane.content.selectedShell == nil { try newShell() } else { toggleTool(pane) }
     }
 
-    func toggleFiles() {
-        guard key.kind == .task else { return }
-        if let pane = filesPane { toggleTool(pane) }
-        else {
-            multiplexer.show(.files(taskId: key.id, location: location,
-                execution: multiplexer.layout.allPanes.first { $0.content.location == location }?.executionLocation))
-        }
+    /// Show or hide the browser; an empty one opens on Files.
+    func toggleBrowser() {
+        guard key.kind == .task, let pane = multiplexer.browserPane else { return }
+        if pane.content.selectedBrowserTab == nil { showBrowser(.files) } else { toggleTool(pane) }
     }
 
     private func toggleTool(_ pane: PaneState) {
@@ -195,23 +192,38 @@ final class SessionsWorkspace {
         if hidden { multiplexer.setFocusedPane(pane.id) }
     }
 
-    /// Tools retain their content when another tool is selected.
-    func selectContent(_ content: PaneContent, in pane: PaneState) throws {
-        guard multiplexer.layout.pane(for: pane.id)?.incarnation == pane.incarnation else { return }
-        if case .shell = content {
-            if let shell = multiplexer.shellPane { multiplexer.setFocusedPane(shell.id) }
-            else { try newShell() }
-        } else {
-            multiplexer.show(content, beside: pane.id)
-        }
+    /// Select a browser tab at the location of `owner`, or the Task's own.
+    @discardableResult
+    func showBrowser(_ tab: BrowserTab, from owner: PaneState? = nil, focus: Bool = true) -> PaneState? {
+        guard key.kind == .task else { return nil }
+        let source = owner ?? multiplexer.sessionPane
+        let place = source?.content.location ?? location
+        let execution = source?.executionLocation
+            ?? multiplexer.layout.allPanes.first { $0.content.location == place }?.executionLocation
+        if tab == .files { selectFilesPage() }
+        return multiplexer.showBrowser(tab, location: place, execution: execution, focus: focus)
     }
 
-    func closePane(_ paneId: String) {
-        if let pane = multiplexer.layout.pane(for: paneId), case .shell = pane.content,
-           let tab = pane.content.selectedShell {
+    /// ⌘W closes the named tab, else the selected one; a session pane, or one
+    /// without tabs, hides. The closed tab keeps its shell or page for Undo until
+    /// another close replaces it.
+    func closePane(_ paneId: String, tab: String? = nil) {
+        guard let pane = multiplexer.layout.pane(for: paneId) else { return }
+        let id = tab ?? pane.content.selectedTabID
+        let replaced: ClosedOccurrence?
+        if case .shell(let tabs, _) = pane.content, let id, tabs.contains(where: { $0.id == id }) {
+            replaced = multiplexer.closeShell(id)
+        } else if case .browser(_, let tabs, _, _, _) = pane.content, let id, tabs.contains(where: { $0.id == id }) {
+            replaced = multiplexer.closeBrowserTab(id)
+        } else {
+            replaced = multiplexer.close(paneId)
+        }
+        switch replaced {
+        case .shellTab(let tab, _):
             if let location = tab.location { surfaces.release(.shell(tab.id, machineId: location.machineId)) }
-            multiplexer.closeShell(tab.id)
-        } else { multiplexer.close(paneId) }
+        case .browserTab(let tab, _): pages.release(tab.id)
+        case .pane, nil: break
+        }
     }
 
     var browserPage: TaskFilesStore.Page {
@@ -230,6 +242,14 @@ final class SessionsWorkspace {
         return (location, execution)
     }
 
+    /// A script's command runs in the shell's login shell at the recorded location.
+    private func shellCommand(_ command: [String], at identity: WorkspaceIdentity, execution: TaskLocationObservation?) throws -> [String] {
+        guard identity.machineId == localMachineId else {
+            throw RegistryQueryError("Commands run in local Task shells; this Task is on another Machine. No shell was opened.")
+        }
+        return command
+    }
+
     private func shellCommand(at identity: WorkspaceIdentity, execution: TaskLocationObservation?) throws -> [String] {
         if identity.machineId == localMachineId { return [] }
         guard let location = execution, location.machineID == identity.machineId,
@@ -241,7 +261,7 @@ final class SessionsWorkspace {
             "--repository", location.repositoryID, "task", "shell", task,
             "--checkout", identity.worktree]
     }
-    let multiplexer = MultiplexerStore()
+    let multiplexer: MultiplexerStore
     /// One flag per pane strip, read only by that strip's Close control, so a
     /// crossing never re-renders another pane. Lookup itself is unobserved.
     @ObservationIgnored private var stripHovers: [String: HoverFlag] = [:]
@@ -275,8 +295,8 @@ final class SessionsWorkspace {
     }
     /// Resolve Files from its content, not the selected checkout or a previous link.
     func files(for content: PaneContent, task: RoadmapTask?, query: RegistryQuery) throws -> TaskFilesStore {
-        guard case .files(let taskId, let location, let execution) = content else {
-            throw RegistryQueryError("The addressed pane is not Files.")
+        guard case .browser(let taskId, _, _, let location, let execution) = content else {
+            throw RegistryQueryError("The addressed pane is not the browser.")
         }
         let issue: String
         let checkout: String
@@ -319,6 +339,7 @@ final class SessionsWorkspace {
         return files(issue: issue, cwd: checkout, query: fileQuery, execution: execution)
     }
     let surfaces: GhosttySurfacePool
+    let pages = BrowserPages()
     private var surfaceClosed: AnyCancellable?
 
     private var retainedStore: SessionsStore?
@@ -339,6 +360,7 @@ final class SessionsWorkspace {
         self.location = location
         self.localMachineId = localMachineId
         self.surfaces = surfaces
+        multiplexer = MultiplexerStore(taskId: key.kind == .task ? key.id : nil)
         // The workspace outlives SessionsView, including while a shell exits
         // on the Work screen or while another repository is selected.
         surfaceClosed = NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)
@@ -347,8 +369,7 @@ final class SessionsWorkspace {
                       case .shell(let tabId, _) = terminal else { return }
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    guard self.multiplexer.shell(tabId)?.location?.machineId == terminal.machineId else { return }
-                    self.multiplexer.closeShell(tabId)
+                    self.multiplexer.removeExitedShell(tabId, machineId: terminal.machineId)
                 }
             }
     }
@@ -422,9 +443,10 @@ final class SessionsWorkspaceRegistry {
             let panes = workspace.multiplexer
             return DesktopWorkspaceInspection(work: workspace.key, title: workspace.title,
                 isOpen: openWork.contains(workspace.key), selected: selectedWork == workspace.key,
-                layout: DesktopLayoutInspection(panes.layout) { content in
-                    content.terminal.flatMap { surfaces.surfaceIncarnation(for: $0) }
-                }, focusedPane: panes.focusedPaneId,
+                layout: DesktopLayoutInspection(panes.layout,
+                    surface: { content in content.terminal.flatMap { surfaces.surfaceIncarnation(for: $0) } },
+                    commands: { content in content.terminal.flatMap { surfaces.commandStatus(for: $0) } }),
+                focusedPane: panes.focusedPaneId,
                 zoomedPane: panes.zoomedPaneId, hiddenPanes: panes.collapsedPaneIds.sorted())
         }
     }
@@ -436,13 +458,13 @@ final class SessionsWorkspaceRegistry {
         let workspace = workspace(for: key, title: destination.task.task.name, location: identity)
         workspace.multiplexer.updateSessionLocation(destination.record.id, location: identity, execution: destination.location)
         guard destination.showsChanges else { return nil }
-        let content = PaneContent.files(taskId: destination.task.id, location: identity, execution: destination.location)
+        let content = PaneContent.browser(taskId: destination.task.id, tabs: [.files], selected: BrowserTab.files.id,
+            location: identity, execution: destination.location)
         let files = try workspace.files(for: content, task: destination.task, query: query)
         files.showsChanges = true
         files.page = .files
-        if let pane = workspace.multiplexer.pane(forSessionId: destination.record.id) {
-            try workspace.selectContent(content, in: pane)
-        } else { workspace.multiplexer.show(content, focus: false) }
+        workspace.multiplexer.showBrowser(.files, location: identity, execution: destination.location,
+            focus: workspace.multiplexer.pane(forSessionId: destination.record.id) != nil)
         return files
     }
 
@@ -461,97 +483,31 @@ final class SessionsWorkspaceRegistry {
             result: result)
     }
 
-    @discardableResult
-    func controlPane(_ request: DesktopPaneCommand, model: WorkModel) throws -> (pane: String, tab: String?) {
-        let target = request.target
-        let (workspace, pane, terminal) = try retainedPane(for: target)
-        let store = workspace.multiplexer
-        // Validate both ends before changing anything. Moving a view is not
-        // reassociating its Work or transferring a client to another checkout.
-        func peer(_ other: DesktopPaneTarget) throws {
-            guard other.repository == target.repository, other.window == target.window,
-                  other.work == target.work,
-                  other.pane != target.pane else {
-                throw RegistryQueryError("Choose two distinct panes in the same retained workspace; no pane was changed.")
-            }
-            _ = try retainedPane(for: other)
-        }
-        var result: PaneState? = pane
-        var resultTab = target.tab
-        switch request.action {
-        case .text(let surface, let text):
-            guard let terminal else {
-                throw RegistryQueryError("The addressed pane is not a terminal; no input was sent.")
-            }
-            try surfaces.insertText(text, terminal: terminal, surface: surface)
-        case .key(let surface, let key):
-            guard let terminal else {
-                throw RegistryQueryError("The addressed pane is not a terminal; no input was sent.")
-            }
-            try surfaces.sendKey(key, terminal: terminal, surface: surface)
-        case .shell:
-            result = try workspace.newShell()
-            resultTab = result?.content.selectedShell?.id
-        case .files(let task), .graphLog(let task):
-            let shell = target.tab.flatMap { store.shell($0) }
-            let location = target.tab == nil ? pane.content.location : shell?.location
-            let execution = target.tab == nil ? pane.executionLocation : shell?.execution
-            guard let projection = model.task(id: task), workspace.key.kind == .task,
-                  (workspace.key.id == projection.task.id || workspace.key.id == projection.task.runtime?.workId),
-                  let identity = location ?? workspace.location,
-                  (model.navigation.preparedTaskWorktrees[projection.task.id]
-                    ?? projection.task.reference.workspace?.identity ?? identity) == identity else {
-                throw RegistryQueryError("The Task is not associated with this checkout. Inspect its recorded workspace; no pane was changed.")
-            }
-            let content: PaneContent = if case .files = request.action {
-                .files(taskId: projection.task.id, location: identity, execution: execution)
-            } else {
-                .graphLog(taskId: projection.task.id, location: identity, execution: execution)
-            }
-            if case .files = request.action { workspace.selectFilesPage() }
-            result = store.show(content, beside: target.pane, focus: false)
-            resultTab = nil
-        case .hide: workspace.setCollapsed(paneId: target.pane, collapsed: true)
-        case .restore: workspace.setCollapsed(paneId: target.pane, collapsed: false)
-        case .focus:
-            if model.navigation.showsSelection, openWork.contains(workspace.key) {
-                focus(workspace.key)
-            } else {
-                model.select(workspace.key.reference)
-            }
-            if let tab = target.tab { store.selectShell(tab) }
-            else { store.setFocusedPane(target.pane) }
-            if let focused = terminal ?? pane.terminal { surfaces.focus(focused) }
-        case .move(let destination, let axis):
-            try peer(destination)
-            store.move(target.pane, beside: destination.pane, axis: axis)
-        case .resize(let toward, let ratio):
-            try peer(toward)
-            guard ratio.isFinite, (0.1...0.9).contains(ratio) else {
-                throw RegistryQueryError("Split ratio must be between 0.1 and 0.9; no pane was changed.")
-            }
-            store.updateRatio(between: target.pane, and: toward.pane, ratio: ratio)
-        case .zoom(let enabled): store.setZoom(target.pane, enabled: enabled)
-        }
-        guard let result else { throw RegistryQueryError("The addressed pane disappeared; inspect Desktop before retrying.") }
-        return (result.id, resultTab ?? result.content.selectedShell?.id)
-    }
-
-    private func retainedPane(for target: DesktopPaneTarget) throws -> (SessionsWorkspace, PaneState, TerminalIdentity?) {
+    /// The exact retained pane a script addressed; a replaced occurrence is a stale target.
+    func retainedPane(for target: DesktopPaneTarget) throws -> (SessionsWorkspace, PaneState, TerminalIdentity?) {
         guard target.repository == target.work.repository,
               let workspace = workspaces[target.work],
               let pane = workspace.multiplexer.layout.pane(for: target.pane) else {
-            throw RegistryQueryError("The pane content was removed or replaced. Inspect Desktop again; no pane was changed.")
+            throw DesktopTargetError("The pane content was removed or replaced. Inspect Desktop again; no pane was changed.")
         }
         if let id = target.tab {
-            guard case .shell(let tabs, _) = pane.content,
-                  let tab = tabs.first(where: { $0.id == id && $0.incarnation == target.incarnation }) else {
-                throw RegistryQueryError("The shell tab was removed or replaced; no input was sent.")
+            switch pane.content {
+            case .shell(let tabs, _):
+                guard let tab = tabs.first(where: { $0.id == id && $0.incarnation == target.incarnation }) else {
+                    throw DesktopTargetError("The shell tab was removed or replaced; nothing changed.")
+                }
+                return (workspace, pane, tab.terminal)
+            case .browser(_, let tabs, _, _, _):
+                guard tabs.contains(where: { $0.id == id }), pane.incarnation == target.incarnation else {
+                    throw DesktopTargetError("The browser tab was removed or replaced; nothing changed.")
+                }
+                return (workspace, pane, nil)
+            case .session:
+                throw DesktopTargetError("A session pane has no tabs; nothing changed.")
             }
-            return (workspace, pane, tab.terminal)
         }
         guard pane.incarnation == target.incarnation else {
-            throw RegistryQueryError("The pane content was replaced; inspect Desktop again.")
+            throw DesktopTargetError("The pane content was replaced; inspect Desktop again.")
         }
         // A Shell tool target grants arrangement authority, not input to whichever
         // tab happens to be selected. Terminal requests must capture a tab.
@@ -1083,10 +1039,6 @@ struct SessionsContentView: View {
         !navigation.showsSelection && workspaces.selectedWork != nil && fileTask?.task.awaitsStart != true
             && (currentKey.kind != .task || fileTask?.task.runtime?.owner != nil || workspace.presentation.content == .terminals)
     }
-    /// Shell, Files and new terminals wait until an unstarted Task starts.
-    private var taskTools: Bool {
-        currentKey.kind == .task && !navigation.showsSelection && fileTask?.task.awaitsStart != true
-    }
     private var fileTask: TaskProjection? {
         // A departing repository view must not mount the next repository's
         // retained terminals while SwiftUI replaces its hierarchy.
@@ -1132,13 +1084,7 @@ struct SessionsContentView: View {
             navigate: { navigation.palette = .search }, toggleSidebar: { navigation.toggleNavigator() },
             focusSidebar: { navigation.showsNavigator = true; navigation.sidebarFocusRequested = true },
             focusTerminal: multiplexer.focusedPane.terminal.map { terminal in { workspaces.surfaces.focus(terminal) } },
-            zoom: { _handle(.zoom) }, focusPane: { _handle(.focus($0)) },
-            back: { model.goBack() }, forward: { model.goForward() },
-            adjacent: { model.cycleSidebarTask($0) }, slot: { model.selectSidebarTask(slot: $0) },
-            shell: taskTools ? { _handle(.toggleShell) } : nil,
-            files: taskTools ? { _handle(.toggleFiles) } : nil,
-            newTerminal: taskTools ? { _handle(.newTerminal) } : nil,
-            close: { _handle(.close) }, reopen: multiplexer.canUndoClose ? { _handle(.undoClose) } : nil))
+            context: { actionContext }, failed: { actionFailed($0) }))
         .background {
             Button("Task actions") { actionTaskID = fileTask?.task.id }
                 .keyboardShortcut("/", modifiers: .command)
@@ -1156,20 +1102,14 @@ struct SessionsContentView: View {
             }
         }
         .overlay {
-            if terminalsVisible, navigation.palette == nil {
-                SessionsShortcutMonitor { _handle($0) }
+            if navigation.palette == nil {
+                DesktopActionMonitor(context: { actionContext }, failed: { actionFailed($0) })
                     .allowsHitTesting(false).frame(width: 0, height: 0)
             }
         }
         .background {
             WorkPaletteShortcut(presented: navigation.palette != nil, restoreFocus: navigation.restorePaletteFocus,
-                toggleSidebar: { navigation.toggleNavigator() }, navigate: { shortcut in
-                    switch shortcut {
-                    case .task(let slot): model.selectSidebarTask(slot: slot)
-                    case .adjacent(let offset): model.cycleSidebarTask(offset)
-                    case .search, .toggleSidebar: break
-                    }
-                }, modifiersChanged: { if navigation.showsSlotHints != $0 { navigation.showsSlotHints = $0 } }) {
+                toggleSidebar: { navigation.toggleNavigator() }, modifiersChanged: { if navigation.showsSlotHints != $0 { navigation.showsSlotHints = $0 } }) {
                 navigation.palette = .search
             }.frame(width: 0, height: 0)
         }
@@ -1277,7 +1217,12 @@ struct SessionsContentView: View {
                             .equatable()
                             .frame(width: geometry.size.width * 0.62)
                         Divider()
-                        WaveTaskInventory(model: model, waveID: key.id)
+                        VStack(spacing: 0) {
+                            WaveTiles(model: model, workspaces: workspaces, sessions: store, waveID: key.id)
+                                .frame(height: geometry.size.height * 0.62)
+                            Divider()
+                            WaveTaskInventory(model: model, waveID: key.id)
+                        }
                     }
                 }
             } else if terminals {
@@ -1314,11 +1259,6 @@ struct SessionsContentView: View {
             PaneGeometry.workspaceShape.strokeBorder(palette.borderActive, lineWidth: 1).allowsHitTesting(false)
         }
         .accessibilityIdentifier("work-workspace-\(key.id)")
-    }
-
-    private func newShell(in workspace: SessionsWorkspace) {
-        do { try workspace.newShell() }
-        catch { launchErrorTitle = "Could not open shell"; launchError = error.localizedDescription }
     }
 
     @ViewBuilder
@@ -1376,7 +1316,7 @@ struct SessionsContentView: View {
         case .graphLog(let id):
             model.select(.task(id: id))
             navigation.content = .terminals
-            multiplexer.show(.graphLog(taskId: id, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation))
+            workspace.showBrowser(.graphLog, from: multiplexer.focusedPane)
         }
         model.remember(destination)
     }
@@ -1442,30 +1382,23 @@ struct SessionsContentView: View {
         case .shell:
             guard let terminal = pane.terminal else { return [] }
             return store.sessions.filter { store.localTerminal(for: $0.record) == terminal }
-        case .session(let id, _, _):
+        case .session(let id?, _, _):
             return store.sessions.filter { $0.id == id }
-        case .empty, .graphLog, .files:
+        case .session(nil, _, _), .browser:
             return []
         }
     }
 
-    private func _handle(_ shortcut: SessionsShortcut) {
-        switch shortcut {
-        case .newTerminal:
-            if currentKey.kind == .task { newShell(in: workspace) }
-        case .toggleShell:
-            do { try workspace.toggleShell() } catch { launchError = error.localizedDescription }
-        case .toggleFiles:
-            workspace.toggleFiles()
-        case .close:
-            workspace.closePane(multiplexer.focusedPaneId)
-        case .undoClose:
-            multiplexer.undoClose()
-        case .zoom:
-            workspace.toggleFocus(multiplexer.focusedPaneId)
-        case .focus(let direction):
-            multiplexer.focus(direction)
-        }
+    /// Keys and menus act on the shown workspace's focused pane; window actions need none.
+    private var actionContext: DesktopActionContext {
+        let shown = terminalsVisible
+        return DesktopActionContext(model: model, workspaces: workspaces, workspace: shown ? workspace : nil,
+            pane: shown ? multiplexer.focusedPane : nil)
+    }
+
+    private func actionFailed(_ error: Error) {
+        launchErrorTitle = "Could not complete the action"
+        launchError = error.localizedDescription
     }
 }
 
@@ -1496,99 +1429,6 @@ private struct SidebarDivider: View {
     }
 }
 
-private enum SessionsShortcut {
-    case toggleShell
-    case toggleFiles
-    case newTerminal
-    case close
-    case undoClose
-    case zoom
-    case focus(SpatialDirection)
-}
-
-private struct SessionsShortcutMonitor: NSViewRepresentable {
-    let handler: (SessionsShortcut) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(handler: handler)
-    }
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        context.coordinator.install(for: view)
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        context.coordinator.view = nsView
-    }
-
-    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
-        coordinator.uninstall()
-    }
-
-    @MainActor
-    final class Coordinator {
-        weak var view: NSView?
-        private let handler: (SessionsShortcut) -> Void
-        private var monitor: Any?
-
-        init(handler: @escaping (SessionsShortcut) -> Void) {
-            self.handler = handler
-        }
-
-        func install(for view: NSView) {
-            self.view = view
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self,
-                      let window = self.view?.window,
-                      event.window === window, window.isKeyWindow, window.attachedSheet == nil,
-                      (window.firstResponder as? NSTextView)?.hasMarkedText() != true,
-                      let shortcut = Self._shortcut(for: event)
-                else { return event }
-                self.handler(shortcut)
-                return nil
-            }
-        }
-
-        func uninstall() {
-            if let monitor {
-                NSEvent.removeMonitor(monitor)
-                self.monitor = nil
-            }
-        }
-
-        private static func _shortcut(for event: NSEvent) -> SessionsShortcut? {
-            let modifiers = event.modifierFlags.intersection([
-                .command, .shift, .option, .control,
-            ])
-            let key = event.charactersIgnoringModifiers?.lowercased()
-            if modifiers == [.control], key == "`" { return .toggleShell }
-            if modifiers == [.command, .shift], key == "e" { return .toggleFiles }
-            if modifiers == [.command], key == "t" {
-                return .newTerminal
-            }
-            if modifiers == [.command], event.charactersIgnoringModifiers == "w" {
-                return .close
-            }
-            if modifiers == [.command, .shift], key == "t" {
-                return .undoClose
-            }
-            if modifiers == [.command, .shift], event.keyCode == 36 || event.keyCode == 76 {
-                return .zoom
-            }
-            guard modifiers == [.command, .option] else { return nil }
-            return switch event.specialKey {
-            case .leftArrow: .focus(.left)
-            case .rightArrow: .focus(.right)
-            case .upArrow: .focus(.up)
-            case .downArrow: .focus(.down)
-            default: nil
-            }
-        }
-    }
-}
-
 #endif
 
 extension SessionsWorkspace {
@@ -1605,7 +1445,7 @@ extension SessionsWorkspace {
                                   cwd: files.store.cwd)
         }
         return multiplexer.paneLayout(work: key, revision: paneRevision,
-            files: place.flatMap { place in taskFiles?.store.paneIntent(location: place) },
+            files: taskFiles?.store.browserTab,
             drafts: (place.flatMap { place in taskFiles?.store.drafts(location: place) } ?? []) + unavailableDrafts)
     }
 
@@ -1614,8 +1454,12 @@ extension SessionsWorkspace {
         isRestoringIntent = true
         defer { isRestoringIntent = false }
         let before = portableLayout()
-        let hadLocalTools = multiplexer.layout.allPanes.count > 1 || multiplexer.layout.allPanes.contains {
-            switch $0.content { case .shell, .files, .graphLog: true; case .empty, .session: false }
+        let hadLocalTools = multiplexer.layout.allPanes.contains {
+            switch $0.content {
+            case .shell(let tabs, _): !tabs.isEmpty
+            case .browser(_, let tabs, _, _, _): !tabs.isEmpty
+            case .session(let id, _, _): id != nil
+            }
         }
         let preserveCurrent = persistenceLoaded || persistenceError != nil || hadLocalTools
         persistenceError = nil
@@ -1629,8 +1473,8 @@ extension SessionsWorkspace {
                 multiplexer.restore(restored)
                 paneRevision = saved.revision
                 unavailableDrafts = restored.drafts
-                if let file = restored.tree?.fileIntent,
-                   case .files(let place?, let tabs, let selected) = file {
+                if case .browser(let place?, let browserTabs, _)? = restored.tree.intent(.browser),
+                   case .files(_, let tabs, let selected)? = browserTabs.first(where: { if case .files = $0 { true } else { false } }) {
                     let fileQuery = place.machineID == localMachineId ? query : query.onMachine(place.machineID, repository: key.repository)
                     let documents = files(issue: key.id, cwd: place.cwd, query: fileQuery)
                     documents.restoreTabs(tabs, selected: selected)
@@ -1646,7 +1490,7 @@ extension SessionsWorkspace {
                 }
                 needsSave = portableLayout() != saved
             } else {
-                needsSave = multiplexer.layout.allPanes.contains { $0.content != .empty }
+                needsSave = hadLocalTools
             }
             // Reloads reuse the workspace's existing observation chain.
             if !persistenceLoaded {
@@ -1692,42 +1536,44 @@ extension SessionsWorkspace {
     }
 
     /// A delayed read contributes missing retained content; current edits own selection and geometry.
+    /// Both layouts hold the same designated panes, so merging is per kind.
     private static func merging(_ saved: WorkPaneLayout, with current: WorkPaneLayout) -> WorkPaneLayout {
-        var pending = saved.tree?.panes ?? []
+        let prior = saved.tree
         func merge(_ node: WorkPaneTree) -> WorkPaneTree {
             switch node {
             case .split(let axis, let ratio, let first, let second):
                 return .split(axis: axis, ratio: ratio, first: merge(first), second: merge(second))
             case .pane(let id, let content):
-                let index = pending.firstIndex { prior in
-                    if prior.0 == id { return true }
-                    switch (prior.1, content) {
-                    case (.shell, .shell), (.files, .files), (.empty, .empty): return true
-                    case (.session(let a, _), .session(let b, _)): return a == b
-                    default: return false
+                switch content {
+                case .session(nil, _):
+                    guard case .session(let old?, let place)? = prior.intent(.session) else { return node }
+                    return .pane(id: id, content: .session(id: old, location: place))
+                case .shell(let tabs, let selected):
+                    guard case .shell(let oldTabs, let oldSelected)? = prior.intent(.shell) else { return node }
+                    let merged = tabs + oldTabs.filter { old in !tabs.contains { $0.id == old.id } }
+                    return .pane(id: id, content: .shell(tabs: merged, selected: selected ?? oldSelected))
+                case .browser(let place, let tabs, let selected):
+                    guard case .browser(let oldPlace, let oldTabs, let oldSelected)? = prior.intent(.browser),
+                          oldPlace == place || place == nil else { return node }
+                    var merged = tabs
+                    for old in oldTabs {
+                        if let index = merged.firstIndex(where: { $0.id == old.id }) {
+                            if case .files(let id, let newFiles, let fileSelected) = merged[index],
+                               case .files(_, let oldFiles, _) = old {
+                                merged[index] = .files(id: id, tabs: newFiles + oldFiles.filter { old in
+                                    !newFiles.contains { $0.id == old.id || $0.path == old.path } }, selected: fileSelected)
+                            }
+                        } else { merged.append(old) }
                     }
-                }
-                guard let index else { return node }
-                let old = pending.remove(at: index).1
-                switch (old, content) {
-                case (.shell(let oldTabs, _), .shell(let tabs, let selected)):
-                    return .pane(id: id, content: .shell(tabs: tabs + oldTabs.filter { old in !tabs.contains { $0.id == old.id } }, selected: selected))
-                case (.files(let oldPlace, let oldTabs, _), .files(let place, let tabs, let selected)) where oldPlace == place:
-                    return .pane(id: id, content: .files(location: place, tabs: tabs + oldTabs.filter { old in !tabs.contains { $0.id == old.id || $0.path == old.path } }, selected: selected))
+                    return .pane(id: id, content: .browser(location: place ?? oldPlace, tabs: merged, selected: selected ?? oldSelected))
                 default: return node
                 }
             }
         }
-        var tree = current.tree.map(merge)
-        for (id, content) in pending {
-            if case .empty = content { continue }
-            let leaf = WorkPaneTree.pane(id: id, content: content)
-            tree = tree.map { .split(axis: .vertical, ratio: 0.618, first: $0, second: leaf) } ?? leaf
-        }
         let drafts = current.drafts + saved.drafts.filter { old in
             !current.drafts.contains { $0.path == old.path && $0.location == old.location }
         }
-        return WorkPaneLayout(work: current.work, revision: saved.revision, tree: tree, focused: current.focused,
+        return WorkPaneLayout(work: current.work, revision: saved.revision, tree: merge(current.tree), focused: current.focused,
                               zoomed: current.zoomed, hidden: current.hidden, drafts: drafts)
     }
 }
@@ -1739,7 +1585,18 @@ private extension WorkPaneTree {
         case .split(_, _, let first, let second): first.panes + second.panes
         }
     }
-    var fileIntent: WorkPaneIntent? {
-        panes.first { if case .files = $0.1 { true } else { false } }?.1
+    /// The designated pane of this kind.
+    func intent(_ kind: PaneContent.Kind) -> WorkPaneIntent? {
+        panes.first { $0.1.kind == kind }?.1
+    }
+}
+
+private extension WorkPaneIntent {
+    var kind: PaneContent.Kind {
+        switch self {
+        case .session: .session
+        case .shell: .shell
+        case .browser: .browser
+        }
     }
 }

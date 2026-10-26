@@ -20,12 +20,16 @@ struct TerminalPaneLayoutTests {
         let view = SessionsContentView(model: model, repoPath: "/repo", workspaces: registry,
                                       machineId: fixtureMachineId, repository: "repo", query: query)
             .environment(\.theme, theme).environment(\.palette, theme.palette)
-        let workspace = try #require(registry.selectedWork.flatMap { registry.retained($0) })
+        // Only a Task has panes to nest: its session beside the shell.
+        let location = WorkspaceIdentity(machineId: fixtureMachineId, worktree: "/repo")
+        let workspace = registry.workspace(for: .init(repository: "repo", kind: .task, id: "task-a"),
+            title: "Task A", location: location)
+        model.select(workspace.key.reference)
         workspace.presentation.content = .terminals
         workspace.multiplexer.load(sessionId: "first")
         let first = workspace.multiplexer.focusedPane
-        workspace.multiplexer.reveal(sessionId: "second")
-        workspace.multiplexer.move(workspace.multiplexer.focusedPaneId, beside: first.id, axis: axis)
+        let shell = try #require(workspace.multiplexer.newShell(focus: false))
+        workspace.multiplexer.move(shell.id, beside: first.id, axis: axis)
         // Prepared Sessions expose the production pane chrome without mounting
         // Ghostty or reading unmounted Observation environment objects.
         let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -34,13 +38,11 @@ struct TerminalPaneLayoutTests {
         var json = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as? [String: Any])
         json["task_primary"] = true
         let sessions = workspace.sessionStore(repoPath: "/repo", query: query)
-        for pane in workspace.multiplexer.layout.allPanes {
-            json["id"] = pane.id
-            let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
-            sessions.reconcile([record])
-            sessions.adoptPreparation(record)
-            workspace.multiplexer.replace(pane.id, with: .session(id: record.id, location: record.workspace?.identity))
-        }
+        json["id"] = first.id
+        let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
+        sessions.reconcile([record])
+        sessions.adoptPreparation(record)
+        workspace.multiplexer.replace(first.id, with: .session(id: record.id, location: record.workspace?.identity))
         let inspection = try view.inspect()
         let layout = try inspection.find(viewWithAccessibilityIdentifier: "work-layout")
         #expect(try layout.padding(.bottom) == 10)

@@ -551,6 +551,9 @@ pub enum Commands {
     /// Open Work's conversation in Desktop, this cmux/Herdr host or a terminal
     Open(commands::open::OpenArgs),
     /// Select Work and control Loopflow Desktop panes
+    #[command(
+        after_help = "Targets: root --task/--wave set the base view; -p names a part of it (shell:2, a tile 3 or LOO-519, LOO-519/shell:2); --window picks the window. Each part resolves by full ID, case-insensitive label, 1-based position, then ID suffix. Without them a command acts on the terminal it runs in. Scripts should pass the IDs receipts return; positions are for people.\n\nExit status: 0 success, 1 failure, 2 bad arguments, expression or verb arguments, 3 missing or ambiguous Task, window, pane or tab (nothing changed), 4 Desktop unreachable (not running, not macOS, or not answering its socket), 130 interrupted."
+    )]
     Desktop {
         #[command(subcommand)]
         cmd: DesktopCommand,
@@ -691,145 +694,23 @@ pub enum DesktopCommand {
         #[arg(long)]
         revision: u64,
     },
-    /// Replace a Dashboard's occurrence order and hidden members from JSON on stdin; prints the Dashboard as JSON
-    Arrange {
-        /// Dashboard name or query:ID
-        query: String,
-        /// The Dashboard's last read revision; a stale one writes nothing
-        #[arg(long)]
-        revision: i64,
-    },
-    /// Replace a Dashboard's slot layout from JSON on stdin; `null` restores the default
-    Slots {
-        /// Dashboard name or query:ID
-        query: String,
-        /// The Dashboard's last read revision; a stale one writes nothing
-        #[arg(long)]
-        revision: i64,
-    },
-    /// Move a member into another's place: the repository's Task order, or a Dashboard's with --query; prints the result as JSON
-    Order {
-        /// Member to move: task:<durable-id>, or wave:<durable-id> on a Dashboard
-        member: String,
-        /// Member whose place it takes
-        #[arg(long)]
-        to: String,
-        /// Dashboard whose order to edit instead of the repository's Task order
-        #[arg(long, requires = "revision")]
-        query: Option<String>,
-        /// The Dashboard's last read revision; a stale one writes nothing
-        #[arg(long, requires = "query")]
-        revision: Option<i64>,
-    },
-    /// Read portable pane intent as JSON, or save a complete revision-checked record from stdin
+    /// Read a Work's pane intent or a Dashboard's slots as JSON, or save a complete revision-checked record from stdin
     Layout {
-        /// repository, wave:<durable-id> or task:<durable-id>
+        /// repository, wave:<durable-id>, task:<durable-id> or query:ID
         work: String,
-        /// Replace the record from JSON on stdin instead of reading it
+        /// Replace the record from JSON on stdin instead of reading it (a Dashboard's: slots, null for the default)
         #[arg(long)]
         save: bool,
+        /// A Dashboard's last read revision; a stale one writes nothing
+        #[arg(long, requires = "save")]
+        revision: Option<i64>,
     },
 
-    /// Insert literal text at an exact surface's cursor; never submits or clears a draft
-    Text {
-        #[arg(long)]
-        pane: Option<String>,
-        /// Unicode text without control characters (use key for Enter/Tab)
-        text: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Send one explicit key to an exact retained surface, without following focus
-    Key {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(value_enum)]
-        key: commands::desktop::DesktopKey,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Read bounded text from an exact retained surface, without following focus
-    Read {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long, value_enum)]
-        region: commands::desktop::DesktopTextRegion,
-        #[arg(long, default_value_t = 65536)]
-        max_bytes: usize,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Hide an exact retained pane without closing its Session or process
-    Hide {
-        /// Pane ID; defaults to this terminal when verified, otherwise one eligible pane
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Restore an exact hidden pane without selecting Work or acquiring a client
-    Restore {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Focus an exact pane, opening its retained workspace when needed
-    Focus {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Add and select a shell tab at the Task’s recorded location
-    Shell {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show the recorded Task's files beside an exact pane, retaining drafts
-    Files {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show the recorded Task's Graph processes beside an exact pane
-    GraphLog {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Move a retained pane after another pane in the same workspace
-    Move {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        destination: String,
-        #[arg(long, value_enum)]
-        axis: commands::desktop::DesktopSplitAxis,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Resize the divider between two exact panes; ratio is the target side's share
-    Resize {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        toward: String,
-        #[arg(long)]
-        ratio: f64,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Zoom an exact retained pane without changing selection; --off unzooms it
-    Zoom {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long)]
-        off: bool,
+    /// List the window's Tasks by position (as ⌘1–9 select them) and each Task's panes
+    Ls {
+        /// Desktop window: ID, position or ID suffix (default: this terminal's window)
+        #[arg(long, value_name = "WINDOW")]
+        window: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -838,6 +719,221 @@ pub enum DesktopCommand {
         #[arg(long)]
         json: bool,
     },
+    /// List the verbs Desktop performs, with their arguments and default keys
+    Actions {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Stream window, pane and destination changes; the first change is every window
+    Events {
+        /// One change per line as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Wait for a shell tab's command to finish (exits with its status), else for the pane to appear
+    #[command(
+        after_help = "Exit status: the command's status when waiting on a shell tab, 1 when --for elapses, otherwise as for lf desktop."
+    )]
+    Wait {
+        /// Longest wait, e.g. 30s, 5m (default: no limit)
+        #[arg(long = "for", value_name = "DURATION", value_parser = crate::config::parse_duration)]
+        timeout: Option<std::time::Duration>,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Go back, as ⌘[ and the crumb chevron do
+    Back {
+        #[command(flatten)]
+        target: DesktopWindowArgs,
+    },
+    /// Go forward, as ⌘] does
+    Forward {
+        #[command(flatten)]
+        target: DesktopWindowArgs,
+    },
+    /// Show the window's Nth sidebar Task, as ⌘N does
+    Goto {
+        index: u32,
+        #[command(flatten)]
+        target: DesktopWindowArgs,
+    },
+    /// Show the next sidebar Task, as ⌃⇥ does
+    Next {
+        #[command(flatten)]
+        target: DesktopWindowArgs,
+    },
+    /// Show the previous sidebar Task, as ⌃⇧⇥ does
+    Previous {
+        #[command(flatten)]
+        target: DesktopWindowArgs,
+    },
+    /// Show the Working Tasks Dashboard
+    WorkingTasks {
+        #[command(flatten)]
+        target: DesktopWindowArgs,
+    },
+    /// Enter a member of the shown Dashboard as full Work, as a tile click does
+    Enter {
+        /// Tile on the shown Dashboard or Wave view, as `-p` names it: position, ID, label or ID suffix
+        tile: String,
+        #[command(flatten)]
+        target: DesktopWindowArgs,
+    },
+    /// Insert literal text at a terminal's cursor (stdin when omitted); never submits
+    Send {
+        /// Unicode text without control characters (use send-key for Enter/Tab)
+        text: Option<String>,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Send one key to a terminal, without following focus
+    SendKey {
+        #[arg(value_enum)]
+        key: commands::desktop::DesktopKey,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Print a terminal's text, without following focus
+    Capture {
+        #[arg(long, value_enum, default_value = "screen")]
+        region: commands::desktop::DesktopTextRegion,
+        /// Drop trailing spaces and blank lines
+        #[arg(long)]
+        trim: bool,
+        #[arg(long, default_value_t = 65536)]
+        max_bytes: usize,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Add a shell tab at the Task's location and type LINE into it, as if typed; focus stays put
+    Run {
+        /// One shell line, e.g. 'cargo test -p loopflow'; omitted opens an empty shell
+        line: Option<String>,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Zoom a pane, or return it to the layout, without changing selection
+    Zoom {
+        #[arg(long, conflicts_with = "off", required_unless_present = "off")]
+        on: bool,
+        #[arg(long)]
+        off: bool,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Focus a pane, or the pane in a direction, opening its retained workspace when needed
+    Focus {
+        #[arg(long, value_enum)]
+        direction: Option<commands::desktop::DesktopDirection>,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Hide a pane without closing its Session or process; on a Dashboard, hide a tile from its shared record
+    Hide {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Show a hidden pane without selecting Work or acquiring a client; on a Dashboard, a hidden tile
+    Show {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Close a shell or browser tab, as ⌘W does; a session pane hides
+    Close {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Undo the Task's last close, as ⇧⌘T does
+    Reopen {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Move a pane beside another pane of the same Task; on a Dashboard or Wave view, a tile into another's place
+    Move {
+        /// Pane to place it beside, or tile whose place it takes, as for -p
+        #[arg(long)]
+        destination: String,
+        /// Split axis for a pane; tiles take the destination's place
+        #[arg(long, value_enum)]
+        axis: Option<commands::desktop::DesktopSplitAxis>,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Resize the divider between two panes or Dashboard tiles; ratio is the addressed one's share
+    Resize {
+        /// The other pane or tile, as for -p
+        #[arg(long)]
+        toward: String,
+        #[arg(long)]
+        ratio: f64,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Show the Task's Files in the browser
+    Files {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Show the Task's Graph processes in the browser
+    GraphLog {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Open an http(s) page in a browser tab
+    Browse {
+        url: String,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Go back in a web page
+    PageBack {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Go forward in a web page
+    PageForward {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Reload a web page, as ⌘R does
+    Reload {
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+    /// Show another of the Task's conversations in its session pane
+    Switch {
+        /// Session ID
+        session: String,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
+}
+
+/// Which part of the view on screen a command acts on. `-p` is a path: a pane
+/// (`session`, `shell`, `browser`, `shell:2`), a Dashboard or Wave view tile (`3`,
+/// `LOO-519`), or `TILE/PANE`. `query:ID/TILE` and `working-tasks/TILE` name a
+/// saved record's tile by Work key without Desktop. Root `--task`/`--wave` set the
+/// base view; without either, a command acts on the terminal it runs in (`LF_TERMINAL_ID`).
+#[derive(Args, Debug, Clone, Default)]
+pub struct DesktopTargetArgs {
+    /// Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix
+    #[arg(short = 'p', long = "pane", value_name = "PATH")]
+    pub pane: Option<String>,
+    /// Desktop window: ID, position or ID suffix
+    #[arg(long, value_name = "WINDOW")]
+    pub window: Option<String>,
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Window-level verbs name no pane.
+#[derive(Args, Debug, Clone, Default)]
+pub struct DesktopWindowArgs {
+    /// Desktop window: ID, position or ID suffix
+    #[arg(long, value_name = "WINDOW")]
+    pub window: Option<String>,
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Subcommand, Debug)]

@@ -90,8 +90,8 @@ headless. Put interactive review on the exact Graph occurrence instead:
 
 ```yaml
 - step:
-    id: review_design
-    name: review-design
+    id: explore
+    name: explore
     human: true
 ```
 

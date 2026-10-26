@@ -35,8 +35,8 @@ struct TaskFilesTests {
         let location = WorkspaceIdentity(machineId: "local", worktree: "/task/checkout")
         let workspace = fixtureWork(.init(machineId: "local", worktree: "/other/work"))
         let query = RegistryQuery { _, _ in throw RegistryQueryError("Offline") }
-        let content = PaneContent.files(taskId: "task-files", location: location)
-        let pane = try #require(workspace.multiplexer.show(content))
+        let content = PaneContent.browser(taskId: "task-files", tabs: [.files], selected: "files", location: location)
+        let pane = try #require(workspace.multiplexer.showBrowser(.files, location: location))
         let files = try workspace.files(for: content, task: nil, query: query)
         #expect(files.cwd == location.worktree)
         files.autosave = false
@@ -51,14 +51,15 @@ struct TaskFilesTests {
         workspace.multiplexer.close(pane.id)
         workspace.multiplexer.undoClose()
         let reopened = try #require(workspace.multiplexer.layout.pane(for: pane.id))
-        #expect(reopened.content == content)
+        #expect(reopened.content.location == content.location)
+        #expect(reopened.content.selectedBrowserTab == .files)
         #expect(try workspace.files(for: reopened.content, task: nil, query: query) === files)
         #expect(document.text == draft)
         #expect(throws: RegistryQueryError.self) {
-            try workspace.files(for: .files(taskId: "task-files"), task: nil, query: query)
+            try workspace.files(for: .browser(taskId: "task-files", tabs: [.files], selected: "files"), task: nil, query: query)
         }
         #expect(throws: RegistryQueryError.self) {
-            try workspace.files(for: .files(taskId: "task-files", location: .init(machineId: "local", worktree: "/replacement")),
+            try workspace.files(for: .browser(taskId: "task-files", tabs: [.files], selected: "files", location: .init(machineId: "local", worktree: "/replacement")),
                 task: nil, query: query)
         }
         #expect(throws: RegistryQueryError.self) {
@@ -75,9 +76,9 @@ struct TaskFilesTests {
             machineID: "peer", observedAt: 1, location: .recorded(taskID: "remote-task", checkout: "/peer/checkout"))
         // The enclosing checkout is deliberately unrelated to the pane's content.
         let workspace = fixtureWork(.init(machineId: "local", worktree: "/local/other"))
-        let content = PaneContent.files(taskId: "portable", execution: location)
+        let content = PaneContent.browser(taskId: "portable", tabs: [.files], selected: "files", execution: location)
         #expect(throws: RegistryQueryError.self) {
-            try workspace.files(for: .files(taskId: "another-task", execution: location), task: nil, query: query)
+            try workspace.files(for: .browser(taskId: "another-task", tabs: [.files], selected: "files", execution: location), task: nil, query: query)
         }
         let store = try workspace.files(for: content, task: nil, query: query)
         store.autosave = false
@@ -89,17 +90,17 @@ struct TaskFilesTests {
         #expect(try workspace.files(for: content, task: nil, query: query) === store)
         let refreshed = TaskLocationObservation(request: "refreshed", repositoryID: location.repositoryID,
             taskID: location.taskID, machineID: location.machineID, observedAt: 2, location: location.location)
-        #expect(try workspace.files(for: .files(taskId: "portable", execution: refreshed), task: nil, query: query) === store)
+        #expect(try workspace.files(for: .browser(taskId: "portable", tabs: [.files], selected: "files", execution: refreshed), task: nil, query: query) === store)
         #expect(document.text == "draft\ntwo\n")
         #expect(document.dirty)
 
         let changed = TaskLocationObservation(request: "changed", repositoryID: "other-plan", taskID: "portable",
             machineID: "peer", observedAt: 2, location: location.location)
         #expect(throws: RegistryQueryError.self) {
-            try workspace.files(for: .files(taskId: "portable", execution: changed), task: nil, query: query)
+            try workspace.files(for: .browser(taskId: "portable", tabs: [.files], selected: "files", execution: changed), task: nil, query: query)
         }
         #expect(throws: RegistryQueryError.self) {
-            try workspace.files(for: .files(taskId: "portable"), task: nil, query: query)
+            try workspace.files(for: .browser(taskId: "portable", tabs: [.files], selected: "files"), task: nil, query: query)
         }
         #expect(store.document("note.txt") === document)
         #expect(document.text == "draft\ntwo\n")
@@ -188,7 +189,7 @@ struct TaskFilesTests {
         store.search = "NOTES"
         #expect(store.scratchPaths == ["scratch/notes.md"])
         #expect(store.changedPaths.isEmpty)
-        store.selectFile("scratch/notes.md", mode: .file)
+        store.selectFile("scratch/notes.md", mode: .edit)
         #expect(store.navigator == .closed)
         #expect(store.selectedDocument === document)
         #expect(document.text == "draft")
@@ -203,6 +204,56 @@ struct TaskFilesTests {
         store.togglePinnedNavigator()
         #expect(store.navigator == .closed)
         #expect(document.text == "draft")
+    }
+
+    @Test func scratchPageWritesTakeOnlyStaleAttention() {
+        let now = Date()
+        func follow(_ path: String = "scratch/explore.html", selection: String? = "scratch/plan.md",
+                    page: TaskFilesStore.Page = .files, mode: TaskFilesStore.Mode = .read, dirty: Bool = false,
+                    auto: Bool = false, idle: TimeInterval? = 10) -> TaskFilesStore.Follow {
+            TaskFilesStore.follow(path, selection: selection, page: page, mode: mode, dirty: dirty,
+                autoSelected: auto,
+                lastInteraction: idle.map { now.addingTimeInterval(-$0) }, now: now)
+        }
+        #expect(TaskFilesStore.isScratchPage("scratch/explore.html"))
+        #expect(TaskFilesStore.isScratchPage("scratch/notes/plan.MD"))
+        #expect(!TaskFilesStore.isScratchPage("scratch/data.json"))
+        #expect(!TaskFilesStore.isScratchPage("docs/plan.md"))
+        // The page already showing reloads in place.
+        #expect(follow(selection: "scratch/explore.html") == .reload)
+        // Stale attention: nothing selected, a followed page, or Files untouched.
+        #expect(follow(selection: nil, mode: .edit) == .select)
+        #expect(follow(auto: true) == .select)
+        #expect(follow(idle: TaskFilesStore.quietInterval) == .select)
+        #expect(follow(idle: nil) == .select)
+        // Fresh or engaged attention keeps the view; the page waits in a tab.
+        #expect(follow() == .openTab)
+        #expect(follow(mode: .edit, auto: true) == .openTab)
+        #expect(follow(mode: .diff, idle: 600) == .openTab)
+        #expect(follow(dirty: true, auto: true) == .openTab)
+        #expect(follow(selection: "scratch/explore.html", page: .task, idle: 600) == .select)
+    }
+
+    @Test func readModeRendersHTMLAsAPageAndMarkdownAsBlocks() async throws {
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { _, _ in "{}" })
+        #expect(store.mode == .read)
+        for (path, text) in [("scratch/explore.html", "<h1>Three visions</h1>"), ("scratch/plan.md", "# Plan")] {
+            let document = store.document(path)
+            await document.reconcile(TaskFileSnapshot(recoveries: [], issueIdentifier: "TEST-1", taskId: "task-files",
+                path: path, content: text, state: .text, revision: text, readOnlyReason: nil, sizeBytes: UInt64(text.utf8.count)))
+            store.selection = path
+            #expect(store.rendersSelection)
+        }
+        let page = TaskFileReadingView(document: store.document("scratch/explore.html"), baseURL: nil)
+        #expect(throws: Never.self) { try page.inspect().find(viewWithAccessibilityIdentifier: "files-rendered-html") }
+        let note = TaskFileReadingView(document: store.document("scratch/plan.md"), baseURL: nil)
+        #expect(try note.inspect().find(MarkdownBlocks.self).actualView().source == "# Plan")
+        // Edit is a mode you switch into; other files read as text.
+        store.mode = .edit
+        #expect(!store.rendersSelection)
+        store.mode = .read
+        store.selection = "Cargo.toml"
+        #expect(!store.rendersSelection)
     }
 
     @Test func diskWinsOverlapKeepsOtherLocalEditsAndUndoNeverRevertsDisk() async {
@@ -739,7 +790,7 @@ struct TaskFilesTests {
         store.selection = "new.txt"
         _ = store.document("new.txt")
         store.selection = original.path
-        store.mode = .file
+        store.mode = .edit
         #expect(store.selectedDocument?.editor === editor)
         #expect(editor.selectedRange() == selection)
         #expect(document.text == edited)

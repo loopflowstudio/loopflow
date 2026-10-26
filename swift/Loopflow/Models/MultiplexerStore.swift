@@ -2,6 +2,14 @@ import CoreGraphics
 import Foundation
 import Observation
 
+/// What ⌘W last closed. ⇧⌘T shows that same occurrence again: a hidden pane,
+/// or a tab put back at its index with its surface or page still alive.
+public enum ClosedOccurrence: Equatable, Sendable {
+    case pane(String)
+    case shellTab(ShellTab, index: Int)
+    case browserTab(BrowserTab, index: Int)
+}
+
 public enum SpatialDirection: Equatable, Sendable {
     case left
     case right
@@ -28,10 +36,18 @@ public final class MultiplexerStore {
             && (zoomedPaneId == nil || zoomedPaneId == pane.id)
     }
 
-    private var closedState: ClosedState?
+    /// The one undoable close. Only another close replaces it.
+    public private(set) var lastClosed: ClosedOccurrence?
     private var focusBeforeZoom: String?
 
-    public init(layout: LayoutNode = .defaultLayout()) {
+    /// A Task workspace's designated panes; Wave and repository workspaces have
+    /// only the session pane. Tools start hidden until they have content.
+    public convenience init(taskId: String?) {
+        self.init(layout: .designated(taskId: taskId))
+        collapsedPaneIds = Set(layout.allPanes.filter { $0.kind != .session }.map(\.id))
+    }
+
+    public init(layout: LayoutNode) {
         self.layout = layout
         let first = layout.firstPane
         focusedPaneId = first.id
@@ -45,10 +61,13 @@ public final class MultiplexerStore {
         return pane
     }
 
-    public var canClose: Bool {
-        layout.allPanes.count > 1 || focusedPane.content != .empty
-    }
-    public var canUndoClose: Bool { closedState != nil }
+    /// Closing hides a pane; the last visible pane stays.
+    public var canClose: Bool { (visibleLayout?.allPanes.count ?? 0) > 1 }
+    public var canUndoClose: Bool { lastClosed != nil }
+
+    public var sessionPane: PaneState? { layout.pane(of: .session) }
+    public var shellPane: PaneState? { layout.pane(of: .shell) }
+    public var browserPane: PaneState? { layout.pane(of: .browser) }
 
     public func pane(forSessionId sessionId: String) -> PaneState? {
         let sessionId = StructuredIdentity.session(sessionId)
@@ -70,10 +89,6 @@ public final class MultiplexerStore {
         }
         let updated = update(layout)
         if updated != layout { layout = updated }
-        if var closed = closedState {
-            closed.layout = update(closed.layout)
-            closedState = closed
-        }
     }
 
     public func setCollapsed(paneId: String, collapsed: Bool) {
@@ -86,16 +101,9 @@ public final class MultiplexerStore {
         }
     }
 
+    /// Show a conversation in the session pane and focus it.
     public func reveal(sessionId: String, location: WorkspaceIdentity? = nil) {
-        let sessionId = StructuredIdentity.session(sessionId)
-        updateSessionLocation(sessionId, location: location)
-        if let pane = pane(forSessionId: sessionId) {
-            setFocusedPane(pane.id)
-        } else if focusedPane.content == .empty {
-            load(sessionId: sessionId, location: location)
-        } else {
-            _insert(.session(id: sessionId, location: location), beside: focusedPaneId)
-        }
+        load(sessionId: sessionId, location: location)
     }
 
     public func setFocusedPane(_ paneId: String) {
@@ -108,112 +116,85 @@ public final class MultiplexerStore {
     }
 
     /// Relocate the leaf itself, retaining content occurrence and surface keys.
-    /// Never use close/load: those invalidate targets and may retire a shell.
     public func move(_ paneId: String, beside destination: String, axis: SplitAxis) {
         guard paneId != destination,
               let pane = layout.pane(for: paneId), layout.pane(for: destination) != nil,
               let remaining = layout.removing([paneId]) else { return }
         layout = remaining.splitting(destination, axis: axis, newPane: pane)
-        closedState = nil
     }
 
-    public func close(_ paneId: String) {
-        guard let pane = layout.pane(for: paneId) else { return }
-        let remaining = layout.removing([paneId])
-        guard remaining != nil || pane.content != .empty else { return }
-
-        // Undo restores this pane as a new occurrence, never reviving a stale
-        // control target. Other panes retain their existing occurrences.
-        let undoContent: PaneContent
-        if case .shell(let tabs, let selected) = pane.content {
-            undoContent = .shell(tabs: tabs.map {
-                ShellTab(id: $0.id, location: $0.location, execution: $0.execution, command: nil, lfProcessID: $0.lfProcessID)
-            }, selected: selected)
-        } else { undoContent = pane.content }
-        closedState = ClosedState(
-            layout: layout.replacingContent(of: paneId, with: undoContent),
-            focusedPaneId: focusedPaneId,
-            zoomedPaneId: zoomedPaneId,
-            collapsedPaneIds: collapsedPaneIds
-        )
-        // Undo may restore a shell pane, but must never replay a completed or
-        // interrupted conversation's initial launch command.
-        collapsedPaneIds.remove(paneId)
-        layout = remaining ?? .leaf(PaneState(id: paneId, content: .empty))
+    /// Hide a pane. Its content, tabs and surfaces stay; Undo shows it again.
+    /// Returns the close this one replaced, whose retained views the caller frees.
+    @discardableResult
+    public func close(_ paneId: String) -> ClosedOccurrence? {
+        guard layout.pane(for: paneId) != nil, !collapsedPaneIds.contains(paneId), canClose else { return nil }
+        let previous = _paneFrames()
+        collapsedPaneIds.insert(paneId)
         if zoomedPaneId == paneId { zoomedPaneId = nil }
-        if focusedPaneId == paneId, remaining != nil {
-            focusedPaneId = _nearestPane(to: paneId, in: closedState?.layout)
-                ?? layout.firstPane.id
+        if focusedPaneId == paneId {
+            focusedPaneId = _nearestPane(to: paneId, in: previous) ?? visibleLayout?.firstPane.id ?? paneId
+        }
+        return _record(.pane(paneId))
+    }
+
+    /// Show the last closed pane, or put its tab back where it was and select it.
+    public func undoClose() {
+        guard let closed = lastClosed else { return }
+        lastClosed = nil
+        switch closed {
+        case .pane(let id):
+            setFocusedPane(id)
+        case .shellTab(let tab, let index):
+            guard let pane = shellPane, case .shell(var tabs, _) = pane.content else { return }
+            tabs.insert(tab, at: min(index, tabs.count))
+            layout = layout.updatingShellTabs(of: pane.id, tabs: tabs, selected: tab.id)
+            setFocusedPane(pane.id)
+        case .browserTab(let tab, let index):
+            guard let pane = browserPane,
+                  case .browser(let taskId, var tabs, _, let place, let observed) = pane.content else { return }
+            if !tabs.contains(where: { $0.id == tab.id }) { tabs.insert(tab, at: min(index, tabs.count)) }
+            layout = layout.replacingBrowser(of: pane.id, with: .browser(taskId: taskId, tabs: tabs, selected: tab.id,
+                location: place, execution: observed), retainingOccurrence: true)
+            setFocusedPane(pane.id)
         }
     }
 
-    public func undoClose() {
-        guard let closedState else { return }
-        layout = closedState.layout
-        focusedPaneId = closedState.focusedPaneId
-        zoomedPaneId = closedState.zoomedPaneId
-        collapsedPaneIds = closedState.collapsedPaneIds
-        self.closedState = nil
+    private func _record(_ closed: ClosedOccurrence) -> ClosedOccurrence? {
+        let replaced = lastClosed
+        lastClosed = closed
+        return replaced
     }
 
-    public func load(sessionId: String, location: WorkspaceIdentity? = nil) {
+    /// Switch the session pane to this conversation. The previous one keeps
+    /// running; its surface stays in the pool.
+    public func load(sessionId: String, location: WorkspaceIdentity? = nil, focus: Bool = true) {
         let sessionId = StructuredIdentity.session(sessionId)
         updateSessionLocation(sessionId, location: location)
-        if let openPane = pane(forSessionId: sessionId) {
-            if collapsedPaneIds.contains(openPane.id), openPane.id != focusedPaneId,
-               case .session = focusedPane.content {
-                // Opening in the active slot must not resurrect a hidden split.
-                // Keep the displaced Session in the hidden slot for later reveal.
-                let previous = focusedPane.content
-                layout = layout.replacingContent(of: focusedPaneId, with: openPane.content)
-                    .replacingContent(of: openPane.id, with: previous)
-                collapsedPaneIds.remove(focusedPaneId)
-                closedState = nil
-                return
-            }
-            setFocusedPane(openPane.id)
-            return
+        guard let pane = sessionPane else { return }
+        if pane.sessionId != sessionId {
+            layout = layout.replacingContent(of: pane.id, with: .session(id: sessionId, location: location))
         }
-
-        switch focusedPane.content {
-        case .shell, .graphLog, .files:
-            _insert(.session(id: sessionId, location: location), beside: focusedPaneId)
-            return
-        case .empty, .session:
-            break
-        }
-
-        layout = layout.replacingContent(
-            of: focusedPaneId,
-            with: .session(id: sessionId, location: location)
-        )
-        collapsedPaneIds.remove(focusedPaneId)
-        closedState = nil
+        if focus { setFocusedPane(pane.id) }
     }
 
     /// Change this slot's content without disturbing its companions or split ratios.
+    /// Content keeps the slot's designated kind.
     public func replace(_ paneId: String, with content: PaneContent) {
-        guard layout.pane(for: paneId) != nil else { return }
+        guard let pane = layout.pane(for: paneId), pane.kind == content.kind else { return }
         layout = layout.replacingContent(of: paneId, with: content)
         collapsedPaneIds.remove(paneId)
         setFocusedPane(paneId)
-        closedState = nil
     }
 
+    /// Add a shell tab and select it. Focus moves only when asked; scripts keep theirs.
     @discardableResult
-    public func newShell(command: [String] = [], location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil) -> PaneState? {
+    public func newShell(command: [String] = [], location: WorkspaceIdentity? = nil,
+                         execution: TaskLocationObservation? = nil, focus: Bool = true) -> PaneState? {
+        guard let pane = shellPane, case .shell(let tabs, _) = pane.content else { return nil }
         let tab = ShellTab(location: location, execution: execution, command: command)
-        if let pane = shellPane, case .shell(let tabs, _) = pane.content {
-            layout = layout.updatingShellTabs(of: pane.id, tabs: tabs + [tab], selected: tab.id)
-            setFocusedPane(pane.id)
-            closedState = nil
-            return layout.pane(for: pane.id)
-        }
-        return _insert(.shell(tabs: [tab], selected: tab.id), beside: focusedPaneId)
-    }
-
-    public var shellPane: PaneState? {
-        layout.allPanes.first { if case .shell = $0.content { true } else { false } }
+        layout = layout.updatingShellTabs(of: pane.id, tabs: tabs + [tab], selected: tab.id)
+        if focus { setFocusedPane(pane.id) } else { setCollapsed(paneId: pane.id, collapsed: false) }
+        return layout.pane(for: pane.id)
     }
 
     public func shell(_ id: String) -> ShellTab? {
@@ -228,98 +209,101 @@ public final class MultiplexerStore {
         setFocusedPane(pane.id)
     }
 
-    public func closeShell(_ id: String) {
+    /// Close a shell tab, keeping it for Undo; the last one leaving hides the shell pane.
+    /// Returns the close this one replaced, whose retained views the caller frees.
+    @discardableResult
+    public func closeShell(_ id: String) -> ClosedOccurrence? {
+        guard let pane = shellPane, case .shell(let tabs, _) = pane.content,
+              let index = tabs.firstIndex(where: { $0.id == id }) else { return nil }
+        _removeShell(id)
+        return _record(.shellTab(tabs[index], index: index))
+    }
+
+    /// Drop a shell tab whose process on `machineId` exited, open or kept for Undo.
+    public func removeExitedShell(_ id: String, machineId: String) {
+        if case .shellTab(let tab, _) = lastClosed, tab.id == id, tab.location?.machineId == machineId {
+            lastClosed = nil
+        }
+        guard shell(id)?.location?.machineId == machineId else { return }
+        _removeShell(id)
+    }
+
+    private func _removeShell(_ id: String) {
         guard let pane = shellPane, case .shell(let tabs, let selected) = pane.content,
-              let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+              let (remaining, next) = Self._closing(id, in: tabs, selected: selected) else { return }
+        layout = layout.updatingShellTabs(of: pane.id, tabs: remaining, selected: next)
+        if remaining.isEmpty { setCollapsed(paneId: pane.id, collapsed: true) }
+    }
+
+    /// The tabs left after closing one, and the selection: unchanged, else the
+    /// tab that took the closed one's place.
+    private static func _closing<Tab: Identifiable>(_ id: String, in tabs: [Tab], selected: String?)
+        -> (remaining: [Tab], selected: String?)? where Tab.ID == String {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return nil }
         var remaining = tabs
         remaining.remove(at: index)
-        guard !remaining.isEmpty else { close(pane.id); return }
-        let next = selected == id ? remaining[min(index, remaining.count - 1)].id : selected
-        layout = layout.updatingShellTabs(of: pane.id, tabs: remaining, selected: next)
-        closedState = nil
+        guard selected == id else { return (remaining, selected) }
+        return (remaining, remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)].id)
     }
 
-    /// Reveal a Task's Graph process log or files beside existing terminals,
-    /// never replacing them. Explicit targets do not follow later focus.
+    /// Select a browser tab, adding it when absent. A fresh owner observation
+    /// replaces the recorded one; missing evidence never discards it.
     @discardableResult
-    public func show(_ content: PaneContent, beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
-        let content = content.canonicalized
-        let existing = layout.allPanes.first { pane in
-            switch (pane.content, content) {
-            case (.files, .files): return true
-            case (.shell, .shell): return true
-            case (.graphLog(let current, _, _), .graphLog(let requested, _, _)):
-                return current == requested
-            default: return pane.content == content
-            }
+    public func showBrowser(_ tab: BrowserTab, location: WorkspaceIdentity? = nil,
+                            execution: TaskLocationObservation? = nil, focus: Bool = true) -> PaneState? {
+        guard let pane = browserPane,
+              case .browser(let taskId, var tabs, _, let place, let observed) = pane.content else { return nil }
+        if !tabs.contains(where: { $0.id == tab.id }) { tabs.append(tab) }
+        let fresh = execution != nil || location != nil
+        let content = PaneContent.browser(taskId: taskId, tabs: tabs, selected: tab.id,
+            location: fresh ? location : place, execution: fresh ? execution : observed)
+        if content != pane.content {
+            layout = layout.replacingBrowser(of: pane.id, with: content, retainingOccurrence: content.location == pane.content.location)
         }
-        if let pane = existing {
-            // A fresh observation can replace the captured owner, but missing
-            // evidence cannot discard the retained remote location or draft.
-            if content.selectedShell == nil, content.executionLocation != nil || content.location != nil, pane.content != content {
-                layout = layout.replacingContent(of: pane.id, with: content)
-                closedState = nil
-            }
-            if focus { setFocusedPane(pane.id) }
-            else { setCollapsed(paneId: pane.id, collapsed: false) }
-            return layout.pane(for: pane.id)
-        } else {
-            return _insert(content, beside: paneId ?? focusedPaneId, focus: focus)
-        }
+        if focus { setFocusedPane(pane.id) } else { setCollapsed(paneId: pane.id, collapsed: false) }
+        return layout.pane(for: pane.id)
     }
 
-    /// Fill an empty slot or insert beside it, updating focus and Undo together.
+    /// Close a browser tab, keeping it for Undo; the last one leaving hides the browser pane.
+    /// Returns the close this one replaced, whose retained views the caller frees.
     @discardableResult
-    private func _insert(
-        _ content: PaneContent,
-        beside paneId: String,
-        focus: Bool = true
-    ) -> PaneState? {
-        guard let target = layout.pane(for: paneId) else { return nil }
-        let axis: SplitAxis? = target.content == .empty ? nil :
-            (layout.allPanes.count.isMultiple(of: 2) ? .horizontal : .vertical)
-        let insertedId: String
-        if let axis {
-            let pane = PaneState(content: content)
-            insertedId = pane.id
-            let ratio: Double
-            if case .shell = content { ratio = LayoutNode.goldenRatio }
-            else { ratio = 0.5 }
-            layout = layout.splitting(paneId, axis: axis, newPane: pane, ratio: ratio)
-        } else {
-            insertedId = paneId
-            layout = layout.replacingContent(of: paneId, with: content)
-            collapsedPaneIds.remove(paneId)
-        }
-        if focus {
-            focusedPaneId = insertedId
-            zoomedPaneId = axis == nil && zoomedPaneId != nil ? insertedId : nil
-        }
-        closedState = nil
-        return layout.pane(for: insertedId)
+    public func closeBrowserTab(_ id: String) -> ClosedOccurrence? {
+        guard let pane = browserPane,
+              case .browser(let taskId, let tabs, let selected, let place, let observed) = pane.content,
+              let index = tabs.firstIndex(where: { $0.id == id }),
+              let (remaining, next) = Self._closing(id, in: tabs, selected: selected) else { return nil }
+        layout = layout.replacingBrowser(of: pane.id, with: .browser(taskId: taskId, tabs: remaining, selected: next,
+            location: place, execution: observed), retainingOccurrence: true)
+        if remaining.isEmpty { setCollapsed(paneId: pane.id, collapsed: true) }
+        return _record(.browserTab(tabs[index], index: index))
     }
 
     public func paneLayout(work: WorkWorkspaceKey, revision: Int64,
-                           files: WorkPaneIntent?, drafts: [WorkFileDraft]) -> WorkPaneLayout {
+                           files: WorkBrowserTab?, drafts: [WorkFileDraft]) -> WorkPaneLayout {
+        func place(_ value: WorkspaceIdentity?) -> WorkViewPlan.Location? {
+            value.map { WorkViewPlan.Location(machineID: $0.machineId, cwd: $0.worktree) }
+        }
         func tree(_ node: LayoutNode) -> WorkPaneTree {
             switch node {
             case .split(let axis, let first, let second, let ratio):
                 return .split(axis: axis, ratio: ratio,
                               first: tree(first), second: tree(second))
             case .leaf(let pane):
-                let location = pane.content.location.map { WorkViewPlan.Location(machineID: $0.machineId, cwd: $0.worktree) }
                 let intent: WorkPaneIntent
                 switch pane.content {
-                case .empty: intent = .empty
-                case .session(let id, _, _): intent = .session(id: id, location: location)
+                case .session(let id, let location, _): intent = .session(id: id, location: place(location))
                 case .shell(let tabs, let selected):
                     intent = .shell(tabs: tabs.map { tab in
-                        WorkShellTab(id: tab.id,
-                            location: tab.location.map { WorkViewPlan.Location(machineID: $0.machineId, cwd: $0.worktree) },
-                            lfProcessID: tab.lfProcessID)
+                        WorkShellTab(id: tab.id, location: place(tab.location), lfProcessID: tab.lfProcessID)
                     }, selected: selected)
-                case .files: intent = files ?? .files(location: location, tabs: [], selected: nil)
-                case .graphLog: intent = .log(location: location)
+                case .browser(_, let tabs, let selected, _, _):
+                    intent = .browser(location: place(pane.content.location), tabs: tabs.map { tab in
+                        switch tab {
+                        case .files: files ?? .files(id: tab.id, tabs: [], selected: nil)
+                        case .graphLog: .graphLog(id: tab.id)
+                        case .url(let id, let url): .url(id: id, url: url.absoluteString)
+                        }
+                    }, selected: selected)
                 }
                 return .pane(id: pane.id, content: intent)
             }
@@ -341,24 +325,31 @@ public final class MultiplexerStore {
             case .pane(let id, let intent):
                 let content: PaneContent
                 switch intent {
-                case .empty: content = .empty
                 case .session(let session, let place): content = .session(id: session, location: location(place))
                 case .shell(let tabs, let selected):
                     content = .shell(tabs: tabs.map { tab in
                         self.shell(tab.id) ?? ShellTab(id: tab.id, location: location(tab.location), command: nil, lfProcessID: tab.lfProcessID)
                     }, selected: selected)
-                case .files(let place, _, _): content = .files(taskId: saved.work.id, location: location(place))
-                case .log(let place): content = .graphLog(taskId: saved.work.id, location: location(place))
+                case .browser(let place, let tabs, let selected):
+                    let restored = tabs.compactMap { tab -> BrowserTab? in
+                        switch tab {
+                        case .files: .files
+                        case .graphLog: .graphLog
+                        case .url(let id, let url): URL(string: url).flatMap { BrowserTab.page($0, id: id) }
+                        }
+                    }
+                    content = .browser(taskId: saved.work.id, tabs: restored,
+                        selected: restored.contains { $0.id == selected } ? selected : restored.first?.id,
+                        location: location(place))
                 }
                 if let retained = layout.pane(for: id), retained.content == content { return .leaf(retained) }
                 return .leaf(PaneState(id: id, content: content))
             }
         }
-        layout = saved.tree.map(tree) ?? .defaultLayout()
-        focusedPaneId = saved.focused ?? layout.firstPane.id
+        layout = tree(saved.tree)
+        focusedPaneId = saved.focused ?? visibleLayout?.firstPane.id ?? layout.firstPane.id
         zoomedPaneId = saved.zoomed
         collapsedPaneIds = Set(saved.hidden)
-        closedState = nil
     }
 
     /// Explicit arrangement changes visibility without selecting another Session.
@@ -427,32 +418,17 @@ public final class MultiplexerStore {
         }
     }
 
-    /// Removes confirmed resolved or moved Sessions without creating an undo entry.
+    /// Clears confirmed resolved or moved Sessions from the session pane without
+    /// creating an undo entry; the pane shows the start state.
     public func removeSessions(_ sessionIds: Set<String>) {
-        let removes: (PaneState) -> Bool = { pane in
-            guard case .session(let id, _, _) = pane.content else { return false }
-            return sessionIds.contains(id)
+        func clear(_ node: LayoutNode) -> LayoutNode {
+            guard let pane = node.pane(of: .session), let id = pane.sessionId, sessionIds.contains(id) else { return node }
+            return node.replacingContent(of: pane.id, with: .session(id: nil))
         }
-        let stale = layout.allPanes.filter(removes)
-        let undoIsStale = closedState?.layout.allPanes.contains(where: removes) == true
-        guard !stale.isEmpty || undoIsStale else { return }
-
-        if let last = stale.last {
-            let removed = Set(stale.map(\.id))
-            // Keep the final slot when all Sessions leave, as single removals do.
-            layout = layout.removing(removed) ?? .leaf(PaneState(id: last.id, content: .empty))
-            collapsedPaneIds.subtract(removed)
-            if let zoomedPaneId, removed.contains(zoomedPaneId) { self.zoomedPaneId = nil }
-        }
-        if layout.pane(for: focusedPaneId) == nil {
-            focusedPaneId = layout.firstPane.id
-        }
-        closedState = nil
+        layout = clear(layout)
     }
 
-    private func _nearestPane(to paneId: String, in previousLayout: LayoutNode?) -> String? {
-        guard let previousLayout else { return nil }
-        let previousFrames = _paneFrames(for: previousLayout)
+    private func _nearestPane(to paneId: String, in previousFrames: [String: CGRect]) -> String? {
         guard let removed = previousFrames[paneId] else { return nil }
         let center = CGPoint(x: removed.midX, y: removed.midY)
         return _paneFrames().min { lhs, rhs in
@@ -510,12 +486,5 @@ public final class MultiplexerStore {
             ? candidate.maxY > current.minY && candidate.minY < current.maxY
             : candidate.maxX > current.minX && candidate.minX < current.maxX
         return primary + perpendicular + (overlaps ? 0 : 10)
-    }
-
-    private struct ClosedState {
-        var layout: LayoutNode
-        let focusedPaneId: String
-        let zoomedPaneId: String?
-        let collapsedPaneIds: Set<String>
     }
 }

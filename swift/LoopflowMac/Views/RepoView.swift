@@ -42,16 +42,8 @@ struct RepoView: View {
 
     @ToolbarContentBuilder
     private var workToolbar: some ToolbarContent {
-#if compiler(>=6.2)
-        if #available(macOS 26.0, *) {
-            ToolbarItem(placement: .navigation) { WorkBreadcrumbs(model: model) }
-                .sharedBackgroundVisibility(.hidden)
-        } else {
-            ToolbarItem(placement: .navigation) { WorkBreadcrumbs(model: model) }
-        }
-#else
         ToolbarItem(placement: .navigation) { WorkBreadcrumbs(model: model) }
-#endif
+            .sharedBackgroundVisibility(.hidden)
     }
 
     var body: some View {
@@ -89,7 +81,7 @@ struct RepoView: View {
             if let taskLinks, let repository {
                 WorkLinkReceiver(router: taskLinks, repository: repository, openingRequests: openingRequests, inspect: { repository, incarnation in
                     model.inspectDesktop(repository: repository, window: incarnation, workspaces: sessionWorkspaces)
-                }, controlPane: { try sessionWorkspaces.controlPane($0, model: model) },
+                }, perform: { try DesktopAction.perform($0, model: model, workspaces: sessionWorkspaces) },
                    readText: { try sessionWorkspaces.readText($0) }) { link in
                     if sessionWorkspaces.localMachineId == nil { await sessionWorkspaces.refreshMachine(query: query) }
                     if let machine = sessionWorkspaces.localMachineId {

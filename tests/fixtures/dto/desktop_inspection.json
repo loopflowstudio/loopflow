@@ -12,19 +12,23 @@
       "repository": "repo_22222222222222222222222222222222",
       "window": "55555555-5555-5555-5555-555555555555",
       "path": "/repo",
-      "selection_kind": "task",
-      "selection_id": "task_44444444444444444444444444444444",
+      "destination": {
+        "kind": "entered",
+        "from": {
+          "dashboard": "attention"
+        },
+        "work": {
+          "repository": "repo_22222222222222222222222222222222",
+          "kind": "task",
+          "id": "task_44444444444444444444444444444444"
+        }
+      },
+      "history": {
+        "back": 1,
+        "forward": 0
+      },
       "reading": "unavailable",
       "reason": "Registry read failed; retained views remain available",
-      "supported_operations": [
-        "state",
-        "hide",
-        "restore",
-        "focus",
-        "move",
-        "resize",
-        "zoom"
-      ],
       "workspaces": [
         {
           "focused_pane": "session-pane",
@@ -126,25 +130,53 @@
           "kind": "task",
           "id": "task_44444444444444444444444444444444"
         }
+      ],
+      "list": [
+        {
+          "position": 1,
+          "work": {
+            "repository": "repo_22222222222222222222222222222222",
+            "kind": "task",
+            "id": "task_44444444444444444444444444444444"
+          },
+          "identifier": "LOO-519",
+          "title": "Fixture Task"
+        }
+      ],
+      "actions": [
+        {
+          "name": "back",
+          "title": "Back",
+          "scope": "window",
+          "arguments": [],
+          "keys": [
+            "⌘["
+          ]
+        },
+        {
+          "name": "forward",
+          "title": "Forward",
+          "scope": "window",
+          "arguments": [],
+          "keys": [
+            "⌘]"
+          ]
+        }
       ]
     },
     {
       "repository": "repo_other",
       "window": "other-window",
       "path": "/repo",
-      "selection_kind": "task",
-      "selection_id": "task_44444444444444444444444444444444",
+      "destination": {
+        "kind": "working_tasks"
+      },
+      "history": {
+        "back": 0,
+        "forward": 2
+      },
       "reading": "current",
       "reason": null,
-      "supported_operations": [
-        "list",
-        "hide",
-        "restore",
-        "focus",
-        "move",
-        "resize",
-        "zoom"
-      ],
       "workspaces": [],
       "task": {
         "id": "task_44444444444444444444444444444444",
@@ -163,7 +195,9 @@
       "session": null,
       "opening": null,
       "view": null,
-      "open_work": []
+      "open_work": [],
+      "list": [],
+      "actions": []
     }
   ]
 }

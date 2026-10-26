@@ -4,8 +4,9 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::sync::mpsc;
 
+use super::fact::{Decoded, ProviderTurn};
 use super::pi::PiHarness;
-use super::pi_mapping::Turn;
+use super::pi_decode::Turn;
 use super::{Harness, SendCurrentOutcome};
 use crate::agent::AgentConfig;
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
@@ -161,9 +162,32 @@ async fn pi_crash_closes_open_tools_and_fails_the_turn() {
     pi.stop().await.unwrap();
 }
 
+/// A test turn whose decoded events are reduced to display.
+struct DisplayTurn(Turn);
+
+impl DisplayTurn {
+    fn new(id: &str) -> Self {
+        Self(Turn::new(ProviderTurn {
+            thread: "/tmp/pi-session.jsonl".into(),
+            turn: id.into(),
+        }))
+    }
+
+    fn event(&mut self, event: &serde_json::Value) -> Vec<ConversationEvent> {
+        self.0
+            .event(event)
+            .into_iter()
+            .filter_map(|decoded| match decoded {
+                Decoded::Display(event) => Some(event),
+                Decoded::Fact(_) => None,
+            })
+            .collect()
+    }
+}
+
 #[test]
 fn pi_waits_for_settlement_and_does_not_invent_missing_usage() {
-    let mut turn = Turn::new("turn".into());
+    let mut turn = DisplayTurn::new("turn");
     assert!(turn
         .event(&json!({"type":"agent_end","willRetry":false}))
         .is_empty());
@@ -355,7 +379,7 @@ fn pi_empty_final_answers_fail_but_tool_steps_and_internal_retries_can_recover()
         ("\n", "stop"),
         ("Checking", "toolUse"),
     ] {
-        let mut turn = Turn::new("empty".into());
+        let mut turn = DisplayTurn::new("empty");
         turn.event(&json!({"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"intermediate"}],"stopReason":"toolUse"}}));
         turn.event(&json!({"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":text}],"stopReason":stop}}));
         let events = turn.event(&json!({"type":"agent_settled","aborted":false}));
@@ -370,7 +394,7 @@ fn pi_empty_final_answers_fail_but_tool_steps_and_internal_retries_can_recover()
             })
         ));
     }
-    let mut turn = Turn::new("recovered".into());
+    let mut turn = DisplayTurn::new("recovered");
     for message in [
         json!({"role":"assistant","content":[],"stopReason":"error","errorMessage":"connection reset"}),
         json!({"role":"assistant","content":[{"type":"toolCall","id":"tool"}],"stopReason":"toolUse"}),

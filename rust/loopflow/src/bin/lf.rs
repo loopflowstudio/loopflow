@@ -2518,7 +2518,7 @@ fn execute_command(
         Some(Commands::ContextBlock {
             moment: ContextMoment::PiEvent,
             ..
-        }) => loopflow::harness::pi_history::native_event(),
+        }) => loopflow::harness::pi::native_event(),
         Some(Commands::ContextBlock {
             moment: ContextMoment::ToolGroup,
             lifeline,

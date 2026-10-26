@@ -495,3 +495,14 @@ planning and CI views still load.
 | `lf serve` | Opt-in stateless server: CLI-over-socket, GitHub webhook replacing `pr ci` polling; Desktop uses it when present | GUI API |
 | Planning surface | `repo` dissolved or slimmed per D5 | D5 |
 | Code host port (filed, local `985879`, Linear sync uncertain) | One code-host + CI port; a second host proves pr/land/ci/release end to end | LOO-610 `pr`/ops surface |
+
+## Run notes
+
+- 2026-10-26: the first pursue run's implement step handed the `wave cron`
+  deletion to a side worktree (`.claude/worktrees/agent-a69d931fbb700b937`,
+  based on a newer main) and exited before merging it. The operator saved the
+  patch, interrupted the Graph during compress, merged it (4 conflicts) and
+  deleted the then-orphaned `ops/cron*` and `tests/scheduled_release_tests.rs`.
+  Nothing has been compiled since the merge. Remaining: build, clippy, fix
+  fallout, regenerate `docs/lf-reference.md`, Swift build, affected tests.
+  Do the work in this checkout; do not delegate to side worktrees.

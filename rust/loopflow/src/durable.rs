@@ -54,12 +54,6 @@ prefixed_uuid_id!(
     DurableDataError,
     DurableDataError::InvalidId
 );
-prefixed_uuid_id!(
-    CronReceiptId,
-    "cron_",
-    DurableDataError,
-    DurableDataError::InvalidId
-);
 
 impl TaskId {
     /// Linear UUIDs are also the creation UUID used by locally authored Tasks.

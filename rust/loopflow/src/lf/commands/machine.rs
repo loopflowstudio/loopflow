@@ -18,13 +18,7 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         MachineCommand::Ondemand { cmd } => return super::rental::run_ondemand(cmd, batch),
         _ => {}
     }
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(run_async(cmd, batch))?;
-    if matches!(cmd, MachineCommand::Public { .. }) {
-        // Publication runs its own runtime, so it waits until this one is done.
-        super::ops::republish_crons()?;
-    }
-    Ok(())
+    tokio::runtime::Runtime::new()?.block_on(run_async(cmd, batch))
 }
 
 async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {

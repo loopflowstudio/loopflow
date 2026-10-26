@@ -20,7 +20,7 @@ use time::OffsetDateTime;
 use crate::pr_landing::{PrLanding, PrLandingState};
 use crate::store::SharedStore;
 
-use super::cron::Launchctl;
+use super::launchd::Launchctl;
 use super::error::{OpsError, OpsResult};
 use super::pr::{GhCheck, MergeGateReading};
 
@@ -475,7 +475,7 @@ fn write_state(root: &Path, state: &CiWatchState) -> OpsResult<()> {
 pub fn status(repo: &Path) -> OpsResult<CiWatchStatus> {
     let root = crate::git::worktrees::main_repo_root(repo).map_err(error)?;
     let running = try_lock(&root)?.is_none();
-    let installed = service_path(&super::cron::default_launch_agents_dir()?, &root).exists();
+    let installed = service_path(&super::launchd::default_launch_agents_dir()?, &root).exists();
     Ok(CiWatchStatus {
         running,
         installed,
@@ -780,7 +780,7 @@ pub struct WatchOptions {
 fn parent_gone(options: &WatchOptions) -> bool {
     options
         .parent_pid
-        .is_some_and(|pid| !super::cron::process_alive(pid))
+        .is_some_and(|pid| !super::launchd::process_alive(pid))
 }
 
 /// Sleep in short steps so a vanished parent stops the watcher promptly.
@@ -891,7 +891,7 @@ fn service_path(launch_agents_dir: &Path, repo: &Path) -> PathBuf {
 }
 
 fn render_service(spec: &ServiceSpec) -> String {
-    let escape = super::cron::xml_escape;
+    let escape = super::launchd::xml_escape;
     let log = spec.repo.join(".lf/logs/ci-watch.log");
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -949,7 +949,7 @@ pub fn install_service(
     if path.exists() {
         let _ = launchctl.unload(&path);
     }
-    super::cron::write_private_file(&path, render_service(spec).as_bytes())?;
+    super::launchd::write_private_file(&path, render_service(spec).as_bytes())?;
     launchctl.load(&path)?;
     Ok(path)
 }
@@ -1211,12 +1211,6 @@ mod tests {
             Ok(())
         }
         fn unload(&self, _: &Path) -> OpsResult<()> {
-            Ok(())
-        }
-        fn is_loaded(&self, _: &str) -> OpsResult<bool> {
-            Ok(true)
-        }
-        fn trigger(&self, _: &str) -> OpsResult<()> {
             Ok(())
         }
     }

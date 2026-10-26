@@ -11,20 +11,8 @@ public struct TaskAutomation: Codable, Sendable, Identifiable {
 }
 
 public struct AutomationStatus: Codable, Sendable {
-    public let enabled: Bool
-    public let cadenceSeconds: UInt32
-    public let coverage: String
-    public let lastSuccessAt: Int64?
-    public let lastFailureAt: Int64?
-    public let lastError: String?
     public let tasks: [TaskAutomation]
     public let deliveries: [DeliveryStatus]
-
-    enum CodingKeys: String, CodingKey {
-        case enabled, cadenceSeconds = "cadence_seconds", coverage
-        case lastSuccessAt = "last_success_at", lastFailureAt = "last_failure_at"
-        case lastError = "last_error", tasks, deliveries
-    }
 }
 
 public struct DeliveryStatus: Codable, Sendable {

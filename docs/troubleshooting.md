@@ -7,28 +7,14 @@ written.
 
 ```bash
 lf doctor
-lf cron list
-lf cron history --wave infrastructure --graph telemetry-daily --days 2
-lf cron sync
 ```
 
-Doctor checks installation selection, store compatibility, Process integrity and
-scheduled receipts separately. Installation commands can have no repository; a
-recorded repository must be an absolute path. Missing scheduled receipts remain
-failures even when ordinary commands work. A receipt proves invocation, not
-successful completion of its Graph or Skill.
-
-For a missing receipt, inspect the executable and log path Doctor prints. Jobs
-installed before the stable entry gate may pin a superseded binary, which a
-later install removes, and fail before recording a receipt. After installing a release with this repair,
-run `lf cron sync` from the repository to reinstall your jobs;
-use `lf cron sync --repo` for repository Task checks. New scheduled invocations
-follow the selected installation across promotions. Existing Sessions
-retain their runtime ownership.
+Doctor checks installation selection, store compatibility and Process integrity
+separately. Installation commands can have no repository; a recorded repository
+must be an absolute path.
 
 Doctor reads storage without initializing it or applying migrations. An incompatible
-store still reports readable Process evidence, scheduler obligations and installation
-selection.
+store still reports readable Process evidence and installation selection.
 
 Binary freshness compares against locally cached `origin/main`, without fetching.
 That reference may be stale, and merged source may be newer than the latest
@@ -38,12 +24,12 @@ itself installs nothing.
 ## A Wave has no active conversation
 
 Wave operations are finite. Read its plan and invoke the next pass explicitly,
-or inspect its cron schedule:
+or inspect your crontab:
 
 ```bash
 lf wave status <wave> --json
 lf --wave <wave> wave-operate
-lf cron list
+crontab -l
 ```
 
 A quiet Wave needs no service restart.

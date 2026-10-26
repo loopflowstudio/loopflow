@@ -119,16 +119,15 @@ refuse "$@"
 "#;
 
 const LAUNCHCTL: &str = r#"#!/bin/sh
-# lf-world's launchd. Records the jobs `lf cron` loads under ../launchd, so
+# lf-world's launchd. Records the jobs `lf ci watch --install` loads under ../launchd, so
 # nothing run inside a World schedules a real job; refuses everything else.
 jobs="$(dirname "$0")/../launchd"
 mkdir -p "$jobs"
 case "$1" in
 load) touch "$jobs/$(basename "$2" .plist)"; exit 0 ;;
 unload) rm -f "$jobs/$(basename "$2" .plist)"; exit 0 ;;
-print) [ -e "$jobs/${2##*/}" ]; exit ;;
 esac
-echo "lf-world's launchd answers only load, unload and print: $*" >&2
+echo "lf-world's launchd answers only load and unload: $*" >&2
 exit 1
 "#;
 

@@ -44,22 +44,8 @@ struct TaskAutomationView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Delivery checks").font(.headline)
             if let status {
-                HStack {
-                    Text(status.coverage.capitalized)
-                    Spacer()
-                    Button(status.enabled ? "Disable" : "Enable") {
-                        perform { try await query.setAutomation(enabled: !status.enabled, cwd: repo) }
-                    }
-                }
-                Text("Checks deliveries every minute while this Machine is available. Graph recovery belongs to its caller.")
+                Text("Run `lf task reconcile` from your own crontab to check deliveries on a schedule.")
                     .font(.caption).foregroundStyle(palette.textSecondary)
-                if let checked = status.lastSuccessAt {
-                    Text("Last successful check: \(Date(timeIntervalSince1970: Double(checked)), style: .relative) ago")
-                        .font(.caption)
-                }
-                if let lastError = status.lastError {
-                    Text("Last failed check: \(lastError)").font(.caption).foregroundStyle(palette.textSecondary)
-                }
                 ForEach(status.tasks) { task in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {

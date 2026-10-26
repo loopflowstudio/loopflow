@@ -273,7 +273,7 @@ lf ps --json
 ```
 
 Author `.lf/wave/shipper/GOAL.md` with an objective and operating guidance.
-`lf cron add` schedules recurring commands on your Machine; `pm:` connects shared planning. Each
+Your crontab schedules recurring lf commands on your Machine; `pm:` connects shared planning. Each
 `wave-operate` invocation keeps your started Tasks moving and leaves the plan alone.
 Tasks own implementation in stable worktrees; `lf land` hands off delivery and
 `lf pr reconcile` settles verified merges; `lf ci watch` repairs failed CI

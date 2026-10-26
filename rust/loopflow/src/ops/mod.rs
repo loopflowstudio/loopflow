@@ -5,13 +5,13 @@ pub mod checkout;
 pub(crate) mod child;
 mod commit;
 pub mod context;
-pub mod cron;
 mod error;
 pub(crate) mod git_operation;
 mod graph;
 pub(crate) mod graph_process;
 pub(crate) mod human_session;
 pub(crate) mod land;
+pub(crate) mod launchd;
 pub mod linear;
 pub mod linear_observe;
 pub(crate) mod metrics;
@@ -49,22 +49,14 @@ pub mod wt_timing;
 
 pub use abandon::{abandon_branch, AbandonOptions};
 pub use commit::{commit_selected, commit_workflow, commit_workflow_traced, CommitOptions};
-pub use cron::{
-    add_cron, daily_time_of, default_launch_agents_dir, latest_cron_receipt, list_cron_receipts,
-    list_crons, parse_schedule, parse_wait_duration, receipt_is_stale, receipt_root,
-    record_cron_preflight_failure, reinstall_crons, remove_cron, resolve_lf_path, run_cron,
-    schedule_from_cron, trigger_cron, wait_for_cron_receipt, CronHost, CronOutcome, CronReceipt,
-    CronSchedule, CronSource, CronSpec, CronTargetKind, InstalledCron, SystemLaunchctl,
-};
-pub(crate) use cron::{cron_receipt_ids, list_cron_obligations, CronObligation};
 pub use error::{OpsError, OpsResult};
 pub use graph::run_telemetry_scorecard;
+pub use launchd::{default_launch_agents_dir, resolve_lf_path, SystemLaunchctl};
 pub use land::{arm, mark_ready, submit, LandOptions};
 pub(crate) use land::{finish_arm_after_sync, finish_submit_after_sync};
 pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};
 pub use present::{present_pr_review, ReviewSurface};
 pub use progress::{NullProgress, Progress};
-pub(crate) use release::release_run_with_cron;
 pub use release::{
     bump_version, generate_release, preview_release_notes, release_bump, release_check,
     release_notes, release_publish, release_run, release_status, release_tag, MergedPr,

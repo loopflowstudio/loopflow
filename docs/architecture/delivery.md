@@ -113,8 +113,8 @@ and push the exact head. Branch commits and merge resolutions retain their ident
 GitHub applies the repository’s allowed merge method or merge queue policy. `arm` and `land` request
 GitHub auto-merge, record the landing, and return. Success means handoff;
 `lf task reconcile` checks recorded repository landings once;
-`lf pr reconcile` uses its delivery-only path. `lf cron sync --repo` installs the
-finite minute check on this Machine. Neither repairs CI; `lf ci watch` does. `submit` performs the
+`lf pr reconcile` uses its delivery-only path. Run either from your own
+crontab to check on a schedule. Neither repairs CI; `lf ci watch` does. `submit` performs the
 same preparation but leaves the exact-head merge to a person. These delivery
 commands inspect Task delivery state when present; they do not require a running
 Task Graph or certify that a particular Graph ran.
@@ -390,12 +390,9 @@ admission.
 The repository lock skips overlapping observations. Per-Task and per-PR claims
 still fence direct callers. Delivery observations have no elapsed-time cutoff;
 concurrent checks skip the landing while its current observation owns the lock.
-launchd calendar entries run each minute and coalesce sleep into a wake-time check.
 The detached transport owner starts a separate process group. Startup waits for
 its acknowledgement without an elapsed-time cutoff. No provider turn runs inside
 the tick.
 
-Desktop consumes the Rust automation projection: installed/enabled state,
-last successful and failed receipts, selection and blockers. A missing receipt
-is unknown coverage. Disabling removes the job and prevents its later admissions;
-it leaves running work and explicitly requested GitHub merges intact.
+Desktop consumes the Rust automation projection: per-Task CI repair holds and
+unsettled deliveries. Scheduling the check is the person's own crontab line.

@@ -113,12 +113,6 @@ pub(crate) async fn repository_tasks(
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AutomationStatus {
-    pub enabled: bool,
-    pub cadence_seconds: u32,
-    pub coverage: String,
-    pub last_success_at: Option<i64>,
-    pub last_failure_at: Option<i64>,
-    pub last_error: Option<String>,
     pub tasks: Vec<TaskAutomation>,
     pub deliveries: Vec<DeliveryStatus>,
 }
@@ -136,43 +130,6 @@ pub fn status(repo: &Path) -> OpsResult<AutomationStatus> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let store = super::pr_landing::landing_store().await?;
-        let local = store.local_machine().await.map_err(error)?;
-        let key = super::cron::repository_cron_key(&root, &local.id);
-        let jobs = super::cron::list_crons(
-            &super::cron::default_launch_agents_dir()?,
-            &super::cron::SystemLaunchctl,
-        )?;
-        let job = jobs.iter().find(|job| {
-            job.target_kind == super::cron::CronTargetKind::Repository && job.graph == key
-        });
-        let enabled = job.is_some_and(|job| job.loaded);
-        let receipts = super::cron::list_cron_receipts(
-            &super::cron::receipt_root(&crate::store::lf_home_dir()),
-            "",
-            Some(&key),
-            35,
-        )?;
-        let success = receipts
-            .iter()
-            .find(|receipt| receipt.outcome == super::cron::CronOutcome::Succeeded);
-        let failure = receipts
-            .iter()
-            .find(|receipt| receipt.outcome == super::cron::CronOutcome::Failed);
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let coverage = if !enabled {
-            "disabled"
-        } else if receipts
-            .first()
-            .is_some_and(|receipt| receipt.outcome == super::cron::CronOutcome::Failed)
-        {
-            "failed"
-        } else if success.is_none() {
-            "unknown"
-        } else if success.is_some_and(|receipt| now - receipt.started_at > 180) {
-            "overdue"
-        } else {
-            "checked"
-        };
         let repo_id = crate::repository::RepoId::discover(&root).map_err(error)?;
         let mut tasks = Vec::new();
         for task in repository_tasks(&store, &repo_id).await? {
@@ -194,12 +151,6 @@ pub fn status(repo: &Path) -> OpsResult<AutomationStatus> {
             })
             .collect();
         Ok(AutomationStatus {
-            enabled,
-            cadence_seconds: 60,
-            coverage: coverage.into(),
-            last_success_at: success.map(|receipt| receipt.started_at),
-            last_failure_at: failure.map(|receipt| receipt.started_at),
-            last_error: failure.and_then(|receipt| receipt.error.clone()),
             tasks,
             deliveries,
         })

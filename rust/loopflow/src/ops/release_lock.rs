@@ -15,14 +15,12 @@ const LOCK_FD_ENV: &str = "LF_RELEASE_LOCK_FD";
 #[derive(Debug)]
 pub(crate) struct ReleaseLock {
     file: File,
-    inherited: bool,
 }
 
 impl ReleaseLock {
     pub(crate) fn try_clone(&self) -> std::io::Result<Self> {
         Ok(Self {
             file: self.file.try_clone()?,
-            inherited: self.inherited,
         })
     }
 
@@ -45,7 +43,6 @@ impl ReleaseLock {
             .ok()
             .and_then(|v| v.parse::<i32>().ok())
             .filter(|fd| *fd >= 3);
-        let mut reused = false;
         let file = if let Some(fd) = inherited {
             // SAFETY: dup validates fd and transfers a new owned descriptor on success.
             let duplicate = unsafe { libc::dup(fd) };
@@ -59,10 +56,7 @@ impl ReleaseLock {
                     // existing ownership. Acquiring it is a fresh manual action.
                     match fs2::FileExt::try_lock_exclusive(&file) {
                         Ok(()) => file,
-                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            reused = true;
-                            inherited
-                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => inherited,
                         Err(error) => return Err(error.into()),
                     }
                 } else {
@@ -78,22 +72,13 @@ impl ReleaseLock {
             if error.kind() == std::io::ErrorKind::WouldBlock {
                 OpsError::ReleaseDeferred {
                     reason: format!("release target {target} already has an active execution"),
-                    continuation:
-                        "retry at the next configured firing after the active execution finishes"
-                            .into(),
+                    continuation: "retry after the active execution finishes".into(),
                 }
             } else {
                 error.into()
             }
         })?;
-        Ok(Self {
-            file,
-            inherited: reused,
-        })
-    }
-
-    pub(crate) fn is_inherited(&self) -> bool {
-        self.inherited
+        Ok(Self { file })
     }
 
     /// The child retains the target exclusion even if its controller dies.

@@ -969,7 +969,6 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        WaveCommand::Cron { .. } => unreachable!("cron dispatches separately"),
         WaveCommand::List { .. } | WaveCommand::Status { .. } | WaveCommand::Show { .. } => {
             unreachable!("read commands dispatch separately")
         }
@@ -1030,10 +1029,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             if *json {
                 println!("{}", serde_json::to_string(&status)?);
             } else {
-                println!(
-                    "{} · every {} seconds",
-                    status.coverage, status.cadence_seconds
-                );
                 for task in status.tasks {
                     println!(
                         "{}: {}",
@@ -2670,17 +2665,6 @@ fn execute_command(
                     repo,
                 },
         }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune, *repo),
-        Some(Commands::Wave {
-            cmd:
-                loopflow::lf::WaveCommand::Cron {
-                    cmd:
-                        cmd @ (loopflow::lf::CronCommand::List { .. }
-                        | loopflow::lf::CronCommand::Remove { .. }),
-                },
-        }) => loopflow::lf::commands::ops::cron_cmd(cmd),
-        Some(Commands::Wave {
-            cmd: loopflow::lf::WaveCommand::Cron { cmd },
-        }) => in_repo_runtime(args, |_| loopflow::lf::commands::ops::cron_cmd(cmd)),
         Some(Commands::Wave {
             cmd: WaveCommand::List { json, all, current },
         }) => loopflow::lf::commands::waves::ls(*json, *all, *current),

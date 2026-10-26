@@ -210,26 +210,17 @@ def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
     assert 'local_machine="$(lf machine id)"' in bootstrap
     assert 'placed_machine="$(lf wave status "$wave" --json' in bootstrap
     assert "--git-common-dir" in bootstrap
-    assert '"${minimal_env[@]}" lf cron add telemetry-daily --schedule "0 0 9 * * *"' in bootstrap
-    assert '"${minimal_env[@]}" lf cron add release-run --schedule "0 0 10 * * *"' in bootstrap
-    assert "-- --wave \"$wave\" --batch graph release-run" in bootstrap
-    assert 'lf cron list --wave "$wave" --json' in bootstrap
-    assert "lf cron trigger" in bootstrap
-    assert "--graph telemetry-daily --wait --timeout 15m" in bootstrap
-    assert "--graph release-run --wait --timeout 3h" in bootstrap
-    assert 'lf cron history --wave "$wave" --days 35' in bootstrap
+    assert 'job "0 9 * * *" telemetry-daily' in bootstrap
+    assert 'job "0 10 * * *" release-run' in bootstrap
+    assert "| crontab -" in bootstrap
     assert "env -i" in bootstrap
     assert "DOPPLER_TOKEN" not in bootstrap
     assert "loopflow-release-publisher" in bootstrap
     assert "not local Machine %s" not in bootstrap
     assert "printf '%s\\n' \"$local_machine\"" not in bootstrap
     assert "bootstrap complete: %s owns" not in bootstrap
-    assert "wrong Machine in installed cron: {entry!r}" not in bootstrap
     assert bootstrap.index("scripts/publish_release.py check") < bootstrap.index(
-        "lf cron add telemetry-daily"
-    )
-    assert bootstrap.index("lf cron add telemetry-daily") < bootstrap.index(
-        "lf cron add release-run"
+        "| crontab -"
     )
 
     public_contract = "\n".join(

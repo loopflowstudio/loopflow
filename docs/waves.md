@@ -192,7 +192,7 @@ radius crosses storage, auth, or public APIs.
 ```
 
 `lf machine use <machine> <wave>` picks your Machine for the Wave; it is personal,
-never committed. Use `lf cron`
+never committed. Put an ordinary lf command in your crontab
 for scheduled commands and `lf --wave <name> wave-operate` for an immediate pass.
 
 Builtin goals resolve by name, including the five Viable System Model charters
@@ -325,7 +325,7 @@ A Machine is a stable machine identity with a replaceable route. Your Wave Machi
 is your own choice, stored locally and copied to your other added Machines; an
 unreachable one gets a warning, so rerun later. An unowned Task resolves through its
 Wave, its parent Waves, its repository, then the Machine running the command. Your Machine
-for the Wave's Tasks runs its crons and receives your unowned Tasks; your Session Machine
+for the Wave's Tasks receives your unowned Tasks; your Session Machine
 hosts your Wave Session (`--tasks` or `--session` sets one, neither sets both). Setting
 the Session Machine completes the old Machine's Wave primary and admits a fresh one there, leaving native
 history behind. Existing Tasks keep the Machine in their claim; `lf machine use <machine> --task <task>`

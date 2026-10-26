@@ -1242,11 +1242,6 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Local launchd jobs that run lf commands on a schedule
-    Cron {
-        #[command(subcommand)]
-        cmd: CronCommand,
-    },
     /// List authored Waves and retained planning identities without starting work.
     List {
         /// Emit the wave snapshot as JSON (Loopflow's dashboard snapshot)
@@ -1896,122 +1891,6 @@ pub enum PrCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum CronCommand {
-    /// Record repair ownership without changing the failed evidence
-    Disposition {
-        subject: String,
-        #[arg(long)]
-        wave: String,
-        #[arg(long)]
-        owner: String,
-        #[arg(long)]
-        reason: String,
-    },
-    /// Install a named ordinary lf command on this Machine
-    Add {
-        /// Stable job name, retained across command changes
-        name: String,
-        /// Daily or every-minute cron expression, or a schedule alias
-        #[arg(long, default_value = "daily")]
-        schedule: String,
-        /// Let teammates see this cron; crons are private by default
-        #[arg(long)]
-        publish: bool,
-        /// Arguments passed to lf, after --
-        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
-        command: Vec<String>,
-    },
-    /// List jobs installed here, then teammates' published ones
-    List {
-        /// Only commands with this --wave selector
-        #[arg(short = 'w', long)]
-        wave: Option<String>,
-        /// Only commands with this --task selector
-        #[arg(long)]
-        task: Option<String>,
-        /// Emit machine-readable job state
-        #[arg(long)]
-        json: bool,
-    },
-    /// Let teammates see an installed cron (pushed to origin)
-    Publish {
-        name: String,
-        /// The cron's Wave, when the name is installed for more than one
-        #[arg(short = 'w', long)]
-        wave: Option<String>,
-    },
-    /// Make an installed cron private again
-    Unpublish {
-        name: String,
-        /// The cron's Wave, when the name is installed for more than one
-        #[arg(short = 'w', long)]
-        wave: Option<String>,
-    },
-    /// Reinstall this Machine's jobs with the current lf
-    Sync {
-        /// Install the finite repository Task check on this Machine
-        #[arg(long)]
-        repo: bool,
-        /// Remove the repository schedule; running work retains its authority
-        #[arg(long, requires = "repo")]
-        disable: bool,
-    },
-    /// Execute one installed cron job and persist its terminal receipt
-    #[command(hide = true)]
-    Run {
-        /// Wave whose installed declaration is executed
-        #[arg(short = 'w', long = "wave")]
-        wave: String,
-        /// Graph or skill name to run
-        // Loaded 0.14.14 jobs pass --flow until reloaded; LOO-574 removes it.
-        #[arg(long = "graph", alias = "flow")]
-        graph: String,
-        /// Mark a launchd-owned invocation
-        #[arg(long, hide = true)]
-        scheduled: bool,
-    },
-    /// Show durable cron receipts
-    History {
-        /// Wave whose receipts are shown
-        #[arg(short = 'w', long = "wave")]
-        wave: String,
-        /// Only receipts for this graph or skill
-        #[arg(long = "graph")]
-        graph: Option<String>,
-        /// Receipt window in days
-        #[arg(long, default_value_t = 35)]
-        days: u32,
-        /// Emit machine-readable receipts
-        #[arg(long)]
-        json: bool,
-    },
-    /// Ask launchd to fire an installed job
-    Trigger {
-        /// Wave whose installed job is fired
-        #[arg(short = 'w', long = "wave")]
-        wave: String,
-        /// Graph or skill name to run
-        #[arg(long = "graph")]
-        graph: String,
-        /// Wait for and return the scheduled receipt
-        #[arg(long)]
-        wait: bool,
-        /// Maximum wait for a receipt
-        #[arg(long, default_value = "15m")]
-        timeout: String,
-    },
-    /// Uninstall a scheduled lf invocation
-    Remove {
-        /// Wave name passed to `lf <graph> --wave <wave>`
-        #[arg(short = 'w', long = "wave")]
-        wave: String,
-        /// Graph or skill name to remove
-        #[arg(long = "graph")]
-        graph: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
 pub enum CiCommand {
     /// Watch this repository's PR checks and start a ci-fix when a recorded landing fails
     Watch {
@@ -2055,7 +1934,7 @@ pub enum PlanningCommand {
 /// Manage the installed artifacts and exported skills.
 #[derive(Debug, Subcommand)]
 pub enum SelfCommand {
-    /// Diagnose installation, storage, Process integrity and scheduled receipts
+    /// Diagnose installation, storage and Process integrity
     Doctor {
         /// Diagnose repository planning without changing it
         #[arg(long)]
@@ -2131,7 +2010,7 @@ pub enum MachineCommand {
         cmd: MachineCredentialCommand,
     },
     /// Name this Machine for teammates, or `off` to make it private again.
-    /// A private Machine's ownership entries and published crons carry only its id.
+    /// A private Machine's ownership entries carry only its id.
     Public { name: String },
     /// Print this machine's stable local Machine identity.
     Id {
@@ -2428,15 +2307,6 @@ pub enum RouteCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ReleaseCommand {
-    /// Show original due opportunities and their release evidence
-    History {
-        #[arg(short = 'w', long)]
-        wave: String,
-        #[arg(long, default_value_t = 35)]
-        days: u32,
-        #[arg(long)]
-        json: bool,
-    },
     /// Run the full release workflow end-to-end
     Run {
         /// Version to release: patch|minor|major|X.Y.Z (default: patch)

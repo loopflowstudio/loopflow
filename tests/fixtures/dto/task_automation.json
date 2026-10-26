@@ -1,10 +1,4 @@
 {
-  "enabled": true,
-  "cadence_seconds": 60,
-  "coverage": "overdue",
-  "last_success_at": 1790812000,
-  "last_failure_at": 1790812100,
-  "last_error": "GitHub unavailable",
   "tasks": [
     {
       "task_id": "task_example",

@@ -691,20 +691,6 @@ impl RunningGraph<'_> {
         command.current_dir(self.cwd);
         command.env(graph_process::GRAPH_ID_ENV, self.process.as_str());
         command.env_remove(graph_process::TASK_INTERRUPT_CURSOR_ENV);
-        if let Some(fd) =
-            crate::ops::cron::accounting::CronExecution::from_env().map(|cron| cron.lock_fd)
-        {
-            // SAFETY: the cron launcher owns the descriptor throughout spawn;
-            // fcntl preserves that exact capability in the step child.
-            unsafe {
-                command.pre_exec(move || {
-                    if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                });
-            }
-        }
         if self.launcher.verbose {
             command.arg("--verbose");
         }

@@ -51,13 +51,8 @@ const AMBIENT_ONLY: &[&[&str]] = &[];
 const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 
 /// Authored inputs do not select an ambient execution Wave: context reads
-/// directories, while cron add saves (and sync reinstalls) commands whose own
-/// selectors name their Work.
-const AUTHORED_CONTEXT: &[&[&str]] = &[
-    &["context"],
-    &["wave", "cron", "add"],
-    &["wave", "cron", "sync"],
-];
+/// directories.
+const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"]];
 
 /// Session entry uses an explicit Work target or checkout discovery, never an
 /// ambient Wave. `session_launch_contract` covers both forms and their effects.
@@ -74,25 +69,13 @@ const FILTER_ONLY: &[&[&str]] = &[
     &["task", "list"],
     &["history"],
     &["ops", "ci"],
-    &["wave", "cron", "list"],
-    &["wave", "cron", "publish"],
-    &["wave", "cron", "unpublish"],
     &["history", "list"],
     &["history", "usage"],
 ];
 
 /// Commands that require a Wave on the command line and therefore never
-/// resolve ambient context. Cron keeps these explicit because scheduled host
-/// operations must name the installed Wave whose authority they validate.
-const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
-    &["wave", "rename"],
-    &["discord", "serve"],
-    &["wave", "cron", "run"],
-    &["wave", "cron", "history"],
-    &["wave", "cron", "disposition"],
-    &["wave", "cron", "trigger"],
-    &["wave", "cron", "remove"],
-];
+/// resolve ambient context.
+const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[&["wave", "rename"], &["discord", "serve"]];
 
 const COMMANDS: &[Cmd] = &[
     // ── Reads ────────────────────────────────────────────────────────────
@@ -540,10 +523,6 @@ fn registry_is_complete() {
         .chain(MEMBERSHIP_TARGETS)
         .map(|path| path.iter().map(|s| s.to_string()).collect())
         .collect();
-    let explicit_paths: HashSet<Vec<String>> = EXPLICIT_WAVE_ONLY
-        .iter()
-        .map(|path| path.iter().map(|s| s.to_string()).collect())
-        .collect();
 
     // 3. Every wave-arg clap command must be classified.
     for path in &found {
@@ -555,29 +534,7 @@ fn registry_is_complete() {
         );
     }
 
-    // 4. Every cron leaf must be classified exactly once. Required-wave cron
-    //    commands do not appear in the optional-wave discovery above.
-    let cron = root
-        .find_subcommand("wave")
-        .expect("wave command must exist")
-        .find_subcommand("cron")
-        .expect("cron command must exist");
-    for subcommand in cron.get_subcommands() {
-        let path = vec![
-            "wave".to_string(),
-            "cron".to_string(),
-            subcommand.get_name().to_string(),
-        ];
-        let classifications = usize::from(registry_paths.contains(&path))
-            + usize::from(filter_paths.contains(&path))
-            + usize::from(explicit_paths.contains(&path));
-        assert_eq!(
-            classifications, 1,
-            "cron command {path:?} must have exactly one Wave-context classification"
-        );
-    }
-
-    // 5. Every ambient-only, filter-only, and explicit-only command must exist
+    // 4. Every ambient-only, filter-only, and explicit-only command must exist
     //    as a real clap leaf. Explicit-only commands must require `wave`.
     for path in AMBIENT_ONLY
         .iter()
@@ -607,7 +564,7 @@ fn registry_is_complete() {
         );
     }
 
-    // 6. Every registry entry must map to a real clap command (no stale
+    // 5. Every registry entry must map to a real clap command (no stale
     //    entries). Ambient-only commands are checked above.
     let ambient_set: HashSet<Vec<String>> = AMBIENT_ONLY
         .iter()
@@ -626,80 +583,4 @@ fn registry_is_complete() {
             cmd.path
         );
     }
-}
-
-// ─── Mutation targeting ─────────────────────────────────────────────────
-
-/// Cron installation refuses a development binary before writing host state.
-/// Valid command arguments cannot leave a disposable binary in launchd.
-#[test]
-fn cron_add_rejects_a_development_binary_before_mutation() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let home = tmp.path().join("home");
-    let repo = tmp.path().join("repo");
-
-    std::fs::create_dir_all(&home).expect("home");
-    std::fs::create_dir_all(&repo).expect("repo");
-
-    // Git repo — `lf cron add` calls `find_repo_root` before wave resolution.
-    let git = |args: &[&str]| {
-        std::process::Command::new("git")
-            .args(args)
-            .current_dir(&repo)
-            .output()
-            .expect("git")
-    };
-    git(&["init", "-b", "main"]);
-    git(&["config", "user.email", "test@loopflow.test"]);
-    git(&["config", "user.name", "Test"]);
-    std::fs::write(repo.join(".gitkeep"), "").expect("gitkeep");
-    git(&["add", "."]);
-    git(&["commit", "-m", "init"]);
-
-    let store = open_test_store(&home.join("loopflow.db"));
-    let alpha = Wave::new(
-        WaveId::new(),
-        "alpha".to_string(),
-        repo.display().to_string(),
-    );
-    store.create_wave(&alpha).expect("register alpha");
-
-    let alpha_uuid = alpha.id().as_str();
-
-    let cron = Command::new(loopflow_test_support::lf_binary())
-        .args([
-            "wave",
-            "cron",
-            "add",
-            "mutation-test",
-            "--schedule",
-            "daily",
-            "--",
-            "--wave",
-            "alpha",
-            "--batch",
-            "graph",
-            "mutation-test",
-        ])
-        .current_dir(&repo)
-        .env("LF_HOME", &home)
-        .env("HOME", &home)
-        .env("LF_WAVE_ID", alpha_uuid)
-        .env_remove("LF_CAPTURE_KEY")
-        .output()
-        .expect("run cron add");
-
-    assert!(
-        !cron.status.success(),
-        "development cron installation should fail"
-    );
-    let stderr = String::from_utf8_lossy(&cron.stderr);
-    assert!(
-        stderr.contains("requires an installed release binary"),
-        "unexpected cron add error: {stderr}"
-    );
-    assert!(
-        !home.join("Library/LaunchAgents").exists(),
-        "development cron installation must not create launchd state"
-    );
 }

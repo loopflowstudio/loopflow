@@ -296,12 +296,6 @@ public struct RegistryQuery: Sendable {
         try Self.decode(AutomationStatus.self, from: await run(["task", "automation", "--json"], cwd))
     }
 
-    public func setAutomation(enabled: Bool, cwd: String) async throws {
-        var args = ["cron", "sync", "--repo"]
-        if !enabled { args.append("--disable") }
-        _ = try await run(args, cwd)
-    }
-
     public func automateTask(issue: String, enabled: Bool, cwd: String) async throws {
         _ = try await run(["task", "automate", issue, enabled ? "on" : "off"], cwd)
     }

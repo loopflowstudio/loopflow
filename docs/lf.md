@@ -178,7 +178,7 @@ Machine's local store and copied to your other Machines (`lf machine add`) over
 `lf --machine`, so the laptop knows to launch there and mini knows to receive the
 runs. An unreachable Machine gets a warning; rerun later. An unowned Task resolves
 through its Wave, then parent Waves, then this Machine, so one Machine needs no
-setup. `lf cron` installs a Wave's crons for the same Machine.
+setup.
 
 Setting the Session Machine moves your Wave Session: the old Machine completes its Wave primary
 Session and the new Machine admits a fresh one, with fresh Wave context as with
@@ -523,9 +523,8 @@ your own conversation for a Wave or a Task.
   design node with `lf pr publish`.
 - **Comments.** A teammate's comment reaches your agents at their next
   supported boundary, under Git planning as under remote planning providers.
-- **Crons.** Install your own with `lf cron add`. They run only on that
-  Machine. Publish individual jobs with `lf cron publish` so teammates can
-  see them; fetching a published cron never installs it.
+- **Schedules.** Put ordinary lf commands in your own crontab. They run only
+  on that Machine and never reach the repository.
 - **Process.** A repository Skill or Graph outranks a personal one of the same
   name, so change the team's in a pull request. To try your own variant, save
   it under a new name in `~/.lf/skills`.
@@ -807,35 +806,24 @@ preserving the child's identity, PR, Session and design.
 ## Schedule ordinary commands
 
 ```bash
-lf cron add daily-review --schedule daily -- --wave product --batch skill wave/operate
-lf cron publish daily-review       # let teammates see it; crons are private by default
-lf cron list                       # yours, then teammates' published crons
-lf cron list --wave product        # filter by the command's Work selector
-lf cron unpublish daily-review
-lf cron remove --wave product --flow daily-review
-lf cron sync                       # reinstall yours with the current lf
+crontab -e
+# 0 9 * * *  cd ~/src/product && lf --wave product --batch skill wave/operate
+# * * * * *  cd ~/src/product && lf task reconcile --json
 ```
 
-Crons are yours: they run only on the Machine that installed them and are never
-committed. Commands use ordinary `lf` arguments, including `--wave` and
-`--task`. Only published crons reach Git: each Machine pushes its published
-crons, with your Git `user.email`, its Machine id and public name, if any, to
-`refs/loopflow/crons/<machine-id>` on `origin`. `lf cron list` shows a
-teammate's published crons as theirs, not installed here. When the fetch fails,
-it shows the last observed state and when it was published. Existing job names
-and Wave selectors retain installed identities and receipt history.
+Any lf command runs from your own crontab, launchd or systemd timer. Commands use
+ordinary `lf` arguments, including `--wave` and `--task`; the schedule is yours
+and never committed.
 
-## Check authorized deliveries in the background
+## Check authorized deliveries
 
 ```bash
-lf cron sync --repo                 # install this Machine's minute delivery check
 lf task reconcile --json            # check recorded deliveries once
-lf task automation --json           # schedule coverage and CI repair holds
-lf cron sync --repo --disable       # remove the schedule
+lf task automation --json           # CI repair holds and unsettled deliveries
 ```
 
-Checks continue with Desktop closed while this Machine's user is logged in.
-They record CI failures and settle verified merges. Graph recovery belongs to its
+Run `lf task reconcile` from your crontab to keep checking with Desktop closed.
+Each check records CI failures and settles verified merges. Graph recovery belongs to its
 caller: inspect execution and effect history before launching fresh work.
 
 ## Repair failed CI

@@ -164,7 +164,6 @@ impl Command {
             "usage" | "replay" => Some("history"),
             "release" | "ci" => Some("ops"),
             "tokens" => Some("history"),
-            "cron" => Some("wave"),
             _ => None,
         };
         if let Some(owner) = owner {

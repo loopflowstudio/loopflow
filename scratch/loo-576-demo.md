@@ -37,6 +37,14 @@ Jack Heart's Mac. Design: `scratch/loo-576-show-the-selected-wave-or-dashboards-
   that border subtler … like the edge of a shadow that has a gradient fade from
   dark to light." → the workspace's top-leading corner is square and the sidebar
   divider is a dark-to-clear gradient. Interpretation of which edge, pending his look.
+- Jack: "the loopflow folder wants to be at the top, and then the selected wave
+  wants to move to the top … the < loopflow is where the loopflow folder should
+  be … the folder should still be a wave … it should literally be the same swift
+  code" (and of the old `GROWTH 13` header: "it should be the same UI as what is
+  shown in the selector") → **Built:** the repository row is pinned at the top
+  where `‹ loopflow` was and replaces it; a selected Wave's row leaves the Waves
+  section and slides up under it. Repository and Wave rows are one
+  `waveRow(scope:name:count:unavailableReason:)`. Dashboards keep their title header.
 - **Open:** Jack: "we think of waveless tasks as assigned to the repo." Today the
   repository row shows Working Tasks (the repository's working Tasks, any Wave), not the
   waveless Tasks. Undecided whether selecting it should list waveless Tasks, with

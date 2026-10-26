@@ -198,13 +198,13 @@ struct WorkNavigationTests {
         #expect(model.navigation.sidebarWaveID == nil)
     }
 
-    @Test("The sidebar header names the Dashboard with Back, and ⌘1 marks its first member")
+    @Test("The sidebar header names the Dashboard under the repository, and ⌘1 marks its first member")
     func dashboardSidebarHeader() throws {
         let model = try dashboardModel()
         model.selectDashboard("review")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         _ = try navigator.inspect().find(text: "REVIEW")
-        _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-sidebar-back")
+        _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-repository")
         #expect(throws: (any Error).self) { try navigator.inspect().find(viewWithAccessibilityIdentifier: "dashboard-review") }
         let first = try navigator.inspect().find(TaskRowMetadata.self) { try $0.actualView().slotHint == "⌘1" }
         #expect(try first.actualView().task.id == "issue-now")

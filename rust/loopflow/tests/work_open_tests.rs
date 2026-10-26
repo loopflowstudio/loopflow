@@ -925,7 +925,7 @@ fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
     // Its execution owner keeps running after the last viewer's terminal closed.
     let owner = loopflow::id::LfProcessId::new();
     db.execute(
-        "INSERT INTO processes(id,trace_id,started_at,viewed,detached_at) VALUES(?1,'fixture',1,0,2)",
+        "INSERT INTO processes(id,trace_id,started_at,viewed) VALUES(?1,'fixture',1,0)",
         [&owner],
     )
     .unwrap();

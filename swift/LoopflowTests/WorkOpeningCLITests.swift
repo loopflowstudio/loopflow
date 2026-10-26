@@ -59,7 +59,7 @@ struct WorkOpeningCLITests {
                                                             address: resolved.url, query: fixture.query) { windows.append($0) }
             if !router.hasWindow(workspace.id) {
                 router.register(UUID(), repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id),
-                                focus: {}, inspect: Self.inspection, controlPane: { ($0.target.pane, $0.target.tab) },
+                                focus: {}, inspect: Self.inspection, perform: { DesktopActionOutcome(pane: $0.pane?.pane, tab: $0.pane?.tab) },
                                 readText: { _ in throw RegistryQueryError("No terminal") }) { received.append($0) }
             }
         }
@@ -74,8 +74,8 @@ struct WorkOpeningCLITests {
 
     private static func inspection(_ repository: String, _ window: UUID) -> DesktopWindowInspection {
         DesktopWindowInspection(repository: repository, window: window.uuidString, path: nil,
-            selectionKind: nil, selectionId: nil, reading: "loading", reason: nil,
-            task: nil, session: nil, supportedOperations: ["state"], workspaces: [], openWork: [], view: nil, opening: nil)
+            destination: .work(WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")), history: DesktopHistory(back: 0, forward: 0), reading: "loading", reason: nil,
+            task: nil, session: nil, list: [], actions: [], workspaces: [], openWork: [], view: nil, opening: nil)
     }
 
     private struct Fixture {

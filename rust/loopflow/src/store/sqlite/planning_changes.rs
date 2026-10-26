@@ -534,7 +534,7 @@ mod tests {
         .unwrap();
         let sql = current_draft_sql("planning_peers");
         conn.execute_batch(&sql).unwrap();
-        crate::store::migrations::seed_peer_planning(&conn, &sql).unwrap();
+        crate::store::migrations::convert_released_data(&conn, &sql).unwrap();
         let task = TaskId::from_raw("task-receipt");
         let owner = PlanningChanges::Task(&task);
         let before = owner.pending(&conn).unwrap();

@@ -1,6 +1,10 @@
 //! LOO-555 acceptance: Maya and Lee, each on their own Home, share one
 //! repository's Git planning. Built by `lf-world build two-people`; every step
 //! runs the real `lf` as one of them, with the World's `gh` and `launchctl`.
+
+#[allow(dead_code)] // Linked for its inherited provider-home scrub.
+mod support;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 

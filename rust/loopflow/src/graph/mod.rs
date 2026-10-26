@@ -1264,7 +1264,7 @@ mod tests {
         fs::create_dir_all(&graphs).unwrap();
         fs::write(
             graphs.join("review.yaml"),
-            "- step:\n    name: review-design\n    human: true\n",
+            "- step:\n    name: explore\n    human: true\n",
         )
         .unwrap();
 
@@ -1273,7 +1273,7 @@ mod tests {
 
         fs::write(
             graphs.join("retired.yaml"),
-            "- step:\n    name: review-design\n    feedback: true\n",
+            "- step:\n    name: explore\n    feedback: true\n",
         )
         .unwrap();
         let error = load_graph("retired", tmp.path()).unwrap_err();
@@ -1368,7 +1368,7 @@ mod tests {
         fs::create_dir_all(&graphs).unwrap();
         fs::write(
             graphs.join("inner.yaml"),
-            "- step:\n    id: revise\n    name: implement\n- step:\n    id: review_kickoff\n    name: review-design\n    human: true\n",
+            "- step:\n    id: revise\n    name: implement\n- step:\n    id: review_kickoff\n    name: explore\n    human: true\n",
         )
         .unwrap();
         fs::write(graphs.join("outer.yaml"), "- graph: inner\n").unwrap();
@@ -1390,7 +1390,7 @@ mod tests {
         fs::create_dir_all(&graphs).unwrap();
         fs::write(
             graphs.join("inner.yaml"),
-            "- step:\n    id: review_kickoff\n    name: review-design\n    human: true\n",
+            "- step:\n    id: review_kickoff\n    name: explore\n    human: true\n",
         )
         .unwrap();
         fs::write(

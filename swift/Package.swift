@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 
 import PackageDescription
 
@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "LoopflowSwift",
     platforms: [
-        .macOS(.v15),
+        .macOS(.v26),
         .iOS(.v18),
     ],
     products: [

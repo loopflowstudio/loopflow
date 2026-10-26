@@ -153,7 +153,9 @@ enum LocalWaveAgentLauncher {
             // closing a query must not signal a provider or a process group.
             if process.isRunning {
                 _ = Darwin.kill(process.processIdentifier, SIGKILL)
-                process.waitUntilExit()
+                // Not waitUntilExit: it parks this cooperative thread's run
+                // loop, which nothing wakes once the task has hopped threads.
+                while process.isRunning { usleep(1000) }
             }
             for handle in [out, err, stdout.fileHandleForWriting, stderr.fileHandleForWriting,
                            stdin?.fileHandleForReading, stdin?.fileHandleForWriting].compactMap({ $0 }) {
@@ -206,7 +208,15 @@ enum LocalWaveAgentLauncher {
             // An inherited pipe in a descendant cannot hold a completed query
             // open. The child's buffered output has been drained at this point.
             if !running, outputDrained, diagnosticsDrained { break }
-            try await Task.sleep(for: .milliseconds(10))
+            // Wake as soon as a pipe is ready; a fixed sleep drains one pipe
+            // buffer per tick, too slow for a large response to beat the deadline.
+            var ready = [pollfd(fd: out.fileDescriptor, events: Int16(POLLIN), revents: 0),
+                         pollfd(fd: err.fileDescriptor, events: Int16(POLLIN), revents: 0)]
+            if let handle = writer {
+                ready.append(pollfd(fd: handle.fileDescriptor, events: Int16(POLLOUT), revents: 0))
+            }
+            _ = Darwin.poll(&ready, nfds_t(ready.count), 10)
+            await Task.yield()
         }
         if process.terminationStatus == 0, sent != draft.count {
             throw LocalLfError(errorDescription: "Could not send draft to lf: \(inputError ?? "request exited before reading the draft")")

@@ -262,7 +262,7 @@ mod tests {
         assert_eq!(stopped.outgoing, [1, 2]);
         let guidance = stopped.guidance("INF-1");
         assert!(
-            guidance.contains("stopped on pursue (design → demo)"),
+            guidance.contains("stopped on pursue (explore → demo)"),
             "{guidance}"
         );
         assert!(guidance.contains("`lf graph list --for-task INF-1`"));

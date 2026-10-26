@@ -179,6 +179,8 @@ struct WorkNavigator: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(model.navigation.sidebarScope == scope ? palette.surface : .clear,
                             in: RoundedRectangle(cornerRadius: 6))
+                // The whole row clicks, as a Task row does, not only its text.
+                .contentShape(RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain)
             .modifier(FocusedWork(focus: $focusedWork, reference: reference))
             .accessibilityLabel("\(name), \(count) Tasks")

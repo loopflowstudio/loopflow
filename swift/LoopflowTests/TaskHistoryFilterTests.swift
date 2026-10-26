@@ -228,20 +228,7 @@ struct TaskHistoryFilterTests {
         }
     }
 
-    @Test("the primary Work Wave detail renders the shared metric portfolio")
-    func loopflowWaveDetailRendersMetricPortfolio() throws {
-        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
-        let wave = try #require(snapshot.waves.first)
-        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering is passive") },
-            repoPath: wave.wave.repo)
-        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
-        let view = WaveTaskInventory(model: model, waveID: wave.wave.id)
-        let metrics = try view.inspect().find(WaveMetricPortfolioView.self).actualView()
-        #expect(metrics.portfolio == wave.metricPortfolio)
-    }
-
-    @Test func waveInventoryShowsEveryCurrentTaskAndSelectionDoesNotStartWork() async throws {
+    @Test func waveBoardShowsTheWaveAndStartStaysWithRust() async throws {
         let payload = String(decoding: try JSONSerialization.data(withJSONObject: roadmapWire()), as: UTF8.self)
         let query = RegistryQuery { _, _ in payload }
         let roadmap = try await query.roadmap()
@@ -249,26 +236,14 @@ struct TaskHistoryFilterTests {
         let model = WorkModel(query: query)
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.wave.toWave()]), workActivity: .loading, repos: [])
         model.select(.wave(id: wave.wave.id))
-        let view = WaveTaskInventory(model: model, waveID: wave.wave.id)
-        let overview = WaveOverview(model: model, roadmap: wave)
-        #expect(try overview.inspect().find(viewWithAccessibilityIdentifier: "wave-objective").text().string()
-            == (wave.wave.goal.isEmpty ? "No objective recorded." : wave.wave.goal))
-        #expect(try overview.inspect().find(viewWithAccessibilityIdentifier: "wave-status").text().string()
+        let board = WaveStandupBoard(model: model, waveID: wave.wave.id)
+        #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-status").text().string()
             == wave.wave.status.label.capitalized)
-        #expect(try overview.inspect().find(viewWithAccessibilityIdentifier: "wave-project-history").button().isDisabled() == false)
-        #expect(try overview.inspect().find(viewWithAccessibilityIdentifier: "wave-realign-projects").button().isDisabled() == false)
-        let groups = WaveTaskGroups(wave.tasks.items)
-        let current = groups.owned + groups.unowned
-        let hidden = wave.tasks.items.filter { !$0.task.isCurrent($0.condition) }
-        #expect(!hidden.isEmpty)
-        for task in hidden {
-            #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "wave-task-\(task.id)") }
+        // Selecting a Wave never starts work; every current Task is on the board.
+        for task in wave.tasks.items where task.task.isCurrent(task.condition) && task.section != .later {
+            _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-row-\(task.id)")
         }
-        for task in current {
-            let button = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-task-\(task.id)").button()
-            try button.tap()
-            #expect(model.selection == .task(id: task.id))
-        }
+        #expect(model.selection == .wave(id: wave.wave.id))
         // Every Task can still be inspected; Rust's admission decision
         // governs Start in its workspace header.
         var work = try #require(JSONSerialization.jsonObject(

@@ -204,8 +204,9 @@ struct DashboardView: View {
     }
 }
 
-/// A Wave view's Tasks as tiles, filling the Wave plan's slots in the shared order.
-/// `lf desktop move -p N` reorders them; LOO-594 refines this view.
+/// A Wave view's footer: its Tasks as tiles filling the Wave plan's strip in the shared
+/// order. `lf desktop move -p N` reorders them. The page lives in navigation, so it
+/// follows an entered tile and survives back.
 struct WaveTiles: View {
     let model: WorkModel
     let workspaces: SessionsWorkspaceRegistry
@@ -214,10 +215,20 @@ struct WaveTiles: View {
 
     var body: some View {
         if let plan = model.wavePlan(waveID) {
-            DashboardSlotGrid(members: model.waveTiles(waveID), focused: nil, layout: plan.slots) { member in
-                DashboardTile(model: model, workspaces: workspaces, sessions: sessions, member: member, plan: plan,
-                              workingTasks: false, focused: false, takesFocus: false)
-            }.padding(8).accessibilityIdentifier("wave-tiles")
+            let members = model.waveTiles(waveID)
+            if members.isEmpty {
+                Text("No planned or started Tasks").font(Typography.body(15))
+                    .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier("wave-tiles-empty")
+            } else {
+                DashboardSlotGrid(members: members, focused: nil, layout: plan.slots,
+                                  heldPage: Binding(get: { model.navigation.wavePages[waveID] ?? 0 },
+                                                    set: { model.navigation.wavePages[waveID] = $0 }),
+                                  pagerKeys: false) { member in
+                    DashboardTile(model: model, workspaces: workspaces, sessions: sessions, member: member, plan: plan,
+                                  workingTasks: false, focused: false, takesFocus: false)
+                }.padding(8).accessibilityIdentifier("wave-tiles")
+            }
         }
     }
 }
@@ -366,8 +377,16 @@ extension WorkModel {
         case .work, .view, .entered: nil
         }
         guard let board, let work = key.reference else { return select(key.reference) }
+        if case .wave(let wave) = board { showWaveTile(key, in: wave) }
         navigation.zoomOrigin = origin
         withAnimation(FocusSizing.animation) { enter(work, from: board) }
+    }
+
+    /// Turn a Wave's footer to the page holding `key`; positions count the whole list.
+    func showWaveTile(_ key: WorkWorkspaceKey, in wave: String) {
+        guard let plan = wavePlan(wave),
+              let index = waveTiles(wave).firstIndex(where: { $0.work == key }) else { return }
+        navigation.wavePages[wave] = index / max(1, plan.slots.count)
     }
 
     /// Hide or restore a tile. Rust decides the mode; hiding never touches the order.

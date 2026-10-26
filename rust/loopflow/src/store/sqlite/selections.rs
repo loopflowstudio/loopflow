@@ -231,6 +231,9 @@ fn definitions(catalog: &[Dashboard]) -> BTreeMap<DashboardId, Selection> {
         .collect()
 }
 
+/// Selection IDs of the built-in plan behind each Wave view.
+const WAVE_DEFAULT_PREFIX: &str = "wave-default:";
+
 fn plan_in(
     conn: &Connection,
     repository: &RepositoryId,
@@ -338,6 +341,12 @@ fn plan_in(
         }
         contents.push(content);
     }
+    // A Wave view's built-in plan fills its footer strip; every other plan starts golden.
+    let default_slots = if selection.id.0.starts_with(WAVE_DEFAULT_PREFIX) {
+        SlotLayout::strip(3)
+    } else {
+        SlotLayout::golden()
+    };
     Ok(ViewPlan {
         name: saved.and_then(|saved| saved.name.clone()),
         pinned: saved.is_some_and(|saved| saved.pinned),
@@ -351,7 +360,7 @@ fn plan_in(
         arrangement,
         slots: saved
             .and_then(|saved| saved.slots.clone())
-            .unwrap_or_else(SlotLayout::golden),
+            .unwrap_or(default_slots),
         contents,
     })
 }
@@ -419,7 +428,7 @@ impl SqliteStore {
                 repository,
                 Selection {
                     id: crate::work::selection::SelectionId(format!(
-                        "wave-default:{}",
+                        "{WAVE_DEFAULT_PREFIX}{}",
                         wave.key.id
                     )),
                     expression: crate::work::selection::SelectionExpression::Wave {
@@ -965,6 +974,26 @@ mod tests {
             store.view_plan(&repo, None).unwrap().resolution.task_ids(),
             [three, two, one]
         );
+    }
+
+    #[test]
+    fn wave_default_plan_uses_three_slot_strip() {
+        use crate::work::selection::{SlotLayout, SlotNode, SplitAxis};
+        let (_dir, store, repo) = fixture();
+        let plans = store.selection_plans(&repo).unwrap();
+        let wave = plans
+            .iter()
+            .find(|plan| plan.selection.id.0.starts_with(super::WAVE_DEFAULT_PREFIX))
+            .expect("fixture has a Wave");
+        assert_eq!(wave.slots, SlotLayout::strip(3));
+        let SlotNode::Split { axis, weights, .. } = &wave.slots.root else {
+            panic!("a strip splits");
+        };
+        assert_eq!(*axis, SplitAxis::Vertical);
+        assert_eq!(weights, &[1.0; 3]);
+        assert_eq!(wave.slots.slots(), [0, 1, 2]);
+        // The repository default and saved Dashboards keep the golden default.
+        assert_eq!(plans[0].slots, SlotLayout::golden());
     }
 
     #[test]

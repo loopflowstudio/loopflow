@@ -213,6 +213,8 @@ final class WorkNavigation {
         if case .saved(let id) = trailBoard { return .dashboard(id) }
         return sidebarWaveID.map(SidebarScope.wave) ?? .repository
     }
+    /// Each Wave view's footer page; it outlives entering a tile and coming back.
+    var wavePages: [String: Int] = [:]
     var showsSlotHints = false
     var sidebarFilter: SidebarFilter = .working
     var sidebarFocusRequested = false

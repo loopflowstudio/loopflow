@@ -287,6 +287,30 @@ struct DesktopAction {
             model.enterTile(member.work, origin: nil)
             return nil
         },
+        DesktopAction("page", "Turn Wave Tasks to Page", arguments: [.init(name: "page", kind: .integer, required: true)],
+                      available: { $0.model.shownWaveID != nil }) { context in
+            let model = context.model
+            guard let wave = model.shownWaveID, let plan = model.wavePlan(wave) else {
+                throw DesktopTargetError("This window shows no Wave view. Nothing changed.")
+            }
+            let pages = plan.slots.pages(model.waveTiles(wave)).count
+            guard let page = Int(try context.string("page")), (1...pages).contains(page) else {
+                throw DesktopArgumentError("page must be 1 to \(pages); nothing changed.")
+            }
+            model.navigation.wavePages[wave] = page - 1
+            return nil
+        },
+        DesktopAction("filter", "Set Wave Board Done Days", arguments: [.init(name: "days", kind: .integer, required: true)],
+                      available: { $0.model.shownWaveID != nil }) { context in
+            guard context.model.shownWaveID != nil else {
+                throw DesktopTargetError("This window shows no Wave board. Nothing changed.")
+            }
+            var filter = TaskHistoryFilter()
+            filter.editDays(try context.string("days"))
+            if let message = filter.validationMessage { throw DesktopArgumentError(message) }
+            UserDefaults.standard.set(filter.days, forKey: WaveStandupDefaults.doneDaysKey)
+            return nil
+        },
     ]
 
     private static func cycle(_ context: DesktopActionContext, by offset: Int) throws -> DesktopActionOutcome? {

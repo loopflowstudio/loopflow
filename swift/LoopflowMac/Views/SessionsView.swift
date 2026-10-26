@@ -1210,19 +1210,21 @@ struct SessionsContentView: View {
                     }
                 }
             } else if key.kind == .wave, active {
+                // The standup board and the Wave conversation share the top band;
+                // the Wave's Tasks run along the bottom, golden proportions both ways.
                 GeometryReader { geometry in
-                    HStack(spacing: 0) {
-                        WorkspacePanesView(workspace: entry, isFocused: navigation.palette == nil, sessions: store, model: model,
-                            onFocus: { pane, session in focusPane(pane, session: session, in: entry) })
-                            .equatable()
-                            .frame(width: geometry.size.width * 0.62)
-                        Divider()
-                        VStack(spacing: 0) {
-                            WaveTiles(model: model, workspaces: workspaces, sessions: store, waveID: key.id)
-                                .frame(height: geometry.size.height * 0.62)
+                    VStack(spacing: 0) {
+                        HStack(spacing: 0) {
+                            WaveStandupBoard(model: model, waveID: key.id)
+                                .frame(width: geometry.size.width * FocusSizing.golden)
                             Divider()
-                            WaveTaskInventory(model: model, waveID: key.id)
+                            WorkspacePanesView(workspace: entry, isFocused: navigation.palette == nil, sessions: store, model: model,
+                                onFocus: { pane, session in focusPane(pane, session: session, in: entry) })
+                                .equatable()
                         }
+                        .frame(height: geometry.size.height * FocusSizing.golden)
+                        Divider()
+                        WaveTiles(model: model, workspaces: workspaces, sessions: store, waveID: key.id)
                     }
                 }
             } else if terminals {

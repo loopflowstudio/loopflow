@@ -80,6 +80,32 @@
       "keys": []
     },
     {
+      "name": "page",
+      "title": "Turn Wave Tasks to Page",
+      "scope": "window",
+      "arguments": [
+        {
+          "name": "page",
+          "kind": "integer",
+          "required": true
+        }
+      ],
+      "keys": []
+    },
+    {
+      "name": "filter",
+      "title": "Set Wave Board Done Days",
+      "scope": "window",
+      "arguments": [
+        {
+          "name": "days",
+          "kind": "integer",
+          "required": true
+        }
+      ],
+      "keys": []
+    },
+    {
       "name": "focus",
       "title": "Focus Pane",
       "scope": "pane",

@@ -594,7 +594,7 @@ struct WorkNavigationTests {
     }
 
 
-    @Test("Task briefs and the full Wave inventory share the current snapshot")
+    @Test("Task briefs and the Wave standup board share the current snapshot")
     func inspectorShowsPlanning() async throws {
         let model = try model()
         await model.refresh()
@@ -606,10 +606,10 @@ struct WorkNavigationTests {
         #expect(throws: Never.self) { try view.inspect().find(button: "New session") }
         model.select(.wave(id: task.wave!.wave.id))
         for member in task.wave!.tasks.items where member.id != "issue-later" {
-            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-task-\(member.id)")
+            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-row-\(member.id)")
         }
-        // Completed work leaves the current plan; Project history keeps it.
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "wave-task-issue-later") }
+        // Completed work without a date is outside Done's window; Project history keeps it.
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "wave-row-issue-later") }
         #expect(throws: (any Error).self) { try view.inspect().find(TaskHistoryControls.self) }
     }
 

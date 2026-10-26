@@ -589,6 +589,17 @@ impl SlotLayout {
         }
     }
 
+    /// `count` equal slots side by side: the Wave view's footer of Tasks.
+    pub fn strip(count: usize) -> Self {
+        Self {
+            root: SlotNode::Split {
+                axis: SplitAxis::Vertical,
+                weights: vec![1.0; count],
+                children: (0..count).map(|slot| SlotNode::Slot { slot }).collect(),
+            },
+        }
+    }
+
     pub fn slots(&self) -> Vec<usize> {
         fn collect(node: &SlotNode, slots: &mut Vec<usize>) {
             match node {

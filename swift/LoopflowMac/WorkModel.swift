@@ -741,7 +741,38 @@ final class WorkModel {
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
             list: desktopList(repository: workspaceRepository ?? repository),
-            actions: DesktopAction.all.map(\.descriptor), workspaces: workspaces.inspect(), openWork: workspaces.openWork, view: selectedViewPlan, opening: selectionOpening ?? taskOpening)
+            actions: DesktopAction.all.map(\.descriptor), workspaces: workspaces.inspect(), openWork: workspaces.openWork,
+            view: selectedViewPlan ?? shownWaveID.flatMap(wavePlan), viewParts: desktopViewParts(repository: repository),
+            opening: selectionOpening ?? taskOpening)
+    }
+
+    /// The Wave whose view this window shows, with its board, conversation and Task strip.
+    var shownWaveID: String? {
+        if case .work(let wave?) = navigation.destination, wave.kind == .wave { return wave.id }
+        return nil
+    }
+
+    /// A Wave view's board, conversation and strip; other views have no named parts yet.
+    func desktopViewParts(repository: String) -> [DesktopViewPart] {
+        guard let id = shownWaveID else { return [] }
+        let doneDays = WaveStandupDefaults.doneDays
+        let text: String? = wave(id: id).map { roadmap in
+            guard case .available(let tasks, _) = roadmap.tasks else { return "Wave planning unavailable" }
+            return WaveStandup(tasks: tasks, closed: tasks, doneDays: doneDays, now: .now).text(roadmap: roadmap)
+        }
+        let tiles = waveTiles(id)
+        let pages = wavePlan(id)?.slots.pages(tiles) ?? [tiles]
+        let page = min(navigation.wavePages[id] ?? 0, pages.count - 1)
+        let work = WorkWorkspaceKey(repository: workspaceRepository ?? repository, kind: .wave, id: id)
+        return [
+            DesktopViewPart(name: "board", kind: .board, work: nil, doneDays: doneDays, text: text,
+                            page: nil, pages: nil, visible: [], actions: ["filter"]),
+            DesktopViewPart(name: "session", kind: .session, work: work, doneDays: nil, text: nil,
+                            page: nil, pages: nil, visible: [], actions: []),
+            DesktopViewPart(name: "tiles", kind: .strip, work: nil, doneDays: nil, text: nil,
+                            page: page + 1, pages: pages.count, visible: pages[page].map(\.work),
+                            actions: ["page"]),
+        ]
     }
 
     /// The Working Tasks ⌘1–9 select, in that order.

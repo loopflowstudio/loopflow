@@ -124,6 +124,7 @@
       },
       "opening": null,
       "view": null,
+      "view_parts": [],
       "open_work": [
         {
           "repository": "repo_22222222222222222222222222222222",
@@ -195,6 +196,55 @@
       "session": null,
       "opening": null,
       "view": null,
+      "view_parts": [
+        {
+          "name": "board",
+          "kind": "board",
+          "work": null,
+          "done_days": 7,
+          "text": "product · Active\n\nDone (last 7 days) · 0\n  None",
+          "page": null,
+          "pages": null,
+          "visible": [],
+          "actions": [
+            "filter"
+          ]
+        },
+        {
+          "name": "session",
+          "kind": "session",
+          "work": {
+            "repository": "repo_22222222222222222222222222222222",
+            "kind": "wave",
+            "id": "wave_11111111111111111111111111111111"
+          },
+          "done_days": null,
+          "text": null,
+          "page": null,
+          "pages": null,
+          "visible": [],
+          "actions": []
+        },
+        {
+          "name": "tiles",
+          "kind": "strip",
+          "work": null,
+          "done_days": null,
+          "text": null,
+          "page": 2,
+          "pages": 3,
+          "visible": [
+            {
+              "repository": "repo_22222222222222222222222222222222",
+              "kind": "task",
+              "id": "task_44444444444444444444444444444444"
+            }
+          ],
+          "actions": [
+            "page"
+          ]
+        }
+      ],
       "open_work": [],
       "list": [],
       "actions": []

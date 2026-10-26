@@ -9,14 +9,14 @@ You are this Task's operator: with no live Graph process, nobody else takes its 
 step. Resolve routine decisions autonomously and ask for needed judgment in the
 present conversation, then continue. Headless, exit when blocked or completed. An
 already satisfied Task needs no new execution. A Task whose shared status is
-Paused stays held: inspect or discuss it, but do not launch work or resume it
+Deferred stays held: inspect or discuss it, but do not launch work or resume it
 automatically. `lf task resume <issue>` clears the hold without starting execution.
 
 Finish with one disposition and its evidence: **moving** (a live Graph process was
 observed and left alone), **acted** (you continued, recovered or delivered it
 and reread status), **available** (the review, demo, choice or merge click the
 person can take up, with its conversation link or PR), **dependency or capacity**,
-**paused** (an explicit hold or instruction), or **unknown** (the missing read
+**deferred** (an explicit hold or instruction), or **unknown** (the missing read
 or liveness evidence; never a reason to start a second Graph process). “Ready” or
 “needs reconciliation” is not a disposition. A PR that conflicts with or
 trails its base is not available to a person: run `lf sync`, resolve the

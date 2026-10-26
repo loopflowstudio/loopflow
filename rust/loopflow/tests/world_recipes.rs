@@ -143,7 +143,7 @@ fn lifecycle_world_reports_each_state() {
     ] {
         assert_eq!(task(name)["condition"]["state"], "clear", "{name}");
     }
-    assert_eq!(task("Paused mid-flight")["runtime"]["status"], "paused");
+    assert_eq!(task("Deferred mid-flight")["runtime"]["status"], "deferred");
     assert_eq!(task("Abandoned attempt")["runtime"]["status"], "abandoned");
     let canceled = task("Canceled upstream");
     assert_eq!(canceled["task"]["state"], "canceled");

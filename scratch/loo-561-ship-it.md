@@ -433,3 +433,30 @@ and names its cause, Stop shipping, `lf ship ISSUE` returning vs foreground.
   moves. Check: `swift test --filter 'DesktopHeadless|WorkNavigationTests'` 53 ok. Awaiting
   Jack's look at the rebuilt app. Still possible: the name and dots fill in after `taskWork`
   loads, a smaller horizontal shift inside the bar.
+- Jack on the main-pane bar: "Ok close." Accepted as close; any remaining shift is the bar's
+  name and dots filling in after `taskWork` loads.
+- **Other ways out on hover** (Jack: "I think on hover ship-it need s to expand to have other
+  button options -- Defer or Delete"; chose Defer = pause and Abandon over Delete; "Defer and
+  Abandon actually I prefer"). Built: hovering the action reveals Defer (Resume when deferred)
+  and Abandon… (same confirmation as the menus) beside it in the Workflow bar.
+- **Pause is Defer everywhere** (Jack: "rename pause to defer everywehre"). Built: `lf task
+  defer` (Resume unchanged), Task state and query term `deferred`, shipping `Deferred`, Swift
+  labels and models, docs, skills, fixtures (`task_deferred.json`). Operator choice, reversible:
+  the released `tasks.paused` column and the synced WorkValue tag `task_paused` keep their names
+  (released lf and peers read them; historical migrations seed the column by name). Saved
+  dashboards holding `state:paused` are not rewritten, like the earlier `running` → `busy`
+  rename. Linear's Project status `paused` and clock/rate-limit pauses are other concepts.
+- **Ship it is Auto-Ship** (Jack: "Ok I think maybe Ship It! is wrong." then "Auto-Ship").
+  Built: the button reads Auto-Ship; its stop reads Stop Auto-Ship (operator's spelling,
+  reversible); docs and comments follow. `lf ship`, the `shipping` state and "is shipping"
+  toast keep their names.
+- Not yet shown to Jack in the app: Defer/Abandon on hover, Auto-Ship, a failed stand-in that
+  backs off and names its cause, Stop Auto-Ship, and `lf ship ISSUE` returning (open question).
+- Jack: "Abandon should be Red. Otherwise lg2m, ship it" (2026-10-26). Built: Abandon… uses
+  `WorkOutlineButtonStyle(destructive: true)` (failure ink and border). Demo accepted; next is
+  the `ship` route. Checks: Swift `DTOFixture|WorkModelTests|DesktopHeadless|WorkNavigation|
+  WorkSelection` 145 ok; clippy clean; CLI reference regenerated; integration `dto_fixtures`/
+  `documented_commands`/`task_ship_holds` ok; lib selection/task_work/ship/planning_write/durable
+  failures only in the shared runner (planning_lookup 21/21, task_planning and os_process pass
+  alone). Open: `world_recipes::lifecycle_world_reports_each_state` reads the upstream-canceled
+  Task idle, not shipping (Linear-cancel area; not checked on the prior head).

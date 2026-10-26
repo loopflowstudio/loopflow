@@ -44,9 +44,9 @@ public enum WorkStatus: Codable, Sendable, Hashable {
 }
 
 /// A Task's state, derived in Rust from its checkout, stage, a running Graph
-/// and the Ship it approval. A Session's available/busy is a separate axis.
+/// and the Auto-Ship approval. A Session's available/busy is a separate axis.
 public enum TaskState: String, Codable, Sendable, Hashable {
-    case paused
+    case deferred
     /// No checkout yet.
     case unstarted
     /// A checkout, no Graph running, not at a stage.

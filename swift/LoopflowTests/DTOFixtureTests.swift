@@ -8,8 +8,8 @@ import Testing
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
     @Test func pausedTaskStateIsUnfinished() throws {
-        let state = try JSONDecoder().decode(TaskState.self, from: loadFixtureData("task_paused.json"))
-        #expect(state == .paused)
+        let state = try JSONDecoder().decode(TaskState.self, from: loadFixtureData("task_deferred.json"))
+        #expect(state == .deferred)
         #expect(!state.isTerminal)
         #expect(try JSONDecoder().decode(TaskState.self, from: JSONEncoder().encode(state)) == state)
     }

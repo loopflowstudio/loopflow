@@ -2317,10 +2317,10 @@ fn task_ship_runs_every_remaining_step_standing_in_at_each_node() {
 #[test]
 fn task_ship_holds_while_paused_and_defers_to_a_live_ship() {
     let task = shipping_task();
-    task.ok(&["task", "pause", "INF-123"]);
-    let paused = task.run(&["-b", "--task", "INF-123", "ship"]);
-    assert!(paused.status.success());
-    assert!(String::from_utf8_lossy(&paused.stdout).contains("INF-123 is paused"));
+    task.ok(&["task", "defer", "INF-123"]);
+    let deferred = task.run(&["-b", "--task", "INF-123", "ship"]);
+    assert!(deferred.status.success());
+    assert!(String::from_utf8_lossy(&deferred.stdout).contains("INF-123 is deferred"));
     assert!(task.workflow().is_null());
     task.ok(&["task", "resume", "INF-123"]);
 

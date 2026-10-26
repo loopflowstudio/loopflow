@@ -250,7 +250,7 @@ final class WorkNavigation {
     var binding: SessionBindingDraft?
     /// Graph drafts by planning Task id; they survive Task and Session navigation.
     var taskRunDrafts: [String: TaskRunDraft] = [:]
-    /// What the last Ship it or Stop shipping on the window heading did.
+    /// What the last Auto-Ship or Stop Auto-Ship on the window heading did.
     var shipNotice: ShipNotice?
     var startingTaskSessions: Set<String> = []
     var taskSessionErrors: [String: String] = [:]

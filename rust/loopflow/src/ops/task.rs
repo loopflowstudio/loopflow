@@ -565,9 +565,10 @@ pub(crate) fn select_task_run(
     checkout: &Path,
     requested: Option<&str>,
 ) -> OpsResult<TaskRunSelection> {
-    if store.sqlite.task_state(&task.id).map_err(task_error)? == crate::durable::TaskState::Paused {
+    if store.sqlite.task_state(&task.id).map_err(task_error)? == crate::durable::TaskState::Deferred
+    {
         return Err(task_error(format!(
-            "Task is paused; use `lf task resume {}` before running a Graph",
+            "Task is deferred; use `lf task resume {}` before running a Graph",
             task.identifier
         )));
     }
@@ -3179,7 +3180,7 @@ pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<
     })
 }
 
-pub fn task_pause(issue: &str, paused: bool) -> OpsResult<()> {
+pub fn task_defer(issue: &str, deferred: bool) -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;
         let task = store
@@ -3189,7 +3190,7 @@ pub fn task_pause(issue: &str, paused: bool) -> OpsResult<()> {
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
         store
             .sqlite
-            .set_task_paused(&task.id, paused)
+            .set_task_deferred(&task.id, deferred)
             .map_err(task_error)?;
         let repo = repository_for_task(&store, &task)?;
         super::planning_sync::sync_after_save(&store, &repo.to_string_lossy()).await;
@@ -3528,7 +3529,8 @@ pub(crate) async fn reconcile_task_completion(
     store: &SharedStore,
     task: &mut Task,
 ) -> OpsResult<()> {
-    if store.sqlite.task_state(&task.id).map_err(task_error)? == crate::durable::TaskState::Paused {
+    if store.sqlite.task_state(&task.id).map_err(task_error)? == crate::durable::TaskState::Deferred
+    {
         return Ok(());
     }
     match task_work_status(store, task).await? {
@@ -3593,11 +3595,11 @@ async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSn
             recommended: Some(crate::ops::task_actions::TaskAction::NoAction),
             reason: "Task was deleted; retained history is read-only".into(),
         }
-    } else if status == crate::durable::TaskState::Paused {
+    } else if status == crate::durable::TaskState::Deferred {
         TaskActionModel {
             recommended: Some(crate::ops::task_actions::TaskAction::NoAction),
             reason: format!(
-                "Task is paused; `lf task resume {}` clears the hold without starting execution",
+                "Task is deferred; `lf task resume {}` clears the hold without starting execution",
                 task.identifier
             ),
         }
@@ -4675,21 +4677,21 @@ mod tests {
         let _ledger = crate::journal::TestLedgerGuard::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let repo = loopflow_test_support::TestRepo::new();
-        let fixture = runtime.block_on(task_fixture_at("PAUSE-1", repo.path().into()));
+        let fixture = runtime.block_on(task_fixture_at("DEFER-1", repo.path().into()));
         fixture
             .store
             .sqlite
-            .set_task_paused(&fixture.task.id, true)
+            .set_task_deferred(&fixture.task.id, true)
             .unwrap();
         let snapshot = runtime
             .block_on(super::read_task_snapshot(&fixture.store, fixture.task))
             .unwrap();
-        assert_eq!(snapshot.status, crate::durable::TaskState::Paused);
+        assert_eq!(snapshot.status, crate::durable::TaskState::Deferred);
         assert_eq!(
             snapshot.actions.recommended,
             Some(crate::ops::task_actions::TaskAction::NoAction)
         );
-        assert!(snapshot.actions.reason.contains("lf task resume PAUSE-1"));
+        assert!(snapshot.actions.reason.contains("lf task resume DEFER-1"));
     }
 
     #[test]

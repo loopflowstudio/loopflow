@@ -43,7 +43,7 @@ fn defaults_include_child_waves_and_uncompleted_wave_tasks_without_execution_fil
             None,
         ),
         (
-            key("paused", WorkWorkspaceKind::Task),
+            key("deferred", WorkWorkspaceKind::Task),
             Some(root.clone()),
             Some(true),
         ),
@@ -73,7 +73,7 @@ fn defaults_include_child_waves_and_uncompleted_wave_tasks_without_execution_fil
         states: match key.id.as_str() {
             "backlog" => BTreeSet::from([SelectionState::Backlog]),
             "done" => BTreeSet::from([SelectionState::Done]),
-            "paused" => BTreeSet::from([SelectionState::Paused]),
+            "deferred" => BTreeSet::from([SelectionState::Deferred]),
             "idle" => BTreeSet::from([SelectionState::Idle]),
             _ => BTreeSet::new(),
         },
@@ -95,7 +95,7 @@ fn defaults_include_child_waves_and_uncompleted_wave_tasks_without_execution_fil
         [
             work[1].key.id.as_str(),
             empty.as_str(),
-            "paused",
+            "deferred",
             "idle",
             "backlog"
         ]
@@ -111,13 +111,13 @@ fn defaults_include_child_waves_and_uncompleted_wave_tasks_without_execution_fil
             .iter()
             .map(|member| member.work.id.as_str())
             .collect::<Vec<_>>(),
-        ["paused", "idle"]
+        ["deferred", "idle"]
     );
     assert_eq!(filtered.unavailable.len(), 1);
     let repo = node("root", SelectionExpression::Repository)
         .resolve("repo", &work, &BTreeMap::new())
         .unwrap();
-    assert_eq!(repo.members.len(), 2); // immediate Wave plus the idle Task; paused isn't Working
+    assert_eq!(repo.members.len(), 2); // immediate Wave plus the idle Task; deferred isn't Working
     let explicit = node(
         "backlog",
         SelectionExpression::Work {
@@ -557,7 +557,7 @@ fn working_tasks_are_idle_active_or_moving_and_shipping_has_its_own_query() {
         ("active", SelectionState::Active),
         ("moving", SelectionState::Moving),
         ("unstarted", SelectionState::Unstarted),
-        ("paused", SelectionState::Paused),
+        ("deferred", SelectionState::Deferred),
         ("shipping", SelectionState::Shipping),
     ]
     .into_iter()
@@ -593,7 +593,7 @@ fn working_tasks_are_idle_active_or_moving_and_shipping_has_its_own_query() {
             "wave",
             SelectionExpression::Wave { wave: wave.clone() }
         )),
-        ["idle", "active", "moving", "unstarted", "paused"]
+        ["idle", "active", "moving", "unstarted", "deferred"]
     );
     assert_eq!(
         ids(Selection::parse("state:shipping", None).unwrap()),

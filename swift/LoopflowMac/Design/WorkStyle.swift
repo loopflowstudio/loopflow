@@ -123,15 +123,19 @@ private struct WorkPanel: ViewModifier {
 /// Ordinary actions stay neutral; a deliberately emphasized action uses the theme accent.
 struct WorkOutlineButtonStyle: ButtonStyle {
     var emphasized = false
+    /// Red, for an action that ends the work.
+    var destructive = false
     @Environment(\.palette) private var palette
     @Environment(\.isEnabled) private var isEnabled
 
     @State private var hovering = false
 
+    private var ink: Color { destructive ? palette.failure : (emphasized ? palette.accentInk : palette.actionInk) }
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(Typography.body(12.5))
-            .foregroundStyle(isEnabled ? (emphasized ? palette.accentInk : palette.actionInk) : palette.textTertiary)
+            .foregroundStyle(isEnabled ? ink : palette.textTertiary)
             .padding(.horizontal, 11)
             .padding(.vertical, 4)
             .background(
@@ -140,7 +144,7 @@ struct WorkOutlineButtonStyle: ButtonStyle {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(isEnabled && emphasized ? palette.accentInk : palette.borderStrong, lineWidth: 1)
+                    .strokeBorder(isEnabled && (emphasized || destructive) ? ink : palette.borderStrong, lineWidth: 1)
             )
             .contentShape(RoundedRectangle(cornerRadius: 6))
             .onHover { hovering = $0 }
@@ -148,7 +152,7 @@ struct WorkOutlineButtonStyle: ButtonStyle {
     }
 }
 
-/// Ship it, the one green action: it hands the Task off to land on its own.
+/// Auto-Ship, the one green action: it hands the Task off to land on its own.
 struct WorkShipButtonStyle: ButtonStyle {
     @Environment(\.palette) private var palette
     @Environment(\.isEnabled) private var isEnabled

@@ -22,8 +22,8 @@ struct TaskWorkflowHeader: View {
                         .foregroundStyle(task.task.isSuccessful ? palette.success : palette.failure)
                         .accessibilityIdentifier("task-lifecycle-status")
                 }
-                if task.runtime?.status == .paused {
-                    Text("Paused").foregroundStyle(palette.textSecondary)
+                if task.runtime?.status == .deferred {
+                    Text("Deferred").foregroundStyle(palette.textSecondary)
                 } else if task.task.terminalLabel == nil, let state = task.task.state {
                     Text(state.capitalized).foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-lifecycle-status")
@@ -83,11 +83,11 @@ struct TaskWorkflowHeader: View {
                     Button("Complete") { Task { await model.completeTask(task) } }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-complete")
-                    Button(task.runtime?.status == .paused ? "Resume" : "Pause") {
-                        Task { await model.pauseTask(task, paused: task.runtime?.status != .paused) }
+                    Button(task.runtime?.status == .deferred ? "Resume" : "Defer") {
+                        Task { await model.deferTask(task, deferred: task.runtime?.status != .deferred) }
                     }
                     .disabled(acting || readingUnavailable != nil)
-                    .accessibilityIdentifier("task-pause-resume")
+                    .accessibilityIdentifier("task-defer-resume")
                     Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-abandon")
@@ -166,7 +166,7 @@ struct TaskWorkflowHeader: View {
                 Task { await model.abandonTask(task) }
             }
         } message: {
-            Text("Cancels the Task, closes its PRs and deletes its branches. Pause instead to keep its work for later.")
+            Text("Cancels the Task, closes its PRs and deletes its branches. Defer instead to keep its work for later.")
         }
         .font(Typography.body(12))
         .padding(.horizontal, 14)
@@ -195,7 +195,7 @@ struct TaskWorkflowHeader: View {
         }
     }
 
-    /// The routes a person can start here. Ship it, in the Workflow bar, is
+    /// The routes a person can start here. Auto-Ship, in the Workflow bar, is
     /// the one way into `end`.
     private func routes(_ workflow: Workflow) -> [Int] {
         workflow.outgoing.filter { workflow.edges.indices.contains($0) && workflow.edges[$0].to != "end" }
@@ -225,12 +225,15 @@ struct TaskWorkflowHeader: View {
     }
 }
 
-/// Ship it at the right end of the Workflow bar, always visible; while
-/// shipping the same spot holds Stop shipping. Rust decides whether shipping
+/// Auto-Ship at the right end of the Workflow bar, always visible; while
+/// shipping the same spot holds Stop Auto-Ship. Rust decides whether shipping
 /// can start. Sidebar rows and menus carry no ship control.
 struct TaskShipControl: View {
     let model: WorkModel
     let task: RoadmapTask
+
+    @State private var hovered = false
+    @State private var confirmingAbandon = false
 
     private var acting: Bool { model.navigation.taskRunDrafts[task.id]?.acting == true }
 
@@ -243,26 +246,52 @@ struct TaskShipControl: View {
     var body: some View {
         Group {
             if task.shipping != nil {
-                Button("Stop shipping") { Task { await model.stopShipping(task) } }
+                Button("Stop Auto-Ship") { Task { await model.stopShipping(task) } }
                     .buttonStyle(WorkOutlineButtonStyle())
                     .disabled(acting || readingUnavailable != nil)
                     .help("lf --task \(task.task.identifier) ship --stop: withdraw it and disarm auto-merge")
                     .accessibilityIdentifier("task-ship-stop")
             } else if !(task.task.isTerminal || task.runtime?.status.isTerminal == true) {
                 let refusal = readingUnavailable ?? task.shipControl.unavailable
-                Button("Ship it") { Task { await model.shipTask(task) } }
-                    .buttonStyle(WorkShipButtonStyle())
-                    .disabled(acting || refusal != nil)
-                    .help(refusal ?? "lf --task \(task.task.identifier) ship: run every remaining step and land it")
-                    .accessibilityIdentifier("task-ship")
+                HStack(spacing: Spacing.sm) {
+                    // Hovering Auto-Ship offers the other ways out of this Task.
+                    if hovered {
+                        let deferred = task.runtime?.status == .deferred
+                        Button(deferred ? "Resume" : "Defer") {
+                            Task { await model.deferTask(task, deferred: !deferred) }
+                        }
+                        .buttonStyle(WorkOutlineButtonStyle())
+                        .disabled(acting || readingUnavailable != nil)
+                        .help(deferred ? "lf task resume: let it run again"
+                                     : "lf task defer: hold it, keeping its checkout, PR and stage")
+                        .accessibilityIdentifier("task-defer")
+                        Button("Abandon…", role: .destructive) { confirmingAbandon = true }
+                            .buttonStyle(WorkOutlineButtonStyle(destructive: true))
+                            .disabled(acting || readingUnavailable != nil)
+                            .accessibilityIdentifier("task-ship-abandon")
+                    }
+                    Button("Auto-Ship") { Task { await model.shipTask(task) } }
+                        .buttonStyle(WorkShipButtonStyle())
+                        .disabled(acting || refusal != nil)
+                        .help(refusal ?? "lf --task \(task.task.identifier) ship: run every remaining step and land it")
+                        .accessibilityIdentifier("task-ship")
+                }
+                .onHover { inside in withAnimation(.easeOut(duration: 0.12)) { hovered = inside } }
             }
         }
         .fixedSize()
+        .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
+            Button("Abandon Task", role: .destructive) {
+                Task { await model.abandonTask(task) }
+            }
+        } message: {
+            Text("Cancels the Task, closes its PRs and deletes its branches. Defer instead to keep its work for later.")
+        }
     }
 }
 
 /// The selected Task's Workflow under the jump bar: its stages as dots, what
-/// is happening now, and Ship it or Stop shipping. Clicking the dots opens a
+/// is happening now, and Auto-Ship or Stop Auto-Ship. Clicking the dots opens a
 /// row with each stage, who takes part there and what happened. Rust owns the
 /// graph, the position and the shipping reason; this only arranges them.
 struct TaskWorkflowBar: View {
@@ -417,7 +446,7 @@ struct TaskWorkflowBar: View {
     }
 }
 
-/// What the last Ship it or Stop shipping did, shown briefly.
+/// What the last Auto-Ship or Stop Auto-Ship did, shown briefly.
 struct ShipNotice: Equatable {
     let id = UUID()
     let taskID: String
@@ -431,7 +460,7 @@ struct ShipNotice: Equatable {
     }
 }
 
-/// The toast after Ship it; its Undo is Stop shipping.
+/// The toast after Auto-Ship; its Undo is Stop Auto-Ship.
 struct ShipNoticeToast: View {
     let notice: ShipNotice
     let undo: () -> Void
@@ -448,7 +477,7 @@ struct ShipNoticeToast: View {
                     .buttonStyle(.plain)
                     .fontWeight(.semibold)
                     .foregroundStyle(palette.success)
-                    .help("Stop shipping")
+                    .help("Stop Auto-Ship")
                     .accessibilityIdentifier("task-ship-undo")
             }
         }
@@ -463,8 +492,8 @@ struct ShipNoticeToast: View {
     }
 }
 
-/// The window's ship toast, shown for six seconds after Ship it or Stop
-/// shipping; its Undo is Stop shipping.
+/// The window's ship toast, shown for six seconds after Auto-Ship or Stop
+/// Auto-Ship; its Undo is Stop Auto-Ship.
 struct ShipNoticeOverlay: View {
     let model: WorkModel
 
@@ -500,7 +529,7 @@ struct TaskHeading: View {
     /// now reads in the Workflow bar.
     var state: String {
         switch task.runtime?.status {
-        case .paused: return "Paused"
+        case .deferred: return "Deferred"
         case .idle: return "Idle"
         case .active: return "Active"
         case .moving: return "Moving"
@@ -589,8 +618,8 @@ struct TaskActionItems: View {
             Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
         } else {
             Button("Complete Task") { Task { await model.completeTask(task) } }.disabled(unavailable)
-            Button(task.runtime?.status == .paused ? "Resume Task" : "Pause Task") {
-                Task { await model.pauseTask(task, paused: task.runtime?.status != .paused) }
+            Button(task.runtime?.status == .deferred ? "Resume Task" : "Defer Task") {
+                Task { await model.deferTask(task, deferred: task.runtime?.status != .deferred) }
             }.disabled(unavailable)
         }
         if let wave { Button("Open owning Wave") { model.select(.wave(id: wave.id)) } }

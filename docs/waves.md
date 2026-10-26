@@ -87,7 +87,7 @@ remains a single skill; whether it should use the VSM Graph is still undecided.
 
 Each pass reads dated evidence and replies in the invoking conversation. It
 gives every started Task you own one disposition: moving, acted on and
-verified, waiting on a named person or dependency, paused, or unknown. A Task
+verified, waiting on a named person or dependency, deferred, or unknown. A Task
 another person owns (`runtime.owner` naming someone other than `lf config user`)
 is listed with that person and Machine and left alone; its liveness is not
 judged from your Machine. A Task you own on another Machine is operated there,

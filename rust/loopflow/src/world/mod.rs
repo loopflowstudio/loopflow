@@ -519,9 +519,9 @@ impl World {
         Ok(task)
     }
 
-    /// Pause a Task the way `lf task pause` does.
-    pub fn pause(&self, task: &Task) -> Result<()> {
-        Ok(crate::ops::task::task_pause(&task.identifier, true)?)
+    /// Defer a Task the way `lf task defer` does.
+    pub fn defer(&self, task: &Task) -> Result<()> {
+        Ok(crate::ops::task::task_defer(&task.identifier, true)?)
     }
 
     /// Abandon a Task the way `lf task abandon` does, removing its checkout.

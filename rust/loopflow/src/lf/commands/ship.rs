@@ -32,8 +32,8 @@ pub fn run(
             println!("{issue} is already shipping (process {process})");
             return Ok(());
         }
-        ShipStart::Paused { issue } => {
-            println!("{issue} is paused; `lf task resume {issue}` before shipping it");
+        ShipStart::Deferred { issue } => {
+            println!("{issue} is deferred; `lf task resume {issue}` before shipping it");
             return Ok(());
         }
         ShipStart::AtEnd { issue } => {
@@ -81,9 +81,9 @@ pub fn run(
                     output.as_ref(),
                 )?;
                 ship_progressed(&task.id)?;
-                // Someone may have paused or stopped it while the stand-in ran.
+                // Someone may have deferred or stopped it while the stand-in ran.
                 let step = ship_next(&issue)?;
-                if matches!(step, ShipStep::Paused | ShipStep::Stopped) {
+                if matches!(step, ShipStep::Deferred | ShipStep::Stopped) {
                     return halt(&issue, &step);
                 }
                 let (decision, summary) = match outcome {
@@ -170,7 +170,7 @@ fn merged(issue: &str) -> ShipMerge {
     }
 }
 
-/// Sleep for `wait`, returning early with the step if the Task is paused or
+/// Sleep for `wait`, returning early with the step if the Task is deferred or
 /// stopped meanwhile.
 fn wait_unless_halted(issue: &str, wait: std::time::Duration) -> Result<Option<ShipStep>> {
     let until = std::time::Instant::now() + wait;
@@ -179,7 +179,7 @@ fn wait_unless_halted(issue: &str, wait: std::time::Duration) -> Result<Option<S
         let step = ship_next(issue)?;
         if matches!(
             step,
-            ShipStep::Paused | ShipStep::Stopped | ShipStep::Finished
+            ShipStep::Deferred | ShipStep::Stopped | ShipStep::Finished
         ) {
             return Ok(Some(step));
         }
@@ -187,11 +187,13 @@ fn wait_unless_halted(issue: &str, wait: std::time::Duration) -> Result<Option<S
     Ok(None)
 }
 
-/// Say why shipping ends here: paused, stopped or finished.
+/// Say why shipping ends here: deferred, stopped or finished.
 fn halt(issue: &str, step: &ShipStep) -> Result<()> {
     match step {
-        ShipStep::Paused => {
-            println!("{issue} is paused; `lf task resume {issue}` and `lf ship` continue shipping")
+        ShipStep::Deferred => {
+            println!(
+                "{issue} is deferred; `lf task resume {issue}` and `lf ship` continue shipping"
+            )
         }
         ShipStep::Stopped => println!("{issue} stopped shipping"),
         _ => println!("{issue} reached its end"),

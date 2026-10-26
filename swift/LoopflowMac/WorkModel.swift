@@ -1965,7 +1965,7 @@ final class WorkModel {
         noteShipping(task, shipped: true)
     }
 
-    /// Stop shipping the Task; it returns to Working and the toast says so.
+    /// Stop Auto-Ship for the Task; it returns to Working and the toast says so.
     func stopShipping(_ task: RoadmapTask) async {
         await performTaskAction(task.id) {
             try await query.stopShipping(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
@@ -2029,9 +2029,9 @@ final class WorkModel {
         }
     }
 
-    func pauseTask(_ task: RoadmapTask, paused: Bool) async {
+    func deferTask(_ task: RoadmapTask, deferred: Bool) async {
         await performTaskAction(task.id) {
-            try await query.pauseTask(issue: task.task.identifier, paused: paused, cwd: WaveOrigin.resolve(task.task.repo))
+            try await query.deferTask(issue: task.task.identifier, deferred: deferred, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 

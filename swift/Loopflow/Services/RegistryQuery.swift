@@ -347,7 +347,7 @@ public struct RegistryQuery: Sendable {
         _ = try await run(["--task", issue, "ship"], cwd)
     }
 
-    /// Withdraw a Task's Ship it approval: its ship process stops and any
+    /// Withdraw a Task's Auto-Ship approval: its ship process stops and any
     /// auto-merge Loopflow armed is disabled.
     public func stopShipping(issue: String, cwd: String?) async throws {
         _ = try await run(["--task", issue, "ship", "--stop"], cwd)
@@ -382,8 +382,8 @@ public struct RegistryQuery: Sendable {
         }
     }
 
-    public func pauseTask(issue: String, paused: Bool, cwd: String?) async throws {
-        _ = try await run(["task", paused ? "pause" : "resume", issue], cwd)
+    public func deferTask(issue: String, deferred: Bool, cwd: String?) async throws {
+        _ = try await run(["task", deferred ? "defer" : "resume", issue], cwd)
     }
 
     public func completeTask(issue: String, cwd: String?) async throws {

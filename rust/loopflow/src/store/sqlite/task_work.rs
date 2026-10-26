@@ -332,9 +332,9 @@ fn choose_edge_in(
     by: Option<&LfProcessId>,
     note: Option<&str>,
 ) -> StoreResult<bool> {
-    if super::durable::task_state_in(tx, task)? == crate::durable::TaskState::Paused {
+    if super::durable::task_state_in(tx, task)? == crate::durable::TaskState::Deferred {
         return Err(crate::store::StoreError::InvalidAuthority(
-            "Task is paused; resume it before running a Graph".into(),
+            "Task is deferred; resume it before running a Graph".into(),
         ));
     }
     let chosen = &workflow.definition.edges[edge as usize];
@@ -931,7 +931,7 @@ impl SqliteStore {
         Ok(shipping)
     }
 
-    /// Withdraw a Task's Ship it approval. Returns the approval and the process
+    /// Withdraw a Task's Auto-Ship approval. Returns the approval and the process
     /// that carried it, when it was approved.
     pub(crate) fn stop_shipping(
         &self,
@@ -1125,11 +1125,11 @@ mod tests {
             .take_up_workflow(&task, &definition, &by, None)
             .unwrap();
         let before = store.workflow(&task).unwrap().unwrap();
-        store.set_task_paused(&task, true).unwrap();
-        store.set_task_paused(&task, true).unwrap();
+        store.set_task_deferred(&task, true).unwrap();
+        store.set_task_deferred(&task, true).unwrap();
         assert_eq!(
             store.task_state(&task).unwrap(),
-            crate::durable::TaskState::Paused
+            crate::durable::TaskState::Deferred
         );
         assert!(store
             .choose_workflow_edge(&task, &before, 0, &LfProcessId::new(), None)
@@ -1139,9 +1139,9 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         assert_eq!(
             store.task_state(&task).unwrap(),
-            crate::durable::TaskState::Paused
+            crate::durable::TaskState::Deferred
         );
-        store.set_task_paused(&task, false).unwrap();
+        store.set_task_deferred(&task, false).unwrap();
         assert_eq!(
             store.task_state(&task).unwrap(),
             crate::durable::TaskState::Idle
@@ -1175,10 +1175,10 @@ mod tests {
             store.local_shipping_tasks().unwrap(),
             [(task.clone(), shipping.clone())]
         );
-        // Pause holds shipping without ending it.
-        store.set_task_paused(&task, true).unwrap();
-        assert_eq!(state(), crate::durable::TaskState::Paused);
-        store.set_task_paused(&task, false).unwrap();
+        // Defer holds shipping without ending it.
+        store.set_task_deferred(&task, true).unwrap();
+        assert_eq!(state(), crate::durable::TaskState::Deferred);
+        store.set_task_deferred(&task, false).unwrap();
         assert_eq!(state(), crate::durable::TaskState::Shipping);
         // Shipping again keeps when it began.
         let again = store.ship_task(&task, &by, "again").unwrap();

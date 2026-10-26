@@ -454,7 +454,7 @@ pub enum Commands {
         /// Why, kept in the Task's history
         #[arg(long)]
         reason: Option<String>,
-        /// Stop shipping: end the ship process and disarm auto-merge it armed
+        /// Stop Auto-Ship: end the ship process and disarm auto-merge it armed
         #[arg(long)]
         stop: bool,
     },
@@ -1317,9 +1317,9 @@ pub enum TaskCommand {
         json: bool,
     },
 
-    /// Pause future Task execution without stopping live processes
-    Pause { issue: String },
-    /// Clear a Task pause without starting execution
+    /// Defer future Task execution without stopping live processes
+    Defer { issue: String },
+    /// Resume a deferred Task without starting execution
     Resume { issue: String },
     /// Synchronize a Task with its tracker; the change sent last wins
     Sync {
@@ -1609,7 +1609,7 @@ impl TaskCommand {
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
-            | Self::Pause { issue }
+            | Self::Defer { issue }
             | Self::Resume { issue }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
@@ -1647,7 +1647,7 @@ impl TaskCommand {
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
-            | Self::Pause { issue }
+            | Self::Defer { issue }
             | Self::Resume { issue }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
@@ -2642,8 +2642,8 @@ mod tests {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
         }
         assert!(matches!(
-            Cli::try_parse_from(["lf", "task", "pause", "LOO-1"]).unwrap().command,
-            Some(Commands::Task { cmd: TaskCommand::Pause { issue } }) if issue == "LOO-1"
+            Cli::try_parse_from(["lf", "task", "defer", "LOO-1"]).unwrap().command,
+            Some(Commands::Task { cmd: TaskCommand::Defer { issue } }) if issue == "LOO-1"
         ));
         assert!(matches!(
             Cli::try_parse_from(["lf", "task", "resume", "LOO-1"]).unwrap().command,

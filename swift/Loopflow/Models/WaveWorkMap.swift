@@ -259,7 +259,7 @@ public struct ShippingSnapshot: Decodable, Sendable, Hashable {
     public let reason: String
 
     public enum State: String, Decodable, Sendable, Hashable {
-        case building, landing, repairing, restarting, paused
+        case building, landing, repairing, restarting, deferred
     }
 
     public var label: String {
@@ -268,7 +268,7 @@ public struct ShippingSnapshot: Decodable, Sendable, Hashable {
         case .landing: "Landing"
         case .repairing: "Repairing"
         case .restarting: "Restarting"
-        case .paused: "Paused"
+        case .deferred: "Deferred"
         }
     }
 

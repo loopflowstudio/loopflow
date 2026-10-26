@@ -2,7 +2,7 @@
 //! `end` with no one at hand. The approval is stored; the Task reads shipping
 //! while this Machine's ship process carries it there, and idle when that
 //! process exited. At each stage a headless stand-in runs the stage's skill and
-//! decides the route. Pause holds it, Stop withdraws the approval, and a ship
+//! decides the route. Defer holds it, Stop withdraws the approval, and a ship
 //! process that died is started again.
 
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,7 @@ pub enum ShipStart {
         issue: String,
         process: LfProcessId,
     },
-    Paused {
+    Deferred {
         issue: String,
     },
     /// The Task already stands at `end`.
@@ -53,7 +53,7 @@ pub enum ShipStep {
     },
     /// Take this edge, or run it again when it stopped.
     Edge(String),
-    Paused,
+    Deferred,
     /// Someone stopped shipping; the approval is withdrawn.
     Stopped,
     /// The Task reached `end`, completed, or was abandoned.
@@ -79,7 +79,7 @@ pub enum ShippingState {
     Landing,
     Repairing,
     Restarting,
-    Paused,
+    Deferred,
 }
 
 async fn task_by_issue(store: &SharedStore, issue: &str) -> OpsResult<Task> {
@@ -148,10 +148,10 @@ pub(crate) fn shipping_snapshot(
             reason,
         })
     };
-    if status == TaskState::Paused {
+    if status == TaskState::Deferred {
         return shipping(
-            ShippingState::Paused,
-            "Paused; resume it to keep shipping".into(),
+            ShippingState::Deferred,
+            "Deferred; resume it to keep shipping".into(),
         );
     }
     if alive == ProcessIdentityEvidence::Dead {
@@ -241,7 +241,7 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
         let task = task_by_issue(&store, issue).await?;
         let issue = task.identifier.clone();
         match store.sqlite.task_state(&task.id).map_err(task_error)? {
-            TaskState::Paused => return Ok(ShipStart::Paused { issue }),
+            TaskState::Deferred => return Ok(ShipStart::Deferred { issue }),
             TaskState::Done => return Err(task_error(format!("Task {issue} is complete"))),
             TaskState::Abandoned => {
                 return Err(task_error(format!(
@@ -312,7 +312,7 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
     })
 }
 
-/// Withdraw a Task's Ship it approval: stop its ship process and take back any
+/// Withdraw a Task's Auto-Ship approval: stop its ship process and take back any
 /// merge request Loopflow armed on GitHub. Returns false when it was not shipping.
 pub fn ship_stop(issue: &str, note: Option<&str>) -> OpsResult<bool> {
     let (task, stopped) = block_on_task(async {
@@ -474,7 +474,7 @@ pub fn ship_next(issue: &str) -> OpsResult<ShipStep> {
         let store = task_store().await?;
         let task = task_by_issue(&store, issue).await?;
         match store.sqlite.task_state(&task.id).map_err(task_error)? {
-            TaskState::Paused => return Ok(ShipStep::Paused),
+            TaskState::Deferred => return Ok(ShipStep::Deferred),
             TaskState::Done | TaskState::Abandoned => return Ok(ShipStep::Finished),
             _ => {}
         }
@@ -587,7 +587,7 @@ pub fn ship_progressed(task: &crate::work::task::TaskId) -> OpsResult<()> {
 }
 
 /// Start `lf --task ISSUE ship` again for each shipping Task checked out on
-/// this Machine whose ship process has exited. Paused and finished Tasks wait.
+/// this Machine whose ship process has exited. Deferred and finished Tasks wait.
 /// After a failure the restart waits, longer each time in a row; a process
 /// that ended without failing (killed, interrupted) restarts at once.
 pub(crate) fn restart_ships() -> OpsResult<()> {
@@ -597,7 +597,7 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
         for (id, shipping) in store.sqlite.local_shipping_tasks().map_err(task_error)? {
             let state = store.sqlite.task_state(&id).map_err(task_error)?;
             if state.is_terminal()
-                || state == TaskState::Paused
+                || state == TaskState::Deferred
                 || carrier_evidence(&store.sqlite, &shipping) != ProcessIdentityEvidence::Dead
             {
                 continue;
@@ -800,8 +800,8 @@ mod tests {
             ShippingState::Restarting
         );
         assert_eq!(
-            read(TaskState::Paused, ProcessIdentityEvidence::Dead, None).state,
-            ShippingState::Paused
+            read(TaskState::Deferred, ProcessIdentityEvidence::Dead, None).state,
+            ShippingState::Deferred
         );
 
         let mut landing = PrLanding::new(

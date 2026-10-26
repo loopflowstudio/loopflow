@@ -141,10 +141,10 @@ Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
 their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
 Source and license notices ship offline with the catalogue.
 
-**Ship it** hands a Task off; it leaves Working tasks and its ship process lands it.
+**Auto-Ship** hands a Task off; it leaves Working tasks and its ship process lands it.
 It sits at the right end of the Workflow bar under the jump bar, beside the Task's
 stages as dots (click them for each stage) and what is running now. While shipping,
-the same spot holds Stop shipping, and the toast's Undo is Stop shipping. Open a Dashboard with `state:shipping` to watch it.
+the same spot holds Stop Auto-Ship, and the toast's Undo is Stop Auto-Ship. Open a Dashboard with `state:shipping` to watch it.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool

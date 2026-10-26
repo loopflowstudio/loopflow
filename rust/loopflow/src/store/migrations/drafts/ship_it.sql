@@ -56,7 +56,7 @@ ALTER TABLE tasks ADD COLUMN shipped_at INTEGER;
 ALTER TABLE tasks ADD COLUMN ship_lf_process_id TEXT REFERENCES processes(id);
 ALTER TABLE tasks ADD COLUMN ship_restarts INTEGER NOT NULL DEFAULT 0;
 
--- CI repair has no per-Task setting: Pause holds it, and the ship process is the
+-- CI repair has no per-Task setting: Defer holds it, and the ship process is the
 -- only repair starter.
 ALTER TABLE tasks DROP COLUMN automation_enabled;
 

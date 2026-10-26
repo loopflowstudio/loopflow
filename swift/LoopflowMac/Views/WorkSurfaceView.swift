@@ -48,7 +48,7 @@ struct WaveTaskInventory: View {
                             Text(owner.summary).font(.caption)
                                 .accessibilityIdentifier("wave-task-owner-\(task.id)")
                         }
-                        if task.runtime?.status == .paused { Label("Paused", systemImage: "pause.circle") }
+                        if task.runtime?.status == .deferred { Label("Deferred", systemImage: "pause.circle") }
                     }.foregroundStyle(palette.textSecondary)
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
             }.buttonStyle(.plain).accessibilityIdentifier("wave-task-\(task.id)")

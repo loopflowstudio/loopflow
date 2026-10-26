@@ -1862,9 +1862,9 @@ List every Task in the selected repository
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf task pause
+## lf task defer
 
-Pause future Task execution without stopping live processes
+Defer future Task execution without stopping live processes
 
 | Argument | What it does |
 |---|---|
@@ -1873,7 +1873,7 @@ Pause future Task execution without stopping live processes
 
 ## lf task resume
 
-Clear a Task pause without starting execution
+Clear a Task defer without starting execution
 
 | Argument | What it does |
 |---|---|

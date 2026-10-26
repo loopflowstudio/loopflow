@@ -311,9 +311,9 @@ fn admit_ci_fix(
                 .map_err(repair_error)?
                 .ok_or_else(|| repair_error("landing Task is missing"))?;
             if store.sqlite.task_state(task_id).map_err(repair_error)?
-                == crate::durable::TaskState::Paused
+                == crate::durable::TaskState::Deferred
             {
-                return Err(repair_error("Task is paused; CI repair is held"));
+                return Err(repair_error("Task is deferred; CI repair is held"));
             }
             let local = store.local_machine().await.map_err(repair_error)?;
             let machine = store
@@ -1528,7 +1528,7 @@ pub fn wait_for_merge(repo: &Path, options: &LandOptions, pr: &PrInfo) -> OpsRes
 
 /// Check every 15 s until the PR merges or closes. A blocked check is a
 /// recorded state, not an answer: the next check acts on fresh evidence, and
-/// only Pause holds it. No elapsed time ends the wait.
+/// only Defer holds it. No elapsed time ends the wait.
 async fn wait_for_landing(
     store: &SharedStore,
     id: &crate::pr_landing::PrLandingId,
@@ -1844,7 +1844,7 @@ mod tests {
         fixture_for(false).await
     }
 
-    /// A landing that belongs to a Task, so its history and Pause apply.
+    /// A landing that belongs to a Task, so its history and Defer apply.
     async fn fixture_for(with_task: bool) -> (tempfile::TempDir, SharedStore, PrLanding) {
         let directory = tempfile::tempdir().unwrap();
         let worktree = directory.path().join("checkout");

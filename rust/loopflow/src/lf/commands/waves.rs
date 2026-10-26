@@ -1040,7 +1040,7 @@ fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     // is offered; an active one keeps its place and shows the conflict.
     let withdrawn = matches!(runtime.status, TaskState::Unstarted)
         && crate::linear::terminal_reason(task.task.state.as_deref()).is_some();
-    if runtime.status.is_terminal() || runtime.status == TaskState::Paused || withdrawn {
+    if runtime.status.is_terminal() || runtime.status == TaskState::Deferred || withdrawn {
         return RoadmapSection::Later;
     }
     match task.next_move.owner {
@@ -1345,8 +1345,8 @@ async fn snapshot_task_detail(
     );
     let acquisition = store.sqlite.task_acquisition(&task.id)?;
     let worktree_blocker = crate::ops::task::task_worktree_blocker(store, task).await?;
-    let launch_refusal = if runtime.status == TaskState::Paused {
-        Some("Task is paused; resume it before running a Graph".to_string())
+    let launch_refusal = if runtime.status == TaskState::Deferred {
+        Some("Task is deferred; resume it before running a Graph".to_string())
     } else if worktree_blocker.is_none() {
         crate::ops::task::task_process_refusal(store, task)
             .await?
@@ -1363,10 +1363,10 @@ async fn snapshot_task_detail(
     } else {
         None
     };
-    let next_move = if runtime.status == TaskState::Paused {
+    let next_move = if runtime.status == TaskState::Deferred {
         NextMove {
             owner: NextMoveOwner::User,
-            reason: "Paused; resume explicitly when wanted".into(),
+            reason: "Deferred; resume explicitly when wanted".into(),
         }
     } else if execution.state != TaskExecutionState::Idle && !runtime.status.is_terminal() {
         NextMove {

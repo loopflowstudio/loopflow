@@ -302,9 +302,9 @@ A Task's state follows what it is doing:
 | `active` | at a stage, in its Task Session |
 | `moving` | a Graph runs, with a stage ahead that stops for you |
 | `shipping` | a Graph runs and no stage ahead stops it |
-| `paused` · `done` · `abandoned` | held, completed, dropped |
+| `deferred` · `done` · `abandoned` | held, completed, dropped |
 
-Ship it (`lf ship`, or any route into `end`) approves stand-ins at the remaining
+Auto-Ship (`lf ship`, or any route into `end`) approves stand-ins at the remaining
 stages; the Task reads shipping while its ship process runs, and idle with the
 failure and next restart when it exited. `lf ship --stop` withdraws the approval.
 Working Tasks are the idle, active and moving ones. A Session is separately

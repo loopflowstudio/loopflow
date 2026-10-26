@@ -960,12 +960,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             loopflow::lf::commands::waves::list_tasks(repo, wave.as_deref(), *json)
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
-        TaskCommand::Pause { issue } | TaskCommand::Resume { issue } => {
-            let paused = matches!(command, TaskCommand::Pause { .. });
-            loopflow::ops::task::task_pause(issue, paused)?;
+        TaskCommand::Defer { issue } | TaskCommand::Resume { issue } => {
+            let deferred = matches!(command, TaskCommand::Defer { .. });
+            loopflow::ops::task::task_defer(issue, deferred)?;
             println!(
                 "{issue}: {}; execution unchanged",
-                if paused { "paused" } else { "resumed" }
+                if deferred { "deferred" } else { "resumed" }
             );
             Ok(())
         }

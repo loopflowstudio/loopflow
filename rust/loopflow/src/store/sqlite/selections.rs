@@ -131,7 +131,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             TaskState::Active => SelectionState::Active,
             TaskState::Moving => SelectionState::Moving,
             TaskState::Shipping => SelectionState::Shipping,
-            TaskState::Paused => SelectionState::Paused,
+            TaskState::Deferred => SelectionState::Deferred,
             TaskState::Done | TaskState::Abandoned => SelectionState::Done,
         });
         if !started && !state.is_terminal() {
@@ -820,7 +820,7 @@ mod tests {
         assert_eq!(restored.arrangement.order, arranged.order);
         let revisions = store.revisions().unwrap();
         assert!(store
-            .edit_dashboard(&repo, &id, "state:paused", Some(next.revision))
+            .edit_dashboard(&repo, &id, "state:deferred", Some(next.revision))
             .is_err());
         assert!(store
             .save_dashboard(
@@ -920,9 +920,9 @@ mod tests {
             "task_22222222222222222222222222222222",
             "task_33333333333333333333333333333333",
         );
-        // Paused Tasks aren't Working; resumed, FIX-1 is idle in its checkout.
+        // Deferred Tasks aren't Working; resumed, FIX-1 is idle in its checkout.
         store
-            .set_task_paused(&crate::durable::TaskId::parse(one).unwrap(), false)
+            .set_task_deferred(&crate::durable::TaskId::parse(one).unwrap(), false)
             .unwrap();
         assert_eq!(
             store.view_plan(&repo, None).unwrap().resolution.task_ids(),
@@ -1702,7 +1702,7 @@ mod tests {
         ))
         .unwrap();
         crate::store::migrations::upgrade_from_draft(&conn, "saved_selections");
-        // The idle Task has a checkout; the paused one isn't Working.
+        // The idle Task has a checkout; the deferred one isn't Working.
         conn.execute(
             "UPDATE tasks SET worktree='/repo/fix-2' WHERE issue_identifier='FIX-2'",
             [],
@@ -1749,7 +1749,7 @@ mod tests {
         let id = DashboardId::new();
         let result = store.resolve_selection(&repo, &selection).unwrap();
         assert!(result.unavailable.is_empty());
-        assert_eq!(result.members.len(), 3); // Two Waves and the idle Task; paused isn't Working.
+        assert_eq!(result.members.len(), 3); // Two Waves and the idle Task; deferred isn't Working.
         assert_eq!(
             result
                 .members

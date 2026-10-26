@@ -346,21 +346,21 @@ impl SqliteStore {
     }
 
     /// Change the explicit planning hold, never execution or Workflow position.
-    pub(crate) fn set_task_paused(&self, id: &TaskId, paused: bool) -> StoreResult<()> {
+    pub(crate) fn set_task_deferred(&self, id: &TaskId, deferred: bool) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
         require_task_not_deleted(&tx, &task)?;
         if super::durable::task_state_in(&tx, id)?.is_terminal() {
             return Err(StoreError::InvalidAuthority(
-                "Reopen the Task before changing its pause state".into(),
+                "Reopen the Task before deferring or resuming it".into(),
             ));
         }
         super::planning_write::local(
             &tx,
             &crate::work::edit::WorkEdit::for_target(
                 id.as_str(),
-                &[crate::work::edit::WorkValue::TaskPaused(paused)],
+                &[crate::work::edit::WorkValue::TaskDeferred(deferred)],
             ),
         )?;
         tx.commit()?;
@@ -389,7 +389,7 @@ impl SqliteStore {
                 [id.as_str()],
             )?;
             super::task_state_delivery::queue_in(&tx, id, "unstarted")?;
-            // Reopening withdraws Ship it: the approval ended with the Task.
+            // Reopening withdraws Auto-Ship: the approval ended with the Task.
             super::task_work::unship_in(&tx, id)?;
             insert_task_event_in(
                 &tx,

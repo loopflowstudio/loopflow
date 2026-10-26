@@ -388,13 +388,13 @@ impl std::fmt::Display for WorkStatus {
 }
 
 /// A Task's state, derived from its checkout, Workflow position, whether a
-/// Graph runs for it and the Ship it approval. Completion, abandonment and
-/// pause are durable; the open states follow what the Task is doing now.
+/// Graph runs for it and the Auto-Ship approval. Completion, abandonment and
+/// defer are durable; the open states follow what the Task is doing now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskState {
     /// Explicit hold; history, Workflow and shipping are retained.
-    Paused,
+    Deferred,
     /// No checkout yet.
     Unstarted,
     /// A checkout, no Graph running and not at a stage: before its first route,
@@ -405,7 +405,7 @@ pub enum TaskState {
     /// A Graph runs for it with a stage still ahead that will stop for a person.
     Moving,
     /// A Graph runs for it and no stage ahead will stop it: none remain, or
-    /// Ship it approved stand-ins at the rest. It finishes on its own to merge.
+    /// Auto-Ship approved stand-ins at the rest. It finishes on its own to merge.
     Shipping,
     /// Completed independently of Workflow position.
     Done,
@@ -415,7 +415,7 @@ pub enum TaskState {
 impl TaskState {
     pub(crate) fn label(&self) -> &'static str {
         match self {
-            Self::Paused => "paused",
+            Self::Deferred => "deferred",
             Self::Unstarted => "unstarted",
             Self::Idle => "idle",
             Self::Active => "active",
@@ -428,7 +428,7 @@ impl TaskState {
 
     pub(crate) fn parse(label: &str) -> Option<Self> {
         [
-            Self::Paused,
+            Self::Deferred,
             Self::Unstarted,
             Self::Idle,
             Self::Active,

@@ -373,7 +373,7 @@ struct DesktopHeadlessTests {
         _ = try stopped.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-1")
 
         // At `demo` the edges leaving it are the buttons, named by what they run;
-        // the one into `end` is Ship it, which runs every remaining step.
+        // the one into `end` is Auto-Ship, which runs every remaining step.
         let waiting = try view(position: ["kind": "node", "node": "demo"], outgoing: [3, 4])
         #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position").text().string() == "feature · demo")
         #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
@@ -386,7 +386,7 @@ struct DesktopHeadlessTests {
         #expect(throws: (any Error).self) {
             try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-4")
         }
-        // Ship it sits in the Workflow bar, not in the detail page's Workflow header.
+        // Auto-Ship sits in the Workflow bar, not in the detail page's Workflow header.
         #expect(throws: (any Error).self) {
             try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
         }
@@ -411,7 +411,7 @@ struct DesktopHeadlessTests {
         await model.completeTask(task)
         #expect(await started.calls.last == ["task", "complete", task.task.identifier])
 
-        // A shipping Task offers Stop shipping in place of Ship it.
+        // A shipping Task offers Stop Auto-Ship in place of Auto-Ship.
         let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
         let shipped = TaskShipControl(model: model, task: shipping)
         #expect(throws: (any Error).self) {
@@ -421,7 +421,7 @@ struct DesktopHeadlessTests {
         for _ in 0..<200 where await started.calls.last?.last != "--stop" { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["--task", shipping.task.identifier, "ship", "--stop"])
 
-        // The toast after Ship it offers Undo; after Stop shipping it only reports.
+        // The toast after Auto-Ship offers Undo; after Stop Auto-Ship it only reports.
         var undone = false
         let toast = ShipNoticeToast(notice: ShipNotice(task: task, shipped: true)) { undone = true }
         #expect(try toast.inspect().find(viewWithAccessibilityIdentifier: "task-ship-notice").text().string()
@@ -434,7 +434,7 @@ struct DesktopHeadlessTests {
         }
     }
 
-    @Test("The Workflow bar shows the stages, what runs now and Ship it, and opens to its stage cells")
+    @Test("The Workflow bar shows the stages, what runs now and Auto-Ship, and opens to its stage cells")
     func taskWorkflowBar() throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
@@ -488,7 +488,7 @@ struct DesktopHeadlessTests {
             work: .available(TaskOverview(sessions: [], graphProcesses: [], workflow: nil)))
         if state == "unstarted" {
             _ = try view.inspect().find(button: "Complete")
-            _ = try view.inspect().find(button: "Pause")
+            _ = try view.inspect().find(button: "Defer")
             _ = try view.inspect().find(button: "Abandon…")
         } else {
             _ = try view.inspect().find(button: "Reopen")
@@ -551,7 +551,7 @@ struct DesktopHeadlessTests {
         #expect(abs(drawn.arrows[1].label.x - design.frame.midX) < 1)
 
         // A graph with no PR: its edge into `end` runs nothing, is drawn, and
-        // Ship it is the one control that takes it.
+        // Auto-Ship is the one control that takes it.
         let catalog = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("workflow_catalog.json"))) as? [[String: Any]])
         let research = try #require(catalog.first { $0["name"] as? String == "research" }?["workflow"] as? [String: Any])

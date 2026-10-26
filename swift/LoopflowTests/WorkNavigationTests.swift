@@ -110,7 +110,7 @@ struct WorkNavigationTests {
         for scope in ["repository", "wave-wave-1"] {
             _ = try crumbs.inspect().find(viewWithAccessibilityIdentifier: "work-jump-" + scope)
         }
-        // The jump bar is navigation; Ship it lives in the Workflow bar below it.
+        // The jump bar is navigation; Auto-Ship lives in the Workflow bar below it.
         #expect(throws: (any Error).self) { try crumbs.inspect().find(viewWithAccessibilityIdentifier: "task-ship") }
         #expect(throws: (any Error).self) { try crumbs.inspect().find(text: "This Mac") }
         #expect(throws: (any Error).self) { try crumbs.inspect().find(viewWithAccessibilityLabel: "Navigate Tasks, Waves and repositories") }

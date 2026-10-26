@@ -386,9 +386,9 @@ impl super::SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         if let Some(task) = &session.task_id {
-            if super::durable::task_state_in(&tx, task)? == crate::durable::TaskState::Paused {
+            if super::durable::task_state_in(&tx, task)? == crate::durable::TaskState::Deferred {
                 return Err(StoreError::InvalidAuthority(
-                    "Task is paused; CI repair is held".into(),
+                    "Task is deferred; CI repair is held".into(),
                 ));
             }
         }

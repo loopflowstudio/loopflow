@@ -837,7 +837,7 @@ PR fails a required check or GitHub drops its merge request, stops when a
 person removes that request, and returns on merge or closure. A shipping Task whose ship process died starts
 again on the next read of this Machine's work (`lf task status`, `lf ps`,
 Desktop); a Machine nothing reads recovers when it is next read. After bare
-`lf land` returns, nothing repairs its PR. `lf task pause` holds repair.
+`lf land` returns, nothing repairs its PR. `lf task defer` holds repair.
 
 Set repository defaults in `.lf/config.yaml`:
 
@@ -1389,14 +1389,14 @@ unpushed work refuses every give-back but `--force`. `lf ondemand list` never
 ends a machine. See [own and rent Machines](architecture/machines.md#own-and-rent-machines)
 for pools, rentals and give-back.
 
-### Pause a Task without discarding work
+### Defer a Task without discarding work
 
 ```sh
-lf task pause LOO-389
+lf task defer LOO-389
 lf task resume LOO-389
 ```
 
-Paused Tasks stay in the Wave plan but leave the default active sidebar. Their
-checkout, conversations and Workflow remain. Pause holds future Task runs and CI
+Deferred Tasks stay in the Wave plan but leave the default active sidebar. Their
+checkout, conversations and Workflow remain. Defer holds future Task runs and CI
 repair; it does not stop an already-running process. Resume starts nothing.
-In Desktop, use the Task header's context menu to pause or resume.
+In Desktop, use the Task header's context menu to defer or resume.

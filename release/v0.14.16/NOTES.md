@@ -2,7 +2,7 @@
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.14.16 lets you hand off work and leave it running. Bare `lf task run` now returns once the Graph is running, and `lf task interrupt` stops it. A Task can also run on a free Machine from a pool you own, or on a rented RunPod pod that is deleted after its history is copied back. Loopflow now costs less while you wait: the store shrinks from gigabytes to hundreds of megabytes, idle relays stop using CPU, and landings stop only when a person removes the merge request. Agents can now script and read back Loopflow Desktop through `lf desktop`, and a feature Task opens with several visions to choose from instead of a single plan. This release changes the store format: `lf < 0.14.16 can no longer open the store (raised by: designated_panes, session_turn_events)`. Desktop now requires macOS 26.
+v0.14.16 lets you hand off work and leave it running. Bare `lf task run` now returns once the Graph is running, and `lf task interrupt` stops it. A Task can also run on a free Machine from a pool you own, or on a rented RunPod pod that is deleted after its history is copied back. Loopflow costs less while you wait: the store shrinks from gigabytes to hundreds of megabytes, `~/.lf` rotates by age, idle relays stop using CPU, and landings stop only when a person removes the merge request. Agents can script and read back Loopflow Desktop through `lf desktop`, every command a Graph or Desktop runs now appears in `lf help`, and a feature Task opens with several visions to choose from instead of a single plan. This release changes the store format: `lf < 0.14.16 can no longer open the store (raised by: designated_panes, session_turn_events)`. Desktop now requires macOS 26.
 
 ## Start work and leave it running
 
@@ -25,13 +25,14 @@ A Task can run on a Machine from a pool you own, or on a rented RunPod pod withi
 
 ## A smaller store, faster installs and quiet idle relays
 
-On a clone of Jack's store, the database went from 9.8 GB to 550 MB, and `lf install` preflight took about 5 seconds instead of several minutes. Loopflow now stores only the facts it reads back; the full provider stream stays in each run's `events.jsonl`. Later in the cycle, the remaining background costs on large stores were removed as well. Each relay now checks only its own viewers, and the history queries that Desktop polls finish in well under a second. (#1666, #1667, #1690, #1692)
+On a clone of Jack's store, the database went from 9.8 GB to 550 MB, and `lf install` preflight took about 5 seconds instead of several minutes. Loopflow now stores only the facts it reads back; the full provider stream stays in each run's `events.jsonl`. Later in the cycle, the remaining background costs on large stores were removed as well. Each relay now checks only its own viewers, and the history queries that Desktop polls finish in well under a second. (#1666, #1667, #1690, #1692, #1696)
 
 - **Recorded facts only.** History keeps attempts, account selection, provider sessions, usage, turn outcomes, and silences longer than 600 s. Usage is stored as one row per provider turn. Provider hooks, `__` callbacks, `--context`/`--explain` previews and Desktop file and diff polls no longer create Process rows. (#1666, #1667)
 - **Existing stores shrink automatically.** An hourly prune, also run by `lf disk clean`, trims old captures and compacts old usage rows. It removes finished, unreferenced inspection Processes after 7 days, closes Processes whose OS process is gone, then runs `VACUUM`. `lf disk clean` reports what it removed. (#1666)
 - **Install copies are APFS clones.** The pre-migration backup and the validation copy are clones, and the backup is removed once the install settles. (#1666)
 - **Idle relays stop scanning the machine.** Previously every running `lf` relay searched the whole store for unviewed Sessions, which cost about 4 s of CPU per pass. Now each relay times its own viewers in memory. When the last viewer has been gone for `session.end_detached_after`, it ends itself if its Sessions are waiting for a person. If a turn or Graph still holds it, it rechecks at most every 5 minutes. On Jack's live store, the check fell from 4.2 s to 44 ms and found the same owners. A new index on Sessions by execution owner makes the lookup direct. (#1690, #1692)
 - **The Desktop Work feed stops churning.** On Jack's store, the `lf history` conversation-inputs snapshot fell from about 35 s to 0.17 s, and a new covering index over provider turn events keeps history away from large payload pages. `lf history usage --weekly` reads recorded silences; it fell from 53 minutes to under 2 minutes on a debug build. `lf history show --events` prints `events.jsonl`, or only the stored facts once rotation has removed the file. (#1666, #1690)
+- **`~/.lf` rotates by age, not size.** The 20 GB `disk_budget` could never be met, because the database, account homes and recent material never rotate. Hourly rotation now removes backups, draft store copies, captures and logs once they are 30 days old, the same window Claude Code uses for transcripts. `lf disk` says when each category rotates, for example `(removed after 30 days)`, instead of "of N budget". `lf disk rotate` is removed; `lf disk clean --keep-days` (default 7) covers manual cleanup. To keep provider transcripts longer, raise Claude's `cleanupPeriodDays`; Loopflow copies nothing to extend retention. (#1696)
 - The steer hook on `UserPromptSubmit` starts `lf` only when a steer newer than the last one seen exists, matching `PostToolUse`. (#1690)
 
 ## Landings and releases stop only for a person
@@ -75,35 +76,30 @@ A feature Task used to begin at `review-design`, refining the one plan it alread
 - **`concept-review`, `demo` and `research` produce pages too:** `scratch/concept-review.html`, a `scratch/demo.html` runbook, and an answer page. Each page is self-contained, uses no network, leads with the decision and ends with numbered questions.
 - **Files renders pages.** The view picker offers Read / Edit / Diff. Read shows Markdown, and shows HTML in a web view that blocks network loads and opens links in your browser. A rewritten page reloads at the same scroll position. A new scratch page takes over the view only if nothing is selected, the selection was itself automatic, or Files has been idle for 2 minutes. Otherwise it opens as a tab.
 
+## Every command lf runs is one you can run
+
+Graph steps, Desktop and provider hooks used to drive `lf` through hidden `__` commands and flags that `lf help` never showed. Now the only hidden entry point is the provider hook `lf __context-block`; everything else is an ordinary, documented command. (#1697)
+
+- **New visible commands.** `lf session serve [--terminal] -- <argv>` replaces `lf __transport-serve` as the process a Session lives in while terminals attach and detach. `lf self sync-skills`, which docs already told people to run, is no longer hidden.
+- **New visible flags.** Root `--skill-input` and `--output-schema`, which Graph steps pass; root `--cwd <PATH>`, which replaces `--__cwd` and now accepts relative paths without `--task`; and `lf ci watch --parent-pid`, which Desktop passes.
+- **Hidden commands folded or removed.** `lf __pi-event` and `lf __tool-lifeline` become `lf __context-block --moment pi-event` and `--moment tool-group`, and no longer write a Process row or reconnect the repository on every event. `lf __telemetry-scorecard` becomes the repository skill `.lf/skills/telemetry-scorecard.md`.
+
 ## Operational notes
 
-- **Store compatibility break.** `lf < 0.14.16 can no longer open the store (raised by: designated_panes, session_turn_events)`. Upgrade every lf that shares an `LF_HOME`, including relays, cron jobs and Machines, together. Relays from older builds keep running the old machine-wide idle sweep until they restart. The release migration also adds pools, on-demands, rentals and `machine_records`, the Sessions-by-owner index, and the turn-events index, and it drops `processes.detached_at`. (#1653, #1677, #1690, #1692)
+- **Store compatibility break.** `lf < 0.14.16 can no longer open the store (raised by: designated_panes, session_turn_events)`. Upgrade every lf that shares an `LF_HOME`, including relays, cron jobs and Machines, together. Relays from older builds keep running the old machine-wide idle sweep until they restart. The release migration also adds pools, on-demands, rentals and `machine_records`, the Sessions-by-owner index and the turn-events index, and it drops `processes.detached_at`. (#1653, #1677, #1690, #1692)
 - **Saved pane layouts reset.** `designated_panes` deletes old saved pane layouts; every Task opens with the session, shell and browser panes. (#1677)
-- **Desktop requires macOS 26.** Support for macOS 15 is dropped. The `swift-test` and `loopflow-ui-test` CI jobs run on `macos-26`; `macos-process-test` stays on `macos-15`. (#1687)
-- **`lf desktop` scripts need updating.** `text` → `send`, `key` → `send-key`, `read` → `capture`, `restore` → `show`, `shell` → `run`. `lf desktop arrange` is removed. The `LF_DESKTOP=1` fallback is gone: `LF_DESKTOP` is a bundle ID. From an ordinary terminal, `LF_DESKTOP=com.loopflow.mac.dev lf desktop ls` reaches the Dev build. (#1664, #1677)
-- **Tasks parked at the feature Workflow's `design` node** need `lf task workflow move <task> explore`. (#1687)
-- **Scripts that relied on bare `lf task run` blocking** should add `-b`. (#1675, #1681)
-- **First cleanup may be slow.** The first hourly prune or `lf disk clean` on a large store rewrites many rows and vacuums; on Jack's 9.8 GB clone, it took about four minutes. Later passes take milliseconds. Captures younger than 24 h wait for the next pass. After 7 days, task work listings and `lf ps` history no longer show unreferenced inspection Processes. (#1666, #1667)
-- **0.14.14 cron jobs upgrade in place.** On first contact, `lf wave cron list` and scheduled runs rewrite Flow-shaped plists, receipts and obligations to the Graph shape, keeping their labels and activation times. These shims are marked for removal (LOO-574). Cron accounting reads only the current repository's records. (#1668)
-- **Branches made only of `checkpoint:`/`wip:` commits** now get a merge commit from main instead of a reset. Stashes made before this release have no path in their name, so `lf task run` won't detect them; find them with `git stash list`. (#1672)
-- **Relay detach timers live in memory**, so they restart from zero if a relay restarts while nobody is viewing. A relay that never reported viewers is no longer ended by another relay. (#1690)
-- **Known gaps:** a person who dequeues in the few seconds between a repair's `lf arm` and the end of its Process can be mistaken for Loopflow's own disarm, and ci-fix may re-arm. In a repo without a merge queue, `lf land` still fails with gh's error when gh refuses `--auto` on an already-mergeable PR. (#1680, #1684)
-- **Verify after install:** these behaviors are covered by unit or integration tests, but no end-to-end run has been recorded for them:
-  - a real merge-queue eviction going through ci-fix;
-  - `lf land` leaving a queued PR untouched;
-  - reconnecting a real detached Codex Session;
-  - the first scheduled run of a 0.14.14 cron job after the upgrade;
-  - the explore page flow in Desktop;
-  - relay and Work-feed CPU on a large store.
-
-  (#1668, #1674, #1679, #1684, #1687, #1690)
+- **Desktop requires macOS 26.**
+- **Desktop scripting moved to a socket.** `lf desktop` talks to `$LF_HOME/run/desktop/<bundle-id>.sock`; Apple events, `Loopflow.sdef` and the `LF_DESKTOP=1` fallback are gone. Desktop sets `LF_DESKTOP` to its own bundle ID, so `LF_DESKTOP=com.loopflow.mac.dev lf desktop state` reaches a Dev build from an ordinary terminal. (#1664, #1677)
+- **Feature Tasks parked at `design`** on the old feature Workflow need `lf task workflow move <task> explore`. (#1687)
+- **0.14.14 cron jobs upgrade in place.** `lf wave cron list` and each scheduled run rewrite Flow-shaped plists, receipts and obligations into the Graph shape, keeping label, activation time and file locations. `lf wave cron run --graph` still accepts `--flow` for a job that is running while you upgrade. These shims are marked for removal by LOO-574. (#1668)
+- **Disk config.** The `disk_budget` key in Machine `config.yaml` is ignored, and `lf disk rotate` no longer exists; update scripts that call it. (#1696)
+- **This is a retried release.** The first v0.14.16 publish failed in `swift build -c release`: Swift 6.2.3 (Xcode 26.2) aborted with "Found ownership error?!" in CopyPropagation on `MultiplexerStore.replace(_:with:)`. The retry compares the optional pane's kind directly, with unchanged behavior; a full release build at the release commit completes. Debug builds and CI don't build with `-O`, so only the publisher can catch this class of failure. (#1699)
 
 ## Small changes
 
-- `swift-test` fails when a test leaks a continuation and names the test. The Desktop test that hung the merge queue is fixed, and a reused barrier key now fails fast instead of hanging. (#1683)
-- The task-installation proof waits up to 120 s for Docker before reporting an infrastructure fault. (#1679)
-- `capture-tasks` and `launch-plan` name open PRs that touch the same files and leave those PRs' open decisions unresolved. (#1682)
-- The README now opens with what `lf` does for you. A small first exercise, requirements, the files and services it touches, and uninstall steps follow. Reference material moved into `docs/`, including a new *Own and rent Machines* section. Install with `curl -fsSL https://loopflow.studio/install.sh | sh`. (#1671)
-- An agent turn that ends `Interrupted` exits 130, and headless `lf run` preserves that code. (#1678)
-- TESTING.md rules out CPU-load generators for reproducing races. Use a temporary delay or a bounded repeat loop instead. (#1686)
-- Desktop's local agent launcher polls its pipes, so large CLI responses no longer hit its deadline. Packaged third-party sources are reproducible. (#1687)
+- **README leads with what `lf` does.** Five short sections (Work, Context, Orchestration, Sessions, Skill Graphs) with one runnable example each, a first exercise, a *Needs* table and uninstall steps. Install is `curl -fsSL https://loopflow.studio/install.sh | sh`, then `npx skills add loopflowstudio/loopflow --skill loopflow -g -y`. Reference detail moved into `docs/getting-started.md`, `docs/lf.md` and `docs/planning.md`. (#1671)
+- **Task filing names overlapping PRs.** `capture-tasks` and `launch-plan` check open PRs that touch the target files and name each one, with its Task and change, in the brief, leaving any choice that Task left to a person open. (#1682)
+- **Rust tests leave your logins alone.** Test processes drop inherited `CODEX_HOME` and `CLAUDE_CONFIG_DIR` before any test starts, so fixtures can no longer write a test login into `~/.codex` or `~/.claude`. (#1693)
+- **swift-test fails on leaked continuations** and names the test, and the Desktop test that hung the merge queue for 300 s is fixed. (#1683)
+- **Integration tests that read Workflow state use `lf -b task run`**, removing a race introduced when bare `task run` began returning early. (#1681)
+- **TESTING.md bans CPU-load generators** for race reproduction and offers a temporary delay or a bounded 20-run loop instead. (#1686)

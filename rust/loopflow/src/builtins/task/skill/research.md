@@ -68,3 +68,25 @@ When contributing independent research to another active writer, use the exact
 assigned artifact or a distinct topic path and leave the canonical design to
 its owner. Publish a complete artifact atomically; a path alone does not deliver
 its contents to another checkout. Preserve source attribution and proof limits.
+
+## The page
+
+When a person is reviewing the answer, present it as a page, and let the
+conversation be about what they see there: the answer first, then the system
+map as a diagram, sources linked to the claims they support, counterexamples
+and open questions. Shape it to the question; a one-line answer needs no page.
+Keep any lasting record in Markdown.
+
+- One self-contained `.html` under `scratch/`: inline CSS and script, no
+  network, no build step. Escape code. Readable in light and dark and at narrow
+  widths.
+- Lead with the decision you need. End with numbered questions, so "2b" is a
+  complete answer.
+- Show the thing, not a description of it. Mark proposed against existing
+  behavior visibly.
+- One reading column, generous whitespace, no dashboard chrome or badges. Shape
+  the structure to the content; no fixed template.
+- Header: Task, step, date, and the files it is built from.
+- Say its path. Loopflow Desktop shows `scratch/` pages beside the
+  conversation; in a bare terminal, open it in the browser. Regenerate the same
+  path when the conversation changes it, and write it last, after the Markdown.

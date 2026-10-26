@@ -642,9 +642,9 @@ Rust partitions wait for one shared build; the other suites run independently.
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
 | `e2e-smoke` | ubuntu-latest | both planning-reconnect proofs, then `tests/e2e/test_smoke.sh` |
 | `task-installation` | ubuntu-latest | `uv run python scripts/test_task_installation.py` |
-| `swift-test` | macos-15 | app build, headless model/view tests, boundary check |
+| `swift-test` | macos-26 | app build, headless model/view tests, boundary check |
 | `macos-process-test` | macos-15 | deleted-executable and exact process-authority regression |
-| `loopflow-ui-test` | macos-15 | xcodegen + app/test-runner compile |
+| `loopflow-ui-test` | macos-26 | xcodegen + app/test-runner compile |
 
 Candidate and merge-group jobs must all pass for `tests-result` to pass. Both CI
 and the local runner collect every Rust test failure with `--no-fail-fast`.
@@ -1393,6 +1393,21 @@ returning successfully does not guarantee `events.jsonl` is complete. Keep
 usage and account-event assertions in the recorder tests, rather than racing
 its queue in subprocess-launch tests. Reproduce suspected races with a temporary
 recorder delay beyond that drain window; remove the delay before publication.
+
+### Reproducing races without CPU load
+
+Never generate CPU load to reproduce a race: no `yes > /dev/null &`, `stress`,
+or busy loops. Agents can't reliably kill what they start: the cleanup line is
+cut off by a tool timeout or the kill command is refused, and the generators run
+forever. On October 25, 32 orphaned `yes` processes from one such probe burned
+about 7.7 cores for 13 hours and slowed every build on the machine.
+
+Reproduce the ordering instead: add a deliberate delay at the race point (as
+above) and remove it before publication, or repeat the test on its own:
+
+```bash
+for i in $(seq 20); do cargo test -p loopflow --test integration <test> < /dev/null || echo FAIL; done
+```
 
 Orphan Session proofs must launch outside every registered Task checkout; changing
 branches in the same directory does not remove checkout membership. Run these

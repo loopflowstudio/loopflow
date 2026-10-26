@@ -2,6 +2,7 @@
 import AppKit
 import Loopflow
 import SwiftUI
+import WebKit
 
 /// Compact document controls leave room for the file itself.
 enum TaskFileChrome {
@@ -27,14 +28,16 @@ struct TaskFilesView: View {
             HStack(spacing: 4) {
                 ScrollView(.horizontal) {
                     HStack(spacing: 12) {
-                        if task != nil { Button("Brief") { store.page = .task } }
-                        Button("Changes") { store.page = .files; store.mode = .diff; store.navigator = .pinned }
-                        if prURL != nil { Button("Pull request") { store.page = .pullRequest } }
+                        if task != nil { Button("Brief") { store.page = .task; store.noteInteraction() } }
+                        Button("Changes") {
+                            store.page = .files; store.mode = .diff; store.navigator = .pinned; store.noteInteraction()
+                        }
+                        if prURL != nil { Button("Pull request") { store.page = .pullRequest; store.noteInteraction() } }
                         ForEach(store.tabs) { tab in
                             HStack(spacing: 4) {
-                                Button(tab.path) { store.page = .files; store.selectFile(tab.path, mode: .file) }
+                                Button(tab.path) { store.selectFile(tab.path, mode: .read) }
                                     .fontWeight(store.page == .files && store.selection == tab.path ? .semibold : .regular)
-                                Button { store.closeTab(tab.id) } label: { Image(systemName: "xmark") }
+                                Button { store.closeTab(tab.id); store.noteInteraction() } label: { Image(systemName: "xmark") }
                                     .accessibilityLabel("Close \(tab.path)")
                             }
                         }
@@ -102,12 +105,13 @@ struct TaskFilesView: View {
             await store.refreshChanges()
         }
         .task(id: "\(store.selection ?? "")|\(store.mode)") {
-            if store.mode == .file { await store.loadFile() }
+            if store.mode != .diff { await store.loadFile() }
         }
         .task(id: diffIdentity) { if store.mode == .diff { await store.loadDiff() } }
     }
 
     private func toggleNavigator() {
+        store.noteInteraction()
         let wasFiles = store.page == .files
         store.page = .files
         if wasFiles || store.navigator == .closed { store.toggleNavigator() }
@@ -132,7 +136,7 @@ struct TaskFilesView: View {
                     .onSubmit {
                         let paths = store.scratchPaths + store.changedPaths
                         if let path = paths.first {
-                            selectFile(path, mode: store.scratchPaths.contains(path) ? .file : .diff)
+                            selectFile(path, mode: store.scratchPaths.contains(path) ? .read : .diff)
                         }
                     }
                 Button { store.togglePinnedNavigator() } label: {
@@ -148,7 +152,7 @@ struct TaskFilesView: View {
                     sectionHeader("scratch", expanded: $store.showsScratch)
                     if store.showsScratch {
                         ForEach(store.scratchPaths, id: \.self) { path in
-                            row(path, label: String(path.dropFirst("scratch/".count)), mode: .file)
+                            row(path, label: String(path.dropFirst("scratch/".count)), mode: .read)
                         }
                         if store.changes?.scratchTruncated == true {
                             Text("Scratch list truncated").font(.caption).foregroundStyle(palette.textSecondary)
@@ -209,12 +213,13 @@ struct TaskFilesView: View {
                 .fixedSize()
             }
             if store.page == .files {
-                Picker("View", selection: $store.mode) {
-                    Text("File").tag(TaskFilesStore.Mode.file)
+                Picker("View", selection: Binding(get: { store.mode }, set: { store.mode = $0; store.noteInteraction() })) {
+                    Text("Read").tag(TaskFilesStore.Mode.read)
+                    Text("Edit").tag(TaskFilesStore.Mode.edit)
                     Text("Diff").tag(TaskFilesStore.Mode.diff)
                         .disabled(store.changesError != nil)
                 }.pickerStyle(.menu).labelsHidden()
-                    .accessibilityLabel("View").frame(width: 65).fixedSize()
+                    .accessibilityLabel("View").frame(width: 70).fixedSize()
             }
         }
         .font(Typography.caption(11)).padding(.horizontal, 10)
@@ -259,6 +264,7 @@ struct TaskFilesView: View {
             }
         }
         .frame(minWidth: 160, maxWidth: .infinity, maxHeight: .infinity)
+        .simultaneousGesture(TapGesture().onEnded { store.noteInteraction() })
     }
 
     private func sectionHeader(_ title: String, expanded: Binding<Bool>) -> some View {
@@ -291,7 +297,7 @@ struct TaskFilesView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 4).padding(.vertical, 2)
-            .workSelection(store.selection == path && store.mode == mode)
+            .workSelection(store.selection == path && (store.mode == .diff) == (mode == .diff))
             .contentShape(Rectangle())
         }.buttonStyle(.plain).help(path)
             .id("\(mode.rawValue):\(path)")
@@ -312,7 +318,11 @@ struct TaskFilesView: View {
                 ContentUnavailableView("Comparison unavailable", systemImage: "doc", description: Text(reason))
             } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
         } else if let document = store.selectedDocument, let snapshot = document.snapshot {
-            if snapshot.state == .text {
+            if snapshot.state == .text, store.rendersSelection {
+                TaskFileReadingView(document: document, baseURL: store.query.remoteMachine == nil
+                    ? URL(fileURLWithPath: store.cwd).appendingPathComponent(document.path) : nil,
+                    interacted: store.noteInteraction)
+            } else if snapshot.state == .text {
                 TaskDocumentView(document: document)
             } else {
                 ContentUnavailableView(stateLabel(snapshot.state), systemImage: "doc")
@@ -328,6 +338,121 @@ struct TaskFilesView: View {
         case .truncated: "File exceeds 1 MB · preview unavailable"
         case .unsupportedEncoding: "Unsupported text encoding"
         }
+    }
+}
+
+/// A document as you read it: Markdown through `MarkdownBlocks`, HTML as a live page.
+struct TaskFileReadingView: View {
+    let document: TaskFileDocument
+    /// Where relative references resolve; `nil` for a peer's checkout.
+    let baseURL: URL?
+    var interacted: () -> Void = {}
+
+    var body: some View {
+        if (document.path as NSString).pathExtension.lowercased() == "html" {
+            TaskHTMLView(html: document.text, baseURL: baseURL, interacted: interacted)
+                .accessibilityIdentifier("files-rendered-html")
+        } else {
+            ScrollView {
+                MarkdownBlocks(source: document.text).equatable()
+                    .frame(maxWidth: 720, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14).textSelection(.enabled)
+            }
+            .onScrollPhaseChange { _, phase in if phase == .interacting { interacted() } }
+            .accessibilityIdentifier("files-rendered-markdown")
+        }
+    }
+}
+
+/// Pages run their scripts but never reach the network; links open in the browser.
+/// A rewrite reloads in place at the same scroll position.
+private struct TaskHTMLView: View {
+    let html: String
+    let baseURL: URL?
+    let interacted: () -> Void
+
+    @State private var page: WebPage?
+    @State private var position = ScrollPosition()
+    @State private var offset = CGPoint.zero
+    /// Offsets during a load are the page settling, not the person scrolling.
+    @State private var loading = false
+
+    var body: some View {
+        Group {
+            if let page {
+                WebView(page)
+                    .webViewScrollPosition($position)
+                    .webViewOnScrollGeometryChange(for: CGPoint.self, of: \.contentOffset) { _, new in
+                        offset = new
+                        if !loading { interacted() }
+                    }
+                    .simultaneousGesture(TapGesture().onEnded { interacted() })
+            } else {
+                Color.clear
+            }
+        }
+        .task(id: html) { await show() }
+    }
+
+    private func show() async {
+        if page == nil {
+            guard let rules = await TaskHTMLRules.offline() else {
+                let blank = WebPage()
+                page = blank
+                await Self.load(blank, html: "<p>Page unavailable: network blocking could not be set up.</p>", baseURL: nil)
+                return
+            }
+            var configuration = WebPage.Configuration()
+            configuration.userContentController.add(rules)
+            page = WebPage(configuration: configuration, navigationDecider: TaskHTMLLinks())
+        }
+        guard let page else { return }
+        let restore = offset
+        loading = true
+        defer { loading = false }
+        guard await Self.load(page, html: html, baseURL: baseURL), !Task.isCancelled else { return }
+        position.scrollTo(point: restore)
+    }
+
+    /// Whether the page finished loading; a superseded or failed load reports false.
+    @discardableResult
+    private static func load(_ page: WebPage, html: String, baseURL: URL?) async -> Bool {
+        do {
+            for try await _ in page.load(html: html, baseURL: baseURL ?? URL(string: "about:blank")!) {}
+            return true
+        } catch { return false }
+    }
+}
+
+/// Links leave the page for the browser; everything else loads in place.
+private struct TaskHTMLLinks: WebPage.NavigationDeciding {
+    func decidePolicy(for action: WebPage.NavigationAction,
+                      preferences: inout WebPage.NavigationPreferences) async -> WKNavigationActionPolicy {
+        guard action.navigationType == .linkActivated, let url = action.request.url,
+              ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") else { return .allow }
+        NSWorkspace.shared.open(url)
+        return .cancel
+    }
+}
+
+/// One compiled rule list blocks every network scheme for rendered pages.
+@MainActor
+private enum TaskHTMLRules {
+    private static var compiled: Task<WKContentRuleList?, Never>?
+    private static let rules = #"""
+    [{"trigger":{"url-filter":"^https?://"},"action":{"type":"block"}},
+     {"trigger":{"url-filter":"^wss?://"},"action":{"type":"block"}},
+     {"trigger":{"url-filter":"^ftp://"},"action":{"type":"block"}}]
+    """#
+
+    static func offline() async -> WKContentRuleList? {
+        let compiled = compiled ?? Task {
+            try? await WKContentRuleListStore.default().compileContentRuleList(
+                forIdentifier: "loopflow-offline-pages", encodedContentRuleList: rules)
+        }
+        Self.compiled = compiled
+        return await compiled.value
     }
 }
 

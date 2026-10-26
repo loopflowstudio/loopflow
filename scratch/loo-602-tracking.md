@@ -1,8 +1,29 @@
 # LOO-602 — What Loopflow uniquely enables, and the tracking it needs
 
-Status: **draft for Jack's decisions** (2026-10-26). Jack Heart requested the
-review from LOO-598. Nothing below is accepted until Jack picks among the
-decisions in §7; follow-up Tasks are filed only for accepted ones.
+Status: **decisions recorded** (2026-10-26). Jack Heart requested the review
+from LOO-598 and accepted decisions 1–5 and 7 in §7; decision 6 (retention and
+disk budget) is still open. Follow-up Tasks are filed only for accepted
+decisions.
+
+## Direction (Jack Heart, 2026-10-26)
+
+Superseding the retention bullets below: Loopflow does no copying for now.
+People who want longer retention raise Claude's `cleanupPeriodDays` themselves
+(decision 6).
+
+
+- By default, providers retain conversation text. Loopflow queries across the
+  provider stores for whatever they still hold.
+- Longer storage is an option, not the default.
+- Loopflow writes in a single file format of its own and never stores raw
+  provider originals for retention. Any raw stream capture must be tied to a
+  win beyond longer retention.
+- Loopflow writes a conversation only when the provider does not have it: the
+  provider never stored it, or it is about to expire and the person opted into
+  longer retention.
+
+This settles decision 4 and frames decision 3. It replaces the earlier
+`capture.stream` opt-in.
 
 ## Problem
 
@@ -139,18 +160,23 @@ only while referenced. That is the default footprint.
   knob, not counted against a budget lf cannot meet (today 18 GB of the 20 GB
   budget is un-rotatable, so rotation can never succeed).
 
-**Opt-in (config grows the footprint for more power).** One setting,
-`capture.stream: true` (Machine config), keeps the verbatim provider stream in
-`runs/<capture>/events.jsonl` for harness debugging and `lf history show
---events`. Off by default; rotated by `disk_budget` either way. Nothing opt-in
-ever lands in SQLite.
+**Opt-in (config grows the footprint for more power).** One retention
+setting (sketch: `transcripts.retain: provider | <days> | forever`, default
+`provider`). Above `provider`, Loopflow writes a Session's turns to its own
+transcript file in the single Loopflow format, but only for content the
+provider no longer holds or never held. Concretely, it writes before a known
+provider expiry (Claude `cleanupPeriodDays`) or for a harness without durable
+native history. Retention never writes raw provider streams. Raw capture
+exists only for a named win beyond retention (decision 3). Nothing opt-in ever
+lands in SQLite.
 
 ## 4. What mirrors the harness, and what to defer
 
 | Loopflow copy | Harness original | Decision |
 |---|---|---|
 | `provider_output` + `conversation` rows (6.1 GB) | Claude `projects/<cwd>/<id>.jsonl`; Codex `sessions/YYYY/MM/DD/rollout-*.jsonl`; OpenCode storage; Pi sessions | **Delete from store.** LOO-570 prune already removes; make the recorder unable to write them (§3). |
-| `runs/*/events.jsonl` verbatim stream | same | **Opt-in** (`capture.stream`). |
+| `runs/*/events.jsonl` verbatim stream | same | **Keep only where tied to a win** (decision 3). Context cost and activity move to facts; harness debugging is the open case. Never kept for retention. |
+| *(new)* Loopflow transcript file, single format | the native transcript while it exists | **Write only when absent at the provider**: retention opt-in before expiry, or a harness without native history. |
 | `user_input` rows (238 MB) | first user message in the native transcript | **Delete from store**; replay reads `runs/<capture>/` prompt file. |
 | observed `usage` (stream copy) | per-message usage in native transcript | **Delete** — native receipt `usage` is the single source. |
 | native `usage` receipts | same, but expire after 30 days in Claude | **Keep** — attribution + longevity are Loopflow's value. |
@@ -160,10 +186,13 @@ ever lands in SQLite.
 Desktop's conversation view) renders turns by reading the native transcript
 through the Session's stored locator, one small reader per harness
 (`harness/<h>_transcript.rs`, `fn turns(locator) -> Option<Vec<Turn>>`), mapping
-into the existing `ConversationItem` types. When the native file is gone (Claude
-30-day cleanup, a deleted Codex home), history shows the retained facts — turn
-times, status, usage, final answer — and says the transcript expired at the
-provider. That is truthful absence, not an error. LOO-324's native-history
+into the existing `ConversationItem` types. Each reader yields the same `Turn` type that
+the Loopflow transcript file serializes, so a query runs across provider files
+and Loopflow files alike. The query covers whatever is still known; it never
+promises completeness. When neither copy exists (Claude 30-day cleanup
+without the opt-in, a deleted Codex home), history shows the retained facts
+(turn times, status, usage, final answer) and says the transcript expired at
+the provider. That is truthful absence, not an error. LOO-324's native-history
 discovery is the same lookup; build it once.
 
 ## 5. The translational layer, and how to simplify it
@@ -204,10 +233,23 @@ Harness driver ─native line─▶ <h>_decode(line) -> Vec<ProviderFact>
 - `ConversationEvent` survives only as the live-display projection (and the
   transcript reader's output type), never persisted.
 - The recorder (`SessionRecorder`, `retained_in_history`, the `events.jsonl`
-  → SQLite path) is deleted; `capture.stream` is a raw tee to a file.
+  → SQLite path) is deleted, and so is raw stream capture (decision 3).
 - The CLI/DTO surface does not change: `lf history`, `lf history usage`,
   `lf monitor`, Desktop's `--json` reads keep their wire types, now fed by facts
   plus the native transcript reader.
+
+### Open: what the decoder's output makes possible (Jack Heart, 2026-10-26)
+
+Jack raised the decoder as an encoding of provider output that Loopflow can then
+work with: searching by token, counting things (tool uses, perhaps
+undercounted categories), and perhaps storing some of those as
+denormalizations in the facts store. Not decided. A test that keeps it
+small: a derived value is stored as a fact only if it must outlive the
+provider transcript (e.g. tool-use counts per turn for months-long analysis,
+which are small) or a hot reader needs it immediately (monitor). Everything
+else is computed at query time from `Turn`s read out of the transcripts. A
+search index would be a rebuildable cache, never truth. That keeps the
+facts store's growth bounded by the number of turns, not the content.
 
 ## 6. Demo
 
@@ -219,31 +261,83 @@ sqlite3 ~/.lf/loopflow.db "select sum(pgsize) from dbstat"   # < 200 MB, growing
 lf history usage --wave infrastructure --weekly   # same totals as before for weeks since 2026-09-30
 lf history show <today's session>                 # turns rendered from ~/.claude/.../<id>.jsonl
 lf history show <a 45-day-old claude session>     # facts + "transcript expired at provider"
+lf history retention                              # Sessions by provider / loopflow / facts, next expiries
 ```
 
-## 7. Decisions for Jack (draft; nothing filed until chosen)
+## 7. Decisions (Jack Heart, 2026-10-26)
 
-1. **Facts-only store by construction** (§3): recorder stops writing stream
-   observations; delete `SessionRecorder` persistence, `retained_in_history`,
-   and — once stores are pruned — the prune's capture pass (`5b0109`) and
-   `RETAINED` SQL. *Recommended.*
-2. **Native usage receipt is the one usage record**; drop stream `usage`
-   observations and their `store_revision_usage_insert` branch. *Recommended*;
-   needs a reader trace first (which of `context_usage.rs`, `lf history usage`
-   read which copy).
-3. **Verbatim stream opt-in** (`capture.stream`, default off). Alternative:
-   keep it default-on since it rotates and is only 74 MB here. The cost of
-   default-on is a second transcript format to maintain, not bytes.
-4. **Transcript rendering from native files** with truthful expiry (§4). This
-   changes what `lf history show` can show for old Sessions. Alternative:
-   keep a compact per-turn summary text in the store for longevity.
-5. **Process rows deleted at exit unless referenced** (§3), replacing the
-   `records_process` denylist and 7-day inspection expiry.
-6. **`disk_budget` excludes provider homes** and reports them separately; rotate
-   `runtime/exec-processes-archive-*` and pre-prune backups/copies.
-7. **One decoder per harness → `ProviderFact`** (§5), merging
-   `_history`, `_mapping` and `activity_tracker`. Largest change; the other
-   decisions do not depend on it, but it removes the double-write class for good.
+1. **Accepted: the store holds facts only, by construction** (§3). The
+   recorder stops writing stream observations. Delete `SessionRecorder`
+   persistence and `retained_in_history`, and, once stores are pruned, the
+   prune's capture pass (`5b0109`) and the `RETAINED` SQL.
+2. **Accepted: the native usage receipt is the one usage record.** Drop
+   stream `usage` observations and their `store_revision_usage_insert` branch.
+   First trace which readers (`context_usage.rs`, `lf history usage`, Desktop)
+   read which copy.
+3. **Accepted: drop raw stream capture entirely.** Its two real readers move
+   to decoder facts: prompt cost per step (`lf history usage --context`) to
+   per-request facts (tokens in, tool-result size, compaction), and live
+   activity to `session_activity`. `lf history show --events` goes. Jack
+   Heart: a debug capture returns only with a named purpose.
+4. **Accepted (Jack Heart, 2026-10-26): providers retain text by default.**
+   Queries run across provider stores, and an opt-in retention setting writes
+   the single Loopflow format only for content absent at the provider (§3, §4).
+   When a transcript is gone, `lf history show` states the expiry and shows
+   the facts.
+
+   **Retention is legible at the top level** (Jack Heart, 2026-10-26). Anyone
+   can see what is retained and what is not, then browse what is still there
+   in one normalized form. Sketch:
+   - Each Session has one retention state, derived at read time and never
+     stored: `provider` (native transcript present), `loopflow` (Loopflow
+     file present), `facts` (only facts remain). Where known, it also has an
+     expiry date, e.g. Claude's `cleanupPeriodDays` counted from the last turn.
+   - A summary view (sketch: `lf history retention`, also shown in Desktop)
+     breaks Sessions down by state, provider, account home and age. It lists
+     what expires next and what the opt-in setting would keep.
+   - Every read of transcript content (`history show`, search across Sessions)
+     goes through the per-harness readers into `Turn`. Callers see one form
+     whatever the source, plus a per-Session source label.
+   - Locating a transcript is the same lookup as LOO-324's native discovery
+     across account homes. Build it once.
+5. **Accepted: Process rows are deleted at exit unless referenced** (§3),
+   replacing the `records_process` denylist and the 7-day inspection expiry.
+6. **Decided (Jack Heart, 2026-10-26): no copying and no syncing.** Loopflow
+   keeps no transcript copies and writes no provider retention settings.
+   Anyone who wants longer Claude history raises `cleanupPeriodDays`
+   themselves. This removes the opt-in Loopflow-format file from §3 and §4 and
+   the `loopflow` retention state from decision 4: a Session is `provider` or
+   `facts`. Earlier reasoning, kept for history: **no `disk_budget`** (Jack
+   Heart). Once the store is facts only,
+   the only reason for a budget is retention beyond the providers', and
+   providers have their own retention knobs. Sketch: one Loopflow setting
+   (`retention.days: 180`) that Loopflow syncs into each harness's own
+   retention setting, replacing the Loopflow-format copy in decision 4
+   wherever the provider has a knob. Measured 2026-10-26: no Claude home
+   (`~/.claude`, three `~/.lf/accounts/claude/*`) sets `cleanupPeriodDays`, so
+   all use Claude's 30-day default. Codex rollouts go back to the start of
+   2026, with no cleanup observed. Open tension: memory
+   `no-global-provider-settings` says lf never writes into global
+   `~/.claude`/`~/.codex` settings. Loopflow-managed homes under
+   `~/.lf/accounts/` can be written; the person's own default home needs
+   either an explicit opt-in write or a per-launch `--settings`, and plain
+   `claude` launches outside lf would still clean up at 30 days.
+   Provider retention (2026-10-26):
+
+   | Harness | Default | Configurable |
+   |---|---|---|
+   | Claude 2.1.310 | deleted at startup after 30 days (`cleanupPeriodDays`) | any number of days ≥ 1; `CLAUDE_CODE_SKIP_PROMPT_HISTORY` writes none |
+   | Codex 0.164.0 | rollouts kept forever (here back to January) | nothing for rollouts; `history.persistence` / `history.max_bytes` cover only `history.jsonl` |
+   | OpenCode 2.0.32 | kept forever (1.2 GB here) | nothing built in; third-party plugins |
+   | Pi 1.3.0 | kept forever | `--no-session` writes none |
+
+   Only Claude deletes, so a synced setting only ever needs Claude's
+   `cleanupPeriodDays`; for the others Loopflow would itself be the pruner.
+   Separately, one-time cleanup of the 906 MB exec archive, the 9.1 GB
+   pre-prune backup and the 38 GB of dev copies.
+7. **Accepted: one decoder per harness → `ProviderFact`** (§5). Four
+   decoders (Claude, Codex, OpenCode, Pi) replace each harness's
+   `_history`/`_mapping` pair and the shared `activity_tracker`.
 
 Immediate, no decision needed: publish v0.14.16 so the LOO-570 prune runs here,
 then re-measure (store, copies, backups).
@@ -254,7 +348,9 @@ then re-measure (store, copies, backups).
 |---|---|---|
 | — | Publish v0.14.16; measure post-prune store, first `lf install` time, copies | release-run; #1666 follow-up |
 | 1, 2 | Store holds Session facts only; one usage record | `5b0109` (delete prune capture pass), LOO-459 (history retention) |
-| 3, 4 | Read conversations from harness transcripts; `capture.stream` opt-in | LOO-324 (native discovery across homes) |
+| 3, 4 | Query conversations across provider transcripts; delete raw stream capture | LOO-324 (native discovery across homes) |
+| 4 | Opt-in retention writes the single Loopflow transcript format only for content absent at the provider | — |
+| 4 | Retention summary: per-Session state (provider / loopflow / facts) with expiry; browse what remains in one normalized `Turn` form | LOO-324 |
 | 5 | Process rows live while running, kept only when referenced | — |
 | 6 | `lf disk` budget covers lf-owned data; provider homes reported | LOO-460, LOO-448 |
 | 7 | One decoder per harness emitting `ProviderFact` | — |
@@ -275,8 +371,11 @@ then re-measure (store, copies, backups).
 
 ## Forbidden outcomes
 
-- A second transcript store in any form (SQLite rows, copied JSONL, reconstructed
-  context) — Jack rejected this for LOO-324 on 2026-10-04.
+- A default second transcript store, or any copy of content the provider still
+  holds (Jack rejected copying for LOO-324 on 2026-10-04). The opt-in
+  Loopflow-format file for content absent at the provider is the one exception.
+- Raw provider originals kept for retention, or kept without a named reader.
+- More than one Loopflow transcript format.
 - A filter that runs after write as the mechanism keeping the store small.
 - Two usage representations, or a reader that sums both.
 - Budget numbers that include data lf cannot rotate.

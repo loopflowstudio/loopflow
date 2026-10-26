@@ -241,18 +241,11 @@ enum CaptureEvent {
     Activity {
         observation: activity::Observation,
     },
-    Handoff {
-        surface: String,
-    },
     Usage {
-        usage_stream_id: String,
         provider: String,
         model: Option<String>,
         attempt_key: String,
         turn_key: String,
-        observation_seq: u64,
-        counter_kind: String,
-        start_known: bool,
         final_receipt: bool,
         usage: Box<TurnUsage>,
     },
@@ -262,17 +255,6 @@ enum CaptureEvent {
     },
     Conversation {
         event: Box<ConversationEvent>,
-    },
-    Text {
-        text: String,
-    },
-    ToolUse {
-        name: String,
-        summary: String,
-    },
-    Result {
-        outcome: String,
-        duration_secs: Option<f64>,
     },
     ProviderOutput {
         stream: String,
@@ -2168,9 +2150,7 @@ struct SessionCapture {
     attempt: u32,
     attempt_started: bool,
     turn_key: String,
-    usage_stream_id: String,
     event_seq: u64,
-    usage_seq: u64,
     recorder: SessionRecorder,
     /// Where facts are kept; none for a mechanical command's capture.
     history: Option<(crate::store::sqlite::SqliteStore, crate::session::LfSession)>,
@@ -2294,9 +2274,7 @@ impl SessionCapture {
             attempt: 1,
             attempt_started: false,
             turn_key: Uuid::new_v4().to_string(),
-            usage_stream_id: Uuid::new_v4().to_string(),
             event_seq: 0,
-            usage_seq: 0,
             recorder,
             history,
             previous_event: None,
@@ -2346,8 +2324,6 @@ impl SessionCapture {
         self.attempt += 1;
         self.attempt_started = false;
         self.turn_key = Uuid::new_v4().to_string();
-        self.usage_stream_id = Uuid::new_v4().to_string();
-        self.usage_seq = 0;
         let start_error = self.start_attempt().err();
         match (finish_error, start_error) {
             (None, None) => Ok(()),
@@ -2369,8 +2345,6 @@ impl SessionCapture {
         match event {
             ConversationEvent::TurnStarted { turn_id } => {
                 self.turn_key = turn_id.clone();
-                self.usage_stream_id = Uuid::new_v4().to_string();
-                self.usage_seq = 0;
                 self.append_event(CaptureEvent::Conversation {
                     event: Box::new(ConversationEvent::TurnStarted { turn_id }),
                 })
@@ -2409,20 +2383,14 @@ impl SessionCapture {
         if !usage.is_reported() {
             return Ok(());
         }
-        self.usage_seq += 1;
         self.append_event(CaptureEvent::Usage {
-            usage_stream_id: self.usage_stream_id.clone(),
             provider: self.provider.clone(),
             model: self.model.clone(),
             attempt_key: self.attempt_key(),
             turn_key: self.turn_key.clone(),
-            observation_seq: self.usage_seq,
-            counter_kind: "cumulative".to_string(),
-            start_known: true,
             final_receipt,
             usage: Box::new(usage),
-        })?;
-        Ok(())
+        })
     }
 
     fn finish(&mut self, outcome: &str) -> std::io::Result<()> {
@@ -3617,7 +3585,6 @@ mod tests {
 
         let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
         assert!(events.contains("\"type\":\"usage\""));
-        assert!(events.contains("\"counter_kind\":\"cumulative\""));
         assert!(events.contains("\"final_receipt\":false"));
         assert!(!events.contains("\"final_receipt\":true"));
         assert!(events.contains("\"type\":\"user_input\""));
@@ -4310,9 +4277,7 @@ mod tests {
         assert_eq!(usage.len(), 2);
         assert_eq!(usage[0]["usage"]["input_tokens"], 10);
         assert_eq!(usage[1]["usage"]["input_tokens"], 12);
-        assert_ne!(usage[0]["usage_stream_id"], usage[1]["usage_stream_id"]);
-        assert_eq!(usage[0]["observation_seq"], 1);
-        assert_eq!(usage[1]["observation_seq"], 1);
+        assert_ne!(usage[0]["attempt_key"], usage[1]["attempt_key"]);
         assert_eq!(usage[0]["final_receipt"], false);
         assert_eq!(usage[1]["final_receipt"], false);
     }
@@ -4321,9 +4286,9 @@ mod tests {
     fn telemetry_loss_cannot_keep_retry_evidence_on_the_prior_attempt() {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        let prior_stream = {
+        let prior_attempt = {
             let mut state = capture.0.lock().unwrap();
-            let stream = state.usage_stream_id.clone();
+            let stream = state.attempt_key();
             state.recorder.sender = None;
             stream
         };
@@ -4341,11 +4306,11 @@ mod tests {
         assert_eq!(state.provider, "fallback");
         assert_eq!(state.model.as_deref(), Some("next"));
         assert!(state.attempt_started);
-        assert_ne!(state.usage_stream_id, prior_stream);
+        assert_ne!(state.attempt_key(), prior_attempt);
     }
 
     #[test]
-    fn usage_keeps_omissions_and_resets_sequence_for_each_provider_turn() {
+    fn usage_keeps_omissions_for_each_provider_turn() {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
             .expect("publish Session capture manifest");
@@ -4398,9 +4363,8 @@ mod tests {
             usage[1]["usage"]["total_input_tokens"],
             serde_json::Value::Null
         );
-        assert_ne!(usage[1]["usage_stream_id"], usage[2]["usage_stream_id"]);
-        assert_eq!(usage[1]["observation_seq"], 2);
-        assert_eq!(usage[2]["observation_seq"], 1);
+        assert_eq!(usage[1]["turn_key"], "provider-turn");
+        assert_eq!(usage[2]["turn_key"], "provider-turn-2");
     }
 
     #[test]

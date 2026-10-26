@@ -4,7 +4,7 @@ use serde_json::Value;
 use crate::id::AgentSessionId;
 use crate::session::{SessionEvent, SessionEventKind};
 use crate::session_record::ProviderSessionRef;
-use crate::store::{StoreError, StoreResult};
+use crate::store::{ProviderAccountId, StoreError, StoreResult};
 
 use super::SqliteStore;
 
@@ -22,6 +22,148 @@ impl SqliteStore {
                 .map(|event| event.payload),
         )
         .map_err(|error| StoreError::InvalidData(error.to_string()))
+    }
+
+    /// What the store kept of each provider conversation `session` used, in
+    /// the order it first used them: each turn's start, settlement and final
+    /// answer from native receipts, and the account it ran on.
+    pub(crate) fn session_turn_facts(
+        &self,
+        session: &str,
+    ) -> StoreResult<Vec<crate::transcript::ThreadFacts>> {
+        use crate::transcript::{ThreadFacts, TurnFacts};
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
+        let mut threads: Vec<ThreadFacts> = Vec::new();
+        {
+            let mut query = conn.prepare(
+                "SELECT e.provider_thread,e.provider_turn,e.kind,e.observed_at,e.payload,
+                        json_extract(c.payload,'$.provider')
+                 FROM session_events e
+                 LEFT JOIN session_events c ON c.seq=e.captured_event AND c.kind='captured'
+                 WHERE e.session_id=?1 AND e.kind IN ('started','completed','output')
+                   AND e.provider_thread IS NOT NULL
+                 ORDER BY e.seq",
+            )?;
+            let mut rows = query.query([session])?;
+            while let Some(row) = rows.next()? {
+                let thread: String = row.get(0)?;
+                let turn: Option<String> = row.get(1)?;
+                let kind: String = row.get(2)?;
+                let at: i64 = row.get(3)?;
+                let payload: Value = serde_json::from_str(&row.get::<_, String>(4)?)?;
+                let harness: Option<String> = row.get(5)?;
+                let index = match threads.iter().position(|t| t.thread.as_str() == thread) {
+                    Some(index) => index,
+                    None => {
+                        threads.push(ThreadFacts {
+                            thread: thread.as_str().into(),
+                            harness: None,
+                            account: None,
+                            turns: Vec::new(),
+                        });
+                        threads.len() - 1
+                    }
+                };
+                let facts = &mut threads[index];
+                if facts.harness.is_none() {
+                    facts.harness = harness;
+                }
+                let turn = turn.unwrap_or_default();
+                let position = match facts.turns.iter().position(|t| t.turn == turn) {
+                    Some(position) => position,
+                    None => {
+                        facts.turns.push(TurnFacts {
+                            turn,
+                            started_at: None,
+                            settled_at: None,
+                            status: None,
+                            final_answer: None,
+                        });
+                        facts.turns.len() - 1
+                    }
+                };
+                let entry = &mut facts.turns[position];
+                match kind.as_str() {
+                    "started" => entry.started_at = Some(at),
+                    "completed" => {
+                        entry.settled_at = Some(at);
+                        entry.status = payload["status"].as_str().map(str::to_owned);
+                    }
+                    _ => {
+                        entry.final_answer = match payload.get("value") {
+                            Some(value) => Some(serde_json::to_string(value)?),
+                            None => payload["text"].as_str().map(str::to_owned),
+                        }
+                    }
+                }
+            }
+        }
+        let (current, provider): (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT provider_thread,provider FROM agent_sessions WHERE id=?1",
+                [session],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .unwrap_or_default();
+        if let Some(current) = current {
+            if !threads.iter().any(|t| t.thread.as_str() == current) {
+                threads.push(ThreadFacts {
+                    thread: current.as_str().into(),
+                    harness: provider.clone(),
+                    account: None,
+                    turns: Vec::new(),
+                });
+            }
+        }
+        let mut account = conn.prepare(
+            "SELECT account_id FROM provider_session_accounts
+             WHERE provider=?1 AND provider_session_id=?2",
+        )?;
+        for facts in &mut threads {
+            if facts.harness.is_none() {
+                facts.harness = provider.clone();
+            }
+            facts.account = account
+                .query_row(params![facts.harness, facts.thread.as_str()], |row| {
+                    row.get::<_, String>(0)
+                })
+                .optional()?
+                .and_then(|account| ProviderAccountId::parse(&account).ok());
+        }
+        Ok(threads)
+    }
+
+    /// Every Session with its current provider conversation and the account
+    /// it ran on, for the retention summary.
+    pub(crate) fn retention_sessions(
+        &self,
+    ) -> StoreResult<Vec<crate::transcript::summary::RetainedSession>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT s.id,s.title,s.provider,s.provider_thread,s.cwd,
+                    MAX(s.created_at,COALESCE(s.completed_at,0)),
+                    (SELECT account_id FROM provider_session_accounts a
+                     WHERE a.provider=s.provider AND a.provider_session_id=s.provider_thread)
+             FROM agent_sessions s WHERE s.provider IS NOT NULL ORDER BY s.created_at,s.id",
+        )?;
+        let rows = query.query_map([], |row| {
+            Ok(crate::transcript::summary::RetainedSession {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                harness: row.get(2)?,
+                thread: row
+                    .get::<_, Option<String>>(3)?
+                    .map(|thread| thread.as_str().into()),
+                cwd: row.get::<_, String>(4)?.into(),
+                last_at: row.get(5)?,
+                account: row
+                    .get::<_, Option<String>>(6)?
+                    .and_then(|account| ProviderAccountId::parse(&account).ok()),
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// Original input order survives importing earlier observations after later ones.

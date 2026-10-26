@@ -89,7 +89,7 @@ invocations run interactively; automated and `--batch` invocations are
 headless. Put interactive review on the exact Graph occurrence instead:
 
 ```yaml
-- interactive: review-design
+- interactive: explore
 ```
 
 Then a one-line summary immediately after the closing `---`. This line captures the essence—what the prompt is for. No preamble, no "This prompt will...". Just state it.

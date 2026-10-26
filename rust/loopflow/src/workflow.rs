@@ -392,19 +392,19 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         let feature = load_workflow("feature", repo.path()).unwrap().unwrap();
         let stages: Vec<_> = feature.nodes.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(stages, ["review-design", "demo", "verify"]);
-        assert_eq!(feature.nodes[0].skill, "review-design");
+        assert_eq!(stages, ["explore", "demo", "verify"]);
+        assert_eq!(feature.nodes[0].skill, "explore");
         assert!(feature.nodes[0].description.is_some());
         assert_eq!(
             routes(&feature, START),
-            [("kickoff".to_string(), "review-design".to_string())]
+            [("kickoff".to_string(), "explore".to_string())]
         );
         // From a stage: back around its loop, or on; routes are named by what
         // they run first, the composed graph before the bare skill.
         assert_eq!(
-            routes(&feature, "review-design"),
+            routes(&feature, "explore"),
             [
-                ("kickoff".to_string(), "review-design".to_string()),
+                ("kickoff".to_string(), "explore".to_string()),
                 ("pursue".to_string(), "demo".to_string())
             ]
         );
@@ -460,9 +460,9 @@ mod tests {
             routes[index as usize].start.clone().map(|c| c.index)
         };
         assert_eq!(start(START, "kickoff"), Some(0));
-        // Repeating review-design returns to kickoff; advancing runs pursue's first step.
-        assert_eq!(start("review-design", "kickoff"), Some(0));
-        let pursue = start("review-design", "pursue").unwrap();
+        // Repeating explore returns to kickoff; advancing runs pursue's first step.
+        assert_eq!(start("explore", "kickoff"), Some(0));
+        let pursue = start("explore", "pursue").unwrap();
         assert!(
             matches!(&graph.steps[pursue], crate::graph::ConcreteStep::Skill(s) if s.sources.get(1).map(String::as_str) == Some("pursue"))
         );

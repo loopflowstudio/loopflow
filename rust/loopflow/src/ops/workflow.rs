@@ -135,7 +135,7 @@ impl Workflow {
         }
     }
 
-    /// The stage where a person takes part now, such as `review-design` or `demo`.
+    /// The stage where a person takes part now, such as `explore` or `demo`.
     pub(crate) fn person_node(&self) -> Option<&str> {
         match &self.position {
             WorkflowPosition::Node { node } if self.definition.node(node).is_some() => Some(node),
@@ -280,7 +280,7 @@ mod tests {
         assert_eq!(stopped.outgoing, [1, 2]);
         let guidance = stopped.guidance("INF-1");
         assert!(
-            guidance.contains("stopped on pursue (review-design → demo)"),
+            guidance.contains("stopped on pursue (explore → demo)"),
             "{guidance}"
         );
         assert!(guidance.contains("`lf graph list --for-task INF-1`"));

@@ -1266,14 +1266,14 @@ mod tests {
         fs::create_dir_all(&graphs).unwrap();
         fs::write(
             graphs.join("choice.yaml"),
-            "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - step:\n              id: revise_choice\n              name: implement\n          - interactive:\n              id: review_choice\n              name: review-design\n",
+            "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - step:\n              id: revise_choice\n              name: implement\n          - interactive:\n              id: review_choice\n              name: explore\n",
         )
         .unwrap();
         let graph = crate::graph::load_graph("choice", repo.path()).unwrap();
         let items = crate::graph::compile_graph(&graph, repo.path()).unwrap();
         assert!(render_pipeline_lines(&items)
             .iter()
-            .any(|line| line.contains("review-design [stage review_choice]")));
+            .any(|line| line.contains("explore [stage review_choice]")));
     }
 
     #[test]

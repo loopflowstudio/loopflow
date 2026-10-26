@@ -707,10 +707,10 @@ mod tests {
         };
         assert_eq!(at("start"), ShipStep::Edge("kickoff".into()));
         assert_eq!(
-            at("review-design"),
+            at("explore"),
             ShipStep::StandIn {
-                stage: "review-design".into(),
-                skill: "review-design".into(),
+                stage: "explore".into(),
+                skill: "explore".into(),
                 advance: "pursue".into(),
                 repeat: Some("kickoff".into()),
             }

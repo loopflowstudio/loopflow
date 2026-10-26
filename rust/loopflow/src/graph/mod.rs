@@ -1307,7 +1307,7 @@ mod tests {
         fs::create_dir_all(&graphs).unwrap();
         fs::write(
             graphs.join("review.yaml"),
-            "- interactive: review-design\n- interactive: {name: demo, id: final-demo}\n",
+            "- interactive: explore\n- interactive: {name: demo, id: final-demo}\n",
         )
         .unwrap();
         let graph = load_graph("review", tmp.path()).unwrap();
@@ -1319,16 +1319,16 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(stages, ["review-design", "final-demo"]);
+        assert_eq!(stages, ["explore", "final-demo"]);
 
         fs::write(
             graphs.join("retired.yaml"),
-            "- step:\n    name: review-design\n    human: true\n",
+            "- step:\n    name: explore\n    human: true\n",
         )
         .unwrap();
         let error = load_graph("retired", tmp.path()).unwrap_err();
         assert!(error.to_string().contains("retired"), "{error}");
-        fs::write(graphs.join("item.yaml"), "- human: review-design\n").unwrap();
+        fs::write(graphs.join("item.yaml"), "- human: explore\n").unwrap();
         let error = load_graph("item", tmp.path()).unwrap_err();
         assert!(
             error.to_string().contains("interactive: <skill>"),
@@ -1428,7 +1428,7 @@ mod tests {
         fs::create_dir_all(&graphs).unwrap();
         fs::write(
             graphs.join("inner.yaml"),
-            "- step:\n    id: revise\n    name: implement\n- interactive:\n    id: review_kickoff\n    name: review-design\n",
+            "- step:\n    id: revise\n    name: implement\n- interactive:\n    id: review_kickoff\n    name: explore\n",
         )
         .unwrap();
         fs::write(graphs.join("outer.yaml"), "- graph: inner\n").unwrap();
@@ -1450,7 +1450,7 @@ mod tests {
         fs::create_dir_all(&graphs).unwrap();
         fs::write(
             graphs.join("inner.yaml"),
-            "- interactive:\n    id: review_kickoff\n    name: review-design\n",
+            "- interactive:\n    id: review_kickoff\n    name: explore\n",
         )
         .unwrap();
         fs::write(

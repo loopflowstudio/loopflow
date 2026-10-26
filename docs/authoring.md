@@ -263,7 +263,7 @@ take part in the Task conversation. Everything between stages runs on its own.
 # .lf/graphs/feature.yaml
 - kickoff
 - loop: kickoff
-  interactive: review-design   # you review the plan; repeat or go on
+  interactive: explore         # you choose what to build; repeat or go on
 - graph: pursue
 - loop: implement
   interactive: demo            # you try the change
@@ -273,11 +273,11 @@ take part in the Task conversation. Everything between stages runs on its own.
 ```
 
 ```bash
-lf task run DES-123            # start: runs kickoff up to review-design
-lf task run DES-123 pursue     # at review-design: build it, up to demo
+lf task run DES-123            # start: runs kickoff up to explore
+lf task run DES-123 pursue     # at explore: build it, up to demo
 lf ship DES-123                # run every remaining step to merge (no ISSUE: this checkout's Task)
 lf task status DES-123         # stage, or the route it is on
-lf task workflow move DES-123 review-design    # go back without running anything
+lf task workflow move DES-123 explore    # go back without running anything
 ```
 
 `start` and `end` are implicit. Routes between stages are projected from the
@@ -326,7 +326,7 @@ can be chosen now and every move with who made it and its `--reason`. There
 is no approve or complete command. Give feedback in the Task conversation,
 which is told its stage's skill and the command for each route leaving it. `lf --task ISSUE graph GRAPH` runs a Graph without moving the Task.
 
-Builtins are `feature` (review-design, demo, then `deliver`), `code` (demo,
+Builtins are `feature` (explore, demo, then `deliver`), `code` (demo,
 then `deliver`) and `research` (research, no PR). `lf wave workflow list`
 lists Workflows; `lf graph list` lists autonomous Graphs. To edit a Workflow,
 copy the builtin into `.lf/graphs/`, edit and commit it, then select it for

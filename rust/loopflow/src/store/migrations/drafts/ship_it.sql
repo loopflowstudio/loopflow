@@ -10,7 +10,7 @@ CREATE TRIGGER task_workflow_graph_is_fixed BEFORE UPDATE OF graph ON task_workf
 END;
 
 -- Builtin stages are named by their skills: the `design` and `findings` nodes of the
--- earlier definitions are `review-design` and `research`. The history table is
+-- earlier definitions are `explore` and `research`. The history table is
 -- append-only, so it is rebuilt with its rows, index and triggers.
 CREATE TABLE task_workflow_moves_renamed (
     seq INTEGER PRIMARY KEY,
@@ -26,8 +26,8 @@ CREATE TABLE task_workflow_moves_renamed (
 ) STRICT;
 INSERT INTO task_workflow_moves_renamed(seq,task_id,workflow,kind,from_node,to_node,edge,lf_process_id,note,at)
 SELECT seq,task_id,workflow,kind,
-    CASE from_node WHEN 'design' THEN 'review-design' WHEN 'findings' THEN 'research' ELSE from_node END,
-    CASE to_node WHEN 'design' THEN 'review-design' WHEN 'findings' THEN 'research' ELSE to_node END,
+    CASE from_node WHEN 'design' THEN 'explore' WHEN 'findings' THEN 'research' ELSE from_node END,
+    CASE to_node WHEN 'design' THEN 'explore' WHEN 'findings' THEN 'research' ELSE to_node END,
     edge,lf_process_id,note,at FROM task_workflow_moves;
 DROP TABLE task_workflow_moves;
 ALTER TABLE task_workflow_moves_renamed RENAME TO task_workflow_moves;

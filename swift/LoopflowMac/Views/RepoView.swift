@@ -42,16 +42,8 @@ struct RepoView: View {
 
     @ToolbarContentBuilder
     private var workToolbar: some ToolbarContent {
-#if compiler(>=6.2)
-        if #available(macOS 26.0, *) {
-            ToolbarItem(placement: .navigation) { WorkBreadcrumbs(model: model) }
-                .sharedBackgroundVisibility(.hidden)
-        } else {
-            ToolbarItem(placement: .navigation) { WorkBreadcrumbs(model: model) }
-        }
-#else
         ToolbarItem(placement: .navigation) { WorkBreadcrumbs(model: model) }
-#endif
+            .sharedBackgroundVisibility(.hidden)
     }
 
     var body: some View {

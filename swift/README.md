@@ -229,8 +229,18 @@ the file list and selected diff. A recorded PR links above the file navigator.
 Use ↑/↓ in the navigator to select files; hover a row for its full path.
 Closing the pane keeps its drafts in this window.
 
-**File** retains editable UTF-8 drafts and selection in this window; **Diff**
-shows the draft comparison read-only. Task headers show the recorded checkout;
+**Read** is where documents open: Markdown renders formatted, HTML as a live
+page that runs its scripts but never reaches the network. Links open in the
+browser. **Edit** retains editable UTF-8 drafts and selection in this window;
+**Diff** shows the draft comparison read-only.
+
+When an agent writes a `scratch/**/*.md` or `.html` file, Files reloads it if it
+is showing, or follows it. It takes the view only when nothing is selected, when
+the current document was itself followed, or when you haven't touched Files for
+two minutes. Edit, Diff, an unsaved draft or keyboard focus in Files keep your
+view; the page then opens as a tab beside it.
+
+Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
 Changing Work assignment leaves the recorded checkout Machine and path intact.
 Files panes retain their opening location through Close/Undo, including a first open

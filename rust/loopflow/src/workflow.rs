@@ -331,10 +331,10 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         let feature = load_workflow("feature", repo.path()).unwrap().unwrap();
         let nodes: Vec<_> = feature.nodes.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(nodes, ["design", "demo"]);
+        assert_eq!(nodes, ["explore", "demo"]);
         assert_eq!(
             feature.nodes[0].description.as_deref(),
-            Some("you review the plan")
+            Some("you choose what to build")
         );
         let from_demo: Vec<_> = feature
             .outgoing("demo")

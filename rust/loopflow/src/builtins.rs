@@ -269,7 +269,6 @@ mod tests {
             "task/pursue",
             "task/mutate",
             "iterate",
-            "explore",
             "scan",
             "assess",
             "mutate",
@@ -283,6 +282,7 @@ mod tests {
             "s4-assess",
             "s5-scan",
             "s5-assess",
+            "review-design",
         ] {
             assert!(get_builtin_skill(name).is_none(), "{name}");
         }
@@ -317,7 +317,7 @@ mod tests {
             "reduce",
             "polish",
             "concept-review",
-            "review-design",
+            "explore",
             "research",
             "qa",
             "triage",

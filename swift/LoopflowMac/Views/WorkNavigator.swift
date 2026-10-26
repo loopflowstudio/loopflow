@@ -14,6 +14,8 @@ struct WorkNavigator: View {
     /// The clicked Wave row moves to the top; a Dashboard's label into the list header.
     @Namespace private var scopeTitle
     @State private var wavesHeight: CGFloat = 130
+    /// Pointing at the Waves section reveals New Wave; only that row reads it.
+    @State private var wavesHover = HoverFlag()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var listTitle: String {
@@ -142,13 +144,14 @@ struct WorkNavigator: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(model.visibleRoadmaps.filter { $0.wave.id != model.sidebarWave?.wave.id }, id: \.wave.id) { waveRow($0) }
+                NewWaveRow(model: model, hover: wavesHover)
             }.padding(8)
         }
         .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
             wavesHeight = height
         }
         .frame(height: min(wavesHeight, model.navigation.sidebarWavesHeight))
-        .modifier(NewWaveOnHover(model: model))
+        .hoverSource(wavesHover)
     }
 
     /// The repository is the default Wave; it lists Working Tasks and can't be edited.
@@ -476,29 +479,29 @@ extension WorkJumpScope {
     }
 }
 
-/// A + appears while the pointer is over the Waves section; it names and authors a Wave.
-/// Hover state lives here so crossing the section re-renders only the button.
-private struct NewWaveOnHover: ViewModifier {
+/// The last row of the Waves list while the pointer is over it; names and authors a Wave.
+private struct NewWaveRow: View {
     let model: WorkModel
+    let hover: HoverFlag
     @Environment(\.palette) private var palette
-    @State private var hovering = false
     @State private var naming = false
     @State private var name = ""
     @State private var error: String?
 
-    func body(content: Content) -> some View {
-        content
-            .onHover { hovering = $0 }
-            .overlay(alignment: .topTrailing) {
-                Button { naming = true } label: { Image(systemName: "plus").padding(6).contentShape(Rectangle()) }
-                    .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
-                    .padding(.top, 12).padding(.trailing, 12)
-                    .opacity(hovering || naming ? 1 : 0)
-                    .help("New Wave")
-                    .accessibilityLabel("New Wave")
-                    .accessibilityIdentifier("work-new-wave")
-                    .popover(isPresented: $naming, arrowEdge: .trailing) { form }
-            }
+    var body: some View {
+        HoverRevealed(flag: hover) {
+            Button { naming = true } label: {
+                HStack {
+                    Image(systemName: "plus")
+                    Text("New Wave").lineLimit(1)
+                    Spacer()
+                }.font(Typography.body(13)).foregroundStyle(palette.textSecondary).padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(RoundedRectangle(cornerRadius: 6))
+            }.buttonStyle(.plain)
+                .accessibilityIdentifier("work-new-wave")
+                .popover(isPresented: $naming, arrowEdge: .trailing) { form }
+        }
     }
 
     private var form: some View {

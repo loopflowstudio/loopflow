@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use rusqlite::{Connection, Row};
 use serde_json::Value;
 
+use super::children::ids_json;
 use super::SqliteStore;
 use crate::durable::{ProjectId, TaskId};
 use crate::store::planning_sync::{PlanningSyncChange, PlanningSyncState, PlanningSyncStatus};
@@ -29,7 +30,7 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         let connected = crate::ops::planning_client::connected(&repo);
-        let ids = Value::from(vec![project.as_str()]).to_string();
+        let ids = ids_json([project.as_str()]);
         let mut changes = fields(&tx, "project", &ids, connected, false)?;
         append(&tx, &mut changes,
             "SELECT c.successor_id,'creation',COALESCE(json_extract(c.export_json,'$.input'),c.local_plan_json),c.export_attempted OR c.export_link_attempted,c.export_error,NULL,p.id
@@ -50,7 +51,7 @@ pub(super) fn task_planning_syncs_in(
     conn: &Connection,
     tasks: &[TaskId],
 ) -> StoreResult<HashMap<TaskId, PlanningSyncStatus>> {
-    let ids = super::children::task_ids_json(tasks);
+    let ids = ids_json(tasks.iter().map(TaskId::as_str));
     let mut statement = conn.prepare(
         "SELECT t.id,w.repo,p.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
          LEFT JOIN projects p ON p.id=t.project_id WHERE t.id IN (SELECT value FROM json_each(?1))",
@@ -74,20 +75,8 @@ pub(super) fn task_planning_syncs_in(
     }
     let mut statuses = HashMap::new();
     for (connected, group) in groups {
-        let task_ids = Value::from(
-            group
-                .iter()
-                .map(|(task, _)| task.as_str())
-                .collect::<Vec<_>>(),
-        )
-        .to_string();
-        let project_ids = Value::from(
-            group
-                .iter()
-                .filter_map(|(_, project)| project.as_deref())
-                .collect::<Vec<_>>(),
-        )
-        .to_string();
+        let task_ids = ids_json(group.iter().map(|(task, _)| task.as_str()));
+        let project_ids = ids_json(group.iter().filter_map(|(_, project)| project.as_deref()));
         let task_fields = fields(conn, "task", &task_ids, connected, false)?;
         let project_fields = fields(conn, "project", &project_ids, connected, true)?;
         let mut receipts = Vec::new();

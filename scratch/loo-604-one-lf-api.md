@@ -180,4 +180,5 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
 - `cargo test --test integration -- task_list_query planning_statements lifecycle_world`: passed (Graph batching, `task list [query]`, `--done --since`); `--test two_people`: passed.
 - `cargo test --lib -- local_planning wave_resolution_matrix task_execution graph_inventory task_work`: 58 passed, 1 failed — `store::tests::separate_task_worktree_tracks_and_collapses_its_parent_pr` needs a global Git `user.email` the test HOME lacks; untouched code, left to CI (which sets one).
 - `cargo clippy --all-targets -- -D warnings`: clean; `docs/lf-reference.md` regenerated.
+- Compress (one `ids_json` for batch-read ID arrays, one `repository_scope` for `lf task list` reads): clippy clean; `--test integration -- task_list_query planning_statements closed_task_pages lifecycle_world` 4 passed; `--lib -- planning_sync task_ownership graph_inventory task_work children` 38 passed, same 1 global-`user.email` failure (CI).
 - Live p99 A/B with an installed build: deferred to gate/demo.

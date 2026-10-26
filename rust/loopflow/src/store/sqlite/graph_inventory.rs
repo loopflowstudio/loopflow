@@ -46,12 +46,11 @@ pub(super) fn graphs_in(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     // Every Graph's steps in one statement, so a reading of many Graphs costs two.
-    let ids = serde_json::to_string(
-        &graph_processes
+    let ids = super::children::ids_json(
+        graph_processes
             .iter()
-            .map(|(process, _, _)| process.id.as_str())
-            .collect::<Vec<_>>(),
-    )?;
+            .map(|(process, _, _)| process.id.as_str()),
+    );
     let mut steps = HashMap::<String, Vec<GraphProcessStep>>::new();
     for row in conn
         .prepare(&format!(
@@ -166,7 +165,7 @@ fn process_inputs(
     conn: &Connection,
     processes: &[&LfProcessId],
 ) -> StoreResult<HashMap<LfProcessId, (String, String, i64)>> {
-    let ids = serde_json::to_string(&processes.iter().map(|id| id.as_str()).collect::<Vec<_>>())?;
+    let ids = super::children::ids_json(processes.iter().map(|id| id.as_str()));
     // Agent Processes record a bare executable name, not an argv array.
     let rows = conn
         .prepare(
@@ -334,16 +333,15 @@ impl SqliteStore {
             .iter()
             .filter_map(|graph| graph.latest().map(|step| &step.process.id))
             .collect();
-        let unfinished = serde_json::to_string(
-            &graphs
+        let unfinished = super::children::ids_json(
+            graphs
                 .iter()
                 .flat_map(|graph| {
                     std::iter::once(&graph.process).chain(graph.latest().map(|step| &step.process))
                 })
                 .filter(|process| process.completed_at.is_none())
-                .map(|process| process.id.as_str())
-                .collect::<Vec<_>>(),
-        )?;
+                .map(|process| process.id.as_str()),
+        );
         let conn = self.conn.lock().expect("store mutex poisoned");
         let inputs = process_inputs(&conn, &steps)?;
         let home = conn

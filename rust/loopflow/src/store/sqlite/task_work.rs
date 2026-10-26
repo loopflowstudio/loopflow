@@ -169,14 +169,14 @@ fn latest_task_graphs(
              WHERE id IN (SELECT value FROM json_each(?1))"
         )?
     ))?;
-    let ids = serde_json::to_string(&tasks.iter().map(|id| id.as_str()).collect::<Vec<_>>())?;
+    let ids = super::children::ids_json(tasks.iter().map(|id| id.as_str()));
     for row in query.query_map([&ids], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })? {
         let (task, graph) = row?;
         latest.insert(task, graph);
     }
-    let ids = serde_json::to_string(&latest.values().collect::<Vec<_>>())?;
+    let ids = super::children::ids_json(latest.values().map(String::as_str));
     let graphs: HashMap<_, _> = super::graph_inventory::graphs_in(
         conn,
         "e.id IN (SELECT value FROM json_each(?1))",

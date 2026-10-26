@@ -521,13 +521,9 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
         let open = super::durable::task_open_sql("t");
-        let wave = if wave_id.is_some() {
-            "p.wave_id=?2"
-        } else {
-            "?2 IS NULL"
-        };
         let query = format!(
-            "{TASK_COLUMNS} WHERE t.repository_id=?1 AND {wave} AND NOT {open} AND {TASK_VISIBLE}
+            "{TASK_COLUMNS} WHERE t.repository_id=?1 AND (?2 IS NULL OR p.wave_id=?2)
+             AND NOT {open} AND {TASK_VISIBLE}
              AND (?3 IS NULL OR ({TASK_CLOSED_AT},t.id) < (
                 SELECT {TASK_CLOSED_AT},t.id FROM tasks t WHERE t.id=?3))
              AND (?5 IS NULL OR {TASK_CLOSED_AT}>=?5)
@@ -1280,7 +1276,7 @@ pub(super) fn task_acquisitions_in(
     tasks: &[&Task],
     allow_pending_membership: bool,
 ) -> StoreResult<HashMap<TaskId, crate::store::TaskAcquisition>> {
-    let ids = task_ids_json(tasks.iter().map(|task| &task.id));
+    let ids = ids_json(tasks.iter().map(|task| task.id.as_str()));
     let linear: std::collections::HashSet<&TaskId> = tasks
         .iter()
         .filter(|task| task.linear_id.is_some())
@@ -1348,11 +1344,11 @@ pub(super) fn task_acquisitions_in(
     .collect()
 }
 
-/// Task IDs as the JSON array batch reads expand with `json_each(?1)`.
-pub(super) fn task_ids_json<'a>(ids: impl IntoIterator<Item = &'a TaskId>) -> String {
+/// IDs as the JSON array batch reads expand with `json_each(?1)`.
+pub(super) fn ids_json<'a>(ids: impl IntoIterator<Item = &'a str>) -> String {
     serde_json::Value::Array(
         ids.into_iter()
-            .map(|id| serde_json::Value::String(id.as_str().to_owned()))
+            .map(|id| serde_json::Value::String(id.to_owned()))
             .collect(),
     )
     .to_string()

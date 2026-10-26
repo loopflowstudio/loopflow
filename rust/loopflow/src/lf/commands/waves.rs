@@ -797,26 +797,13 @@ async fn open_tasks(
     repo: &Path,
     query: &TaskQuery<'_>,
 ) -> Result<Vec<RoadmapTask>> {
-    let canonical = crate::repository::CanonicalRepo::discover(repo)?;
-    let Some(repository) = store.sqlite.repository_id(&canonical.to_string())? else {
+    let Some(scope) = repository_scope(store, repo, query.wave).await? else {
         return Ok(Vec::new());
     };
-    let wave = match query.wave {
-        Some(name) => Some(
-            crate::work::wave::context::resolve_managed_wave(
-                Some(store),
-                Some(repo),
-                Some(name),
-                None,
-            )
-            .await?,
-        ),
-        None => None,
-    };
     let tasks = store.sqlite.open_tasks_matching(
-        &repository,
+        &scope.id,
         query.text,
-        wave.as_ref().map(Wave::id),
+        scope.wave.as_ref().map(Wave::id),
         query.project,
     )?;
     let shared = SharedTaskReads::read(store).await?;
@@ -840,6 +827,42 @@ async fn open_tasks(
         })
         .map(roadmap_task)
         .collect())
+}
+
+/// The repository `lf task list` reads, and the Wave it narrows to.
+struct RepositoryScope {
+    repo: String,
+    id: crate::durable::RepositoryId,
+    wave: Option<Wave>,
+}
+
+/// `None` when the store has never seen the repository.
+async fn repository_scope(
+    store: &SharedStore,
+    repo: &Path,
+    wave: Option<&str>,
+) -> Result<Option<RepositoryScope>> {
+    let canonical = crate::repository::CanonicalRepo::discover(repo)?.to_string();
+    let Some(id) = store.sqlite.repository_id(&canonical)? else {
+        return Ok(None);
+    };
+    let wave = match wave {
+        Some(name) => Some(
+            crate::work::wave::context::resolve_managed_wave(
+                Some(store),
+                Some(repo),
+                Some(name),
+                None,
+            )
+            .await?,
+        ),
+        None => None,
+    };
+    Ok(Some(RepositoryScope {
+        repo: canonical,
+        id,
+        wave,
+    }))
 }
 
 /// `lf task list --done --json`: one page of closed Tasks.
@@ -906,36 +929,23 @@ async fn closed_task_page(
             Ok(format_time(since).expect("a UTC timestamp formats as RFC 3339"))
         })
         .transpose()?;
-    let canonical = crate::repository::CanonicalRepo::discover(repo)?;
-    let Some(repository) = store.sqlite.repository_id(&canonical.to_string())? else {
+    let Some(scope) = repository_scope(store, repo, wave).await? else {
         return Ok(ClosedTaskPageSnapshot {
             tasks: Vec::new(),
             next: None,
         });
     };
-    let wave = match wave {
-        Some(name) => Some(
-            crate::work::wave::context::resolve_managed_wave(
-                Some(store),
-                Some(repo),
-                Some(name),
-                None,
-            )
-            .await?,
-        ),
-        None => None,
-    };
     let after = after
         .map(|selector| {
             store
                 .sqlite
-                .resolve_task_id(selector, Some(&canonical.to_string()))?
+                .resolve_task_id(selector, Some(&scope.repo))?
                 .ok_or_else(|| anyhow!("no Task {selector} to continue after"))
         })
         .transpose()?;
     let page = store.sqlite.closed_tasks_page(
-        &repository,
-        wave.as_ref().map(Wave::id),
+        &scope.id,
+        scope.wave.as_ref().map(Wave::id),
         since.as_deref(),
         after.as_ref(),
         limit,

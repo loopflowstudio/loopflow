@@ -44,19 +44,22 @@ fn logs_in(conn: &Connection, tasks: &[TaskId]) -> StoreResult<HashMap<TaskId, V
          FROM task_ownership WHERE task_id IN (SELECT value FROM json_each(?1))
          ORDER BY ordered_at IS NULL,ordered_at,at,rowid",
     )?;
-    let rows = statement.query_map([super::children::task_ids_json(tasks)], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, Option<String>>(3)?,
-            row.get::<_, Option<String>>(4)?,
-            row.get::<_, Option<String>>(5)?,
-            row.get::<_, i64>(6)?,
-            row.get::<_, bool>(7)?,
-            row.get::<_, String>(8)?,
-        ))
-    })?;
+    let rows = statement.query_map(
+        [super::children::ids_json(tasks.iter().map(TaskId::as_str))],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, bool>(7)?,
+                row.get::<_, String>(8)?,
+            ))
+        },
+    )?;
     let mut logs = HashMap::<TaskId, Vec<Row>>::new();
     for row in rows {
         let (id, kind, person, person_key, machine, machine_label, at, written_here, task) = row?;

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use rusqlite::Connection;
 
 use super::children::{
-    map_task_event_row, map_task_pr_row, task_acquisitions_in, task_ids_json, TASK_PR_COLUMNS,
+    ids_json, map_task_event_row, map_task_pr_row, task_acquisitions_in, TASK_PR_COLUMNS,
 };
 use super::SqliteStore;
 use crate::durable::{RepositoryId, TaskOwner, TaskState};
@@ -39,7 +39,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
         let ids: Vec<TaskId> = tasks.iter().map(|task| task.id.clone()).collect();
-        let json = task_ids_json(&ids);
+        let json = ids_json(ids.iter().map(TaskId::as_str));
         let facts = TaskDetailFacts {
             states: states_in(&snapshot, &json)?,
             active_prs: keyed(

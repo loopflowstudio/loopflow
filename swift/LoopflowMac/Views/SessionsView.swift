@@ -1094,6 +1094,26 @@ struct SessionsContentView: View {
         return model.breadcrumb?.task
     }
 
+    private var mainPane: some View {
+        ZStack {
+            if navigation.showsSelection {
+                DashboardView(model: model, workspaces: workspaces, sessions: store)
+            } else if let key = workspaces.selectedWork {
+                VStack(spacing: 0) {
+                    workspacePanel(key).id(key)
+                }
+                .padding([.horizontal, .bottom], PaneGeometry.windowInset)
+                .background(palette.surfaceMuted)
+                .accessibilityIdentifier("work-layout")
+                .transition(.zoom(from: navigation.zoomOrigin))
+            } else {
+                ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
+                    description: Text("Open a repository, Wave or Task from the sidebar."))
+            }
+        }
+        .coordinateSpace(.named(ZoomFromTile.space))
+    }
+
     var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
@@ -1106,23 +1126,13 @@ struct SessionsContentView: View {
                     }
                     SidebarDivider(navigation: navigation, availableWidth: geometry.size.width)
                 }
-                ZStack {
-                    if navigation.showsSelection {
-                        DashboardView(model: model, workspaces: workspaces, sessions: store)
-                    } else if let key = workspaces.selectedWork {
-                        VStack(spacing: 0) {
-                            workspacePanel(key).id(key)
-                        }
-                        .padding([.horizontal, .bottom], PaneGeometry.windowInset)
-                        .background(palette.surfaceMuted)
-                        .accessibilityIdentifier("work-layout")
-                        .transition(.zoom(from: navigation.zoomOrigin))
-                    } else {
-                        ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
-                            description: Text("Open a repository, Wave or Task from the sidebar."))
+                VStack(spacing: 0) {
+                    // The main pane alone: the sidebar stays put when a Task opens.
+                    if let task = model.breadcrumb?.task?.task {
+                        TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
                     }
+                    mainPane
                 }
-                .coordinateSpace(.named(ZoomFromTile.space))
             }
         }
         .background(palette.background)

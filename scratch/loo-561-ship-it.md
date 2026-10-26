@@ -419,3 +419,17 @@ availability" (renamed `moving`), dead ship process: "i would say idle". Operato
   `unresolved_processes` lives in `task_execution.rs`. #1684's `isInMergeQueue` merged in.
 - Checks after this sync: lib `ops::pr`/`pr_landing`/`release`/`task::ship`/`commands::ship`
   116/116; integration `land_tests`/`release_lock` 45/45; fmt and clippy clean.
+
+## Re-demo 3 (2026-10-25, branch build 7fa3957680 as "Loopflow 561" on a fresh lf-world `portfolio`)
+
+Plan: Workflow bar (dots, stage cells, live line, Ship it), Ship it → failed stand-in backs off
+and names its cause, Stop shipping, `lf ship ISSUE` returning vs foreground.
+
+- **Jumpiness on opening a Task** (Jack: "i dont like the jumpiness when you click on the task
+  due to the new header"). Cause (screenshot): `TaskWorkflowBar` was mounted in `RepoView` above
+  `SessionsView`, so it spanned the sidebar too; selecting a Task inserted 34pt and pushed the
+  Task list down under the pointer. This also broke Jack's "placement B in the main pane only".
+  Fixed: the bar mounts at the top of `SessionsContentView`'s main pane; the sidebar never
+  moves. Check: `swift test --filter 'DesktopHeadless|WorkNavigationTests'` 53 ok. Awaiting
+  Jack's look at the rebuilt app. Still possible: the name and dots fill in after `taskWork`
+  loads, a smaller horizontal shift inside the bar.

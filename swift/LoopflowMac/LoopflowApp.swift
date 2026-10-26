@@ -7,7 +7,7 @@ private func enrichProcessPathForGUILaunch() {
     let existing = ProcessInfo.processInfo.environment
     let enriched = GUIProcessEnvironment.enriched(existing)
     for key in existing.keys where enriched[key] == nil { unsetenv(key) }
-    for key in ["PATH", "LF_BIN"] {
+    for key in ["PATH", "LF_BIN", "LF_DESKTOP"] {
         if let value = enriched[key] { setenv(key, value, 1) }
     }
 }

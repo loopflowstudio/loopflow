@@ -38,7 +38,7 @@ Jack Heart's Mac. Design: `scratch/loo-576-show-the-selected-wave-or-dashboards-
   dark to light." → the workspace's top-leading corner is square and the sidebar
   divider is a dark-to-clear gradient. Interpretation of which edge, pending his look.
 - **Open:** Jack: "we think of waveless tasks as assigned to the repo." Today the
-  repository row shows Working Tasks (all repositories' working Tasks), not the
+  repository row shows Working Tasks (the repository's working Tasks, any Wave), not the
   waveless Tasks. Undecided whether selecting it should list waveless Tasks, with
   Working Tasks becoming an ordinary Dashboard scope.
 

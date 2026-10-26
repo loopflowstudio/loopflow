@@ -129,7 +129,7 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
 
 ## Check results
 
-- `cargo test -p loopflow --lib work_watch`: 29 passed. clippy/fmt clean.
+- `cargo test -p loopflow --lib work_watch`: 29 passed after compress. clippy/fmt clean.
 - `scripts/test_desktop.sh --filter 'RegistryQueryTests|DTOFixtureTests'`: 63 passed.
 - Live A/B of the rest: not possible here. Dev builds without drafts re-exec the
   installed lf on the shared home (`installation.rs`), and a cloned home has no

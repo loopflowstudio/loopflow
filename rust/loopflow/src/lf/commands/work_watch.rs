@@ -702,7 +702,7 @@ impl Reader {
                 let wake = if rest_end > now {
                     rest_end
                 } else {
-                    read_on + part.clock().max(state.rest())
+                    read_on + part.clock()
                 };
                 Some(wake.saturating_duration_since(now))
             })
@@ -1114,9 +1114,10 @@ pub(super) fn run(watch: bool) -> Result<()> {
                     Ok(content) => (None, content),
                     Err(error) => (Some(format!("{error:#}")), unavailable(part)),
                 };
+                let cost = now.elapsed();
                 tracing::debug!(
                     part = part.name(),
-                    elapsed_us = now.elapsed().as_micros(),
+                    elapsed_us = cost.as_micros(),
                     "projected Work"
                 );
                 let identity = fingerprint(&reason, &content)?;
@@ -1124,7 +1125,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
                 let send = state.force || state.sent != Some(identity);
                 state.read_at = revisions;
                 state.read_on = Some(now);
-                state.cost = now.elapsed();
+                state.cost = cost;
                 state.force = false;
                 state.stale = false;
                 state.failures = if reason.is_some() {

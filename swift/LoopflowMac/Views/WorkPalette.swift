@@ -79,7 +79,7 @@ extension WorkModel {
         var rows = paletteRows
         if sidebarOnly {
             let sidebar = Set(sidebarTaskIDs.map { WorkDestination.task($0) }
-                + visibleRoadmaps.map { WorkDestination.wave($0.wave.id) })
+                + sidebarWaves.map { WorkDestination.wave($0.wave.id) })
             rows.removeAll { !sidebar.contains($0.id) }
         }
         let working = Set(workingTaskIDs)

@@ -49,7 +49,7 @@ struct TerminalPaneLayoutTests {
         #expect(try layout.padding(.leading) == layout.padding(.bottom))
         #expect(try layout.padding(.trailing) == layout.padding(.bottom))
         let outer = try inspection.find(viewWithAccessibilityIdentifier: "work-workspace-\(workspace.key.id)")
-        let radius = try outer.clipShape(RoundedRectangle.self).cornerSize.width
+        let radius = try outer.clipShape(UnevenRoundedRectangle.self).cornerRadii.bottomLeading
         let multiplexer = try inspection.find(viewWithAccessibilityIdentifier: "sessions-multiplexer")
         let gap = try multiplexer.padding(.bottom)
         #expect(try multiplexer.padding(.trailing) == gap)

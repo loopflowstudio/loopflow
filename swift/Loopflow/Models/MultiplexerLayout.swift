@@ -10,31 +10,39 @@ public enum SplitAxis: String, Codable, Sendable, Equatable {
     case vertical
 }
 
+/// A Task workspace holds exactly one session, shell and browser pane; Wave and
+/// repository workspaces hold only the session pane. Panes are retained, never
+/// created or destroyed: closing hides one, and content changes inside it.
 public enum PaneContent: Codable, Sendable, Equatable {
-    case empty
-    case session(id: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
+    /// One conversation at a time; nil shows the start state.
+    case session(id: String?, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
     /// Unknown locations remain unavailable, never a local-shell fallback.
-    case shell(tabs: [ShellTab], selected: String)
-    /// Every Graph process of a Task.
-    case graphLog(taskId: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
-    /// A Task's worktree files.
-    case files(taskId: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
+    case shell(tabs: [ShellTab], selected: String?)
+    /// The Task's Files, Graph process log and web pages, following its recorded owner.
+    case browser(taskId: String, tabs: [BrowserTab], selected: String?,
+                 location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
+
+    public enum Kind: String, Codable, Sendable, CaseIterable {
+        case session, shell, browser
+    }
+
+    public var kind: Kind {
+        switch self {
+        case .session: .session
+        case .shell: .shell
+        case .browser: .browser
+        }
+    }
 
     var canonicalized: PaneContent {
         switch self {
         case .session(let id, let location, let execution):
-            .session(id: StructuredIdentity.session(id), location: location, execution: execution)
-        case .files(let id, let location, let execution):
-            .files(taskId: StructuredIdentity.prefixed(id, "task_"), location: location, execution: execution)
-        case .graphLog(let id, let location, let execution):
-            .graphLog(taskId: StructuredIdentity.prefixed(id, "task_"), location: location, execution: execution)
-        case .empty, .shell: self
+            .session(id: id.map(StructuredIdentity.session), location: location, execution: execution)
+        case .browser(let id, let tabs, let selected, let location, let execution):
+            .browser(taskId: StructuredIdentity.prefixed(id, "task_"), tabs: tabs, selected: selected,
+                     location: location, execution: execution)
+        case .shell: self
         }
-    }
-
-    public static func shell(location: WorkspaceIdentity?, execution: TaskLocationObservation? = nil) -> Self {
-        let tab = ShellTab(location: location, execution: execution)
-        return .shell(tabs: [tab], selected: tab.id)
     }
 
     public var selectedShell: ShellTab? {
@@ -42,14 +50,18 @@ public enum PaneContent: Codable, Sendable, Equatable {
         return tabs.first { $0.id == selected }
     }
 
-    /// Terminals retain their captured location; Files and logs follow their
+    public var selectedBrowserTab: BrowserTab? {
+        guard case .browser(_, let tabs, let selected, _, _) = self else { return nil }
+        return tabs.first { $0.id == selected }
+    }
+
+    /// Terminals retain their captured location; the browser follows its
     /// recorded owner. Unavailable owner evidence never falls back to a path.
     public var location: WorkspaceIdentity? {
         switch self {
-        case .empty: return nil
         case .session(_, let location, _): return location
         case .shell: return selectedShell?.location
-        case .files(_, let location, let execution), .graphLog(_, let location, let execution):
+        case .browser(_, _, _, let location, let execution):
             guard let execution else { return location }
             guard case .recorded(_, let checkout?) = execution.location else { return nil }
             return WorkspaceIdentity(machineId: execution.machineID, worktree: checkout)
@@ -60,10 +72,37 @@ public enum PaneContent: Codable, Sendable, Equatable {
     public var executionLocation: TaskLocationObservation? {
         switch self {
         case .shell: return selectedShell?.execution
-        case .session(_, _, let execution),
-             .files(_, _, let execution), .graphLog(_, _, let execution): return execution
-        case .empty: return nil
+        case .session(_, _, let execution), .browser(_, _, _, _, let execution): return execution
         }
+    }
+}
+
+/// One browser tab. Files keeps its own document tabs in TaskFilesStore.
+public enum BrowserTab: Codable, Sendable, Equatable, Identifiable {
+    case files
+    case graphLog
+    case url(id: String, url: URL)
+
+    public var id: String {
+        switch self {
+        case .files: "files"
+        case .graphLog: "graph-log"
+        case .url(let id, _): id
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .files: "Files"
+        case .graphLog: "Graph processes"
+        case .url(_, let url): url.host() ?? url.absoluteString
+        }
+    }
+
+    /// Web pages are http or https; anything else is refused before it reaches a view.
+    public static func page(_ url: URL, id: String = UUID().uuidString) -> BrowserTab? {
+        guard ["http", "https"].contains(url.scheme?.lowercased()), url.host() != nil else { return nil }
+        return .url(id: id, url: url)
     }
 }
 
@@ -90,6 +129,7 @@ public struct PaneState: Codable, Sendable, Identifiable, Equatable {
         guard case .session(let id, _, _) = content else { return nil }
         return id
     }
+    public var kind: PaneContent.Kind { content.kind }
 
     public var executionLocation: TaskLocationObservation? { content.executionLocation }
 
@@ -113,8 +153,20 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
     case leaf(PaneState)
     case split(SplitAxis, first: LayoutNode, second: LayoutNode, ratio: Double)
 
-    public static func defaultLayout() -> LayoutNode {
-        .leaf(PaneState(content: .empty))
+    /// The designated panes, with stable IDs a script can name: the session
+    /// beside the browser over the shell.
+    public static func designated(taskId: String?) -> LayoutNode {
+        let session = LayoutNode.leaf(PaneState(id: "session", content: .session(id: nil)))
+        guard let taskId else { return session }
+        return .split(.vertical, first: session,
+            second: .split(.horizontal,
+                first: .leaf(PaneState(id: "browser", content: .browser(taskId: taskId, tabs: [], selected: nil))),
+                second: .leaf(PaneState(id: "shell", content: .shell(tabs: [], selected: nil))), ratio: goldenRatio),
+            ratio: goldenRatio)
+    }
+
+    public func pane(of kind: PaneContent.Kind) -> PaneState? {
+        allPanes.first { $0.kind == kind }
     }
 
     public func visible(excluding collapsed: Set<String>) -> LayoutNode? {
@@ -181,9 +233,17 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
         }
     }
 
-    public func updatingShellTabs(of paneId: String, tabs: [ShellTab], selected: String) -> LayoutNode {
+    public func updatingShellTabs(of paneId: String, tabs: [ShellTab], selected: String?) -> LayoutNode {
         _replacingLeaf(paneId) { pane in
             .leaf(PaneState(id: pane.id, content: .shell(tabs: tabs, selected: selected), incarnation: pane.incarnation))
+        }
+    }
+
+    /// Tab changes keep the occurrence; a new owner location renews it.
+    public func replacingBrowser(of paneId: String, with content: PaneContent, retainingOccurrence: Bool) -> LayoutNode {
+        guard retainingOccurrence else { return replacingContent(of: paneId, with: content) }
+        return _replacingLeaf(paneId) { pane in
+            .leaf(PaneState(id: pane.id, content: content.canonicalized, incarnation: pane.incarnation))
         }
     }
 

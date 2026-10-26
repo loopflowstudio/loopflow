@@ -20,34 +20,35 @@ struct MultiplexerLayoutTests {
             let owner = TaskLocationObservation(request: "read", repositoryID: "repo",
                 taskID: "task", machineID: "peer", observedAt: 1, location: reading)
             let contents: [(PaneContent, WorkspaceIdentity?)] = [
-                (.empty, nil),
+                (.session(id: nil), nil),
                 (.session(id: "session", location: captured, execution: owner), captured),
-                (.shell(location: captured, execution: owner), captured),
-                (.files(taskId: "task", location: captured, execution: owner), expected),
-                (.graphLog(taskId: "task", location: captured, execution: owner), expected),
-                (.files(taskId: "task", location: captured), captured),
-                (.graphLog(taskId: "task", location: captured), captured),
+                (.shell(tabs: [ShellTab(id: "tab", location: captured, execution: owner)], selected: "tab"), captured),
+                (.browser(taskId: "task", tabs: [.files], selected: "files", location: captured, execution: owner), expected),
+                (.browser(taskId: "task", tabs: [.graphLog], selected: "graph-log", location: captured, execution: owner), expected),
+                (.browser(taskId: "task", tabs: [.files], selected: "files", location: captured), captured),
+                (.browser(taskId: "task", tabs: [.graphLog], selected: "graph-log", location: captured), captured),
             ]
             for (content, location) in contents {
                 #expect(content.location == location)
-                let inspected = DesktopLayoutInspection(.leaf(PaneState(content: content))) { _ in nil }
+                let inspected = DesktopLayoutInspection(.leaf(PaneState(content: content)), surface: { _ in nil }, commands: { _ in nil })
                 #expect(inspected.location == location)
             }
         }
     }
 
-    @Test("default layout is a single empty pane")
-    func defaultIsOneLeaf() {
-        let layout = LayoutNode.defaultLayout()
-        #expect(layout.allPanes.count == 1)
-        #expect(layout.allPanes.first?.content == .empty)
+    @Test("Designated layouts name each pane once; only Tasks have tools")
+    func designatedLayouts() {
+        #expect(LayoutNode.designated(taskId: nil).allPanes.map(\.id) == ["session"])
+        let task = LayoutNode.designated(taskId: "task")
+        #expect(task.allPanes.map(\.id) == ["session", "browser", "shell"])
+        #expect(task.pane(of: .browser)?.content == .browser(taskId: "task", tabs: [], selected: nil))
     }
 
     @Test("splitting a leaf yields two panes under a split")
     func splittingAddsAPane() {
-        let base = PaneState(content: .empty)
+        let base = PaneState(content: .session(id: nil))
         let layout = LayoutNode.leaf(base)
-        let shell = PaneState(content: .shell(location: nil))
+        let shell = PaneState(content: .shell(tabs: [], selected: nil))
         let split = layout.splitting(base.id, axis: .vertical, newPane: shell)
 
         #expect(split.allPanes.count == 2)
@@ -62,8 +63,8 @@ struct MultiplexerLayoutTests {
 
     @Test("removing a pane collapses its split back to the sibling")
     func removingCollapses() {
-        let a = PaneState(content: .empty)
-        let b = PaneState(content: .shell(location: nil))
+        let a = PaneState(content: .session(id: nil))
+        let b = PaneState(content: .shell(tabs: [], selected: nil))
         let split = LayoutNode.leaf(a).splitting(a.id, axis: .horizontal, newPane: b)
 
         let collapsed = split.removing([b.id])
@@ -73,15 +74,15 @@ struct MultiplexerLayoutTests {
 
     @Test("removing the only pane returns nil")
     func removingLastReturnsNil() {
-        let a = PaneState(content: .empty)
+        let a = PaneState(content: .session(id: nil))
         #expect(LayoutNode.leaf(a).removing([a.id]) == nil)
     }
 
     @Test("Pruning nested panes retains surviving occurrences, axes and ratios")
     func pruningRetainsSurvivingSplits() {
         let a = PaneState(content: .session(id: "draft"))
-        let b = PaneState(content: .shell(location: nil))
-        let c = PaneState(content: .files(taskId: "task"))
+        let b = PaneState(content: .shell(tabs: [], selected: nil))
+        let c = PaneState(content: .browser(taskId: "task", tabs: [.files], selected: "files"))
         let left = LayoutNode.split(.horizontal, first: .leaf(a), second: .leaf(b), ratio: 0.3)
         let tree = LayoutNode.split(.vertical, first: left, second: .leaf(c), ratio: 0.7)
         let cases: [(Set<String>, LayoutNode?)] = [
@@ -103,8 +104,8 @@ struct MultiplexerLayoutTests {
 
     @Test("replacing pane content preserves identity and tree shape")
     func replacePreservesShape() {
-        let a = PaneState(content: .empty)
-        let b = PaneState(content: .shell(location: nil))
+        let a = PaneState(content: .session(id: nil))
+        let b = PaneState(content: .shell(tabs: [], selected: nil))
         let split = LayoutNode.leaf(a).splitting(a.id, axis: .vertical, newPane: b)
 
         let replaced = split.replacingContent(of: b.id, with: .session(id: "session-1"))
@@ -115,8 +116,8 @@ struct MultiplexerLayoutTests {
 
     @Test("resizing updates the split between two panes")
     func updatingRatioChangesContainingSplit() {
-        let a = PaneState(content: .empty)
-        let b = PaneState(content: .shell(location: nil))
+        let a = PaneState(content: .session(id: nil))
+        let b = PaneState(content: .shell(tabs: [], selected: nil))
         let split = LayoutNode.leaf(a).splitting(a.id, axis: .vertical, newPane: b)
 
         let resized = split.updatingRatio(between: a.id, and: b.id, ratio: 0.3)
@@ -130,8 +131,8 @@ struct MultiplexerLayoutTests {
     @Test("a nested tree round-trips through Codable")
     func codableRoundTrip() throws {
         let a = PaneState(content: .session(id: "session-1"))
-        let b = PaneState(content: .shell(location: nil))
-        let c = PaneState(content: .empty)
+        let b = PaneState(content: .shell(tabs: [], selected: nil))
+        let c = PaneState(content: .session(id: nil))
         let tree = LayoutNode
             .leaf(a)
             .splitting(a.id, axis: .vertical, newPane: b)

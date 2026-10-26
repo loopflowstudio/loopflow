@@ -1,0 +1,534 @@
+{
+  "actions": [
+    {
+      "name": "back",
+      "title": "Back",
+      "scope": "window",
+      "arguments": [],
+      "keys": [
+        "⌘["
+      ]
+    },
+    {
+      "name": "forward",
+      "title": "Forward",
+      "scope": "window",
+      "arguments": [],
+      "keys": [
+        "⌘]"
+      ]
+    },
+    {
+      "name": "goto",
+      "title": "Working Task",
+      "scope": "window",
+      "arguments": [
+        {
+          "name": "index",
+          "kind": "integer",
+          "required": true
+        }
+      ],
+      "keys": [
+        "⌘1",
+        "⌘2",
+        "⌘3",
+        "⌘4",
+        "⌘5",
+        "⌘6",
+        "⌘7",
+        "⌘8",
+        "⌘9"
+      ]
+    },
+    {
+      "name": "next",
+      "title": "Next Task",
+      "scope": "window",
+      "arguments": [],
+      "keys": [
+        "⌃⇥"
+      ]
+    },
+    {
+      "name": "previous",
+      "title": "Previous Task",
+      "scope": "window",
+      "arguments": [],
+      "keys": [
+        "⌃⇧⇥"
+      ]
+    },
+    {
+      "name": "working-tasks",
+      "title": "Working Tasks",
+      "scope": "window",
+      "arguments": [],
+      "keys": []
+    },
+    {
+      "name": "enter",
+      "title": "Enter Tile",
+      "scope": "window",
+      "arguments": [
+        {
+          "name": "tile",
+          "kind": "string",
+          "required": true
+        }
+      ],
+      "keys": []
+    },
+    {
+      "name": "focus",
+      "title": "Focus Pane",
+      "scope": "pane",
+      "arguments": [
+        {
+          "name": "direction",
+          "kind": "direction",
+          "required": false
+        }
+      ],
+      "keys": [
+        "⌥⌘←",
+        "⌥⌘→",
+        "⌥⌘↑",
+        "⌥⌘↓"
+      ]
+    },
+    {
+      "name": "zoom",
+      "title": "Zoom Pane",
+      "scope": "pane",
+      "arguments": [
+        {
+          "name": "on",
+          "kind": "boolean",
+          "required": false
+        }
+      ],
+      "keys": [
+        "⇧⌘↩"
+      ]
+    },
+    {
+      "name": "hide",
+      "title": "Hide Pane",
+      "scope": "pane",
+      "arguments": [],
+      "keys": []
+    },
+    {
+      "name": "close",
+      "title": "Close Tab",
+      "scope": "pane",
+      "arguments": [],
+      "keys": [
+        "⌘W"
+      ]
+    },
+    {
+      "name": "show",
+      "title": "Show Pane",
+      "scope": "pane",
+      "arguments": [],
+      "keys": []
+    },
+    {
+      "name": "reopen",
+      "title": "Undo Close",
+      "scope": "pane",
+      "arguments": [],
+      "keys": [
+        "⇧⌘T"
+      ]
+    },
+    {
+      "name": "move",
+      "title": "Move Pane",
+      "scope": "pane",
+      "arguments": [
+        {
+          "name": "destination",
+          "kind": "pane",
+          "required": true
+        },
+        {
+          "name": "axis",
+          "kind": "axis",
+          "required": true
+        }
+      ],
+      "keys": []
+    },
+    {
+      "name": "resize",
+      "title": "Resize Pane",
+      "scope": "pane",
+      "arguments": [
+        {
+          "name": "toward",
+          "kind": "pane",
+          "required": true
+        },
+        {
+          "name": "ratio",
+          "kind": "ratio",
+          "required": true
+        }
+      ],
+      "keys": []
+    },
+    {
+      "name": "send",
+      "title": "Send Text",
+      "scope": "pane",
+      "arguments": [
+        {
+          "name": "text",
+          "kind": "string",
+          "required": true
+        },
+        {
+          "name": "surface",
+          "kind": "string",
+          "required": false
+        }
+      ],
+      "keys": []
+    },
+    {
+      "name": "send-key",
+      "title": "Send Key",
+      "scope": "pane",
+      "arguments": [
+        {
+          "name": "key",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "surface",
+          "kind": "string",
+          "required": false
+        }
+      ],
+      "keys": []
+    },
+    {
+      "name": "run",
+      "title": "New Terminal",
+      "scope": "pane",
+      "arguments": [
+        {
+          "name": "command",
+          "kind": "string",
+          "required": false
+        },
+        {
+          "name": "focus",
+          "kind": "boolean",
+          "required": false
+        }
+      ],
+      "keys": [
+        "⌘T"
+      ]
+    },
+    {
+      "name": "toggle-shell",
+      "title": "Toggle Shell",
+      "scope": "pane",
+      "arguments": [],
+      "keys": [
+        "⌃`"
+      ]
+    },
+    {
+      "name": "toggle-browser",
+      "title": "Toggle Browser",
+      "scope": "pane",
+      "arguments": [],
+      "keys": [
+        "⇧⌘E"
+      ]
+    },
+    {
+      "name": "files",
+      "title": "Show Files",
+      "scope": "pane",
+      "arguments": [],
+      "keys": []
+    },
+    {
+      "name": "graph-log",
+      "title": "Show Graph Processes",
+      "scope": "pane",
+      "arguments": [],
+      "keys": []
+    },
+    {
+      "name": "browse",
+      "title": "Open Web Page",
+      "scope": "pane",
+      "arguments": [
+        {
+          "name": "url",
+          "kind": "url",
+          "required": true
+        }
+      ],
+      "keys": []
+    },
+    {
+      "name": "page-back",
+      "title": "Web Page Back",
+      "scope": "pane",
+      "arguments": [],
+      "keys": []
+    },
+    {
+      "name": "page-forward",
+      "title": "Web Page Forward",
+      "scope": "pane",
+      "arguments": [],
+      "keys": []
+    },
+    {
+      "name": "reload",
+      "title": "Reload Web Page",
+      "scope": "pane",
+      "arguments": [],
+      "keys": [
+        "⌘R"
+      ]
+    },
+    {
+      "name": "switch",
+      "title": "Switch Conversation",
+      "scope": "pane",
+      "arguments": [
+        {
+          "name": "session",
+          "kind": "string",
+          "required": true
+        }
+      ],
+      "keys": []
+    }
+  ],
+  "requests": [
+    {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "pane": null,
+      "action": "goto",
+      "args": {
+        "index": "2"
+      }
+    },
+    {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "pane": null,
+      "action": "back",
+      "args": {}
+    },
+    {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "pane": {
+        "repository": "repo_22222222222222222222222222222222",
+        "window": "55555555-5555-5555-5555-555555555555",
+        "work": {
+          "repository": "repo_22222222222222222222222222222222",
+          "kind": "task",
+          "id": "task_44444444444444444444444444444444"
+        },
+        "pane": "shell",
+        "incarnation": "shell-tab-occurrence",
+        "tab": "shell-tab"
+      },
+      "action": "run",
+      "args": {
+        "command": "cargo test -p loopflow desktop"
+      }
+    },
+    {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "pane": {
+        "repository": "repo_22222222222222222222222222222222",
+        "window": "55555555-5555-5555-5555-555555555555",
+        "work": {
+          "repository": "repo_22222222222222222222222222222222",
+          "kind": "task",
+          "id": "task_44444444444444444444444444444444"
+        },
+        "pane": "shell",
+        "incarnation": "shell-tab-occurrence",
+        "tab": "shell-tab"
+      },
+      "action": "zoom",
+      "args": {
+        "on": "true"
+      }
+    }
+  ],
+  "receipt": {
+    "repository": "repo_22222222222222222222222222222222",
+    "window": "55555555-5555-5555-5555-555555555555",
+    "action": "browse",
+    "destination": {
+      "kind": "work",
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      }
+    },
+    "history": {
+      "back": 1,
+      "forward": 0
+    },
+    "pane": "browser",
+    "tab": "page-1",
+    "workspace": {
+      "work": {
+        "repository": "repo_22222222222222222222222222222222",
+        "kind": "task",
+        "id": "task_44444444444444444444444444444444"
+      },
+      "title": "Fixture Task",
+      "is_open": true,
+      "selected": true,
+      "layout": {
+        "pane": null,
+        "incarnation": null,
+        "surface": null,
+        "content": null,
+        "subject": null,
+        "axis": "vertical",
+        "ratio": 0.5,
+        "children": [
+          {
+            "pane": "session",
+            "incarnation": "occurrence-session",
+            "surface": "native-surface-incarnation",
+            "content": "session",
+            "subject": "session-one",
+            "axis": null,
+            "ratio": null,
+            "children": [],
+            "location": {
+              "machine_id": "home_11111111111111111111111111111111",
+              "worktree": "/repo.task"
+            },
+            "tabs": [],
+            "selected_tab": null
+          },
+          {
+            "pane": null,
+            "incarnation": null,
+            "surface": null,
+            "content": null,
+            "subject": null,
+            "axis": "horizontal",
+            "ratio": 0.5,
+            "children": [
+              {
+                "pane": "shell",
+                "incarnation": "occurrence-shell",
+                "surface": "shell-surface",
+                "content": "shell",
+                "subject": null,
+                "axis": null,
+                "ratio": null,
+                "children": [],
+                "location": {
+                  "machine_id": "home_11111111111111111111111111111111",
+                  "worktree": "/repo.task"
+                },
+                "tabs": [
+                  {
+                    "id": "shell-tab",
+                    "kind": "shell",
+                    "title": "Shell",
+                    "incarnation": "shell-tab-occurrence",
+                    "surface": "shell-surface",
+                    "location": {
+                      "machine_id": "home_11111111111111111111111111111111",
+                      "worktree": "/repo.task"
+                    },
+                    "url": null,
+                    "commands": {
+                      "submitted": 1,
+                      "finished": 1,
+                      "exit_status": 0
+                    }
+                  }
+                ],
+                "selected_tab": "shell-tab"
+              },
+              {
+                "pane": "browser",
+                "incarnation": "occurrence-browser",
+                "surface": null,
+                "content": "browser",
+                "subject": "task_44444444444444444444444444444444",
+                "axis": null,
+                "ratio": null,
+                "children": [],
+                "location": {
+                  "machine_id": "home_11111111111111111111111111111111",
+                  "worktree": "/repo.task"
+                },
+                "tabs": [
+                  {
+                    "id": "files",
+                    "kind": "files",
+                    "title": "Files",
+                    "incarnation": "occurrence-browser",
+                    "surface": null,
+                    "location": {
+                      "machine_id": "home_11111111111111111111111111111111",
+                      "worktree": "/repo.task"
+                    },
+                    "url": null,
+                    "commands": null
+                  },
+                  {
+                    "id": "page-1",
+                    "kind": "url",
+                    "title": "localhost",
+                    "incarnation": "occurrence-browser",
+                    "surface": null,
+                    "location": {
+                      "machine_id": "home_11111111111111111111111111111111",
+                      "worktree": "/repo.task"
+                    },
+                    "url": "http://localhost:5173",
+                    "commands": null
+                  }
+                ],
+                "selected_tab": "page-1"
+              }
+            ],
+            "location": null,
+            "tabs": [],
+            "selected_tab": null
+          }
+        ],
+        "location": null,
+        "tabs": [],
+        "selected_tab": null
+      },
+      "focused_pane": "session",
+      "zoomed_pane": "browser",
+      "hidden_panes": []
+    },
+    "observed_at": 1791652805,
+    "applies_to": "window"
+  }
+}

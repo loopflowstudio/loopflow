@@ -39,8 +39,7 @@
   Installed input exceeds budget; rendering proves no adoption.
 
 Jack folded LOO-430/431/432 into LOO-427: identity, window
-control and terminal I/O in one diff. October 8: design approved; implementation
-authorized through demo review. Owned cmux probe cleaned up.
+control and terminal I/O in one diff.
 
 October 8: LOO-427 leaves unknown checkout location unavailable. `92cafe61d`
 removes copied placements, preserves legacy overrides and routes known Tasks
@@ -55,7 +54,7 @@ extraction/input remains unproved. Reads grant no input authority.
 Jack's October 8 API: `--context` previews input, `--explain` is broader,
 `--chrome` controls execution. Root `run`, `--max-turns` and `--no-loopflow` are
 removed; Task skill/Flow selection survives. History owns activity, Process pages,
-show/replay and usage; Desktop owns open/list. Bare `open` conflicts with PR opening;
+show/replay and usage; Desktop owns open/state. Bare `open` conflicts with PR opening;
 Sessions use `connect`. October 9 local Task/Session-plus-Changes opening bypasses
 execution routing and CLI preparation. Session/companion intent travels together; a partial Session inventory must not
 retire other panes. Opening generations follow Session/Files/pane readiness and failures. Wave-owned `show`, `workflow` and `edit-plan` replace root roadmap/Project locally;
@@ -168,15 +167,10 @@ Admission/integration checks and interrupted attempts:
 `cf67067b0d:.lf/wave/product/MEMORY.md`, this heading. Isolated SSH/provider
 simulation establishes neither live migration nor native acceptance.
 
-Jack Heart accepted LOO-427 for queue then Task-completing shipping on October 10
-(`16e9c950b9`), superseding the demo hold without claiming missing proof. LOO-397
-owns broader explanations/discovery; LOO-391 native Work-tab/input/read, configured
-remote panes and running-Flow exchange proof; LOO-416 relaunch persistence;
-LOO-452 richer keys; LOO-453 readiness/events. Owners: comparison.
-Jack subsequently selected stacking on LOO-412 and landing after it; the earlier
-baseline-first interpretation is superseded.
-Jack requested publication and merge; full matrix stays with CI. No installation,
-live migration or provider-account use is authorized.
+Jack Heart accepted LOO-427 shipping on October 10 (`16e9c950b9`) without
+claiming missing proof. LOO-397 owns broader explanations/discovery; LOO-391 native
+Work-tab/input/read, configured remote panes and running-Flow exchange proof;
+LOO-416 relaunch persistence; LOO-452 richer keys; LOO-453 readiness/events.
 
 ## Optional Task membership (LOO-505, accepted 2026-10-17)
 

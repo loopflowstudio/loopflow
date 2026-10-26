@@ -41,7 +41,6 @@ let package = Package(
             path: "LoopflowMac",
             exclude: [
                 "Info.plist",
-                "Loopflow.sdef",
                 "Loopflow.entitlements",
                 "AppIcon.icns",
                 "logo.svg",

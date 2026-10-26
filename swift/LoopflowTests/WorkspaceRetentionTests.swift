@@ -49,7 +49,7 @@ struct WorkspaceRetentionTests {
                     openingRequests: router.workspaceRequests(reopened.id), focus: {},
                     inspect: { repository, incarnation in
                         model.inspectDesktop(repository: repository, window: incarnation, workspaces: registry)
-                    }, controlPane: { try registry.controlPane($0, model: model) },
+                    }, perform: { try DesktopAction.perform($0, model: model, workspaces: registry) },
                     readText: { try registry.readText($0) }) { url in
                         received.append(url)
                         delivered.continuation.yield(url)
@@ -196,8 +196,7 @@ struct WorkspaceRetentionTests {
                 let workspace = registry.open(key, title: "Task \(index)", location: location)
                 workspace.multiplexer.load(sessionId: "session-\(index)", location: location)
                 let sessionPane = workspace.multiplexer.focusedPaneId
-                let filesPane = try #require(workspace.multiplexer.show(
-                    .files(taskId: key.id, location: location), beside: sessionPane))
+                let filesPane = try #require(workspace.multiplexer.showBrowser(.files, location: location))
                 workspace.multiplexer.updateRatio(between: sessionPane, and: filesPane.id, ratio: 0.6)
                 workspace.multiplexer.setCollapsed(paneId: filesPane.id, collapsed: true)
                 workspace.presentation.selectedSessionId = "session-\(index)"

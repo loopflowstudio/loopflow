@@ -7,17 +7,18 @@ import Testing
 @Suite("Pane resizing")
 @MainActor
 struct PaneResizeTests {
-    @Test("New shells use the golden split and retain the existing pane")
+    @Test("A new shell appears in its designated pane beside the golden split")
     func newShellStartsAtGoldenRatio() throws {
-        let store = MultiplexerStore()
+        let store = MultiplexerStore(taskId: "task")
         store.load(sessionId: "conversation")
         let original = store.focusedPane
         let added = try #require(store.newShell())
-        guard case .split(_, let first, let second, let ratio) = store.layout else {
-            Issue.record("Expected a shell split"); return
+        guard case .split(_, let first, _, let ratio) = store.layout else {
+            Issue.record("Expected the designated split"); return
         }
         #expect(first.firstPane == original)
-        #expect(second.firstPane.id == added.id)
+        #expect(added.id == "shell")
+        #expect(store.isVisible(added))
         #expect(ratio == 0.618)
         #expect(store.focusedPaneId == added.id)
     }
@@ -42,7 +43,7 @@ struct PaneResizeTests {
 
     @Test("Nested panes contribute minimum size and small windows shrink both sides to fit")
     func nestedAndSmallLayouts() {
-        let leaf = LayoutNode.leaf(PaneState(content: .empty))
+        let leaf = LayoutNode.leaf(PaneState(content: .session(id: nil)))
         let columns = LayoutNode.split(.vertical, first: leaf, second: leaf, ratio: 0.618)
         let rows = LayoutNode.split(.horizontal, first: columns, second: leaf, ratio: 0.618)
         #expect(rows.minimumPaneSize == CGSize(width: 486, height: 286))

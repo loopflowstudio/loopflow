@@ -24,7 +24,7 @@ struct WorkspacePanesTests {
         return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
-    @Test("Hiding both tools keeps conversation entry and restores the retained pane")
+    @Test("Toggling both tools away keeps conversation entry in the session pane")
     func collapsedToolsKeepEntry() throws {
         let query = RegistryQuery { _, _ in throw RegistryQueryError("Rendering cannot open work") }
         let model = WorkModel(query: query, repoPath: location.worktree)
@@ -32,19 +32,16 @@ struct WorkspacePanesTests {
             title: "Task A", location: location, localMachineId: location.machineId)
         let sessions = workspace.sessionStore(repoPath: location.worktree, query: query)
         try workspace.toggleShell()
-        workspace.toggleFiles()
+        workspace.toggleBrowser()
         try workspace.toggleShell()
-        workspace.toggleFiles()
+        workspace.toggleBrowser()
         let store = workspace.multiplexer
-        let layout = store.layout
-        #expect(store.visibleLayout == nil)
+        #expect(store.visibleLayout?.allPanes.map(\.id) == ["session"])
+        #expect(store.shellPane?.content.selectedShell != nil)
         let view = WorkspacePanesView(workspace: workspace, isFocused: true, sessions: sessions,
             model: model, onFocus: { id, _ in store.setFocusedPane(id) })
         let button = try view.inspect().find(viewWithAccessibilityIdentifier: "task-open-conversation").button()
         #expect(try button.labelView().text().string() == "Open conversation")
-        try view.inspect().find(button: "Show pane").tap()
-        #expect(store.visibleLayout?.allPanes == [store.focusedPane])
-        #expect(store.layout == layout)
         #expect(sessions.sessions.isEmpty)
     }
 
@@ -70,7 +67,7 @@ struct WorkspacePanesTests {
         let store = workspace.multiplexer
         store.load(sessionId: primary.id, location: location)
         let primaryPane = store.focusedPane
-        store.show(.files(taskId: "task-a", location: location))
+        store.showBrowser(.files, location: location)
         let pane = store.focusedPane
         let files = try workspace.files(for: pane.content, task: nil, query: query)
         let document = files.document("note.txt")
@@ -101,7 +98,7 @@ struct WorkspacePanesTests {
         #expect(renderedFiles.store.document("note.txt") === document)
         store.setZoom(pane.id, enabled: false)
         let full = try view().inspect().findAll(SessionPaneView.self)
-        #expect(try full.map { try $0.actualView().pane } == layout.allPanes)
+        #expect(try full.map { try $0.actualView().pane } == store.visibleLayout?.allPanes)
         #expect(store.layout == layout)
         #expect(document.editor.string == "unfinished Task A draft")
         #expect(document.editor.selectedRange() == NSRange(location: 3, length: 5))
@@ -147,9 +144,9 @@ struct WorkspacePanesTests {
             .first { try $0.actualView().pane.id == pane.id }?.actualView()
         let activeView = try #require(active)
         #expect(activeView.isFocused)
-        #expect(other.multiplexer.layout.allPanes.count == 1)
+        #expect(other.multiplexer.sessionPane?.sessionId == nil)
         try activeView.inspect().find(viewWithAccessibilityIdentifier: "pane-close").button().tap()
-        #expect(workspace.multiplexer.layout.pane(for: pane.id) == nil)
+        #expect(workspace.multiplexer.collapsedPaneIds.contains(pane.id))
         #expect(workspace.multiplexer.layout.pane(for: shell.id) == shell)
         #expect(sessions.sessions.first?.id == primary.id)
     }

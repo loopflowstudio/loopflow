@@ -59,3 +59,32 @@ fn test_guards_keep_store_writes_out_of_ambient_paths() {
 
     assert!(!ambient_home.path().join("loopflow.db").exists());
 }
+
+const SCRUB_PROBE: &str = "LOOPFLOW_TEST_PROVIDER_HOME_PROBE";
+
+#[test]
+fn inherited_provider_homes_never_reach_tests() {
+    let sentinel = tempfile::tempdir().expect("sentinel");
+    let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+        .args(["--exact", "provider_home_probe", "--nocapture"])
+        .env(SCRUB_PROBE, "1")
+        .env("CODEX_HOME", sentinel.path().join("codex"))
+        .env("CLAUDE_CONFIG_DIR", sentinel.path().join("claude"))
+        .output()
+        .expect("re-exec test binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "{stdout}{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn provider_home_probe() {
+    if std::env::var_os(SCRUB_PROBE).is_none() {
+        return;
+    }
+    assert_eq!(std::env::var_os("CODEX_HOME"), None);
+    assert_eq!(std::env::var_os("CLAUDE_CONFIG_DIR"), None);
+}

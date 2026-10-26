@@ -23,7 +23,7 @@
     },
     "second": {
       "kind": "split",
-      "axis": "vertical",
+      "axis": "horizontal",
       "ratio": 0.6,
       "first": {
         "kind": "pane",
@@ -49,61 +49,49 @@
         }
       },
       "second": {
-        "kind": "split",
-        "axis": "vertical",
-        "ratio": 0.6,
-        "first": {
-          "kind": "pane",
-          "id": "pane-2",
-          "content": {
-            "kind": "files",
-            "tabs": [
-              {
-                "id": "file-1",
-                "path": "src/lib.rs"
-              },
-              {
-                "id": "file-2",
-                "path": "README.md"
-              }
-            ],
-            "selected": "file-1",
-            "location": {
-              "machine_id": "machine_recorded",
-              "cwd": "/repo/task"
-            }
-          }
-        },
-        "second": {
-          "kind": "split",
-          "axis": "vertical",
-          "ratio": 0.6,
-          "first": {
-            "kind": "pane",
-            "id": "pane-3",
-            "content": {
-              "kind": "log",
-              "location": {
-                "machine_id": "machine_recorded",
-                "cwd": "/repo/task"
-              }
-            }
+        "kind": "pane",
+        "id": "pane-2",
+        "content": {
+          "kind": "browser",
+          "location": {
+            "machine_id": "machine_recorded",
+            "cwd": "/repo/task"
           },
-          "second": {
-            "kind": "pane",
-            "id": "pane-4",
-            "content": {
-              "kind": "empty"
+          "tabs": [
+            {
+              "kind": "files",
+              "id": "files",
+              "tabs": [
+                {
+                  "id": "file-1",
+                  "path": "src/lib.rs"
+                },
+                {
+                  "id": "file-2",
+                  "path": "README.md"
+                }
+              ],
+              "selected": "file-1"
+            },
+            {
+              "kind": "graph_log",
+              "id": "graph-log"
+            },
+            {
+              "kind": "url",
+              "id": "page-1",
+              "url": "http://localhost:5173"
             }
-          }
+          ],
+          "selected": "files"
         }
       }
     }
   },
-  "focused": "pane-1",
+  "focused": "pane-0",
   "zoomed": "pane-2",
   "hidden": [
-    "pane-4"
+    "pane-1"
   ],
   "drafts": [
     {

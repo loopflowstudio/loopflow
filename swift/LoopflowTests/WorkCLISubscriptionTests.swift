@@ -72,7 +72,7 @@ struct WorkCLISubscriptionTests {
         let surfaceID = TerminalIdentity.session(session.id, machineId: machineID)
         let surface = registry.surfaces.view(for: surfaceID)
         #endif
-        workspace.multiplexer.show(.files(taskId: id))
+        workspace.multiplexer.showBrowser(.files)
         let files = workspace.files(issue: task.task.identifier, cwd: checkout.worktree, query: query)
         let draft = files.document("notes.txt")
         draft.editor.string = "unsaved Task draft"

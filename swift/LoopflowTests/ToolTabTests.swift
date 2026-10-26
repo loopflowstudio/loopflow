@@ -11,18 +11,18 @@ struct ToolTabTests {
     let work = WorkWorkspaceKey(repository: "repo", kind: .task, id: "task")
 
     @Test func twoShellsAndFilesRestoreIdentitiesSelectionAndDrafts() async throws {
-        let store = MultiplexerStore()
+        let store = MultiplexerStore(taskId: work.id)
         let firstPane = try #require(store.newShell(command: ["first"], location: location))
         let first = try #require(firstPane.content.selectedShell)
         let secondPane = try #require(store.newShell(command: ["second"], location: location))
         let second = try #require(secondPane.content.selectedShell)
         #expect(firstPane.id == secondPane.id)
         #expect(first.id != second.id)
-        #expect(store.layout.allPanes.count == 1)
+        #expect(store.layout.allPanes.count == 3)
         store.selectShell(first.id)
         #expect(store.shell(second.id) == second)
         #expect(store.shellPane?.incarnation == firstPane.incarnation)
-        let filesPane = try #require(store.show(.files(taskId: work.id, location: location)))
+        let filesPane = try #require(store.showBrowser(.files, location: location))
         let files = TaskFilesStore(issue: work.id, cwd: location.worktree)
         files.autosave = false
         files.selectFile("first.txt", mode: .edit)
@@ -38,19 +38,21 @@ struct ToolTabTests {
         #expect(document.text == "unsaved draft")
         let portableLocation = WorkViewPlan.Location(machineID: location.machineId, cwd: location.worktree)
         let saved = store.paneLayout(work: work, revision: 2,
-            files: files.paneIntent(location: portableLocation), drafts: files.drafts(location: portableLocation))
+            files: files.browserTab, drafts: files.drafts(location: portableLocation))
         let decoded = try JSONDecoder().decode(WorkPaneLayout.self, from: JSONEncoder().encode(saved))
-        let restored = MultiplexerStore()
+        let restored = MultiplexerStore(taskId: work.id)
         restored.restore(decoded)
-        #expect(restored.layout.allPanes.map(\.id) == [firstPane.id, filesPane.id])
+        #expect(restored.layout.allPanes.map(\.id) == store.layout.allPanes.map(\.id))
+        #expect(restored.browserPane?.id == filesPane.id)
         #expect(restored.shellPane?.content.selectedShell?.id == first.id)
         #expect(restored.shell(second.id)?.location == location)
         #expect(restored.shell(first.id)?.command == nil)
         #expect(restored.shell(first.id)?.incarnation != first.incarnation)
         let reopenedFiles = TaskFilesStore(issue: work.id, cwd: location.worktree)
         reopenedFiles.autosave = false
-        guard case .split(_, _, _, .pane(_, .files(_, let retained, let selected))) = decoded.tree else {
-            Issue.record("Missing Files tool"); return
+        guard case .split(_, _, _, .split(_, _, .pane(_, .browser(_, let browserTabs, _)), _)) = decoded.tree,
+              case .files(_, let retained, let selected)? = browserTabs.first else {
+            Issue.record("Missing Files tab"); return
         }
         reopenedFiles.restoreTabs(retained, selected: selected)
         reopenedFiles.restoreDrafts(decoded.drafts, location: portableLocation)
@@ -65,10 +67,10 @@ struct ToolTabTests {
     }
 
     @Test func emptyFilesRetainTheirRecordedLocation() throws {
-        let store = MultiplexerStore()
-        let pane = try #require(store.show(.files(taskId: work.id, location: location)))
+        let store = MultiplexerStore(taskId: work.id)
+        let pane = try #require(store.showBrowser(.files, location: location))
         let saved = store.paneLayout(work: work, revision: 0, files: nil, drafts: [])
-        let restored = MultiplexerStore()
+        let restored = MultiplexerStore(taskId: work.id)
         restored.restore(saved)
         #expect(restored.layout.pane(for: pane.id)?.content.location == location)
     }
@@ -81,12 +83,12 @@ struct ToolTabTests {
         let source = DesktopPaneTarget(repository: work.repository, window: "window", work: work,
             pane: session.id, incarnation: session.incarnation, tab: nil)
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No execution during control") })
-        let first = try registry.controlPane(.init(target: source, action: .shell), model: model)
+        let first = try DesktopAction.perform(DesktopActionRequest("run", at: source), model: model, workspaces: registry)
         let firstID = try #require(first.tab)
         let shell = try #require(workspace.multiplexer.shell(firstID))
         let exact = DesktopPaneTarget(repository: work.repository, window: "window", work: work,
-            pane: first.pane, incarnation: shell.incarnation, tab: shell.id)
-        let second = try registry.controlPane(.init(target: source, action: .shell), model: model)
+            pane: try #require(first.pane), incarnation: shell.incarnation, tab: shell.id)
+        let second = try DesktopAction.perform(DesktopActionRequest("run", at: source), model: model, workspaces: registry)
         #expect(first.pane == second.pane)
         #expect(first.tab != second.tab)
         #expect(workspace.multiplexer.shellPane?.content.selectedShell?.id == second.tab)
@@ -101,17 +103,17 @@ struct ToolTabTests {
         let toolRead = DesktopTextRequest(target: toolTarget, surface: "missing", region: .screen, maxBytes: 1024)
         #expect(try registry.readText(toolRead).result == .unavailable(reason: .notTerminal))
         #expect(throws: RegistryQueryError.self) {
-            try registry.controlPane(.init(target: toolTarget, action: .text(surface: "missing", text: "draft")), model: model)
+            try DesktopAction.perform(DesktopActionRequest("send", at: toolTarget, args: ["text": "draft", "surface": "missing"]), model: model, workspaces: registry)
         }
-        let hidden = try registry.controlPane(.init(target: exact, action: .hide), model: model)
+        let hidden = try DesktopAction.perform(DesktopActionRequest("hide", at: exact), model: model, workspaces: registry)
         #expect(hidden.tab == firstID)
         #expect(try registry.readText(request).hidden)
-        _ = try registry.controlPane(.init(target: exact, action: .restore), model: model)
+        _ = try DesktopAction.perform(DesktopActionRequest("show", at: exact), model: model, workspaces: registry)
         workspace.multiplexer.selectShell(shell.id)
         #expect(!(try registry.readText(request)).hidden)
-        workspace.closePane(first.pane)
+        workspace.closePane(try #require(first.pane))
         #expect(workspace.multiplexer.shell(try #require(second.tab)) != nil)
-        #expect(throws: RegistryQueryError.self) { try registry.readText(request) }
+        #expect(throws: DesktopTargetError.self) { try registry.readText(request) }
     }
 
     @Test func higherLevelShellRequestsMutateNothing() throws {

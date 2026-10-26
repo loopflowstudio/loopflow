@@ -1107,37 +1107,67 @@ fn native_skill_help_and_graph_capture_keep_the_selected_source_and_declarations
 }
 
 #[test]
-fn desktop_input_uses_work_and_pane_selectors_without_public_lifetime_tokens() {
+fn desktop_verbs_take_pane_paths_without_public_lifetime_tokens() {
     use loopflow::lf::commands::desktop::DesktopKey;
     use loopflow::lf::DesktopCommand;
     let literal = "héλ🙂 \\n \"$(literal)\"";
     let cli = Cli::try_parse_from([
-        "lf", "--repo", "project", "--task", "LOO-427", "desktop", "text", "--pane", "pane-one",
-        "--", literal,
+        "lf",
+        "--repo",
+        "project",
+        "--task",
+        "LOO-427",
+        "desktop",
+        "send",
+        "-p",
+        "2/shell:1",
+        literal,
     ])
     .unwrap();
     assert_eq!(cli.task.as_deref(), Some("LOO-427"));
     assert!(matches!(cli.command, Some(Commands::Desktop {
-        cmd: DesktopCommand::Text { text, pane: Some(pane), .. }
-    }) if text == literal && pane == "pane-one"));
-    let cli = Cli::try_parse_from(["lf", "--task", "LOO-427", "desktop", "key", "enter"]).unwrap();
+        cmd: DesktopCommand::Send { text: Some(text), target }
+    }) if text == literal && target.pane.as_deref() == Some("2/shell:1")));
+    let cli = Cli::try_parse_from(["lf", "desktop", "send-key", "enter"]).unwrap();
     assert!(matches!(
         cli.command,
         Some(Commands::Desktop {
-            cmd: DesktopCommand::Key {
+            cmd: DesktopCommand::SendKey {
                 key: DesktopKey::Enter,
-                pane: None,
                 ..
             }
         })
     ));
-    for flag in ["--target", "--surface", "--window", "--incarnation"] {
-        assert!(Cli::try_parse_from(["lf", "desktop", "text", flag, "removed", "text"]).is_err());
+    // One shell line, as typed; no `--`.
+    let cli = Cli::try_parse_from(["lf", "desktop", "run", "cargo test -p loopflow"]).unwrap();
+    assert!(matches!(cli.command, Some(Commands::Desktop {
+        cmd: DesktopCommand::Run { line: Some(line), .. }
+    }) if line == "cargo test -p loopflow"));
+    let cli = Cli::try_parse_from(["lf", "desktop", "goto", "2", "--json"]).unwrap();
+    assert!(matches!(cli.command, Some(Commands::Desktop {
+        cmd: DesktopCommand::Goto { index: 2, target }
+    }) if target.json));
+    for removed in [
+        &["desktop", "do", "goto", "index=2"][..],
+        &["desktop", "text", "hello"],
+        &["desktop", "read", "--region", "screen"],
+        &["desktop", "restore"],
+        &["desktop", "zoom"],
+        &["desktop", "zoom", "-b", "shell", "--on"],
+        &["desktop", "zoom", "-t", "2", "--on"],
+        &["desktop", "back", "-p", "shell"],
+        &["desktop", "send", "--surface", "removed", "text"],
+    ] {
+        assert!(
+            Cli::try_parse_from(std::iter::once("lf").chain(removed.iter().copied())).is_err(),
+            "{removed:?}"
+        );
     }
-    assert!(Cli::try_parse_from(["lf", "desktop", "key", "arbitrary-bytes"]).is_err());
+    assert!(Cli::try_parse_from(["lf", "desktop", "send-key", "arbitrary-bytes"]).is_err());
+    assert!(Cli::try_parse_from(["lf", "desktop", "zoom", "--on", "--off"]).is_err());
     assert!(
-        matches!(Cli::try_parse_from(["lf", "desktop", "move", "--pane", "one", "--destination", "two", "--axis", "vertical"]).unwrap().command,
-        Some(Commands::Desktop { cmd: DesktopCommand::Move { destination, .. } }) if destination == "two")
+        matches!(Cli::try_parse_from(["lf", "desktop", "move", "-p", "browser", "--destination", "session", "--axis", "vertical"]).unwrap().command,
+        Some(Commands::Desktop { cmd: DesktopCommand::Move { destination, .. } }) if destination == "session")
     );
 }
 
@@ -1175,36 +1205,39 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
     let output = success(run(
         repo.path(),
         home.path(),
-        &["help", "desktop", "shell", "--json"],
+        &["help", "desktop", "run", "--json"],
     ));
     let shell: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(
         shell,
-        describe_command(&["desktop".into(), "shell".into()], false).unwrap()
+        describe_command(&["desktop".into(), "run".into()], false).unwrap()
     );
     assert!(!home.path().join(".lf").exists());
     let definition = &shell["definition"];
     let args = definition["arguments"].as_array().unwrap();
     assert!(!args.iter().any(|arg| arg["name"] == "axis"));
     assert!(definition["result_schema"]["properties"]["tab"].is_object());
-    assert!(args
+    assert!(definition["result_schema"]["properties"]["target"].is_object());
+    for name in ["pane", "window", "line"] {
+        assert!(
+            args.iter()
+                .any(|arg| arg["name"] == name && arg["required"] == false),
+            "{name}"
+        );
+    }
+    assert!(!args
         .iter()
-        .any(|arg| arg["name"] == "pane" && arg["required"] == false));
-    assert!(!args.iter().any(|arg| arg["name"] == "target"));
+        .any(|arg| arg["name"] == "task" || arg["name"] == "block" || arg["name"] == "target"));
     assert_eq!(
-        definition["result_schema"]["properties"]["pane"]["type"],
-        "string"
-    );
-    assert_eq!(
-        definition["result_schema"]["properties"]["work"]["$ref"],
-        "#/$defs/WorkWorkspaceKey"
+        definition["result_schema"]["properties"]["destination"]["$ref"],
+        "#/$defs/DesktopDestination"
     );
     let view = describe_command(&["desktop".into(), "view".into()], false).unwrap();
     let schema = &view["definition"]["result_schema"];
     assert_eq!(schema["anyOf"].as_array().unwrap().len(), 2);
     assert!(schema["$defs"]["ViewPlan"].is_object());
     assert!(schema["$defs"]["DesktopOpening"].is_object());
-    let read = describe_command(&["desktop".into(), "read".into()], false).unwrap();
+    let read = describe_command(&["desktop".into(), "capture".into()], false).unwrap();
     let region = read["definition"]["arguments"]
         .as_array()
         .unwrap()
@@ -1222,7 +1255,9 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|command| command["command"] != "lf desktop rename")
+        .filter(|command| {
+            command["command"] != "lf desktop rename" && command["command"] != "lf desktop wait"
+        })
         .all(|command| command["result_schema"].is_object()));
 }
 
@@ -1419,48 +1454,89 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
             .unwrap();
         child.wait_with_output().unwrap()
     };
-    let mut arrangement = plan.arrangement.clone();
-    arrangement
-        .hide(&arrangement.order[0].clone(), true)
-        .unwrap();
-    let arranged = invoke_input(
-        &["desktop", "arrange", "backlog", "--revision", "3"],
-        &serde_json::to_string(&arrangement.to_edit()).unwrap(),
-    );
+    // Tile verbs aimed at a saved record's tile edit it without Desktop.
+    let tile = format!("query:backlog/task:{}", plan.arrangement.order[0].work.id);
+    let hidden = invoke(&["desktop", "hide", "-p", &tile]);
     assert!(
-        arranged.status.success(),
+        hidden.status.success(),
         "{}",
-        String::from_utf8_lossy(&arranged.stderr)
+        String::from_utf8_lossy(&hidden.stderr)
     );
     let arranged: loopflow::work::selection::Dashboard =
-        serde_json::from_slice(&arranged.stdout).unwrap();
+        serde_json::from_slice(&hidden.stdout).unwrap();
     assert!(arranged.arrangement.project().visible.is_empty());
     assert_eq!(arranged.arrangement.order.len(), 1);
     // Hiding never changes whether the order is automatic.
     assert_eq!(arranged.arrangement.mode, plan.arrangement.mode);
-    let invalid = loopflow::work::selection::Arrangement::automatic(&[]);
-    assert!(!invoke_input(
-        &["desktop", "arrange", "backlog", "--revision", "4"],
-        &serde_json::to_string(&invalid.to_edit()).unwrap(),
-    )
-    .status
-    .success());
-    // The writer owns mode; input naming it is rejected rather than ignored.
-    assert!(!invoke_input(
-        &["desktop", "arrange", "backlog", "--revision", "4"],
-        &serde_json::to_string(&arranged.arrangement).unwrap(),
-    )
-    .status
-    .success());
+    // A hidden tile is no longer shown, so hiding it again names nothing.
+    let again = invoke(&["desktop", "hide", "-p", &tile]);
+    assert_eq!(again.status.code(), Some(3));
+    let order = defaults.resolution.task_ids();
+    // Working Tasks keeps only the shared order: nothing to size.
+    let sized = invoke(&[
+        "desktop",
+        "resize",
+        "-p",
+        &format!("working-tasks/task:{}", order[0]),
+        "--toward",
+        &format!("task:{}", order[1]),
+        "--ratio",
+        "0.6",
+    ]);
+    assert_eq!(sized.status.code(), Some(1));
+    let moved = invoke(&[
+        "desktop",
+        "move",
+        "-p",
+        &format!("working-tasks/task:{}", order[order.len() - 1]),
+        "--destination",
+        &format!("task:{}", order[0]),
+    ]);
+    assert!(
+        moved.status.success(),
+        "{}",
+        String::from_utf8_lossy(&moved.stderr)
+    );
+    let moved: Vec<String> = serde_json::from_slice(&moved.stdout).unwrap();
+    assert_eq!(moved[0], order[order.len() - 1]);
     let reopened = invoke(&["desktop", "view", "query:backlog", "--plan"]);
     let reopened: loopflow::work::selection::ViewPlan =
         serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened.arrangement, arranged.arrangement);
     assert_eq!(reopened.saved_revision, Some(arranged.revision));
+    let revision = arranged.revision.to_string();
+    let slots = invoke_input(
+        &[
+            "desktop",
+            "layout",
+            "query:backlog",
+            "--save",
+            "--revision",
+            &revision,
+        ],
+        "null",
+    );
+    assert!(
+        slots.status.success(),
+        "{}",
+        String::from_utf8_lossy(&slots.stderr)
+    );
+    let read = invoke(&["desktop", "layout", "query:backlog"]);
+    let read: loopflow::work::selection::Dashboard = serde_json::from_slice(&read.stdout).unwrap();
+    assert_eq!((read.slots, read.revision), (None, arranged.revision + 1));
     let mut layout: loopflow::work::selection::WorkPaneLayout =
         serde_json::from_str(include_str!("../../../tests/fixtures/dto/pane_layout.json")).unwrap();
     layout.revision = 0;
-    layout.tree = None;
+    // The fixture's conversation is not recorded here; the session pane shows the start state.
+    if let loopflow::work::selection::PaneTree::Split { first, .. } = &mut layout.tree {
+        **first = loopflow::work::selection::PaneTree::Pane {
+            id: "pane-0".into(),
+            content: loopflow::work::selection::PaneIntent::Session {
+                session_id: None,
+                location: None,
+            },
+        };
+    }
     layout.focused = None;
     layout.zoomed = None;
     layout.hidden.clear();

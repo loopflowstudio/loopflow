@@ -321,7 +321,7 @@ fn operator_scope(
     use crate::durable::WorkRef;
     use crate::session::PrimaryScope;
 
-    if cli.bound_cwd.is_some() || cli.task.is_some() || cli.wt.is_some() {
+    if cli.cwd.is_some() || cli.task.is_some() || cli.wt.is_some() {
         return Ok(None);
     }
     let skill = resolve_skill(skill, cli, cwd)?;

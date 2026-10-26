@@ -57,11 +57,11 @@ pub struct Cli {
     #[arg(short = 'a', long = "agent", global = true)]
     pub agent: Option<String>,
 
-    /// Captured skill and arguments supplied by the invoking Graph process.
-    #[arg(long, hide = true)]
+    /// Read the skill and its arguments from this captured invocation file, as a Graph step does
+    #[arg(long, value_name = "PATH")]
     pub skill_input: Option<std::path::PathBuf>,
-    /// Native final-answer schema supplied by a deciding step.
-    #[arg(long, hide = true, value_parser = |text: &str| serde_json::from_str::<serde_json::Value>(text))]
+    /// Require the final answer to match this JSON schema, as a deciding Graph step does
+    #[arg(long, value_name = "JSON", value_parser = |text: &str| serde_json::from_str::<serde_json::Value>(text))]
     pub output_schema: Option<serde_json::Value>,
     #[arg(skip)]
     pub resolved_invocation: Option<crate::skills::invocation::SkillInvocation>,
@@ -149,9 +149,9 @@ pub struct Cli {
     #[arg(long, value_name = "NAME", conflicts_with = "task")]
     pub wt: Option<String>,
 
-    /// Keep a Work-bound internal launch in this exact checkout.
-    #[arg(long = "__cwd", value_name = "PATH", hide = true)]
-    pub bound_cwd: Option<PathBuf>,
+    /// Run in this directory; Work still comes from `--task` or `--wave`
+    #[arg(long, value_name = "PATH", conflicts_with = "wt")]
+    pub cwd: Option<PathBuf>,
 
     /// The conversation `lf -b connect ID --message TEXT` continues.
     #[arg(skip)]
@@ -377,7 +377,7 @@ impl Cli {
             wave: self.wave.clone(),
             task: self.task.clone(),
             wt: self.wt.clone(),
-            bound_cwd: self.bound_cwd.clone(),
+            cwd: self.cwd.clone(),
             resume: self.resume.clone(),
         }
     }
@@ -477,32 +477,24 @@ pub enum Commands {
         #[arg(trailing_var_arg = true)]
         prompt: Vec<String>,
     },
-    /// Internal detached owner for an execution, launched by its delegating command.
-    #[command(name = "__transport-serve", hide = true)]
-    TransportServe {
-        #[arg(long)]
-        terminal: bool,
-        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
-        argv: Vec<String>,
-    },
     /// Internal provider turn-boundary hook: context at startup and compaction,
-    /// steers at tool and prompt boundaries, Linear acquisition at turn end.
+    /// steers at tool and prompt boundaries, Linear acquisition at turn end,
+    /// Pi's native lifecycle events and its bash tool groups.
     #[command(name = "__context-block", hide = true)]
     ContextBlock {
         #[arg(long)]
         delivery: Option<std::path::PathBuf>,
         #[arg(long, value_enum)]
         moment: crate::context_block::ContextMoment,
-    },
-    /// Owned Pi native lifecycle callback.
-    #[command(name = "__pi-event", hide = true)]
-    PiEvent,
-    /// Arm the existing watchdog for an owned detached tool group.
-    #[command(name = "__tool-lifeline", hide = true)]
-    ToolLifeline {
-        path: std::path::PathBuf,
-        #[arg(long)]
-        provider_pid: u32,
+        /// The FIFO Pi holds open while a `tool-group` command runs
+        #[arg(
+            long,
+            required_if_eq("moment", "tool-group"),
+            requires = "provider_pid"
+        )]
+        lifeline: Option<std::path::PathBuf>,
+        #[arg(long, requires = "lifeline")]
+        provider_pid: Option<u32>,
     },
     /// Inspect and continue Sessions
     Session {
@@ -598,13 +590,6 @@ pub enum Commands {
         /// Inspect a Task's checkout and Wave context
         #[arg(long)]
         task: Option<String>,
-    },
-    /// Internal: render the repository maintainer scorecard for telemetry-daily
-    #[command(name = "__telemetry-scorecard", hide = true)]
-    TelemetryScorecard {
-        /// Emit structured JSON for operator automation
-        #[arg(long)]
-        json: bool,
     },
     /// Discover commands, skills, and graphs
     List {
@@ -1104,6 +1089,15 @@ impl SessionConnectionArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Run the process a Session lives in while terminals come and go
+    Serve {
+        /// Relay the execution to an attached terminal
+        #[arg(long)]
+        terminal: bool,
+        /// The command this process executes
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        argv: Vec<String>,
+    },
     /// Attach to the current execution without restarting or submitting input
     Attach {
         id: String,
@@ -1419,9 +1413,6 @@ pub enum TaskCommand {
         #[arg(value_parser = ["on", "off"])]
         state: String,
     },
-    /// Run a reserved CI repair in its own process
-    #[command(name = "__repair", hide = true)]
-    Repair { incident: String, launcher: String },
     /// Ensure tracked Task Work and its worktree without launching a Graph
     Checkout {
         issue: Option<String>,
@@ -1674,7 +1665,6 @@ impl TaskCommand {
             | Self::Create { .. }
             | Self::Sweep { .. }
             | Self::Reconcile { .. }
-            | Self::Repair { .. }
             | Self::Automation { .. } => None,
             Self::Workflow {
                 cmd:
@@ -1716,7 +1706,6 @@ impl TaskCommand {
             | Self::Create { .. }
             | Self::Sweep { .. }
             | Self::Reconcile { .. }
-            | Self::Repair { .. }
             | Self::Automation { .. } => None,
             Self::Workflow {
                 cmd:
@@ -2070,8 +2059,8 @@ pub enum CiCommand {
         /// Emit the status as JSON
         #[arg(long, requires = "status")]
         json: bool,
-        /// Stop when this process exits
-        #[arg(long = "parent-pid", hide = true)]
+        /// Stop when the process with this PID exits, as Desktop's watcher does
+        #[arg(long = "parent-pid")]
         parent_pid: Option<u32>,
     },
 }
@@ -2207,8 +2196,8 @@ pub enum SelfCommand {
         #[command(subcommand)]
         cmd: Option<InstallCommand>,
     },
-    /// Export skills and Graphs into native vendor Skills directories.
-    #[command(name = "sync-skills", hide = true)]
+    /// Export skills and Graphs into native vendor Skills directories
+    #[command(name = "sync-skills")]
     SyncSkills {
         /// Confirm writes under ~/ without prompting
         #[arg(short = 'y', long = "yes")]
@@ -2965,17 +2954,33 @@ mod tests {
     }
 
     #[test]
-    fn telemetry_scorecard_is_parseable_but_hidden() {
-        let cli = Cli::try_parse_from(["lf", "__telemetry-scorecard", "--json"])
-            .expect("parse internal telemetry scorecard");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::TelemetryScorecard { json: true })
-        ));
-        assert!(!Cli::command()
-            .render_long_help()
-            .to_string()
-            .contains("__telemetry-scorecard"));
+    fn the_provider_hook_is_the_only_hidden_command_and_the_root_hides_no_flag() {
+        let root = Cli::command();
+        let hidden = root
+            .get_subcommands()
+            .filter(|command| command.is_hide_set())
+            .map(|command| command.get_name().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(hidden, ["__context-block"]);
+        fn internal(command: &clap::Command) -> Vec<String> {
+            command
+                .get_subcommands()
+                .flat_map(|child| {
+                    let mut names = internal(child);
+                    if child.get_name().starts_with("__") {
+                        names.push(child.get_name().to_string());
+                    }
+                    names
+                })
+                .collect()
+        }
+        assert_eq!(internal(&root), ["__context-block"]);
+        let hidden_flags = root
+            .get_arguments()
+            .filter(|arg| arg.is_hide_set())
+            .map(|arg| arg.get_id().to_string())
+            .collect::<Vec<_>>();
+        assert!(hidden_flags.is_empty(), "{hidden_flags:?}");
     }
 
     #[test]

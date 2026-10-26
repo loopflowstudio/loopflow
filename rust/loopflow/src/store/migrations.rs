@@ -2451,11 +2451,16 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pending, ("completed".into(), 1, 0));
-        let execution: (String, i64, String, Option<i64>) = conn.query_row(
+        let execution: Option<(String, i64, String, Option<i64>)> = conn.query_row(
             "SELECT w.node,w.edge,w.lf_process_id,p.completed_at FROM task_workflows w JOIN processes p ON p.id=w.lf_process_id WHERE w.task_id='single'",
             [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
-        ).unwrap();
-        assert_eq!(execution, ("start".into(), 0, "held".into(), None));
+        ).optional().unwrap();
+        // A released `ship_it` drops Workflow rows short of `end`; the next run re-places them.
+        if _draft_is_canonical("ship_it") {
+            assert_eq!(execution, None);
+        } else {
+            assert_eq!(execution, Some(("start".into(), 0, "held".into(), None)));
+        }
         assert_eq!(
             conn.query_row(
                 "SELECT task_id FROM agent_sessions WHERE id='conversation'",

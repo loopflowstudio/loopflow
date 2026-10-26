@@ -1112,7 +1112,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
             retained["tasks"]["items"][0]["task"]["linear_id"],
             "other-task"
         );
-        assert_eq!(retained["tasks"]["items"][0]["task"]["completed"], true);
+        assert_eq!(retained["tasks"]["items"][0]["task"]["state"], "completed");
     }
 }
 
@@ -1146,7 +1146,7 @@ fn ordinary_task_due_date_is_visible_before_checkout() {
         row["task"]["due_date"], "2026-10-08",
         "current planning owns the date, not the original filing"
     );
-    assert_eq!(row["task"]["completed"], false);
+    assert_eq!(row["task"]["state"], "unstarted");
     let roadmap = roadmap_json(home.path(), "product");
     let roadmap_child = roadmap["tasks"]["items"]
         .as_array()

@@ -1115,7 +1115,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
         &repo.head_sha(),
     );
     // A captured Workflow wins over the Project's feature selection.
-    let graph = serde_json::json!({"name": "captured", "nodes": [{"name":"review", "skill":"demo", "description":null}], "edges":[{"from":"review", "to":"end", "graph":null}]});
+    let graph = serde_json::json!({"name": "captured", "steps": [{"Skill":{"skill":{"name":"demo"},"id":"review","interactive":true,"returns":null,"sources":[]}}]});
     let path = home.path().join(".lf/loopflow.db");
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute(
@@ -1897,7 +1897,7 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
     );
     let path = home.path().join(".lf/loopflow.db");
     let db = rusqlite::Connection::open(&path).unwrap();
-    let graph = serde_json::json!({"name":"captured", "nodes":[{"name":"review","skill":"demo","description":null}], "edges":[{"from":"review","to":"end","graph":null}]});
+    let graph = serde_json::json!({"name": "captured", "steps": [{"Skill":{"skill":{"name":"demo"},"id":"review","interactive":true,"returns":null,"sources":[]}}]});
     db.execute(
         "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
         rusqlite::params![registered.task.id.as_str(), graph.to_string()],

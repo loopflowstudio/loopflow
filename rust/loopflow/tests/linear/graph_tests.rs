@@ -298,8 +298,8 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
     kill_recorded_graph(home.path(), read()["entry"]["id"].as_str().unwrap());
     graph_process.kill().unwrap();
     graph_process.wait().unwrap();
-    // Reconciliation before and after the surviving effect completes must not
-    // continue the dead process's Graph or execute its successor.
+    // Recovery on a read, before and after the surviving effect completes, must
+    // not continue the dead process's Graph or execute its successor.
     for effect_finished in [false, true] {
         if effect_finished {
             fs::write(repo.path().join("release"), "").unwrap();
@@ -307,12 +307,7 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
                 step_fields(&read(), "outcome") == ["succeeded"]
             });
         }
-        let check = run_lf(
-            repo.path(),
-            home.path(),
-            &["task", "reconcile", "--json"],
-            None,
-        );
+        let check = run_lf(repo.path(), home.path(), &["task", "list"], None);
         assert!(
             check.status.success(),
             "{}",
@@ -1736,7 +1731,8 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
         .iter()
         .all(|session| session["kind"] != "graph"));
     assert!(!home.path().join("prompts").exists());
-    assert_eq!(support::recorded_graphs(home.path()).len(), 6);
+    // The launch that stopped at its stage is one more Graph process.
+    assert_eq!(support::recorded_graphs(home.path()).len(), 7);
     assert_eq!(earlier_graph(), stopped);
     assert_eq!(repo.head_sha(), original_head);
 }
@@ -2180,7 +2176,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
     );
     let status = String::from_utf8(status.stdout).unwrap();
     assert!(
-        status.lines().any(|line| line == "INF-123  not ready"),
+        status.lines().any(|line| line == "INF-123  idle"),
         "{status}"
     );
     assert!(

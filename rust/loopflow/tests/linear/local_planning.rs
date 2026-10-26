@@ -977,7 +977,8 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         .starts_with(&format!("jack/{}-", &id.trim_start_matches("task_")[..6])));
     lf(repo.path(), home.path(), &["-b", "task", "run", id]);
     let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
-    assert_eq!(status["execution"]["status"], "working");
+    // The run stops at the Workflow's first stage, where a person takes part.
+    assert_eq!(status["execution"]["status"], "active");
     assert_eq!(status["execution"]["task_id"], id);
     assert!(status["planning_error"].is_null());
     assert!(status["execution"]["work"]["workflow"].is_object());
@@ -988,7 +989,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let error = String::from_utf8_lossy(&landing.stderr);
     assert!(error.contains("remote"), "{error}");
     let retained = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
-    assert_eq!(retained["execution"]["status"], "working");
+    assert_eq!(retained["execution"]["status"], "active");
     assert!(retained["execution"]["pr"].is_null());
     let backlog = lf(
         repo.path(),

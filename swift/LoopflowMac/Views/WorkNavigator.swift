@@ -154,19 +154,20 @@ struct WorkNavigator: View {
     /// The repository is the default Wave; it lists Working Tasks and can't be edited.
     private var repositoryRow: some View {
         waveRow(scope: .repository, name: model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository",
-                count: model.workingTaskMembers.count, unavailableReason: nil)
+                icon: nil, count: model.workingTaskMembers.count, unavailableReason: nil)
     }
 
     private func waveRow(_ wave: WaveRoadmap) -> some View {
-        waveRow(scope: .wave(wave.wave.id), name: wave.wave.displayName,
+        waveRow(scope: .wave(wave.wave.id), name: wave.wave.displayName, icon: "water.waves",
                 count: wave.tasks.items.count, unavailableReason: wave.tasks.unavailableReason)
     }
 
-    private func waveRow(scope: WorkNavigation.SidebarScope, name: String, count: Int, unavailableReason: String?) -> some View {
+    private func waveRow(scope: WorkNavigation.SidebarScope, name: String, icon: String?,
+                         count: Int, unavailableReason: String?) -> some View {
         let reference: WorkReference? = if case .wave(let id) = scope { .wave(id: id) } else { nil }
         return Button { model.select(reference) } label: {
             HStack {
-                Image(systemName: "water.waves")
+                if let icon { Image(systemName: icon) }
                 Text(name).lineLimit(1)
                 Spacer()
                 if let unavailableReason {

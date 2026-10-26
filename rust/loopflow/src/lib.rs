@@ -60,6 +60,7 @@ pub mod steer;
 pub mod store;
 pub mod subscription;
 pub mod trace;
+pub mod transcript;
 pub mod work;
 pub mod world;
 

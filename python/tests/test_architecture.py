@@ -142,16 +142,16 @@ def test_hidden_graph_command_is_internal_not_public(repo: Path) -> None:
     commands.write_text(
         commands.read_text().replace(
             "    Wave,",
-            '    Wave,\n    #[command(name = "__telemetry-scorecard", hide = true)]\n'
-            "    TelemetryScorecard,",
+            '    Wave,\n    #[command(name = "__context-block", hide = true)]\n'
+            "    ContextBlock,",
         )
     )
 
     errors = _errors(repo)
-    assert "public API missing from map: lf __telemetry-scorecard" not in errors
-    assert "process boundary missing from map: lf __telemetry-scorecard" in errors
+    assert "public API missing from map: lf __context-block" not in errors
+    assert "process boundary missing from map: lf __context-block" in errors
 
-    _write(repo, ".lf/graphs/telemetry-daily.yaml", "- cmd: __telemetry-scorecard\n")
+    _write(repo, ".lf/graphs/internal.yaml", "- cmd: __context-block\n")
 
     assert architecture.check_repository(repo).ok
 

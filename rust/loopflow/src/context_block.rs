@@ -27,6 +27,11 @@ pub enum ContextMoment {
     Tool,
     /// A turn ended: acquire Linear changes, which become steers for the next boundary.
     Stop,
+    /// Pi's native lifecycle event on stdin: turn, usage and completion receipts.
+    PiEvent,
+    /// A Pi bash command is about to run: join its tool group to the watchdog
+    /// that ends the group with its provider.
+    ToolGroup,
 }
 
 /// Captured source identities, not frozen context. Hooks reread scratch and Wave

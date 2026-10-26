@@ -213,7 +213,7 @@ fn mechanical_failure_retains_earlier_step_success() {
     write_graph(
         repo.path(),
         "mechanical-failure",
-        "- cmd: sync --plan\n- cmd: __telemetry-scorecard\n",
+        "- cmd: sync --plan\n- cmd: graph show no-such-graph\n",
     );
     let output = run_lf(
         repo.path(),
@@ -223,7 +223,7 @@ fn mechanical_failure_retains_earlier_step_success() {
     );
     assert!(!output.status.success());
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("telemetry scorecard generator not found"),
+        String::from_utf8_lossy(&output.stderr).contains("graph not found: no-such-graph"),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -232,7 +232,7 @@ fn mechanical_failure_retains_earlier_step_success() {
     assert_eq!(graphs[0]["entry"]["state"], "stopped");
     assert_eq!(
         step_fields(&graphs[0], "label"),
-        ["sync --plan", "__telemetry-scorecard"]
+        ["sync --plan", "graph show no-such-graph"]
     );
     assert_eq!(step_fields(&graphs[0], "outcome"), ["succeeded", "failed"]);
     let sessions = lf_json(
@@ -247,15 +247,12 @@ fn mechanical_failure_retains_earlier_step_success() {
 fn ordinary_graph_crash_retains_effects_without_repository_restart() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
-    let scripts = repo.path().join("scripts");
-    fs::create_dir_all(&scripts).unwrap();
+    // The effect is an ordinary owned execution whose script the test holds.
     fs::write(
-        scripts.join("lifecycle_scorecard.py"),
-        r#"import json
-import pathlib
-import sys
+        repo.path().join("effect.py"),
+        r#"import pathlib
 import time
-repo = pathlib.Path(sys.argv[2])
+repo = pathlib.Path.cwd()
 with repo.joinpath("effects").open("a") as log:
     log.write("started\n")
 repo.joinpath("entered").touch()
@@ -264,14 +261,13 @@ while not repo.joinpath("release").exists():
     if time.monotonic() > deadline:
         raise RuntimeError("fixture release timed out")
     time.sleep(0.02)
-print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
 "#,
     )
     .unwrap();
     write_graph(
         repo.path(),
         "survive",
-        "- cmd: __telemetry-scorecard\n- cmd: sync --plan\n",
+        "- cmd: session serve -- python3 effect.py\n- cmd: sync --plan\n",
     );
     let mut graph_process = lf_command(
         repo.path(),
@@ -325,7 +321,7 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
         let graph = read();
         assert_eq!(
             step_fields(&graph, "label"),
-            ["__telemetry-scorecard"],
+            ["session serve -- python3 effect.py"],
             "inspection must not launch the successor"
         );
         assert_ne!(
@@ -2049,7 +2045,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
     write_graph(
         repo.path(),
         "two-loops",
-        "- cmd: sync --plan\n- implement-proof\n- loop: implement-proof\n  step: decide-proof\n- xor:\n    router: route-proof\n    paths:\n      alpha:\n        description: Check the plan\n        graph: plan-check\n      zeta:\n        description: Show the work\n        skill: demo-proof\n- loop: implement-proof\n  step: decide-proof\n- cmd: __telemetry-scorecard\n",
+        "- cmd: sync --plan\n- implement-proof\n- loop: implement-proof\n  step: decide-proof\n- xor:\n    router: route-proof\n    paths:\n      alpha:\n        description: Check the plan\n        graph: plan-check\n      zeta:\n        description: Show the work\n        skill: demo-proof\n- loop: implement-proof\n  step: decide-proof\n- cmd: graph show no-such-graph\n",
     );
     let task_graph = || {
         lf_json(
@@ -2099,7 +2095,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
     );
     assert!(!ran.status.success(), "the last operation fails");
     assert!(
-        String::from_utf8_lossy(&ran.stderr).contains("telemetry scorecard generator not found"),
+        String::from_utf8_lossy(&ran.stderr).contains("graph not found: no-such-graph"),
         "{}",
         String::from_utf8_lossy(&ran.stderr)
     );
@@ -2118,7 +2114,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
         .all(|session| session["graph_lf_process_id"] == id));
     // The failed step is red and stays with the Graph for its caller.
     assert_eq!(execution["execution"]["state"], "blocked");
-    assert_eq!(execution["execution"]["step"], "__telemetry-scorecard");
+    assert_eq!(execution["execution"]["step"], "graph show no-such-graph");
     let graph = roadmap_task(repo.path(), home.path());
     let record = &graph["latest_graph_process"];
     assert_eq!(record["entry"]["id"], id);
@@ -2137,7 +2133,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
                 "decide-proof",
                 "route-proof",
                 "decide-proof",
-                "__telemetry-scorecard"
+                "graph show no-such-graph"
             ]
         );
         assert_eq!(read["current"], 7);
@@ -2195,7 +2191,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
         "{status}"
     );
     assert!(
-        status.contains("telemetry scorecard generator not found"),
+        status.contains("graph show no-such-graph: command exited with status 2"),
         "{status}"
     );
 

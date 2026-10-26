@@ -1711,6 +1711,27 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
     );
 }
 
+/// The capture manifests of every ci-fix run under `home`.
+fn ci_fix_manifests(home: &std::path::Path) -> Vec<serde_json::Value> {
+    let mut pending = vec![home.join("runs")];
+    let mut manifests = Vec::new();
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.file_name() == Some("manifest.json".as_ref()) {
+                let manifest: serde_json::Value =
+                    serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+                if manifest["skill"] == "ci-fix" {
+                    manifests.push(manifest);
+                }
+            }
+        }
+    }
+    manifests
+}
+
 #[test]
 fn lf_pr_land_returns_before_later_checks_repair_and_observe_merge() {
     for (repair, blocked, awaiting_queue, merge_race, graph, fail_start) in [
@@ -1778,6 +1799,8 @@ fi"#;
         fs::write(worktree.join("feature.txt"), "feature").unwrap();
         fs::create_dir_all(worktree.join(".lf")).unwrap();
         fs::write(worktree.join(".lf/config.yaml"), "agent: codex\n").unwrap();
+        // A ci-fix run is an ordinary skill run, which keeps its prompt log ignored.
+        fs::write(worktree.join(".gitignore"), ".lf/prompts/\n").unwrap();
         if graph {
             fs::create_dir_all(worktree.join(".lf/graphs")).unwrap();
             fs::write(
@@ -1902,28 +1925,17 @@ fi"#;
         let mut output = command().args(check).output().unwrap();
         if fail_start {
             fs::remove_dir(&transport_log).unwrap();
-            let reserved: String = conn
-                .query_row("SELECT repair_session_id FROM ci_incidents", [], |row| {
-                    row.get(0)
-                })
-                .unwrap();
             assert!(
                 !repair_launches.exists(),
                 "failed launch performed no repair"
             );
             output = command().args(check).output().unwrap();
-            let recovered: (String, i64) = conn
-                .query_row(
-                    "SELECT repair_session_id,repair_retries FROM ci_incidents",
-                    [],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
+            let retries: i64 = conn
+                .query_row("SELECT repair_retries FROM ci_incidents", [], |row| {
+                    row.get(0)
+                })
                 .unwrap();
-            assert_eq!(
-                recovered,
-                (reserved, 1),
-                "recovery retains the reserved conversation"
-            );
+            assert_eq!(retries, 1, "recovery is a fresh run");
         }
         if repair {
             assert!(
@@ -1945,9 +1957,8 @@ fi"#;
             fs::write(format!("{}.release", repair_launches.display()), "").unwrap();
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
             loop {
-                // Checkout cleanup waits for the transport's final output drain
-                // as well as the repair executor, both real Processes.
-                let done: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM ci_incidents c JOIN processes e ON e.id=c.repair_lf_process_id JOIN agent_sessions s ON s.id=c.repair_session_id JOIN processes transport ON transport.id=s.transport_lf_process_id WHERE c.repair_finished_at IS NOT NULL AND e.exit_code IS NOT NULL AND transport.completed_at IS NOT NULL)",[],|row|row.get(0)).unwrap();
+                // The run's transport owner exits after its final output drain.
+                let done: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM ci_incidents c JOIN processes e ON e.id=c.repair_lf_process_id WHERE e.completed_at IS NOT NULL)",[],|row|row.get(0)).unwrap();
                 if done {
                     break;
                 }
@@ -1996,8 +2007,8 @@ fi"#;
                 .unwrap();
             assert_eq!(
                 parent.1,
-                i64::from(blocked),
-                "{}\nNested sync: {}",
+                0,
+                "a blocked answer is still a finished run: {}\nNested sync: {}",
                 String::from_utf8_lossy(&output.stderr),
                 fs::read_to_string(&sync_log).unwrap_or_default()
             );
@@ -2022,6 +2033,14 @@ fi"#;
                 )
                 .unwrap();
             assert_eq!(exit, 0, "checking process exited independently");
+            let served: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM ci_incidents c JOIN agent_sessions s ON s.transport_lf_process_id=c.repair_lf_process_id)",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(served, "the reservation names the run's owner Process");
             assert_eq!(
                 fs::read_to_string(&repair_launches)
                     .unwrap()
@@ -2030,7 +2049,31 @@ fi"#;
                 1
             );
         }
+        // The next check settles the exited run from its final answer.
+        let settled = |conclusion: &str| {
+            let (recorded, session): (String, String) = conn
+                .query_row(
+                    "SELECT repair_conclusion,repair_session_id FROM ci_incidents",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            let started: String = conn
+                .query_row(
+                    "SELECT DISTINCT session_id FROM session_events WHERE kind='started'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!((recorded.as_str(), session), (conclusion, started));
+        };
         if blocked {
+            let repeated = command().args(check).output().unwrap();
+            assert!(
+                repeated.status.success(),
+                "a useful blocked check is not a failed observation"
+            );
+            settled("blocked");
             let error: String = conn
                 .query_row("SELECT repair_error FROM ci_incidents", [], |row| {
                     row.get(0)
@@ -2038,11 +2081,6 @@ fi"#;
                 .unwrap();
             assert!(error.contains("GitHub credential revoked; reconnect it before retrying."));
             assert!(!repair_proof.exists());
-            let repeated = command().args(check).output().unwrap();
-            assert!(
-                repeated.status.success(),
-                "a useful blocked check is not a failed observation"
-            );
             assert_eq!(
                 fs::read_to_string(&repair_launches)
                     .unwrap()
@@ -2069,6 +2107,19 @@ fi"#;
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
+            settled("published");
+            // The run answered under the conclusion's schema, as any
+            // structured headless run does.
+            let schema = ci_fix_manifests(&lf_home)
+                .into_iter()
+                .map(|manifest| manifest["exec"]["output_schema"].clone())
+                .next()
+                .expect("the ci-fix run recorded its request");
+            assert_eq!(
+                schema["properties"]["status"]["enum"],
+                serde_json::json!(["published", "blocked"])
+            );
+            assert_eq!(schema["required"], serde_json::json!(["status", "summary"]));
         }
         let state: String = conn
             .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
@@ -2167,7 +2218,7 @@ fn waited_task_landing_completes_at_workflow_end_without_another_command() {
 }
 
 #[test]
-fn waited_task_landing_reports_repair_exit_before_reservation_handoff() {
+fn waited_task_landing_reports_a_repair_run_that_opened_no_session() {
     waited_task_landing("review", true);
 }
 
@@ -2209,6 +2260,7 @@ fn waited_task_landing(destination: &str, failed_startup: bool) {
     for (path, contents) in [
         ("feature.txt", "keep the feature"),
         (".lf/config.yaml", "agent: codex\nplanning:\n  provider: linear\n  team: team-task-pr-tests\n"),
+        (".gitignore", ".lf/prompts/\n"),
         (".lf/workflows/delivery-proof.yaml", workflow),
         (".lf/graphs/delivery-proof.yaml", "- cmd: graph show ship\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n"),
     ] {
@@ -2251,18 +2303,19 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         &[("gh", &gh), ("codex", &codex), ("open", noop_open_script())],
         home.path(),
     );
-    let launcher = home.path().join("lf-delayed-repair");
+    let launcher = home.path().join("lf-failing-repair");
     fs::write(
         &launcher,
         if failed_startup {
-            "#!/bin/sh\nif [ \"$1\" = task ] && [ \"$2\" = __repair ]; then exit 17; fi\nexec \"$LF_TEST_BIN\" \"$@\"\n"
+            "#!/bin/sh\nif [ \"$4 $5\" = 'skill ci-fix' ]; then exit 17; fi\nexec \"$LF_TEST_BIN\" \"$@\"\n"
         } else {
-            "#!/bin/sh\nif [ \"$1\" = task ] && [ \"$2\" = __repair ]; then sleep 12; fi\nexec \"$LF_TEST_BIN\" \"$@\"\n"
+            "#!/bin/sh\nexec \"$LF_TEST_BIN\" \"$@\"\n"
         },
     )
     .unwrap();
     fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
     let fixture = register_task_with_pr(home.path(), &worktree, "waited-repair", &base);
+    support::managed_codex_account(home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let unrelated = loopflow::id::LfProcessId::new();
     db.execute("INSERT INTO processes(id,trace_id,pid,cwd,command,started_at) VALUES(?1,?2,?3,?4,'independent-edit',?5)",
@@ -2347,10 +2400,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     let (status, output, error) = run();
     if failed_startup {
         assert_eq!(status.code(), Some(3), "{output}\n{error}");
-        assert!(
-            error.contains("repair owner exited before claiming its reservation"),
-            "{error}"
-        );
+        assert!(error.contains("exited before opening a Session"), "{error}");
         assert!(!launches.exists());
         assert_eq!(repo.head_sha(), original_head);
         let retained: (String, String, Option<String>) = db

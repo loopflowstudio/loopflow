@@ -21,7 +21,7 @@ async function guardBashTools(pi, ctx) {
         // RDWR opens without waiting for the shell's reader. OS exit also
         // closes this writer, even when Pi cannot run any shutdown handlers.
         writer = openSync(path, constants.O_RDWR);
-        const guard = `${quote(spec.executable)} __tool-lifeline ${quote(path)} --provider-pid ${process.pid}`;
+        const guard = `${quote(spec.executable)} __context-block --moment tool-group --lifeline ${quote(path)} --provider-pid ${process.pid}`;
         return await local.exec(`${guard} || exit $?\n${command}`, cwd, options);
       } finally {
         if (writer !== undefined) closeSync(writer);
@@ -65,8 +65,8 @@ export default function (pi) {
   const report = (event, ctx, extra = {}) => {
     if (!spec.native || (!started && event.type !== "session_start")) return;
     try {
-      invoke("__pi-event", { ...event, ...extra, sessionFile: ctx.sessionManager.getSessionFile(),
-        turn, openTools: tools.size, pendingInput });
+      invoke("__context-block", { ...event, ...extra, sessionFile: ctx.sessionManager.getSessionFile(),
+        turn, openTools: tools.size, pendingInput }, ["--moment", "pi-event"]);
     } catch (error) {
       shutdown(ctx);
       throw error;

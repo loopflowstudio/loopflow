@@ -74,9 +74,10 @@ Task completion.
    - If blocked, name the capability (provider, github-observation, secrets,
      publication) and exact next action. Do not claim an unpublished or unarmed
      repair is complete.
-   - When the landing reconciler supplies a final-answer format, use it. Its
-     `published` or `blocked` result tells the reconciler whether to continue or
-     surface the required human action. Write it only in the final answer.
+   - When the landing reconciler launches the run with an `--output-schema`
+     conclusion, answer with it. Its `published` or `blocked` status tells the
+     reconciler whether to continue or surface the required human action. Write
+     it only in the final answer.
 
 ## Guardrails
 

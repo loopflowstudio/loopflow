@@ -5928,7 +5928,7 @@ mod tests {
             let repairs = repairs.clone();
             let store = store.clone();
             let phase = phase.clone();
-            Arc::new(move |landing, _| {
+            Arc::new(move |landing, _, _| {
                 repairs.fetch_add(1, Ordering::SeqCst);
                 started.lock().unwrap().take().unwrap().send(()).unwrap();
                 held.lock().unwrap().recv().map_err(super::task_error)?;

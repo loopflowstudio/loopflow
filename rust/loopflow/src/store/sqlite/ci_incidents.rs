@@ -232,20 +232,22 @@ impl super::SqliteStore {
         )?)
     }
 
-    /// Processes holding an unfinished repair for this PR, newest first.
+    /// Each unfinished repair for this PR, as its incident and Process, newest first.
     pub(crate) fn pr_repair_processes(
         &self,
         repo: &str,
         pr_number: u32,
-    ) -> StoreResult<Vec<crate::id::LfProcessId>> {
+    ) -> StoreResult<Vec<(String, crate::id::LfProcessId)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT repair_lf_process_id FROM ci_incidents
+            "SELECT identity,repair_lf_process_id FROM ci_incidents
              WHERE repo=?1 AND pr_number=?2
                AND repair_lf_process_id IS NOT NULL AND repair_finished_at IS NULL
              ORDER BY updated_at DESC",
         )?;
-        let rows = statement.query_map(params![repo, i64::from(pr_number)], |row| row.get(0))?;
+        let rows = statement.query_map(params![repo, i64::from(pr_number)], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StoreError::from)
     }

@@ -80,13 +80,13 @@ pub fn assemble(
     })?;
     let mut launch = cli.process_options();
     launch.context = true;
-    if let (Some(binding), Some(cwd)) = (&mut binding, &cli.bound_cwd) {
+    if let (Some(binding), Some(cwd)) = (&mut binding, &cli.cwd) {
         binding.cwd = cwd.clone();
     }
     let cwd = binding
         .as_ref()
         .map(|binding| binding.cwd.as_path())
-        .or(cli.bound_cwd.as_deref())
+        .or(cli.cwd.as_deref())
         .unwrap_or(repo);
     if let Some(name) = skill {
         let invocation = if let Some(path) = &cli.skill_input {

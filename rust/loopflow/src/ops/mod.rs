@@ -8,7 +8,6 @@ pub mod context;
 pub mod cron;
 mod error;
 pub(crate) mod git_operation;
-mod graph;
 pub(crate) mod graph_process;
 pub(crate) mod human_session;
 pub(crate) mod land;
@@ -58,7 +57,6 @@ pub use cron::{
 };
 pub(crate) use cron::{cron_receipt_ids, list_cron_obligations, CronObligation};
 pub use error::{OpsError, OpsResult};
-pub use graph::run_telemetry_scorecard;
 pub use land::{arm, mark_ready, submit, LandOptions};
 pub(crate) use land::{finish_arm_after_sync, finish_submit_after_sync};
 pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};

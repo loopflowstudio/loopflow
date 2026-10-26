@@ -221,6 +221,12 @@ The next repository tick or `lf pr reconcile` repeats this from fresh evidence.
 Those checks record a failure and return. `lf land --wait-and-fix`, `lf ci watch`
 and a release's own landing can start a repair through this same check.
 
+A repair is an ordinary detached `lf -b skill ci-fix` run in the landing's
+checkout; the incident's reservation names its owner Process. Any later check
+settles an exited run from its Session's final answer: `published`, `blocked`
+with a reason, or no conclusion. A run without one holds the landing once, and
+the next check starts a fresh run within `automation.retries`.
+
 ### CI watcher
 
 ```text

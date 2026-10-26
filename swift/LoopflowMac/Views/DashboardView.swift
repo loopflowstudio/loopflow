@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct DashboardSidebar: View {
     @Bindable var model: WorkModel
+    let scopeTitle: Namespace.ID
     @State private var creating = false
     /// The whole section reveals New Dashboard; only the button reads it.
     @State private var hover = HoverFlag()
@@ -13,6 +14,11 @@ struct DashboardSidebar: View {
         // Hover follows hit testing: the shape makes the section's empty space
         // and the hidden button count, not just its labels.
         VStack(alignment: .leading, spacing: 5) { section }.contentShape(Rectangle()).hoverSource(hover)
+    }
+
+    /// A zoomed member fills the center, so its Dashboard is containing.
+    private func selection(of board: WorkNavigation.Board, shown: Bool) -> SidebarSelection {
+        shown ? .shown : model.navigation.trailBoard == board ? .containing : .none
     }
 
     @ViewBuilder private var section: some View {
@@ -29,18 +35,25 @@ struct DashboardSidebar: View {
         }.padding(10)
             .sheet(isPresented: $creating) { DashboardEditor(model: model, plan: nil) }
         Button { model.selectWorkingTasksDashboard() } label: {
+            let state = selection(of: .workingTasks, shown: model.navigation.destination == .workingTasks)
             Label(WorkNavigation.workingTasksTitle, systemImage: "square.grid.3x2")
                 .frame(maxWidth: .infinity, alignment: .leading).padding(10)
-                .background(model.navigation.destination == .workingTasks ? palette.surface : .clear,
-                            in: RoundedRectangle(cornerRadius: 6))
+                .foregroundStyle(state == .shown ? palette.workSelectedText : palette.text)
+                .background(SidebarSelectionShape(state: state))
+                .contentShape(RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain).accessibilityIdentifier("dashboard-working-tasks")
         ForEach(model.dashboards.filter(\.pinned), id: \.dashboardID) { plan in
             if let id = plan.dashboardID {
+                let state = selection(of: .saved(id), shown: model.navigation.dashboardID == id)
                 Button { model.selectDashboard(id) } label: {
-                    Label(plan.name ?? id, systemImage: "rectangle.split.2x2")
+                    Label {
+                        Text(plan.name ?? id)
+                            .matchedGeometryEffect(id: WorkNavigation.SidebarScope.dashboard(id), in: scopeTitle)
+                    } icon: { Image(systemName: "rectangle.split.2x2") }
                         .frame(maxWidth: .infinity, alignment: .leading).padding(10)
-                        .background(model.navigation.dashboardID == id ? palette.surface : .clear,
-                                    in: RoundedRectangle(cornerRadius: 6))
+                        .foregroundStyle(state == .shown ? palette.workSelectedText : palette.text)
+                        .background(SidebarSelectionShape(state: state))
+                        .contentShape(RoundedRectangle(cornerRadius: 6))
                 }.buttonStyle(.plain).accessibilityIdentifier("dashboard-" + id)
             }
         }

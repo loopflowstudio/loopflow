@@ -769,16 +769,23 @@ final class WorkModel {
 
     /// The board as `lf desktop capture -p board` reads it.
     private func standupText(_ view: WorkNavigation.Board, doneDays: Int) -> String? {
-        guard case .wave(let id) = view else {
-            if let reason = roadmap.value?.tasks.unavailableReason { return "Repository planning unavailable · \(reason)" }
-            return WaveStandup(tasks: visibleTasks, closed: visibleTasks, doneDays: doneDays, now: .now)
-                .text(heading: [repositoryName])
+        let scope = view == .repository ? "Repository" : "Wave"
+        switch standupTasks(view) {
+        case .available(let tasks, _):
+            let heading = if case .wave(let id) = view, let roadmap = wave(id: id) { WaveStandup.heading(roadmap) }
+                else { [repositoryName] }
+            return WaveStandup(tasks: tasks, closed: tasks, doneDays: doneDays, now: .now).text(heading: heading)
+        case .unavailable(let reason): return "\(scope) planning unavailable · \(reason)"
+        case nil: return nil
         }
-        return wave(id: id).map { roadmap in
-            guard case .available(let tasks, _) = roadmap.tasks else { return "Wave planning unavailable" }
-            return WaveStandup(tasks: tasks, closed: tasks, doneDays: doneDays, now: .now)
-                .text(heading: WaveStandup.heading(roadmap))
-        }
+    }
+
+    /// The Tasks a Wave view's board buckets: the Wave's, or every Task in the repository.
+    func standupTasks(_ view: WorkNavigation.Board) -> WorkEvidence<RoadmapTask>? {
+        if case .wave(let id) = view { return wave(id: id)?.tasks }
+        guard view == .repository, let tasks = roadmap.value?.tasks else { return nil }
+        guard case .available(_, let truncated) = tasks else { return tasks }
+        return .available(items: visibleTasks, truncated: truncated)
     }
 
     var repositoryName: String { repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository" }

@@ -126,14 +126,6 @@ struct WaveStandupBoard: View {
         if case .wave(let id) = view { model.wave(id: id) } else { nil }
     }
 
-    /// The Tasks the board buckets: the Wave's, or every Task in the repository.
-    private var evidence: WorkEvidence<RoadmapTask>? {
-        if let roadmap { return roadmap.tasks }
-        guard view == .repository, let tasks = model.roadmap.value?.tasks else { return nil }
-        guard case .available(_, let truncated) = tasks else { return tasks }
-        return .available(items: model.visibleTasks, truncated: truncated)
-    }
-
     var body: some View {
         let scope = view == .repository ? "Repository" : "Wave"
         VStack(alignment: .leading, spacing: Spacing.lg) {
@@ -149,7 +141,7 @@ struct WaveStandupBoard: View {
                 Text("Refresh failed · \(error)").foregroundStyle(palette.warning)
                     .accessibilityIdentifier("wave-refresh-failed")
             }
-            switch evidence {
+            switch model.standupTasks(view) {
             case .unavailable(let reason):
                 Text("\(scope) planning unavailable · \(reason)").font(Typography.body(15))
                     .foregroundStyle(palette.warning)

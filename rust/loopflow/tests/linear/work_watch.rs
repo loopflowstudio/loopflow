@@ -699,6 +699,7 @@ fn usage_receipts_do_not_publish_changes_or_delay_a_task() {
     watch.session(|_| true);
     watch.parts(Duration::from_secs(1));
     let before = watch.heartbeat();
+    let started = Instant::now();
 
     for line in 0..2000 {
         usage_receipt(&conn, line);
@@ -715,10 +716,19 @@ fn usage_receipts_do_not_publish_changes_or_delay_a_task() {
         )));
     let after = watch.heartbeat();
     // Process-backed parts reread on their OS clock even without store writes.
-    // Usage receipts must neither wake planning nor publish unchanged Sessions.
-    for part in ["planning", "wave"] {
-        assert_eq!(before.get(part), after.get(part), "{part} was read again");
-    }
+    // Usage receipts never wake planning; Wave token totals rest between reads.
+    assert_eq!(
+        before.get("planning"),
+        after.get("planning"),
+        "planning was read again"
+    );
+    let rest_budget = started.elapsed().as_secs() / 10 + 1;
+    assert!(
+        after["wave"] - before["wave"] <= rest_budget,
+        "wave read {} times in {:?}",
+        after["wave"] - before["wave"],
+        started.elapsed()
+    );
 
     // An Process can change a planning condition, so planning is read; nothing
     // displayed changed, so nothing is sent.

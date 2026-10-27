@@ -474,6 +474,7 @@ mod tests {
                 agent: None,
                 default_agent: None,
                 action_style: None,
+                docs: Vec::new(),
             }),
             message: Some("Fix this".into()),
             clipboard: Some("🦀 $reference\r\n".repeat(10_000)),

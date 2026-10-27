@@ -51,82 +51,41 @@ ol.q ol { list-style: lower-alpha; margin-top: .3rem; }
 <body>
 <main>
 <header>
-  <h1>LOO-628: moving a Session, moving a Task</h1>
-  Task LOO-628 · design review (explore) · 2026-10-26<br>
-  Built from <code>scratch/loo-628-lf-resume-moves.md</code>, <code>scratch/questions.md</code>,
-  <code>provider_account/selection.rs</code>, <code>transcript/mod.rs</code>, <code>config.rs</code> (<code>resume_choice</code>),
-  <code>lf machine use --help</code>, <code>lf session connect --help</code>
+  <h1>LOO-628: <code>--task</code> on a Machine move</h1>
+  Task LOO-628 · concept review (headless, second pass against the build) · 2026-10-27<br>
+  Built from <code>scratch/loo-628-lf-resume-moves.md</code>, the Task definition (edited 2026-10-27),
+  <code>lf/commands/ssh.rs</code>, <code>lf/commands/session_move.rs</code>, <code>bin/lf.rs</code> (<code>reorder_args</code>)
 </header>
 
-<p class="lead">Every decision is settled (Jack Heart, 2026-10-26), and the
-design is going to implementation. Only the demo is still open: Codex's
-encrypted reasoning under another ChatGPT login.</p>
-
-<h2>What you do</h2>
-<pre><code># ran out of room on this login (any Session, same Machine)
-lf resume --account jackstah@gmail.com -a claude
-
-# move a Task: ownership, Workflow, branch, and its conversation
-lf task move LOO-12 --machine mini
-#   Committed 3 files on jack/loo-12-… and pushed
-#   LOO-12 now runs on mini (Workflow at `explore`); its Session moved with it
-
-# move only a conversation (you know what you're doing)
-lf --machine mini resume &lt;session&gt;</code></pre>
+<p class="lead">One spelling from the Task definition refuses today. Accepted direction already says what it should do, so this is implement direction, not a question.</p>
 
 <h2>Actions → concepts → APIs</h2>
-<div class="wrap">
-<table>
-  <tr><th>Action</th><th>What moves</th><th>Before (today)</th><th class="proposed">After</th></tr>
-  <tr><td>change login</td><td>Session's pinned account</td><td>shared home only; isolated starts empty</td><td class="proposed">any Session; transcript copied, same id</td></tr>
-  <tr><td>move a conversation</td><td>branch + history + Session id</td><td>nothing (<code>--machine</code> forwards and fails)</td><td class="proposed"><code>send</code> → <code>receive</code>; source row records where it went</td></tr>
-  <tr><td>move a Task</td><td>ownership + Workflow + Session move</td><td><code>lf machine use --task</code>: ownership only, Session completed, history left behind</td><td class="proposed"><code>lf task move --machine</code>; <code>machine use --task</code> deleted</td></tr>
-</table>
+<div class="wrap"><table>
+<tr><th>You type</th><th>Concept</th><th>API</th></tr>
+<tr><td><code>lf resume --account jackstah@gmail.com -a claude</code></td><td>account move (Session)</td><td><span class="existing">built</span> · <code>ProviderAccountRoute::adopt</code></td></tr>
+<tr><td><code>lf --machine mini resume &lt;session&gt;</code></td><td>Session move</td><td><span class="existing">built</span> · <code>session_move::relay</code></td></tr>
+<tr><td><code>lf task move LOO-12 --machine mini</code></td><td>Task move</td><td><span class="existing">built</span> · <code>session_move::relay_task</code></td></tr>
+<tr><td><code>lf --machine mini resume --task LOO-12</code></td><td>Task move, then resume</td><td>before: refuses · <span class="proposed">after: <code>relay_task</code>, then forward</span></td></tr>
+</table></div>
+
+<div class="callout">
+<p><strong>The mismatch.</strong> The Task definition lists <code>lf --machine mini resume --task LOO-12 # continue it on another Machine</code>. The build answers:</p>
+<pre><code>Task is owned on Machine laptop, not mini; `lf task move &lt;task&gt; --machine &lt;machine&gt;` moves it</code></pre>
+<p>Jack's “people should use the task move API” says <em>which</em> move a Task gets. Naming the Task asks for that move, and Flexibility says adapt instead of refusing.</p>
 </div>
 
-<h3 class="proposed">One payload for both</h3>
-<div class="box-proposed">
-<pre><code>Move {
-  from_machine_id
-  session:  { id, name, title_source, task_id, provider, model } | null
-  checkout: { repository_id, branch, commit }
-  history                                   // carrier: question 2
-  task:     { ownership_marker,
-              workflow: { graph, node, edge, moves[] } } | null
-}</code></pre>
+<h2>After</h2>
+<div class="box-proposed"><span class="tag proposed">Proposed</span>
+<p>In <code>ssh.rs</code>'s resume branch, <code>--task X</code> owned somewhere other than M calls the same <code>relay_task(X, M)</code> that <code>lf task move</code> uses, then forwards <code>resume --task X</code> as it does today. <code>resume &lt;session&gt;</code> still moves only the conversation. Other forwarded commands keep the refusal, because there <code>--machine</code> is transport.</p>
+<p>Proof: the Task-move integration test reaches the same state through the <code>resume --task</code> spelling.</p>
 </div>
-<p>The Workflow's <em>selection</em> already reaches other Machines through
-planning sync. Its <em>position and history</em> (<code>task_workflows</code>,
-<code>task_workflow_moves</code>) are rows on the owner's Machine, so the Task
-move carries them. The process ids in the history are cleared, because those
-processes stay on the laptop.</p>
 
-<h2>Decided</h2>
-<ol>
-  <li><strong>Two moves, layered.</strong> The Session move carries one
-  conversation. <code>lf task move --machine</code> carries the Task and uses the
-  Session move underneath. A Task's Session moved on its own takes only the
-  conversation.</li>
-  <li><strong>A live Graph is stopped</strong> by a Task move. The checkpoint
-  commit keeps whatever it had written, and <code>lf task run</code> on the
-  target runs the slice again.</li>
-  <li><strong>History is the provider's own session file</strong> for every
-  move that keeps the same agent harness, across logins and Machines. The
-  rendered log is only for switching agents, and as a fallback when the target
-  can't read the file. A test confirmed that Claude finds a copied file filed
-  under a different working directory.</li>
-  <li><strong><code>lf machine use --session</code> carries the conversation</strong>
-  for Wave and repository primaries, instead of starting a fresh one.</li>
-  <li><strong>A login you name that can't launch fails</strong> and names it.
-  It never falls back silently.</li>
-  <li><code>lf resume --account &lt;email&gt; -a claude</code> works, and
-  <code>-a claude</code> means the Claude login.</li>
+<p><code>lf resume --machine M</code> already parses the way <code>--account</code> does, since <code>reorder_args</code> lifts any global flag that isn't local.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>None open. If <code>resume --task</code> should keep refusing, say so and the refusal stays.</li>
 </ol>
-
-<h2>Next proof</h2>
-<p>Build order: account moves, then moving a conversation, then moving a Task.
-The demo uses two real Claude logins and two real Codex logins on one Machine,
-then <code>lf task move</code> from the laptop to the mini with a real Task.</p>
 </main>
 </body>
 </html>

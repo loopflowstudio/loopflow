@@ -1,7 +1,7 @@
 # LOO-628: `lf resume` moves a conversation to another account or Machine
 
 Status: design reviewed with Jack Heart 2026-10-26 (concept review). Slices 1, 2 and 3,
-the pre-handoff check of M and the `lf resume` help built (2026-10-26/27); the demo remains. Product direction is Jack Heart's
+the pre-handoff check of M and the `lf resume` help built (2026-10-26/27); `lf --machine M resume --task X` running the Task move (second concept pass, 2026-10-27) and the demo remain. Product direction is Jack Heart's
 (LOO-610 conversation, 2026-10-26) and is binding; mechanisms below are chosen
 here and reversible.
 
@@ -269,12 +269,38 @@ and points to `lf task move` (`ssh.rs` route check), which matches Jack's
 "people should use the task move API". `lf session receive --check` is
 plumbing behind the pre-handoff check; no user learns it.
 
+(Superseded by the second pass below: `--task` with `--machine` runs the
+Task move instead of refusing.)
+
 Built 2026-10-27: `lf help resume` lists the account move, the
 conversation-only Machine move and `lf task move`; `docs/subscriptions.md`
 says `--account` on `lf resume` re-pins the conversation and a named login that
 cannot launch fails.
 
 No open product choice; `scratch/questions.md` holds only demo-decided risks.
+
+### Second pass against the build (2026-10-27, headless)
+
+One mismatch, settled by accepted direction; next implement direction:
+
+- **`lf --machine M resume --task X` runs the Task move, then resumes on M.**
+  Today `ssh.rs` refuses it ("Task is owned on Machine …; `lf task move …`
+  moves it"). The current Task definition (edited 2026-10-27) gives exactly
+  this spelling as "continue it on another Machine", and Jack's "people
+  should use the task move API" names which move a Task gets, not a refusal.
+  Naming the Task is asking for the Task move; Flexibility says adapt, not
+  refuse. So: in the `resume` branch of `ssh.rs`, when `--task X` names a
+  Task owned elsewhere than M, call `session_move::relay_task(X, M)` (same
+  function `lf task move` uses; not a second implementation), then forward
+  `resume --task X` to M as today. `lf resume <session>` keeps moving only
+  the conversation. The refusal stays for other forwarded commands, where
+  `--machine` is transport. Test: extend
+  `task_move_carries_ownership_workflow_and_session` (or a sibling) with the
+  `lf --machine mini resume --task X` spelling reaching the same state.
+  Demo line 2 of the Task text then works as written.
+
+`lf resume --machine M` already parses like `--account` (`reorder_args`
+lifts any non-local global flag). Nothing else changes.
 
 ## Alternatives considered
 
@@ -341,7 +367,7 @@ All deleted as of 2026-10-27 (`rg` finds none); kept so nothing returns.
 A second continuation renderer; a fresh Session id on the target; a Session
 live on two Machines; committing during a merge; a fallback that launches an
 empty conversation; a Task move that leaves the Workflow position behind; a
-second Task-to-Machine command beside `lf task move --machine`.
+second Task-to-Machine implementation beside `relay_task` (`lf --machine M resume --task X` calls it).
 
 ## Slices
 

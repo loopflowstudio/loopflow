@@ -100,6 +100,7 @@ pub fn run(json: bool) -> Result<()> {
     let rows = events.as_ref().map_or(0, Vec::len);
     // Binary freshness remains useful when the store cannot open.
     checks.extend(check_installation(&database_path));
+    checks.push(check_running_binaries());
     checks.push(check_binary_freshness());
     checks.push(check_contention(
         &crate::diagnostic_log::log_path(),
@@ -122,6 +123,40 @@ pub fn run(json: bool) -> Result<()> {
         return Err(anyhow!("doctor checks failed"));
     }
     Ok(())
+}
+
+const RUNNING: &str = "lf-binaries";
+
+/// Name live processes still running a binary the install has moved past.
+fn check_running_binaries() -> Check {
+    let inventory = match super::rollover::inventory() {
+        Ok(inventory) => inventory,
+        Err(error) => {
+            return Check::warn(RUNNING, format!("cannot list live lf processes: {error:#}"))
+        }
+    };
+    match super::rollover::superseded_summary(&inventory) {
+        Some(summary) => Check::warn(
+            RUNNING,
+            format!("{summary}. `lf monitor rollover` moves the resumable ones"),
+        ),
+        None => {
+            let count = inventory
+                .binaries
+                .iter()
+                .map(|binary| binary.processes.len())
+                .sum::<usize>();
+            let selected = inventory
+                .binaries
+                .first()
+                .map(super::rollover::RunningBinary::describe)
+                .unwrap_or_else(|| "the selected lf".into());
+            Check::ok(
+                RUNNING,
+                format!("{count} live lf process(es) run {selected}"),
+            )
+        }
+    }
 }
 
 const CONTENTION_WINDOW_SECONDS: i64 = 86_400;

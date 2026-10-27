@@ -1,6 +1,6 @@
 # LOO-643: Repair retained Process ancestry without losing Session history
 
-Status: slices 1–3 implemented and synced with main (2026-10-27); gate and ship remain. Jack Heart authorized an end-to-end
+Status: slices 1–5 implemented and synced with main (2026-10-27); gate and ship remain. Jack Heart authorized an end-to-end
 autonomous fix, local hotfix and patch release. No ad-hoc SQL writes to the live store.
 
 ## Problem
@@ -120,6 +120,15 @@ omitted the attached-owner clause. Resolved: doctor's `run` counts
 `audit`/`check_lineage` take that count. A recorded-owner fixture fails lineage
 without the hint and prune leaves it alone.
 
+Second concept review (2026-10-27, after main sync): the model, names and action
+vocabulary (`would_repair`/`repaired`/`retained`, matching reap's) hold. One gap:
+the doctor hint sends operators to `lf monitor prune`, but its help ("Reap
+registered orphan providers and remove dead process receipts") and
+`docs/troubleshooting.md` "Orphaned agent processes" describe only reaping. Next
+implement: the prune `about` names the repair, regenerate `docs/lf-reference.md`,
+and the troubleshooting section adds `lf self doctor` failing `lineage` → prune
+releases ancestry that was never recorded, keeping a Session fact.
+
 ## Alternatives rejected
 
 - **Backfill a placeholder parent row.** Its started_at, trace and command are
@@ -167,7 +176,8 @@ the prevention row is named by its agent child (`parent_lf_process_id`) and as
    predicate in processes.rs).
 3. Done: doctor's remedy count reads `unrecorded_agent_ancestry`.
 4. Done: sync with main (#1718).
-5. Remaining: gate, PR, land. The root operator owns the shared patch release,
+5. Done: prune help and troubleshooting name the ancestry repair (concept review).
+6. Remaining: gate, PR, land. The root operator owns the shared patch release,
    `lf install`, and the live `lf monitor prune` readback after merge (Jack's steer, 2026-10-27).
 
 ## Done when

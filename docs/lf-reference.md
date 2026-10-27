@@ -1433,7 +1433,7 @@ Refresh live Loopflow call trees on a terminal; print once when redirected
 
 ## lf monitor prune
 
-Reap registered orphan providers and remove dead process receipts
+Reap orphan providers, remove dead process receipts, and release AgentProcess ancestry that was never recorded
 
 | Argument | What it does |
 |---|---|

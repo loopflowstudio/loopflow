@@ -1,0 +1,4 @@
+# LOO-646 open questions and assumptions
+
+- 2026-10-27 (kickoff, assumption): if a provider has no state history (Asana, Notion), or the Linear history read fails, an uncertain attempt stays pending and is not retried automatically. Today it is adopted as a possible reopening. Simpler safe choice: unknown evidence neither drops the completion nor overwrites a possible reopening. Explicit `lf task complete` / `lf task sync --retry-updates` remains the person's override.
+- 2026-10-27 (kickoff, assumption): Linear merges rapid history entries from the same actor. An entry whose state change happened before the base and that was updated after it can read as `Changed` and cause a spurious adoption. Bounded by checking for `toState.type != base_state`; this is accepted as the conservative residual.

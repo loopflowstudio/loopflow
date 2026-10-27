@@ -261,3 +261,32 @@ fn runpod_rows_from_0_14_16_go_and_current_ones_stay() {
         .unwrap();
     assert_eq!(rentals, 0);
 }
+
+#[test]
+fn fly_rows_from_0_14_17_go_and_the_rest_still_read() {
+    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_before_current_draft(&conn, "forget_fly_rentals");
+    conn.execute_batch(include_str!(
+        "../../../tests/fixtures/migrations/forget_fly_rentals_released.sql"
+    ))
+    .unwrap();
+    conn.execute_batch(&current_draft_sql("forget_fly_rentals"))
+        .unwrap();
+    let providers: Vec<String> = conn
+        .prepare("SELECT provider FROM ondemands UNION ALL SELECT provider FROM rentals")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(providers, ["daytona"]);
+    assert!(Provider::parse(&providers[0]).is_some());
+    let capacity: Option<String> = conn
+        .query_row("SELECT tasks_capacity FROM scope_defaults", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(capacity, None);
+}

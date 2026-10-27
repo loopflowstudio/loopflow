@@ -59,6 +59,12 @@ enum Credential {
     },
 }
 
+/// How long a refreshed Linear access token lasts (observed 2026-10-27). A
+/// rental refreshed at prepare must not outlive it, or Linear stops working
+/// there; raising `rental::MAX_HOURS` past it needs another way to renew.
+const LINEAR_ACCESS_HOURS: f64 = 24.0;
+const _: () = assert!(crate::rental::MAX_HOURS <= LINEAR_ACCESS_HOURS);
+
 pub(super) async fn connect(
     machine: &Machine,
     provider: Provider,

@@ -102,7 +102,8 @@ Native Codex Sessions restore their context binding on start and reconnect,
 including when the provider is still running. A missing delivery file reports its
 path; reconnect the Loopflow Session to restore the binding from its saved input.
 Missing referenced files remain errors and must be restored at their reported paths.
-Host hook declarations and Codex trust decisions remain unchanged.
+Each Codex thread trusts exactly Loopflow's own hook declarations, after any
+wrapper hooks; host declarations and saved Codex trust decisions remain unchanged.
 
 ```bash
 lf context                         # size targets, sources and current usage

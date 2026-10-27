@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wave view demo</title>
+<style>
+:root{--bg:#faf8f4;--fg:#222;--muted:#666;--line:#ddd6cb;--warn:#8a5a00;--prop:#2f5d8a}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1b19;--fg:#e8e4dc;--muted:#a09a90;--line:#3a3732;--warn:#e0b25a;--prop:#8fb6e0}}
+body{background:var(--bg);color:var(--fg);font:16px/1.55 -apple-system,system-ui,sans-serif;margin:0}
+main{max-width:760px;margin:0 auto;padding:32px 16px 64px}
+h1{font-size:24px;margin:0 0 4px}h2{font-size:18px;margin:40px 0 8px}
+.meta{color:var(--muted);font-size:13px}
+.decide{border-left:3px solid var(--warn);padding:8px 14px;margin:24px 0}
+img{width:100%;border:1px solid var(--line);border-radius:6px;margin:8px 0}
+code{font:13px ui-monospace,Menlo,monospace}
+.step{border-top:1px solid var(--line);padding:14px 0}
+.step b{display:block}.expect{color:var(--muted)}.fail{color:var(--warn)}
+textarea{width:100%;min-height:44px;background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:4px;font:inherit;padding:6px;box-sizing:border-box}
+ol.q li{margin:10px 0}
+</style></head><body><main>
+<h1>Wave view demo</h1>
+<div class="meta">LOO-594 · demo · October 26, 2026 · branch at 381df6246e · built from <code>scratch/loo-594-refine-the-desktop-wave-view.md</code>, <code>scratch/questions.md</code>, <code>scratch/demo-wave-view.md</code> · PR #1705 at 15d2615160</div>
+
+<div class="decide"><b>Decision needed:</b> the view works on live data now. Walk the runbook in Loopflow Dev (already open), then answer the questions at the end. I found four problems before you looked; they’re listed below.</div>
+
+<h2>Fixed on this branch</h2>
+<p>Planning failed with <code>missing field `interactive`</code>. Graphs recorded before #1652 store the old key <code>"human"</code>. The draft migration <code>graph_node_interactive.sql</code> renames it in every recorded step (381df6246e). All 796 recorded Graphs now read.</p>
+
+<h2>Product Wave in Loopflow Dev</h2>
+<img src="demo/after-wave.png" alt="Product Wave view: board, Wave Session, three-tile strip">
+<h2>What I found before you looked</h2>
+<ol>
+<li class="fail">Initials appear while you’re solo. You’re counted as two people: 39 owners carry your email, 16 carry only your name.</li>
+<li class="fail">No GitHub pictures yet, only initials. The GitHub lookup wasn’t built.</li>
+<li class="fail">Unstarted Tasks show in Active (“Unowned · ready”). The roadmap’s <code>waiting</code> section holds 89 unstarted Tasks, so Backlog shows only 2.</li>
+<li class="fail">The strip starts with an abandoned Task (LOO-299) and runs to 13 pages, because it includes finished Tasks.</li>
+</ol>
+<p>Before (installed release): planning failed there too, so there’s no comparison image.</p>
+<img src="demo/before-wave.png" alt="Installed Loopflow with planning timeout">
+
+<h2>Runbook (once planning loads)</h2>
+<div class="step"><b>1. Open Loopflow Dev and select the product Wave in the sidebar.</b>
+<span class="expect">Expected: Done · Active · Backlog board on the left, the Wave conversation on the right, three live tiles below with “Page 1 of N”.</span><textarea placeholder="What you saw"></textarea></div>
+<div class="step"><b>2. Hover over the Done header, then click it and type 14.</b>
+<span class="expect">Expected: “· last 7 days” appears on hover; the number edits in place, and Done widens. Relaunch: still 14.</span><textarea placeholder="What you saw"></textarea></div>
+<div class="step"><b>3. Look at Done and Active rows.</b>
+<span class="expect">Expected: no profile pictures (solo). With two people on the board, GitHub pictures and names appear.</span><textarea placeholder="What you saw"></textarea></div>
+<div class="step"><b>4. Page the strip, then click a tile header.</b>
+<span class="expect">Expected: the full Task opens with a link back to the Wave and its sidebar row selected. Back returns you to the same page.</span><textarea placeholder="What you saw"></textarea></div>
+<div class="step"><b>5. Select the repository at the top of the sidebar.</b>
+<span class="expect">Expected: the same view over every repository Task. Backlog lists unstarted Tasks with Start.</span><textarea placeholder="What you saw"></textarea></div>
+<div class="step"><b>6. In a terminal: <code>lf desktop state --json | jq '.windows[0].view_parts'</code>, then <code>lf desktop capture -p board</code>.</b>
+<span class="expect">Expected: board, session and tiles parts, with done_days and the strip page; the board as text.</span><textarea placeholder="What you saw"></textarea></div>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Active vs Backlog: (a) bucket by state, so unstarted Tasks go to Backlog whatever their roadmap section; (b) keep the roadmap sections.</li>
+<li>Strip contents: (a) only unfinished Tasks; (b) Active Tasks only; (c) leave as is.</li>
+<li>People: (a) fix the solo count (one person per name or email) and build GitHub pictures in this PR; (b) fix only the solo count now and file GitHub pictures as its own Task.</li>
+<li>Anything you see in steps 1–6 that should change.</li>
+</ol>
+</main></body></html>

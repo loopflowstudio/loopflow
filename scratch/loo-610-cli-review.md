@@ -462,7 +462,7 @@ design for the follow-ups. No compatibility aliases; Desktop, skills, docs,
      went with main's deletion of `ci watch` (#1652).
    - `repo tokens` → `lf ops tokens` (Jack Heart, 2026-10-26: not `history`, which
      is Session history per LOO-604). Desktop: `RegistryQuery.swift:605,613`.
-   - `repo comment` → `lf session steer --repo` (steer the repo scope's Sessions).
+   - `repo comment` → `lf session steer` with no id (see "One steer verb").
    - `repo refresh` → delete; `wave status --sync` already refreshes
      (Desktop `RegistryQuery.swift:579` uses it).
    - `repo planning key|status` → `lf config planning key|status` (doctor's JSON

@@ -71,9 +71,6 @@ struct Request<A> {
 pub(crate) struct Watched {
     /// Facts outside the store are read again this often.
     pub clock: Duration,
-    /// A field of the result, or of each of its rows, that restates when it
-    /// was read.
-    pub stamp: Option<&'static str>,
     /// The result shows Git facts of Task checkouts: read again when one
     /// changes on disk and Git's answer about it differs.
     pub checkouts: bool,
@@ -83,7 +80,6 @@ impl Watched {
     pub(crate) fn every(clock: Duration) -> Self {
         Self {
             clock,
-            stamp: None,
             checkouts: false,
         }
     }
@@ -248,7 +244,7 @@ where
             };
             drop(snapshot);
             cost = began.elapsed();
-            let identity = identity(&unavailable, &body, watched.stamp)?;
+            let identity = identity(&unavailable, &body)?;
             if force || sent != Some(identity) {
                 let frame = WatchFrame {
                     answers,
@@ -327,26 +323,9 @@ fn strip_reading_time(value: &mut serde_json::Value) {
     }
 }
 
-fn identity<T: Serialize>(
-    unavailable: &Option<String>,
-    body: &Option<T>,
-    stamp: Option<&str>,
-) -> Result<[u8; 32]> {
+fn identity<T: Serialize>(unavailable: &Option<String>, body: &Option<T>) -> Result<[u8; 32]> {
     let mut value = serde_json::to_value(body)?;
     strip_reading_time(&mut value);
-    if let Some(stamp) = stamp {
-        match &mut value {
-            serde_json::Value::Object(fields) => {
-                fields.remove(stamp);
-            }
-            serde_json::Value::Array(rows) => {
-                for fields in rows.iter_mut().filter_map(|row| row.as_object_mut()) {
-                    fields.remove(stamp);
-                }
-            }
-            _ => {}
-        }
-    }
     let mut hash = Sha256::new();
     hash.update(serde_json::to_vec(unavailable)?);
     hash.update(serde_json::to_vec(&value)?);
@@ -493,21 +472,12 @@ mod tests {
 
     #[test]
     fn the_time_of_a_reading_is_not_a_change() {
-        let at = |observed_at| serde_json::json!({"observed_at": observed_at, "nodes": []});
-        let rows = |observed_at| serde_json::json!([{"observed_at": observed_at, "id": 1}]);
-        let stamped = |body, stamp| identity(&None, &Some(body), stamp).unwrap();
-        assert_eq!(
-            stamped(at(1), Some("observed_at")),
-            stamped(at(2), Some("observed_at"))
-        );
-        assert_eq!(
-            stamped(rows(1), Some("observed_at")),
-            stamped(rows(2), Some("observed_at"))
-        );
-        assert_ne!(stamped(at(1), None), stamped(at(2), None));
+        let rows = |at| serde_json::json!([{"id": 1, "condition": {"observed_at": at}}]);
+        let read = |body| identity(&None, &Some(body)).unwrap();
+        assert_eq!(read(rows(1)), read(rows(2)));
         assert_ne!(
-            stamped(at(1), Some("observed_at")),
-            identity(&Some("gone".into()), &Some(at(1)), Some("observed_at")).unwrap()
+            read(rows(1)),
+            identity(&Some("gone".into()), &Some(rows(1))).unwrap()
         );
     }
 }

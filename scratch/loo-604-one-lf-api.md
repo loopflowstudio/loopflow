@@ -62,8 +62,9 @@ to store queries.
 
 `--watch` (`lf/commands/watch.rs`, one implementation): a frame
 `{answers, unavailable, body}` per line, `body` = the
-`--json` output, sent first and whenever its identity (reading-time fields and
-`Watched::stamp`, on the result or each row, stripped) changes. Wakes on the
+`--json` output, sent first and whenever it changes (Desktop shapes'
+`generated_at`, `evidence_age_secs` and condition `observed_at` ignored; the
+ordinary bodies carry no reading time). Wakes on the
 read's revision domains (all but usage), its clock, or — with
 `Watched::following_checkouts` — a Task checkout whose Git answer changed;
 settles bursts; rests `BUSY_SHARE` × last cost; retries failures with backoff.
@@ -280,3 +281,4 @@ unless "Work needed" says otherwise.
 - Compress (`DesktopCommand::is_read` shared by preview and process recording; `TaskNames::read` takes an optional store): clippy --all-targets clean (also covers 75faef7b22's deferred clippy); integration `dto_fixtures world_recipes global_commands` 50 passed.
 - Realign after main sync (b3fb1ba128): `every_verb_names_a_registry_action` skips the branch's `lf desktop plans|plan|done|wave|task` reads; `cargo test -p loopflow --lib every_verb_names_a_registry_action` passed.
 - Minimal watch bodies + Task pane row (2026-10-27): clippy --all-targets clean; integration `dto_fixtures cli_reference session_cli_tests session_list_watch world_recipes work_open_tests performance_tests data_clones planning_foreground` passed (`available_lists_only…` and `cmux_opens…` failed only under the parallel run, pass alone); `session_lifecycle_tests` (30), `global_commands`, `process_ownership_tests` passed; lib `planning_peers planning_write commands::top|activity|desktop work::task` passed, `watch::a_store_created…` passes alone; `test_desktop.sh` 27 suites / 361 tests passed (incl. `taskLifecycleUpdatesOpenSidebar`; stand-ins still answering `wave show` from 75faef7b22 now answer `desktop plan`). Lib `linear/` suites and Linux `planning_reconnect`: gate.
+- Compress (`Watched::stamp` deleted; no body restates its reading time): clippy --all-targets clean; lib `lf::commands::watch` 3 passed.

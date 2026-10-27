@@ -32,7 +32,7 @@ pub struct GraphNode {
     /// Literal skill name, operation, or XOR router.
     pub label: String,
     pub kind: GraphNodeKind,
-    pub human: bool,
+    pub interactive: bool,
     /// Key of the earlier node this deciding occurrence can return to.
     pub returns_to: Option<u32>,
     /// Composed Graphs this occurrence was compiled from, outermost first.
@@ -191,7 +191,7 @@ pub struct InteractionGraph {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InteractionTransition {
-    /// Structural human occurrence or `@start` / `@end` anchor.
+    /// Structural interactive stage or `@start` / `@end` anchor.
     pub from: String,
     pub to: String,
     pub nodes: Vec<String>,
@@ -218,7 +218,7 @@ fn project_interaction_nodes(steps: &[GraphNode]) -> InteractionGraph {
             let next = steps
                 .get(index + 1)
                 .map_or_else(|| end.to_string(), |node| node.key.to_string());
-            if node.human {
+            if node.interactive {
                 stages.push(node.key.to_string());
             }
             if node.kind == GraphNodeKind::Xor {
@@ -365,7 +365,7 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<GraphNode> {
                 id: skill.id.clone(),
                 label: skill.skill.name.clone(),
                 kind: GraphNodeKind::Skill,
-                human: skill.human,
+                interactive: skill.interactive,
                 sources: skill.sources.clone(),
                 paths: Vec::new(),
             },
@@ -374,7 +374,7 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<GraphNode> {
                 id: None,
                 label: op.item.display_name(),
                 kind: GraphNodeKind::Op,
-                human: false,
+                interactive: false,
                 returns_to: None,
                 sources: op.sources.clone(),
                 paths: Vec::new(),
@@ -398,7 +398,7 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<GraphNode> {
                     id: None,
                     label: branch.router.name.clone(),
                     kind: GraphNodeKind::Xor,
-                    human: false,
+                    interactive: false,
                     returns_to: None,
                     sources: branch.sources.clone(),
                     paths,
@@ -460,7 +460,7 @@ pub(crate) fn location(
 
 /// Ordered backward-edge traversal counts at each active nesting level, outermost
 /// first. Empty levels are retained so nested counts never masquerade as root
-/// counts. Visit tokens used for human-boundary identity are deliberately absent.
+/// counts. Visit tokens used for stage identity are deliberately absent.
 pub fn graph_iterations(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> Vec<Vec<u32>> {
     let counts = (0..steps.len())
         .filter(|index| return_target(steps, *index).is_some())
@@ -708,7 +708,7 @@ mod tests {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(name),
             id: id.map(str::to_string),
-            human,
+            interactive: human,
             returns,
             sources: Vec::new(),
         })
@@ -857,8 +857,7 @@ mod tests {
                 &[],
                 2,
             ),
-            ("deploy", &["gate", "pr land"], &[], 0),
-            ("ship", &["gate", "land --wait-and-fix"], &[], 0),
+            ("deliver", &["gate", "land --wait-and-fix"], &[], 0),
             ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
         ];
         for (name, labels, humans, returns) in cases {
@@ -878,7 +877,7 @@ mod tests {
                     .steps
                     .iter()
                     .enumerate()
-                    .filter_map(|(i, s)| s.human.then_some(i))
+                    .filter_map(|(i, s)| s.interactive.then_some(i))
                     .collect::<Vec<_>>(),
                 *humans,
                 "{name}"
@@ -949,7 +948,7 @@ mod tests {
             ]
         );
         // Review and landing are the conversation's to launch, not this Graph's.
-        assert!(compiled.steps.iter().all(|node| !node.human));
+        assert!(compiled.steps.iter().all(|node| !node.interactive));
         assert!(compiled
             .steps
             .iter()

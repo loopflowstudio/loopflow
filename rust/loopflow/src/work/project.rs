@@ -5,7 +5,6 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::child::AbandonIntent;
 pub use crate::durable::ProjectId;
 use crate::id::WaveId;
 use crate::linear::{LinearBindingError, LinearProjectId};
@@ -58,9 +57,6 @@ pub struct Project {
     pub pm_snapshot_synced_at: Option<i64>,
     /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
-    /// Set when abandonment is *requested*, not when it is applied. No launch
-    /// path may start a Run for Project Work carrying this.
-    pub abandon_intent: Option<AbandonIntent>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }

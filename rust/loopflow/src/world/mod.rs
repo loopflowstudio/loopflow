@@ -21,7 +21,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 
 use crate::graph::compiled::CompiledGraph;
-use crate::graph::ConcreteStep;
+use crate::graph::{ConcreteSkill, ConcreteStep, Skill};
 use crate::id::{LfProcessId, TraceId};
 use crate::ops::human_session::provider_conversation;
 use crate::ops::task::TaskRunSelection;
@@ -518,9 +518,9 @@ impl World {
         Ok(task)
     }
 
-    /// Pause a Task the way `lf task pause` does.
-    pub fn pause(&self, task: &Task) -> Result<()> {
-        Ok(crate::ops::task::task_pause(&task.identifier, true)?)
+    /// Defer a Task the way `lf task defer` does.
+    pub fn defer(&self, task: &Task) -> Result<()> {
+        Ok(crate::ops::task::task_defer(&task.identifier, true)?)
     }
 
     /// Abandon a Task the way `lf task abandon` does, removing its checkout.
@@ -567,10 +567,11 @@ impl World {
 
     /// Run `requested` for `task` the way `lf task run` does: take up a
     /// Workflow it names (or the Wave or repository default), set out on the
-    /// edge it selects and record that edge's Graph, each step lasting
+    /// route it selects and record that route's Graph, each step lasting
     /// `minutes` and the last ending `ended_days_ago`. A Graph that succeeds
-    /// puts the Task at the edge's target; one that fails leaves it stopped on
-    /// the edge. A requested Graph that is no edge runs off any Workflow.
+    /// puts the Task at the route's target stage; one that fails leaves it
+    /// stopped on the route. A requested Graph that is no route becomes the
+    /// Task's Workflow.
     pub fn task_run(
         &self,
         task: &Task,
@@ -581,46 +582,49 @@ impl World {
     ) -> Result<LfProcessId> {
         let store = self.store()?;
         let checkout = task.worktree()?.clone();
-        let selection =
-            crate::ops::task::select_task_run(&store, task, &checkout, Some(requested))?;
+        let TaskRunSelection {
+            workflow,
+            index,
+            take_up,
+        } = crate::ops::task::select_task_run(&store, task, &checkout, Some(requested))?;
+        // A route into `end` that runs nothing completes the Task instead.
+        if !workflow.edge_runs(index) {
+            bail!("{requested} enters {END} running nothing; complete the Task instead");
+        }
+        // The route is recorded as the graph or skill it is named by.
+        let graph = workflow.definition.edges[index as usize].name.clone();
         let trace = TraceId::new();
         let issue = task.identifier.as_str();
         let argv = vec!["lf", "task", "run", issue, requested];
-        let (graph, edge) = match selection {
-            TaskRunSelection::Graph(graph) => (graph, None),
-            TaskRunSelection::Edge {
-                workflow,
-                index,
-                take_up,
-            } => {
-                // Only an edge into `end` may name no Graph.
-                let edge = &workflow.definition.edges[index as usize];
-                let graph = match &edge.graph {
-                    Some(graph) if edge.to != END => graph.clone(),
-                    _ => bail!("{requested} enters {END}; complete the Task instead"),
-                };
-                (graph, Some((workflow, index, take_up)))
-            }
+        let (name, steps) = match crate::workflow::CapturedGraph::load(&graph, &checkout)? {
+            Some(captured) => (captured.name, captured.steps),
+            None => (
+                graph.clone(),
+                vec![ConcreteStep::Skill(ConcreteSkill {
+                    skill: Skill::named(&graph),
+                    id: None,
+                    interactive: false,
+                    returns: None,
+                    sources: Vec::new(),
+                })],
+            ),
         };
-        let (name, steps) = crate::ops::task::load_task_graph(&checkout, &graph)?;
         let (started, ended) = self.span(&steps, ended_days_ago, minutes, outcome)?;
         // The Task run starts its Graph, which starts the first step.
         let mut run = self.process(&trace, None, &checkout, argv, started - 2);
         run.completed_at = Some(ended);
         outcome.complete(&mut run);
         store.sqlite.record_process(&run)?;
-        if let Some((workflow, index, take_up)) = edge {
-            if take_up {
-                store
-                    .sqlite
-                    .take_up_workflow(&task.id, &workflow.definition, &run.id, None)?;
-            }
-            if !store
+        if let Some(graph) = &take_up {
+            store
                 .sqlite
-                .choose_workflow_edge(&task.id, &workflow, index, &run.id, None)?
-            {
-                bail!("Task {issue} moved while choosing {graph}");
-            }
+                .take_up_workflow(&task.id, graph, &run.id, None)?;
+        }
+        if !store
+            .sqlite
+            .choose_workflow_edge(&task.id, &workflow, index, &run.id, None)?
+        {
+            bail!("Task {issue} moved while choosing {graph}");
         }
         let argv = vec!["lf", "--task", issue, "graph", "--", &name];
         self.graph(

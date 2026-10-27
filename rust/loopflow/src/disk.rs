@@ -1,11 +1,12 @@
 //! Loopflow's footprint on this Machine's disk.
 //!
-//! Home (`~/.lf`) is measured by category and kept within `disk_budget` from the
-//! Machine's `config.yaml`. Rotation removes the oldest backups, draft store
-//! copies, Session captures and logs first. It never removes the database or its
-//! sidecars, account homes, the newest backup of each database, anything modified
-//! within the grace period, or anything a running process holds open. Every
-//! removal is appended to `logs/disk.log`.
+//! Home (`~/.lf`) is measured by category. Rotation removes backups, draft store
+//! copies, Session captures and logs once they are older than [`RETENTION`],
+//! matching Claude Code's default transcript cleanup; there is no size budget.
+//! It never removes the database or its sidecars, account homes, the newest
+//! backup of each database, anything modified within the grace period, or
+//! anything a running process holds open. Every removal is appended to
+//! `logs/disk.log`.
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File, OpenOptions};
@@ -15,11 +16,11 @@ use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-/// Home budget when `disk_budget` is unset.
-pub const DEFAULT_BUDGET_BYTES: u64 = 20 * GIB;
+/// Rotatable material older than this is removed automatically.
+pub const RETENTION: Duration = Duration::from_secs(30 * 24 * 3600);
 /// Material modified this recently is never rotated.
 pub const GRACE: Duration = Duration::from_secs(24 * 3600);
 /// Automatic rotation runs at most this often.
@@ -27,7 +28,6 @@ const ROTATION_INTERVAL: Duration = Duration::from_secs(3600);
 const ROTATION_STAMP: &str = "runtime/disk-rotation.stamp";
 const LOCK: &str = "runtime/disk.lock";
 const LOG: &str = "logs/disk.log";
-const GIB: u64 = 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -67,7 +67,6 @@ pub struct CategoryUsage {
 pub struct HomeUsage {
     pub home: PathBuf,
     pub bytes: u64,
-    pub budget_bytes: u64,
     pub categories: Vec<CategoryUsage>,
     /// Process receipt files, dead ones included, counted without reading them.
     pub process_receipts: u64,
@@ -90,43 +89,6 @@ pub struct RotationReport {
     /// Home size after removals (estimated on a dry run).
     pub after_bytes: u64,
     pub errors: Vec<String>,
-}
-
-// ---------------------------------------------------------------------------
-// Budget
-
-/// Parse `20G`, `512M`, `1.5T` or a plain byte count (powers of 1024).
-pub fn parse_size(text: &str) -> Result<u64> {
-    let text = text.trim();
-    let split = text
-        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
-        .unwrap_or(text.len());
-    let (number, unit) = text.split_at(split);
-    let number: f64 = number
-        .parse()
-        .with_context(|| format!("invalid size {text:?}"))?;
-    let scale = match unit
-        .trim()
-        .to_ascii_uppercase()
-        .trim_end_matches(['B', 'I'])
-    {
-        "" => 1u64,
-        "K" => 1024,
-        "M" => 1024 * 1024,
-        "G" => GIB,
-        "T" => 1024 * GIB,
-        _ => bail!("invalid size unit in {text:?}; use K, M, G or T"),
-    };
-    Ok((number * scale as f64) as u64)
-}
-
-/// The Machine's Home budget: `disk_budget` in `config.yaml`, else the default.
-pub fn budget_bytes() -> Result<u64> {
-    let config = crate::config::load_global_config().map_err(|error| anyhow::anyhow!("{error}"))?;
-    match config.and_then(|config| config.disk_budget) {
-        Some(text) => parse_size(&text).context("disk_budget in config.yaml"),
-        None => Ok(DEFAULT_BUDGET_BYTES),
-    }
 }
 
 pub fn format_bytes(bytes: u64) -> String {
@@ -232,7 +194,7 @@ fn categorize(database: Option<&str>, name: &str) -> Category {
 }
 
 /// Measure Home by category.
-pub fn measure_home(home: &Path, budget_bytes: u64) -> Result<HomeUsage> {
+pub fn measure_home(home: &Path) -> Result<HomeUsage> {
     let mut totals: BTreeMap<Category, u64> = BTreeMap::new();
     let mut seen = HashSet::new();
     let store = crate::store::default_db_path();
@@ -257,7 +219,6 @@ pub fn measure_home(home: &Path, budget_bytes: u64) -> Result<HomeUsage> {
     Ok(HomeUsage {
         home: home.to_path_buf(),
         bytes: categories.iter().map(|usage| usage.bytes).sum(),
-        budget_bytes,
         categories,
         process_receipts,
     })
@@ -367,12 +328,12 @@ fn rotatable_units(home: &Path) -> Vec<Unit> {
     units
 }
 
-/// Remove rotatable units, oldest first. `select` decides whether a unit is
-/// still wanted given the bytes freed so far.
+/// Remove rotatable units, oldest first. `select` gives the reason a unit goes,
+/// or `None` to keep it.
 fn rotate(
     home: &Path,
     dry_run: bool,
-    mut select: impl FnMut(&Unit, u64) -> Option<String>,
+    select: impl Fn(&Unit) -> Option<String>,
 ) -> Result<(Vec<Removal>, Vec<String>)> {
     let mut units = rotatable_units(home);
     units.sort_by_key(|unit| unit.modified);
@@ -380,13 +341,12 @@ fn rotate(
     let mut open: Option<HashSet<PathBuf>> = None;
     let mut removed = Vec::new();
     let mut errors = Vec::new();
-    let mut freed = 0;
     let mut log = (!dry_run).then(|| open_log(home)).transpose()?;
     for unit in units {
         if unit.modified > cutoff {
             continue;
         }
-        let Some(reason) = select(&unit, freed) else {
+        let Some(reason) = select(&unit) else {
             continue;
         };
         if open.is_none() {
@@ -416,7 +376,6 @@ fn rotate(
                 continue;
             }
         }
-        freed += unit.bytes;
         let removal = Removal {
             category: unit.category,
             path: unit.paths[0].clone(),
@@ -485,45 +444,27 @@ fn try_lock(home: &Path) -> Result<Option<File>> {
     Ok(locked.then_some(file))
 }
 
-/// Rotate Home until it fits `budget_bytes`, or remove everything rotatable older
-/// than `older_than` when set. Returns `None` when another rotation is running.
+/// Remove everything rotatable older than `older_than`. Returns `None` when
+/// another rotation is running.
 pub fn rotate_home(
     home: &Path,
-    budget_bytes: u64,
-    older_than: Option<Duration>,
+    older_than: Duration,
     dry_run: bool,
 ) -> Result<Option<RotationReport>> {
     let Some(_lock) = try_lock(home)? else {
         return Ok(None);
     };
-    let before = measure_home(home, budget_bytes)?;
-    let excess = before.bytes.saturating_sub(budget_bytes);
-    let expiry = older_than.map(|age| {
-        (
-            SystemTime::now() - age,
-            format!("older than {} days", age.as_secs() / 86400),
-        )
-    });
-    let (removed, errors) = rotate(home, dry_run, |unit, freed| {
-        if let Some((_, reason)) = expiry
-            .as_ref()
-            .filter(|(expired, _)| unit.modified < *expired)
-        {
-            Some(reason.clone())
-        } else if freed < excess {
-            Some(format!(
-                "Home over its {} budget",
-                format_bytes(budget_bytes)
-            ))
-        } else {
-            None
-        }
+    let before = measure_home(home)?;
+    let expired = SystemTime::now() - older_than;
+    let reason = format!("older than {} days", older_than.as_secs() / 86400);
+    let (removed, errors) = rotate(home, dry_run, |unit| {
+        (unit.modified < expired).then(|| reason.clone())
     })?;
     let freed_bytes = removed.iter().map(|removal| removal.bytes).sum();
     let after_bytes = if dry_run {
         before.bytes.saturating_sub(freed_bytes)
     } else {
-        measure_home(home, budget_bytes)?.bytes
+        measure_home(home)?.bytes
     };
     Ok(Some(RotationReport {
         dry_run,
@@ -536,7 +477,7 @@ pub fn rotate_home(
 }
 
 /// Rotate Home on a background thread when the last rotation began over an hour
-/// ago. Called as Loopflow produces new captures, so Home stays within budget
+/// ago. Called as Loopflow produces new captures, so expired material leaves
 /// without anyone running a cleanup. Rotation runs in this process rather than a
 /// spawned `lf`, so it adds no Process history; one cut short by exit resumes on
 /// the next due capture.
@@ -559,7 +500,7 @@ pub(crate) fn rotate_when_due(home: &Path) {
         let rotated = (|| -> Result<()> {
             fs::create_dir_all(stamp.parent().expect("stamp has a directory"))?;
             File::create(&stamp)?;
-            rotate_home(&home, budget_bytes()?, None, false)?;
+            rotate_home(&home, RETENTION, false)?;
             Ok(())
         })();
         if let Err(error) = rotated {
@@ -588,7 +529,7 @@ pub(crate) fn prune_store() -> Result<crate::store::sqlite::retention::Retention
 
 #[cfg(test)]
 mod tests {
-    use super::{backup_database, parse_size, rotate_home, Category, GIB};
+    use super::{backup_database, rotate_home, Category};
     use std::fs::{self, File, FileTimes};
     use std::path::Path;
     use std::time::{Duration, SystemTime};
@@ -611,24 +552,15 @@ mod tests {
     fn footprint_counts_process_receipts_without_reading_them() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path();
-        assert_eq!(super::measure_home(home, 0).unwrap().process_receipts, 0);
+        assert_eq!(super::measure_home(home).unwrap().process_receipts, 0);
         let receipts = home.join(crate::journal::PROCESS_RECEIPT_ROOT);
         fs::create_dir_all(&receipts).unwrap();
         for name in ["a.json", "b.json", "not-json-at-all.json"] {
             fs::write(receipts.join(name), b"{").unwrap();
         }
-        let usage = super::measure_home(home, 0).unwrap();
+        let usage = super::measure_home(home).unwrap();
         assert_eq!(usage.process_receipts, 3);
         assert_eq!(serde_json::to_value(&usage).unwrap()["process_receipts"], 3);
-    }
-
-    #[test]
-    fn sizes_parse_with_binary_units() {
-        assert_eq!(parse_size("20G").unwrap(), 20 * GIB);
-        assert_eq!(parse_size("512M").unwrap(), 512 * 1024 * 1024);
-        assert_eq!(parse_size("1.5GiB").unwrap(), 3 * GIB / 2);
-        assert_eq!(parse_size("4096").unwrap(), 4096);
-        assert!(parse_size("lots").is_err());
     }
 
     #[test]
@@ -647,7 +579,7 @@ mod tests {
     }
 
     #[test]
-    fn rotation_removes_oldest_material_until_home_fits_and_keeps_the_store() {
+    fn rotation_removes_expired_material_and_keeps_the_store() {
         let home = tempfile::tempdir().unwrap();
         let home = home.path();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
@@ -679,12 +611,10 @@ mod tests {
         write(&home.join("runs/ef/fresh/events.jsonl"), 100_000, 0);
         write(&home.join("logs/old.log"), 50_000, 5);
 
-        let total = super::measure_home(home, 0).unwrap().bytes;
-        // Room for everything except roughly the oldest capture and old backup.
-        let budget = total - 250_000;
-        let report = rotate_home(home, budget, None, false).unwrap().unwrap();
+        let report = rotate_home(home, Duration::from_secs(18 * 86400), false)
+            .unwrap()
+            .unwrap();
 
-        assert!(report.after_bytes <= budget, "{report:#?}");
         assert_eq!(
             report
                 .removed
@@ -736,7 +666,7 @@ mod tests {
             .open(home.join("logs/held.log"))
             .unwrap();
 
-        let report = rotate_home(home, u64::MAX, Some(Duration::from_secs(7 * 86400)), false)
+        let report = rotate_home(home, Duration::from_secs(7 * 86400), false)
             .unwrap()
             .unwrap();
 

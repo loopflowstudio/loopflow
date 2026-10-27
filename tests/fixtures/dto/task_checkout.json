@@ -11,7 +11,7 @@
   },
   "wave": "product",
   "project_id": "ps_11111111111111111111111111111111",
-  "status": "ready",
+  "status": "unstarted",
   "completion_pending": null,
   "execution": {
     "state": "idle",

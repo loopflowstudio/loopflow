@@ -3,6 +3,7 @@ use std::num::NonZeroU32;
 use anyhow::Context;
 use clap::Subcommand;
 
+use crate::lf::commands::session_history::SessionView;
 use crate::lf::output::print_process;
 use crate::process::{
     LfProcessCursor, LfProcessFilter, LfProcessOutcomeFilter, LfProcessWorkFilter,
@@ -84,6 +85,34 @@ pub enum HistoryCommand {
         /// Explain recorded instruction inclusion and omission
         #[arg(long, conflicts_with_all = ["events", "final_answer", "context"])]
         instructions: bool,
+        /// Print only the Session's conversation, as its providers kept it
+        #[arg(long, conflicts_with_all = ["events", "final_answer", "context", "instructions", "input"])]
+        transcript: bool,
+    },
+    /// Show how much Session history providers still keep, and what they remove next
+    Retention {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Find text in the conversations of recent Sessions
+    Search {
+        text: String,
+        /// Relative window (7d, 24h, 30m) or RFC3339 start
+        #[arg(long, default_value = "7d")]
+        since: String,
+        /// Scope to one Wave by name
+        #[arg(long)]
+        wave: Option<String>,
+        /// Scope to one Project by slug
+        #[arg(long)]
+        project: Option<String>,
+        /// Scope to one Task by Linear identifier
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
     },
     /// Show direct provider-authored usage from recorded Session inputs
     Usage {
@@ -153,6 +182,26 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
     match command {
         HistoryCommand::Replay { run } => super::replay::run(run),
         HistoryCommand::Export { since } => export(since),
+        HistoryCommand::Retention { json } => super::history_transcript::retention(*json),
+        HistoryCommand::Search {
+            text,
+            since,
+            wave,
+            project,
+            task,
+            limit,
+            json,
+        } => super::history_transcript::search(
+            text,
+            since,
+            super::WorkFilter {
+                wave: wave.as_deref(),
+                project: project.as_deref(),
+                task: task.as_deref(),
+            },
+            *limit,
+            *json,
+        ),
         HistoryCommand::Usage {
             json, binds: true, ..
         } => super::bind_attribution::run(*json),
@@ -198,15 +247,20 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
             input,
             context,
             instructions,
-        } => show(
-            id,
-            *json,
-            *events,
-            *final_answer,
-            input.as_deref(),
-            *context,
-            *instructions,
-        ),
+            transcript,
+        } => {
+            let view = [
+                (*events, SessionView::Events),
+                (*final_answer, SessionView::Final),
+                (*context, SessionView::Context),
+                (*instructions, SessionView::Instructions),
+                (*transcript, SessionView::Transcript),
+            ]
+            .into_iter()
+            .find_map(|(asked, view)| asked.then_some(view))
+            .unwrap_or(SessionView::Summary);
+            show(id, *json, input.as_deref(), view)
+        }
         HistoryCommand::List {
             json,
             all,
@@ -289,15 +343,7 @@ enum Shown {
     Copied(crate::machine_records::CopiedHistory),
 }
 
-fn show(
-    id: &str,
-    json: bool,
-    events: bool,
-    final_answer: bool,
-    input: Option<&str>,
-    context: bool,
-    instructions: bool,
-) -> anyhow::Result<()> {
+fn show(id: &str, json: bool, input: Option<&str>, view: SessionView) -> anyhow::Result<()> {
     let shown = tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
         let process = store.resolve_process(id).await?;
@@ -327,11 +373,13 @@ fn show(
         Shown::Local(process) => process,
         Shown::Copied(copied) => {
             anyhow::ensure!(
-                !json && !final_answer && !context && !instructions && input.is_none(),
+                !json
+                    && input.is_none()
+                    && matches!(view, SessionView::Summary | SessionView::Events),
                 "Session {id} is a copy from {}; it reads as text, or as raw rows with --events",
                 copied.session.origin_name()
             );
-            if events {
+            if view == SessionView::Events {
                 for event in &copied.events {
                     println!("{}", serde_json::to_string(&event.row)?);
                 }
@@ -344,8 +392,8 @@ fn show(
     match process {
         Some(process) => {
             anyhow::ensure!(
-                !events && !final_answer && !context && !instructions,
-                "--events, --final, --context and --instructions inspect Session evidence; Processes record command outcomes"
+                view == SessionView::Summary,
+                "--events, --final, --context, --instructions and --transcript inspect Session evidence; Processes record command outcomes"
             );
             if !json {
                 print_process(&process);
@@ -353,13 +401,6 @@ fn show(
             println!("{}", serde_json::to_string_pretty(&process)?);
             Ok(())
         }
-        None => super::session_history::inspect(
-            input.unwrap_or(id),
-            events,
-            final_answer,
-            context,
-            instructions,
-            json,
-        ),
+        None => super::session_history::inspect(input.unwrap_or(id), view, json),
     }
 }

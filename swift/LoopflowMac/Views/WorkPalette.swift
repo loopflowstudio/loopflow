@@ -79,7 +79,7 @@ extension WorkModel {
         var rows = paletteRows
         if sidebarOnly {
             let sidebar = Set(sidebarTaskIDs.map { WorkDestination.task($0) }
-                + visibleRoadmaps.map { WorkDestination.wave($0.wave.id) })
+                + sidebarWaves.map { WorkDestination.wave($0.wave.id) })
             rows.removeAll { !sidebar.contains($0.id) }
         }
         let working = Set(workingTaskIDs)
@@ -387,7 +387,7 @@ struct GraphCatalogInspector: View {
                 Button(entry.source == nil ? "Customize" : "Edit") {
                     Task {
                         do {
-                            let url = try await model.definitionSource(entry)
+                            let url = try await model.definitionFile(entry.name)
                             sourceError = nil
                             NSWorkspace.shared.open(url)
                         } catch { sourceError = error.localizedDescription }
@@ -421,7 +421,7 @@ struct WorkflowCatalogInspector: View {
                 Button(entry.source == nil ? "Customize" : "Edit") {
                     Task {
                         do {
-                            let url = try await model.workflowDefinitionFile(entry)
+                            let url = try await model.definitionFile(entry.name)
                             sourceError = nil
                             NSWorkspace.shared.open(url)
                         } catch { sourceError = error.localizedDescription }

@@ -884,6 +884,7 @@ final class WorkModel {
 
     private(set) var roadmap: WorkReading<RoadmapSnapshot> = .loading {
         didSet {
+            taskIndexCache = nil
             // Retain the latest observed Task across temporary chapter membership
             // gaps, including selections saved in another repository.
             for navigation in navigationByRepo.values {
@@ -1664,22 +1665,40 @@ final class WorkModel {
         }
     }
 
+    /// A Task on the shown Dashboard keeps its board in the trail, as its tile does.
     func select(_ requested: WorkReference?) {
+        if let requested, requested.kind == .task, let board = navigation.trailBoard,
+           taskIDs(on: board).contains(task(id: requested.id)?.task.id ?? requested.id) {
+            return enter(requested, from: board)
+        }
         select(requested, preservingOpening: false)
     }
 
     /// Working Tasks: the repository plan's started, uncompleted Tasks, in plan order.
-    var workingTaskIDs: [String] { taskIDs(in: builtInPlan(.repository)) }
+    var workingTaskIDs: [String] { taskIDs(in: builtInPlan(.repository)?.resolution.members ?? []) }
 
     /// The Wave the sidebar lists, while its planning is current.
     var sidebarWave: WaveRoadmap? {
         navigation.sidebarWaveID.flatMap { id in visibleRoadmaps.first { $0.wave.id == id } }
     }
 
-    /// Every Wave at the repository; a scoped Wave's child Waves from its built-in plan.
+    /// The sidebar scope's members: its built-in plan's, or a Dashboard's visible ones in arrangement order.
+    private var sidebarMembers: [WorkMemberRef] {
+        switch navigation.sidebarScope {
+        case .repository: return builtInPlan(.repository)?.resolution.members ?? []
+        case .wave(let id):
+            // Working Tasks only, as at the repository; the Wave board keeps unstarted ones.
+            let working = Set(workingTaskMembers.map(\.work))
+            return (builtInPlan(.wave(id))?.resolution.members ?? [])
+                .filter { $0.work.kind != .task || working.contains($0.work) }
+        case .dashboard(let id): return dashboard(id)?.projection.visible ?? []
+        }
+    }
+
+    /// Every Wave at the repository; a scoped Wave's child Waves; a Dashboard's Wave members.
     var sidebarWaves: [WaveRoadmap] {
-        guard let id = navigation.sidebarWaveID else { return visibleRoadmaps }
-        return (builtInPlan(.wave(id))?.resolution.members ?? []).filter { $0.work.kind == .wave }
+        guard navigation.sidebarScope != .repository else { return visibleRoadmaps }
+        return sidebarMembers.filter { $0.work.kind == .wave }
             .compactMap { member in visibleRoadmaps.first { $0.wave.id == member.work.id } }
     }
 
@@ -1687,23 +1706,31 @@ final class WorkModel {
         selectionPlans.value?.first { $0.dashboardID == nil && $0.selection.expression == expression }
     }
 
-    /// Plan members name Tasks by Work ID; rows use the planning ID when it is known.
-    private func taskIDs(in plan: WorkViewPlan?) -> [String] {
+    /// A Dashboard's visible Tasks in arrangement order; Working Tasks and a Wave's in plan order.
+    private func taskIDs(on board: WorkNavigation.Board) -> [String] {
+        switch board {
+        case .workingTasks: workingTaskIDs
+        case .saved(let id): taskIDs(in: dashboard(id)?.projection.visible ?? [])
+        case .wave(let id): taskIDs(in: waveTiles(id))
+        }
+    }
+
+    /// Members name Tasks by Work ID; rows use the planning ID when it is known.
+    private func taskIDs(in members: [WorkMemberRef]) -> [String] {
         var seen = Set<String>()
-        return (plan?.resolution.members ?? []).filter { $0.work.kind == .task }
+        return members.filter { $0.work.kind == .task }
             .map { task(id: $0.work.id)?.task.id ?? $0.work.id }
             .filter { seen.insert($0).inserted }
     }
 
     var sidebarTaskIDs: [String] {
-        let scoped = navigation.sidebarWaveID.map { taskIDs(in: builtInPlan(.wave($0))) } ?? workingTaskIDs
-        return scoped.filter { id in
+        taskIDs(in: sidebarMembers).filter { id in
             switch navigation.sidebarFilter {
             case .working: return true
             case .available:
                 guard sessions.errorMessage == nil else { return false }
                 return taskSessions(id).contains { $0.availability == .available && $0.state != .closed }
-            case .running:
+            case .busy:
                 if case .reported(_, let report) = SessionProgramStatus(sessions: taskSessions(id), unavailable: sessions.errorMessage) { return report.state == .working }
                 return false
             }
@@ -1720,6 +1747,22 @@ final class WorkModel {
     func openPrimaryConversation(in workspace: SessionsWorkspace, wave: String?, store: SessionsStore) async {
         guard let workspaceRegistry else { return }
         await workspace.openPrimaryConversation(wave: wave, store: store, registry: workspaceRegistry)
+    }
+
+    /// ⌘N: the Nth Task row on screen.
+    func selectSidebarTask(slot: Int) {
+        let ids = sidebarTaskIDs
+        guard ids.indices.contains(slot) else { return }
+        select(.task(id: ids[slot]))
+    }
+
+    /// ⌃⇥: the next Task row on screen, wrapping.
+    func cycleSidebarTask(_ offset: Int) {
+        let ids = sidebarTaskIDs
+        guard !ids.isEmpty else { return }
+        let index = ids.firstIndex { isSelected(.task(id: $0)) }
+        let next = index.map { ($0 + offset + ids.count) % ids.count } ?? (offset > 0 ? 0 : ids.count - 1)
+        select(.task(id: ids[next]))
     }
 
     func goBack() {
@@ -1957,24 +2000,12 @@ final class WorkModel {
         workflowCatalogRevisions[key] = revision
     }
 
-    /// The repository file that defines the Workflow; a builtin is first copied
-    /// into `.lf/workflows/` so the edit is committed with the code.
-    func workflowDefinitionFile(_ entry: WorkflowCatalogEntry) async throws -> URL {
-        guard let repoPath else { throw RegistryQueryError("No repository is open") }
-        let root = URL(fileURLWithPath: repoPath)
-        if let source = entry.source { return root.appendingPathComponent(source) }
-        let content = try await query.workflowSource(entry.name, cwd: repoPath)
-        let url = root.appendingPathComponent(".lf/workflows/\(entry.name).yaml")
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(content.utf8).write(to: url, options: .withoutOverwriting)
-        await loadWorkflowCatalog(force: true)
-        return url
-    }
-
-    func definitionSource(_ entry: GraphCatalogEntry) async throws -> URL {
-        let path = try await query.customizeGraph(entry.name, cwd: repoPath)
-        await loadGraphCatalog(force: true)
+    /// The repository file that defines graph `name`; a builtin is first copied
+    /// into `.lf/graphs/` so the edit is committed with the code. A Workflow is
+    /// a graph, so both catalogues may change.
+    func definitionFile(_ name: String) async throws -> URL {
+        let path = try await query.customizeGraph(name, cwd: repoPath)
+        await rereadDefinitions()
         return URL(fileURLWithPath: path)
     }
 
@@ -1986,6 +2017,28 @@ final class WorkModel {
         await performTaskAction(task.id) {
             try await query.runTask(issue: task.task.identifier, graph: graph, cwd: WaveOrigin.resolve(task.task.repo))
         }
+    }
+
+    /// Ship the Task, then confirm its subscription update; it moves to Shipping
+    /// and the window's ship toast offers Undo.
+    func shipTask(_ task: RoadmapTask) async {
+        await performTaskAction(task.id) {
+            try await query.shipTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+        }
+        noteShipping(task, shipped: true)
+    }
+
+    /// Stop Auto-Ship for the Task; it returns to Working and the toast says so.
+    func stopShipping(_ task: RoadmapTask) async {
+        await performTaskAction(task.id) {
+            try await query.stopShipping(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+        }
+        noteShipping(task, shipped: false)
+    }
+
+    private func noteShipping(_ task: RoadmapTask, shipped: Bool) {
+        guard navigation.taskRunDrafts[task.id]?.error == nil else { return }
+        navigation.shipNotice = ShipNotice(task: task, shipped: shipped)
     }
 
     /// The Work the Machine control describes: the current started Task, else the
@@ -2039,9 +2092,9 @@ final class WorkModel {
         }
     }
 
-    func pauseTask(_ task: RoadmapTask, paused: Bool) async {
+    func deferTask(_ task: RoadmapTask, deferred: Bool) async {
         await performTaskAction(task.id) {
-            try await query.pauseTask(issue: task.task.identifier, paused: paused, cwd: WaveOrigin.resolve(task.task.repo))
+            try await query.deferTask(issue: task.task.identifier, deferred: deferred, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 
@@ -2200,16 +2253,45 @@ final class WorkModel {
     }
 
     /// Current repository inventory only; retained navigation evidence is display-only.
-    var visibleTasks: [RoadmapTask] {
+    var visibleTasks: [RoadmapTask] { taskIndex.tasks }
+
+    /// The repository's Tasks with lookups by ID, Work ID and identifier. Every
+    /// sidebar row looks Tasks up on each update; a filtered scan per lookup made
+    /// returning to a long list take over a second.
+    private struct TaskIndex {
+        let key: (revision: Int, repoPath: String?)
+        let tasks: [RoadmapTask]
+        let positions: [String: Int]
+        let waves: [String: WaveRoadmap]
+    }
+    @ObservationIgnored private var taskIndexCache: TaskIndex?
+
+    private var taskIndex: TaskIndex {
         let tasks = roadmap.value?.tasks.items ?? []
-        guard let repoPath else { return tasks }
-        let repository = repoIdentity(repoPath)
-        return tasks.filter { repoIdentity($0.task.repo) == repository }
+        let key = (revision: WaveOrigin.revision, repoPath: repoPath)
+        if let cached = taskIndexCache, cached.key == key { return cached }
+        let visible = repoPath.map { path in
+            let repository = repoIdentity(path)
+            return tasks.filter { repoIdentity($0.task.repo) == repository }
+        } ?? tasks
+        // The first Task matching any of its keys wins, as a scan in order would.
+        var positions: [String: Int] = [:]
+        for (index, task) in visible.enumerated() {
+            for name in [task.id, task.runtime?.workId, task.task.identifier].compactMap({ $0 }) where positions[name] == nil {
+                positions[name] = index
+            }
+        }
+        let waves = Dictionary(visibleRoadmaps.map { ($0.wave.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let index = TaskIndex(key: key, tasks: visible, positions: positions, waves: waves)
+        taskIndexCache = index
+        return index
     }
 
     private func currentTask(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask)? {
-        guard let task = visibleTasks.first(where: { $0.id == id || $0.runtime?.workId == id || $0.task.identifier == id }) else { return nil }
-        return (visibleRoadmaps.first { $0.wave.id == task.task.waveId }, task)
+        let index = taskIndex
+        guard let position = index.positions[id] else { return nil }
+        let task = index.tasks[position]
+        return (task.task.waveId.flatMap { index.waves[$0] }, task)
     }
 
     func task(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask)? {
@@ -2459,7 +2541,8 @@ extension WorkModel {
         switch destination {
         case .work(let work): select(work, preservingOpening: false, recordingHistory: recordingHistory)
         case .entered(let board, let work):
-            select(work, preservingOpening: false, recordingHistory: recordingHistory)
+            // Re-selecting the zoomed member (⌘N on the open row) is not a new visit.
+            select(work, preservingOpening: false, recordingHistory: recordingHistory && navigation.destination != destination)
             navigation.destination = .entered(from: board, work: work)
         case .dashboard, .view, .workingTasks:
             if recordingHistory, navigation.destination != destination {
@@ -2476,11 +2559,14 @@ extension WorkModel {
         }
     }
 
+    /// Dashboards are repository-level; their sidebar's back control returns to the repository.
     func selectDashboard(_ id: String) {
+        navigation.sidebarWaveID = nil
         selectDestination(.dashboard(id), recordingHistory: true)
     }
 
     func selectWorkingTasksDashboard() {
+        navigation.sidebarWaveID = nil
         selectDestination(.workingTasks, recordingHistory: true)
     }
 

@@ -2140,7 +2140,6 @@ pub(crate) async fn require_outside_current_chapter(repo: &Path, issue: &str) ->
         .ok_or_else(|| OpsError::Message("current Wave is unavailable".into()))?;
     let chapter = super::project::current_project(&store, &wave)?;
     if Some(&chapter.id) == resolved.project_id.as_ref()
-        || resolved.completed
         || matches!(
             resolved.state.as_deref(),
             Some("completed" | "canceled" | "duplicate")

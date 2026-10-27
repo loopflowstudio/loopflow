@@ -1,25 +1,196 @@
-use std::collections::HashMap;
+//! Claude Code stream-json, decoded once per line. Loopflow's own input
+//! carries a UUID that Claude echoes, which correlates each native result with
+//! the request it answers.
+use std::collections::{HashMap, HashSet, VecDeque};
 
-use serde_json::Value;
-use tokio::sync::mpsc;
+use anyhow::Result;
+use serde_json::{json, Value};
 
+use super::fact::{self, Decoded, ProviderFact, ProviderTurn, Signal};
 use crate::chat::types::{ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage};
 use crate::harness::lf_tag::LfTagParser;
-use crate::id::AgentSessionId;
 use crate::provider_account::RateLimitSignal;
+
+/// One persistent Claude process's stream.
+#[derive(Debug, Default)]
+pub(super) struct ClaudeDecoder {
+    /// Request UUIDs Loopflow wrote that Claude has not yet echoed.
+    outbound: HashSet<String>,
+    /// Echoed requests whose results are still owed, oldest first.
+    pending: VecDeque<ProviderTurn>,
+    state: ReaderState,
+}
+
+impl ClaudeDecoder {
+    /// Loopflow wrote a user message carrying `request` as its UUID.
+    pub(super) fn outbound(&mut self, request: &str) {
+        self.outbound.insert(request.to_owned());
+    }
+
+    /// Forget display state for a turn that ended outside the stream.
+    pub(super) fn reset_turn(&mut self) {
+        self.state = ReaderState::default();
+    }
+
+    /// Tools still in flight when the stream ended without a result.
+    pub(super) fn drain_open_items(&mut self, status: Lifecycle) -> Vec<ConversationItem> {
+        self.state.drain_open_items(status)
+    }
+
+    /// Decode one line; display events report under the runner's `turn_id`.
+    pub(super) fn decode(&mut self, line: &str, turn_id: &str) -> Result<Vec<Decoded>> {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            return Ok(Vec::new());
+        };
+        if let Some(signal) = rate_limit_signal(&value) {
+            return Ok(vec![ProviderFact::RateLimit(signal).into()]);
+        }
+        let mut out = fact::activity(signals(&value));
+        if value["type"] == "user" {
+            if let (Some(thread), Some(request)) =
+                (value["session_id"].as_str(), value["uuid"].as_str())
+            {
+                if self.outbound.remove(request) {
+                    let turn = ProviderTurn {
+                        thread: thread.into(),
+                        turn: request.to_owned(),
+                    };
+                    out.push(
+                        ProviderFact::TurnAnswered {
+                            turn: turn.clone(),
+                            request: request.to_owned(),
+                        }
+                        .into(),
+                    );
+                    self.pending.push_back(turn);
+                }
+            }
+        }
+        let start = out.len();
+        let ended = process_line(&value, turn_id, &mut out, &mut self.state);
+        let result = value["type"] == "result";
+        let turn = result.then(|| self.pending.pop_front()).flatten();
+        if let Some(turn) = &turn {
+            anyhow::ensure!(
+                value["session_id"] == turn.thread.as_str(),
+                "Claude result changed conversation"
+            );
+            if let Some(output) = value.get("structured_output").filter(|v| !v.is_null()) {
+                out.push(output_fact(turn, json!({"value": output})));
+            } else if let Some(text) = value["result"].as_str() {
+                out.push(output_fact(turn, json!({"text": text})));
+            }
+        }
+        // The turn's one usage row carries the numbers the live view showed:
+        // each assistant response updates it, and the result makes it final.
+        let usage = out[start..].iter().find_map(|decoded| match decoded {
+            Decoded::Display(ConversationEvent::UsageCheckpoint {
+                usage,
+                final_receipt,
+                ..
+            }) => Some((usage.clone(), *final_receipt)),
+            _ => None,
+        });
+        if let (Some((usage, final_receipt)), Some(owner)) =
+            (usage, turn.as_ref().or(self.pending.front()))
+        {
+            out.push(
+                ProviderFact::Usage {
+                    turn: owner.clone(),
+                    receipt: json!({"provider":"claude","usage":usage,"final":final_receipt}),
+                }
+                .into(),
+            );
+        }
+        if result || ended.is_some() {
+            let succeeded = value["subtype"] == "success" && value["is_error"] != true;
+            out.push(
+                ProviderFact::TurnCompleted {
+                    turn,
+                    status: ended.unwrap_or(Lifecycle::Failed),
+                    detail: json!({
+                        "status": if succeeded { "completed" } else { "failed" },
+                        "result_id": value["uuid"],
+                        "errors": value["errors"],
+                        "subtype": value["subtype"],
+                    }),
+                }
+                .into(),
+            );
+            self.state = ReaderState::default();
+        }
+        Ok(out)
+    }
+}
+
+/// What one line says about availability. Partial messages arrive wrapped as
+/// `{"type":"stream_event","event":…}`.
+fn signals(line: &Value) -> Vec<Signal> {
+    let event = if line["type"] == "stream_event" {
+        &line["event"]
+    } else {
+        line
+    };
+    let blocks = |kind: &str, id: &str| -> Vec<String> {
+        event["message"]["content"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|block| block["type"] == kind)
+            .filter_map(|block| block[id].as_str().map(str::to_owned))
+            .collect()
+    };
+    match event["type"].as_str() {
+        Some("result") => vec![Signal::Yielded(
+            event["is_error"] != true
+                && (event["subtype"].is_null() || event["subtype"] == "success"),
+        )],
+        Some("content_block_start") if event["content_block"]["type"] == "tool_use" => event
+            ["content_block"]["id"]
+            .as_str()
+            .map(|id| Signal::ToolStarted(id.to_owned()))
+            .into_iter()
+            .collect(),
+        Some("assistant") => {
+            let tools = blocks("tool_use", "id");
+            if tools.is_empty() {
+                vec![Signal::Working]
+            } else {
+                tools.into_iter().map(Signal::ToolStarted).collect()
+            }
+        }
+        Some("user") => {
+            let results = blocks("tool_result", "tool_use_id");
+            if results.is_empty() {
+                vec![Signal::Working]
+            } else {
+                results.into_iter().map(Signal::ToolResolved).collect()
+            }
+        }
+        Some("message_start" | "content_block_start" | "content_block_delta") => {
+            vec![Signal::Working]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn output_fact(turn: &ProviderTurn, answer: Value) -> Decoded {
+    ProviderFact::Output {
+        turn: turn.clone(),
+        answer,
+    }
+    .into()
+}
 
 /// Reader-local state for tracking in-flight content blocks.
 #[derive(Debug, Default)]
-pub(super) struct ReaderState {
+struct ReaderState {
     /// Map block index -> tool use state for streaming deltas.
     tool_blocks: HashMap<usize, ToolUseState>,
     /// Map tool_use_id -> block index for direct completion lookup.
     tool_indexes: HashMap<String, usize>,
     /// Streaming parser for `<lf:...>` tagged payloads.
     tag_parser: LfTagParser,
-    /// Vendor session id from the turn's `system` event; the harness drains
-    /// it for `--resume` and persistence.
-    agent_session: Option<AgentSessionId>,
     /// Largest effective input observed for each model in this turn. Assistant
     /// events repeat usage snapshots, so retaining maxima also deduplicates them.
     peak_input_by_model: HashMap<String, u64>,
@@ -92,7 +263,7 @@ impl ReaderState {
     /// Drain tools still in flight when the turn ended without a result,
     /// stamped with the turn's terminal status (Failed for a crash,
     /// Interrupted for a kill we asked for).
-    pub(super) fn drain_open_items(&mut self, status: Lifecycle) -> Vec<ConversationItem> {
+    fn drain_open_items(&mut self, status: Lifecycle) -> Vec<ConversationItem> {
         let mut tools: Vec<_> = self.tool_blocks.drain().map(|(_, tool)| tool).collect();
         self.tool_indexes.clear();
         tools.sort_by(|left, right| left.id.cmp(&right.id));
@@ -100,10 +271,6 @@ impl ReaderState {
             .into_iter()
             .map(|tool| build_item(&tool.name, &tool.id, tool.parsed_input(), status, None))
             .collect()
-    }
-
-    pub(super) fn take_agent_session(&mut self) -> Option<AgentSessionId> {
-        self.agent_session.take()
     }
 
     fn observe_assistant_pressure(&mut self, value: &Value) {
@@ -197,12 +364,11 @@ impl ReaderState {
     }
 }
 
-pub(crate) fn rate_limit_signal(line: &str) -> Option<RateLimitSignal> {
-    let value = serde_json::from_str::<Value>(line).ok()?;
+fn rate_limit_signal(value: &Value) -> Option<RateLimitSignal> {
     let event = value
         .get("stream_event")
         .and_then(|stream| stream.get("event"))
-        .unwrap_or(&value);
+        .unwrap_or(value);
     if event.get("type").and_then(Value::as_str)? != "rate_limit_event" {
         return None;
     }
@@ -290,24 +456,20 @@ fn parse_reset_timestamp(value: &Value) -> Option<i64> {
         .map(|timestamp| timestamp.unix_timestamp())
 }
 
-/// Parse a single NDJSON line and emit conversation events.
-/// Map one NDJSON line to conversation events. Returns `Some(status)` when the
-/// line is a turn `result` — the caller owns the terminal `TurnCompleted`, so a
+/// Map one NDJSON line to display events. Returns `Some(status)` when the
+/// line is a turn `result`; the driver owns the terminal `TurnCompleted`, so a
 /// persistent reader can coalesce a seed turn and its queued steer turns into a
-/// single boundary. `None` for every other line (including malformed ones).
-pub(super) fn process_line(
-    line: &str,
+/// single boundary.
+fn process_line(
+    value: &Value,
     turn_id: &str,
-    events: &mpsc::UnboundedSender<ConversationEvent>,
+    out: &mut Vec<Decoded>,
     state: &mut ReaderState,
 ) -> Option<Lifecycle> {
-    let Ok(value) = serde_json::from_str::<Value>(line) else {
-        return None;
-    };
     let event = value
         .get("stream_event")
         .and_then(|stream| stream.get("event"))
-        .unwrap_or(&value);
+        .unwrap_or(value);
 
     let event_type = event.get("type").and_then(Value::as_str)?;
 
@@ -318,7 +480,7 @@ pub(super) fn process_line(
                 .or_else(|| value.get("session_id"))
                 .and_then(Value::as_str)
             {
-                state.agent_session = Some(session_id.into());
+                out.push(ProviderFact::SessionObserved(session_id.into()).into());
             }
         }
 
@@ -333,10 +495,10 @@ pub(super) fn process_line(
                 let tool_name = block.get("name").and_then(Value::as_str)?;
                 if state.track_tool(index, tool_id, tool_name, None) {
                     let item = infer_item(tool_name, tool_id, None);
-                    let _ = events.send(ConversationEvent::ItemStarted {
+                    out.push(Decoded::from(ConversationEvent::ItemStarted {
                         turn_id: turn_id.to_string(),
                         item,
-                    });
+                    }));
                 }
             }
         }
@@ -352,7 +514,7 @@ pub(super) fn process_line(
             match delta_type {
                 "text_delta" => {
                     if let Some(text) = delta.get("text").and_then(Value::as_str) {
-                        emit_text_delta(events, state, turn_id, text);
+                        emit_text_delta(out, state, turn_id, text);
                     }
                 }
                 "thinking_delta" | "summary_delta" => {
@@ -361,10 +523,10 @@ pub(super) fn process_line(
                         .or_else(|| delta.get("summary"))
                         .and_then(Value::as_str)
                     {
-                        let _ = events.send(ConversationEvent::ReasoningDelta {
+                        out.push(Decoded::from(ConversationEvent::ReasoningDelta {
                             turn_id: turn_id.to_string(),
                             content: text.to_string(),
-                        });
+                        }));
                     }
                 }
                 "input_json_delta" => {
@@ -384,7 +546,7 @@ pub(super) fn process_line(
         }
 
         "result" => {
-            flush_text_delta_parser(events, state, turn_id);
+            flush_text_delta_parser(out, state, turn_id);
             let usage = map_turn_usage(event, state);
             let status = if event
                 .get("is_error")
@@ -411,18 +573,18 @@ pub(super) fn process_line(
                     })
                     .filter(|message| !message.is_empty())
                     .unwrap_or_else(|| "Claude turn failed".to_string());
-                let _ = events.send(ConversationEvent::Error {
+                out.push(Decoded::from(ConversationEvent::Error {
                     code: "claude_result".to_string(),
                     message,
                     evidence: None,
-                });
+                }));
             }
             if let Some(usage) = usage {
-                let _ = events.send(ConversationEvent::UsageCheckpoint {
+                out.push(Decoded::from(ConversationEvent::UsageCheckpoint {
                     turn_id: turn_id.to_string(),
                     usage,
                     final_receipt: true,
-                });
+                }));
             }
             // The reader owns TurnCompleted so it can coalesce queued steer
             // turns into one boundary.
@@ -434,18 +596,18 @@ pub(super) fn process_line(
         "assistant" => {
             state.observe_assistant_pressure(event);
             if let Some(usage) = state.observe_assistant_usage(event) {
-                let _ = events.send(ConversationEvent::UsageCheckpoint {
+                out.push(Decoded::from(ConversationEvent::UsageCheckpoint {
                     turn_id: turn_id.to_string(),
                     usage,
                     final_receipt: false,
-                });
+                }));
             }
-            process_assistant_message(event, turn_id, events, state);
+            process_assistant_message(event, turn_id, out, state);
         }
 
         // Tool result events: type "user" with tool_result content.
         "user" => {
-            process_user_message(event, turn_id, events, state);
+            process_user_message(event, turn_id, out, state);
         }
 
         _ => {}
@@ -594,7 +756,7 @@ fn synthesize_edit_diff(path: &str, input: &Value) -> Option<String> {
 fn process_assistant_message(
     value: &Value,
     turn_id: &str,
-    events: &mpsc::UnboundedSender<ConversationEvent>,
+    out: &mut Vec<Decoded>,
     state: &mut ReaderState,
 ) {
     let Some(blocks) = message_content(value) else {
@@ -623,16 +785,16 @@ fn process_assistant_message(
                 // emit both started and track it.
                 if state.track_tool(idx, &tool_id, &tool_name, input.clone()) {
                     let item = infer_item(&tool_name, &tool_id, input);
-                    let _ = events.send(ConversationEvent::ItemStarted {
+                    out.push(Decoded::from(ConversationEvent::ItemStarted {
                         turn_id: turn_id.to_string(),
                         item,
-                    });
+                    }));
                 }
             }
             "text" => {
                 if let Some(text) = block.get("text").and_then(Value::as_str) {
                     if !text.is_empty() {
-                        emit_text_delta(events, state, turn_id, text);
+                        emit_text_delta(out, state, turn_id, text);
                     }
                 }
             }
@@ -644,7 +806,7 @@ fn process_assistant_message(
 fn process_user_message(
     value: &Value,
     turn_id: &str,
-    events: &mpsc::UnboundedSender<ConversationEvent>,
+    out: &mut Vec<Decoded>,
     state: &mut ReaderState,
 ) {
     let Some(blocks) = message_content(value) else {
@@ -671,10 +833,10 @@ fn process_user_message(
                 let input = tool.parsed_input();
                 let completed_item =
                     build_item(&tool.name, &tool.id, input, Lifecycle::Completed, output);
-                let _ = events.send(ConversationEvent::ItemCompleted {
+                out.push(Decoded::from(ConversationEvent::ItemCompleted {
                     turn_id: turn_id.to_string(),
                     item: completed_item,
-                });
+                }));
             }
             // Text blocks in user messages are Claude echoing back input the
             // client already displayed. Emitting them would duplicate messages.
@@ -716,24 +878,15 @@ fn extract_tool_result_text(block: &Value) -> Option<String> {
         .map(String::from)
 }
 
-fn emit_text_delta(
-    events: &mpsc::UnboundedSender<ConversationEvent>,
-    state: &mut ReaderState,
-    turn_id: &str,
-    content: &str,
-) {
+fn emit_text_delta(out: &mut Vec<Decoded>, state: &mut ReaderState, turn_id: &str, content: &str) {
     for event in state.tag_parser.consume_text(turn_id, content) {
-        let _ = events.send(event);
+        out.push(Decoded::from(event));
     }
 }
 
-fn flush_text_delta_parser(
-    events: &mpsc::UnboundedSender<ConversationEvent>,
-    state: &mut ReaderState,
-    turn_id: &str,
-) {
+fn flush_text_delta_parser(out: &mut Vec<Decoded>, state: &mut ReaderState, turn_id: &str) {
     for event in state.tag_parser.finish_turn(turn_id) {
-        let _ = events.send(event);
+        out.push(Decoded::from(event));
     }
 }
 
@@ -741,6 +894,121 @@ fn flush_text_delta_parser(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A recorded trace decoded alone, without a store, as its fact sequence.
+    /// Loopflow wrote `request`, which Claude echoed in `session` before the
+    /// trace begins; a result the trace left unattributed belongs to it.
+    fn replay(file: &str, session: &str) -> Vec<String> {
+        let mut decoder = ClaudeDecoder::default();
+        decoder.outbound("request");
+        let echo =
+            json!({"type":"user","session_id":session,"uuid":"request","message":{"content":"go"}});
+        let mut decoded = decoder.decode(&echo.to_string(), "turn").unwrap();
+        for mut line in fact::trace(file) {
+            if line["type"] == "result" && line["session_id"].is_null() {
+                line["session_id"] = json!(session);
+            }
+            decoded.extend(decoder.decode(&line.to_string(), "turn").unwrap());
+        }
+        fact::fact_lines(&decoded)
+    }
+
+    #[test]
+    fn trace_claude_normal_turn() {
+        assert_eq!(
+            replay("claude_normal_turn.ndjson", "sess_claude_normal"),
+            [
+                "Activity Working",
+                "TurnAnswered sess_claude_normal/request request=request",
+                "SessionObserved sess_claude_normal",
+                "Activity Working",
+                "Activity Yielded(true)",
+                r#"Output sess_claude_normal/request {"text":"done"}"#,
+                "Usage sess_claude_normal/request",
+                "TurnCompleted sess_claude_normal/request Completed",
+            ]
+        );
+    }
+
+    #[test]
+    fn each_turn_usage_fact_matches_the_live_receipt() {
+        let mut decoder = ClaudeDecoder::default();
+        decoder.outbound("request");
+        let lines = [
+            json!({"type":"user","uuid":"request","session_id":"thread"}),
+            json!({"type":"assistant","session_id":"thread","message":{"id":"msg_1","model":"claude-sonnet-4","content":[],
+                "usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":20}}}),
+            json!({"type":"assistant","session_id":"thread","message":{"id":"msg_2","model":"claude-sonnet-4","content":[],
+                "usage":{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":5}}}),
+            json!({"type":"result","uuid":"result","session_id":"thread","subtype":"success","result":"done",
+                "model":"claude-sonnet-4","total_cost_usd":0.25,
+                "usage":{"input_tokens":13,"output_tokens":6,"cache_read_input_tokens":20,"cache_creation_input_tokens":5},
+                "modelUsage":{"claude-sonnet-4":{"contextWindow":200000}}}),
+        ];
+        let decoded: Vec<_> = lines
+            .iter()
+            .flat_map(|line| decoder.decode(&line.to_string(), "turn").unwrap())
+            .collect();
+        let receipts: Vec<_> = decoded
+            .iter()
+            .filter_map(|decoded| match decoded.fact() {
+                Some(ProviderFact::Usage { turn, receipt }) => {
+                    assert_eq!(turn.turn, "request");
+                    Some(receipt.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        let live = decoded.iter().rev().find_map(|decoded| match decoded {
+            Decoded::Display(ConversationEvent::UsageCheckpoint {
+                usage,
+                final_receipt: true,
+                ..
+            }) => Some(usage.clone()),
+            _ => None,
+        });
+        assert_eq!(receipts.len(), 3);
+        assert_eq!(receipts[1]["final"], false);
+        assert_eq!(receipts[1]["usage"]["total_input_tokens"], 38);
+        assert_eq!(receipts[2]["final"], true);
+        let recorded: TurnUsage = serde_json::from_value(receipts[2]["usage"].clone()).unwrap();
+        assert_eq!(Some(&recorded), live.as_ref());
+        assert_eq!(recorded.cost_usd, Some(0.25));
+        assert_eq!(recorded.peak_input_tokens, Some(30));
+        assert_eq!(recorded.context_window_tokens, Some(200000));
+    }
+
+    #[test]
+    fn trace_claude_multi_tool() {
+        assert_eq!(
+            replay("claude_multi_tool.ndjson", "sess_trace"),
+            [
+                "Activity Working",
+                "TurnAnswered sess_trace/request request=request",
+                r#"Activity ToolStarted("tool_multi_1")"#,
+                r#"Activity ToolResolved("tool_multi_1")"#,
+                r#"Activity ToolStarted("tool_multi_2")"#,
+                r#"Activity ToolResolved("tool_multi_2")"#,
+                "Activity Yielded(true)",
+                r#"Output sess_trace/request {"text":"done"}"#,
+                "TurnCompleted sess_trace/request Completed",
+            ]
+        );
+    }
+
+    /// The stream ends mid-tool: no completion, so the tool stays open.
+    #[test]
+    fn trace_claude_crash_mid_tool() {
+        assert_eq!(
+            replay("claude_crash_mid_tool.ndjson", "sess_trace"),
+            [
+                "Activity Working",
+                "TurnAnswered sess_trace/request request=request",
+                r#"Activity ToolStarted("tool_crash_1")"#,
+                "Activity Working",
+            ]
+        );
+    }
 
     #[test]
     fn infer_item_bash_to_command() {
@@ -811,37 +1079,58 @@ mod tests {
         }
     }
 
-    #[test]
-    fn process_line_system_event_captures_session_id() {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let mut state = ReaderState::default();
-        let line = r#"{"type":"system","session_id":"sess_abc123","tools":[]}"#;
+    /// Display events and facts for one line under runner turn `turn`.
+    fn decode(
+        decoder: &mut ClaudeDecoder,
+        line: &str,
+        turn: &str,
+    ) -> (Vec<ConversationEvent>, Vec<ProviderFact>) {
+        let mut display = Vec::new();
+        let mut facts = Vec::new();
+        for decoded in decoder.decode(line, turn).unwrap() {
+            match decoded {
+                Decoded::Display(event) => display.push(event),
+                Decoded::Fact(fact) => facts.push(fact),
+            }
+        }
+        (display, facts)
+    }
 
-        let result = process_line(line, "turn_1", &tx, &mut state);
-        assert!(result.is_none());
-        assert!(rx.is_empty(), "system event should not emit events");
-        assert_eq!(state.take_agent_session(), Some("sess_abc123".into()));
-        assert!(state.take_agent_session().is_none(), "take drains");
+    fn ended(facts: &[ProviderFact]) -> Option<Lifecycle> {
+        facts.iter().find_map(|fact| match fact {
+            ProviderFact::TurnCompleted { status, .. } => Some(*status),
+            _ => None,
+        })
+    }
+
+    fn rate_limit(line: &str) -> RateLimitSignal {
+        let (_, facts) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+        match facts.as_slice() {
+            [ProviderFact::RateLimit(signal)] => signal.clone(),
+            other => panic!("expected one rate limit, got {other:?}"),
+        }
     }
 
     #[test]
-    fn process_line_wrapped_stream_event_captures_session_id() {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let mut state = ReaderState::default();
-        let line = r#"{"stream_event":{"event":{"type":"system","session_id":"sess_wrapped"}}}"#;
-
-        let result = process_line(line, "turn_1", &tx, &mut state);
-        assert!(result.is_none());
-        assert!(rx.is_empty(), "system event should not emit events");
-        assert_eq!(state.take_agent_session(), Some("sess_wrapped".into()));
+    fn system_event_observes_the_native_session() {
+        for line in [
+            r#"{"type":"system","session_id":"sess_abc123","tools":[]}"#,
+            r#"{"stream_event":{"event":{"type":"system","session_id":"sess_abc123"}}}"#,
+        ] {
+            let (display, facts) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+            assert!(display.is_empty(), "system event should not emit events");
+            assert_eq!(
+                facts,
+                vec![ProviderFact::SessionObserved("sess_abc123".into())]
+            );
+        }
     }
 
     #[test]
     fn rejected_rate_limit_event_marks_a_hard_limit() {
-        let signal = rate_limit_signal(
+        let signal = rate_limit(
             r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"five_hour","utilization":1.0,"resets_at":1900000000}}"#,
-        )
-        .unwrap();
+        );
 
         assert!(signal.limited);
         assert_eq!(signal.utilization_percent, Some(100));
@@ -851,43 +1140,31 @@ mod tests {
 
     #[test]
     fn rate_limit_warning_updates_utilization_without_limiting() {
-        let signal = rate_limit_signal(
+        let signal = rate_limit(
             r#"{"stream_event":{"event":{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","utilization":0.72}}}}"#,
-        )
-        .unwrap();
+        );
 
         assert!(!signal.limited);
         assert_eq!(signal.utilization_percent, Some(72));
     }
 
     #[test]
-    fn process_line_text_delta() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut state = ReaderState::default();
+    fn text_delta_displays_under_the_runner_turn() {
         let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello world"}}"#;
-
-        process_line(line, "turn_1", &tx, &mut state);
-
-        let event = rx.try_recv().expect("should have event");
-        match event {
-            ConversationEvent::TextDelta { turn_id, content } => {
-                assert_eq!(turn_id, "turn_1");
-                assert_eq!(content, "Hello world");
-            }
-            other => panic!("expected TextDelta, got {other:?}"),
-        }
+        let (display, facts) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+        assert!(matches!(
+            display.as_slice(),
+            [ConversationEvent::TextDelta { turn_id, content }]
+                if turn_id == "turn_1" && content == "Hello world"
+        ));
+        assert_eq!(facts, vec![ProviderFact::Activity(Signal::Working)]);
     }
 
     #[test]
-    fn process_line_text_delta_emits_suggested_actions_event() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut state = ReaderState::default();
+    fn text_delta_emits_suggested_actions_event() {
         let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"<lf:suggest_actions>[{\"label\":\"Land PR\"}]</lf:suggest_actions>"}}"#;
-
-        process_line(line, "turn_1", &tx, &mut state);
-
-        let event = rx.try_recv().expect("should have event");
-        match event {
+        let (display, _) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+        match &display[0] {
             ConversationEvent::SuggestedActions { turn_id, actions } => {
                 assert_eq!(turn_id, "turn_1");
                 assert_eq!(actions.len(), 1);
@@ -898,78 +1175,53 @@ mod tests {
     }
 
     #[test]
-    fn process_line_thinking_delta() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut state = ReaderState::default();
+    fn thinking_delta_displays_reasoning() {
         let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think..."}}"#;
-
-        process_line(line, "turn_1", &tx, &mut state);
-
-        let event = rx.try_recv().expect("should have event");
-        match event {
-            ConversationEvent::ReasoningDelta { turn_id, content } => {
-                assert_eq!(turn_id, "turn_1");
-                assert_eq!(content, "Let me think...");
-            }
-            other => panic!("expected ReasoningDelta, got {other:?}"),
-        }
+        let (display, _) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+        assert!(matches!(
+            display.as_slice(),
+            [ConversationEvent::ReasoningDelta { turn_id, content }]
+                if turn_id == "turn_1" && content == "Let me think..."
+        ));
     }
 
     #[test]
-    fn process_line_result_completes_turn() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut state = ReaderState::default();
+    fn result_ends_the_provider_turn_without_displaying_its_boundary() {
         let line = r#"{"type":"result","duration_ms":1234,"cost_usd":0.01,"is_error":false,"result":"done","session_id":"sess_abc"}"#;
-
-        // The reader owns TurnCompleted now; process_line reports the status.
-        let result = process_line(line, "turn_1", &tx, &mut state);
-        assert_eq!(result, Some(Lifecycle::Completed));
-
-        let usage_event = rx.try_recv().expect("should have usage event");
-        match usage_event {
-            ConversationEvent::UsageCheckpoint { turn_id, usage, .. } => {
+        let (display, facts) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+        assert_eq!(ended(&facts), Some(Lifecycle::Completed));
+        match display.as_slice() {
+            [ConversationEvent::UsageCheckpoint { turn_id, usage, .. }] => {
                 assert_eq!(turn_id, "turn_1");
                 assert_eq!(usage.input_tokens, None);
                 assert_eq!(usage.output_tokens, None);
                 assert_eq!(usage.cost_usd, Some(0.01));
             }
-            other => panic!("expected TurnUsage, got {other:?}"),
+            other => panic!("expected only usage, got {other:?}"),
         }
-        assert!(
-            rx.try_recv().is_err(),
-            "process_line emits no TurnCompleted"
-        );
     }
 
     #[test]
-    fn process_line_result_error_marks_failed() {
+    fn result_error_marks_failed() {
         for line in [
             r#"{"type":"result","is_error":true,"result":"failed"}"#,
             r#"{"type":"result","is_error":true,"result":"","errors":["failed"]}"#,
         ] {
-            let (tx, mut rx) = mpsc::unbounded_channel();
-            let mut state = ReaderState::default();
-            let result = process_line(line, "turn_1", &tx, &mut state);
-            assert_eq!(result, Some(Lifecycle::Failed));
+            let (display, facts) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+            assert_eq!(ended(&facts), Some(Lifecycle::Failed));
             assert!(
-                matches!(rx.try_recv().unwrap(), ConversationEvent::Error { message, .. } if message == "failed")
+                matches!(display.as_slice(), [ConversationEvent::Error { message, .. }] if message == "failed")
             );
-            assert!(rx.try_recv().is_err());
         }
     }
 
     #[test]
-    fn process_line_result_extracts_turn_usage_tokens() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut state = ReaderState::default();
+    fn result_extracts_turn_usage_tokens() {
         let line = r#"{"type":"result","is_error":false,"model":"claude-sonnet-4","total_cost_usd":0.2,"usage":{"input_tokens":321,"output_tokens":123,"reasoning_tokens":9,"cache_read_input_tokens":11,"cache_creation_input_tokens":5}}"#;
-
-        let result = process_line(line, "turn_42", &tx, &mut state);
-        assert_eq!(result, Some(Lifecycle::Completed));
-
-        let usage_event = rx.try_recv().expect("usage event");
-        match usage_event {
-            ConversationEvent::UsageCheckpoint { turn_id, usage, .. } => {
+        let (display, facts) = decode(&mut ClaudeDecoder::default(), line, "turn_42");
+        assert_eq!(ended(&facts), Some(Lifecycle::Completed));
+        match display.as_slice() {
+            [ConversationEvent::UsageCheckpoint { turn_id, usage, .. }] => {
                 assert_eq!(turn_id, "turn_42");
                 assert_eq!(usage.input_tokens, Some(321));
                 assert_eq!(usage.total_input_tokens, Some(337));
@@ -980,38 +1232,29 @@ mod tests {
                 assert_eq!(usage.model.as_deref(), Some("claude-sonnet-4"));
                 assert_eq!(usage.cost_usd, Some(0.2));
             }
-            other => panic!("expected TurnUsage, got {other:?}"),
+            other => panic!("expected only usage, got {other:?}"),
         }
-        assert!(
-            rx.try_recv().is_err(),
-            "process_line emits no TurnCompleted"
-        );
     }
 
     #[test]
     fn assistant_usage_is_live_and_deduplicated_by_message() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut state = ReaderState::default();
+        let mut decoder = ClaudeDecoder::default();
         let first = r#"{"type":"assistant","message":{"id":"msg_1","model":"claude-sonnet-4","content":[],"usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":20}}}"#;
-        let repeated = r#"{"type":"assistant","message":{"id":"msg_1","model":"claude-sonnet-4","content":[],"usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":20}}}"#;
         let second = r#"{"type":"assistant","message":{"id":"msg_2","model":"claude-sonnet-4","content":[],"usage":{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":5}}}"#;
 
-        assert!(process_line(first, "turn_42", &tx, &mut state).is_none());
-        assert!(process_line(repeated, "turn_42", &tx, &mut state).is_none());
-        assert!(process_line(second, "turn_42", &tx, &mut state).is_none());
-
-        let checkpoints = [
-            rx.try_recv().unwrap(),
-            rx.try_recv().unwrap(),
-            rx.try_recv().unwrap(),
-        ];
-        let ConversationEvent::UsageCheckpoint {
+        let mut checkpoints = Vec::new();
+        for line in [first, first, second] {
+            let (display, facts) = decode(&mut decoder, line, "turn_42");
+            assert_eq!(ended(&facts), None);
+            checkpoints.extend(display);
+        }
+        let [_, _, ConversationEvent::UsageCheckpoint {
             usage,
             final_receipt,
             ..
-        } = &checkpoints[2]
+        }] = checkpoints.as_slice()
         else {
-            panic!("expected live usage checkpoint");
+            panic!("expected three live usage checkpoints");
         };
         assert!(!final_receipt);
         assert_eq!(usage.input_tokens, Some(13));
@@ -1023,46 +1266,36 @@ mod tests {
 
     #[test]
     fn result_pairs_peak_assistant_input_with_its_model_window() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut state = ReaderState::default();
+        let mut decoder = ClaudeDecoder::default();
         let assistant = r#"{"type":"assistant","message":{"model":"claude-sonnet-4","content":[],"usage":{"input_tokens":1,"cache_read_input_tokens":49,"cache_creation_input_tokens":0}}}"#;
         let result = r#"{"type":"result","is_error":false,"usage":{"input_tokens":2,"output_tokens":3,"cache_read_input_tokens":98,"cache_creation_input_tokens":4},"modelUsage":{"claude-sonnet-4":{"contextWindow":200}}}"#;
 
-        assert!(process_line(assistant, "turn_42", &tx, &mut state).is_none());
-        assert_eq!(
-            process_line(result, "turn_42", &tx, &mut state),
-            Some(Lifecycle::Completed)
-        );
-        let usage_event = rx.try_recv().expect("usage event");
-        let ConversationEvent::UsageCheckpoint { usage, .. } = usage_event else {
-            panic!("expected usage event");
+        decode(&mut decoder, assistant, "turn_42");
+        let (display, facts) = decode(&mut decoder, result, "turn_42");
+        assert_eq!(ended(&facts), Some(Lifecycle::Completed));
+        let [ConversationEvent::UsageCheckpoint { usage, .. }] = display.as_slice() else {
+            panic!("expected only usage, got {display:?}");
         };
         assert_eq!(usage.total_input_tokens, Some(104));
         assert_eq!(usage.peak_input_tokens, Some(50));
         assert_eq!(usage.context_window_tokens, Some(200));
-        assert!(
-            rx.try_recv().is_err(),
-            "process_line emits no TurnCompleted"
-        );
     }
 
     #[test]
-    fn process_line_tool_use_start() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut state = ReaderState::default();
+    fn tool_use_start_displays_its_item_and_opens_a_tool() {
+        let mut decoder = ClaudeDecoder::default();
         let line = r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_bash_1","name":"Bash"}}"#;
+        let (display, facts) = decode(&mut decoder, line, "turn_1");
 
-        process_line(line, "turn_1", &tx, &mut state);
-
-        assert!(state.tool_blocks.contains_key(&1));
-        let tool = &state.tool_blocks[&1];
-        assert_eq!(tool.id, "tu_bash_1");
-        assert_eq!(tool.name, "Bash");
-        assert_eq!(state.tool_indexes.get("tu_bash_1"), Some(&1));
-
-        let event = rx.try_recv().expect("should have event");
-        match event {
-            ConversationEvent::ItemStarted { turn_id, item } => {
+        assert_eq!(decoder.state.tool_indexes.get("tu_bash_1"), Some(&1));
+        assert_eq!(
+            facts,
+            vec![ProviderFact::Activity(Signal::ToolStarted(
+                "tu_bash_1".into()
+            ))]
+        );
+        match display.as_slice() {
+            [ConversationEvent::ItemStarted { turn_id, item }] => {
                 assert_eq!(turn_id, "turn_1");
                 assert!(matches!(item, ConversationItem::Command { .. }));
             }
@@ -1071,22 +1304,18 @@ mod tests {
     }
 
     #[test]
-    fn process_line_input_json_delta_accumulates() {
-        let (tx, _rx) = mpsc::unbounded_channel();
-        let mut state = ReaderState::default();
-
-        // Start a tool block first.
-        let start_line = r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tu_1","name":"Bash"}}"#;
-        process_line(start_line, "turn_1", &tx, &mut state);
-
-        // Send partial input.
-        let delta1 = r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"com"}}"#;
-        let delta2 = r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"mand\":\"ls\"}"}}"#;
-        process_line(delta1, "turn_1", &tx, &mut state);
-        process_line(delta2, "turn_1", &tx, &mut state);
-
+    fn input_json_delta_accumulates() {
+        let mut decoder = ClaudeDecoder::default();
+        for line in [
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tu_1","name":"Bash"}}"#,
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"com"}}"#,
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"mand\":\"ls\"}"}}"#,
+        ] {
+            decode(&mut decoder, line, "turn_1");
+        }
         assert_eq!(
-            state
+            decoder
+                .state
                 .tool_blocks
                 .get(&0)
                 .map(|tool| tool.input_json.as_str()),
@@ -1095,16 +1324,84 @@ mod tests {
     }
 
     #[test]
-    fn process_line_user_text_is_dropped() {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let mut state = ReaderState::default();
+    fn user_text_is_not_displayed() {
         // Text blocks in user messages are Claude echoing back input the
         // client already displayed — emitting them would duplicate messages.
         let line = r#"{"type":"user","message":{"content":[{"type":"text","text":"Design the architecture before coding."}]}}"#;
+        let (display, _) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+        assert!(
+            display.is_empty(),
+            "user text blocks should not emit events"
+        );
+    }
 
-        process_line(line, "turn_1", &tx, &mut state);
+    #[test]
+    fn echoed_requests_correlate_results_without_borrowing_another_request() {
+        let mut decoder = ClaudeDecoder::default();
+        let turn = |id: &str| ProviderTurn {
+            thread: "thread".into(),
+            turn: id.into(),
+        };
+        // A user message Loopflow did not send (a tool result) starts nothing,
+        // and its result has no request to report under.
+        let (_, facts) = decode(
+            &mut decoder,
+            r#"{"type":"user","uuid":"old","session_id":"thread"}"#,
+            "runner",
+        );
+        assert_eq!(facts, vec![ProviderFact::Activity(Signal::Working)]);
+        let (_, facts) = decode(
+            &mut decoder,
+            r#"{"type":"result","uuid":"old-result","session_id":"thread","subtype":"success","result":"old"}"#,
+            "runner",
+        );
+        assert!(matches!(
+            facts.as_slice(),
+            [_, ProviderFact::TurnCompleted { turn: None, .. }]
+        ));
 
-        assert!(rx.is_empty(), "user text blocks should not emit events");
+        decoder.outbound("request");
+        let (_, facts) = decode(
+            &mut decoder,
+            r#"{"type":"user","uuid":"request","session_id":"thread"}"#,
+            "runner",
+        );
+        assert_eq!(
+            facts[1],
+            ProviderFact::TurnAnswered {
+                turn: turn("request"),
+                request: "request".into()
+            }
+        );
+        let value = json!({"decision":"advance","summary":"native proof"});
+        let (_, facts) = decode(
+            &mut decoder,
+            &json!({"type":"result","uuid":"result","session_id":"thread","subtype":"success","structured_output":value,"usage":{"input_tokens":1}}).to_string(),
+            "runner",
+        );
+        assert_eq!(
+            facts,
+            vec![
+                ProviderFact::Activity(Signal::Yielded(true)),
+                ProviderFact::Output {
+                    turn: turn("request"),
+                    answer: json!({"value": value})
+                },
+                ProviderFact::Usage {
+                    turn: turn("request"),
+                    receipt: json!({
+                        "provider":"claude",
+                        "usage":{"input_tokens":1,"total_input_tokens":1},
+                        "final":true
+                    })
+                },
+                ProviderFact::TurnCompleted {
+                    turn: Some(turn("request")),
+                    status: Lifecycle::Completed,
+                    detail: json!({"status":"completed","result_id":"result","errors":null,"subtype":"success"})
+                },
+            ]
+        );
     }
 
     #[test]

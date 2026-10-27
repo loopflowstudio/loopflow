@@ -2405,7 +2405,7 @@ esac
     // Keep its launcher alive briefly after the real Process exits to expose that gap.
     let lf = format!(
         r#"#!/bin/sh
-if [ "$1 $2" = 'task __repair' ]; then
+if [ "$2 $3" = 'skill ci-fix' ]; then
   '{}' "$@"
   status=$?
   sleep 2
@@ -2426,6 +2426,8 @@ exec '{}' "$@"
     git(&repo, &["push", "origin", "v0.9.1"]);
     fs::create_dir_all(repo.path().join(".lf")).unwrap();
     fs::write(repo.path().join(".lf/config.yaml"), "agent: codex\n").unwrap();
+    // A ci-fix run is an ordinary skill run, which keeps its prompt log ignored.
+    fs::write(repo.path().join(".gitignore"), ".lf/prompts/\n").unwrap();
     fs::write(repo.path().join("feature.txt"), "release me").unwrap();
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-m", "Release fixture"]);

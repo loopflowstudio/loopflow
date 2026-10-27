@@ -70,6 +70,7 @@ const FILTER_ONLY: &[&[&str]] = &[
     &["history"],
     &["ops", "ci"],
     &["history", "list"],
+    &["history", "search"],
     &["history", "usage"],
 ];
 

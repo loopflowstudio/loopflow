@@ -369,51 +369,19 @@ mod tests {
     }
 
     #[test]
-    fn transcript_lines_move_nothing_and_usage_moves_only_its_own_revision() {
+    fn usage_moves_only_its_own_revision_and_every_fact_moves_sessions() {
         let (_dir, store) = store();
         session(&store, "conversation");
         let before = store.revisions().unwrap();
-        // The types every summary reader skips.
-        for (line, kind) in [
-            "activity",
-            "handoff",
-            "user_input",
-            "conversation",
-            "text",
-            "tool_use",
-            "result",
-            "provider_output",
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let receipt = format!("input:events.jsonl:{line}");
-            event(
-                &store,
-                "conversation",
-                "observed",
-                &receipt,
-                &evidence(kind),
-            );
-        }
-        assert_eq!(store.revisions().unwrap(), before);
         event(&store, "conversation", "usage", "turn", "{}");
-        event(
-            &store,
-            "conversation",
-            "observed",
-            "input:events.jsonl:9",
-            &evidence("usage"),
-        );
         assert_eq!(
             store.revisions().unwrap(),
             StoreRevisions {
-                usage: before.usage + 2,
+                usage: before.usage + 1,
                 ..before
             }
         );
-        // Lifecycle facts share the `observed` kind with transcript lines, and
-        // provider attempts share their receipt key. Unreadable evidence counts.
+        // Facts share the `observed` kind and receipt keys; unreadable evidence counts.
         for (kind, receipt, payload) in [
             ("observed", "input:manifest.json", "{}".to_owned()),
             ("observed", "input:terminal.json", "{}".to_owned()),
@@ -431,7 +399,7 @@ mod tests {
                 evidence("provider_attempt_finished"),
             ),
             ("observed", "input:events.jsonl:22", "{".to_owned()),
-            ("observed", "input:events.jsonl:23", "{}".to_owned()),
+            ("observed", "input:silence:23", "{}".to_owned()),
         ] {
             let sessions = store.revisions().unwrap().sessions;
             event(&store, "conversation", kind, receipt, &payload);

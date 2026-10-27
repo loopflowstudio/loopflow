@@ -122,7 +122,6 @@ pub struct TaskSummary {
     pub name: String,
     pub description: String,
     pub rank: u32,
-    pub completed: bool,
     pub state: Option<String>,
     pub completed_at: Option<String>,
     pub due_date: Option<String>,
@@ -255,6 +254,9 @@ pub struct TaskDetailSnapshot {
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
+    /// Whether `lf ship` would start now; `unavailable` says why not.
+    pub ship_control: TaskRunControl,
+    pub shipping: Option<crate::ops::task::ship::ShippingSnapshot>,
     pub pr: Option<PrSnapshot>,
 }
 
@@ -516,6 +518,8 @@ pub struct RoadmapTask {
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
+    pub ship_control: TaskRunControl,
+    pub shipping: Option<crate::ops::task::ship::ShippingSnapshot>,
     pub pr: Option<PrSnapshot>,
     pub section: RoadmapSection,
 }
@@ -1008,6 +1012,8 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
         latest_graph_process: detail.latest_graph_process,
         execution: detail.execution,
         run_control: detail.run_control,
+        ship_control: detail.ship_control,
+        shipping: detail.shipping,
         pr: detail.pr,
         section,
     }
@@ -1016,9 +1022,7 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
 /// A Task's section, from the same planning primitives the row already carries.
 fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     let Some(runtime) = &task.runtime else {
-        return if crate::linear::terminal_reason(task.task.state.as_deref(), task.task.completed)
-            .is_some()
-        {
+        return if crate::linear::terminal_reason(task.task.state.as_deref()).is_some() {
             RoadmapSection::Later
         } else {
             RoadmapSection::NotStarted
@@ -1026,10 +1030,9 @@ fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     };
     // Linear completing a Task that never left `start` withdraws it from what
     // is offered; an active one keeps its place and shows the conflict.
-    let withdrawn = matches!(runtime.status, TaskState::NotReady | TaskState::Ready)
-        && crate::linear::terminal_reason(task.task.state.as_deref(), task.task.completed)
-            .is_some();
-    if runtime.status.is_terminal() || runtime.status == TaskState::Paused || withdrawn {
+    let withdrawn = matches!(runtime.status, TaskState::Unstarted)
+        && crate::linear::terminal_reason(task.task.state.as_deref()).is_some();
+    if runtime.status.is_terminal() || runtime.status == TaskState::Deferred || withdrawn {
         return RoadmapSection::Later;
     }
     match task.next_move.owner {
@@ -1227,9 +1230,9 @@ async fn snapshot_tasks(
     }
     let mut details = snapshot_task_details(store, requests, probe_pr_empty, shared)?;
     details.sort_by(|left, right| {
-        left.task
-            .completed
-            .cmp(&right.task.completed)
+        let done = |task: &TaskSummary| task.state.as_deref() == Some("completed");
+        done(&left.task)
+            .cmp(&done(&right.task))
             .then(left.task.rank.cmp(&right.task.rank))
             .then(left.task.identifier.cmp(&right.task.identifier))
     });
@@ -1334,8 +1337,8 @@ async fn snapshot_task_detail(
     );
     let acquisition = store.sqlite.task_acquisition(&task.id)?;
     let worktree_blocker = crate::ops::task::task_worktree_blocker(store, task).await?;
-    let launch_refusal = if runtime.status == TaskState::Paused {
-        Some("Task is paused; resume it before running a Graph".to_string())
+    let launch_refusal = if runtime.status == TaskState::Deferred {
+        Some("Task is deferred; resume it before running a Graph".to_string())
     } else if worktree_blocker.is_none() {
         crate::ops::task::task_process_refusal(store, task)
             .await?
@@ -1352,10 +1355,10 @@ async fn snapshot_task_detail(
     } else {
         None
     };
-    let next_move = if runtime.status == TaskState::Paused {
+    let next_move = if runtime.status == TaskState::Deferred {
         NextMove {
             owner: NextMoveOwner::User,
-            reason: "Paused; resume explicitly when wanted".into(),
+            reason: "Deferred; resume explicitly when wanted".into(),
         }
     } else if execution.state != TaskExecutionState::Idle && !runtime.status.is_terminal() {
         NextMove {
@@ -1415,7 +1418,6 @@ async fn snapshot_task_detail(
         resume_refusal: resume_refusal.as_deref(),
         ci: active.and_then(|pr| pr.fresh_ci()),
         predecessor_phase,
-        abandon_intent: task.abandon_intent.is_some(),
         launch_refusal: launch_refusal.as_deref(),
     };
     let condition = derive_task_condition(
@@ -1433,17 +1435,35 @@ async fn snapshot_task_detail(
         crate::ops::task_run::task_run_control(&crate::ops::task_run::TaskRunEvidence {
             status: Some(&work_status),
             // Shared completion withdraws an unstarted Task, never advances its Workflow.
-            plan_terminal_reason: crate::linear::terminal_reason(
-                task.state.as_deref(),
-                task.completed,
-            )
-            .filter(|_| matches!(runtime.status, TaskState::NotReady | TaskState::Ready)),
+            plan_terminal_reason: crate::linear::terminal_reason(task.state.as_deref())
+                .filter(|_| matches!(runtime.status, TaskState::Unstarted)),
             worktree_blocker: worktree_blocker
                 .as_ref()
                 .map(|blocker| blocker.reason.as_str()),
             launch_refusal: launch_refusal.as_deref(),
         });
-    let (workflow_name, workflow_source) = match store.sqlite.workflow(&task.id)? {
+    let workflow = store.sqlite.workflow(&task.id)?;
+    let shipping = crate::ops::task::ship::read_shipping(
+        &store.sqlite,
+        &task.id,
+        workflow.as_ref(),
+        runtime.status,
+    )?;
+    let at_end = workflow.as_ref().is_some_and(|workflow| {
+        matches!(&workflow.position, crate::ops::workflow::WorkflowPosition::Node { node } if node == crate::workflow::END)
+    });
+    let ship_control = TaskRunControl {
+        unavailable: run_control.unavailable.clone().or_else(|| {
+            if shipping.is_some() {
+                Some("Task is already shipping".to_string())
+            } else if at_end {
+                Some("Task is at the end of its Workflow".to_string())
+            } else {
+                None
+            }
+        }),
+    };
+    let (workflow_name, workflow_source) = match workflow {
         Some(workflow) => (workflow.definition.name, "task"),
         None => crate::ops::task::task_workflow_default(store, task)?,
     };
@@ -1467,6 +1487,8 @@ async fn snapshot_task_detail(
         latest_graph_process: graph_record,
         execution: Some(execution),
         run_control,
+        ship_control,
+        shipping,
         pr: pr.as_ref().map(|pr| {
             let empty = (probe_pr_empty && pr.is_active())
                 .then(|| task_pr_empty(task, pr))
@@ -1777,7 +1799,6 @@ fn task_summary(
         name: task.title.clone(),
         description: task.description.clone(),
         rank: task.rank,
-        completed: task.completed,
         state: task.state.clone(),
         completed_at: task.completed_at.clone(),
         assignee: task.assignee.clone(),
@@ -1945,11 +1966,7 @@ fn print_status(status: &WaveDetailSnapshot) {
                     .runtime
                     .as_ref()
                     .map(|runtime| runtime.status.label())
-                    .unwrap_or(if task.task.completed {
-                        "completed"
-                    } else {
-                        "unstarted"
-                    });
+                    .unwrap_or(task.task.state.as_deref().unwrap_or("unstarted"));
                 println!(
                     "  {}  {:<10}  {:<12}  {}  {}",
                     task.task.identifier,
@@ -2627,8 +2644,7 @@ mod tests {
                 .unwrap();
             assert_eq!(detail.task.state, item.state);
             assert_eq!(detail.task.completed_at, item.completed_at);
-            assert_eq!(detail.task.completed, item.completed);
-            let terminal = crate::linear::terminal_reason(item.state.as_deref(), item.completed);
+            let terminal = crate::linear::terminal_reason(detail.task.state.as_deref());
             assert_eq!(
                 matches!(super::task_section(detail), super::RoadmapSection::Later),
                 terminal.is_some()
@@ -3300,7 +3316,7 @@ mod tests {
         let missing = LocalProgressEvidenceState::Missing;
         // A removed checkout alone does not reopen settled work.
         assert!(!unresolved(TaskState::Done, none, missing, true));
-        assert!(unresolved(TaskState::Active, none, missing, true));
+        assert!(unresolved(TaskState::Moving, none, missing, true));
         // Blocked describes a stopped failed Graph, not a live Process. Later
         // Task completion must not make that retained history current forever.
         assert!(!unresolved(
@@ -3310,7 +3326,7 @@ mod tests {
             false
         ));
         assert!(unresolved(
-            TaskState::Active,
+            TaskState::Moving,
             review.as_ref(),
             missing,
             false
@@ -3346,7 +3362,7 @@ mod tests {
     fn task_condition_distinguishes_clear_work_from_external_waits() {
         let runtime = TaskRuntimeSnapshot {
             work_id: "task-1".to_string(),
-            status: TaskState::Active,
+            status: TaskState::Moving,
             reason: "ready".to_string(),
             updated_at: "2026-07-21T00:00:00Z".to_string(),
             provider: "codex".to_string(),
@@ -3428,7 +3444,6 @@ mod tests {
                 resume_refusal: None,
                 ci: None,
                 predecessor_phase: None,
-                abandon_intent: false,
                 launch_refusal: Some("next launch configuration is invalid"),
             };
             let condition = derive_task_condition(
@@ -3549,7 +3564,6 @@ mod tests {
                     resume_refusal: None,
                     ci: None,
                     predecessor_phase: None,
-                    abandon_intent: false,
                     launch_refusal: Some("worktree is missing"),
                 }),
                 Some(&failed),
@@ -3580,7 +3594,6 @@ mod tests {
             resume_refusal: None,
             ci: None,
             predecessor_phase: None,
-            abandon_intent: false,
             launch_refusal: None,
         };
         let condition = derive_task_condition(

@@ -37,6 +37,11 @@ Task completion.
    - If a previous repair conclusion is supplied, inspect its existing changes
      and continue from them. The same head can recover through a check rerun;
      do not manufacture a commit just to change its SHA.
+   - Before changing code, check whether the same check also fails on the base
+     branch's latest commit, or fails on a timeout, hang or race unrelated to
+     the diff. That is a flake: rerun it (`gh run rerun <run-id> --failed`), or
+     re-queue a failed merge-queue run with `lf arm`, and report `published`
+     with no code change.
 
 3. **Repair and verify**
    - For required integration with green checks, finish the sync and verify its
@@ -71,12 +76,13 @@ Task completion.
 5. **Report the handoff**
    - Give the published SHA, PR URL, auto-merge state, and local checks run.
      Distinguish local passes from CI still pending on the new head.
-   - If blocked, name the capability (provider, github-observation, secrets,
-     publication) and exact next action. Do not claim an unpublished or unarmed
-     repair is complete.
-   - When the landing reconciler supplies a final-answer format, use it. Its
-     `published` or `blocked` result tells the reconciler whether to continue or
-     surface the required human action. Write it only in the final answer.
+   - If this attempt cannot repair it, say what you tried and what stopped you
+     (provider, github-observation, secrets, publication). Do not claim an
+     unpublished or unarmed repair is complete. No one is available to answer.
+   - When the landing reconciler launches the run with an `--output-schema`
+     conclusion, answer with it. A `blocked` result ends this attempt; the
+     landing starts the next after a backoff and hands it your summary. Write
+     it only in the final answer.
 
 ## Guardrails
 

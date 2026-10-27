@@ -2,10 +2,8 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
-use loopflow::id::WaveId;
 use loopflow::process::LfProcess;
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::work::wave::Wave;
 use time::OffsetDateTime;
 
 use loopflow_test_support::TestRepo;
@@ -94,7 +92,7 @@ fn doctor_json_reports_the_build_revision_and_freshness_check() {
 }
 
 #[test]
-fn copied_production_history_does_not_block_the_telemetry_scorecard() {
+fn copied_production_history_does_not_block_the_telemetry_cron() {
     let home = TestRepo::new();
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     insert_process(
@@ -122,32 +120,11 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
     }
     let original_events = store.processes_since(0).unwrap();
     fs::create_dir_all(home.path().join(".lf/graphs")).unwrap();
-    fs::create_dir_all(home.path().join("scripts")).unwrap();
     fs::write(
         home.path().join(".lf/graphs/telemetry-daily.yaml"),
-        "- cmd: doctor\n- cmd: __telemetry-scorecard\n",
+        "- cmd: doctor\n",
     )
     .unwrap();
-    fs::create_dir_all(home.path().join(".lf/wave/product/metrics")).unwrap();
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for file in [
-        "scripts/lifecycle_scorecard.py",
-        "scripts/performance-budgets.json",
-    ] {
-        fs::copy(source.join(file), home.path().join(file)).unwrap();
-    }
-    fs::write(
-        home.path().join(".lf/wave/product/metrics/task-loop-trust.md"),
-        "---\nschema: 1\nid: task-loop-trust\nstage: installed\ninstrument: lifecycle-scorecard\nunit: ratio\nwindow: 7d\nfreshness: 30h\n---\n\n# Task loops earn trust\n\nCount settled Task loops.\n",
-    )
-    .unwrap();
-    store
-        .create_wave(&Wave::new(
-            WaveId::new(),
-            "product".to_string(),
-            home.path().display().to_string(),
-        ))
-        .unwrap();
 
     let doctor = run_lf(home.path(), &["doctor", "--json"]);
     assert!(
@@ -164,10 +141,6 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
         String::from_utf8_lossy(&telemetry.stdout),
         String::from_utf8_lossy(&telemetry.stderr)
     );
-    let report = String::from_utf8_lossy(&telemetry.stdout);
-    assert!(report.contains("Lifecycle scorecard"), "{report}");
-    assert!(report.contains("Recorded input elapsed"), "{report}");
-    assert!(report.contains("Land request → merge"), "{report}");
     let events_after_telemetry = store.processes_since(0).unwrap();
     for original in original_events {
         assert!(events_after_telemetry.contains(&original));

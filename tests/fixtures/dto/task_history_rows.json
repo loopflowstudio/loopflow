@@ -6,7 +6,6 @@
       "name": "LOO-318",
       "description": "",
       "rank": 0,
-      "completed": false,
       "state": "canceled",
       "completed_at": null,
       "assignee": null,
@@ -60,6 +59,10 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
+    "ship_control": {
+      "unavailable": "Linear Task is canceled"
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -70,7 +73,6 @@
       "name": "LOO-315",
       "description": "",
       "rank": 1,
-      "completed": false,
       "state": "canceled",
       "completed_at": null,
       "assignee": null,
@@ -124,6 +126,10 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
+    "ship_control": {
+      "unavailable": "Linear Task is canceled"
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -134,7 +140,6 @@
       "name": "LOO-314",
       "description": "",
       "rank": 2,
-      "completed": false,
       "state": "canceled",
       "completed_at": null,
       "assignee": null,
@@ -188,6 +193,10 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
+    "ship_control": {
+      "unavailable": "Linear Task is canceled"
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -198,7 +207,6 @@
       "name": "LOO-313",
       "description": "",
       "rank": 3,
-      "completed": false,
       "state": "canceled",
       "completed_at": null,
       "assignee": null,
@@ -252,6 +260,10 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
+    "ship_control": {
+      "unavailable": "Linear Task is canceled"
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -262,7 +274,6 @@
       "name": "LOO-310",
       "description": "",
       "rank": 4,
-      "completed": false,
       "state": "canceled",
       "completed_at": null,
       "assignee": null,
@@ -316,6 +327,10 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
+    "ship_control": {
+      "unavailable": "Linear Task is canceled"
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -326,7 +341,6 @@
       "name": "LOO-308",
       "description": "",
       "rank": 5,
-      "completed": false,
       "state": "canceled",
       "completed_at": null,
       "assignee": null,
@@ -380,6 +394,10 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
+    "ship_control": {
+      "unavailable": "Linear Task is canceled"
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -390,7 +408,6 @@
       "name": "LOO-307",
       "description": "",
       "rank": 6,
-      "completed": false,
       "state": "canceled",
       "completed_at": null,
       "assignee": null,
@@ -444,6 +461,10 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
+    "ship_control": {
+      "unavailable": "Linear Task is canceled"
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -454,7 +475,6 @@
       "name": "LOO-309",
       "description": "",
       "rank": 7,
-      "completed": false,
       "state": "unstarted",
       "completed_at": null,
       "assignee": null,
@@ -508,6 +528,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -518,7 +542,6 @@
       "name": "LOO-316",
       "description": "",
       "rank": 8,
-      "completed": false,
       "state": "unstarted",
       "completed_at": null,
       "assignee": null,
@@ -572,6 +595,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -582,7 +609,6 @@
       "name": "LOO-312",
       "description": "",
       "rank": 9,
-      "completed": false,
       "state": "unstarted",
       "completed_at": null,
       "assignee": null,
@@ -636,6 +662,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -646,7 +676,6 @@
       "name": "LOO-306",
       "description": "",
       "rank": 10,
-      "completed": false,
       "state": "unstarted",
       "completed_at": null,
       "assignee": null,
@@ -700,6 +729,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -710,7 +743,6 @@
       "name": "recent",
       "description": "",
       "rank": 11,
-      "completed": true,
       "state": "completed",
       "completed_at": "2026-10-01T12:00:00Z",
       "assignee": null,
@@ -764,6 +796,10 @@
     "run_control": {
       "unavailable": "Linear Task is complete"
     },
+    "ship_control": {
+      "unavailable": "Linear Task is complete"
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -774,7 +810,6 @@
       "name": "old",
       "description": "",
       "rank": 12,
-      "completed": true,
       "state": "completed",
       "completed_at": "2026-09-12T12:00:00Z",
       "assignee": null,
@@ -828,6 +863,10 @@
     "run_control": {
       "unavailable": "Linear Task is complete"
     },
+    "ship_control": {
+      "unavailable": "Linear Task is complete"
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -838,7 +877,6 @@
       "name": "unknown",
       "description": "",
       "rank": 13,
-      "completed": true,
       "state": "completed",
       "completed_at": null,
       "assignee": null,
@@ -892,6 +930,10 @@
     "run_control": {
       "unavailable": "Linear Task is complete"
     },
+    "ship_control": {
+      "unavailable": "Linear Task is complete"
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -902,7 +944,6 @@
       "name": "reopened",
       "description": "",
       "rank": 14,
-      "completed": false,
       "state": "unstarted",
       "completed_at": "2026-09-01T12:00:00Z",
       "assignee": null,
@@ -956,6 +997,10 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   },
@@ -966,7 +1011,6 @@
       "name": "unresolved",
       "description": "",
       "rank": 15,
-      "completed": false,
       "state": "canceled",
       "completed_at": null,
       "assignee": null,
@@ -1020,6 +1064,10 @@
     "run_control": {
       "unavailable": "Linear Task is canceled"
     },
+    "ship_control": {
+      "unavailable": "Linear Task is canceled"
+    },
+    "shipping": null,
     "pr": null,
     "workflow_source": "task"
   }

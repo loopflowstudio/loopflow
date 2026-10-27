@@ -17,10 +17,9 @@ pub enum TaskRunAction {
         take_up: bool,
         from: String,
         to: String,
-        graph: Option<String>,
-    },
-    Graph {
-        graph: String,
+        name: String,
+        /// Whether the edge runs steps, or enters `end` running nothing.
+        runs: bool,
     },
 }
 
@@ -41,18 +40,17 @@ impl TaskRunExplanation {
                 take_up,
                 from,
                 to,
-                graph,
+                name,
+                runs,
             }) => format!(
-                "{}Workflow {workflow}: {from} → {to}; {}",
+                "{}graph {workflow}: {from} → {to}; {}",
                 if *take_up { "take up " } else { "" },
-                graph
-                    .as_ref()
-                    .map(|graph| format!("run {graph}"))
-                    .unwrap_or_else(|| "run no Graph".into()),
+                if *runs {
+                    format!("run {name}")
+                } else {
+                    "run nothing".into()
+                },
             ),
-            Some(TaskRunAction::Graph { graph }) => {
-                format!("run {graph} without moving the Workflow")
-            }
             None => "unavailable".into(),
         };
         let mut lines = vec![
@@ -146,29 +144,23 @@ async fn read_task_run(
             return Ok(());
         }
     };
-    report.action = Some(match choice {
-        TaskRunSelection::Graph(graph) => TaskRunAction::Graph { graph },
-        TaskRunSelection::Edge {
-            workflow,
-            index,
-            take_up,
-        } => {
-            let edge = &workflow.definition.edges[index as usize];
-            if let Some(graph) = &edge.graph {
-                if let Err(error) = super::load_task_graph(checkout, graph) {
-                    report.impediments.push(error.to_string());
-                }
-            } else {
-                report.unavailable.push("Arrival requests planning completion; PR gates and eligible checkout cleanup are evaluated during settlement, not by this preview".into());
-            }
-            TaskRunAction::Edge {
-                workflow: workflow.definition.name,
-                take_up,
-                from: edge.from.clone(),
-                to: edge.to.clone(),
-                graph: edge.graph.clone(),
-            }
-        }
+    let TaskRunSelection {
+        workflow,
+        index,
+        take_up,
+    } = choice;
+    let edge = &workflow.definition.edges[index as usize];
+    let runs = workflow.edge_runs(index);
+    if !runs {
+        report.unavailable.push("Arrival requests planning completion; PR gates and eligible checkout cleanup are evaluated during settlement, not by this preview".into());
+    }
+    report.action = Some(TaskRunAction::Edge {
+        workflow: workflow.definition.name.clone(),
+        take_up: take_up.is_some(),
+        from: edge.from.clone(),
+        to: edge.to.clone(),
+        name: edge.name.clone(),
+        runs,
     });
     report
         .unavailable

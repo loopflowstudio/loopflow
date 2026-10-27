@@ -140,11 +140,9 @@ fn two_people_share_one_repository() {
     // A takeover Workflow whose only Graph runs no agent.
     let maya = pair.repo(Maya);
     std::fs::create_dir_all(maya.join(".lf/graphs")).unwrap();
-    std::fs::create_dir_all(maya.join(".lf/workflows")).unwrap();
-    std::fs::write(maya.join(".lf/graphs/look.yaml"), "- cmd: task status\n").unwrap();
     std::fs::write(
-        maya.join(".lf/workflows/takeover.yaml"),
-        "nodes: {review: demo}\nedges:\n  - {from: start, to: review, graph: look}\n  - {from: review, to: end}\n",
+        maya.join(".lf/graphs/takeover.yaml"),
+        "- cmd: task status\n- interactive: {name: demo, id: review}\n",
     )
     .unwrap();
     pair.git(&maya, &["add", ".lf"]);
@@ -262,11 +260,11 @@ fn two_people_share_one_repository() {
     );
     assert_eq!(rejected.status.code(), Some(2));
     std::fs::write(
-        maya.join(".lf/workflows/review.yaml"),
-        "nodes: {review: demo}\nedges:\n  - {from: start, to: review, graph: implement}\n  - {from: review, to: end}\n",
+        maya.join(".lf/graphs/review.yaml"),
+        "- implement\n- interactive: {name: demo, id: review}\n",
     )
     .unwrap();
-    pair.git(&maya, &["add", ".lf/workflows"]);
+    pair.git(&maya, &["add", ".lf/graphs"]);
     pair.git(
         &maya,
         &[

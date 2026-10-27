@@ -437,7 +437,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
                     .trim_end()
             ));
         }
-        output.push_str("\nSelect: --repo <name-or-path>, --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>\n--repo resolves names under repo_root (default ~/src) on the selected Machine.\n--machine otherwise uses its saved remote repository.\nWith --machine: --forward-agent\nAgent selection: -a, --agent <harness[:model]> overrides agents in Tasks, Graphs, skills and child commands\n");
+        output.push_str("\nSelect: --repo <name-or-path>, --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>, --cwd <path>\n--repo resolves names under repo_root (default ~/src) on the selected Machine.\n--machine otherwise uses its saved remote repository.\nWith --machine: --forward-agent\nAgent selection: -a, --agent <harness[:model]> overrides agents in Tasks, Graphs, skills and child commands\n");
         output.push_str("\nOmit owners when a command is unique: lf land → lf ops pr land.\nCommands take precedence; lf skill NAME and lf graph NAME select definitions.\n");
         return Ok(output);
     }
@@ -525,6 +525,7 @@ fn format_written_steps(steps: &[Step]) -> String {
 fn format_written_step(step: &Step) -> String {
     match &step.target {
         Target::Graph(graph) => graph.name.clone(),
+        Target::Skill(skill) if step.interactive => format!("{} (interactive)", skill.name),
         target => format_target(target),
     }
 }
@@ -568,12 +569,8 @@ fn definition_help(
             skill.source.as_ref().map(|source| source.path.clone()),
         ),
         Target::Graph(graph) => {
-            let mut reviews = crate::graph::human_occurrence_ids(graph, repo)?;
-            reviews.sort();
-            let mut description = format_written_steps(&graph.items);
-            if !reviews.is_empty() {
-                description.push_str(&format!("\nReview steps: {}", reviews.join(", ")));
-            }
+            crate::graph::compile_graph(graph, repo)?;
+            let description = format_written_steps(&graph.items);
             (
                 graph.name.as_str(),
                 DefinitionKind::Graph,

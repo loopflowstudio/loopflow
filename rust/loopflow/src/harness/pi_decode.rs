@@ -1,12 +1,19 @@
-//! Pi 1.3 session events. A Loopflow turn ends at agent_settled, not agent_end.
+//! Pi 1.3 session events, decoded once each. A Loopflow turn ends at
+//! agent_settled, not agent_end. Pi evidence carries no provider-account
+//! inference.
 use std::collections::BTreeMap;
 
-use serde_json::Value;
+use anyhow::Result;
+use serde_json::{json, Value};
 
+use super::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle, TurnUsage};
+use crate::id::AgentSessionId;
 
-#[derive(Debug, Default)]
+/// One Loopflow turn in a Pi conversation.
+#[derive(Debug)]
 pub(super) struct Turn {
+    turn: ProviderTurn,
     id: String,
     usage: TurnUsage,
     messages: usize,
@@ -54,18 +61,52 @@ fn text_content(content: &Value) -> String {
 }
 
 impl Turn {
-    pub fn new(id: String) -> Self {
+    pub fn new(turn: ProviderTurn) -> Self {
         Self {
-            id,
-            ..Default::default()
+            id: turn.turn.clone(),
+            turn,
+            usage: TurnUsage::default(),
+            messages: 0,
+            failed: false,
+            answered: false,
+            final_text: String::new(),
+            streamed_text: false,
+            tools: BTreeMap::new(),
         }
+    }
+
+    /// Decode one session event of this turn.
+    pub fn event(&mut self, event: &Value) -> Vec<Decoded> {
+        let mut facts = signals(event)
+            .into_iter()
+            .map(|signal| ProviderFact::Activity(signal).into())
+            .collect();
+        let display = self.display(event, &mut facts);
+        facts.extend(display.into_iter().map(Decoded::from));
+        facts
+    }
+
+    /// End the turn, as Pi settled it or as its stream died.
+    pub fn finish(&mut self, status: Lifecycle) -> Vec<Decoded> {
+        let mut facts = Vec::new();
+        let display = self.settle(status, &mut facts);
+        facts.extend(display.into_iter().map(Decoded::from));
+        facts
+    }
+
+    fn usage_fact(&self, final_receipt: bool) -> Decoded {
+        ProviderFact::Usage {
+            turn: self.turn.clone(),
+            receipt: json!({"provider":"pi", "usage":self.usage, "final":final_receipt}),
+        }
+        .into()
     }
 
     pub fn id(&self) -> &str {
         &self.id
     }
 
-    pub fn event(&mut self, event: &Value) -> Vec<ConversationEvent> {
+    fn display(&mut self, event: &Value, facts: &mut Vec<Decoded>) -> Vec<ConversationEvent> {
         let mut out = Vec::new();
         match event["type"].as_str() {
             Some("message_update") => {
@@ -142,6 +183,7 @@ impl Turn {
                     });
                 }
                 if self.usage.is_reported() {
+                    facts.push(self.usage_fact(false));
                     out.push(ConversationEvent::UsageCheckpoint {
                         turn_id: self.id.clone(),
                         usage: self.usage.clone(),
@@ -206,7 +248,7 @@ impl Turn {
                 } else {
                     Lifecycle::Completed
                 };
-                out.extend(self.finish(status));
+                out.extend(self.settle(status, facts));
             }
             _ => {}
         }
@@ -232,9 +274,17 @@ impl Turn {
         self.usage.model = usage.model;
     }
 
-    pub fn finish(&mut self, status: Lifecycle) -> Vec<ConversationEvent> {
+    fn settle(&mut self, status: Lifecycle, facts: &mut Vec<Decoded>) -> Vec<ConversationEvent> {
         let mut out = Vec::new();
+        facts.push(ProviderFact::Activity(Signal::Yielded(status == Lifecycle::Completed)).into());
         if !self.final_text.is_empty() {
+            facts.push(
+                ProviderFact::Output {
+                    turn: self.turn.clone(),
+                    answer: json!({"text": self.final_text}),
+                }
+                .into(),
+            );
             out.push(ConversationEvent::ItemCompleted {
                 turn_id: self.id.clone(),
                 item: ConversationItem::Message {
@@ -258,16 +308,118 @@ impl Turn {
             });
         }
         if self.usage.is_reported() {
+            facts.push(self.usage_fact(true));
             out.push(ConversationEvent::UsageCheckpoint {
                 turn_id: self.id.clone(),
                 usage: self.usage.clone(),
                 final_receipt: true,
             });
         }
+        facts.push(
+            ProviderFact::TurnCompleted {
+                turn: Some(self.turn.clone()),
+                status,
+                detail: json!({"status": status.name()}),
+            }
+            .into(),
+        );
         out.push(ConversationEvent::TurnCompleted {
             turn_id: self.id.clone(),
             status,
         });
         out
     }
+}
+
+/// What one session event says about availability; settlement yields through
+/// `settle`, which knows how the turn ended.
+fn signals(value: &Value) -> Vec<Signal> {
+    match value["type"].as_str() {
+        Some("agent_start" | "message_update") => vec![Signal::Working],
+        Some("tool_execution_start") => value["toolCallId"]
+            .as_str()
+            .map(|id| Signal::ToolStarted(id.into()))
+            .into_iter()
+            .collect(),
+        Some("tool_execution_end") => value["toolCallId"]
+            .as_str()
+            .map(|id| Signal::ToolResolved(id.into()))
+            .into_iter()
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// One callback from Pi's native extension, which counts its own
+/// availability and supplies cumulative turn evidence.
+pub(super) fn native(thread: &AgentSessionId, value: &Value) -> Result<Vec<Decoded>> {
+    let turn = value["turn"].as_str();
+    let require_turn = || -> Result<ProviderTurn> {
+        Ok(ProviderTurn {
+            thread: thread.clone(),
+            turn: turn
+                .ok_or_else(|| anyhow::anyhow!("Pi event has no turn"))?
+                .into(),
+        })
+    };
+    let mut out = Vec::new();
+    if value["type"] == "agent_start" {
+        let turn = require_turn()?;
+        out.push(
+            ProviderFact::TurnAnswered {
+                request: turn.turn.clone(),
+                turn,
+            }
+            .into(),
+        );
+    }
+    let settled = value["type"] == "agent_settled";
+    let mut yielded = turn.is_none() && value["type"] == "ui_prompt_end";
+    if settled || (value["type"] == "message_end" && value["message"]["role"] == "assistant") {
+        let mut state = Turn::new(require_turn()?);
+        let mut latest = Vec::new();
+        for event in value["events"].as_array().into_iter().flatten() {
+            // The extension supplies cumulative evidence; retain only the latest
+            // checkpoint. Existing receipt keys make repeated observations idempotent.
+            latest = state.event(event);
+        }
+        if settled {
+            latest = state.event(value);
+        }
+        yielded = latest.iter().any(|decoded| {
+            matches!(
+                decoded,
+                Decoded::Fact(ProviderFact::TurnCompleted {
+                    status: Lifecycle::Completed,
+                    ..
+                })
+            )
+        });
+        // The extension's own counts describe availability, not replayed signals.
+        out.extend(latest.into_iter().filter(|decoded| {
+            matches!(
+                decoded,
+                Decoded::Fact(
+                    ProviderFact::Output { .. }
+                        | ProviderFact::Usage { .. }
+                        | ProviderFact::TurnCompleted { .. }
+                )
+            )
+        }));
+    }
+    let count = |key: &str| -> Result<usize> {
+        Ok(value[key]
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("Pi callback has no {key} count"))? as usize)
+    };
+    out.push(
+        ProviderFact::AvailabilityReading {
+            open_tools: count("openTools")?,
+            pending_input: count("pendingInput")?,
+            yielded,
+            settled,
+        }
+        .into(),
+    );
+    Ok(out)
 }

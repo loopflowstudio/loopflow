@@ -27,11 +27,10 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
             ".lf/wave/product/GOAL.md",
             "---\nlinear:\n  initiative: initiative-1\n---\nKeep working.\n",
         );
-        repo.create_file(".lf/graphs/adoption.yaml", "- cmd: sync --plan\n");
-        // The Project names a workflow; its planning is what the launches below test.
+        // The Project names a graph; its planning is what the launches below test.
         repo.create_file(
-            ".lf/workflows/adoption.yaml",
-            "nodes:\n  demo: demo\nedges:\n  - { from: start, to: demo, graph: adoption }\n  - { from: demo, to: end }\n",
+            ".lf/graphs/adoption.yaml",
+            "- cmd: sync --plan\n- interactive: demo\n",
         );
         repo.stage_all();
         repo.commit("Fixture planning");
@@ -107,7 +106,6 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
             krs: Vec::new(),
             metric_targets: Vec::new(),
             pm_snapshot_synced_at: Some(now.unix_timestamp()),
-            abandon_intent: None,
             created_at: now,
             updated_at: now,
         };

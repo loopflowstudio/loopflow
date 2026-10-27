@@ -54,6 +54,8 @@ Open Loopflow or run its CLI
 | `--docs` | Docs paths, globs, or directories to include in context |
 | `--clipboard / -c` | Include clipboard content in prompt Default: false. |
 | `--agent / -a` | Override agents named in Tasks, Graphs and skills, including child commands (claude, codex, opencode, pi; harness[:model]) Applies everywhere. |
+| `--skill-input` | Read the skill and its arguments from this captured invocation file, as a Graph step does |
+| `--output-schema` | Require the final answer to match this JSON schema, as a deciding Graph step does |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
@@ -71,6 +73,7 @@ Open Loopflow or run its CLI
 | `--wave` | Add Wave context and identity without changing the working directory |
 | `--task` | Execute in this Task's checkout |
 | `--wt` | Execute in an existing worktree by name or branch |
+| `--cwd` | Run in this directory; Work still comes from `--task` or `--wave` |
 | `--help / -h` | Print help |
 | `--version / -V` | Print version |
 
@@ -339,19 +342,6 @@ Show how failed CI is detected, repaired, and landed across this Machine
 | `--wave` | Scope to one Wave |
 | `--repo` | Scope to one GitHub owner/repo |
 | `--json` | Emit the complete incident report as JSON Default: false. |
-| `--help / -h` | Print help |
-
-## lf ops ci watch
-
-Watch this repository's PR checks and start a ci-fix when a recorded landing fails
-
-| Argument | What it does |
-|---|---|
-| `--once` | Check every open PR once and exit Default: false. |
-| `--install` | Keep the watcher running in the background as a launchd service Default: false. |
-| `--uninstall` | Remove the background service Default: false. |
-| `--status` | Show whether a watcher is live, its last poll, and what it started Default: false. |
-| `--json` | Emit the status as JSON Default: false. |
 | `--help / -h` | Print help |
 
 ## lf ops commit
@@ -845,6 +835,18 @@ Replace a provider's ordered route
 | `--default` | default Default: false. |
 | `--help / -h` | Print help |
 
+## lf ship
+
+Ship the Task: run every remaining step to merge and completion, standing in at each stage
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--graph` | Take up this graph in place of the Task's remaining steps |
+| `--reason` | Why, kept in the Task's history |
+| `--stop` | Stop Auto-Ship: end the ship process and disarm auto-merge it armed Default: false. |
+| `--help / -h` | Print help (see more with '--help') |
+
 ## lf scratch
 
 Manage working notes
@@ -940,17 +942,6 @@ Reclaim finished worktrees and build output, dead receipts, old backups, store c
 | `--keep-days` | Keep captures and logs modified within this many days Default: 7. |
 | `--help / -h` | Print help |
 
-## lf disk rotate
-
-Remove the oldest backups, store copies, captures and logs until ~/.lf fits its disk_budget
-
-| Argument | What it does |
-|---|---|
-| `--dry-run` | Show what would be removed without removing anything Default: false. |
-| `--json` | json Default: false. |
-| `--quiet / -q` | Print nothing; removals are still logged to ~/.lf/logs/disk.log Default: false. |
-| `--help / -h` | Print help |
-
 ## lf :
 
 Run an inline prompt
@@ -966,6 +957,16 @@ Inspect and continue Sessions
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf session serve
+
+Run the process a Session lives in while terminals come and go
+
+| Argument | What it does |
+|---|---|
+| `--terminal` | Relay the execution to an attached terminal Default: false. |
+| `<argv>` | The command this process executes |
 | `--help / -h` | Print help |
 
 ## lf session attach
@@ -1124,6 +1125,17 @@ Install the latest Loopflow at login and weekly by default (macOS launchd)
 | Argument | What it does |
 |---|---|
 | `<frequency>` | Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time) Default: weekly. |
+| `--help / -h` | Print help |
+
+## lf self sync-skills
+
+Export skills and Graphs into native vendor Skills directories
+
+| Argument | What it does |
+|---|---|
+| `--yes / -y` | Confirm writes under ~/ without prompting Default: false. |
+| `--no-prune` | Keep stale loopflow-generated skills Default: false. |
+| `--repo` | Export repository definitions into this checkout instead of home Default: false. |
 | `--help / -h` | Print help |
 
 ## lf portfolio
@@ -1714,7 +1726,7 @@ Select and inspect the Wave default Workflow
 
 ## lf wave workflow source
 
-Print a definition from `.lf/workflows/` or the builtins
+Print a graph from `.lf/graphs/` or the builtins
 
 | Argument | What it does |
 |---|---|
@@ -1723,7 +1735,7 @@ Print a definition from `.lf/workflows/` or the builtins
 
 ## lf wave workflow list
 
-List Workflow definitions, including unavailable local files
+List graphs, including unavailable local files
 
 | Argument | What it does |
 |---|---|
@@ -1742,7 +1754,7 @@ Show the Wave's default Workflow
 
 ## lf wave workflow set
 
-Select the Workflow future Tasks take up; captured Tasks stay unchanged. Definitions are committed `.lf/workflows/<name>.yaml` files or builtins
+Select the graph future Tasks take up; captured Tasks stay unchanged. Graphs are committed `.lf/graphs/<name>.yaml` files or builtins
 
 | Argument | What it does |
 |---|---|
@@ -1893,9 +1905,9 @@ List every Task in the selected repository
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf task pause
+## lf task defer
 
-Pause future Task execution without stopping live processes
+Defer future Task execution without stopping live processes
 
 | Argument | What it does |
 |---|---|
@@ -1904,7 +1916,7 @@ Pause future Task execution without stopping live processes
 
 ## lf task resume
 
-Clear a Task pause without starting execution
+Resume a deferred Task without starting execution
 
 | Argument | What it does |
 |---|---|
@@ -1937,7 +1949,7 @@ Move Workflow position without running anything; `end` requests completion
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `<node>` | `start`, `end` or one of the workflow's nodes |
+| `<stage>` | `start`, `end` or one of the graph's stages |
 | `--reason` | Why, kept in the Task's workflow history |
 | `--help / -h` | Print help |
 
@@ -1958,34 +1970,6 @@ Move the captured Workflow to start without executing or reloading it
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--help / -h` | Print help |
-
-## lf task automation
-
-Inspect delivery scheduling and Task CI repair settings
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task reconcile
-
-Check authorized deliveries once, then exit
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task automate
-
-Enable or hold CI repair for a Task without interrupting running work
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `<state>` | state |
 | `--help / -h` | Print help |
 
 ## lf task checkout
@@ -2010,7 +1994,7 @@ Place a Task's worktree, then start a Graph there like `lf --task ISSUE graph GR
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `<graph>` | The edge's Graph, or a workflow to take up; the Task's only edge or its Wave or repository default when omitted |
+| `<graph>` | A route from the Task's stage, or a graph to take up; the Task's only route or its Wave or repository default when omitted |
 | `--name` | name |
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
@@ -2334,6 +2318,31 @@ Inspect a process or Session by identity
 | `--input` | Inspect an exact retained input belonging to this Session |
 | `--context` | Print only what the step's submitted input was made of, by source Default: false. |
 | `--instructions` | Explain recorded instruction inclusion and omission Default: false. |
+| `--transcript` | Print only the Session's conversation, as its providers kept it Default: false. |
+| `--help / -h` | Print help |
+
+## lf history retention
+
+Show how much Session history providers still keep, and what they remove next
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf history search
+
+Find text in the conversations of recent Sessions
+
+| Argument | What it does |
+|---|---|
+| `<text>` | text |
+| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start Default: 7d. |
+| `--wave` | Scope to one Wave by name |
+| `--project` | Scope to one Project by slug |
+| `--task` | Scope to one Task by Linear identifier |
+| `--limit` | limit Default: 50. |
+| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf history usage
@@ -2415,6 +2424,14 @@ Print the repository file that defines a Graph, creating it from the builtin whe
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf graph route
+
+Run the slice of the Task's graph its current route names; `lf task run` starts it
+
+| Argument | What it does |
+|---|---|
 | `--help / -h` | Print help |
 
 ## lf skill

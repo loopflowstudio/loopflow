@@ -63,7 +63,7 @@ itself installs nothing.
 
 ## A Task stopped advancing
 
-**Symptom:** the Task is still `ready`, but nothing is moving, or its agent
+**Symptom:** the Task is not done, but nothing is moving, or its agent
 exited.
 
 ```bash
@@ -83,10 +83,11 @@ live it records nothing and says so.
 If the Task's worktree never finished being created, status keeps the Task and
 names the exact path and branch to restore before launching.
 
-## Status says `ready`, but the Task is waiting
+## The Task is idle, but waiting on something
 
-Task status is deliberately small: `ready`, `done` or `abandoned`. What it is
-waiting on (a child Task, review, CI, merge) lives in its condition:
+Task state says what the Task is doing (`idle`, `active`, `moving`, `shipping`,
+`deferred`, …). What it is waiting on (a child Task, review, CI, merge) lives in
+its condition:
 
 ```bash
 lf task status <ID> --json
@@ -146,7 +147,7 @@ shrink it. Persistent docs belong in `docs:` in `.lf/config.yaml`.
 ## Disk filling up
 
 ```bash
-lf disk                    # ~/.lf by category against its budget, plus every worktree
+lf disk                    # ~/.lf by category, plus every worktree
 lf disk clean --dry-run    # what a cleanup would remove
 lf disk clean              # remove it; each removal is logged to ~/.lf/logs/disk.log
 ```
@@ -155,11 +156,12 @@ lf disk clean              # remove it; each removal is logged to ~/.lf/logs/dis
 output, dead process receipts, every database backup but the newest, and
 captures and logs older than `--keep-days` (7). The database, account homes, the
 newest backup, anything written in the last day and anything a process holds
-open are never removed. Set the budget in `~/.lf/config.yaml`:
+open are never removed.
 
-```yaml
-disk_budget: 20G           # the default
-```
+Starting a Session rotates `~/.lf` at most hourly: backups, draft store copies,
+captures and logs older than 30 days go, the same window Claude Code keeps its
+transcripts. There is no size budget. Provider transcripts follow each
+provider's own retention; raise Claude's `cleanupPeriodDays` to keep more.
 
 ## Stale worktrees and branches
 

@@ -272,7 +272,7 @@ struct RegistryQueryTests {
           "name": "Wire it",
           "description": "",
           "rank": 1,
-          "completed": false, "state": "unstarted", "completed_at": null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},
+          "state": "unstarted", "completed_at": null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},
           "assignee": null
         },
         "reference": {
@@ -285,14 +285,14 @@ struct RegistryQueryTests {
         },
         "runtime": {
           "work_id": "issue-1",
-          "status": "ready",
+          "status": "unstarted",
           "reason": "ready",
           "updated_at": "2026-07-06T00:00:00Z",
           "provider": "codex",
           "owner": {"person": "Jack Heart", "machine": {"id": null, "label": null}}
         },
         "directive": null,
-        "workflow_name":"feature","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},
+        "workflow_name":"feature","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
         "next_move": {
           "owner": "task",
           "reason": "ready"

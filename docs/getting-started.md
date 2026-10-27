@@ -76,7 +76,8 @@ lf comment <ID> "raise ValueError, not ZeroDivisionError"   # reaches the run be
 ```
 
 `code` is the built-in Workflow: build until it holds and publish the PR, stop
-for you to try the change, then ship. Name it once; the Task keeps it. Set
+for you to try the change, then deliver it and stop again for you to check it on
+`main`. Name it once; the Task keeps it. Set
 `workflow: code` in `.lf/config.yaml` and `lf task run <ID>` picks it up for
 every new Task.
 
@@ -103,11 +104,14 @@ it interrupted.
 ## 5. Land it
 
 ```bash
-lf -b task run <ID> ship         # gate, then merge; repairs failing CI until it lands
+lf ship <ID>                     # the remaining steps, then merge; repairs failing CI until it lands
+lf ship <ID> --stop              # withdraw it; disarms the auto-merge it armed
 ```
 
-`ship` runs `gate`, then `lf land --wait-and-fix`. The Task completes when the
-PR merges, and its worktree is cleaned up later by `lf wt prune`.
+`lf ship` stands in for you at each remaining stage and runs `deliver`: `gate`,
+then `lf land --wait-and-fix`. It returns once the Task is shipping (`-b` waits);
+`lf task status` follows it. The Task completes when the PR merges, and its
+worktree is cleaned up later by `lf wt prune`.
 
 Outside a Task, the same verbs work on any branch:
 

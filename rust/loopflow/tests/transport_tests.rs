@@ -70,7 +70,7 @@ impl Fixture {
         line.trim().to_owned()
     }
     fn serve(&self, terminal: bool, argv: &[&str]) -> Command {
-        let mut command = self.command(&["__transport-serve"]);
+        let mut command = self.command(&["session", "serve"]);
         if terminal {
             command.arg("--terminal");
         }

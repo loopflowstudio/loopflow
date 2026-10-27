@@ -1,8 +1,9 @@
 # LOO-604: one lf API for Loopflow state
 
 Status: implementing; core rebuilt (watches, open-Task scope, batched details,
-live reads). Jack Heart (2026-10-27) asked to finish the design and publish the
-PR; Remaining 1–5 continue after it. Client API docs done (surfaces "Build
+live reads) and Remaining 0 (minimal streamed JSON) done. Jack Heart
+(2026-10-27) asked to finish the design and publish the PR; Remaining 1–6
+continue after it. Client API docs done (surfaces "Build
 your own view" is the watch list); published as PR #1719 (2026-10-27).
 `lf repo planning status --help` resolves but execution routes `repo` to
 `lf config repository` (navigation mismatch, from #1708; not this PR). Jack Heart requested the Task;
@@ -228,7 +229,9 @@ unless "Work needed" says otherwise.
    conflicts, and the journal (every change, growing with each edit) moved to
    one-shot `lf planning journal`. Task and TaskSnapshot times are RFC 3339.
    `lf desktop task` carries the Task's `row`, so a completed or canceled
-   Task's pane follows its own watch after it leaves the plan.
+   Task's pane follows its own watch after it leaves the plan. Left as is:
+   `lf desktop task`'s Graph `entry` (`ended_at`, `updated_at`) stays epoch
+   seconds; it is Desktop's rich shape, not a Task read.
 1. Sessions: incremental or paged rows instead of 5.7 MB per reading; a quiet
    Session turns Waiting on the 2 s clock (`next_quiet_available` is gone).
 2. `lf task status`: flat in Graphs; measure what still grows on Jack's store
@@ -282,3 +285,4 @@ unless "Work needed" says otherwise.
 - Realign after main sync (b3fb1ba128): `every_verb_names_a_registry_action` skips the branch's `lf desktop plans|plan|done|wave|task` reads; `cargo test -p loopflow --lib every_verb_names_a_registry_action` passed.
 - Minimal watch bodies + Task pane row (2026-10-27): clippy --all-targets clean; integration `dto_fixtures cli_reference session_cli_tests session_list_watch world_recipes work_open_tests performance_tests data_clones planning_foreground` passed (`available_lists_only…` and `cmux_opens…` failed only under the parallel run, pass alone); `session_lifecycle_tests` (30), `global_commands`, `process_ownership_tests` passed; lib `planning_peers planning_write commands::top|activity|desktop work::task` passed, `watch::a_store_created…` passes alone; `test_desktop.sh` 27 suites / 361 tests passed (incl. `taskLifecycleUpdatesOpenSidebar`; stand-ins still answering `wave show` from 75faef7b22 now answer `desktop plan`). Lib `linear/` suites and Linux `planning_reconnect`: gate.
 - Compress (`Watched::stamp` deleted; no body restates its reading time): clippy --all-targets clean; lib `lf::commands::watch` 3 passed.
+- Realign after main merge 651ccfbe80 (main adds `account` to Desktop's `sessions.json`): `cargo test -p loopflow --test integration dto_fixtures` 45 passed.

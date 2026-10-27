@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -53,7 +52,6 @@ pub struct SyncPlan {
 #[derive(Debug)]
 struct SyncExpectation {
     strategy: SyncStrategy,
-    tracked_dirty: BTreeSet<String>,
     stacked: bool,
     require_changes: bool,
 }
@@ -264,7 +262,6 @@ fn start_owned_sync(
     progress: &impl Progress,
 ) -> OpsResult<SyncVerification> {
     let mut operation = begin_sync_operation(repo, &options.onto)?;
-    let tracked_dirty = tracked_dirty_state(repo)?;
     let planned;
     let plan = match plan {
         Some(plan) => plan,
@@ -280,7 +277,6 @@ fn start_owned_sync(
 
     let expected = SyncExpectation {
         strategy: plan.strategy.clone(),
-        tracked_dirty,
         stacked: options.fork_base.is_some(),
         require_changes,
     };
@@ -404,17 +400,6 @@ fn verify_sync(
             conflicts.lines().collect::<Vec<_>>().join(", ")
         )));
     }
-    let tracked_dirty = tracked_dirty_state(repo)?;
-    let introduced = tracked_dirty
-        .difference(&expected.tracked_dirty)
-        .cloned()
-        .collect::<Vec<_>>();
-    if !introduced.is_empty() {
-        return Err(OpsError::Message(format!(
-            "sync incomplete: new tracked dirty state remains: {}",
-            introduced.join(", ")
-        )));
-    }
     let unique_commits = count_unique_commits(repo, target_sha)?;
     if matches!(expected.strategy, SyncStrategy::MergeTarget)
         && !crate::git::is_ancestor(repo, &owner.head, &head)?
@@ -461,13 +446,6 @@ fn verify_control_completion(repo: &Path, owner: &GitOperationOwner) -> OpsResul
                 "sync incomplete: pinned target {target_sha} is not an ancestor of HEAD"
             )));
         }
-        let introduced = tracked_dirty_state(repo)?;
-        if !introduced.is_empty() {
-            return Err(OpsError::Message(format!(
-                "sync incomplete: tracked dirty state remains: {}",
-                introduced.into_iter().collect::<Vec<_>>().join(", ")
-            )));
-        }
         if !crate::git::is_ancestor(repo, &owner.head, "HEAD")? {
             return Err(OpsError::Message(
                 "sync lost the original branch history".to_string(),
@@ -511,15 +489,6 @@ fn revalidate_start(repo: &Path, owner: &GitOperationOwner) -> OpsResult<()> {
         )));
     }
     Ok(())
-}
-
-fn tracked_dirty_state(repo: &Path) -> OpsResult<BTreeSet<String>> {
-    Ok(
-        git(repo, &["status", "--porcelain", "--untracked-files=no"])?
-            .lines()
-            .map(str::to_string)
-            .collect(),
-    )
 }
 
 fn push_synced_branch(repo: &Path, branch: &str) -> OpsResult<()> {

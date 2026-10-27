@@ -508,7 +508,7 @@ fn recovery_with_detached_head_cannot_masquerade_as_success() {
 }
 
 #[test]
-fn recovery_with_new_tracked_dirt_cannot_masquerade_as_success() {
+fn an_edit_beside_a_committed_resolution_leaves_the_sync_verified() {
     let _env = EnvGuard::new(&[]);
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
@@ -520,13 +520,44 @@ fn recovery_with_new_tracked_dirt_cannot_masquerade_as_success() {
             repo.path(),
             &["-c", "core.editor=true", "commit", "--no-edit"],
         );
-        repo.create_file("conflict.txt", "dirty after resolution\n");
+        repo.create_file("README.md", "another writer's edit\n");
         Ok(())
     });
 
-    assert!(
-        matches!(result, Err(OpsError::Message(ref message)) if message.contains("new tracked dirty state")),
-        "expected dirty-state postcondition failure, got {result:?}"
+    result.expect("another writer's edit does not fail the sync");
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("README.md")).unwrap(),
+        "another writer's edit\n"
+    );
+}
+
+#[test]
+fn continue_completes_beside_existing_tracked_edits() {
+    let _env = EnvGuard::new(&[]);
+    let repo = create_conflicting_repo();
+    repo.create_file("README.md", "edit in progress\n");
+    let result = sync_with_recovery(
+        repo.path(),
+        &SyncOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    );
+    assert!(matches!(result, Err(OpsError::SyncConflict { .. })));
+    drop(result);
+
+    repo.create_file("conflict.txt", "main and feature\n");
+    continue_sync_for_resolution(repo.path(), false).expect("continue beside existing edits");
+
+    assert_eq!(
+        loopflow::git::intervention_state(repo.path()).unwrap(),
+        None
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("README.md")).unwrap(),
+        "edit in progress\n"
     );
 }
 

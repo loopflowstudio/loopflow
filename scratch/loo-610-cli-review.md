@@ -1,7 +1,9 @@
 # LOO-610 — The lf CLI, top down
 
-Status: **decided slice in progress** (2026-10-26): `lf ops` group and `lf repo`
-dissolution and `wave cron` deletion implemented on this branch. Deviations recorded in `scratch/questions.md`. Source: `docs/lf-reference.md` at main `1b137b8f2d` (26 top-level
+Status: **decided slice implemented** (2026-10-26): items 1–6 below are on the
+branch, merged with main `e636ab6397` (#1652). Remaining: gate, publish.
+Deviations in `scratch/questions.md`. Sections 1–8 are the review as proposed;
+where the implementation scope or a later decision differs, the later one wins. Source: `docs/lf-reference.md` at main `1b137b8f2d` (26 top-level
 commands, ~230 subcommands, 24 root flags), `lf --help`, the builtin catalog,
 LOO-601's branch (hidden `__` commands) and LOO-602's accepted tracking decisions.
 
@@ -125,7 +127,7 @@ Rules applied throughout:
 | `:` | **keep** | Inline prompt. Cheap, memorable. |
 | `monitor` | **split** → `lf ps` (person) + `lf watch` (GUI streams) | Bare `monitor`, `active`, `ps`, `top` are four views of "what's running" → `lf ps` (`--watch` refreshes like `top`). `monitor work --watch` is Desktop's stream → `lf watch work` (§4). `prune` → `lf self doctor --repair`. |
 | `desktop` | **reshape** (§4) | Two different APIs share the name. Pane control keeps `lf desktop`; Dashboard data moves to the GUI API. |
-| `repo` | **split** | Grab bag of 10. Planning bits → `wave plan`; `ci` → `pr ci`; `tokens` → skill; `release` → experimental (§7). `repo` disappears from root. |
+| `repo` | **dissolved** (scope item 2) | Grab bag of 10; `repo` is a scope selector, not a group. |
 | `disk` | **merge** → `lf self disk` | Maintenance, not a concept. `rotate` dies with `disk_budget` if LOO-602 decision 6 lands as leaning. |
 | `portfolio` | **merge** → `lf config repos` | It is configuration (which repos Desktop shows). `import` is a one-time migration: delete. |
 | `config` | **keep as group**, grows `repos` | Today a one-command group (`config user`). |
@@ -147,9 +149,8 @@ open ps watch view sync commit wt self config`, plus `help list :`.
 | `run wait interrupt` | keep | Execution. |
 | `checkout` | keep | Explicit "give me the worktree". |
 | `workflow show/move/restart` | keep `show`, `move`; **delete `restart`** | `restart` = `move <issue> start`. |
-| `pause` / `resume` | **rename** → `hold` / `release` | Frees "resume" for Sessions; "hold" is already the status word. |
+| `defer` / `resume` | **rename** `resume` (D2) | Main (#1652) renamed `pause` → `defer`; `task resume` still clears it. Open: D2's `hold/release` predates `defer` — LOO-618 picks `defer`/`undefer` or `hold`/`release`. |
 | `claim` / `unclaim` | keep (claims are real ownership) | — |
-| `automate` / `automation` / `reconcile` | **merge** → `task status` shows automation; `lf pr ci` owns repair on/off | Three commands, one fact (does CI repair run for this Task). |
 | `sync` | **delete** (automatic on read/write) | Provider sync is plumbing; failures surface in `status`. Keep `--retry` on `status` if needed. |
 | `sweep` | → skill (`triage`) | Planning judgment, not a primitive. |
 | `location` | merge into `status --json` (`location`, `--peers`) | A field of status. |
@@ -177,9 +178,9 @@ See §3.
 `open publish submit land abandon checks reviews` keep. `arm` merges into
 `land` (`land` already requests auto-merge and returns; `arm` differs only by
 not retaining settlement intent — make that `--no-settle` if it is still
-needed). `request-review` → `reviews --request <login>`. `reconcile` (settle
-recorded landings once) is what `ci watch` and `task reconcile` already run —
-delete both commands, keep the function. `repo ci` + `repo ci watch` → **`lf pr ci`** (`--watch`, `--status`).
+needed). `request-review` → `reviews --request <login>`. Main (#1652) deleted
+`ci watch` and `task reconcile`; `pr reconcile` is the one settle-once command
+and the documented crontab line. `repo ci` → `lf ops ci` (incident report).
 
 ## 3. Session resuming — one verb, no questions
 
@@ -225,8 +226,8 @@ show`).
 - Opt out with a flag (Jack: "--fork or --save or something"; draft name
   `--fork`): leave the other client running and continue in a new conversation
   forked from it.
-- `--fresh` → `lf session new [--task|--wave]`; `task pause/resume` →
-  `task hold/release`; `lf connect` stops being a separate name.
+- `--fresh` → `lf session new [--task|--wave]`; `task resume` (clears
+  `defer`) gets a non-`resume` name; `lf connect` stops being a separate name.
 - `lf session new` confirmed (Jack Heart): "restart" read as the same Session
   and sat too close to "resume". Help: "Start a new conversation for this
   scope; the previous one stays in history."
@@ -284,8 +285,6 @@ mutations. A tmux/herdr/rex UI shells out exactly as Desktop does.
   *and* after every remote-routed call: 3 processes per call. → file.
 - Graph inspector: `graph list --processes --for-task`, then one `graph show
   --processes` per entry (N+1). → file; `list --processes` should carry steps.
-- `repo ci watch --parent-pid` spawns one watcher per open repository. → `lf
-  serve` (§6) or one watcher per Machine.
 
 ## 5. Telemetry and promises the infrastructure must keep
 
@@ -371,17 +370,17 @@ Open:
 
 ## 6. Servers and remote calls
 
-Everything long-running today is a separate poller with its own install story:
-`repo ci watch --install` (launchd), `wave cron` (launchd), `discord serve`
+Long-running today: `lf ship` (one process per shipping Task), `discord serve`
 (foreground poll), `monitor … --watch` and `task watch-files` (NDJSON streams
-Desktop holds open), `session serve` (LOO-601; one per Session).
+Desktop holds open), `session serve` (LOO-601; one per Session). `wave cron`
+and `ci watch` are gone; scheduled work is a crontab line (`lf pr reconcile`).
 
 **Proposal: `lf serve`, opt-in, stateless.**
 
 - One process a person may run (or install as a launchd/systemd unit). It
   hosts (a) a local socket speaking the CLI — request is an lf argv, response
   is that command's JSON or NDJSON — and (b) webhook endpoints (GitHub checks
-  replace `ci watch` polling; Discord replaces `discord serve`).
+  replace `lf ship`/`pr reconcile` polling; Discord replaces `discord serve`).
 - **Not lfd again.** lfd owned identity and state and was mandatory. `lf serve`
   owns nothing: the SQLite owner is still the lf library each call runs; every
   operation works identically without the server via plain `lf`; Sessions live
@@ -406,8 +405,9 @@ flag — Jack's call (D1): `repo release *`, `discord`, `machine pool/ondemand`,
 
 Part of the surface because `lf <name>` runs them.
 
-- Root-help "Run" line shows `lf pursue`. Keep `pursue`, `ship`, `deploy`?
-  `deploy` (gate → land) and `ship` overlap — merge.
+- Root-help "Run" line shows `lf pursue`. Main (#1652) deleted the `ship` and
+  `deploy` Graphs; `lf ship` is now a root command (kept beside `task`/`wave`,
+  questions).
 - Wave VSM skills `s1`–`s5` and Graph `vsm-operate`: names a recruit can't
   guess; experimental or delete.
 - Session skills (`task_session`, `wave_session`, `repo_session`) and operators
@@ -422,8 +422,8 @@ Part of the surface because `lf <name>` runs them.
 
 - **D1.** What 1.0 promises: the 16-entry root above as stable; §7 as
   experimental (namespace `lf experimental …`, or hidden)?
-- **D2.** `lf resume` as the one resume verb, with `task pause/resume` →
-  `hold/release`?
+- **D2.** `lf resume` as the one resume verb; `task resume` (clears `defer`)
+  renamed? (decided below; the new name is open, see §2.)
 - **D3.** GUI API as a named surface (§4) — what Desktop calls becomes the
   documented build-your-own-UI API.
 - **D4.** Where scheduled jobs live: `lf schedule …` (new noun), `lf machine
@@ -452,8 +452,8 @@ design for the follow-ups. No compatibility aliases; Desktop, skills, docs,
 2. **Dissolve `lf repo`** (Jack: repo is the scope of a Task without a Wave, a
    selector like `--wave`, not a command group):
    - `repo release *` → `lf ops release *` (Jack Heart: software ops).
-   - `repo ci`, `repo ci watch` → `lf ops ci`, `lf ops ci watch` (Desktop:
-     `CIWatchers.swift:31`).
+   - `repo ci` → `lf ops ci`. `repo ci watch` and Desktop's `CIWatchers`
+     went with main's deletion of `ci watch` (#1652).
    - `repo tokens` → `lf ops tokens` (Jack Heart, 2026-10-26: not `history`, which
      is Session history per LOO-604). Desktop: `RegistryQuery.swift:605,613`.
    - `repo comment` → `lf session steer --repo` (steer the repo scope's Sessions).
@@ -481,7 +481,7 @@ design for the follow-ups. No compatibility aliases; Desktop, skills, docs,
    `documented_commands` passes; Swift builds; affected Rust/Swift tests pass.
 
 Demo: `lf --help` (no `repo`; `ops` holds delivery and environment), `lf land` /
-`lf release status` / `lf ci watch --status` / `lf ops tokens` work; Desktop's Telemetry,
+`lf release status` / `lf ops ci` / `lf ops tokens` work; Desktop's Telemetry,
 planning and CI views still load.
 
 ## Docs and README redo (Jack Heart, 2026-10-26: part of this Task)
@@ -528,7 +528,7 @@ Implemented 2026-10-26; the page list is `docs/index.md` "Read by area".
 | Task | Lands | Depends on |
 |---|---|---|
 | **LOO-610 (this)** | The design, plus: `wave cron` deleted; `lf repo` dissolved (scope above); the `lf ops` group (`pr release ci tokens commit sync wt machine account`, `pool`/`ondemand` under `machine`); reference, docs, skills, tests regenerated. Not in this slice: `clone`, `portfolio`, `scratch`, `monitor` | — |
-| Resume (LOO-618) | `lf resume` per §3; `task hold/release`; deletes `session attach`, `--try/--takeover/--if-free`; absorbs LOO-424 | D2 |
+| Resume (LOO-618) | `lf resume` per §3; renames `task resume` (clears `defer`); deletes `session attach`, `--try/--takeover/--if-free`; absorbs LOO-424 | D2 |
 | Usage | `lf usage` filter × group × bucket × measure; interactive-Session usage gap fixed or explained | LOO-611, LOO-612 for `source` |
 | GUI API → **LOO-604** | `--watch` on ordinary reads; Desktop moves onto them (Jack Heart: LOO-604's approach). Left here: `lf open --files/--graphs` | — |
 | `lf serve` | Opt-in stateless server: CLI-over-socket, GitHub webhook replacing `pr ci` polling; Desktop uses it when present | GUI API |
@@ -667,31 +667,13 @@ Daytona/Modal land; then it names them.
 
 ## Run notes
 
-- 2026-10-26: the first pursue run's implement step handed the `wave cron`
-  deletion to a side worktree (`.claude/worktrees/agent-a69d931fbb700b937`,
-  based on a newer main) and exited before merging it. The operator saved the
-  patch, interrupted the Graph during compress, merged it (4 conflicts) and
-  deleted the then-orphaned `ops/cron*` and `tests/scheduled_release_tests.rs`.
-  Compress pass then removed the cron-only release-lock intervention test and
-  its `release_history.json` fixture, cron mentions in docs, and stale
-  `repo comment`/`repo identity`/`repo refresh` calls in tests and e2e scripts.
-  Remaining: gate.
-- 2026-10-26 verify run: `history tokens` → `ops tokens` (Desktop, tests,
-  reference); items 4 (`code` default, test
-  `local_planning::unconfigured_repository_runs_tasks_on_the_builtin_code_workflow`)
-  and 5 (skill/LOOPFLOW.md drafts in place, alignment test updated) done.
-  Item 6 done in the next run (see below).
-  Checks: integration suite 429/436 then 7 fixed and rerun green; two_people,
-  golden_prompt, clippy, Xcode build-for-testing and SwiftPM build pass. Lib
-  suite not rerun in full (stopped at 966/2215 under machine load; its 9
-  failures passed in isolation) — gate/CI.
-- 2026-10-26 item 6: README and `docs/{getting-started,work,sessions,ops,
-  surfaces,telemetry,orchestration,troubleshooting}.md` in place; `lf.md`,
-  `conducting.md`, `planning.md`, `waves.md`, `authoring.md` deleted;
-  `subscriptions.md` kept (questions). Website registry, home links and e2e
-  slugs moved to the staged pages; `docs/index.md` map rewritten.
-  Checks: docs integration tests 5/5, website suite 72/72, every documented
-  `lf` path resolves against the branch build. Remaining: gate, publish.
-- 2026-10-26 compress: `snapshot_task_detail` destructures the Workflow
-  selection; `docs/config.md` teaches `lf self sync-skills`. Checks: clippy,
-  `--lib local_planning::unconfigured_repository_runs` pass. Remaining: gate.
+- 2026-10-26: the `wave cron` deletion was built in a side worktree and merged
+  by hand (4 conflicts); orphaned `ops/cron*`, `scheduled_release_tests.rs`,
+  the cron-only release-lock test and `release_history.json` fixture removed.
+- Verify run: integration 436/436 after 7 fixes; two_people, golden_prompt,
+  clippy, Xcode build-for-testing, SwiftPM build pass. Lib suite stopped at
+  966/2215 under machine load (its 9 failures passed in isolation).
+- Item 6: docs 5/5, website 72/72, every documented `lf` path resolved.
+- Merge with main `e636ab6397` (#1652) and docs port (`964b288617`): no tests
+  run since the merge; the generated reference shows `ship`, `ops ci` (no
+  `watch`) and `task defer`. Gate owes integration, lib, clippy, Swift.

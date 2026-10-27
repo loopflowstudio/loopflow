@@ -97,7 +97,7 @@ You want to do something; here's how through `lf`.
 | use every Claude and Codex login you pay for, routed to the one with room | `lf account` |
 | run on Claude Code, Codex, OpenCode or Pi, per run or per Skill | `lf -a codex : "…"` |
 | run on your own machine over SSH | `lf --machine mini -b task run <ID>` |
-| rent a sandbox for one Task and give it back after | `lf task run <ID> --rent <template>` |
+| rent a Daytona or Modal sandbox for one Task and give it back after | `lf task run <ID> --rent <template>` |
 | land when checks pass, with CI failures repaired for you | `lf land --wait-and-fix` |
 | see what agents cost, by Task, Wave or week | `lf history usage --weekly` |
 | open work in Desktop, cmux, Herdr, tmux or a terminal | `lf open --task <ID>` |

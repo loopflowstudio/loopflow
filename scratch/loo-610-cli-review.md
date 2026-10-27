@@ -1,7 +1,7 @@
 # LOO-610 — The lf CLI, top down
 
 Status: **decided slice implemented** (2026-10-26): items 1–7 and the
-Task-first README are on the branch, merged with main `e636ab6397` (#1652). Remaining: gate, publish.
+Task-first README are on the branch, merged with main `d40f2757c1` (#1704). Remaining: gate, publish.
 Deviations in `scratch/questions.md`. Sections 1–8 are the review as proposed;
 a later decision wins where they differ. Source: `docs/lf-reference.md` at
 main `1b137b8f2d`, LOO-601 (hidden `__` commands) and LOO-602's decisions.
@@ -645,15 +645,12 @@ mode "any Graph, run past its interactive stages"; then this builtin goes.
   just run it. (LOO-622, plus the existing Task Jack recalls on human vs
   interactive flags.)
 
-## Coordination with the rental-machines work (2026-10-26)
+## Rental-machines merge (2026-10-26, resolved)
 
-`loopflow.rental-machines` (LOO-527 rewritten + LOO-542, one PR, uncommitted)
-replaces RunPod with Daytona and Modal and deletes `lf ondemand availability`.
-It edits `lf/mod.rs` (`OndemandCommand` args), `bin/lf.rs`, `machine*.rs`,
-`docs/lf-reference.md`, `docs/lf.md`. LOO-610 moved `ondemand`/`pool` under
-`lf ops machine`. Whichever lands second rebases: the provider changes move into
-the `ops machine ondemand` tree. The README's rental row names no provider until
-Daytona/Modal land; then it names them.
+Main's #1704 (Daytona/Modal rentals, `lf machine use`, `ondemand availability`
+deleted) merged as `b18510b1cb`; its commands sit under `lf ops machine`
+(`ondemand`, `use`, `end`) and the reference regenerated in the merge. The
+README rental row names Daytona and Modal.
 
 ## One steer verb (2026-10-26, built)
 
@@ -691,6 +688,7 @@ root; see questions).
 - Merge with main `e636ab6397` (#1652) and docs port (`964b288617`); steer
   verb (`session_steers`, `global_commands` 45/45, clippy clean); pillar order
   (`documented_commands` 4/4, `reference_matches_the_compiled_cli` pass).
-  Gate owes integration, lib and Swift since the merge.
+  Gate owes integration, lib and Swift since the #1652 and #1704 merges.
+- After #1704 merge: `cargo build --bin lf` ok; `lf help ondemand list|machine use|pool list|release status|ops tokens` resolve.
 - Compress after `auto`: dropped redundant auto checks (definition list,
   catalog lookup); `local_planning::{auto_workflow,wave_workflow_set,unconfigured}` 3/3.

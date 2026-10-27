@@ -122,7 +122,7 @@ clippy clean; `session_cli` deferred to gate.
 3. Tests: update `work_open_tests::cmux_opens_the_task_conversation_through_session_connect`
    to expect `workspace create --name Prove Task PR transitions · INF-123 --cwd`; adjust any
    Herdr/tmux create-name assertions the same way.
-4. Docs: `docs/lf.md` ("In cmux, the attached workspace and tab follow `lf session
+4. Docs: `docs/sessions.md` (was `docs/lf.md`) ("In cmux, the attached workspace and tab follow `lf session
    rename`") → workspace follows the Task title, tab follows the Session name;
    `docs/architecture-reference.md` LfSession row (`process:cmux` projects the
    Task title onto the workspace, the Session name onto the tab).

@@ -1407,7 +1407,10 @@ Daytona `DAYTONA_API_KEY`; Modal `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or
 `~/.modal.toml`; RunPod `RUNPOD_API_KEY`; AWS `AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY` and `AWS_REGION`; Fly `FLY_API_TOKEN` (and `FLY_ORG`,
 default `personal`). Each runs under `uv`. `--gpu` rents one GPU on RunPod, AWS
-or Modal. A rented machine gets GitHub forwarded and every Claude account with a
+or Modal, on a machine with at least `--vcpus` and `--memory-gb`. `--spot` rents
+interruptible capacity on AWS or RunPod, never charged above the admitted price;
+the provider may end it early, losing unpushed work. EC2 prices are us-east-1's,
+so AWS names the region it rents in and the region it priced. A rented machine gets GitHub forwarded and every Claude account with a
 stored long-lived token (`claude setup-token`, approved once in the account's
 Chrome profile; API keys are refused). Its provider deletes it at its deadline.
 `lf machine use code infrastructure` (or `--repo`) sends a scope's unowned

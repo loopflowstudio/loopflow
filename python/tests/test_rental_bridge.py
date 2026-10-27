@@ -22,7 +22,9 @@ REQUEST = {
     "memory_gb": 16,
     "disk_gb": 40,
     "gpu": None,
+    "spot": False,
     "type": "cpu3g",
+    "usd_per_hour": "0.16",
     "lifetime_minutes": 120,
     "public_key": "ssh-ed25519 AAAA lf",
     "deadline": "2026-10-26T22:00:00Z",
@@ -132,6 +134,16 @@ def test_runpod_asks_for_one_gpu_by_its_type(http):
         1,
     )
     assert "cpuFlavorIds" not in body
+    # The GPU's machine must meet --vcpus and --memory-gb.
+    assert (body["minVCPUPerGPU"], body["minRAMPerGPU"]) == (4, 16)
+    assert "interruptible" not in body
+
+
+def test_runpod_rents_spot_as_an_interruptible_pod(http):
+    pod = {"id": "p3", "publicIp": "203.0.113.9", "portMappings": {"22": 40001}}
+    fake = http({("POST", "/pods"): [(201, pod)]})
+    bridge._runpod("create", {**REQUEST, "spot": True})
+    assert fake.sent[0][2]["interruptible"] is True
 
 
 def test_runpod_finds_a_pod_by_name_and_reads_absence(http):
@@ -198,6 +210,7 @@ def test_aws_creates_a_tagged_instance_that_terminates_itself(aws):
     run = dict(aws.calls)["run_instances"]
     assert run["ImageId"] == "ami-123" and run["InstanceType"] == "m7i.xlarge"
     assert run["InstanceInitiatedShutdownBehavior"] == "terminate"
+    assert "InstanceMarketOptions" not in run
     assert run["ClientToken"] == "lf-rent_0b5c"
     assert {"Key": "loopflow:name", "Value": "lf-rent_0b5c"} in run["TagSpecifications"][0]["Tags"]
     assert run["SecurityGroupIds"] == ["sg-new"]
@@ -208,6 +221,14 @@ def test_aws_creates_a_tagged_instance_that_terminates_itself(aws):
     assert user_data.index("claude-code") < user_data.index("authorized_keys")
     ingress = dict(aws.calls)["authorize_security_group_ingress"]
     assert ingress["IpPermissions"][0]["FromPort"] == 22
+
+
+def test_aws_rents_spot_capped_at_the_admitted_price(aws):
+    bridge._aws("create", {**REQUEST, "type": "m7i.xlarge", "spot": True})
+    market = dict(aws.calls)["run_instances"]["InstanceMarketOptions"]
+    assert market["MarketType"] == "spot"
+    assert market["SpotOptions"]["MaxPrice"] == "0.16"
+    assert market["SpotOptions"]["InstanceInterruptionBehavior"] == "terminate"
 
 
 def test_aws_finds_a_live_instance_by_its_tag(aws):

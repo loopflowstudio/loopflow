@@ -119,11 +119,15 @@ GPU); `--gpu` on RunPod, AWS and Modal; a refresh that finds a machine ended
 still deletes it. DigitalOcean was built, then dropped (Jack).
 Assumptions in `scratch/questions.md`.
 
+Built (2026-10-26, after the concept review): `Hardware.spot` (draft
+`rental_spot` backfills `false`), refused off AWS/RunPod; AWS spot with
+`MaxPrice` = admitted price, RunPod `interruptible`; RunPod GPU pods send
+`minVCPUPerGPU`/`minRAMPerGPU`, EC2 GPU shapes must hold the hardware; add,
+quote and rent name AWS's region and that it priced us-east-1.
+
 Remaining:
 - Live run per provider (needs `RUNPOD_API_KEY`, AWS keys + region in Doppler);
   README rental row only after each passes.
-- Decided above: region in env, GPU floors, `--spot`. Modal
-  Functions are not needed yet (Jack); `--gpu` stays `Sandbox.create(gpu=...)`.
 - LOO-527 is PR #1704; publish stacked on it when Jack asks.
 
-Check: `cargo test -p loopflow --lib rental` 26 passed, clippy clean after the `offer`/`find_gpu` compress (2026-10-26); bridge pytest unchanged (13 passed).
+Check: `cargo test -p loopflow --lib rental` 29 passed, clippy and ruff clean, bridge+guardian pytest 19 passed (2026-10-26).

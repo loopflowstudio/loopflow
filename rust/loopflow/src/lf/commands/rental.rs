@@ -16,7 +16,7 @@ use crate::lf::{OndemandCommand, PoolCommand};
 use crate::machine_records::CopyCounts;
 use crate::rental::sandbox::{CreateSandbox, Sandboxes};
 use crate::rental::{
-    self, GiveBack, Hardware, Holdings, OnDemand, Pool, PoolMachine, Rental, RentalState,
+    self, GiveBack, Hardware, Holdings, OnDemand, Pool, PoolMachine, Provider, Rental, RentalState,
     Resolution, Usd,
 };
 use crate::store::sqlite::SqliteStore;
@@ -176,6 +176,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             memory_gb,
             disk_gb,
             gpu,
+            spot,
             hours,
             max,
             max_usd_per_hour,
@@ -188,6 +189,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                     memory_gb: *memory_gb,
                     disk_gb: *disk_gb,
                     gpu: gpu.clone(),
+                    spot: *spot,
                 },
                 max_machines: *max,
                 max_usd_per_hour: *max_usd_per_hour,
@@ -197,10 +199,17 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             let price = ondemand.usd_per_hour().map_err(|reason| anyhow!(reason))?;
             sqlite.add_ondemand(&ondemand)?;
             println!(
-                "Added on-demand {name}: {} on {provider} at {price}/h; at most {max} at once, \
-                 {}h each",
-                ondemand.hardware, ondemand.hours
+                "Added on-demand {name}: {} on {} at {price}/h; at most {max} at once, {}h each",
+                ondemand.hardware,
+                where_rented(*provider),
+                ondemand.hours
             );
+            if *spot {
+                eprintln!(
+                    "{provider} may end a spot machine before its deadline; \
+                     work not pushed from it is lost"
+                );
+            }
             if price > *max_usd_per_hour {
                 eprintln!(
                     "{price}/h is above its {max_usd_per_hour}/h limit, so it rents nothing yet"
@@ -274,6 +283,14 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// The provider, and its region where lf rents in one: `aws (eu-west-1, priced as us-east-1)`.
+fn where_rented(provider: Provider) -> String {
+    match provider.region() {
+        Some(region) => format!("{provider} ({region})"),
+        None => provider.to_string(),
+    }
 }
 
 fn require_ondemand(sqlite: &SqliteStore, name: &str) -> anyhow::Result<OnDemand> {
@@ -370,7 +387,7 @@ pub(crate) fn rent(
     eprintln!(
         "Renting {} on {} at {}/h until {}",
         rental.hardware,
-        ondemand.provider,
+        where_rented(ondemand.provider),
         rental.usd_per_hour,
         clock(rental.deadline)
     );
@@ -382,6 +399,7 @@ pub(crate) fn rent(
         name: rental.provider_name.clone(),
         hardware: rental.hardware.clone(),
         machine_type: offer.machine_type,
+        usd_per_hour: rental.usd_per_hour,
         lifetime_minutes: u32::try_from((rental.deadline - now()).whole_minutes().max(1))
             .unwrap_or(u32::MAX),
         deadline: rental.deadline,
@@ -605,7 +623,7 @@ pub fn place(
         println!(
             "would rent {} on {} at {}/h, ≤ {} until {}; runs nothing",
             admission.hardware,
-            ondemand.provider,
+            where_rented(ondemand.provider),
             admission.usd_per_hour,
             admission.cap_usd,
             clock(admission.deadline)
@@ -1146,6 +1164,7 @@ mod tests {
                     memory_gb: 8,
                     disk_gb: 10,
                     gpu: None,
+                    spot: false,
                 },
                 max_machines: 1,
                 max_usd_per_hour: Usd::parse("0.40").unwrap(),

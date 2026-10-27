@@ -55,6 +55,8 @@ pub struct CreateSandbox {
     pub hardware: Hardware,
     /// The provider's own name for what to rent (`Offer::machine_type`).
     pub machine_type: Option<String>,
+    /// The admitted price: the most a spot machine may be charged.
+    pub usd_per_hour: Usd,
     /// The provider deletes it this long after creation, whatever else fails.
     pub lifetime_minutes: u32,
     /// The hard deadline and what the budget allows from `created_at`, for
@@ -159,7 +161,9 @@ impl Sandboxes {
                     "memory_gb": request.hardware.memory_gb,
                     "disk_gb": request.hardware.disk_gb,
                     "gpu": request.hardware.gpu,
+                    "spot": request.hardware.spot,
                     "type": request.machine_type,
+                    "usd_per_hour": request.usd_per_hour.to_decimal(),
                     "lifetime_minutes": request.lifetime_minutes,
                     "deadline": utc(request.deadline),
                     "created_at": utc(request.created_at),
@@ -231,8 +235,10 @@ mod tests {
                     memory_gb: 8,
                     disk_gb: 10,
                     gpu: None,
+                    spot: false,
                 },
                 machine_type: None,
+                usd_per_hour: Usd::ZERO,
                 lifetime_minutes: 60,
                 deadline: OffsetDateTime::UNIX_EPOCH,
                 created_at: OffsetDateTime::UNIX_EPOCH,

@@ -13,4 +13,13 @@
   app. A Machine that exits is destroyed (`auto_destroy`) but its app and
   IPv4 ($2/month) remain until lf's next refresh deletes the app. Fly sizes
   disk itself (`--disk-gb` ignored). `FLY_ORG` defaults to `personal`.
-- **RunPod GPU pods:** superseded: `--vcpus`/`--memory-gb` are floors with `--gpu` (Jack, design.md).
+- **Spot price (assumed):** a spot machine is admitted, capped and given its
+  deadline at the on-demand price, the most it can be charged. RunPod's REST
+  create takes `interruptible` without a bid; its reported `costPerHr` and the
+  guardian then use the lower price. EC2 reports none, so `lf ondemand list`
+  overstates an AWS spot machine's cost.
+- **RunPod GPU floors (assumed):** RunPod checks `minVCPUPerGPU`/`minRAMPerGPU`
+  at create; lf has no per-GPU host table, so an unmet floor fails the create
+  (the rental is lost after 20 minutes) rather than at admission.
+- **Region (assumed):** only AWS names one. Fly picks its own region and
+  `FLY_ORG` is an organization, not a region; Fly prices are treated as uniform.

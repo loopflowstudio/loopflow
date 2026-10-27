@@ -229,6 +229,11 @@ impl Provider {
         };
         let per_size = |vcpu: i64, gib: i64, extra: i64| vcpu * vcpus + gib * memory + extra;
         let no_shape = || format!("{self} rents nothing with {hardware}");
+        if hardware.spot && !matches!(self, Self::Aws | Self::Runpod) {
+            return Err(format!(
+                "{self} sells no interruptible capacity; --spot works on aws and runpod"
+            ));
+        }
         match (self, hardware.gpu.as_deref()) {
             (Self::Daytona | Self::Fly, Some(_)) => Err(format!(
                 "{self} rents no GPUs; --gpu works on runpod, aws and modal"
@@ -285,6 +290,26 @@ impl Provider {
 
     pub fn usd_per_hour(self, hardware: &Hardware) -> Result<Usd, String> {
         self.offer(hardware).map(|offer| offer.usd_per_hour)
+    }
+
+    /// Where it rents, set in the environment, and whose prices `offer` read
+    /// when they differ: EC2's table is us-east-1, other regions charge
+    /// otherwise and report no price. `None` where lf picks no region.
+    pub fn region(self) -> Option<String> {
+        let priced = "us-east-1";
+        match self {
+            Self::Aws => {
+                let region = ["AWS_REGION", "AWS_DEFAULT_REGION"]
+                    .iter()
+                    .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))?;
+                Some(if region == priced {
+                    region
+                } else {
+                    format!("{region}, priced as {priced}")
+                })
+            }
+            _ => None,
+        }
     }
 }
 
@@ -399,15 +424,21 @@ pub struct Hardware {
     pub disk_gb: u32,
     /// One GPU, by its `--gpu` name; absent from hardware stored without one.
     pub gpu: Option<String>,
+    /// Interruptible capacity (AWS spot, RunPod interruptible pods), bid at
+    /// the admitted price; the provider may end it before its deadline.
+    pub spot: bool,
 }
 
 impl fmt::Display for Hardware {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} vCPU {} GB", self.vcpus, self.memory_gb)?;
-        match &self.gpu {
-            Some(gpu) => write!(f, " + {gpu}"),
-            None => Ok(()),
+        if let Some(gpu) = &self.gpu {
+            write!(f, " + {gpu}")?;
         }
+        if self.spot {
+            f.write_str(" spot")?;
+        }
+        Ok(())
     }
 }
 

@@ -2319,6 +2319,10 @@ pub enum OndemandCommand {
         /// aws (L4, A10G) or modal (T4, L4, A10G, L40S, A100, H100)
         #[arg(long)]
         gpu: Option<String>,
+        /// Interruptible capacity on aws or runpod, bid at the admitted price;
+        /// the provider may end it early, losing unpushed work
+        #[arg(long)]
+        spot: bool,
         /// Hard deadline for each machine it rents, at most 24
         #[arg(long, default_value_t = crate::rental::DEFAULT_HOURS)]
         hours: f64,

@@ -275,11 +275,22 @@ def _runpod(op, request):
             "env": _container_env(request),
         }
         if request["gpu"]:
-            body.update(computeType="GPU", gpuTypeIds=[request["type"]], gpuCount=1)
+            # --vcpus and --memory-gb are floors the GPU's machine must meet.
+            body.update(
+                computeType="GPU",
+                gpuTypeIds=[request["type"]],
+                gpuCount=1,
+                minVCPUPerGPU=request["vcpus"],
+                minRAMPerGPU=request["memory_gb"],
+            )
         else:
             body.update(
                 computeType="CPU", cpuFlavorIds=[request["type"]], vcpuCount=request["vcpus"]
             )
+        if request["spot"]:
+            # RunPod bids the interruptible price; the guardian rereads what
+            # it charges, which never exceeds the admitted on-demand price.
+            body["interruptible"] = True
         pod = ask("POST", "pods", body)
         # RunPod assigns the public address and port after the create answers.
         for _ in range(120):
@@ -382,7 +393,19 @@ def _aws(op, request):
     if op == "create":
         ami = boto3.client("ssm").get_parameter(Name=AWS_AMI)["Parameter"]["Value"]
         name = request["name"]
+        spot = {}
+        if request["spot"]:
+            # Never charged above the admitted price, so the budget holds.
+            spot["InstanceMarketOptions"] = {
+                "MarketType": "spot",
+                "SpotOptions": {
+                    "MaxPrice": request["usd_per_hour"],
+                    "SpotInstanceType": "one-time",
+                    "InstanceInterruptionBehavior": "terminate",
+                },
+            }
         instance = ec2.run_instances(
+            **spot,
             ImageId=ami,
             InstanceType=request["type"],
             MinCount=1,

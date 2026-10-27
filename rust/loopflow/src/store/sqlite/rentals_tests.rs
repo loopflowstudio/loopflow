@@ -24,6 +24,7 @@ fn code(max: u32) -> OnDemand {
             memory_gb: 8,
             disk_gb: 10,
             gpu: None,
+            spot: false,
         },
         max_machines: max,
         max_usd_per_hour: usd("0.40"),
@@ -211,4 +212,26 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
     );
     // This Machine writes the Task again: `lf task run` stays here.
     store.unclaim_task(&task).unwrap();
+}
+
+#[test]
+fn hardware_rented_before_spot_existed_reads_as_on_demand() {
+    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_before_current_draft(&conn, "rental_spot");
+    conn.execute_batch(include_str!(
+        "../../../tests/fixtures/migrations/rental_spot_released.sql"
+    ))
+    .unwrap();
+    conn.execute_batch(&current_draft_sql("rental_spot"))
+        .unwrap();
+    for sql in [
+        "SELECT template FROM ondemands",
+        "SELECT hardware FROM rentals",
+    ] {
+        let json: String = conn.query_row(sql, [], |row| row.get(0)).unwrap();
+        let hardware: Hardware = serde_json::from_str(&json).unwrap();
+        assert!(!hardware.spot, "{sql}");
+    }
 }

@@ -227,7 +227,8 @@ Session bindings retain membership independently of checkout location.
 A **pool** names machines you own (`machines.pool`, with `cost_usd` and
 `expires_at`); it knows no provider. An **on-demand** (`ondemands`) is a
 provider (Daytona, Modal, RunPod, AWS or Fly), hardware with at most one GPU
-(RunPod, AWS and Modal rent them), and a budget: machines at once and the
+(RunPod, AWS and Modal rent them; `--vcpus`/`--memory-gb` are floors its machine
+meets) and optionally spot (AWS and RunPod), and a budget: machines at once and the
 most per hour. They share one namespace. A **rental** (`rentals`, `rent_…` ids)
 is one paid window: hardware, price, cap, deadline, state and cost, separate
 from the Machine it becomes once reachable. Task execution never learns a

@@ -25,6 +25,7 @@ fn box4() -> Hardware {
         memory_gb: 8,
         disk_gb: 10,
         gpu: None,
+        spot: false,
     }
 }
 
@@ -101,6 +102,43 @@ fn gpus_rent_where_the_provider_offers_them() {
         .offer(&gpu("H100"))
         .unwrap_err()
         .contains("it rents L4, A10G"));
+}
+
+#[test]
+fn gpu_hardware_is_a_floor_the_shape_must_meet() {
+    let big = Provider::Aws
+        .offer(&Hardware {
+            vcpus: 8,
+            memory_gb: 20,
+            ..gpu("L4")
+        })
+        .unwrap();
+    assert_eq!(big.machine_type.as_deref(), Some("g6.2xlarge"));
+    let refused = Provider::Aws
+        .offer(&Hardware {
+            vcpus: 32,
+            ..gpu("A10G")
+        })
+        .unwrap_err();
+    assert_eq!(refused, "aws rents nothing with 32 vCPU 8 GB + A10G");
+}
+
+#[test]
+fn spot_rents_only_where_the_provider_sells_it() {
+    let spot = Hardware {
+        spot: true,
+        ..box4()
+    };
+    assert!(Provider::Aws.offer(&spot).is_ok());
+    assert!(Provider::Runpod.offer(&spot).is_ok());
+    for provider in [Provider::Daytona, Provider::Modal, Provider::Fly] {
+        let refused = provider.offer(&spot).unwrap_err();
+        assert!(refused.starts_with(provider.as_str()), "{refused}");
+        assert!(
+            refused.contains("--spot works on aws and runpod"),
+            "{refused}"
+        );
+    }
 }
 
 #[test]

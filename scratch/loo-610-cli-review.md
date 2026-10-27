@@ -1,8 +1,8 @@
 # LOO-610 — The lf CLI, top down
 
 Status: **decided slice implemented** (2026-10-26): items 1–7 and the
-Task-first README are on the branch, merged with main `d40f2757c1` (#1704). Remaining: `machine use --repo`
-(concept review after #1704), gate, publish.
+Task-first README are on the branch, merged with main `d40f2757c1` (#1704), and `machine use`'s
+boolean `--repo` is deleted. Remaining: gate, publish.
 Deviations in `scratch/questions.md`. Sections 1–8 are the review as proposed;
 a later decision wins where they differ. Source: `docs/lf-reference.md` at
 main `1b137b8f2d`, LOO-601 (hidden `__` commands) and LOO-602's decisions.
@@ -678,20 +678,20 @@ help context` · not-yet-reviewed `clone portfolio disk scratch discord`. No
 names or paths changed. Left: `lf ship` → `lf task ship` (main #1652 chose the
 root; see questions).
 
-## Concept review after #1704 and items 4–7 (2026-10-26, next implement)
+## Concept review after #1704 and items 4–7 (2026-10-26, built)
 
 Items 4–7 and the Task-first README match the decisions. One mismatch arrived
 with main's #1704: `lf machine use <machine> --repo` is a boolean `--repo`, the
 double spelling of the global scope selector that "One steer verb" deleted from
 `session steer` (Jack: `--repo` is a scope selector like `--wave`).
 
-Next implement: delete `machine use`'s boolean `--repo`; repository scope is the
-global selector, `lf --repo <name> machine use mini [--tasks|--session]`. Keep
+Built: `machine use`'s boolean `--repo` is deleted; repository scope is the
+global selector, `lf --repo <name> machine use mini [--tasks|--session]` (or
+`--repository ID`). Scope order: `--task`, the `<wave>` argument, a selected
+repository, then the worktree's Task/Wave/repository. Keep
 the positional `<wave>` (it matches `wave workflow set <graph> <wave>` and the
-README pairs the two lines). The remote hand-off argv (`machine_use.rs:134`)
-forwards the global form. Update `init.md:281`, `repo_operate.md:169`,
-`docs/architecture/machines.md:106,248`, `docs/architecture-reference.md:1158`,
-the tests, and regenerate the reference.
+README pairs the two lines). The copy to your other Machines forwards `--repository ID`.
+Check: `cargo test --test integration machine_commands` 29 pass; clippy clean.
 
 Left to their owners: `session connect --task/--wave` (README `lf resume --task`)
 repeats the global `--task`/`--wave` — LOO-618 reshapes resume; per-command

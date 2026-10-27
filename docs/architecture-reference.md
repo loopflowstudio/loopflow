@@ -1155,7 +1155,7 @@ person's Wave work is that person's choice, never repository content:
 ```bash
 lf machine use mini infrastructure            # this Wave's new Tasks and its Session
 lf machine use laptop infrastructure --session  # only the Wave Session
-lf machine use mini --repo --tasks             # only the repository's new Tasks
+lf --repo loopflow machine use mini --tasks    # only the repository's new Tasks
 lf machine list                               # each Machine with the defaults naming it
 ```
 

@@ -134,7 +134,8 @@ fn launch_task(cli: &Cli) -> Option<&str> {
 
 /// Bare `lf machine use` and bare `lf connect` in a Task's worktree act on that
 /// Task, so they route to its Machine exactly as `--task` does. `--session` and
-/// `--tasks` set the worktree's Wave or repository instead.
+/// `--tasks` set the worktree's Wave or repository instead, as does a selected
+/// repository.
 fn worktree_task(cli: &Cli) -> Result<Option<String>> {
     let bare = match &cli.command {
         Some(Commands::Ops {
@@ -144,13 +145,12 @@ fn worktree_task(cli: &Cli) -> Result<Option<String>> {
                         MachineCommand::Use {
                             wave: None,
                             task: None,
-                            repo: false,
                             session: false,
                             tasks: false,
                             ..
                         },
                 },
-        }) => true,
+        }) => cli.repo.is_none() && cli.repository.is_none(),
         Some(Commands::Session {
             cmd:
                 SessionCommand::Connect {

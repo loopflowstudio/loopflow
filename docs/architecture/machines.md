@@ -103,7 +103,7 @@ repository content:
 ```bash
 lf machine use mini infrastructure            # this Wave's new Tasks and its Session
 lf machine use laptop infrastructure --session  # only the Wave Session
-lf machine use mini --repo --tasks             # only the repository's new Tasks
+lf --repo loopflow machine use mini --tasks    # only the repository's new Tasks
 lf machine list                               # each Machine with the defaults naming it
 ```
 
@@ -245,7 +245,7 @@ resent. With `LF_RENT_LINUX_BIN` naming a Linux build, the laptop uploads that
 binary instead of the published `lf`, so a development build rents sandboxes
 running its own code.
 
-`lf machine use R [WAVE]` or `--repo`, naming a pool or on-demand, sets the
+`lf [--repo REPO] machine use R [WAVE]`, naming a pool or on-demand, sets the
 scope's Tasks capacity (`scope_defaults.tasks_capacity`) in place of a Tasks
 Machine; the nearest scope that sets either wins. `lf task run` places an
 unowned Task by that default as `--pool` or `--rent` would. Its Session stays

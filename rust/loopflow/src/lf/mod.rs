@@ -2107,14 +2107,11 @@ pub enum MachineCommand {
         /// A registered Machine label, this Machine's hostname, or a Machine id
         machine: String,
         /// Set this Wave's default for new Tasks and its Wave Session
-        #[arg(conflicts_with_all = ["task", "repo"])]
+        #[arg(conflicts_with = "task")]
         wave: Option<String>,
         /// Hand this Task to the Machine; you stay its person
-        #[arg(long, conflicts_with_all = ["repo", "session", "tasks"])]
+        #[arg(long, conflicts_with_all = ["session", "tasks"])]
         task: Option<String>,
-        /// Set this repository's default for its Session and Tasks with no Wave default
-        #[arg(long)]
-        repo: bool,
         /// Set only where the scope's primary Session runs, and move it there
         #[arg(long, conflicts_with = "tasks")]
         session: bool,

@@ -143,7 +143,7 @@ pub enum TaskExecutionSource {
 pub enum OwningMachineSource {
     /// `lf machine use <machine> <wave>`, set on the Task's Wave or a parent Wave.
     Wave(String),
-    /// `lf machine use <machine> --repo`, set on the Task's repository.
+    /// `lf --repo <repo> machine use <machine>`, set on the Task's repository.
     Repository,
     /// No default is set: the Machine running the command.
     ThisMachine,

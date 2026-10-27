@@ -278,7 +278,7 @@ personal choice, never committed repository content:
 
 ```bash
 lf machine use <machine-label> <wave>        # this Wave's default, copied to their other Machines
-lf machine use <machine-label> --repo        # this repository's default
+lf --repo <repo> machine use <machine-label> # this repository's default
 lf machine use <machine-label> --task <issue> # hand one Task to that Machine
 lf machine list                              # each Machine with the defaults naming it
 ```

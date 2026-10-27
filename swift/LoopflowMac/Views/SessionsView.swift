@@ -1230,14 +1230,14 @@ struct SessionsContentView: View {
                         if top {
                             HStack(spacing: 0) {
                                 if shown(.board) {
-                                    HideablePart(part: .board, hover: entry.stripHover("wave-board"), hide: { model.setHidden(.board, true, in: view) }) {
+                                    HideablePart(part: .board, view: view, model: model, workspace: entry) {
                                         WaveStandupBoard(model: model, view: view)
                                     }
                                     .frame(width: shown(.session) ? geometry.size.width * FocusSizing.golden : nil)
                                 }
                                 if shown(.board), shown(.session) { Divider() }
                                 if shown(.session) {
-                                    HideablePart(part: .session, hover: entry.stripHover("wave-session"), hide: { model.setHidden(.session, true, in: view) }) {
+                                    HideablePart(part: .session, view: view, model: model, workspace: entry) {
                                         conversationPanes(key, entry, isFocused: navigation.palette == nil)
                                     }
                                 }
@@ -1246,7 +1246,7 @@ struct SessionsContentView: View {
                         }
                         if shown(.tiles) {
                             if top { Divider() }
-                            HideablePart(part: .tiles, hover: entry.stripHover("wave-tiles"), hide: { model.setHidden(.tiles, true, in: view) }) {
+                            HideablePart(part: .tiles, view: view, model: model, workspace: entry) {
                                 WaveTiles(model: model, workspaces: workspaces, sessions: store, view: view)
                             }
                         }

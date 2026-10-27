@@ -46,19 +46,22 @@ extension ShowHiddenMenu {
 }
 
 /// A Wave view part with a hide button revealed on hover, as every workspace pane has.
-/// The Wave's workspace keeps the hover flag, as it does for pane strips.
+/// The view's conversation workspace keeps the hover flag, as it does for pane strips.
 struct HideablePart<Content: View>: View {
     let part: WaveViewPart
-    let hover: HoverFlag
-    let hide: () -> Void
+    let view: WorkNavigation.Board
+    let model: WorkModel
+    let workspace: SessionsWorkspace
     @ViewBuilder let content: Content
     @Environment(\.palette) private var palette
+
+    private var hover: HoverFlag { workspace.stripHover("wave-\(part.rawValue)") }
 
     var body: some View {
         content
             .overlay(alignment: .topTrailing) {
                 HoverRevealed(flag: hover) {
-                    Button(action: hide) {
+                    Button { model.setHidden(part, true, in: view) } label: {
                         Image(systemName: "eye.slash")
                             .font(.system(size: 11))
                             .foregroundStyle(palette.textSecondary)

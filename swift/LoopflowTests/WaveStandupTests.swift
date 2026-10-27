@@ -142,9 +142,8 @@ struct WaveStandupTests {
         #expect(throws: (any Error).self) {
             try WaveStandupBoard(model: model, view: view).inspect().find(viewWithAccessibilityIdentifier: "show-hidden-panes")
         }
-        let hover = conversation.stripHover("wave-tiles")
-        hover.isHovered = true
-        let strip = HideablePart(part: .tiles, hover: hover, hide: { model.setHidden(.tiles, true, in: view) }) { Text("Tasks") }
+        conversation.stripHover("wave-tiles").isHovered = true
+        let strip = HideablePart(part: .tiles, view: view, model: model, workspace: conversation) { Text("Tasks") }
         try strip.inspect().find(viewWithAccessibilityIdentifier: "wave-hide-tiles").button().tap()
         // `lf desktop hide -p session` hides the conversation as its pane; `-p board` names the part.
         let pane = try #require(conversation.multiplexer.sessionPane)

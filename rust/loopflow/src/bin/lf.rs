@@ -761,11 +761,7 @@ fn dispatch_ops(cmd: &OpsCommand, cli: &Cli, args: &[String]) -> anyhow::Result<
         OpsCommand::Machine {
             cmd: cmd @ loopflow::lf::MachineCommand::Use { .. },
         } => in_directory_runtime(args, |repo| {
-            loopflow::lf::commands::machine_use::run(
-                repo,
-                cmd,
-                cli.repo.is_some() || cli.repository.is_some(),
-            )
+            loopflow::lf::commands::machine_use::run(repo, cmd, cli.selects_repository())
         }),
         OpsCommand::Machine { cmd } => loopflow::lf::commands::machine::run(cmd, cli.batch),
         OpsCommand::Pr { cmd } => in_repo_runtime(args, |_| {

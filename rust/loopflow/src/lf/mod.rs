@@ -159,6 +159,11 @@ pub struct Cli {
 }
 
 impl Cli {
+    /// The global `--repo` or `--repository` selector names a repository.
+    pub fn selects_repository(&self) -> bool {
+        self.repo.is_some() || self.repository.is_some()
+    }
+
     pub fn may_launch_agent(&self) -> bool {
         match &self.command {
             None
@@ -1132,9 +1137,7 @@ impl SessionConnectionArgs {
             self.wave.as_deref().or(cli.wave.as_deref()),
         )?;
         Ok(
-            if matches!(target, SessionTarget::Context)
-                && (cli.repo.is_some() || cli.repository.is_some())
-            {
+            if matches!(target, SessionTarget::Context) && cli.selects_repository() {
                 SessionTarget::Repository
             } else {
                 target

@@ -190,8 +190,9 @@ fn use_capacity(
 }
 
 /// `--task`, a Wave argument and a selected repository are explicit, in that
-/// order; bare, the worktree's Task, then its Wave, then this repository. `--session` or `--tasks` names a
-/// part of a Wave or repository, so a bare one skips the worktree's Task.
+/// order; bare, the worktree's Task, then its Wave, then this repository.
+/// `--session` or `--tasks` names a part of a Wave or repository, so a bare one
+/// skips the worktree's Task.
 async fn select_scope(
     store: &SharedStore,
     repo: &Path,

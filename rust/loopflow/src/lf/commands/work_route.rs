@@ -57,7 +57,7 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
     ) {
         return Ok(()); // Keep the requested portable ID in the reply envelope.
     }
-    let explicit_repository = cli.repo.is_some() || cli.repository.is_some();
+    let explicit_repository = cli.selects_repository();
     let (command_task, parent_task) = match &mut cli.command {
         Some(Commands::Task {
             cmd:
@@ -150,7 +150,7 @@ fn worktree_task(cli: &Cli) -> Result<Option<String>> {
                             ..
                         },
                 },
-        }) => cli.repo.is_none() && cli.repository.is_none(),
+        }) => !cli.selects_repository(),
         Some(Commands::Session {
             cmd:
                 SessionCommand::Connect {
@@ -158,7 +158,7 @@ fn worktree_task(cli: &Cli) -> Result<Option<String>> {
                     all: false,
                     ..
                 },
-        }) => cli.wave.is_none() && cli.repo.is_none() && cli.repository.is_none(),
+        }) => cli.wave.is_none() && !cli.selects_repository(),
         _ => false,
     };
     if !bare || cli.task.is_some() {
@@ -318,7 +318,7 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
     };
     let wave = match cli.wave.clone() {
         Some(wave) => Some(wave),
-        None if cli.repo.is_some() || cli.repository.is_some() => None,
+        None if cli.selects_repository() => None,
         None => match context_scope(&registry, repo.as_deref())? {
             Some(ContextScope::Wave(name)) => Some(name),
             Some(ContextScope::Repository) => None,

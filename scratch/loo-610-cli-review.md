@@ -395,11 +395,6 @@ and `ci watch` are gone; scheduled work is a crontab line (`lf pr reconcile`).
 Decision D6: build `lf serve` now, or record the rule and ship 1.0 with the
 pollers marked experimental.
 
-## 7. Experimental for 1.0 (superseded)
-
-No experimental tier: Jack's "promised or deleted" replaces it. The commands
-it held await that call (listed under One steer verb, unresolved).
-
 ## 8. Builtin skills and Graphs
 
 Part of the surface because `lf <name>` runs them.
@@ -424,8 +419,8 @@ D3 superseded by LOO-604, D4 decided (crontab), D5 decided (`repo` dissolved),
 D6 decided (build `lf serve`), D7 decided (chunked follow-ups, each lands real
 code). D2's new name stays with LOO-618.
 
-- **D1.** What 1.0 promises: the 16-entry root above as stable; §7 as
-  experimental (namespace `lf experimental …`, or hidden)?
+- **D1.** What 1.0 promises: the 16-entry root above as stable; no
+  experimental tier (Jack: promised or deleted).
 - **D2.** `lf resume` as the one resume verb; `task resume` (clears `defer`)
   renamed? (decided below; the new name is open, see §2.)
 - **D3.** GUI API as a named surface (§4) — what Desktop calls becomes the
@@ -646,13 +641,6 @@ mode "any Graph, run past its interactive stages"; then this builtin goes.
   just run it. (LOO-622, plus the existing Task Jack recalls on human vs
   interactive flags.)
 
-## Rental-machines merge (2026-10-26, resolved)
-
-Main's #1704 (Daytona/Modal rentals, `lf machine use`, `ondemand availability`
-deleted) merged as `b18510b1cb`; its commands sit under `lf ops machine`
-(`ondemand`, `use`, `end`) and the reference regenerated in the merge. The
-README rental row names Daytona and Modal.
-
 ## One steer verb (2026-10-26, built)
 
 `lf session steer SESSION "…"` steers one Session; without an id it steers the
@@ -664,8 +652,7 @@ and its `--steer` keeps meaning "also direct". Desktop calls neither deleted
 form.
 
 Unresolved, outside this Task's slice (do not block publish): bare `lf` as
-front door vs. "start a conversation" (above); promise-or-delete for §7's
-commands (`discord`, `machine pool/ondemand`, `wave plan`, `desktop` pane
+front door vs. "start a conversation" (above); promise-or-delete (no experimental tier; Jack: "promised or deleted") for (`discord`, `machine pool/ondemand`, `wave plan`, `desktop` pane
 control, `history replay`) and the not-yet-reviewed roots `clone`,
 `portfolio`, `disk`, `scratch`, `monitor`.
 
@@ -680,18 +667,12 @@ root; see questions).
 
 ## Concept review after #1704 and items 4–7 (2026-10-26, built)
 
-Items 4–7 and the Task-first README match the decisions. One mismatch arrived
-with main's #1704: `lf machine use <machine> --repo` is a boolean `--repo`, the
-double spelling of the global scope selector that "One steer verb" deleted from
-`session steer` (Jack: `--repo` is a scope selector like `--wave`).
-
-Built: `machine use`'s boolean `--repo` is deleted; repository scope is the
-global selector, `lf --repo <name> machine use mini [--tasks|--session]` (or
-`--repository ID`). Scope order: `--task`, the `<wave>` argument, a selected
-repository, then the worktree's Task/Wave/repository. Keep
-the positional `<wave>` (it matches `wave workflow set <graph> <wave>` and the
-README pairs the two lines). The copy to your other Machines forwards `--repository ID`.
-Check: `cargo test --test integration machine_commands` 29 pass; clippy clean.
+Items 4–7 and the Task-first README match the decisions. Main's #1704 brought
+`machine use`'s boolean `--repo`, now deleted as `session steer`'s was:
+`lf --repo <name> machine use mini [--tasks|--session]` (`Cli::selects_repository`).
+Scope order: `--task`, `<wave>`, a selected repository, then the worktree's
+Task/Wave/repository. The positional `<wave>` stays (matches `wave workflow
+set <graph> <wave>`). The copy to your other Machines forwards `--repository ID`.
 
 Left to their owners: `session connect --task/--wave` (README `lf resume --task`)
 repeats the global `--task`/`--wave` — LOO-618 reshapes resume; per-command
@@ -711,6 +692,7 @@ configuration). `ops ci --repo` (a GitHub owner/repo) and `self sync-skills
   verb (`session_steers`, `global_commands` 45/45, clippy clean); pillar order
   (`documented_commands` 4/4, `reference_matches_the_compiled_cli` pass).
   Gate owes integration, lib and Swift since the #1652 and #1704 merges.
-- After #1704 merge: `cargo build --bin lf` ok; `lf help ondemand list|machine use|pool list|release status|ops tokens` resolve.
+- #1704 (Daytona/Modal rentals) merged as `b18510b1cb` under `lf ops machine`; `cargo build --bin lf` ok; `lf help ondemand list|machine use|pool list|release status|ops tokens` resolve.
 - Compress after `auto`: dropped redundant auto checks (definition list,
   catalog lookup); `local_planning::{auto_workflow,wave_workflow_set,unconfigured}` 3/3.
+- Machine-use `--repo` cut + compress: `machine_commands` 29/29, clippy clean.

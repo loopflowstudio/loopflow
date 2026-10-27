@@ -286,15 +286,15 @@ def _terminal(
                 if startup_verified and startup_failure != "after-thread":
                     return 0
             if waiting_for_diagnostic:
-                assert b"cmux title update failed" not in output, (
+                assert b"title update failed" not in output, (
                     "Loopflow warning entered the native draft display"
                 )
                 logs = Path(env["LF_HOME"]) / "logs"
                 if any(
-                    b"cmux title update failed" in path.read_bytes()
+                    b"title update failed" in path.read_bytes()
                     for path in logs.glob("terminal-*.log")
                 ):
-                    assert b"cmux title update failed" not in output
+                    assert b"title update failed" not in output
                     fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 100, 0, 0))
                     os.write(master, b"\x7f\x1b[200~ ready\x1b[201~")
                     submit_at = time.monotonic() + 0.3
@@ -376,7 +376,7 @@ def _terminal(
             assert (cwd / "transport-reconnected").exists(), "renderer never reconnected"
         elif follow_up:
             assert not waiting_for_diagnostic, "background failure never reached diagnostics"
-            assert b"cmux title update failed" not in output
+            assert b"title update failed" not in output
             assert b"Loopflow recorded diagnostics:" in output
         return child.returncode
     finally:
@@ -478,6 +478,11 @@ requires_openai_auth=false
 [projects.{json.dumps(str(root))}]
 trust_level="trusted"
 """
+    # Earlier releases' persisted decisions at Loopflow's hook IDs are stale,
+    # as on a long-lived Machine; they must neither block nor be rewritten.
+    for event in ["user_prompt_submit", "post_tool_use"]:
+        key = json.dumps(f"/<session-flags>/config.toml:{event}:0:0")
+        config += f'[hooks.state.{key}]\ntrusted_hash="sha256:{"0" * 64}"\n'
     (native / "config.toml").write_text(config)
     hooks = []
     states = []
@@ -502,37 +507,10 @@ trust_level="trusted"
         key = json.dumps(f"/<session-flags>/config.toml:{event_name}:0:0")
         if wrapped:
             states.append(f'{key}={{trusted_hash="sha256:{digest}"}}')
-    # Trust Loopflow's stable declarations as well: an untrusted hook never runs,
-    # so checking only the host callbacks would conceal broken context delivery.
-    command = f"env LF_HOME='{root / 'lf'}' '{lf}'"
-    for event, index, matcher, suffix, timeout in [
-        ("session_start", int(wrapped), "startup|resume", "__context-block --moment start", 30),
-        ("session_start", int(wrapped) + 1, "compact", "__context-block --moment compact", 30),
-        ("user_prompt_submit", 0, None, "__context-block --moment tool", 30),
-        ("post_tool_use", 0, None, "__context-block --moment tool", 30),
-        ("stop", int(wrapped), None, "__context-block --moment stop", 10),
-    ]:
-        declaration = {
-            "event_name": event,
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": f"{command} {suffix}",
-                    "timeout": timeout,
-                    "async": False,
-                }
-            ],
-        }
-        if matcher:
-            declaration["matcher"] = matcher
-        digest = hashlib.sha256(
-            json.dumps(declaration, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
-        key = json.dumps(f"/<session-flags>/config.toml:{event}:{index}:0")
-        states.append(f'{key}={{trusted_hash="sha256:{digest}"}}')
-    # Keep the same hook identities across resume.
+    # Trust only the wrapper's declarations; Loopflow must trust its own hooks
+    # on the thread. The same IDs must survive resume.
     hooks.append("state={" + ",".join(states) + "}")
-    host_args = ["-c", "hooks={" + ",".join(hooks if wrapped else [hooks[-1]]) + "}"]
+    host_args = ["-c", "hooks={" + ",".join(hooks) + "}"] if wrapped else []
     executable = [str(cmux_wrapper or codex)]
     if transport_failure or startup_failure:
         executable = [
@@ -614,6 +592,14 @@ trust_level="trusted"
     assert any(skill_marker in request for request in Model.requests)
     binding.unlink()  # Reconnect must restore this Session's context, not another's.
     (root / "scratch/context.md").write_text("NATIVE_CONTEXT_AFTER_RESUME")
+    # Prompt and tool hooks deliver a steer saved between turns.
+    subprocess.run(
+        [str(lf), "session", "steer", session_id, "NATIVE_STEER_BETWEEN_TURNS"],
+        env=env,
+        cwd=root,
+        stdin=subprocess.DEVNULL,
+        check=True,
+    )
     status = _terminal(
         [str(lf), "session", "connect", session_id],
         env,
@@ -648,12 +634,17 @@ trust_level="trusted"
         live = database.execute(
             "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL"
         ).fetchone()[0]
-        callbacks = database.execute(
-            "SELECT command, exit_code, error FROM processes WHERE command LIKE '%__context-block%'"
-        ).fetchall()
-    assert len(callbacks) >= 8, callbacks
-    assert all(code == 0 and error is None for _, code, error in callbacks), callbacks
-    assert sum('"--moment","stop"' in command for command, _, _ in callbacks) == 2, callbacks
+    assert any(b"NATIVE_STEER_BETWEEN_TURNS" in request for request in Model.requests)
+    steers = subprocess.run(
+        [str(lf), "session", "steers", session_id, "--json"],
+        env=env,
+        cwd=root,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=True,
+    ).stdout
+    (root / "steers.json").write_bytes(steers)
+    assert json.loads(steers)["pending"] == 0, root / "steers.json"
     assert any(b"NATIVE_TOOL_DONE" in request for request in Model.requests)
     assert answers == [("FIXTURE_DONE",), ("FOLLOWUP_DONE",)], answers
     assert completed == 2, completed

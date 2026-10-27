@@ -1069,9 +1069,9 @@ pub(crate) fn release_run_with_cron(
                     inspection.ensure_unpublished(&candidate.tag)?;
                     if remote_tag_sha(&main_repo, &candidate.tag)?.is_some() {
                         return Err(OpsError::Message(format!(
-                        "unfinished tagged release {} needs preparation; recover that version before starting another",
-                        candidate.tag
-                    )));
+                            "unfinished tagged release {} needs preparation; recover that version before starting another",
+                            candidate.tag
+                        )));
                     }
                     accounting::authorize_replacement(
                         &home,

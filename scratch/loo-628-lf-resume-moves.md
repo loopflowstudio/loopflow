@@ -346,3 +346,4 @@ second Task-to-Machine command beside `lf task move --machine`.
   with a real Task and keep talking to it there.
 
 Check results: 2026-10-26 slice 2 — `machine_commands` (30, incl. resume_moves_a_session_to_another_machine, a_mid_merge_worktree_refuses_to_move), `moves::` unit, clippy, CLI reference: pass; slice 3 unbuilt.
+2026-10-26 compress — clippy --all-targets, `machine_commands` (31): pass.

@@ -7,14 +7,16 @@ use anyhow::{anyhow, Context, Result};
 
 use crate::durable::Machine;
 use crate::ops::human_session::moves::{self, Move};
+use crate::session::LfSession;
 use crate::store::SharedStore;
 
-/// Move Session `id`, which this Machine knows, to `target` unless it is
+/// Move `session`, which this Machine knows, to `target` unless it is
 /// already there.
-pub(crate) async fn relay(store: &SharedStore, id: &str, target: &Machine) -> Result<()> {
-    let session = crate::ops::human_session::session_by_id(store, id)
-        .await?
-        .ok_or_else(|| anyhow!("Session {id} was not found"))?;
+pub(crate) async fn relay(
+    store: &SharedStore,
+    session: &LfSession,
+    target: &Machine,
+) -> Result<()> {
     let id = session.id.to_string();
     let moved = match store.sqlite.session_moved_to(&id)? {
         Some(machine) if machine == target.id => return Ok(()),

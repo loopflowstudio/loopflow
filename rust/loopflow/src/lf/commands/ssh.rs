@@ -52,22 +52,18 @@ pub fn run(
         })
     );
     let runtime = tokio::runtime::Runtime::new()?;
-    if let Some(id) = moved_session(cli).filter(|_| !preview) {
+    if let Some(id) = super::work_route::resumed_session(cli).filter(|_| !preview) {
         // Resuming a Session that lives here, or moved elsewhere, moves it there first.
         runtime.block_on(async {
             let Some(store) = crate::store::open_existing_store().await else {
                 return anyhow::Ok(());
             };
             let store: crate::store::SharedStore = std::sync::Arc::new(store);
-            if crate::ops::human_session::session_by_id(&store, id)
-                .await?
-                .is_none()
-            {
+            let Some(session) = crate::ops::human_session::session_by_id(&store, id).await? else {
                 return Ok(());
-            }
+            };
             let machine = resolve_target(target, forward_agent).await?;
-            super::session_move::relay(&store, id, &machine).await?;
-            Ok(())
+            super::session_move::relay(&store, &session, &machine).await
         })?;
     }
     let source = if preview || resident_operation {
@@ -205,22 +201,6 @@ pub fn run(
     }
     let preamble = build_preamble(&cmd, &extra_env);
     run_ssh(&target.route, forward_agent, &preamble)
-}
-
-/// The Session an explicit `resume <session>` names; `--prepare` moves it too
-/// and returns the command that opens it there.
-fn moved_session(cli: &Cli) -> Option<&str> {
-    match &cli.command {
-        Some(crate::lf::Commands::Session {
-            cmd:
-                crate::lf::SessionCommand::Connect {
-                    id: Some(id),
-                    all: false,
-                    ..
-                },
-        }) => Some(id),
-        _ => None,
-    }
 }
 
 fn resident_args(

@@ -272,7 +272,7 @@ async fn move_primary_session(
             .sqlite
             .machine_by_id(target)?
             .ok_or_else(|| anyhow!("Machine {target} is not registered here"))?;
-        crate::lf::commands::session_move::relay(store, &session.id, &machine).await?;
+        crate::lf::commands::session_move::relay(store, &session, &machine).await?;
     }
     Ok(())
 }

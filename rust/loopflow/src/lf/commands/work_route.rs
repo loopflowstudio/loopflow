@@ -255,17 +255,24 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     Ok(true)
 }
 
+/// The Session an explicit `resume <session>` names.
+pub(super) fn resumed_session(cli: &Cli) -> Option<&str> {
+    match &cli.command {
+        Some(Commands::Session {
+            cmd:
+                SessionCommand::Connect {
+                    id: Some(id),
+                    all: false,
+                    ..
+                },
+        }) => Some(id),
+        _ => None,
+    }
+}
+
 /// A Session that moved to another Machine resumes there.
 fn dispatch_moved_session(cli: &Cli, args: &[String]) -> Result<bool> {
-    let Some(Commands::Session {
-        cmd:
-            SessionCommand::Connect {
-                id: Some(id),
-                all: false,
-                ..
-            },
-    }) = &cli.command
-    else {
+    let Some(id) = resumed_session(cli) else {
         return Ok(false);
     };
     if std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {

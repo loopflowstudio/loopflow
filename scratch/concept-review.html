@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-608 — Workspace frame concept review</title>
+<style>
+  :root { color-scheme: light dark; --paper:#faf9f6; --ink:#252522; --muted:#63635d; --line:#77776d; --pane:#eeede7; --accent:#466686; }
+  @media (prefers-color-scheme:dark) { :root { --paper:#20211f; --ink:#ecece5; --muted:#b5b6ad; --line:#898b80; --pane:#2c2e29; --accent:#9bb8ce; } }
+  * { box-sizing:border-box; }
+  body { margin:0 auto; max-width:780px; padding:40px 24px 64px; background:var(--paper); color:var(--ink); font:17px/1.55 system-ui,sans-serif; }
+  header { color:var(--muted); font-size:13px; }
+  h1 { font-size:30px; line-height:1.2; margin:26px 0 14px; }
+  h2 { font-size:20px; margin:32px 0 12px; }
+  p { margin:12px 0; }
+  code { font-size:.85em; overflow-wrap:anywhere; }
+  .comparison { display:flex; flex-wrap:wrap; gap:24px; margin:22px 0; }
+  figure { flex:1 1 240px; margin:0; }
+  figcaption { font-size:14px; margin-bottom:12px; }
+  .frame { display:flex; gap:6px; padding:6px; height:102px; border-radius:0 14px 14px 14px; position:relative; }
+  .before { border:1px solid var(--accent); }
+  .after { border-radius:0 0 14px 14px; }
+  .after:after { content:""; position:absolute; inset:0; border:2px solid var(--line); border-radius:inherit; opacity:.3; filter:blur(3px); pointer-events:none; }
+  .pane { flex:1; min-width:0; padding:14px 8px; border:1px solid var(--line); background:var(--pane); border-radius:8px; font-size:14px; }
+  .note { color:var(--muted); font-size:14px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th,td { text-align:left; vertical-align:top; padding:12px 8px 12px 0; border-bottom:1px solid var(--line); }
+  th:first-child { width:25%; }
+  @media (max-width:480px) { body { padding:24px 16px 40px; } table { font-size:12px; } }
+</style>
+<header>
+  LOO-608 · concept-review · 2026-10-27<br>
+  Built from <code>scratch/workspace-frame.md</code>, <code>swift/README.md</code>,
+  <code>SessionsView.swift</code>, <code>WorkspacePanesView.swift</code>,
+  <code>MultiplexerStore.swift</code> and <code>TerminalPaneLayoutTests.swift</code>.
+</header>
+<main>
+  <h1>No product decision is open.</h1>
+  <p>Jack Heart requested square top corners, rounded lower corners and a fading edge.
+  The implementation matches that contract. Visual acceptance remains pending.</p>
+  <div class="comparison">
+    <figure>
+      <figcaption>Before — hard outline, rounded top right</figcaption>
+      <div class="frame before"><div class="pane">Conversation</div><div class="pane">Shell</div></div>
+    </figure>
+    <figure>
+      <figcaption>Implemented — square top, fading outline</figcaption>
+      <div class="frame after"><div class="pane">Conversation</div><div class="pane">Shell</div></div>
+    </figure>
+  </div>
+  <p class="note">Schematic only: CSS does not prove SwiftUI rendering. Shadow tuning is provisional; no additional behavior is proposed.</p>
+  <p><strong>The consequential mismatch:</strong> the former active-color workspace outline competed
+  with pane emphasis. The frame now decorates the workspace; the pane still owns focus.</p>
+  <h2>Same actions, same state</h2>
+  <table>
+    <thead><tr><th>Action</th><th>Concept</th><th>Existing API, before and after</th></tr></thead>
+    <tbody>
+      <tr><td>Open a Task</td><td>Retained workspace</td><td><code>workspacePanel</code> renders the frame for <code>WorkWorkspaceKey</code></td></tr>
+      <tr><td>Focus conversation</td><td>Focused pane</td><td><code>focusPane → setFocusedPane</code></td></tr>
+      <tr><td>Resize split</td><td>Layout ratio</td><td><code>updateRatio → savePaneIntent</code></td></tr>
+      <tr><td>Reload after a save failure</td><td>Saved and current pane intent</td><td><code>loadPaneIntent</code> merges saved content while retaining current edits</td></tr>
+    </tbody>
+  </table>
+  <p>No frame record, setting, migration or provider operation is needed. The decoration
+  accepts no pointer input; recovery controls remain in the workspace.</p>
+  <h2>Next proof: the actual frame</h2>
+  <p>Compare Light and Dark in Desktop. Check lower-corner clearance, pane focus,
+  native terminal sizing and input. A hard halo, an invisible edge or visual crowding
+  would call for tuning within the accepted outcome.</p>
+  <p class="note">Headless geometry checks previously passed. This review changed only local
+  notes and this page; it neither reran those checks nor supplied visual acceptance.</p>
+</main>
+</html>

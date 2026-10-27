@@ -662,14 +662,17 @@ cross-machine continuity remain unproved with 416.
 Pane ownership follows Task.repository_id, not optional Project/Wave membership;
 leaving a Project must preserve the same saved panes and drafts.
 
-October 15, LOO-492: Jack Heart clarified that nested corner curves need even
-clearance; text padding alone does not satisfy the defect. The implementation
-derives workspace radius from pane radius plus inset. Terminal clearance sits
-outside Ghostty's measurement; native grid padding remains because block hit
-testing shares it. Focused headless checks cover radius/inset relationships,
-not the conditional outer stroke or native frames. Geometry proof with visible
-workspace borders and visual acceptance remain pending. AGENTS.md records the
-ViewInspector Observation limitation; fallback builds do not prove Ghostty behavior.
+October 15, LOO-492: Jack Heart required even nested-corner clearance; text
+padding alone is insufficient. Lower workspace radii derive from pane radius
+plus inset. Terminal clearance stays outside Ghostty's measurement; native grid
+padding remains for block hit testing. October 26, LOO-608: Jack requested square
+top corners and a shadow-like fading edge. The October 27 implementation replaces
+the hard workspace stroke with a noninteractive blurred theme-shadow stroke;
+its tuning awaits demo. Headless tests cover both square top radii, matching lower
+radii and at least five points between pane outlines and the workspace clip.
+Fading decoration no longer defines clearance. Light/Dark split-axis cases prove
+geometry, not rendered shadow quality or native terminal continuity; visual
+acceptance remains pending. Fallback builds do not prove Ghostty behavior.
 
 LOO-298/299/300 retain their historical allocations; the archive does not close
 them. Rust owns grouping and binding; September 30's primary repo conversation

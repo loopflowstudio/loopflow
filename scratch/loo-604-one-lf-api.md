@@ -24,9 +24,11 @@ to store queries.
   `lf task search`.
 - Jack Heart, 2026-10-26 (concept review, option B): the live API is `--watch`
   on the ordinary reads; the command a client types one-shot is the one it
-  streams. One open-Task row, `RoadmapTask`, shared by `lf task list --json`
-  and planning; closed pages use it too. Wave detail becomes Task rows
-  filtered by `--wave` plus the Wave's own fields.
+  streams. One Task row shared by `lf task list --json`, `lf task status` and
+  the Task rows of `wave show`/`wave status`; closed pages use it too (since
+  2026-10-27 that row is `TaskRow`; `RoadmapTask` is Desktop's shape under
+  `lf desktop`). Wave detail becomes Task rows filtered by `--wave` plus the
+  Wave's own fields.
 - Jack Heart, 2026-10-26: delete `lf monitor work`. Desktop runs one process
   per watch (`lf task list --watch`, `lf session list --watch`,
   `lf task status <id> --watch`, the live-process read); each watch is
@@ -232,6 +234,29 @@ unless "Work needed" says otherwise.
    Task's pane follows its own watch after it leaves the plan. Left as is:
    `lf desktop task`'s Graph `entry` (`ended_at`, `updated_at`) stays epoch
    seconds; it is Desktop's rich shape, not a Task read.
+0b. Concept review, 2026-10-27 (headless; settled by Jack Heart's
+   2026-10-27 Task-read and minimal-JSON decisions). `lf task status --json`
+   still says the Task more than once and ships Desktop internals:
+   - `graph_processes` are full `GraphProcessDetail`s: each repeats
+     `task_id`/`wave_id`, carries the compiled graph, interaction graph and
+     iteration vectors, and epoch-second times. Make them summary rows
+     `{id, name, state, step, updated_at}` (`step` = the current or last
+     step's position, "implement · pass 2"; RFC 3339 time). The full shape
+     stays where it already lives: `lf graph show <id> --processes --json`
+     and `lf desktop task`.
+   - `sessions` are `TaskSession` (`completed_at` epoch, no liveness), a
+     second Session row beside `SessionRow`. Use `SessionRow` filtered to the
+     Task, dropping its `task`/`wave` (the enclosing Task says them), so a
+     client joins `lf session list` by id and sees `state`/`available`.
+     Delete `TaskSession` if `lf desktop task` has no other reader.
+   - `comments` repeats `identifier`; drop it from the `lf task status`
+     output (`TaskComments` keeps it where it is a standalone read).
+   - Ordinary (non-`lf desktop`) watch bodies use RFC 3339 for every time:
+     `lf history` `recorded_at`, `lf ps` `started_at`. Desktop's shapes stay
+     as they are (Remaining 0's note).
+   Fixtures: `task_detail.json`, `work_activity_snapshot.json`,
+   `activity_snapshot.json` and their Swift mirrors (Desktop decodes `history`
+   and `ps` bodies directly: convert in its decoders, no `??` fallbacks).
 1. Sessions: incremental or paged rows instead of 5.7 MB per reading; a quiet
    Session turns Waiting on the 2 s clock (`next_quiet_available` is gone).
 2. `lf task status`: flat in Graphs; measure what still grows on Jack's store

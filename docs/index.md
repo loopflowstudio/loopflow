@@ -76,12 +76,15 @@ agent, the machine and the login that pays. Your repository is the Wave for
 Tasks without one.
 
 ```yaml
-# .lf/wave/infrastructure/config.yaml, committed
+# .lf/wave/infrastructure/config.yaml, committed: shaped like .lf/config.yaml
 workflow: auto        # infrastructure Tasks go from request to merged PR without you
+agent: claude:opus
 ```
 
 ```bash
-lf --wave infrastructure set machine mini   # and run on your mini
+lf --wave infrastructure set machine mini                       # and run on your mini
+lf --wave infrastructure set account.claude work@example.com    # billed to your work login
+lf wave status infrastructure                                   # each setting and where it came from
 ```
 
 **Without a Task,** `lf` still launches any agent or Skill directly:

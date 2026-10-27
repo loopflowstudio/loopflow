@@ -118,3 +118,14 @@ point in the ui".
    (the last pane stays). Board/tiles hidden state lives in navigation, not saved
    across launches.
 
+
+17. **"Being worked on" (strip, Oct 26).** Assumed: Working Tasks (idle, active,
+    moving), the sidebar's rule, now Rust's `wave:` rule too. An idle Task may have no
+    live process; Shipping Tasks (a live Graph) stay off the strip and sit in
+    Autonomous. Alternative: live-only (active, moving, shipping).
+18. **Esc zooms out only a board or strip.** A zoomed conversation keeps Esc for its
+    terminal; the crumb's button or parent crumb zooms it out.
+19. **Done stays planning-completed** (`task.isSuccessful` within the window), not
+    `runtime.status == done`, so Tasks closed in planning without lf runtime count.
+20. **GitHub people load once per repository** per Desktop launch; a new owner's
+    picture appears after relaunch. Failures leave initials, silently.

@@ -61,7 +61,8 @@ struct WorkNavigationTests {
         #expect(model.workingTaskIDs.isEmpty)
         model.applySelectionPlans([
             fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [task("issue-now")]),
-            fixtureViewPlan(owner: .init(repository: "repo", kind: .wave, id: wave), members: [task("issue-now"), task("issue-review")]),
+            // Rust lists a Wave's Working Tasks only, as at the repository.
+            fixtureViewPlan(owner: .init(repository: "repo", kind: .wave, id: wave), members: [task("issue-now")]),
         ], reason: "")
         #expect(model.workingTaskIDs == ["issue-now"])
         #expect(model.sidebarTaskIDs == ["issue-now"])
@@ -196,11 +197,10 @@ struct WorkNavigationTests {
         let model = try dashboardModel()
         model.select(.wave(id: "wave-1"))
         #expect(model.sidebarTaskIDs == ["issue-now"])
-        #expect(model.boardTiles(.wave("wave-1")).map(\.work.id) == ["issue-later", "issue-now"])
-        // One slot per page in this fixture, so the page is the Task's tile position.
+        #expect(model.boardTiles(.wave("wave-1")).map(\.work.id) == ["issue-now"])
         model.selectSidebarTask(slot: 0)
         #expect(model.navigation.destination == .entered(from: .wave("wave-1"), work: .task(id: "issue-now")))
-        #expect(model.navigation.wavePages[.wave("wave-1")] == 1)
+        #expect(model.navigation.wavePages[.wave("wave-1")] == 0)
         #expect(model.navigation.sidebarScope == .wave("wave-1"))
         model.selectSidebarTask(slot: 1)
         #expect(model.selection == .task(id: "issue-now"))
@@ -616,8 +616,13 @@ struct WorkNavigationTests {
         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
         #expect(throws: Never.self) { try view.inspect().find(button: "New session") }
         model.select(.wave(id: task.wave!.wave.id))
-        for member in task.wave!.tasks.items where member.id != "issue-later" {
-            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-row-\(member.id)")
+        let board = WorkNavigation.Board.wave(task.wave!.wave.id)
+        let standup = model.standup(task.wave!.tasks.items, doneDays: WaveStandupDefaults.doneDays)
+        for section in WaveBoardSection.allCases {
+            model.navigation.boardSections[board] = section
+            for row in standup.rows(section) {
+                _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-row-\(row.id)")
+            }
         }
         // Completed work without a date is outside Done's window; Project history keeps it.
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "wave-row-issue-later") }
@@ -1026,7 +1031,7 @@ struct WorkNavigationTests {
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
         return WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
     }
-    /// Working Tasks [review, now]; wave-1 [later, now]; Dashboard "Review" [now, later, review] and wave-1.
+    /// Working Tasks [review, now]; wave-1 [now]; Dashboard "Review" [now, later, review] and wave-1.
     private func dashboardModel() throws -> WorkModel {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing must not execute") }, repoPath: "/src/loopflow")
         model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
@@ -1048,7 +1053,7 @@ struct WorkNavigationTests {
             fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
                             members: [content(.task, "issue-review"), content(.task, "issue-now")]),
             fixtureViewPlan(owner: .init(repository: "repo", kind: .wave, id: "wave-1"),
-                            members: [content(.task, "issue-later"), content(.task, "issue-now")]),
+                            members: [content(.task, "issue-now")]),
             dashboard,
         ], reason: "")
         return model

@@ -1219,39 +1219,14 @@ struct SessionsContentView: View {
                     }
                 }
             } else if key.kind != .task, active, let view = navigation.waveView {
-                // A Wave view, the repository page included: the standup board and the
-                // conversation share the top band; the Tasks run along the bottom,
-                // golden proportions both ways. A hidden part gives its room to the rest.
-                let shown = { (part: WaveViewPart) in !model.isHidden(part, in: view) }
-                let top = shown(.board) || shown(.session)
-                GeometryReader { geometry in
-                    VStack(spacing: 0) {
-                        if !shown(.board) { WaveViewHeader(model: model, view: view) }
-                        if top {
-                            HStack(spacing: 0) {
-                                if shown(.board) {
-                                    HideablePart(part: .board, view: view, model: model, workspace: entry) {
-                                        WaveStandupBoard(model: model, view: view)
-                                    }
-                                    .frame(width: shown(.session) ? geometry.size.width * FocusSizing.golden : nil)
-                                }
-                                if shown(.board), shown(.session) { Divider() }
-                                if shown(.session) {
-                                    HideablePart(part: .session, view: view, model: model, workspace: entry) {
-                                        conversationPanes(key, entry, isFocused: navigation.palette == nil)
-                                    }
-                                }
-                            }
-                            .frame(height: shown(.tiles) ? geometry.size.height * FocusSizing.golden : nil)
-                        }
-                        if shown(.tiles) {
-                            if top { Divider() }
-                            HideablePart(part: .tiles, view: view, model: model, workspace: entry) {
-                                WaveTiles(model: model, workspaces: workspaces, sessions: store, view: view)
-                            }
-                        }
-                        if !top, !shown(.tiles) { Spacer() }
-                    }
+                // A Wave view, the repository page included: the conversation and the
+                // standup board share the top band; the Tasks run along the bottom.
+                WaveViewLayout(model: model, view: view, workspace: entry) {
+                    conversationPanes(key, entry, isFocused: navigation.palette == nil)
+                } board: {
+                    WaveStandupBoard(model: model, view: view)
+                } tiles: {
+                    WaveTiles(model: model, workspaces: workspaces, sessions: store, view: view)
                 }
             } else if terminals {
                 conversationPanes(key, entry, isFocused: active && navigation.palette == nil)

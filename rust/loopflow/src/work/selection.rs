@@ -377,25 +377,17 @@ impl Selection {
                                     .unavailable
                                     .push(format!("Task {} state is unavailable", item.name));
                             }
-                            // The repository lists Working Tasks: idle, active or
-                            // moving. A Wave lists all its uncompleted Tasks, so
-                            // unstarted ones can offer Start. Shipping Tasks leave
-                            // both for `state:shipping`.
+                            // The repository and a Wave list Working Tasks: idle,
+                            // active or moving. Unstarted Tasks live on the Wave
+                            // board's Backlog; Shipping Tasks leave for `state:shipping`.
                             in_scope
-                                && !item.states.contains(&SelectionState::Shipping)
-                                && match wave {
-                                    None => [
-                                        SelectionState::Idle,
-                                        SelectionState::Active,
-                                        SelectionState::Moving,
-                                    ]
-                                    .iter()
-                                    .any(|state| item.states.contains(state)),
-                                    Some(_) => {
-                                        item.open.is_some()
-                                            && !item.states.contains(&SelectionState::Done)
-                                    }
-                                }
+                                && [
+                                    SelectionState::Idle,
+                                    SelectionState::Active,
+                                    SelectionState::Moving,
+                                ]
+                                .iter()
+                                .any(|state| item.states.contains(state))
                         }
                     };
                     if included {

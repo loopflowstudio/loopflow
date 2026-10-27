@@ -57,6 +57,8 @@ pub struct DesktopViewPart {
     pub kind: DesktopViewPartKind,
     /// The Work a session part converses with.
     pub work: Option<WorkWorkspaceKey>,
+    /// A board's shown section: `done`, `active` or `backlog`.
+    pub section: Option<String>,
     /// A board's Done window in days; 0 includes all ages.
     pub done_days: Option<u32>,
     /// A board as rendered text, what `lf desktop capture -p board` prints.
@@ -69,6 +71,12 @@ pub struct DesktopViewPart {
     /// Hidden with `lf desktop hide` or the part's hover button; the view's
     /// `Show…` menu lists it. A session part is hidden as its pane is.
     pub hidden: bool,
+    /// The part's share of its split, as its divider and `lf desktop resize` set it:
+    /// the conversation's and board's of the top band's width, the strip's of the
+    /// view's height.
+    pub ratio: f64,
+    /// Filling the whole view, as `lf desktop zoom` or its hover button set it.
+    pub zoomed: bool,
     pub actions: Vec<String>,
 }
 
@@ -951,10 +959,24 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
                 ))
                 .into());
             }
-            // `hide`/`show` on a board or strip set that part's hidden state in the view.
-            if let Some(part) = part.filter(|_| matches!(name.as_str(), "hide" | "show")) {
+            // A pane verb (hide, show, zoom, resize) on a view part acts on that part
+            // in the view. Resizing the conversation toward a part names the part too.
+            let pane_verb = window
+                .actions
+                .iter()
+                .any(|action| action.name == *name && action.scope == DesktopActionScope::Pane);
+            let toward_part = args
+                .get("toward")
+                .filter(|_| name == "resize")
+                .and_then(|toward| window.view_part_named(toward))
+                .and(verb.target.pane.as_deref());
+            if let Some(part) = part
+                .map(|part| part.name.as_str())
+                .or(toward_part)
+                .filter(|_| pane_verb)
+            {
                 let mut args = args.clone();
-                args.insert("part".into(), part.name.clone());
+                args.insert("part".into(), part.to_owned());
                 return perform(
                     &mut desktop,
                     DesktopActionRequest {
@@ -2809,10 +2831,13 @@ impl DesktopWindowInspection {
     /// The view part a lone `-p` names; part names are fixed words, matched first.
     /// A session part is its Work's session pane, so it resolves as a pane.
     fn view_part(&self, path: Option<&str>) -> Option<&DesktopViewPart> {
-        let path = path.filter(|path| !path.contains('/'))?;
-        self.view_parts
-            .iter()
-            .find(|part| part.name == path && part.kind != DesktopViewPartKind::Session)
+        self.view_part_named(path?)
+            .filter(|part| part.kind != DesktopViewPartKind::Session)
+    }
+
+    /// Any view part by name, the conversation included.
+    fn view_part_named(&self, name: &str) -> Option<&DesktopViewPart> {
+        self.view_parts.iter().find(|part| part.name == name)
     }
 
     /// One `lf desktop events` line: what the window shows and where focus is.
@@ -3229,11 +3254,11 @@ mod tests {
             window
                 .view_part(Some("tiles"))
                 .map(|part| part.actions.clone()),
-            Some(vec![
-                "page".to_owned(),
-                "hide".to_owned(),
-                "show".to_owned()
-            ])
+            Some(
+                ["page", "hide", "show", "zoom", "resize"]
+                    .map(str::to_owned)
+                    .to_vec()
+            )
         );
         // `-p session` stays the conversation pane, so send and capture reach it.
         assert!(window.view_part(Some("session")).is_none());

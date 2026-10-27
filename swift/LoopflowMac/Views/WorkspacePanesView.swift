@@ -476,9 +476,17 @@ struct SessionPaneView: View {
                     .foregroundStyle(theme.palette.available)
                     .accessibilityLabel("Session ready")
             }
-            // Every pane hides on hover; the view header's Show… brings it back.
+            // Every pane zooms and hides on hover; the breadcrumb zooms out and the
+            // view header's Show… brings a hidden pane back.
             HoverRevealed(flag: hover) {
                 HStack(spacing: 2) {
+                    let zoomed = store.zoomedPaneId == pane.id
+                    stripButton(zoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                                label: zoomed ? "Zoom out" : "Zoom pane", id: "pane-zoom",
+                                help: zoomed ? "Return to the layout (⌘⇧↩)" : "Fill the view with this pane (⌘⇧↩)",
+                                disabled: !store.canClose) {
+                        workspace.toggleFocus(pane.id)
+                    }
                     if isFocused, pane.content.selectedTabID != nil {
                         stripButton("xmark", label: "Close tab", id: "pane-close", help: closeHelp, disabled: !store.canClose) {
                             closePane()

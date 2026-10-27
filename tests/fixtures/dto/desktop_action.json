@@ -93,6 +93,19 @@
       "keys": []
     },
     {
+      "name": "section",
+      "title": "Show Wave Board Section",
+      "scope": "window",
+      "arguments": [
+        {
+          "name": "section",
+          "kind": "string",
+          "required": true
+        }
+      ],
+      "keys": []
+    },
+    {
       "name": "filter",
       "title": "Set Wave Board Done Days",
       "scope": "window",
@@ -131,6 +144,11 @@
         {
           "name": "on",
           "kind": "boolean",
+          "required": false
+        },
+        {
+          "name": "part",
+          "kind": "string",
           "required": false
         }
       ],
@@ -214,6 +232,11 @@
           "name": "ratio",
           "kind": "ratio",
           "required": true
+        },
+        {
+          "name": "part",
+          "kind": "string",
+          "required": false
         }
       ],
       "keys": []

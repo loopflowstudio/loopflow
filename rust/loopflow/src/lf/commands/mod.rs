@@ -21,6 +21,7 @@ pub mod machine_use;
 pub mod monitor;
 pub mod open;
 pub mod ops;
+pub mod people;
 pub mod planning;
 pub mod profile;
 pub mod rental;

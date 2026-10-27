@@ -1196,8 +1196,11 @@ lf desktop move -p 3 --destination 1         # on a Dashboard: tile 3 takes tile
 `-p` is a path from the view on screen: a view part (`board`, `tiles`), a pane
 (`session`, `shell`, `browser`), a tab (`shell:2`, `browser:1`), a tile (`3`,
 `LOO-519`), or `TILE/PANE`. Dashboards and Wave views have tiles. A Wave view is
-a standup board (Done · Active · Backlog against the chapter's KRs) beside the
-Wave conversation, with its Tasks three to a page along the bottom. The
+the Wave conversation beside a standup board against the chapter's KRs, with the
+Tasks being worked on three to a page along the bottom. The board shows one
+section at a time, Backlog first: Backlog (unstarted or deferred), Working (idle,
+active or moving, with their Session Available or Busy), Autonomous (shipping)
+and Done; it scrolls and loads more as you reach the end. The
 repository page is the same view: every repository Task on the board, unstarted
 backlog included, the repository conversation, and its Working Tasks as tiles.
 Selecting a sidebar Task from either view enters it through that view, so back
@@ -1207,7 +1210,10 @@ part picks a Task by its ⌘N place.
 
 ```bash
 lf desktop capture -p board              # the standup board as text
+lf desktop do section -p board section=working   # backlog, working, autonomous or done
 lf desktop do filter -p board days=14    # Done covers 14 days (0 = all); kept on this Mac
+lf desktop zoom --on -p board            # the board fills the view; --off returns
+lf desktop resize -p tiles --toward board --ratio 0.3   # the strip takes 30% of the height
 lf desktop do page -p tiles page=2       # the Task strip turns to page 2
 lf desktop enter 4                       # Task 4 in full; the strip turns to its page
 lf desktop hide -p board                 # the conversation and strip take its room
@@ -1215,10 +1221,13 @@ lf desktop show -p board
 ```
 
 `lf desktop state` lists each view's parts under `view_parts`, with their state,
-whether they are `hidden`, and the verbs they accept. Every pane and view part
-also hides from a button on hover; the view's header (the Task header, or the
-board's header row on a Wave view) offers a `Show…` menu while anything is
-hidden. `hide -p session` on a Wave view hides its conversation pane, as on a Task.
+their share of their split (`ratio`), whether they are `hidden` or `zoomed`, and
+the verbs they accept. Every pane and view part also zooms and hides from
+buttons on hover, and its dividers drag. A zoomed pane adds its name to the
+breadcrumb; the crumb's button, the parent crumb or Esc (on a board or strip)
+zooms out. The view's header (the Task header, or the board's header row on a
+Wave view) offers a `Show…` menu while anything is hidden. `hide` and `zoom
+-p session` on a Wave view act on its conversation pane, as on a Task.
 
 `hide`, `show`, `move` and `resize` aimed at a tile edit the shared record, so
 every window showing it and the next launch agree: a saved Dashboard's

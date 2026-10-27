@@ -953,7 +953,8 @@ mod tests {
                     && plan.resolution.members.len() > 1
             })
             .unwrap();
-        assert_eq!(wave.resolution.task_ids(), [two, one, three]);
+        // The Wave strip lists Working Tasks; unstarted FIX-3 waits in Backlog.
+        assert_eq!(wave.resolution.task_ids(), [two, one]);
 
         store
             .conn

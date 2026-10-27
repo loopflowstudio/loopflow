@@ -85,6 +85,9 @@ takeover, shared legal actions and unavailable evidence without client acquisiti
 
 `repository_identity.json` carries the selected plan and retained Machine-local locators.
 
+`repo_people.json` pins `lf repo people --json`: each Task owner's claim email and
+name, with a GitHub identity that is null when unresolved.
+
 `task_move_explanations.json` preserves exact prior Workflow positions, move/restart intent and unperformed completion checks.
 
 `task_planning_explanations.json` preserves creation, edit revision/fields, comment

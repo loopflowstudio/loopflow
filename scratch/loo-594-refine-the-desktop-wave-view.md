@@ -314,16 +314,7 @@ one plan; `DashboardView.swift:37` still offers Working Tasks.
 
 ## Check results
 
-- Realign (Oct 26, after slice 4): plan and code agree; no repair, no rerun. LOO-604 not yet on origin/main.
-- Compress (Oct 26, repository page): the board view and `capture -p board` share `WorkModel.standupTasks(view)`; the text now carries the unavailable reason for Waves too. Swift filter (WaveStandup/TaskHistoryFilter/DesktopHeadless/WorkNavigation) → 65 pass.
-- Oct 26 (repository page, slice 4): `cargo test -p loopflow --lib` desktop/selections filter → 42 pass; clippy clean; Swift filter (WaveStandup/TaskHistoryFilter/DesktopHeadless/DTOFixture/DashboardWorkspace/WorkNavigation/DesktopPaneControl/WorkDestination) → 207 pass.
-
-- `cargo test -p loopflow --lib wave_default_plan_uses_three_slot_strip a_wave_view_names_its_board enter_names_a_tile dashboard_slots_round_trip` → pass.
-- `scripts/test_desktop.sh --filter 'WaveStandupTests|TaskHistoryFilterTests|DesktopHeadlessTests|DTOFixtureTests|DashboardWorkspaceTests|WorkNavigationTests|DesktopPaneControlTests|WorkDestinationTests'` → 203 pass. `WorkOpeningCLITests` needs `target/debug/lf` built (gate).
-- Compress (Oct 26): dropped the redundant part filter on `tile_request` (part verbs are never tile verbs) and the empty-verbs branch; `WaveStandup` carries `doneDays` (one default from `TaskHistoryFilter`), Backlog is two ordered filters instead of a sort. Fixed `every_verb_names_a_registry_action` to exempt `do`. `cargo test -p loopflow --lib desktop` → 21 pass; Swift filter (WaveStandup/TaskHistoryFilter/DesktopHeadless/WorkNavigation) → 61 pass.
-
-- Oct 26 (hide/Show…): `cargo test -p loopflow --lib desktop::` 13 pass, `--test integration dto_fixtures` 42 pass, clippy clean; Swift filter (WorkspacePanes/DesktopPaneControl/WaveStandup/WorkDestination/MultiplexerStore/DashboardWorkspace/WorktreeWorkspace/DTOFixture) pass. `hide -p board` CLI routing has no live-Desktop test (gate/demo).
-- Oct 26 (after `HideablePart` takes part/view/workspace, f504a40657): `scripts/test_desktop.sh --filter 'WaveStandupTests|WorkspacePanesTests|DesktopPaneControlTests'` → 37 pass.
+- Oct 26 (items 1–7, 12): `cargo test -p loopflow --lib -- desktop:: selection ops::people` 79 pass; `--test integration` dto/desktop/repo_people/reference/documented 48 pass; clippy clean; `scripts/test_desktop.sh --filter 'WaveStandupTests|DTOFixtureTests|DesktopPaneControlTests|WorkspacePanesTests|WorkNavigationTests|DesktopHeadlessTests|DashboardWorkspaceTests'` 156 pass. Part routing of `zoom`/`resize -p board` through the CLI has no live-Desktop test (gate/demo); `lf repo people` against GitHub ran by hand only.
 
 ## Direction added October 26, 2026, after acceptance (binding; supersedes conflicts above)
 
@@ -350,37 +341,35 @@ one plan; `DashboardView.swift:37` still offers Working Tasks.
    (LOO-621). Built (c19e51920c, cda832a1cb); the strip shows started Tasks only
    (questions #12), unstarted ones live in Backlog.
 
-## Demo direction — October 26, 2026 (binding)
+## Demo direction — October 26, 2026 (binding; Jack Heart's words in `scratch/demo-wave-view.md`)
 
-Jack Heart: "we need to make sure every pane has a hide button on hover that adds a
-Show... in the task header". Every pane in Task and Wave/repository views gets a
-hover hide button; hidden panes appear in a `Show…` menu in the view's header and
-restore from there. Use the existing hidden-pane state and `lf desktop hide/show`
-semantics (one hidden state; UI and CLI agree); `board` and `tiles` become hideable
-view parts like workspace panes. See `scratch/demo-wave-view.md`.
+Built (hide/Show…, 00bc8b5d85, f504a40657): every pane and Wave part hides on
+hover; `Show…` in the view header restores; `WorkModel.isHidden/setHidden` is the one
+reader/writer; board/tiles hide in navigation, the conversation as its session pane.
 
-Built October 26: every Task pane strip reveals Hide (eye.slash) on hover, focused
-or not (Close stays for tabs); Wave parts wrap in `HideablePart` (hover flag on the
-Wave workspace). Board/tiles hide in `WorkNavigation.hiddenViewParts`; the Wave
-conversation hides as its session pane (`collapsedPaneIds`), so `hide -p session`
-and the button agree. `WorkModel.isHidden/setHidden` is the one reader/writer.
-`ShowHiddenMenu` sits after the Task crumb and in the board header (in
-`WaveViewHeader` while the board is hidden); absent when nothing is hidden.
-`DesktopViewPart.hidden` reports it; `lf desktop hide|show -p board|tiles` sends
-`part=` to the pane-scoped `hide`/`show`.
+Built (items 1–7 and 12 of the October 26 notes):
+1. Dividers between conversation and board and above the strip drag (`RatioSplit` over
+   `SplitDivider`); `WorkNavigation.waveRatios`; `lf desktop resize -p tiles|board
+   --toward …` (Rust routes pane verbs on a part with `part=`; `-p session --toward
+   board` too); `view_parts[].ratio` is the part's share.
+2. Board lists scroll and load 20 more on reaching the end (`WaveBoardList`).
+3. One section at a time, segmented selector, default Backlog;
+   `navigation.boardSections`; `view_parts[board].section`; `lf desktop do section -p
+   board section=…`; Done keeps its days control; capture lists every count, the shown
+   one bracketed.
+4. Conversation left (38.2%), board right, strip below (`WaveViewLayout`).
+5. Zoom beside hide on every Task pane strip and Wave part; zoomed part fills the view;
+   `ZoomCrumb` names it in the breadcrumb with a zoom-out button; parent crumb and Esc
+   (board/strip only) zoom out; `zoom -p board|tiles` and `-p session` (its pane) agree;
+   `view_parts[].zoomed`.
+6. One person per email, name-only owners join by name; GitHub login/name/avatar from
+   `lf repo people --json` (Rust caches per email in `github_people`, in the one draft
+   migration), read once per repository by Desktop; initials until resolved.
+7. Strip = Working Tasks: Rust's `wave:` expression now lists idle/active/moving, as the
+   repository does; Swift's sidebar re-filter deleted.
+12. Sections by Task state: Backlog (unstarted, deferred) · Working (idle, active, moving)
+   · Autonomous (shipping) · Done; Working/Autonomous rows show their Session Available
+   or Busy.
 
-## More demo direction — October 26, 2026 (binding; not yet built)
-
-Jack Heart, October 26, 2026 (LOO-594 demo), in addition to hover-hide panes with a Show… menu in the header:
-
-1. "we want the section borders resizable": the dividers between the board and the Wave Session, and between the top band and the Task strip, drag to resize, like Task pane dividers (same ratio state that lf desktop resize writes; reported by lf desktop state).
-2. "the task lists also need to auto paginate and scroll": board Task lists scroll, and load the next page automatically as you reach the end, replacing "+N more".
-3. "I prefer turning it in to just showing one section but the section is selectable. Defaults to backlog": the board shows one section at a time, Done, Active or Backlog, picked by a selector in the board header, defaulting to Backlog. The Done-days control stays on Done. The selected section is reported in the board part state (replacing done_days-only state) and settable via lf desktop do.
-4. "maybe we can switch the session and the tasks pane back": the Wave/repository Session goes back on the left, the board on the right (strip stays below).
-5. "but add a zoom on every pane / so that panel can expand to whole page, and add sometjhing to breadcrumb / with an easy zoom otu": every pane (Task: session, shell, browser; Wave: board, session, tiles) has a hover zoom button beside hide. Zoom fills the whole view; the breadcrumb gains a segment naming the zoomed pane (e.g. "Product › Board"), and clicking the parent crumb, a zoom-out control, or Esc returns. Same zoom state as lf desktop zoom, reported by lf desktop state.
-
-6. People, Jack Heart Oct 26 ("3 people: (a)"): fix the solo count (one person per email, name-only owners join the person with that name) and build GitHub pictures and names in this PR, per scratch/questions.md #4.
-7. Strip, Jack Heart Oct 26 ("(b)"): the strip shows only Tasks being worked on (a live Session or Graph): no unstarted, finished or abandoned tiles. Unstarted Tasks live in the board Backlog.
-8. Active vs Backlog (agent default, Jack did not object; reversible): bucket by Task state, not roadmap section. Active = started and unfinished; Backlog = not started (no checkout), whatever roadmap section it sits in (the roadmap files unstarted Tasks under waiting).
-
-9. Jack Heart Oct 26: "I think we need actaully a fourth seciton which is like Autonomous Tasks that are still working" and "somewhere earlier i had a 2x2 grid about defining Active and Available". Section definitions OPEN until the grid is found or redrawn; do not change bucketing in the next pass.
+Remaining: `focus -p N/…` turning the strip; Done from `lf task list --done --since`
+after LOO-604; the Working Tasks Dashboard now also pages Working-only Waves.

@@ -1002,6 +1002,7 @@ pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
             Ok(())
         }
         RepoCommand::Release { cmd } => run_release(cmd),
+        RepoCommand::People { json } => crate::lf::commands::people::run(*json),
         RepoCommand::Tokens { json, days } => crate::lf::commands::tokens::run(*json, *days),
         RepoCommand::Ci {
             since,

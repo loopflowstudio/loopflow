@@ -4,9 +4,11 @@
 import Loopflow
 import SwiftUI
 
-/// A Wave's Tasks bucketed for standup. The one bucketing rule; the board only renders it.
-/// Done holds Tasks completed in the last `doneDays` days (0 = all ages); Active the
-/// started and waiting Tasks; Backlog the rest of the plan, not started first.
+/// A Wave's Tasks bucketed for standup by Task state. The one bucketing rule; the
+/// board only renders it. Backlog holds unstarted and deferred Tasks; Working the
+/// idle, active and moving ones (the sidebar's Working Tasks); Autonomous the
+/// shipping ones, a Graph running to merge that stops for no one; Done the Tasks
+/// completed in the last `doneDays` days (0 = all ages).
 struct WaveStandup: Equatable {
     struct Row: Equatable, Identifiable {
         let task: RoadmapTask
@@ -14,54 +16,89 @@ struct WaveStandup: Equatable {
         let person: Person?
         /// Detail that follows the name: next move, waiting reason, or "merged".
         let note: String?
+        /// A Working or Autonomous Task's Session: Available or Busy.
+        let session: SessionAttention?
         var id: String { task.id }
     }
 
+    enum SessionAttention: String, Equatable {
+        case available = "Available", busy = "Busy"
+    }
+
+    /// One person per email; an owner recorded by name alone joins the person with
+    /// that name. GitHub supplies the picture and name once the email resolves.
     struct Person: Equatable, Hashable {
         let key: String
         let name: String
+        let login: String?
+        let avatarURL: URL?
         var initials: String {
             let words = name.split(whereSeparator: { $0 == " " || $0 == "@" || $0 == "." }).prefix(2)
             return words.compactMap(\.first).map { String($0).uppercased() }.joined()
         }
     }
 
-    let done: [Row]
-    let active: [Row]
     let backlog: [Row]
+    let working: [Row]
+    let autonomous: [Row]
+    let done: [Row]
     let doneDays: Int
-    /// Pictures and names appear once the Wave's Done and Active span two people.
+    /// Pictures and names appear once the started and finished Tasks span two people.
     let showsPeople: Bool
 
     /// `tasks` fill Active and Backlog; `closed` fills Done. Today both come from the
     /// Wave roadmap; LOO-604 moves closed Tasks to `lf task list --done`, which then
-    /// becomes `closed` alone.
-    init(tasks: [RoadmapTask], closed: [RoadmapTask], doneDays: Int, now: Date) {
+    /// becomes `closed` alone. `github` maps lowercase owner emails to their users;
+    /// `sessions` names each started Task's Session attention.
+    init(tasks: [RoadmapTask], closed: [RoadmapTask], doneDays: Int, now: Date, github: [String: GitHubPerson],
+         sessions: [String: SessionAttention]) {
         self.doneDays = doneDays
         let ranked = tasks.sorted { $0.task.rank < $1.task.rank }
         let since = now.addingTimeInterval(-Double(doneDays) * 86_400)
+        var emails: [String: String] = [:]
+        for owner in (tasks + closed).compactMap({ $0.runtime?.owner }) {
+            if let name = owner.person, let email = owner.personKey { emails[name] = emails[name] ?? email.lowercased() }
+        }
+        func person(_ task: RoadmapTask) -> Person? {
+            guard let owner = task.runtime?.owner,
+                  let key = owner.personKey?.lowercased() ?? owner.person.map({ emails[$0] ?? $0 }) else { return nil }
+            let user = github[key]
+            return Person(key: key, name: user?.name ?? owner.person ?? user?.login ?? key,
+                          login: user?.login, avatarURL: user?.avatarUrl)
+        }
         done = closed.filter { task in
             guard task.task.isSuccessful, !task.condition.unresolvedExecution else { return false }
             if doneDays == 0 { return true }
             guard let date = task.task.completedAt.flatMap(Self.date) else { return false }
             return date <= now && date >= since
         }.sorted { ($0.task.completedAt ?? "") > ($1.task.completedAt ?? "") }
-            .map { Row(task: $0, person: Self.person($0), note: nil) }
-        active = ranked.filter { task in
-            (task.section == .now || task.section == .waiting) && task.task.isCurrent(task.condition)
-        }.map { task in
-            let note = task.pr?.phase == .merged ? "merged" : task.nextMove.reason
-            return Row(task: task, person: Self.person(task), note: note.isEmpty ? nil : note)
+            .map { Row(task: $0, person: person($0), note: nil, session: nil) }
+        func started(_ states: Set<TaskState>) -> [Row] {
+            ranked.filter { states.contains(Self.state($0)) }.map { task in
+                let note = task.pr?.phase == .merged ? "merged" : task.nextMove.reason
+                return Row(task: task, person: person(task), note: note.isEmpty ? nil : note,
+                           session: sessions[task.id])
+            }
         }
-        backlog = (ranked.filter { $0.section == .notStarted }
-            + ranked.filter { $0.section == .later && !$0.task.isTerminal })
-            .map { Row(task: $0, person: nil, note: nil) }
-        showsPeople = Set((done + active).compactMap(\.person)).count >= 2
+        working = started([.idle, .active, .moving])
+        autonomous = started([.shipping])
+        backlog = ranked.filter { [.unstarted, .deferred].contains(Self.state($0)) }
+            .map { Row(task: $0, person: nil, note: nil, session: nil) }
+        showsPeople = Set((working + autonomous + done).compactMap { $0.person?.key }).count >= 2
     }
 
-    private static func person(_ task: RoadmapTask) -> Person? {
-        guard let owner = task.runtime?.owner, let key = owner.personKey ?? owner.person else { return nil }
-        return Person(key: key, name: owner.person ?? key)
+    /// A Task's state; a Task with no runtime has no checkout, unless planning closed it.
+    private static func state(_ task: RoadmapTask) -> TaskState {
+        task.runtime?.status ?? (task.task.isTerminal ? .done : .unstarted)
+    }
+
+    func rows(_ section: WaveBoardSection) -> [Row] {
+        switch section {
+        case .backlog: backlog
+        case .working: working
+        case .autonomous: autonomous
+        case .done: done
+        }
     }
 
     private static func date(_ timestamp: String) -> Date? {
@@ -80,23 +117,25 @@ struct WaveStandup: Equatable {
         return lines
     }
 
-    /// The board as an agent reads it with `lf desktop capture -p board`.
-    func text(heading: [String]) -> String {
+    /// The board as an agent reads it with `lf desktop capture -p board`: every
+    /// section's count, the shown one bracketed, then its rows.
+    func text(heading: [String], section: WaveBoardSection) -> String {
         var lines = heading
-        func column(_ title: String, _ rows: [Row]) {
-            lines.append("")
-            lines.append("\(title) · \(rows.count)")
-            if rows.isEmpty { lines.append("  None") }
-            lines += rows.map { row in
-                var line = "  \(row.task.task.identifier) \(row.task.task.name)"
-                if let person = row.person, showsPeople { line += " · \(person.name)" }
-                if let note = row.note { line += " · \(note)" }
-                return line
-            }
+        lines.append("")
+        lines.append(WaveBoardSection.allCases.map { item in
+            let label = "\(item.title) \(rows(item).count)"
+            return item == section ? "[\(label)]" : label
+        }.joined(separator: " · "))
+        if section == .done, doneDays > 0 { lines.append("  last \(doneDays) days") }
+        let shown = rows(section)
+        if shown.isEmpty { lines.append("  None") }
+        lines += shown.map { row in
+            var line = "  \(row.task.task.identifier) \(row.task.task.name)"
+            if let person = row.person, showsPeople { line += " · \(person.name)" }
+            if let session = row.session { line += " · \(session.rawValue)" }
+            if let note = row.note { line += " · \(note)" }
+            return line
         }
-        column(doneDays == 0 ? "Done" : "Done (last \(doneDays) days)", done)
-        column("Active", active)
-        column("Backlog", backlog)
         return lines.joined(separator: "\n")
     }
 }
@@ -109,15 +148,14 @@ enum WaveStandupDefaults {
     }
 }
 
-/// Large enough to read across a room. A row opens its Task through the Wave, as a
-/// tile does, so Backlog is where unstarted Tasks are seen and started. The
-/// repository page is the same board over every repository Task, without a chapter.
+/// Large enough to read across a room, one section at a time, Backlog first. A row
+/// opens its Task through the Wave, as a tile does, so Backlog is where unstarted
+/// Tasks are seen and started. The repository page is the same board over every
+/// repository Task, without a chapter.
 struct WaveStandupBoard: View {
     let model: WorkModel
     /// `.wave(id)` or `.repository`.
     let view: WorkNavigation.Board
-    /// Rows a column shows before `+N more`; a 1440×900 window fits six without scrolling.
-    static let visibleRows = 6
     @AppStorage(WaveStandupDefaults.doneDaysKey) private var doneDays = TaskHistoryFilter().days
     @Environment(\.palette) private var palette
     @State private var showRealignment = false
@@ -150,7 +188,7 @@ struct WaveStandupBoard: View {
                 Text("\(scope) planning unavailable · \(reason)").font(Typography.body(15))
                     .foregroundStyle(palette.warning)
             case .available(let tasks, let truncated):
-                columns(WaveStandup(tasks: tasks, closed: tasks, doneDays: doneDays, now: .now))
+                section(model.standup(tasks, doneDays: doneDays))
                 if truncated { Text("Planning is partial; more Tasks exist.").foregroundStyle(palette.warning) }
             case nil:
                 Text("\(scope) planning unavailable").font(Typography.body(15)).foregroundStyle(palette.warning)
@@ -160,6 +198,7 @@ struct WaveStandupBoard: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.background)
         .accessibilityIdentifier("wave-standup-board")
+        .task(id: model.repoPath) { await model.loadGitHubPeople() }
         .sheet(isPresented: $showRealignment) {
             if let roadmap { ProjectRealignmentView(repo: roadmap.wave.repo) }
         }
@@ -224,41 +263,57 @@ struct WaveStandupBoard: View {
         }
     }
 
-    private func columns(_ standup: WaveStandup) -> some View {
-        HStack(alignment: .top, spacing: Spacing.xl) {
-            column(standup.done, people: standup.showsPeople, id: "done") { WaveDoneHeading(count: standup.done.count, days: $doneDays) }
-            column(standup.active, people: standup.showsPeople, id: "active") { heading("Active", standup.active.count) }
-            column(standup.backlog, people: false, id: "backlog") { heading("Backlog", standup.backlog.count) }
+    /// The shown section's selector, its Done range when it is Done, and its rows.
+    private func section(_ standup: WaveStandup) -> some View {
+        let shown = model.boardSection(view)
+        return VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(alignment: .center, spacing: Spacing.lg) {
+                Picker("Section", selection: Binding(get: { shown }, set: { model.navigation.boardSections[view] = $0 })) {
+                    ForEach(WaveBoardSection.allCases, id: \.self) { item in
+                        Text("\(item.title) · \(standup.rows(item).count)").tag(item)
+                    }
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
+                .font(Typography.strong(15))
+                .accessibilityIdentifier("wave-section-picker")
+                if shown == .done { WaveDoneRange(days: $doneDays) }
+            }
+            WaveBoardList(rows: standup.rows(shown), people: shown != .backlog && standup.showsPeople) { row in
+                withAnimation(FocusSizing.animation) { model.enter(.task(id: row.id), from: view) }
+            }
+            .id(shown)
+            .accessibilityIdentifier("wave-section-\(shown.rawValue)")
         }
     }
+}
 
-    private func open(_ row: WaveStandup.Row) {
-        withAnimation(FocusSizing.animation) { model.enter(.task(id: row.id), from: view) }
-    }
+/// A board section's rows. It scrolls, and reaching its end brings the next page.
+struct WaveBoardList: View {
+    static let pageSize = 20
+    let rows: [WaveStandup.Row]
+    let people: Bool
+    let open: (WaveStandup.Row) -> Void
+    @Environment(\.palette) private var palette
+    @State private var limit = pageSize
 
-    private func heading(_ title: String, _ count: Int) -> some View {
-        Text("\(title) · \(count)").font(Typography.strong(20))
-    }
-
-    private func column<Heading: View>(_ rows: [WaveStandup.Row], people: Bool, id: String,
-                                       @ViewBuilder heading: () -> Heading) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            heading()
-            if rows.isEmpty {
-                Text("None").font(Typography.body(15)).foregroundStyle(palette.textTertiary)
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: Spacing.sm) {
+                if rows.isEmpty {
+                    Text("None").font(Typography.body(15)).foregroundStyle(palette.textTertiary)
+                }
+                ForEach(rows.prefix(limit)) { row in
+                    Button { open(row) } label: { WaveStandupRow(row: row, people: people) }
+                        .buttonStyle(.plain)
+                }
+                if rows.count > limit {
+                    ProgressView().controlSize(.small)
+                        .onAppear { limit += Self.pageSize }
+                        .accessibilityIdentifier("wave-next-page")
+                }
             }
-            ForEach(rows.prefix(Self.visibleRows)) { row in
-                Button { open(row) } label: { WaveStandupRow(row: row, people: people) }
-                    .buttonStyle(.plain)
-            }
-            if rows.count > Self.visibleRows {
-                Text("+\(rows.count - Self.visibleRows) more").font(Typography.body(13))
-                    .foregroundStyle(palette.textTertiary)
-                    .accessibilityIdentifier("wave-\(id)-more")
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .accessibilityIdentifier("wave-column-\(id)")
     }
 }
 
@@ -285,42 +340,36 @@ struct WaveViewHeader: View {
     }
 }
 
-/// "Done" reads plainly; hovering discloses its range, and clicking the range edits it.
-struct WaveDoneHeading: View {
-    let count: Int
+/// The Done section's range; clicking it edits the number of days in place.
+struct WaveDoneRange: View {
     @Binding var days: Int
     @Environment(\.palette) private var palette
-    @State private var hovered = false
     @State private var editing = false
     @State private var text = ""
     @State private var message: String?
     @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Text("Done · \(count)").font(Typography.strong(20))
-                if editing {
-                    TextField("days", text: $text).textFieldStyle(.plain).font(Typography.code(15))
-                        .frame(width: 48).focused($focused)
-                        .onSubmit(commit).onExitCommand { editing = false; message = nil }
-                        .accessibilityIdentifier("wave-done-days-field")
-                } else if hovered || message != nil {
-                    Button(days == 0 ? "· all ages" : "· last \(days) days") {
-                        text = String(days)
-                        editing = true
-                        focused = true
-                    }
-                    .buttonStyle(.plain).font(Typography.body(13)).foregroundStyle(palette.actionInk)
-                    .help("Click to edit; 0 includes all ages.")
-                    .accessibilityIdentifier("wave-done-days")
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+            if editing {
+                TextField("days", text: $text).textFieldStyle(.plain).font(Typography.code(15))
+                    .frame(width: 48).focused($focused)
+                    .onSubmit(commit).onExitCommand { editing = false; message = nil }
+                    .accessibilityIdentifier("wave-done-days-field")
+            } else {
+                Button(days == 0 ? "All ages" : "Last \(days) days") {
+                    text = String(days)
+                    editing = true
+                    focused = true
                 }
+                .buttonStyle(.plain).font(Typography.body(13)).foregroundStyle(palette.actionInk)
+                .help("Click to edit; 0 includes all ages.")
+                .accessibilityIdentifier("wave-done-days")
             }
             if let message {
                 Text(message).font(Typography.caption()).foregroundStyle(palette.warning)
             }
         }
-        .onHover { hovered = $0 }
         .onChange(of: focused) { _, focused in if !focused, editing { commit() } }
     }
 
@@ -388,10 +437,8 @@ struct WaveStandupRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
             if people, let person = row.person {
-                Text(person.initials).font(Typography.strong(10)).foregroundStyle(palette.text)
-                    .frame(width: 20, height: 20)
-                    .background(palette.surfaceMuted, in: Circle())
-                    .help(person.name)
+                WavePersonPicture(person: person)
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 4 }
                     .accessibilityIdentifier("wave-person-\(row.id)")
             }
             VStack(alignment: .leading, spacing: 2) {
@@ -399,15 +446,51 @@ struct WaveStandupRow: View {
                     Text(row.task.task.identifier).font(Typography.code(13)).foregroundStyle(palette.textSecondary)
                         .fixedSize()
                     Text(row.task.task.name).font(Typography.body(15)).lineLimit(1)
+                    if let session = row.session {
+                        Text(session.rawValue).font(Typography.caption(11))
+                            .foregroundStyle(session == .available ? palette.available : palette.textSecondary)
+                            .accessibilityIdentifier("wave-session-\(row.id)")
+                    }
                 }
-                if let note = row.note {
-                    Text(people ? "\(row.person?.name ?? "Unowned") · \(note)" : note)
-                        .font(Typography.body(13)).foregroundStyle(palette.textSecondary).lineLimit(1)
+                if let detail {
+                    Text(detail).font(Typography.body(13)).foregroundStyle(palette.textSecondary).lineLimit(1)
                 }
             }
         }
         .help(row.task.task.name)
         .accessibilityIdentifier("wave-row-\(row.id)")
+    }
+
+    /// The owner's name when the board shows people, then the row's note.
+    private var detail: String? {
+        let name = people ? row.person?.name ?? "Unowned" : nil
+        let parts = [name, row.note].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+/// A person's GitHub picture, or their initials until GitHub names them.
+struct WavePersonPicture: View {
+    let person: WaveStandup.Person
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Group {
+            if let url = person.avatarURL {
+                AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { initials }
+            } else {
+                initials
+            }
+        }
+        .frame(width: 20, height: 20)
+        .clipShape(Circle())
+        .help(person.login.map { "\(person.name) (@\($0))" } ?? person.name)
+    }
+
+    private var initials: some View {
+        Text(person.initials).font(Typography.strong(10)).foregroundStyle(palette.text)
+            .frame(width: 20, height: 20)
+            .background(palette.surfaceMuted, in: Circle())
     }
 }
 #endif

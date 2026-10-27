@@ -2130,6 +2130,11 @@ pub enum RepoCommand {
         #[command(subcommand)]
         cmd: ReleaseCommand,
     },
+    /// List the people who own this repository's Tasks, with their GitHub identity
+    People {
+        #[arg(long)]
+        json: bool,
+    },
     /// Measure this codebase: lines and tokens per directory (tracked files only)
     Tokens {
         /// Emit as JSON

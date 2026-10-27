@@ -205,6 +205,20 @@ enum WaveViewPart: String, CaseIterable, Hashable {
     }
 }
 
+/// The section a Wave board shows, one at a time; Backlog by default.
+enum WaveBoardSection: String, CaseIterable, Hashable {
+    case backlog, working, autonomous, done
+
+    var title: String { rawValue.capitalized }
+}
+
+/// A Wave view's dividers: the conversation's share of the top band's width, and
+/// the top band's share of the view's height, golden by default.
+struct WaveViewRatios: Equatable {
+    var session = 1 - FocusSizing.golden
+    var band = FocusSizing.golden
+}
+
 /// Per-window/repository navigation; independent of terminal layout and liveness.
 @MainActor
 @Observable
@@ -231,6 +245,10 @@ final class WorkNavigation {
     var wavePages: [Board: Int] = [:]
     /// Each Wave view's hidden board and strip; its conversation hides as its session pane.
     var hiddenViewParts: [Board: Set<WaveViewPart>] = [:]
+    /// Each Wave view's zoomed board or strip; its conversation zooms as its session pane.
+    var zoomedViewParts: [Board: WaveViewPart] = [:]
+    var waveRatios: [Board: WaveViewRatios] = [:]
+    var boardSections: [Board: WaveBoardSection] = [:]
     var showsSlotHints = false
     var sidebarFilter: SidebarFilter = .working
     var sidebarFocusRequested = false

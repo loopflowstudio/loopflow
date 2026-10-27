@@ -329,6 +329,8 @@ struct WorkBreadcrumbs: View {
                 .frame(width: 24, height: 28).contentShape(Rectangle())
                 .disabled(model.navigation.forwardStack.isEmpty).help("Forward")
             Button(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Work") {
+                // The parent crumb of a zoomed part zooms out.
+                if model.navigation.waveView == .repository { model.setZoomed(nil, in: .repository) }
                 model.select(nil)
                 model.navigation.content = .terminals
             }.lineLimit(1).fixedSize()
@@ -351,10 +353,17 @@ struct WorkBreadcrumbs: View {
                 if model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
             case .wave, .repository, nil: EmptyView()
             }
+            if let view = model.navigation.waveView, let zoomed = model.zoomedPart(in: view) {
+                ZoomCrumb(title: zoomed.title) { model.setZoomed(nil, in: view) }
+            }
             if let task = model.breadcrumb?.task {
                 TaskHeading(task: task.task)
                 if let workspace = model.shownWorkspace, workspace.key.kind == .task, workspace.key.id == task.task.id {
                     ShowHiddenMenu(workspace: workspace).font(Typography.caption())
+                    let store = workspace.multiplexer
+                    if let zoomed = store.zoomedPaneId, let pane = store.layout.pane(for: zoomed) {
+                        ZoomCrumb(title: pane.kind.rawValue.capitalized) { store.setZoom(zoomed, enabled: false) }
+                    }
                 }
             }
             if let target = model.machineTarget {
@@ -366,6 +375,7 @@ struct WorkBreadcrumbs: View {
     private func waveCrumb(_ id: String, name: String) -> some View {
         HStack(alignment: .center, spacing: 6) {
             Button(name) {
+                if model.navigation.waveView == .wave(id) { model.setZoomed(nil, in: .wave(id)) }
                 model.select(.wave(id: id))
                 model.navigation.content = .terminals
             }.lineLimit(1).fixedSize()

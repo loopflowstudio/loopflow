@@ -79,9 +79,10 @@ Task completion.
    - If this attempt cannot repair it, say what you tried and what stopped you
      (provider, github-observation, secrets, publication). Do not claim an
      unpublished or unarmed repair is complete. No one is available to answer.
-   - When the landing reconciler supplies a final-answer format, use it. A
-     `blocked` result ends this attempt; the landing starts the next after a
-     backoff and hands it your summary. Write it only in the final answer.
+   - When the landing reconciler launches the run with an `--output-schema`
+     conclusion, answer with it. A `blocked` result ends this attempt; the
+     landing starts the next after a backoff and hands it your summary. Write
+     it only in the final answer.
 
 ## Guardrails
 

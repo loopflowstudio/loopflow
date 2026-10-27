@@ -44,7 +44,7 @@ struct WorkCLISubscriptionTests {
         let id = try #require(created["id"] as? String)
         try await eventually { model.task(id: id) != nil }
         // A Wave lists its unstarted Tasks so each can offer Start.
-        try await eventually { selectedPlanMembers(model).first { $0.work.id == id }?.states == [.backlog] }
+        try await eventually { selectedPlanMembers(model).first { $0.work.id == id }?.states == [.unstarted, .backlog] }
         _ = try await fixture.run(["-b", "task", "run", id])
         // Membership and checkout details arrive in separate observation frames.
         try await eventually {
@@ -211,10 +211,10 @@ struct WorkCLISubscriptionTests {
         }?.contents ?? []
     }
 
-    private func eventually(_ condition: @MainActor () -> Bool) async throws {
+    private func eventually(_ line: Int = #line, _ condition: @MainActor () -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(20)
         while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        try #require(condition(), "CLI mutation did not reach the open Work model")
+        try #require(condition(), "CLI mutation did not reach the open Work model (line \(line))")
     }
 }
 

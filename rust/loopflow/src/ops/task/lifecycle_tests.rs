@@ -195,25 +195,26 @@ fi
     let mut paths = vec![bin];
     paths.extend(std::env::split_paths(&path));
     std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
-    for (path, contents) in [
-        (
-            ".lf/graphs/delivery.yaml",
-            "- cmd: __telemetry-scorecard\n- cmd: task complete FIX-1\n",
-        ),
-        (
-            "scripts/lifecycle_scorecard.py",
-            r#"import json, os, time
+    // The delivery edge holds in an ordinary owned execution until released.
+    let hold = home.path().join("hold.py");
+    fs::write(
+        &hold,
+        r#"import os, time
 from pathlib import Path
 home = Path(os.environ['LF_HOME'])
 (home / 'ready').touch()
 while not (home / 'release').exists():
     time.sleep(.02)
-print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}))
 "#,
+    )
+    .unwrap();
+    repo.create_file(
+        ".lf/graphs/delivery.yaml",
+        &format!(
+            "- cmd: session serve -- python3 {}\n- cmd: task complete FIX-1\n",
+            hold.display()
         ),
-    ] {
-        repo.create_file(path, contents);
-    }
+    );
     let provider = Arc::new(Mutex::new(Linear::default()));
     let (url, server) = runtime.block_on(async {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

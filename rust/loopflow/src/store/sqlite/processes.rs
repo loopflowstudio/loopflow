@@ -563,6 +563,7 @@ impl SqliteStore {
             .flatten())
     }
 
+    #[cfg(test)]
     pub(crate) fn agent_process_identity(&self, session: &str) -> StoreResult<Option<(u32, i64)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn

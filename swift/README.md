@@ -50,8 +50,11 @@ path follows hierarchy: click a name to go there, or the **›** after it to lis
 search what it contains; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
 across repositories and opens another repository in its own window. Its
 **Sidebar shows** picker filters Working tasks / Available / Running without
-changing the selected Work. **⌘1–9** selects Working Tasks by position regardless of the
-filter; **⌃Tab / ⌃⇧Tab** cycles them. Missing slots do nothing.
+changing the selected Work. Click a Wave or Dashboard and its name moves into the
+sidebar header; the rows below are its Tasks, in plan or arrangement order, until
+**‹ repo** returns to Working Tasks. **⌘1–9** selects the sidebar's Task rows by
+position and **⌃Tab / ⌃⇧Tab** cycles them. Missing slots do nothing. Selecting a
+Dashboard's Task, from any of these, keeps the Dashboard in the path, as its tile does.
 With sidebar focus, **⌘F** searches its visible Tasks and Waves; **Search all Work**
 widens the same navigator. **Shift-F10** opens the focused Task's actions without
 changing the open workspace.

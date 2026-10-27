@@ -9,16 +9,11 @@ use fs2::FileExt;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-use crate::agent::{run_agent, AgentConfig, ProcessConfig};
 use crate::config::load_config_or_default;
 use crate::git::current_branch;
-use crate::graph::load_skill;
 use crate::pr_landing::{
     LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
     SUPERVISOR_STALE_AFTER,
-};
-use crate::session_record::{
-    AgentProcessRequest, CaptureHandle, SessionCaptureSpec, SessionGraphMembership,
 };
 use crate::store::sqlite::ci_incidents::RepairAttempt;
 use crate::store::{open_store, storage_config_from_env, SharedStore};
@@ -34,16 +29,22 @@ use super::pr::{
 #[derive(Debug, serde::Deserialize)]
 #[serde(tag = "status", content = "summary", rename_all = "snake_case")]
 enum RepairConclusion {
-    Published(String),
+    /// The summary stays in the run's Session.
+    Published(serde::de::IgnoredAny),
     Blocked(String),
 }
 
-impl RepairConclusion {
-    fn summary(&self) -> &str {
-        match self {
-            Self::Published(summary) | Self::Blocked(summary) => summary,
-        }
-    }
+/// The conclusion's shape, enforced natively where the provider supports it.
+fn repair_conclusion_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["published", "blocked"]},
+            "summary": {"type": "string"},
+        },
+        "required": ["status", "summary"],
+        "additionalProperties": false,
+    })
 }
 
 fn parse_repair_conclusion(answer: &str) -> OpsResult<RepairConclusion> {
@@ -103,7 +104,8 @@ impl LandingObservation {
 pub(crate) type ObservePr = Arc<dyn Fn(&PrLanding) -> OpsResult<LandingObservation> + Send + Sync>;
 /// How one check starts a ci-fix. A check without one (`lf pr reconcile`) still
 /// records the failure and leaves the repair to the landing's own process.
-pub(crate) type RepairCi = Arc<dyn Fn(&PrLanding, &CiIncident) -> OpsResult<()> + Send + Sync>;
+pub(crate) type RepairCi =
+    Arc<dyn Fn(&PrLanding, &CiIncident, &[CiCheck]) -> OpsResult<()> + Send + Sync>;
 
 /// Before attempt `n` (n ≥ 2) of the same incident starts: 1, 2, 4… minutes, at most 30.
 pub(crate) fn repair_backoff(attempt: u32) -> i64 {
@@ -164,7 +166,9 @@ fn repair_windows(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
 fn ci_fix(
     release: Option<Arc<(super::release_lock::ReleaseLock, crate::git::WorktreeLease)>>,
 ) -> RepairCi {
-    Arc::new(move |landing, incident| admit_ci_fix(landing, incident, release.as_deref()))
+    Arc::new(move |landing, incident, checks| {
+        admit_ci_fix(landing, incident, checks, release.as_deref())
+    })
 }
 
 /// The one decision over a PR read, its merge-request removal and its head
@@ -258,6 +262,7 @@ pub(crate) fn decide_merge(
 fn admit_ci_fix(
     landing: &PrLanding,
     incident: &CiIncident,
+    checks: &[CiCheck],
     release: Option<&(super::release_lock::ReleaseLock, crate::git::WorktreeLease)>,
 ) -> OpsResult<()> {
     let runtime = tokio::runtime::Runtime::new()?;
@@ -281,28 +286,6 @@ fn admit_ci_fix(
         }
         if repair_live(&store, reservation.process.as_ref()) {
             return Ok(());
-        }
-        if let Some(session) = &reservation.session {
-            // An attached Session's AgentProcess is judged by its own OS identity.
-            let bound = store
-                .sqlite
-                .session_attachment(session)
-                .map_err(repair_error)?
-                .is_some();
-            let agent = store
-                .sqlite
-                .agent_process_identity(session)
-                .map_err(repair_error)?;
-            if bound
-                && agent.is_some_and(|(pid, started)| {
-                    crate::journal::process_identity_evidence(pid, started)
-                        != crate::journal::ProcessIdentityEvidence::Dead
-                })
-            {
-                return Err(OpsError::Message(format!(
-                    "repair Session {session} has a live or unresolved provider"
-                )));
-            }
         }
         if let Some(task_id) = &landing.task_id {
             let task = store
@@ -347,44 +330,6 @@ fn admit_ci_fix(
         }
         let launcher = crate::journal::current_lf_process_id()
             .ok_or_else(|| repair_error("repair admission requires a recorded Process"))?;
-        let session = if let Some(id) = &reservation.session {
-            store
-                .sqlite
-                .session(id)
-                .map_err(repair_error)?
-                .ok_or_else(|| repair_error("reserved repair Session disappeared"))?
-        } else {
-            let (provider, model) = crate::config::parse_agent(config.agent());
-            crate::session::LfSession {
-                id: format!("session_{}", uuid::Uuid::new_v4().simple()).into(),
-                captured: None,
-                artifact_key: Some(crate::session_record::new_artifact_key()),
-                caller_artifact_key: None,
-                input_published: false,
-                cwd: landing.worktree.clone(),
-                skill: Some("ci-fix".into()),
-                provider: Some(provider),
-                model,
-                node: None,
-                iterations: None,
-                task_id: landing.task_id.clone(),
-                wave_id: None,
-                graph_lf_process_id: None,
-                work_source: landing
-                    .task_id
-                    .as_ref()
-                    .map(|_| crate::session::WorkSource::Declared),
-                bound_at: None,
-                interactive: false,
-                repo: None,
-                title: format!("Repair PR #{}", landing.pr_number),
-                title_source: crate::session::TitleSource::Generated,
-                request: None,
-                ready_summary: None,
-                completed_at: None,
-                created_at: OffsetDateTime::now_utc().unix_timestamp(),
-            }
-        };
         if !store
             .sqlite
             .reserve_repair(
@@ -392,7 +337,7 @@ fn admit_ci_fix(
                 landing.generation,
                 &launcher,
                 retry,
-                session,
+                landing.task_id.as_ref(),
             )
             .map_err(repair_error)?
         {
@@ -402,10 +347,17 @@ fn admit_ci_fix(
         let context = crate::os_process::execution_context().map_err(repair_error)?;
         let argv = vec![
             context.lf_bin.to_string_lossy().to_string(),
-            "task".into(),
-            "__repair".into(),
-            incident.identity.clone(),
-            launcher.to_string(),
+            "--batch".into(),
+            "--output-schema".into(),
+            repair_conclusion_schema().to_string(),
+            "skill".into(),
+            "ci-fix".into(),
+            ci_fix_message(
+                landing,
+                incident,
+                checks,
+                &earlier_attempts(&store, &incident.identity)?,
+            ),
         ];
         let work = landing
             .task_id
@@ -428,27 +380,67 @@ fn admit_ci_fix(
             },
         )
         .map_err(repair_error)?;
-        loop {
-            let owner_exited = crate::journal::process_evidence(&store.sqlite, &owner)
-                == crate::journal::ProcessIdentityEvidence::Dead;
-            let saved = store
-                .sqlite
-                .repair_reservation(&incident.identity)
-                .map_err(repair_error)?;
-            if saved.process.as_ref() != Some(&launcher) {
-                return Ok(());
-            }
-            if owner_exited {
-                return Err(repair_error(
-                    "repair owner exited before claiming its reservation; inspect transport.log",
-                ));
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+        if !store
+            .sqlite
+            .handoff_repair(&incident.identity, &launcher, &owner)
+            .map_err(repair_error)?
+        {
+            return Err(repair_error("repair reservation changed during startup"));
         }
+        Ok(())
     })
 }
 
-/// A reservation still held by the caller was never handed to a repair worker;
+/// What one ci-fix run repairs and how it answers.
+fn ci_fix_message(
+    landing: &PrLanding,
+    incident: &CiIncident,
+    checks: &[CiCheck],
+    earlier: &[String],
+) -> String {
+    // The checks that matched this incident carry its URLs, including the
+    // merge-group run of a queue eviction.
+    let checks = checks
+        .iter()
+        .map(|check| match &check.url {
+            Some(url) => format!("- {} ({url})", check.name),
+            None => format!("- {}", check.name),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let task_context = landing
+        .task_id
+        .as_ref()
+        .map(|task_id| format!("\nTask context: {task_id}"))
+        .unwrap_or_default();
+    let mut message = format!(
+        "Repository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
+        incident.repo,
+        incident.pr_number,
+        landing.branch,
+        incident.failed_head_sha,
+        checks,
+        task_context,
+    );
+    for (name, meaning) in [
+        ("merge-queue", "GitHub removed the PR from its merge queue because checks failed on the integrated commit. Inspect that run with `gh run list --event merge_group`; rerun a flake by re-arming, or fix a real failure."),
+        ("auto-merge", "The PR head is published but not armed. Verify it, then `lf arm`."),
+    ] {
+        if incident.failure_set.iter().any(|check| check == name) {
+            message.push_str(&format!("\n{name}: {meaning}"));
+        }
+    }
+    if !earlier.is_empty() {
+        message.push_str(&format!(
+            "\n\nEarlier repair attempts left this same failure in place:\n{}",
+            earlier.join("\n")
+        ));
+    }
+    message.push_str("\n\nReturn your final answer as one JSON object: {\"status\":\"published\",\"summary\":\"Published head, PR URL, auto-merge state, and checks run\"}. If this attempt cannot repair it, return {\"status\":\"blocked\",\"summary\":\"What you tried and what stopped you\"}; the landing tries again after a backoff with your summary.");
+    message
+}
+
+/// A reservation still held by the caller was never handed to a ci-fix run;
 /// a long-lived watcher must be able to retry its own unacknowledged launch.
 fn repair_live(store: &SharedStore, process: Option<&crate::id::LfProcessId>) -> bool {
     process.is_some_and(|process| {
@@ -474,266 +466,78 @@ fn checkout_execution_blockers(store: &SharedStore, worktree: &Path) -> OpsResul
     super::task_execution::execution_blockers(&store.sqlite, &processes)
 }
 
-pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let (store, landing, incident, captured) = runtime.block_on(async {
-        let store = landing_store().await?;
-        let id = store
-            .sqlite
-            .incident_landing(identity)
-            .map_err(repair_error)?
-            .ok_or_else(|| repair_error("repair incident has no landing"))?;
-        let landing = store
-            .get_pr_landing(&crate::pr_landing::PrLandingId::from_raw(id))
-            .await
-            .map_err(repair_error)?
-            .ok_or_else(|| repair_error("repair landing disappeared"))?;
-        let incident = store
-            .ci_incidents_since(OffsetDateTime::UNIX_EPOCH, None, Some(&landing.repo))
-            .await
-            .map_err(repair_error)?
-            .into_iter()
-            .find(|row| row.incident.identity == identity)
-            .ok_or_else(|| repair_error("repair incident disappeared"))?
-            .incident;
-        let process = crate::journal::current_lf_process_id()
-            .ok_or_else(|| repair_error("repair worker has no Process"))?;
-        if !store
-            .sqlite
-            .handoff_repair(
-                identity,
-                &crate::id::LfProcessId::parse(launcher).map_err(repair_error)?,
-                &process,
-            )
-            .map_err(repair_error)?
-        {
-            return Err(repair_error("repair reservation changed before startup"));
-        }
-        let session = store
-            .sqlite
-            .repair_reservation(identity)
-            .map_err(repair_error)?
-            .session
-            .ok_or_else(|| repair_error("repair reservation has no Session"))?;
-        let captured = store
-            .sqlite
-            .session(&session)
-            .map_err(repair_error)?
-            .ok_or_else(|| repair_error("repair Session disappeared"))?
-            .captured;
-        Ok::<_, OpsError>((store, landing, incident, captured))
-    })?;
-    let result = (|| {
-        let checks = match observe_github(&landing)? {
-            LandingObservation::Failing {
-                head_sha,
-                failing_checks,
-            } if head_sha == incident.failed_head_sha
-                && ci_incident(&landing, &failing_checks, OffsetDateTime::now_utc()).identity
-                    == attempt_base(&incident.identity) =>
-            {
-                failing_checks
-            }
-            _ => {
-                return Err(repair_error(
-                    "PR evidence changed before repair; next check will reconcile it",
-                ))
-            }
-        };
-        process_ci_fix(&store, &landing, &incident, &checks)
-    })();
-    let (conclusion, failure) = match &result {
-        Ok(RepairConclusion::Published(_)) => (Some("published"), None),
-        Ok(RepairConclusion::Blocked(reason)) => (Some("blocked"), Some(reason.clone())),
-        Err(error) => (None, Some(error.to_string())),
-    };
-    store
+/// Record each exited ci-fix run of this PR: the Session it opened and the
+/// conclusion its final answer returned.
+fn settle_repairs(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<()> {
+    let current = crate::journal::current_lf_process_id();
+    for (identity, owner) in store
         .sqlite
-        .finish_repair(
-            identity,
-            &crate::journal::current_lf_process_id().expect("repair has a process"),
-            failure.as_deref(),
-            conclusion,
-            captured,
-        )
-        .map_err(repair_error)?;
-    if let Some(failure) = failure {
-        Err(repair_error(failure))
-    } else {
-        Ok(())
-    }
-}
-
-fn process_ci_fix(
-    store: &SharedStore,
-    landing: &PrLanding,
-    incident: &CiIncident,
-    checks: &[CiCheck],
-) -> OpsResult<RepairConclusion> {
-    let skill = load_skill("ci-fix", &landing.worktree)
-        .map_err(|error| OpsError::Message(format!("ci-fix skill not found: {error}")))?
-        .content
-        .ok_or_else(|| OpsError::Message("ci-fix skill has no content".to_string()))?;
-    // The checks that matched this incident carry its URLs, including the
-    // merge-group run of a queue eviction.
-    let checks = checks
-        .iter()
-        .map(|check| match &check.url {
-            Some(url) => format!("- {} ({url})", check.name),
-            None => format!("- {}", check.name),
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let task_context = landing
-        .task_id
-        .as_ref()
-        .map(|task_id| format!("\nTask context: {task_id}"))
-        .unwrap_or_default();
-    let mut prompt = format!(
-        "{skill}\n\nRepair the exact recorded landing incident below. Start with `lf sync`. Repair and verify, then run `lf arm` to publish and enable auto-merge. Do not invoke `lf pr land` or wait for merge; a later finite check observes the merge; Task completion remains with its Workflow or conversation.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
-        incident.repo,
-        incident.pr_number,
-        landing.branch,
-        incident.failed_head_sha,
-        checks,
-        task_context,
-    );
-    for (name, meaning) in [
-        ("merge-queue", "GitHub removed the PR from its merge queue because checks failed on the integrated commit. Inspect that run with `gh run list --event merge_group`; rerun a flake by re-arming, or fix a real failure."),
-        ("auto-merge", "The PR head is published but not armed. Verify it, then `lf arm`."),
-    ] {
-        if incident.failure_set.iter().any(|check| check == name) {
-            prompt.push_str(&format!("\n{name}: {meaning}"));
-        }
-    }
-    let earlier = earlier_attempts(store, &incident.identity)?;
-    if !earlier.is_empty() {
-        prompt.push_str(&format!(
-            "\n\nEarlier repair attempts left this same failure in place:\n{}",
-            earlier.join("\n")
-        ));
-    }
-    prompt.push_str(
-        "\n\nReturn your final answer as one JSON object: {\"status\":\"published\",\"summary\":\"Published head, PR URL, auto-merge state, and checks run\"}. If this attempt cannot repair it, return {\"status\":\"blocked\",\"summary\":\"What you tried and what stopped you\"}; the landing tries again after a backoff with your summary. No one is available to answer questions. Continue resolving repairable failures yourself. Do not mark an unpublished repair as published. This result belongs only in your final answer; create no result file.",
-    );
-    let config = load_config_or_default(Some(&landing.worktree));
-    let mut launch = AgentConfig {
-        chrome: config.chrome,
-        task_prompt: prompt,
-        agent: Some(config.agent().to_string()),
-        cwd: Some(landing.worktree.clone()),
-        skip_permissions: true,
-        ..Default::default()
-    };
-    let reservation = store
-        .sqlite
-        .repair_reservation(&incident.identity)
-        .map_err(repair_error)?;
-    let session_id = reservation
-        .session
-        .as_deref()
-        .ok_or_else(|| repair_error("repair has no Session"))?;
-    if reservation.retries > 0 {
-        for artifact in store
-            .sqlite
-            .session_inputs(session_id)
-            .map_err(repair_error)?
-            .iter()
-            .rev()
-        {
-            if let Ok((_, manifest)) =
-                crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), artifact)
-            {
-                if let Some(request) = manifest.process {
-                    launch.agent = Some(request.agent);
-                    launch.provider_account_id = request.account_id;
-                    launch.system_prompt = request.system_prompt;
-                    launch.conversation_context = request.conversation_context;
-                    launch.task_prompt = request.task_prompt;
-                    launch.skill_invocation = request.skill_invocation;
-                    launch.max_turns = request.max_turns;
-                    launch.write_scope = request.write_scope;
-                    launch.execution_boundary = request.execution_boundary;
-                    break;
-                }
-            }
-        }
-    }
-    crate::agent::pin_provider_account_id_blocking(&mut launch)?;
-
-    let (harness, model) = crate::config::parse_agent(launch.agent());
-    let session = store
-        .sqlite
-        .session(session_id)
+        .pr_repair_processes(repo, pr_number)
         .map_err(repair_error)?
-        .ok_or_else(|| repair_error("reserved Session disappeared"))?;
-    let request = AgentProcessRequest::from_prepared(&launch);
-    let context = crate::trace::PreparedTurnContext::from_prompts(
-        &request.system_prompt,
-        &request.task_prompt,
-    );
-    let capture = CaptureHandle::begin_reserved_with_context(
-        SessionCaptureSpec {
-            harness,
-            model,
-            surface: "headless".to_string(),
-            cwd: landing.worktree.clone(),
-            repo: Some(landing.worktree.clone()),
-            worktree: Some(landing.worktree.clone()),
-            skill: Some("ci-fix".to_string()),
-            subjects: Vec::new(),
-            graph: SessionGraphMembership::Independent,
-            work: landing
-                .task_id
-                .clone()
-                .map(|task| crate::session::SessionWork {
-                    task_id: Some(task),
-                    wave_id: None,
-                    source: crate::session::WorkSource::Declared,
-                }),
-        },
-        session.input_key().map_err(repair_error)?.clone(),
-        Some(request),
-        &context,
-        |_| store.sqlite.publish_capture(&session.id, session.captured),
-    )
-    .map_err(|error| OpsError::Message(error.to_string()))?;
-    capture.record_input("initial", &launch.task_prompt);
-    let process = ProcessConfig {
-        auto: true,
-        stream: true,
-        capture: Some(capture.clone().into()),
-        ..Default::default()
-    };
-    let result = run_agent(&launch, &process);
-    let outcome = if matches!(&result, Ok(result) if result.exit_code == 0) {
-        "completed"
-    } else {
-        "failed"
-    };
-    capture
-        .finish(outcome)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let conclusion = capture.final_answer().ok().flatten().unwrap_or_else(|| {
-        format!(
-            "No repair conclusion recorded for input {}; retained artifacts: {}",
-            capture.artifact_key(),
-            capture.artifact_dir().display()
-        )
-    });
-    let result = result.map_err(|error| {
-        OpsError::Message(format!("ci-fix provider failed: {error}\n{conclusion}"))
-    })?;
-    if result.exit_code != 0 {
-        return Err(OpsError::Message(format!(
-            "ci-fix provider exited {}: {}\n{conclusion}",
-            result.exit_code,
-            result.stderr.trim()
-        )));
+    {
+        if Some(&owner) == current.as_ref()
+            || crate::journal::process_evidence(&store.sqlite, &owner)
+                != crate::journal::ProcessIdentityEvidence::Dead
+        {
+            continue;
+        }
+        // The run's Session names the owner that served it.
+        let session = match store
+            .sqlite
+            .transport_session(&owner)
+            .map_err(repair_error)?
+        {
+            Some(id) => store.sqlite.session(&id).map_err(repair_error)?,
+            None => None,
+        };
+        let answer = match session
+            .as_ref()
+            .and_then(|session| session.input_key().ok())
+        {
+            Some(input) => store
+                .sqlite
+                .input_final_answer(input)
+                .map_err(repair_error)?,
+            None => None,
+        };
+        let (conclusion, error) = match (&session, answer) {
+            (None, _) => (
+                None,
+                Some(format!(
+                    "ci-fix run {owner} exited before opening a Session; inspect transport.log"
+                )),
+            ),
+            (Some(session), None) => (
+                None,
+                Some(format!(
+                    "ci-fix Session {} recorded no final answer",
+                    session.id
+                )),
+            ),
+            (Some(_), Some(answer)) => match parse_repair_conclusion(&answer) {
+                Ok(RepairConclusion::Published(_)) => (Some("published"), None),
+                Ok(RepairConclusion::Blocked(reason)) => (Some("blocked"), Some(reason)),
+                Err(error) => (None, Some(error.to_string())),
+            },
+        };
+        if let Some(error) = &error {
+            // The next attempt backs off; say why this one ended.
+            eprintln!("PR #{pr_number}: ci-fix run ended without a repair: {error}");
+        }
+        store
+            .sqlite
+            .finish_repair(
+                &identity,
+                &owner,
+                session
+                    .as_ref()
+                    .map(|session| (session.id.as_str(), session.captured)),
+                error.as_deref(),
+                conclusion,
+            )
+            .map_err(repair_error)?;
     }
-    let conclusion = parse_repair_conclusion(&conclusion)?;
-    eprintln!("ci-fix: {}", conclusion.summary());
-    Ok(conclusion)
+    Ok(())
 }
 
 /// One line per earlier attempt of this incident, oldest first.
@@ -1045,6 +849,7 @@ async fn reconcile_claimed(
 ) -> OpsResult<()> {
     let LandingIo { observe, repair } = io;
     refresh_joined_request(store, landing).await?;
+    settle_repairs(store, &landing.repo, landing.pr_number)?;
     let mut observed = if let Some(merge_commit) = &landing.merge_commit {
         LandingObservation::Merged {
             head_sha: landing.observed_head_sha.clone(),
@@ -1167,8 +972,8 @@ async fn reconcile_claimed(
             head_sha,
             failing_checks,
         } => {
-            // Publication can expose a new head before its repair worker exits.
-            // Keep observing that worker's landing rather than admitting a new
+            // Publication can expose a new head before its ci-fix run exits.
+            // Keep observing that run's landing rather than admitting a new
             // incident against the checkout it still owns.
             if repair_running(store, &landing.repo, landing.pr_number)? {
                 return Ok(());
@@ -1217,7 +1022,7 @@ async fn reconcile_claimed(
             };
             let repaired = run_landing_operation(ownership, "ci-fix", {
                 let landing = landing.clone();
-                move || repair(&landing, &incident)
+                move || repair(&landing, &incident, &failing_checks)
             })
             .await;
             if let Err(error) = repaired {
@@ -1498,14 +1303,14 @@ pub(crate) fn reconcile_armed_pr(
     })
 }
 
-/// Whether a repair worker for this PR is running now, whichever landing reserved it.
+/// Whether a ci-fix run for this PR is running now, whichever landing reserved it.
 pub(crate) fn repair_running(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<bool> {
     Ok(store
         .sqlite
         .pr_repair_processes(repo, pr_number)
         .map_err(repair_error)?
         .iter()
-        .any(|process| repair_live(store, Some(process))))
+        .any(|(_, process)| repair_live(store, Some(process))))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1786,7 +1591,7 @@ mod tests {
         );
     }
 
-    /// Scripted observations and a counted ci-fix in place of GitHub and a repair worker.
+    /// Scripted observations and a counted ci-fix in place of GitHub and a ci-fix run.
     struct Script {
         observations: Mutex<VecDeque<LandingObservation>>,
         repairs: Mutex<u32>,
@@ -1808,7 +1613,7 @@ mod tests {
 
         fn repair(self: &Arc<Self>) -> RepairCi {
             let script = Arc::clone(self);
-            Arc::new(move |_, _| {
+            Arc::new(move |_, _, _| {
                 *script.repairs.lock().unwrap() += 1;
                 match &script.repair_error {
                     Some(error) => Err(OpsError::Message(error.clone())),
@@ -2343,7 +2148,9 @@ mod tests {
             landing.clone(),
             LandingIo::scripted(
                 Arc::new(|_| Err(OpsError::Message("network failure".into()))),
-                Some(Arc::new(|_, _| panic!("failed reads cannot start repair"))),
+                Some(Arc::new(|_, _, _| {
+                    panic!("failed reads cannot start repair")
+                })),
             ),
         )
         .await
@@ -2380,7 +2187,7 @@ mod tests {
             landing.clone(),
             LandingIo::scripted(
                 Arc::new(|_| Ok(failure("head"))),
-                Some(Arc::new(move |_, _| {
+                Some(Arc::new(move |_, _, _| {
                     entered.lock().unwrap().take().unwrap().send(()).unwrap();
                     held.lock().unwrap().recv().unwrap();
                     Ok(())

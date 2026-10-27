@@ -1282,8 +1282,11 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         .unwrap();
     conn.execute("UPDATE waves SET repo=?1", [&path]).unwrap();
     // Resumed, FIX-1 joins FIX-2 in Working, so Working Tasks has two tiles to arrange.
-    conn.execute("UPDATE tasks SET paused=0 WHERE issue_identifier='FIX-1'", [])
-        .unwrap();
+    conn.execute(
+        "UPDATE tasks SET paused=0 WHERE issue_identifier='FIX-1'",
+        [],
+    )
+    .unwrap();
     let counts = || -> (i64, i64, i64) {
         conn.query_row("SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM task_ownership), (SELECT count(*) FROM processes)", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap()
     };

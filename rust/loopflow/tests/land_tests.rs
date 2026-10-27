@@ -1705,6 +1705,8 @@ fn lf_pr_land_returns_before_a_later_check_observes_merge() {
         fs::write(worktree.join("feature.txt"), "feature").unwrap();
         fs::create_dir_all(worktree.join(".lf")).unwrap();
         fs::write(worktree.join(".lf/config.yaml"), "agent: codex\n").unwrap();
+        // A ci-fix run is an ordinary skill run, which keeps its prompt log ignored.
+        fs::write(worktree.join(".gitignore"), ".lf/prompts/\n").unwrap();
         if graph {
             fs::create_dir_all(worktree.join(".lf/graphs")).unwrap();
             fs::write(
@@ -1883,7 +1885,7 @@ fn waited_task_landing_completes_at_workflow_end_without_another_command() {
 }
 
 #[test]
-fn waited_task_landing_reports_repair_exit_before_reservation_handoff() {
+fn waited_task_landing_reports_a_repair_run_that_opened_no_session() {
     waited_task_landing("review", true);
 }
 
@@ -1928,6 +1930,7 @@ fn waited_task_landing(destination: &str, failed_startup: bool) {
             ".lf/config.yaml",
             "agent: codex\nplanning:\n  provider: linear\n  team: team-task-pr-tests\n",
         ),
+        (".gitignore", ".lf/prompts/\n"),
         (".lf/graphs/delivery-proof.yaml", graph.as_str()),
     ] {
         let path = worktree.join(path);
@@ -1969,18 +1972,19 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         &[("gh", &gh), ("codex", &codex), ("open", noop_open_script())],
         home.path(),
     );
-    let launcher = home.path().join("lf-delayed-repair");
+    let launcher = home.path().join("lf-failing-repair");
     fs::write(
         &launcher,
         if failed_startup {
-            "#!/bin/sh\nif [ \"$1\" = task ] && [ \"$2\" = __repair ]; then exit 17; fi\nexec \"$LF_TEST_BIN\" \"$@\"\n"
+            "#!/bin/sh\nif [ \"$4 $5\" = 'skill ci-fix' ]; then exit 17; fi\nexec \"$LF_TEST_BIN\" \"$@\"\n"
         } else {
-            "#!/bin/sh\nif [ \"$1\" = task ] && [ \"$2\" = __repair ]; then sleep 12; fi\nexec \"$LF_TEST_BIN\" \"$@\"\n"
+            "#!/bin/sh\nexec \"$LF_TEST_BIN\" \"$@\"\n"
         },
     )
     .unwrap();
     fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
     let fixture = register_task_with_pr(home.path(), &worktree, "waited-repair", &base);
+    support::managed_codex_account(home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let unrelated = loopflow::id::LfProcessId::new();
     db.execute("INSERT INTO processes(id,trace_id,pid,cwd,command,started_at) VALUES(?1,?2,?3,?4,'independent-edit',?5)",
@@ -2087,17 +2091,25 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     db.execute("UPDATE processes SET completed_at=started_at+1,outcome='succeeded',exit_code=0 WHERE id=?1", [&unrelated]).unwrap();
     let original_head = repo.head_sha();
     if failed_startup {
-        wait_for("repair owner exited before claiming its reservation");
+        wait_for("exited before opening a Session");
         assert!(!launches.exists());
         assert_eq!(repo.head_sha(), original_head);
-        let retained: (String, String, Option<String>) = db
-            .query_row(
-                "SELECT state,requested_head_sha,merge_commit FROM pr_landings",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(retained, ("blocked".into(), original_head, None));
+        // The attempt ended; the next one backs off rather than blocking.
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let retained = loop {
+            let retained: (String, String, Option<String>) = db
+                .query_row(
+                    "SELECT state,requested_head_sha,merge_commit FROM pr_landings",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            if retained.0 == "repairing" || Instant::now() > deadline {
+                break retained;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        };
+        assert_eq!(retained, ("repairing".into(), original_head, None));
         return;
     }
     let deadline = Instant::now() + Duration::from_secs(120);

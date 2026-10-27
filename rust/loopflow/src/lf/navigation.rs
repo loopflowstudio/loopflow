@@ -431,7 +431,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
                     .trim_end()
             ));
         }
-        output.push_str("\nSelect: --repo <name-or-path>, --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>\n--repo resolves names under repo_root (default ~/src) on the selected Machine.\n--machine otherwise uses its saved remote repository.\nWith --machine: --forward-agent\nAgent selection: -a, --agent <harness[:model]> overrides agents in Tasks, Graphs, skills and child commands\n");
+        output.push_str("\nSelect: --repo <name-or-path>, --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>, --cwd <path>\n--repo resolves names under repo_root (default ~/src) on the selected Machine.\n--machine otherwise uses its saved remote repository.\nWith --machine: --forward-agent\nAgent selection: -a, --agent <harness[:model]> overrides agents in Tasks, Graphs, skills and child commands\n");
         output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf skill NAME and lf graph NAME select definitions.\n");
         return Ok(output);
     }

@@ -85,7 +85,10 @@ if "--mode" not in args:
             | event
         )
         subprocess.run(
-            [os.environ["LF_BIN"], "__pi-event"], input=json.dumps(event), text=True, check=True
+            [os.environ["LF_BIN"], "__context-block", "--moment", "pi-event"],
+            input=json.dumps(event),
+            text=True,
+            check=True,
         )
 
     _callback({"type": "session_start"})

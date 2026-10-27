@@ -5200,6 +5200,7 @@ fn linear_on_demand_hook_child() {
     let Some(crate::lf::Commands::ContextBlock {
         delivery,
         moment: crate::context_block::ContextMoment::Stop,
+        ..
     }) = cli.command
     else {
         panic!("generated turn hook must select the planning callback")

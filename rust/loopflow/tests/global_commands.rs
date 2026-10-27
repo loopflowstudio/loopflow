@@ -1157,7 +1157,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
     }
     assert_eq!(
         explicit["action"],
-        serde_json::json!({"kind":"edge", "workflow":"captured", "take_up":false, "from":"review", "to":"end", "graph":null})
+        serde_json::json!({"kind":"edge", "workflow":"captured", "take_up":false, "from":"review", "to":"end", "name":"end", "runs":false})
     );
     assert_eq!(
         explicit["resolution"]["execution_machine"]["source"],
@@ -1177,17 +1177,20 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
         invalid["resolution"]["task"]["value"],
         registered.task.id.as_str()
     );
-    assert!(invalid["impediments"][0]
-        .as_str()
-        .unwrap()
-        .contains("does not leave review"));
+    assert!(
+        invalid["impediments"][0]
+            .as_str()
+            .unwrap()
+            .contains("is neither a route leaving review"),
+        "{invalid}"
+    );
     let text = success(
         command(home.path(), repo.path(), &["task", "run", "--explain"])
             .output()
             .unwrap(),
     );
     assert!(
-        text.contains("Workflow captured: review → end; run no Graph"),
+        text.contains("graph captured: review → end; run nothing"),
         "{text}"
     );
     assert!(text.contains("Nothing was executed"));
@@ -1986,7 +1989,7 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
     }
     let cases = [(
         vec!["task", "workflow", "move", "INF-123", "missing"],
-        "has no node",
+        "has no stage",
     )];
     let mut reasons = Vec::new();
     for (args, expected) in &cases {
@@ -2117,10 +2120,13 @@ fn task_move_explain_keeps_missing_workflow_and_registry_explicit() {
         "--json",
     ]);
     assert!(restart["action"].is_null());
-    assert!(restart["impediments"][0]
-        .as_str()
-        .unwrap()
-        .contains("has no workflow"));
+    assert!(
+        restart["impediments"][0]
+            .as_str()
+            .unwrap()
+            .contains("has no graph"),
+        "{restart}"
+    );
     let end = read(&[
         "task",
         "workflow",

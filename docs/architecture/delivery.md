@@ -222,6 +222,12 @@ shipping Task) and a release's own landing start a repair through this check.
 The landing lock, landing generation and incident reservation are the claim, so
 none of them repeats a fix. A returned bare landing is repaired by nothing.
 
+A repair is an ordinary detached `lf -b skill ci-fix` run in the landing's
+checkout; the incident's reservation names its owner Process. Any later check
+settles an exited run from its Session's final answer: `published`, `blocked`
+with a reason, or no conclusion. A run that ends without publishing ends that
+attempt; the next attempt starts after a backoff, with the earlier summaries.
+
 ### Recovery
 
 There is no schedule. Any lf read of this Machine's Tasks or processes

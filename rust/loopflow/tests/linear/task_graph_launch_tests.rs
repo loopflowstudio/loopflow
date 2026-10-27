@@ -605,6 +605,25 @@ impl Drop for HeldGraph {
     }
 }
 
+/// A held Graph step: an ordinary owned execution running this script, which
+/// optionally announces `ready` in the home and waits there for `release`.
+fn hold_script(home: &Path, announce: bool) -> PathBuf {
+    let script = home.join("hold.py");
+    let ready = if announce {
+        "(home / 'ready.tmp').write_text('ready')\n(home / 'ready.tmp').replace(home / 'ready')\n"
+    } else {
+        ""
+    };
+    fs::write(
+        &script,
+        format!(
+            "import os\nfrom pathlib import Path\nimport time\nhome = Path(os.environ['LF_HOME'])\n{ready}while not (home / 'release').exists():\n    time.sleep(.02)\n"
+        ),
+    )
+    .unwrap();
+    script
+}
+
 #[test]
 fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
     for launch in ["task", "direct", "checkout", "alias", "wt"] {
@@ -624,23 +643,10 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
         let alias = alias_root.path().join("target");
         #[cfg(unix)]
         std::os::unix::fs::symlink(task.repo.path(), &alias).unwrap();
-        task.repo
-            .create_file(".lf/graphs/proof.yaml", "- cmd: __telemetry-scorecard\n");
+        let hold = hold_script(task.home.path(), true);
         task.repo.create_file(
-            "scripts/lifecycle_scorecard.py",
-            r#"
-import json
-import os
-from pathlib import Path
-import time
-
-home = Path(os.environ['LF_HOME'])
-(home / 'ready.tmp').write_text(os.environ['LF_PROCESS_ID'])
-(home / 'ready.tmp').replace(home / 'ready')
-while not (home / 'release').exists():
-    time.sleep(.02)
-print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}))
-"#,
+            ".lf/graphs/proof.yaml",
+            &format!("- cmd: session serve -- python3 {}\n", hold.display()),
         );
         let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
         // The checkout already claimed the Task; inspection and Graphs add no entry.
@@ -781,27 +787,17 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
 #[test]
 fn task_run_returns_while_its_graph_keeps_running() {
     let task = WorkflowTask::new();
+    let hold = hold_script(task.home.path(), false);
     task.repo.create_file(
         ".lf/graphs/held.yaml",
-        "- cmd: __telemetry-scorecard\n- cmd: task sync --plan\n",
+        &format!(
+            "- cmd: session serve -- python3 {}\n- cmd: task sync --plan\n",
+            hold.display()
+        ),
     );
     task.repo.create_file(
         ".lf/graphs/held-flow.yaml",
         "- graph: held\n- interactive: {name: demo, id: review}\n",
-    );
-    task.repo.create_file(
-        "scripts/lifecycle_scorecard.py",
-        r#"
-import json
-import os
-from pathlib import Path
-import time
-
-home = Path(os.environ['LF_HOME'])
-while not (home / 'release').exists():
-    time.sleep(.02)
-print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}))
-"#,
     );
     task.select_workflow("held-flow");
     let home = task.home.path();
@@ -2080,23 +2076,13 @@ fn provider_completion_preserves_a_live_edge_and_the_graph_process_records_its_r
         fs::write(path, content).unwrap();
     };
     write(".lf/graphs/live-workflow.yaml", "- graph: live\n");
+    let hold = hold_script(task.home.path(), true);
     write(
         ".lf/graphs/live.yaml",
-        "- cmd: __telemetry-scorecard\n- cmd: task complete INF-123\n",
-    );
-    write(
-        "scripts/lifecycle_scorecard.py",
-        r#"
-import json
-import os
-from pathlib import Path
-import time
-home = Path(os.environ['LF_HOME'])
-(home / 'ready').write_text('ready')
-while not (home / 'release').exists():
-    time.sleep(.02)
-print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}))
-"#,
+        &format!(
+            "- cmd: session serve -- python3 {}\n- cmd: task complete INF-123\n",
+            hold.display()
+        ),
     );
     // The run names the checkout's Workflow file; no Wave selection is needed.
     let log_path = task.home.path().join("live.log");

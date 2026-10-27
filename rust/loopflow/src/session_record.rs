@@ -2078,19 +2078,6 @@ impl CaptureHandle {
         )
     }
 
-    pub(crate) fn begin_reserved_with_context(
-        spec: SessionCaptureSpec,
-        artifact_key: String,
-        process: Option<AgentProcessRequest>,
-        context: &crate::trace::PreparedTurnContext,
-        publish: impl FnOnce(&String) -> StoreResult<()>,
-    ) -> StoreResult<Self> {
-        let home = crate::store::lf_home_dir();
-        crate::disk::rotate_when_due(&home);
-        let caller = inherited_capture_key()?;
-        Self::begin_reserved_at(&home, spec, artifact_key, caller, process, context, publish)
-    }
-
     fn begin_reserved_at(
         home: &Path,
         spec: SessionCaptureSpec,

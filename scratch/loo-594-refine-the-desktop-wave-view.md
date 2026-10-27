@@ -353,7 +353,7 @@ after LOO-604; the Working Tasks Dashboard now also pages Working-only Waves.
 Jack Heart answered the demo questions:
 
 1. **Strip: Working only.** The Task strip keeps the sidebar's Working rule (idle, active, moving); Autonomous Tasks stay on the board's Autonomous section only. Closes concept-review #17.
-2. **No cancelled/abandoned distinction.** Linear "canceled" is abandoned; Tasks such as LOO-299 and LOO-318 that read `unstarted` locally but are canceled/merged upstream are old data to ignore. Keep them off the board (and the Backlog count) without inventing a separate state.
+2. **No cancelled/abandoned distinction, and no code for it.** Tasks such as LOO-299 and LOO-318 that read `unstarted` locally but are canceled/merged upstream are old data. Jack: don't add code for state users can't reach; the operator edits the local store directly. Nothing to build.
 3. **Fix the first-load reader timeout here.** Desktop reports "Workspace reader sent no observation for ten seconds" when the Work feed's startup runs past 10 s under load, before its first heartbeat. Make startup survive a slow first read (e.g. the feed emits a heartbeat before its first, slow projection, and/or Desktop's no-observation limit starts at the first frame) without hiding a reader that is truly hung.
 4. **Board paint bug:** the board part's dark background covers only the left part of its pane (to about x 1390 of 2000). The board must fill its part's frame.
 

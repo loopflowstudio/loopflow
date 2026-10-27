@@ -46,15 +46,24 @@ re-derive what these already record.
    Run the affected suites and required formatting/static-analysis checks once
    for the current tree, including the design's automated acceptance. Plan any
    relevant before/after measurements and headless UI captures in this same run.
-   - Follow the repo's documented guidance first (`TESTING.md`, `README.md`, and relevant module docs).
+   - Plan from the diff before running anything: list the changed paths, the
+     suites they can reach, and why. Run that list, not the whole repository.
+   - Find the repository's changed-aware runner (a test script, task runner or
+     CI path filter) in its agent guide, module READMEs or CI configuration.
+     Prefer it over hand-picked commands; if it can reuse a passing result only
+     for identical tracked/untracked content and the same plan, enable that reuse.
+   - A later pass reruns only the suites whose inputs changed since the last
+     pass. Unchanged suites keep their result.
+   - Never run a whole package or workspace test suite to stand in for focused
+     ones. Run the full matrix only when reproducing a CI failure or when release
+     guidance requires it; CI owns it otherwise.
+   - One build at a time: never run two compilers, test runners or linters
+     against the same build directory concurrently, in the background or in
+     parallel tool calls. Run tests first, then static analysis that reuses the
+     same build.
+   - Leave slow integration binaries the change cannot reach to CI.
    - Cross-check CI so formatting and static-analysis commands match what the
-     repository enforces.
-   - Use the repo's standard command entrypoints and auto-fix modes where
-     available. Fix remaining formatting or static-analysis failures manually.
-   - Prefer a changed-aware runner. If it can reuse a passing result only for
-     identical tracked/untracked content and the same plan, enable that reuse.
-   - Do not run the full local matrix merely to mirror parallel CI. Run it only
-     when release guidance requires it or when reproducing a full-matrix failure.
+     repository enforces. Use auto-fix modes where available; fix the rest by hand.
    - All required checks must run headless without a person or display session.
      For Desktop, build the app and run view/interaction tests or offscreen
      snapshots. Do not require manual clicks or permission dialogs.
@@ -112,6 +121,6 @@ leave them alone. Report check results and unresolved blockers briefly.
 
 Did you discover a quality check this repo always needs? A formatter, a type
 check, a build step that should run every time? Encode it so the next gate is
-faster. Most discoveries belong in repo docs (AGENTS.md, TESTING.md) where all
-skills can see them. Copy this skill to `.lf/skills/gate.md` when the repo needs
-gate to work differently.
+faster. Most discoveries belong in the repo's agent guide or module docs where
+all skills can see them. Copy this skill to `.lf/skills/gate.md` when the repo
+needs gate to work differently.

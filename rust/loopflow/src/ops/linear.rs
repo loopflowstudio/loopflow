@@ -248,12 +248,23 @@ pub(crate) async fn resolve_context(
 /// Planning providers authenticate via OAuth: the access token and refresh grant
 /// live in store, and access refreshes the grant before the access token expires.
 pub(super) async fn resolve_planning_token(provider: Provider) -> OpsResult<String> {
+    Ok(planning_token(provider, false).await?.access_token)
+}
+
+/// This laptop's credential just refreshed, so its access token lives as long as
+/// the provider grants. The refresh grant stays here; a machine handed the access
+/// token cannot rotate it away.
+pub(crate) async fn renewed_planning_token(provider: Provider) -> OpsResult<ProviderToken> {
+    planning_token(provider, true).await
+}
+
+async fn planning_token(provider: Provider, renew: bool) -> OpsResult<ProviderToken> {
     let deadline = Instant::now() + LINEAR_REFRESH_TIMEOUT;
     tokio::time::timeout(LINEAR_REFRESH_TIMEOUT, async {
         let config = super::planning_sync::storage_config_from_env()?;
         let store = super::planning_sync::open_planning_store(&config).await?;
         let StorageConfig::Sqlite { path } = config;
-        resolve_planning_token_from_store(provider, &store, &path, deadline).await
+        resolve_planning_token_from_store(provider, &store, &path, deadline, renew).await
     })
     .await
     .map_err(|_| credential_deadline(provider))?
@@ -277,7 +288,7 @@ fn credential_deadline(provider: Provider) -> OpsError {
     credential_retry(provider, &format!("{} credential resolution deadline elapsed; a pending write may still settle, so the next call must re-read the credential", provider.display_name()))
 }
 
-fn usable_token(provider: Provider, token: ProviderToken) -> OpsResult<String> {
+fn usable_token(provider: Provider, token: ProviderToken) -> OpsResult<ProviderToken> {
     if token.access_token.trim().is_empty()
         || token
             .expires_at
@@ -291,7 +302,7 @@ fn usable_token(provider: Provider, token: ProviderToken) -> OpsResult<String> {
             ),
         ));
     }
-    Ok(token.access_token)
+    Ok(token)
 }
 
 async fn planning_refresh_lock(
@@ -334,7 +345,12 @@ async fn resolve_planning_token_from_store(
     store: &Store,
     database: &Path,
     deadline: Instant,
-) -> OpsResult<String> {
+    renew: bool,
+) -> OpsResult<ProviderToken> {
+    let due = |token: &ProviderToken| {
+        provider_token_refresh_due(token, time::OffsetDateTime::now_utc().unix_timestamp())
+            || (renew && token.refresh_token.is_some())
+    };
     let read = || async {
         store
             .get_provider_token(provider.as_str())
@@ -342,12 +358,12 @@ async fn resolve_planning_token_from_store(
             .map_err(|_| credential_retry(provider, "Could not read the credential"))
     };
     let initial = read().await?.ok_or_else(|| missing_credential(provider))?;
-    if !provider_token_refresh_due(&initial, time::OffsetDateTime::now_utc().unix_timestamp()) {
+    if !due(&initial) {
         return usable_token(provider, initial);
     }
     let lock = planning_refresh_lock(provider, database, deadline).await?;
     let current = read().await?.ok_or_else(|| missing_credential(provider))?;
-    if !provider_token_refresh_due(&current, time::OffsetDateTime::now_utc().unix_timestamp()) {
+    if !due(&current) {
         return usable_token(provider, current);
     }
     for attempt in 0..2 {

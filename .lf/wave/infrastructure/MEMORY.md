@@ -206,7 +206,7 @@ fixture seeding and Linux reconnect peers. Network-isolated Linux proofs cover
 concurrent hooks, no idle-agent requests, watcher backoff, lost replies and
 rate-limit recovery; formatting, Clippy and architecture checks pass. A scheduled
 release child signal did not recur; cause unknown. Hosted candidate CI, live
-request counts and installed acceptance remain unproved. TESTING.md retains
+request counts and installed acceptance remain unproved. `rust/loopflow/tests/README.md` retains
 Linux HTTPS reconnect as CI's obligation. Exact failures, commands and counts:
 `6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
 On-demand Linear acquisition.
@@ -808,7 +808,7 @@ Home must agree. The real Codex fixture used synthetic feedback and predates
 generic loop-decide; Claude launch/resume, real five-minute stall and rendered
 Desktop agreement remain unverified. Simulated liveness grants no signal authority;
 preserve first PID/birth across missing samples and account for active tools.
-TESTING.md owns fixture/disk isolation; no branch binary may migrate main.
+`rust/loopflow/tests/README.md` and `scripts/README.md` own fixture/disk isolation; no branch binary may migrate main.
 
 ## Data model and performance decisions (curated 2026-10-17)
 
@@ -900,7 +900,7 @@ removal cause: `71bbdb80d268e5e9eb6a84d5bc11f53c016e7c51:.lf/wave/infrastructure
 this heading. Current model/acceptance above supersedes old controllers without
 retroactive proof. Repair operation entry; UI observation is no scheduler.
 Historical trigger/default-wait proposals need current selection. Current
-[delivery mechanics](../../../docs/architecture/delivery.md) and TESTING.md own
+[delivery mechanics](../../../docs/architecture/delivery.md) and [CI](../../../.github/README.md) own
 their guidance; Wave learning stays with its identified owner.
 
 ## Installation and command scope (curated 2026-10-11)
@@ -985,7 +985,7 @@ runs prove no firing, and old gaps do not keep later telemetry red.
   marker through `migration_sql_for_test`; an `include_str!` pointing directly
   at `migrations/drafts/` passes locally and fails the release tree at compile
   time.
-- **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks named in TESTING.md: getpwuid bypasses HOME/LF_HOME. PR #1444 supplies disposable-account proofs; until integrated, isolated CI owns them. Ordinary fixtures also scrub inherited LF_* authority.
+- **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks named in `tests/e2e/README.md`: getpwuid bypasses HOME/LF_HOME. PR #1444 supplies disposable-account proofs; until integrated, isolated CI owns them. Ordinary fixtures also scrub inherited LF_* authority.
 - **One writer owns a checkout and its Git sequencer.** Concurrent-edit/rebase incident: `6016eca30585:wave/infrastructure/MEMORY.md`, Gotchas.
 - **Linear Project UUIDs survive renames; derived slugs do not.** Canonical local
   Project fields own content; optional Linear bindings and observations retain

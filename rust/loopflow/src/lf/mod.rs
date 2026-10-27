@@ -2209,7 +2209,7 @@ pub enum OndemandCommand {
         vcpus: u32,
         #[arg(long)]
         memory_gb: u32,
-        /// Modal and Fly size disk themselves
+        /// Modal sizes disk itself
         #[arg(long, default_value_t = 10)]
         disk_gb: u32,
         /// One GPU, on runpod (A40, A6000, L4, RTX4090, L40S, A100, H100),

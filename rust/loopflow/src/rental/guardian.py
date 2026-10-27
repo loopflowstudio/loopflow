@@ -4,8 +4,8 @@ Standard library only; it starts before anything else on the machine. It runs
 the machine's command as its child and returns at the deadline, or sooner when
 the child exits. What returning means is the provider's:
 
-- Exit: the machine ends when its main process does (Fly's `auto_destroy`,
-  AWS's terminate-on-shutdown).
+- Exit: the machine ends when its main process does (AWS's
+  terminate-on-shutdown).
 - Delete: on RunPod it then deletes its own pod with the pod-scoped key RunPod
   injects as RUNPOD_API_KEY, which can only touch this pod, and first reads the
   price actually charged so the budget can shorten the deadline.

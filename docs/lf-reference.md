@@ -1469,6 +1469,16 @@ Refresh live Loopflow call trees on a terminal; print once when redirected
 | `--json` | Emit one versioned activity snapshot as JSON Default: false. |
 | `--help / -h` | Print help |
 
+## lf monitor rollover
+
+Move idle Sessions still running a superseded lf onto the selected install
+
+| Argument | What it does |
+|---|---|
+| `--dry-run` | List what would move and what stays without stopping anything Default: false. |
+| `--json` | Emit the rollover report as JSON Default: false. |
+| `--help / -h` | Print help |
+
 ## lf monitor prune
 
 Reap registered orphan providers and remove dead process receipts
@@ -2007,7 +2017,7 @@ Name what to rent and the most it may cost
 | `--provider` | provider |
 | `--vcpus` | vcpus |
 | `--memory-gb` | memory gb |
-| `--disk-gb` | Modal and Fly size disk themselves Default: 10. |
+| `--disk-gb` | Modal sizes disk itself Default: 10. |
 | `--gpu` | One GPU, on runpod (A40, A6000, L4, RTX4090, L40S, A100, H100), aws (L4, A10G) or modal (T4, L4, A10G, L40S, A100, H100) |
 | `--spot` | Interruptible capacity on aws or runpod, bid at the admitted price; the provider may end it early, losing unpushed work Default: false. |
 | `--hours` | Hard deadline for each machine it rents, at most 24 Default: 4. |

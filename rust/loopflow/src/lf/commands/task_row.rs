@@ -67,7 +67,11 @@ pub(crate) struct TaskNames {
 }
 
 impl TaskNames {
-    pub(crate) async fn read(store: &SharedStore) -> Result<Self> {
+    /// Without a store there are no Tasks to name.
+    pub(crate) async fn read(store: Option<&SharedStore>) -> Result<Self> {
+        let Some(store) = store else {
+            return Ok(Self::default());
+        };
         let waves = store
             .list_waves(None)
             .await

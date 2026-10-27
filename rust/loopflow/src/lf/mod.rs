@@ -237,16 +237,7 @@ impl Cli {
                             | WaveWorkflowCommand::Source { .. }
                     }
             ),
-            Some(Commands::Desktop { cmd }) => !matches!(
-                cmd,
-                DesktopCommand::View { .. }
-                    | DesktopCommand::Plans { .. }
-                    | DesktopCommand::Plan { .. }
-                    | DesktopCommand::Done { .. }
-                    | DesktopCommand::Wave { .. }
-                    | DesktopCommand::Task { .. }
-                    | DesktopCommand::Layout { save: false, .. }
-            ),
+            Some(Commands::Desktop { cmd }) => !cmd.is_read(),
             _ => true,
         }
     }
@@ -1012,6 +1003,22 @@ pub enum DesktopCommand {
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
+}
+
+impl DesktopCommand {
+    /// Reads of saved intent and Work that need no Desktop and change nothing.
+    pub fn is_read(&self) -> bool {
+        matches!(
+            self,
+            Self::View { .. }
+                | Self::Plans { .. }
+                | Self::Plan { .. }
+                | Self::Done { .. }
+                | Self::Wave { .. }
+                | Self::Task { .. }
+                | Self::Layout { save: false, .. }
+        )
+    }
 }
 
 /// Which part of the view on screen a command acts on. `-p` is a path: a pane

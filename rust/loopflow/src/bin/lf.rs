@@ -1516,19 +1516,7 @@ fn init_tracing(verbose: bool) {
 }
 
 fn desktop_intent_read(cli: &Cli) -> bool {
-    use loopflow::lf::DesktopCommand;
-    matches!(
-        cli.command,
-        Some(Commands::Desktop {
-            cmd: DesktopCommand::View { .. }
-                | DesktopCommand::Plans { .. }
-                | DesktopCommand::Plan { .. }
-                | DesktopCommand::Done { .. }
-                | DesktopCommand::Wave { .. }
-                | DesktopCommand::Task { .. }
-                | DesktopCommand::Layout { save: false, .. }
-        })
-    )
+    matches!(&cli.command, Some(Commands::Desktop { cmd }) if cmd.is_read())
 }
 
 /// Opened per event, so a command that logs nothing creates no home.

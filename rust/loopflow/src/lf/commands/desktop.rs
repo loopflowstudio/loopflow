@@ -563,8 +563,6 @@ fn selection_repository(
         .context("repository has no recorded Work identity")
 }
 
-/// `lf desktop plans`: every plan a repository window shows, the default and
-/// each saved Dashboard, as Desktop reads them.
 /// `lf desktop task`: what the Task pane shows, from the same reading as
 /// `lf task status`.
 fn task_pane(issue: &str, watch: bool) -> Result<()> {
@@ -580,6 +578,8 @@ fn task_pane(issue: &str, watch: bool) -> Result<()> {
     Ok(())
 }
 
+/// `lf desktop plans`: every plan a repository window shows, the default and
+/// each saved Dashboard, as Desktop reads them.
 fn plans(cli: &crate::lf::Cli, watch: bool) -> Result<()> {
     if !watch {
         let store = crate::store::read_existing_registry()?

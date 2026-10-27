@@ -407,12 +407,9 @@ impl Shape {
         T: Serialize,
         U: Serialize,
     {
-        Ok(match (self, store) {
-            (Self::Desktop, _) => serde_json::to_value(value)?,
-            (Self::Tasks, Some(store)) => {
-                serde_json::to_value(rows(value, &TaskNames::read(store).await?))?
-            }
-            (Self::Tasks, None) => serde_json::to_value(rows(value, &TaskNames::default()))?,
+        Ok(match self {
+            Self::Desktop => serde_json::to_value(value)?,
+            Self::Tasks => serde_json::to_value(rows(value, &TaskNames::read(store).await?))?,
         })
     }
 }
@@ -862,14 +859,8 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
             None => Vec::new(),
         };
         if json {
-            let rows = Shape::Tasks
-                .print(store.as_ref(), tasks, |tasks, names| {
-                    tasks
-                        .into_iter()
-                        .map(|task| names.row(task))
-                        .collect::<Vec<_>>()
-                })
-                .await?;
+            let names = TaskNames::read(store.as_ref()).await?;
+            let rows: Vec<TaskRow> = tasks.into_iter().map(|task| names.row(task)).collect();
             println!("{}", serde_json::to_string(&rows)?);
         } else {
             for task in tasks {
@@ -897,7 +888,7 @@ pub fn watch_tasks(repo: &Path, args: TaskListArgs) -> Result<()> {
                     return Ok(Vec::new());
                 };
                 let tasks = open_tasks(&store, &repo, &args).await?;
-                let names = TaskNames::read(&store).await?;
+                let names = TaskNames::read(Some(&store)).await?;
                 Ok(tasks.into_iter().map(|task| names.row(task)).collect())
             }
         },
@@ -980,7 +971,7 @@ pub(crate) async fn task_detail(
         .pop()
         .expect("a registered Task has a row");
     Ok(TaskDetail {
-        task: TaskNames::read(store).await?.row(row),
+        task: TaskNames::read(Some(store)).await?.row(row),
         sessions: status
             .overview
             .map(|overview| overview.sessions)

@@ -245,6 +245,13 @@ unless "Work needed" says otherwise.
    reading marked unavailable (the monitor read only `task_overview`); a
    confirmation re-reads each watch (the monitor replayed unchanged parts).
 5. Live p99 A/B with an installed build: gate/demo.
+6. Acceptance, cause unknown (Jack Heart, 2026-10-27): installed v0.14.18
+   Desktop (`LF_DESKTOP=com.loopflow.mac lf desktop state`) timed out twice
+   at 10 s (15:01) after a 0.1 s success (14:28). Sample
+   `/tmp/installed-v18-desktop-sample.txt`: main AppKit thread idle, a
+   background WorkFrame JSON decode, socket still open. Not a claim this
+   branch caused it; check whether the released frame decode (large planning
+   frames) is what holds the socket. Release/install belongs to root.
 
 ## Delete — do not maintain
 
@@ -273,3 +280,4 @@ unless "Work needed" says otherwise.
 - Realign (2026-10-27): plan reconciled to code (watch argv, clocks, history filters); prose only, no checks rerun.
 - Client API docs (surfaces watch list, work.md `lf ps`): `--test integration documented_commands` 4 passed.
 - Minimal streamed JSON (75faef7b22): integration world_recipes (7), watch lib (15), dto_fixtures, cli_reference (regenerated), planning_foreground, performance, global_commands (45), session_lifecycle (29), two_people, process_ownership (11) passed; `test_desktop.sh` 18 suites / 233 tests passed. machine_commands failed only under parallel load (passes alone). Not run: clippy and the lib linear suites (graph, local_planning, status, task_graph_launch, wave_*), stopped when the disk filled: gate.
+- Compress (`DesktopCommand::is_read` shared by preview and process recording; `TaskNames::read` takes an optional store): clippy --all-targets clean (also covers 75faef7b22's deferred clippy); integration `dto_fixtures world_recipes global_commands` 50 passed.

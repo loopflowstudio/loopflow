@@ -587,6 +587,9 @@ lf history                         # durable Work, delivery and steering facts
 lf history list --json              # bounded Process history with a next cursor
 lf mon active --watch --json        # NDJSON until stdin closes
 lf history show SESSION --final     # provider conclusion
+lf history show SESSION --transcript   # the conversation, as its providers kept it
+lf history search "cleanupPeriodDays" --since 30d   # text across recent conversations
+lf history retention                # what providers still keep, and what goes next
 lf usage --days 30                  # measured consumption and missing evidence
 lf usage --task LOO-265 --context   # each step's input by source, flagged over budget
 lf history show SESSION --context       # input cost by source
@@ -602,6 +605,15 @@ lf wt timing                        # how long real `lf wt list` runs took here
 ```
 
 Usage covers Sessions recorded on this Machine; a teammate's runs appear on theirs.
+
+Conversation text stays with its provider. `lf history show SESSION` prints each
+provider conversation the Session used, read from Claude, Codex or Pi transcript
+files or `opencode session export`. Loopflow stores none of it. When a transcript
+is gone, it prints the recorded turns (time, status, final answer) and why: Claude
+removes conversations idle longer than `cleanupPeriodDays` (30 days unless set in
+its `settings.json`); Codex, OpenCode and Pi keep everything. Raise
+`cleanupPeriodDays` to keep more Claude history. `lf history retention` counts
+what is readable by provider, account and age, and lists the next removals.
 
 `lf history show SESSION` also prints private Codex relay failures with their
 AgentProcess identity. `--events` includes the diagnostic JSON. Retention keeps

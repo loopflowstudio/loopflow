@@ -337,7 +337,13 @@ impl CodexConnection {
                 json!({"method":"initialized"}).to_string().into(),
             ))
             .await?;
-        let mut history = super::codex_history::History::default();
+        let mut history = super::codex::CodexStream::new(super::fact_writer::FactWriter::new(
+            self.store.clone(),
+            self.session_id.to_string(),
+            None,
+            None,
+            Default::default(),
+        ));
         let mut cursor = Value::Null;
         loop {
             let result = rpc_request(
@@ -352,15 +358,10 @@ impl CodexConnection {
             result["data"]
                 .as_array()
                 .ok_or_else(|| anyhow!("Native history response has no turns"))?;
-            super::dispatch::off_reactor(|| {
-                history.record(
-                    &self.store,
-                    &self.session_id,
-                    None,
-                    Some(thread),
-                    &json!({"result":result}),
-                )
-            })?;
+            history
+                .inbound(&json!({"result":result}), Some(thread))
+                .await
+                .1?;
             let next = result.get("nextCursor").cloned().unwrap_or(Value::Null);
             if next.is_null() {
                 break;
@@ -425,7 +426,13 @@ impl CodexConnection {
             .await
             .context(RelayOperation::new("handshake", "relay_to_provider"))?;
         let input_key = &diagnostics.input;
-        let mut history = super::codex_history::History::default();
+        let mut history = super::codex::CodexStream::new(super::fact_writer::FactWriter::new(
+            self.store.clone(),
+            self.session_id.to_string(),
+            self.attachment.clone(),
+            None,
+            Default::default(),
+        ));
         let mut startup_request = None;
         let mut initial_request = None;
         let mut client_open = true;
@@ -500,13 +507,14 @@ impl CodexConnection {
                         }
                         _ => false,
                     };
-                    match history.request(&rpc, self.attachment.as_ref().map(|attachment| (&self.store,self.session_id.as_str(),attachment))) {
-                        Ok(()) => {},
-                        Err(StoreError::InvalidAuthority(reason)) => {
-                            reject(&mut client, &rpc, &reason).await?;
-                            continue;
+                    if let Err(error) = history.outbound(&rpc).await {
+                        match error.downcast_ref::<StoreError>() {
+                            Some(StoreError::InvalidAuthority(reason)) => {
+                                reject(&mut client, &rpc, reason).await?;
+                                continue;
+                            }
+                            _ => return Err(error),
                         }
-                        Err(error) => return Err(error.into()),
                     }
                     let message = Message::Text(serde_json::to_string(&rpc)?.into());
                     if passive {
@@ -587,10 +595,7 @@ impl CodexConnection {
                                         &crate::session_record::capture_dir(session.input_key()?)?, thread, self.account_id.clone())?;
                                 }
                             }
-                            super::dispatch::off_reactor(|| {
-                                history.record(&self.store, &self.session_id,
-                                    self.attachment.as_ref(), thread.as_ref(), &rpc)
-                            })?;
+                            history.inbound(&rpc, thread.as_ref()).await.1?;
                             if initial_request.as_ref().is_some_and(|(id, _)| rpc.get("id") == Some(id)) {
                                 let (_, text) = initial_request.take().expect("matched initial request");
                                 if let Some(error) = rpc.get("error") {
@@ -628,7 +633,7 @@ impl CodexConnection {
                             let request = json!({"id":id,"method":"turn/start","params":{
                                 "threadId":thread,"input":[{"type":"text","text":&text}]
                             }});
-                            history.request(&request, self.attachment.as_ref().map(|attachment| (&self.store,self.session_id.as_str(),attachment)))?;
+                            history.outbound(&request).await?;
                             let outcome;
                             (upstream, outcome) = self.send(upstream, Message::Text(request.to_string().into()),
                                 Some((input_key.as_str(), NativeSubmission::InputDispatched))).await?;

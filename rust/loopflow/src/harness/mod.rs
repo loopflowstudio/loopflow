@@ -1,14 +1,11 @@
-mod activity_tracker;
 pub mod agent_process;
 pub mod claude;
-mod claude_history;
-mod claude_mapping;
+mod claude_decode;
 pub(crate) mod claude_trust;
 pub mod codex;
 #[cfg(unix)]
 pub mod codex_connection;
-mod codex_history;
-mod codex_mapping;
+mod codex_decode;
 mod common;
 #[cfg(test)]
 mod conformance_tests;
@@ -16,18 +13,18 @@ pub(crate) mod context;
 mod dispatch;
 #[cfg(all(test, unix))]
 mod dispatch_tests;
+mod fact;
+mod fact_writer;
 mod lf_tag;
 pub mod opencode;
-pub(crate) mod opencode_history;
-mod opencode_mapping;
+mod opencode_decode;
 pub mod pi;
-pub mod pi_history;
-mod pi_mapping;
+mod pi_decode;
 
 use crate::id::AgentSessionId;
 /// Name a codex rate-limit window by duration — shared with the subscription
 /// poller so stream and poll observations land on the same window key.
-pub(crate) use codex_mapping::window_name as codex_window_name;
+pub(crate) use codex_decode::window_name as codex_window_name;
 
 use anyhow::Result;
 use async_trait::async_trait;

@@ -12,6 +12,8 @@ struct TelemetryDashboardView: View {
 
     @State private var usage: [SessionHistory] = []
     @State private var doctor: DoctorReport?
+    @State private var retention: RetentionSummary?
+    @State private var retentionError: String?
     @State private var codebase: CodeNode?
     @State private var growth: [CodeSnapshot] = []
     @State private var selectedRepo: String?
@@ -40,6 +42,13 @@ struct TelemetryDashboardView: View {
                         subtitle: "Provider-authored cumulative counters. Dashes are unknown; final receipts and evidence gaps remain explicit."
                     ) {
                         DirectSessionUsageList(history: usage, repo: selectedRepo)
+                    }
+
+                    chartCard(
+                        "Retention",
+                        subtitle: "Conversations providers still keep, and what they remove next. Loopflow keeps the facts."
+                    ) {
+                        RetentionCard(summary: retention, failure: retentionError)
                     }
 
                     chartCard(
@@ -253,6 +262,13 @@ struct TelemetryDashboardView: View {
             }
         } catch {
             errorMessage = error.localizedDescription
+        }
+        do {
+            retention = try await RegistryQueryLocal.shared.retention()
+            retentionError = nil
+        } catch {
+            retention = nil
+            retentionError = error.localizedDescription
         }
         if selectedRepo == nil || !repos.contains(selectedRepo ?? "") {
             selectedRepo = repos.first
@@ -549,6 +565,77 @@ private struct IcicleNode: View {
     private var depthColor: Color {
         let ramp: [Color] = [palette.emphasisInk, palette.working, palette.success, palette.warning]
         return ramp[min(depth, ramp.count - 1)]
+    }
+}
+
+/// What each provider still keeps of your Sessions, from `lf history retention --json`.
+struct RetentionCard: View {
+    @Environment(\.palette) private var palette
+    let summary: RetentionSummary?
+    let failure: String?
+
+    private static let shownExpiries = 5
+
+    var body: some View {
+        if let failure {
+            EmptyChartHint(message: "Retention unavailable", hint: failure)
+        } else if let summary, summary.sessions > 0 {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                ForEach(summary.harnesses) { harness in
+                    Text(Self.line(harness))
+                        .font(Typography.code(12))
+                        .foregroundStyle(palette.text)
+                }
+                Text("Expiring in the next 7 days: \(summary.expiringWithinWeek)")
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textSecondary)
+                ForEach(summary.nextExpiries.prefix(Self.shownExpiries)) { expiring in
+                    Text("after \(Self.date(expiring.after))  \(expiring.harness)  \(expiring.title)")
+                        .font(Typography.code(11))
+                        .foregroundStyle(palette.textSecondary)
+                        .lineLimit(1)
+                        .help(expiring.sessionID)
+                }
+                if let hint = Self.keepMoreHint(summary) {
+                    Text(hint)
+                        .font(Typography.caption(11))
+                        .foregroundStyle(palette.textSecondary)
+                }
+            }
+        } else {
+            EmptyChartHint(message: "No Sessions recorded", hint: "Retention appears once a Session runs")
+        }
+    }
+
+    static func line(_ harness: HarnessRetention) -> String {
+        var line = "\(harness.harness)  \(harness.provider.formatted()) readable · \(harness.facts.formatted()) facts only"
+        if harness.unknown > 0 {
+            line += " · \(harness.unknown.formatted()) not checked"
+        }
+        if let next = harness.nextExpiry {
+            line += " · next removal after \(date(next))"
+        } else if harness.harness != "claude" {
+            line += " · no provider expiry"
+        }
+        return line
+    }
+
+    /// Claude is the only provider that removes history; name its setting.
+    static func keepMoreHint(_ summary: RetentionSummary) -> String? {
+        for home in summary.homes {
+            if case let .claudeCleanup(days, settings) = home.policy {
+                let file = settings ?? "\(home.home)/settings.json"
+                return "Claude removes conversations idle \(days) days. Raise cleanupPeriodDays in \(file) to keep more."
+            }
+        }
+        return nil
+    }
+
+    static func date(_ unix: Int64) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(unix)))
     }
 }
 

@@ -78,6 +78,7 @@ const FILTER_ONLY: &[&[&str]] = &[
     &["wave", "cron", "publish"],
     &["wave", "cron", "unpublish"],
     &["history", "list"],
+    &["history", "search"],
     &["history", "usage"],
 ];
 

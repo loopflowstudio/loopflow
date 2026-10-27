@@ -88,6 +88,31 @@ AWS (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, region), `DIGITALOCEAN_TOKEN`
 (optional `DIGITALOCEAN_REGION`, default `nyc3`).
 The live demo per provider needs those set (`doppler secrets set NAME > /dev/null`).
 
+## Concept review (2026-10-26, proposed; nothing below is accepted yet)
+
+The product promise people rely on is "a rental ends by its deadline even if
+my laptop dies." Users see one concept for it: the deadline printed as
+"until 18:30". The guardian is how a provider keeps it, not something users
+learn. Every provider keeps it except DigitalOcean, yet `lf ondemand list`,
+`lf machine end` and the scheduled check (`rental.rs` `check`: "its provider
+deletes it at the deadline either way") say it for DigitalOcean too.
+
+Counterexample: a DigitalOcean rental, laptop lost. Rentals are Machine-local
+and the scheduled check reaches a provider only with its key in the
+environment, so no lf anywhere looks for the Droplet. It bills indefinitely.
+
+Proposed: each `Provider` names who holds its deadline (provider, guardian, or
+lf only), and every surface that prints a deadline says it truthfully. The
+choice is what DigitalOcean is in this PR (question 1 in
+`scratch/concept-review.html`).
+
+Smaller, proposed:
+- Region is ambient (`AWS_REGION`, `DIGITALOCEAN_REGION`, `FLY_ORG`), yet it
+  sets price (EC2 rates are us-east-1 only) and placement. An on-demand could
+  carry `--region` so two on-demands can differ and the quote is true.
+- With `--gpu` on RunPod, `--vcpus`/`--memory-gb` are silently dropped. Treat
+  them as floors the chosen GPU shape must meet, or refuse them with `--gpu`.
+
 ## Order
 
 Stacks on LOO-527's `c5a0918783`; rebase as it moves, onto main once it lands.

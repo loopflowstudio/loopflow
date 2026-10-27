@@ -67,4 +67,7 @@
 - Assumption (2026-10-27): with the Wave selected, no watch follows a closed
   Task; an edit to it reaches Desktop when the Task is shown again
   (`taskLifecycleUpdatesOpenSidebar` asserts after `goBack`).
-
+- Assumption (2026-10-27): `lf task status` reads each of the Task's Sessions
+  by id (`human_session::listed`), not through `lf session list --task`, which
+  scans every Session (Remaining 1's cost). A Session whose row is gone is
+  omitted. Its `available` uses the same per-id judgment `lf session show` uses.

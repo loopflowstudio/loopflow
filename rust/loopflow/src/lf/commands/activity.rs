@@ -24,7 +24,8 @@ pub struct WorkActivitySnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkActivityEntry {
     pub id: String,
-    pub recorded_at: i64,
+    #[serde(with = "time::serde::rfc3339")]
+    pub recorded_at: OffsetDateTime,
     pub summary: String,
     pub work: WorkRef,
     /// Current display label: Wave name, Project slug, or Task identifier.
@@ -188,7 +189,8 @@ fn activity_entry(
 ) -> WorkActivityEntry {
     WorkActivityEntry {
         id,
-        recorded_at,
+        recorded_at: OffsetDateTime::from_unix_timestamp(recorded_at)
+            .expect("store times are Unix seconds within the calendar"),
         summary,
         work: owner.work.clone(),
         subject: owner.subject.clone(),
@@ -265,18 +267,15 @@ fn print_snapshot(snapshot: &WorkActivitySnapshot) {
     }
     println!("TIME              WORK             ACTIVITY");
     for item in &snapshot.items {
-        let time = OffsetDateTime::from_unix_timestamp(item.recorded_at)
-            .map(|value| {
-                format!(
-                    "{:04}-{:02}-{:02} {:02}:{:02}",
-                    value.year(),
-                    u8::from(value.month()),
-                    value.day(),
-                    value.hour(),
-                    value.minute()
-                )
-            })
-            .unwrap_or_else(|_| item.recorded_at.to_string());
+        let value = item.recorded_at;
+        let time = format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}",
+            value.year(),
+            u8::from(value.month()),
+            value.day(),
+            value.hour(),
+            value.minute()
+        );
         println!(
             "{time:<17} {work:<16} {summary}",
             work = item.subject,

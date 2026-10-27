@@ -509,6 +509,15 @@ fn graph_occurrence(
     }
 }
 
+/// One Session as `list` reads it; `None` once it is gone.
+pub(crate) fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    Ok(store
+        .sqlite
+        .session_summary(id, now)?
+        .map(|session| summary_surface(&session)))
+}
+
 /// Passive listing reads record metadata and exact local client receipts only.
 /// Connect/complete still enter find_session and surface, with full validation.
 fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {

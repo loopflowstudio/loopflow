@@ -8,7 +8,7 @@ public struct WorkActivitySnapshot: Decodable, Sendable, Hashable {
 
 public struct WorkActivityEntry: Decodable, Sendable, Hashable, Identifiable {
     public let id: String
-    public let recordedAt: Int64
+    public let recordedAt: Date
     public let summary: String
     public let work: WorkReference
     public let subject: String
@@ -17,6 +17,16 @@ public struct WorkActivityEntry: Decodable, Sendable, Hashable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, summary, work, subject, fact
         case recordedAt = "recorded_at"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        recordedAt = try c.decodeRFC3339(forKey: .recordedAt)
+        summary = try c.decode(String.self, forKey: .summary)
+        work = try c.decode(WorkReference.self, forKey: .work)
+        subject = try c.decode(String.self, forKey: .subject)
+        fact = try c.decode(WorkActivityFact.self, forKey: .fact)
     }
 }
 

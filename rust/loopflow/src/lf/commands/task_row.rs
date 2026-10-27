@@ -7,12 +7,14 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 
+use super::session::SessionFacts;
 use super::waves::RoadmapTask;
 use crate::durable::{GraphProcessDetail, TaskState};
+use crate::session::GraphProcessSummaryState;
 use crate::store::SharedStore;
-use crate::task_work::TaskSession;
-use crate::work::task::comment::TaskComments;
+use crate::work::task::comment::{TaskComment, TaskComments};
 use crate::work::task::PrPhase;
 
 /// One Task. Wire type; no defaults.
@@ -50,13 +52,64 @@ pub struct TaskRowPr {
 }
 
 /// `lf task status`: one Task with its Sessions, Graph processes and comments.
-/// Wire type; no defaults.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The enclosing Task names each one's Task and Wave. Wire type; no defaults.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskDetail {
     pub task: TaskRow,
-    pub sessions: Vec<TaskSession>,
-    pub graph_processes: Vec<GraphProcessDetail>,
-    pub comments: Option<TaskComments>,
+    /// As `lf session list` lists them, joined by `id`.
+    pub sessions: Vec<SessionFacts>,
+    pub graph_processes: Vec<TaskGraphRow>,
+    pub comments: Option<TaskThread>,
+}
+
+/// One of the Task's Graph processes; `lf graph show <id> --processes` draws it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskGraphRow {
+    /// The Graph process.
+    pub id: String,
+    pub name: String,
+    pub state: GraphProcessSummaryState,
+    /// The current or last step's position, "implement · pass 2"; `null` before a first step.
+    pub step: Option<String>,
+    /// When its latest step started, or its Graph process exited.
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: OffsetDateTime,
+}
+
+impl TaskGraphRow {
+    pub(crate) fn of(detail: GraphProcessDetail) -> Self {
+        let summary = detail.entry.summary;
+        Self {
+            step: detail.steps.last().map(|step| step.position()),
+            updated_at: OffsetDateTime::from_unix_timestamp(summary.updated_at)
+                .expect("store times are Unix seconds within the calendar"),
+            id: summary.id,
+            name: summary.name,
+            state: summary.state,
+        }
+    }
+}
+
+/// The Task's comment thread, as `lf task comment` keeps it, without restating
+/// the Task's identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskThread {
+    pub comments: Vec<TaskComment>,
+    pub pending_sync: Vec<String>,
+    /// Losing local comment bodies; the thread contains the adopted Linear values.
+    pub conflicts: std::collections::BTreeMap<String, String>,
+    pub refresh_error: Option<String>,
+}
+
+impl From<TaskComments> for TaskThread {
+    fn from(thread: TaskComments) -> Self {
+        Self {
+            comments: thread.comments,
+            pending_sync: thread.pending_sync,
+            conflicts: thread.conflicts,
+            refresh_error: thread.refresh_error,
+        }
+    }
 }
 
 /// Wave and Project names, read once per reading.

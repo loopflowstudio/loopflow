@@ -60,7 +60,8 @@ pub struct ActivityNode {
     pub worktree: Option<String>,
     pub wave: Option<String>,
     pub pid: Option<u32>,
-    pub started_at: i64,
+    #[serde(with = "time::serde::rfc3339")]
+    pub started_at: OffsetDateTime,
     pub state: ActivityState,
 }
 
@@ -264,7 +265,8 @@ fn collect_activity(
             worktree: record.cwd,
             wave: None,
             pid: record.pid,
-            started_at: record.started_at,
+            started_at: OffsetDateTime::from_unix_timestamp(record.started_at)
+                .expect("store times are Unix seconds within the calendar"),
             state,
         });
     }
@@ -530,7 +532,7 @@ fn render_node(
     };
     output.push_str(&format!(
         "{:>9}  {:>8}  {:<9}  {:<36}  {}{}{}\n",
-        format_duration(tree.now.saturating_sub(node.started_at)),
+        format_duration(tree.now.saturating_sub(node.started_at.unix_timestamp())),
         node.pid
             .map_or_else(|| "—".to_string(), |pid| pid.to_string()),
         node.state.label(),
@@ -587,7 +589,7 @@ mod tests {
             worktree: None,
             wave: None,
             pid: None,
-            started_at: 0,
+            started_at: time::OffsetDateTime::UNIX_EPOCH,
         };
         // Children can precede parents. Missing parents remain separate roots;
         // agent state is its own OS observation, not inherited child activity.

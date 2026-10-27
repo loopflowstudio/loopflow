@@ -310,9 +310,20 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
     }
 }
 
-/// `lf session list --json`: one Session. Wire type; no defaults.
+/// `lf session list --json`: one Session and the Work it belongs to. Wire
+/// type; no defaults.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRow {
+    #[serde(flatten)]
+    pub session: SessionFacts,
+    pub task: Option<crate::durable::TaskId>,
+    /// Wave name, as `--wave` takes it.
+    pub wave: Option<String>,
+}
+
+/// One Session's own facts; `lf task status` lists its Task's Sessions with them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionFacts {
     pub id: crate::id::LfSessionId,
     pub title: String,
     /// The provider its current input launched with; `null` before a first launch.
@@ -323,9 +334,6 @@ pub struct SessionRow {
     pub state: SessionState,
     /// Ready for a person's input.
     pub available: bool,
-    pub task: Option<crate::durable::TaskId>,
-    /// Wave name, as `--wave` takes it.
-    pub wave: Option<String>,
     pub cwd: String,
     /// The provider's current AgentProcess, as `lf ps` lists it.
     pub agent_process_id: Option<crate::id::LfProcessId>,
@@ -334,13 +342,22 @@ pub struct SessionRow {
 impl SessionRow {
     fn of(session: SessionRecord, waves: &std::collections::HashMap<String, String>) -> Self {
         Self {
-            task: match session.work {
-                Some(crate::durable::WorkRef::Task(task)) => Some(task),
+            task: match &session.work {
+                Some(crate::durable::WorkRef::Task(task)) => Some(task.clone()),
                 _ => None,
             },
             wave: session
                 .wave_id
+                .as_ref()
                 .and_then(|wave| waves.get(&wave.to_string()).cloned()),
+            session: SessionFacts::of(session),
+        }
+    }
+}
+
+impl SessionFacts {
+    pub(crate) fn of(session: SessionRecord) -> Self {
+        Self {
             id: session.id,
             title: session.title,
             provider: session.provider,

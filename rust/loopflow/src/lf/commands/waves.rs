@@ -19,8 +19,9 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::durable::{Machine, TaskState, WorkRef, WorkStatus};
+use crate::lf::commands::session::SessionFacts;
 use crate::lf::commands::session_history::format_tokens;
-use crate::lf::commands::task_row::{TaskDetail, TaskNames, TaskRow};
+use crate::lf::commands::task_row::{TaskDetail, TaskGraphRow, TaskNames, TaskRow, TaskThread};
 use crate::lf::output::Colors;
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use crate::session_record::SessionHistory;
@@ -993,14 +994,25 @@ pub(crate) async fn task_detail(
     let row = snapshot_task_details(store, vec![&task], false, &shared)?
         .pop()
         .expect("a registered Task has a row");
+    let mut sessions = Vec::new();
+    for session in status
+        .overview
+        .map(|overview| overview.sessions)
+        .unwrap_or_default()
+    {
+        if let Some(record) = crate::ops::human_session::listed(store, session.id.as_str())? {
+            sessions.push(SessionFacts::of(record));
+        }
+    }
     Ok(TaskDetail {
         task: TaskNames::read(Some(store)).await?.row(row),
-        sessions: status
-            .overview
-            .map(|overview| overview.sessions)
-            .unwrap_or_default(),
-        graph_processes: status.graph_processes,
-        comments: status.comments,
+        sessions,
+        graph_processes: status
+            .graph_processes
+            .into_iter()
+            .map(TaskGraphRow::of)
+            .collect(),
+        comments: status.comments.map(TaskThread::from),
     })
 }
 

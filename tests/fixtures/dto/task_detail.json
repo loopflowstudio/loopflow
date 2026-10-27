@@ -22,14 +22,24 @@
     {
       "id": "manual",
       "title": "Checkout conversation",
+      "provider": "claude",
       "interactive": false,
-      "completed_at": null,
-      "graph_lf_process_id": null
+      "state": "closed",
+      "available": false,
+      "cwd": "/src/loopflow.loo-2",
+      "agent_process_id": null
     }
   ],
-  "graph_processes": [],
+  "graph_processes": [
+    {
+      "id": "00000005-0000-4000-8000-000000000000",
+      "name": "feature",
+      "state": "current",
+      "step": "implement · pass 2",
+      "updated_at": "2026-09-23T08:05:00Z"
+    }
+  ],
   "comments": {
-    "identifier": "LOO-2",
     "pending_sync": [],
     "comments": [
       {

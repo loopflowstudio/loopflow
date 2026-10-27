@@ -186,14 +186,12 @@ struct WorkActivityView: View {
         }
     }
 
-    private func activityTime(_ timestamp: Int64) -> String {
-        Date(timeIntervalSince1970: TimeInterval(timestamp))
-            .formatted(.relative(presentation: .named))
+    private func activityTime(_ time: Date) -> String {
+        time.formatted(.relative(presentation: .named))
     }
 
-    private func exactTime(_ timestamp: Int64) -> String {
-        Date(timeIntervalSince1970: TimeInterval(timestamp))
-            .formatted(date: .abbreviated, time: .shortened)
+    private func exactTime(_ time: Date) -> String {
+        time.formatted(date: .abbreviated, time: .shortened)
     }
 
     private func evidenceBanner(_ reason: String) -> some View {

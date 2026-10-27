@@ -3,7 +3,7 @@
   "items": [
     {
       "id": "session:run_00000000000000000000000000000001:12:completion",
-      "recorded_at": 1784654700,
+      "recorded_at": "2026-07-21T17:25:00Z",
       "summary": "task/task_pursue recorder reported ok",
       "work": {
         "kind": "task",
@@ -19,7 +19,7 @@
     },
     {
       "id": "session:run_00000000000000000000000000000001:{\"kind\":\"native_turn\",\"thread\":\"thread-1\",\"turn\":\"turn-1\",\"start_seq\":3,\"completion_seq\":9}:completed",
-      "recorded_at": 1784654650,
+      "recorded_at": "2026-07-21T17:24:10Z",
       "summary": "task/task_pursue provider completed",
       "work": {
         "kind": "task",
@@ -43,7 +43,7 @@
     },
     {
       "id": "session:run_00000000000000000000000000000002:4:captured",
-      "recorded_at": 1784654500,
+      "recorded_at": "2026-07-21T17:21:40Z",
       "summary": "wave session input captured",
       "work": {
         "kind": "wave",

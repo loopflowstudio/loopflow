@@ -8,7 +8,7 @@
       "repo": "/src/loopflow",
       "wave": "product",
       "pid": 4100,
-      "started_at": 1784602800,
+      "started_at": "2026-07-21T03:00:00Z",
       "state": "working",
       "worktree": "/src/loopflow.task"
     },
@@ -20,7 +20,7 @@
       "repo": "/src/loopflow",
       "wave": "product",
       "pid": 4101,
-      "started_at": 1784602805,
+      "started_at": "2026-07-21T03:00:05Z",
       "state": "working",
       "worktree": "/src/loopflow.task"
     },
@@ -32,7 +32,7 @@
       "repo": "/src/loopflow",
       "wave": "product",
       "pid": null,
-      "started_at": 1784599200,
+      "started_at": "2026-07-21T02:00:00Z",
       "state": "unknown",
       "worktree": "/src/loopflow.task"
     }

@@ -3866,8 +3866,10 @@ fn waveless_task_lifecycle() {
 fn unconfigured_repository_runs_tasks_on_the_builtin_code_workflow() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    // Stand in for pursue's agent steps; the Workflow stays the builtin.
-    repo.create_file(".lf/graphs/pursue.yaml", "- cmd: graph show pursue\n");
+    // Stand in for pursue's agent steps, keeping the `implement` that code's
+    // loops return to; the Workflow stays the builtin.
+    repo.create_file(".lf/graphs/pursue.yaml", "- graph: implement\n");
+    repo.create_file(".lf/graphs/implement.yaml", "- cmd: graph show pursue\n");
     repo.stage_all();
     repo.commit("Stand in for pursue");
     repo.push();
@@ -3888,6 +3890,77 @@ fn unconfigured_repository_runs_tasks_on_the_builtin_code_workflow() {
     );
     assert_eq!(shown["name"], "code");
     assert_eq!(shown["position"]["node"], "demo");
+}
+
+#[test]
+fn auto_workflow_runs_a_task_past_demo_to_end() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(".lf/config.yaml", "workflow: auto\n");
+    // Stand in for the agent and delivery steps; the Workflow stays the builtin.
+    repo.create_file(".lf/graphs/pursue.yaml", "- cmd: graph show pursue\n");
+    repo.create_file(".lf/graphs/deliver.yaml", "- cmd: graph show deliver\n");
+    repo.stage_all();
+    repo.commit("Run Tasks on auto");
+    repo.push();
+    let created = lf(
+        repo.path(),
+        home.path(),
+        &["task", "create", "--title", "Auto Task", "--json"],
+    );
+    let id = created["id"].as_str().unwrap();
+    lf(repo.path(), home.path(), &["-b", "task", "run", id]);
+    let shown = lf(
+        repo.path(),
+        home.path(),
+        &["task", "workflow", "show", id, "--json"],
+    );
+    assert_eq!(shown["name"], "auto");
+    assert_eq!(shown["position"]["node"], "end");
+}
+
+#[test]
+fn wave_workflow_set_selects_the_builtin_auto() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let catalog = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "workflow", "list", "--json"],
+    );
+    let auto = catalog
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "auto")
+        .unwrap();
+    assert!(auto["source"].is_null());
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "ensure", "product", "--json"],
+    );
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "workflow", "set", "auto", "product"],
+    );
+    let created = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task", "create", "--wave", "product", "--title", "Auto", "--json",
+        ],
+    );
+    let listed = lf(repo.path(), home.path(), &["task", "list", "--json"]);
+    let task = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|task| task["task"]["id"] == created["id"])
+        .unwrap();
+    assert_eq!(task["workflow_name"], "auto");
+    assert_eq!(task["workflow_source"], "wave");
 }
 
 #[test]

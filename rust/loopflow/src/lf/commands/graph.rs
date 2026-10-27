@@ -1230,7 +1230,7 @@ mod tests {
     #[test]
     fn builtin_task_graphs_compile_and_the_stageless_ones_run_whole() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for name in ["task-design", "pursue", "queue", "deliver"] {
+        for name in ["task-design", "pursue", "queue", "deliver", "auto"] {
             let graph = crate::graph::load_graph(name, &repo).unwrap();
             let items = crate::graph::compile_graph(&graph, &repo).unwrap();
             assert!(

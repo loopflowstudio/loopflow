@@ -1,7 +1,7 @@
 # LOO-610 — The lf CLI, top down
 
-Status: **decided slice implemented** (2026-10-26): items 1–6 below are on the
-branch, merged with main `e636ab6397` (#1652). Remaining: gate, publish.
+Status: **decided slice implemented** (2026-10-26): items 1–7 and the
+Task-first README are on the branch, merged with main `e636ab6397` (#1652). Remaining: gate, publish.
 Deviations in `scratch/questions.md`. Sections 1–8 are the review as proposed;
 a later decision wins where they differ. Source: `docs/lf-reference.md` at
 main `1b137b8f2d`, LOO-601 (hidden `__` commands) and LOO-602's decisions.
@@ -489,8 +489,7 @@ planning and CI views still load.
 
 ## Docs and README redo (Jack Heart, 2026-10-26: part of this Task)
 
-After the CLI slice verifies, the next pursue iteration on this Task rewrites
-the README and `docs/` around the reorganized surface, in the same PR.
+README and `docs/` follow the reorganized surface, in the same PR.
 
 - Structure by what you work with: **Work** (`task`, `wave`), **Sessions**
   (`session`, resume), **Orchestration** (`graph`, `skill`, `lf <name>`),
@@ -501,12 +500,9 @@ the README and `docs/` around the reorganized surface, in the same PR.
   `lf commit`, `lf account`), and claim only what exists today: no `lf resume`
   takeover/`session new` (LOO-618), no `--watch` (LOO-604), no front door
   until they land.
-- Covers what LOO-509 (getting-started path matches the released product) and
-  LOO-404 (docs answer what survives, what went wrong, what to run next) ask
-  for in `docs/`; their Tasks close into this one when it lands, or keep only
-  what's left. Website stays LOO-513.
-- Keep Jack's own wording where it exists (README lines from LOO-550) unless
-  the surface it describes changed; flag rather than silently rewrite.
+- Covers LOO-509 and LOO-404 in `docs/`; they close into this one or keep only
+  what's left. Website stays LOO-513 (its homepage still lists three builtins).
+- Keep Jack's own wording unless its surface changed; flag, never silently rewrite.
 
 **README voice (Jack Heart, 2026-10-26).** Opens with "A software instrument"
 and "arrange and conduct". At its core lf is an agent launcher and session
@@ -516,13 +512,10 @@ nothing; `lf resume --all`, `--task`, a provider ID do).
 
 ### Docs map (proposed; drafts in scratch/, moved into place after the CLI run lands)
 
-**Staged, not all at once (Jack Heart, 2026-10-26).** Walk people through it in
-stages; don't teach the whole system at once. The README teaches three steps
-(start an agent with `lf :`, `lf resume`, hand it off as a Task) and then a
-"When you want more" table pointing to one page per next stage, in order: Ops
-(land), Surfaces, Telemetry, Orchestration, Waves. Each page opens from what the
-reader already did and adds one idea; reference material sits at the end of the
-page or in `lf-reference.md`.
+**Staged, not all at once (Jack Heart, 2026-10-26).** Teach in stages, one idea
+per page. Superseded for the README opening by **Task first** (Jack Heart,
+2026-10-26): a Task is one conversation with a workflow behind it, plus its
+PR/branch/issue and history; Waves set Task defaults; `lf :` comes last.
 
 Implemented 2026-10-26; the page list is `docs/index.md` "Read by area".
 
@@ -638,20 +631,10 @@ LOO-594 (Desktop Wave view as a standup board, accepted):
    `skills/loopflow/README.md` from `scratch/skill-draft/README.md`. Update any
    test that pins LOOPFLOW.md text.
 7. **Builtin `auto` workflow** (Jack Heart, 2026-10-26: sell auto mode now).
-   `code` without the demo stop: request to merged PR without a person.
-   Concept review settled the shape: `builtins/task/graph/auto.yaml` is
-   `- graph: pursue` then `- graph: deliver` (main #1652 deleted the `ship`
-   graph; `deliver` is gate + `land --wait-and-fix`). No `interactive:` steps,
-   so its only stages are `start`/`end` and one route runs it whole; no new
-   workflow kind or edge syntax. It drops `code`'s `verify` stop too ("without
-   a person"); arriving at `end` approves Auto-Ship as any route into `end`
-   does. `lf wave workflow set auto <wave>` makes a Wave's Tasks run that way
-   (arg order is `<name> <wave>`). Interim until LOO-622 makes auto mode "any
-   Graph, run past its interactive stages"; then this builtin goes. Test: a
-   fresh repo with `workflow: auto` runs `lf -b task run <ID>` past where
-   `code` would stop at `demo`, with pursue/deliver steps stubbed as in
-   `ops/task.rs` `test_graph`. Update `wave workflow list` expectations and the
-   docs that enumerate builtin workflows.
+   Done: `builtins/task/graph/auto.yaml` is `graph: pursue` then
+   `graph: deliver` (main #1652 deleted `ship`); no stages, so one route runs
+   it to `end`, approving Auto-Ship. Interim until LOO-622 makes auto mode
+   "any Graph, run past its interactive stages"; then this builtin goes.
 6. **Docs and README** move into place from `scratch/README.draft.md` and
    `scratch/docs-draft/` after items 1–5 verify (see "Docs and README redo").
 

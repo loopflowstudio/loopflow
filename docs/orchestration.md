@@ -155,7 +155,8 @@ history. `lf ship --stop` withdraws it. Any route into `end` ships the same way.
 | `deferred` · `done` · `abandoned` | held, completed, dropped |
 
 Builtins are `feature` (explore, demo, deliver, verify), `code` (demo, deliver,
-verify) and `research` (findings, no PR). To change one, copy it, commit it, and
+verify), `auto` (pursue then deliver, no stops: request to merged PR without
+you) and `research` (findings, no PR). To change one, copy it, commit it, and
 select it for a Wave:
 
 ```bash

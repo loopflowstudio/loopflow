@@ -6,48 +6,48 @@ lf init
 npx skills add loopflowstudio/loopflow --skill loopflow -g -y   # teach your coding agent to use lf
 ```
 
-`lf` is how your agent orchestra conducts itself. It launches coding agents for
-you, and lets your agents launch more. It organizes them around Tasks: one Task
-ties together the tracker issue, the worktree, the branch and the pull request.
-Then Waves split the work into areas, each with its own Graph, machine and
-accounts. It works with Claude Code, Codex, OpenCode and Pi, on your existing
-subscriptions, inside whatever terminal, multiplexer and tracker you already use.
+`lf` is how your agent orchestra conducts itself. It's a task system for coding
+agents: you say what you want, and each Task gets its own conversation, its own
+workflow and its own pull request. Organize Tasks into Waves to give each area of
+work its own defaults. It works with Claude Code, Codex, OpenCode and Pi, on your
+existing subscriptions, inside whatever terminal, multiplexer and tracker you
+already use.
 
-**1. Launch agents.** In any git repository:
-
-```bash
-lf : "fix the flaky retry test"            # an agent, on whichever of your logins has room
-lf -a codex : "fix the flaky retry test"   # the same thing on Codex
-lf debug -c                                # a Skill: paste an error, it finds and fixes the cause
-lf resume --all                            # after a crash or reboot, every interrupted conversation comes back
-```
-
-The last install line teaches your own coding agent to do the same, so you can
-just ask it: *"Split the auth cleanup into Tasks and run them with lf."*
-[What the skill teaches](https://github.com/loopflowstudio/loopflow/blob/main/skills/loopflow/README.md).
-
-**2. Organize them around Tasks.** A Task is one outcome: its tracker issue, its
-worktree and branch, its agents and its pull request, in one place. Ten requests
-come back as ten PRs you review one at a time, and every agent on a Task starts
-where the last one left off.
+**1. A Task is a conversation with a workflow behind it.**
 
 ```bash
 lf task create --title "fix the flaky retry test"   # prints the Task ID
-lf -b task run <ID>                                   # worktree, branch, agents, PR
-lf comment <ID> "keep the retry budget at 3"          # reaches the run before its next step
+lf -b task run <ID>                                   # its worktree, its agents, its pull request
 lf resume --task <ID>                                 # its conversation, from any terminal
-lf land --wait-and-fix                                # merge when checks pass; fix them if not
 ```
 
-**3. Split the work into Waves.** A Wave is an area of work with its own goal,
-memory and plan, and its own assignments: the Graph its Tasks run, the machine
-they run on and the logins that pay. Your repository is the Wave for anything
-without one.
+Each Task has:
 
-A Graph is how an area of work runs: a YAML list of Skills, and a Skill is a
-Markdown file, both in your repository and reviewed like code. Each step can name
-its own agent, and the whole Graph runs interactively, headless or on another
-machine.
+- **One conversation.** A persistent chat thread with your agent where everything
+  about the Task goes: you talk in it, reviews happen in it, results come back to
+  it. One context, on whichever harness and login it runs; it outlives terminals
+  and crashes.
+- **A workflow.** The stages the Task moves through (design, build, demo, land)
+  and the Graphs that run in the background between them, each in the Task's own
+  worktree and branch. You take part at the stages; the steps in between run
+  without you, or all of them do in `auto`.
+- **Its own pull request, branch and tracker issue,** kept together.
+- **Its history.** Every conversation, Graph run and step, and what each cost.
+
+```bash
+lf comment <ID> "keep the retry budget at 3"   # reaches the next step, in its context
+lf task status <ID>                            # where it is in its workflow, and what it needs from you
+lf history usage --task <ID>                   # what it cost
+lf land --wait-and-fix                         # merge when checks pass; fix them if not
+```
+
+The last install line teaches your own coding agent to do all of this, so you
+can just ask it: *"Split the auth cleanup into Tasks and run them with lf."*
+[What the skill teaches](https://github.com/loopflowstudio/loopflow/blob/main/skills/loopflow/README.md).
+
+**2. Write down how work runs.** A workflow's background steps are Graphs: a
+Graph is a YAML list of Skills, and a Skill is a Markdown file, both in your
+repository and reviewed like code. Each step can name its own agent.
 
 ```markdown
 <!-- .lf/skills/audit.md -->
@@ -62,14 +62,31 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 ```
 
 ```bash
-lf -b task run <ID> ship-api               # one Task through the Graph
-lf wave workflow set code infrastructure   # every infrastructure Task: build, demo, then land
-lf machine use mini infrastructure          # and run on your mini
+lf audit                        # one Skill, here and now
+lf -b task run <ID> ship-api    # one Task through the Graph
 ```
 
 Loopflow ships reasonable workflows for software engineering, and they are
 templates. Copy one with `lf graph customize pursue`, change it, or write down
 the way you work and share it.
+
+**3. Organize Tasks into Waves.** A Wave is an area of work with its own goal,
+memory and plan, and its own defaults for every Task in it: the workflow, the
+machine, and more as they land. Your repository is the Wave for Tasks without one.
+
+```bash
+lf wave workflow set auto infrastructure   # infrastructure Tasks go from request to merged PR without you
+lf machine use mini infrastructure          # and run on your mini
+```
+
+**Without a Task,** `lf` still launches any agent or Skill directly:
+
+```bash
+lf : "fix the flaky retry test"            # an agent, on whichever of your logins has room
+lf -a codex : "fix the flaky retry test"   # the same thing on Codex
+lf debug -c                                # a Skill: paste an error, it finds and fixes the cause
+lf resume --all                            # after a crash or reboot, every interrupted conversation comes back
+```
 
 ## What else it does
 

@@ -176,12 +176,12 @@ unless "Work needed" says otherwise.
 |---|---|---|---|
 | `wave show --all` | watch | M | Waves and Projects ride the plan |
 | `session list` | watch | R | page or diff (Remaining 1) |
-| `task status <id>` | watch | T | 5k statements, 20 connections (Remaining 2) |
+| `task status <id>` | watch | T | flat in Graphs; Sessions/Processes unmeasured (Remaining 2) |
 | `history --since 7d` | watch | W/P/T | |
 | `monitor top` | watch | M | shrinks with LOO-615 |
 | `planning status` | watch | R | holds the repository's planning sync |
 | `desktop plans` | watch | R | |
-| `wave status` per Wave | `openHistoricalReference`, user action | W | check historical Projects are in the plan |
+| `wave status` per Wave | `openHistoricalReference`, `ProjectHistoryView`; user action | W | check historical Projects are in the plan |
 | `wave list --all --current` | before first frame; after createWave | M | delete once a checkpoint covers createWave |
 | `desktop view --plan` | each planning frame while a `.view` is open | R | ad-hoc expression in `desktop plans` args |
 | `wave workflow list`, `graph list` | frames whose planning moved; palette | R | catalog watch (Remaining 3) |
@@ -214,9 +214,11 @@ unless "Work needed" says otherwise.
   `session_watch.rs`, task_history part, `work_frame.json`, `LocalWorkObservation`'s
   single reader, Desktop's `wave status` watch, `taskComments` read.
 - Next: `allWaves`
-  after createWave, no-stream-only reads (`roadmap`, `sessionPage`,
-  `peerPlanningStatus`, `workActivity`) if the one-shot transport is not kept
-  for remote Machines.
+  after createWave (`PortfolioRepoState`, `WavesView`); one-shot reads
+  (`roadmap`, `peerPlanningStatus`, `workActivity`) if the one-shot transport
+  is not kept for remote Machines. `sessionPage` also pages every Session to
+  resolve an explicit Session link the window does not hold (`WorkModel`);
+  an exact `lf session list` lookup would replace that loop.
 
 ## Check results
 

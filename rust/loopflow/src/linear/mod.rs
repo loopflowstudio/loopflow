@@ -289,6 +289,17 @@ pub(crate) mod test_server {
     }
 }
 
+/// Provider evidence about an issue's state since a delivery's base revision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StateHistory {
+    /// No evidence was read; an uncertain write stays uncertain.
+    Unknown,
+    /// Only unrelated edits followed the base: an earlier write had no effect.
+    Unchanged,
+    /// The state left its base: a write landed, or someone moved the issue.
+    Changed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct LinearIssue {
     /// Provider revision; absent only in historical planning.
@@ -1334,6 +1345,73 @@ impl LinearClient {
             )
             .await?;
         response.issue.map(IssueNode::into_ownership).transpose()
+    }
+
+    /// Whether the issue's state left `base_state` after `base_revision`.
+    /// Linear's history has no filter or sort direction, so the client pages it;
+    /// an unread remainder is unknown, never unchanged.
+    pub(crate) async fn state_history_since(
+        &self,
+        issue_id: &str,
+        base_revision: &str,
+        base_state: &str,
+    ) -> LinearResult<StateHistory> {
+        #[derive(Deserialize)]
+        struct Data {
+            issue: Option<Issue>,
+        }
+        #[derive(Deserialize)]
+        struct Issue {
+            history: Connection<Entry>,
+        }
+        #[derive(Deserialize)]
+        struct Entry {
+            #[serde(rename = "updatedAt")]
+            revision: String,
+            #[serde(rename = "toState")]
+            to_state: Option<State>,
+        }
+        #[derive(Deserialize)]
+        struct State {
+            r#type: String,
+        }
+        let nanos = |revision: &str| {
+            crate::linear::observations::revision_nanos(Some(revision))
+                .map_err(|error| LinearError::Message(error.to_string()))
+        };
+        let base = nanos(base_revision)?;
+        let mut after: Option<String> = None;
+        for _ in 0..10 {
+            let data: Data = self
+                .graphql(
+                    r#"query IssueStateHistory($id: String!, $after: String) {
+                issue(id: $id) { history(first: 50, after: $after) {
+                    nodes { updatedAt toState { type } }
+                    pageInfo { hasNextPage endCursor }
+                } }
+            }"#,
+                    json!({"id": issue_id, "after": after}),
+                )
+                .await?;
+            let Some(issue) = data.issue else {
+                return Ok(StateHistory::Unknown);
+            };
+            for entry in issue.history.nodes {
+                if nanos(&entry.revision)? > base
+                    && entry
+                        .to_state
+                        .is_some_and(|state| !state.r#type.eq_ignore_ascii_case(base_state))
+                {
+                    return Ok(StateHistory::Changed);
+                }
+            }
+            let page = issue.history.page_info;
+            match page.end_cursor {
+                Some(cursor) if page.has_next_page => after = Some(cursor),
+                _ => return Ok(StateHistory::Unchanged),
+            }
+        }
+        Ok(StateHistory::Unknown)
     }
 
     pub(crate) async fn issue_trash(&self, id: &str) -> LinearResult<Option<(bool, String)>> {

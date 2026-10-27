@@ -256,6 +256,9 @@ def _discover_executable_edges(root: Path) -> set[str]:
         relative = path.relative_to(root)
         if "tests" in relative.parts or MIGRATIONS in relative.parents:
             continue
+        # `#[cfg(test)] mod foo_tests;` sibling files are test-only.
+        if path.stem == "tests" or path.stem.endswith("_tests"):
+            continue
         source = _production_rust(path.read_text())
         edges.update(f"process:{name}" for name in COMMAND_EDGE.findall(source))
     return edges

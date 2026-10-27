@@ -10,7 +10,7 @@ use crate::asana::AsanaClient;
 use crate::config::PlanningConfig;
 use crate::linear::{
     LinearClient, LinearIssue, LinearIssueObservation, LinearProject, LinearResult,
-    PlanningResponse,
+    PlanningResponse, StateHistory,
 };
 use crate::notion::NotionClient;
 use crate::provider_auth::Provider;
@@ -190,6 +190,23 @@ impl PlanningClient {
             Self::Linear(client) => client.issue_ownership(id).await,
             Self::Asana(client) => Ok(client.task(id).await?.map(|task| (task, None))),
             Self::Notion(client) => Ok(client.task(id).await?.map(|task| (task, None))),
+        }
+    }
+
+    /// Asana and Notion keep no readable state history.
+    pub(crate) async fn state_history_since(
+        &self,
+        id: &str,
+        base_revision: &str,
+        base_state: &str,
+    ) -> LinearResult<StateHistory> {
+        match self {
+            Self::Linear(client) => {
+                client
+                    .state_history_since(id, base_revision, base_state)
+                    .await
+            }
+            Self::Asana(_) | Self::Notion(_) => Ok(StateHistory::Unknown),
         }
     }
 

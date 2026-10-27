@@ -550,6 +550,62 @@ mod tests {
     }
 
     #[test]
+    fn a_waves_capacity_takes_its_new_tasks_until_a_nearer_machine_does() {
+        use crate::durable::{DefaultScope, MachineSetting, OwningMachineSource};
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let repo = home.path().canonicalize().unwrap();
+        let repo = repo.to_str().unwrap();
+        let project = store.ensure_wave_project(repo, "infrastructure").unwrap();
+        let wave = DefaultScope::Wave(project.wave_id.clone());
+        let repository = store.ensure_repository(repo).unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                repository_id: repository.clone(),
+                id: TaskId::new(),
+                project_id: Some(project.id.clone()),
+                title: "Rented".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let worker = MachineId::new();
+        store
+            .set_machine_default(
+                &DefaultScope::Repository(repository.clone()),
+                MachineSetting::Tasks,
+                &worker,
+            )
+            .unwrap();
+        assert_eq!(store.task_capacity(&task.id).unwrap(), None);
+
+        // The Wave is nearer than the repository: its Tasks rent, and until
+        // `lf task run` places one it stays on this Machine.
+        store.set_tasks_capacity(&wave, "code").unwrap();
+        assert_eq!(
+            store.task_capacity(&task.id).unwrap().as_deref(),
+            Some("code")
+        );
+        assert_eq!(
+            store
+                .wave_owning_machine(&project.wave_id, MachineSetting::Tasks)
+                .unwrap(),
+            (
+                store.local_machine().unwrap().id,
+                OwningMachineSource::Wave("infrastructure".into())
+            )
+        );
+        assert_eq!(store.capacity_defaults().unwrap().len(), 1);
+
+        // A Machine at the same scope replaces it.
+        store
+            .set_machine_default(&wave, MachineSetting::Tasks, &worker)
+            .unwrap();
+        assert_eq!(store.task_capacity(&task.id).unwrap(), None);
+        assert!(store.capacity_defaults().unwrap().is_empty());
+    }
+
+    #[test]
     fn repository_plans_are_explicit_and_do_not_depend_on_clone_names() {
         let a = tempfile::tempdir().unwrap();
         let b = tempfile::tempdir().unwrap();

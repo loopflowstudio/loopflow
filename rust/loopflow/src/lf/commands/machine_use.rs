@@ -2,6 +2,9 @@
 //! handoff; a Wave or repository default is personal, stored on this Machine
 //! and copied to your other Machines. A scope's Tasks and its Session each
 //! have their own Machine; `--tasks` or `--session` sets one, neither sets both.
+//! Naming a pool or on-demand instead sends the scope's new Tasks there and
+//! leaves its Session where it runs; pools and on-demands live on this
+//! Machine, so that default is not copied.
 use crate::durable::{DefaultScope, MachineId, MachineSetting, RepositoryId};
 use crate::id::WaveId;
 use crate::lf::MachineCommand;
@@ -55,6 +58,11 @@ pub fn run(repo: &Path, command: &MachineCommand) -> anyhow::Result<()> {
         .await?;
         anyhow::Ok((store, scope))
     })?;
+    let capacity =
+        store.sqlite.pool(machine)?.is_some() || store.sqlite.ondemand(machine)?.is_some();
+    if capacity {
+        return use_capacity(&store.sqlite, repo, scope, machine, *session, *json);
+    }
     if let Scope::Task(task) = &scope {
         let ownership = change(repo, task, OwnershipChange::Handoff(machine.clone()))?;
         if *json {
@@ -133,6 +141,50 @@ pub fn run(repo: &Path, command: &MachineCommand) -> anyhow::Result<()> {
             args.push("--tasks".into());
         }
         runtime.block_on(copy_to_my_machines(&store.sqlite, &args))?;
+    }
+    Ok(())
+}
+
+/// Send a Wave's or repository's new Tasks to a pool or on-demand.
+fn use_capacity(
+    sqlite: &SqliteStore,
+    repo: &Path,
+    scope: Scope,
+    capacity: &str,
+    session: bool,
+    json: bool,
+) -> anyhow::Result<()> {
+    if session {
+        return Err(anyhow!(
+            "{capacity} lends machines to Tasks; a Session runs on one Machine you name"
+        ));
+    }
+    let (default_scope, label) = match scope {
+        Scope::Task(task) => {
+            return Err(anyhow!(
+            "{capacity} sets a Wave or repository default; `lf task run {task} --rent {capacity}` \
+                 or `--pool {capacity}` runs one Task there"
+        ))
+        }
+        Scope::Wave { id, name } => (DefaultScope::Wave(id), format!("Wave {name}")),
+        Scope::Repository => {
+            let canonical = CanonicalRepo::discover(repo)?;
+            (
+                DefaultScope::Repository(repository_id(sqlite, &canonical)?),
+                "This repository".to_string(),
+            )
+        }
+    };
+    sqlite.set_tasks_capacity(&default_scope, capacity)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({ "scope": default_scope, "capacity": capacity })
+        );
+    } else {
+        println!(
+            "{label}: your new Tasks take a machine from {capacity} when they run; its Session stays where it runs"
+        );
     }
     Ok(())
 }

@@ -39,7 +39,7 @@ type Result<T> = std::result::Result<T, Unavailable>;
 pub struct Sandbox {
     pub id: String,
     /// Ended, deleted or failed; it runs nothing more, and deleting it frees
-    /// whatever remains (a Fly app's IPv4, an exited pod's disk).
+    /// whatever remains (an exited pod's disk).
     pub gone: bool,
     /// The SSH destination, reported only by create.
     pub route: Option<String>,

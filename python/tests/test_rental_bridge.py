@@ -1,4 +1,4 @@
-"""The rental bridge's requests to RunPod, AWS and Fly, over mocked HTTP and SDKs."""
+"""The rental bridge's requests to RunPod and AWS, over mocked HTTP and SDKs."""
 
 import base64
 import importlib.util
@@ -64,7 +64,6 @@ def http(monkeypatch):
         return fake
 
     monkeypatch.setenv("RUNPOD_API_KEY", "rp-key")
-    monkeypatch.setenv("FLY_API_TOKEN", "FlyV1 fm2_token")
     return install
 
 
@@ -199,8 +198,14 @@ class Ec2:
 def aws(monkeypatch):
     ec2 = Ec2(groups=[])
     ssm = types.SimpleNamespace(get_parameter=lambda Name: {"Parameter": {"Value": "ami-123"}})
-    boto3 = types.SimpleNamespace(client=lambda service: ec2 if service == "ec2" else ssm)
-    monkeypatch.setitem(sys.modules, "boto3", boto3)
+    ec2.regions = []
+
+    def client(service, region_name):
+        ec2.regions.append(region_name)
+        return ec2 if service == "ec2" else ssm
+
+    monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(client=client))
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
     return ec2
 
 
@@ -221,6 +226,12 @@ def test_aws_creates_a_tagged_instance_that_terminates_itself(aws):
     assert user_data.index("claude-code") < user_data.index("authorized_keys")
     ingress = dict(aws.calls)["authorize_security_group_ingress"]
     assert ingress["IpPermissions"][0]["FromPort"] == 22
+
+
+def test_aws_rents_in_the_region_lf_quoted(aws, monkeypatch):
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-west-2")
+    bridge._aws("create", {**REQUEST, "type": "m7i.xlarge"})
+    assert set(aws.regions) == {"us-east-1"}
 
 
 def test_aws_rents_spot_capped_at_the_admitted_price(aws):
@@ -256,49 +267,3 @@ def test_daytona_deletes_only_a_sandbox_not_yet_destroyed(monkeypatch, state, de
     monkeypatch.setitem(sys.modules, "daytona", daytona)
     assert bridge._daytona("delete", {"id": "sb-1"}) is None
     assert bool(deleted) == deletes
-
-
-# --- Fly ------------------------------------------------------------------
-
-
-def test_fly_creates_an_app_with_ipv4_and_a_self_destroying_machine(http):
-    fake = http(
-        {
-            ("POST", "/v1/apps/lf-rent-0b5c/machines"): [(200, {"id": "m1"})],
-            ("POST", "/v1/apps"): [(201, {"id": "app1"})],
-            ("POST", "/graphql"): [
-                (200, {"data": {"allocateIpAddress": {"ipAddress": {"address": "192.0.2.9"}}}})
-            ],
-        }
-    )
-    reply = bridge._fly("create", REQUEST)
-    assert reply == {"id": "lf-rent-0b5c", "gone": False, "route": "ssh://lf@192.0.2.9"}
-    app, ip, machine = (sent[2] for sent in fake.sent)
-    assert app == {"app_name": "lf-rent-0b5c", "org_slug": "personal"}
-    assert ip["variables"]["input"] == {"appId": "lf-rent-0b5c", "type": "v4"}
-    config = machine["config"]
-    assert config["guest"] == {"cpu_kind": "performance", "cpus": 4, "memory_mb": 16384}
-    assert config["auto_destroy"] is True and config["restart"] == {"policy": "no"}
-    assert config["services"][0]["internal_port"] == 22
-    assert fake.sent[0][3]["Authorization"] == "FlyV1 fm2_token"
-
-
-def test_fly_reads_an_ended_machine_as_gone_and_a_missing_app_as_absent(http):
-    http(
-        {
-            ("GET", "/apps/lf-rent-0b5c/machines"): [(200, [{"id": "m1", "state": "destroyed"}])],
-            ("GET", "/apps/lf-rent-none/machines"): [(404, None)],
-        }
-    )
-    assert bridge._fly("get", {"name": "lf-rent_0b5c"}) == {
-        "id": "lf-rent-0b5c",
-        "gone": True,
-        "route": None,
-    }
-    assert bridge._fly("get", {"id": "lf-rent-none"}) is None
-
-
-def test_fly_delete_removes_the_app(http):
-    fake = http({("DELETE", "/apps/lf-rent-0b5c"): [(202, {})]})
-    bridge._fly("delete", {"id": "lf-rent-0b5c"})
-    assert fake.sent[0][1].endswith("/v1/apps/lf-rent-0b5c?force=true")

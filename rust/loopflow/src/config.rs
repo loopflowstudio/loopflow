@@ -10,6 +10,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
@@ -817,22 +818,46 @@ fn personal_settings(
     wave: Option<&str>,
 ) -> Option<(PathBuf, crate::store::sqlite::ScopeSettings)> {
     let read = || -> anyhow::Result<Option<(PathBuf, crate::store::sqlite::ScopeSettings)>> {
-        let Some(store) = crate::store::read_existing_registry()? else {
+        let path = crate::store::database_path_from_env()?;
+        if !path.try_exists()? {
             return Ok(None);
-        };
-        if !store.sqlite.has_scope_settings()? {
+        }
+        let store = settings_reader(&path)?;
+        if !store.has_scope_settings()? {
             return Ok(None);
         }
         let repo = repo_root
             .and_then(|root| crate::repository::CanonicalRepo::discover(root).ok())
             .map(|repo| repo.to_string());
-        let settings = store.sqlite.scope_settings(repo.as_deref(), wave)?;
-        Ok(Some((crate::store::database_path_from_env()?, settings)))
+        let settings = store.scope_settings(repo.as_deref(), wave)?;
+        Ok(Some((path, settings)))
     };
     read().unwrap_or_else(|error| {
         tracing::warn!(%error, "your lf set values are unavailable");
         None
     })
+}
+
+/// One connection per store for the process, the receipt ledger's when it has
+/// one: each new connection reads the whole schema, and every config load asks
+/// for your values.
+fn settings_reader(path: &Path) -> anyhow::Result<crate::store::sqlite::SqliteStore> {
+    static READERS: OnceLock<Mutex<HashMap<PathBuf, crate::store::sqlite::SqliteStore>>> =
+        OnceLock::new();
+    let mut readers = READERS
+        .get_or_init(Default::default)
+        .lock()
+        .expect("settings readers mutex poisoned");
+    if let Some(store) = readers
+        .get(path)
+        .cloned()
+        .or_else(|| crate::journal::retained_ledger(path))
+    {
+        return Ok(store);
+    }
+    let store = crate::store::sqlite::SqliteStore::open_read_only(path)?;
+    readers.insert(path.to_path_buf(), store.clone());
+    Ok(store)
 }
 
 fn settings_value(values: &BTreeMap<String, String>) -> serde_yaml_ng::Value {

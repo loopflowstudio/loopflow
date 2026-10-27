@@ -261,11 +261,14 @@ impl SqliteStore {
     /// Whether you have set any override, so readers skip finding the repository.
     pub fn has_scope_settings(&self) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(
-            conn.query_row("SELECT EXISTS(SELECT 1 FROM scope_settings)", [], |row| {
-                row.get(0)
-            })?,
-        )
+        // A store older than this build has no table, and so no values.
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'scope_settings')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )? && conn.query_row("SELECT EXISTS(SELECT 1 FROM scope_settings)", [], |row| {
+            row.get(0)
+        })?)
     }
 
     /// Your overrides for work in `repo` (its canonical main checkout) and,

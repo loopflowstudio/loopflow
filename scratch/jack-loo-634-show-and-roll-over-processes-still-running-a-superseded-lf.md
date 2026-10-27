@@ -187,6 +187,7 @@ helper → stays with "update Desktop". No rename, merge or open product choice.
 - 2026-10-27 kickoff and implement (recovery steer): source re-read, no change, no rerun — `os_process.rs:241`
   main Home → Desktop helper or entry gate, private Home → `LF_BIN`; `lf/commands/graph.rs:736`
   per step; branch current with origin/main; no open policy choice.
+- 2026-10-27 realign (recovery steer): no rerun; origin/main still f66d7acdee, `os_process.rs:241` and `graph.rs:736` match the plan, PR #1729 open and mergeable with no failing checks.
 - Demo: rollover and the `ps` section reach the live store only once installed (a
   branch build re-execs the installed lf for ordinary commands; `lf doctor` doesn't).
 

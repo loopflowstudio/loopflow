@@ -133,6 +133,10 @@ Third concept review (2026-10-27, through `65ed22f566`): slice 5 closed that gap
 the help, troubleshooting and doctor hint now tell one story. The `start_record`
 cwd compression changes no concept. Nothing to change and no open product choice.
 
+Fourth concept review (2026-10-27, through `73d42e4b4b`): compress's single
+`prune_agent_processes` entry and the `e3d16c5d27` sync change no concept; lazy
+recovery still only reaps. Nothing to change and no open product choice.
+
 ## Alternatives rejected
 
 - **Backfill a placeholder parent row.** Its started_at, trace and command are

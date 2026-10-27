@@ -71,12 +71,20 @@ templates. Copy one with `lf graph customize pursue`, change it, or write down
 the way you work and share it.
 
 **3. Organize Tasks into Waves.** A Wave is an area of work with its own goal,
-memory and plan, and its own defaults for every Task in it: the workflow, the
-machine, and more as they land. Your repository is the Wave for Tasks without one.
+memory and plan, and its own setup for every Task in it: the workflow, the
+agent, the machine and the login that pays. Your repository is the Wave for
+Tasks without one.
+
+```yaml
+# .lf/wave/infrastructure/config.yaml, committed: shaped like .lf/config.yaml
+workflow: auto        # infrastructure Tasks go from request to merged PR without you
+agent: claude:opus
+```
 
 ```bash
-lf wave workflow set auto infrastructure   # infrastructure Tasks go from request to merged PR without you
-lf machine use mini infrastructure          # and run on your mini
+lf machine use mini infrastructure                                  # and run on your mini
+lf account route set claude work@example.com --wave infrastructure  # billed to your work login
+lf wave status infrastructure                                       # each setting and where it came from
 ```
 
 **Without a Task,** `lf` still launches any agent or Skill directly:

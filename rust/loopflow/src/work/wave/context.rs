@@ -16,6 +16,13 @@ use std::sync::{Mutex, OnceLock};
 /// The durable Wave attributed to this process.
 pub const WAVE_ID_ENV: &str = "LF_WAVE_ID";
 
+/// The Wave this process works in, from its launch's `LF_WAVE_ID`.
+pub fn ambient_wave_id() -> Option<WaveId> {
+    std::env::var(WAVE_ID_ENV)
+        .ok()
+        .and_then(|id| WaveId::parse(&id).ok())
+}
+
 /// Resolve this process's ambient Wave name through the durable Wave id.
 pub fn resolve_ambient_wave_name() -> Option<String> {
     std::env::var(WAVE_ID_ENV)

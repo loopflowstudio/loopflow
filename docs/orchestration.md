@@ -161,11 +161,12 @@ select it for a Wave:
 
 ```bash
 lf graph customize feature               # copies the builtin to .lf/graphs/feature.yaml
-lf wave workflow set feature product     # future product Tasks take it up
+lf wave workflow set feature product     # writes workflow: to .lf/wave/product/config.yaml
 ```
 
+Commit that file; teammates run your definition once they have your commit.
 A Task captures its Workflow on its first `lf task run`: the one you name, then
-its Wave's default, then repository `workflow:` in `.lf/config.yaml`, then
+its Wave's `workflow:`, then the repository's in `.lf/config.yaml`, then
 builtin `code`. Later edits apply to new Tasks; `lf task workflow restart LOO-12`
 moves an existing one back to `start` without reloading it.
 

@@ -75,6 +75,8 @@ pub struct WaveDetailSnapshot {
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
     /// This Wave's Machine-local Session history, newest first.
     pub history: Evidence<SessionHistory>,
+    /// What the Wave's Tasks run, where, and which logins pay, with each source.
+    pub setup: crate::work::wave::setup::WaveSetup,
 }
 
 /// A reading, or the reason there is none. "We looked and found nothing" and
@@ -645,6 +647,7 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
         tasks: task_snapshots.tasks,
         metric_portfolio,
         unavailable_tasks: task_snapshots.unavailable_tasks,
+        setup: crate::work::wave::setup::read_wave_setup(store, wave, &checkout).await?,
     })
 }
 
@@ -873,7 +876,7 @@ async fn roadmap_snapshot(
             continue;
         }
         roadmaps.push(WaveRoadmap {
-            workflow: store.sqlite.selected_wave_workflow(wave.id())?,
+            workflow: crate::work::wave::config::wave_workflow(&checkout, wave.slug())?,
             project_readiness: store.sqlite.project_readiness(wave.id())?,
             wave: snapshot,
             projects: project_planning(store, wave).await,
@@ -1920,6 +1923,37 @@ fn work_status_is_terminal(status: &WorkStatus) -> bool {
     matches!(status, WorkStatus::Done | WorkStatus::Abandoned)
 }
 
+fn print_setup(setup: &crate::work::wave::setup::WaveSetup) {
+    use crate::work::wave::setup::SetupValue;
+    let line = |label: &str, value: &SetupValue| {
+        println!(
+            "  {label:<16} {} ({})",
+            value.value.as_deref().unwrap_or("-"),
+            value.source.as_str()
+        );
+    };
+    println!("  setup");
+    line("workflow", &setup.workflow);
+    line("agent", &setup.agent);
+    for (skill, value) in &setup.skill_agents {
+        line(&format!("  {skill}"), value);
+    }
+    line("tasks machine", &setup.tasks_machine);
+    line("session machine", &setup.session_machine);
+    for (provider, route) in &setup.accounts {
+        let accounts = if route.accounts.is_empty() {
+            "unrouted".to_string()
+        } else {
+            route.accounts.join(" -> ")
+        };
+        println!(
+            "  {:<16} {accounts} ({})",
+            format!("{provider} accounts"),
+            route.source.as_str()
+        );
+    }
+}
+
 fn print_status(status: &WaveDetailSnapshot) {
     let colors = Colors::default();
     let wave = &status.wave;
@@ -1946,6 +1980,7 @@ fn print_status(status: &WaveDetailSnapshot) {
         Some(machine) => println!("  machine      {} ({})", machine.id, machine.route),
         None => println!("  machine      unplaced"),
     }
+    print_setup(&status.setup);
     print_projects(&status.projects);
     print_metric_portfolio(&status.metric_portfolio);
     match &status.tasks {

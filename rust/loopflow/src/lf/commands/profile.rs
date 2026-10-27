@@ -20,17 +20,34 @@ pub(super) async fn run_route_async(
             provider,
             accounts,
             repo,
+            wave,
             default,
         }) => {
-            let scope = if *default {
-                RouteScope::Default
-            } else {
-                RouteScope::Repo(resolve_repo_id(repo.as_deref())?.ok_or_else(|| anyhow!(
-                    "Run lf account route set in a repository with an origin, or pass --repo owner/name or --default."
-                ))?)
-            };
             let store = open_account_store().await?;
-            set_route(&store, scope, provider, accounts).await
+            let (scope, label) = if *default {
+                (RouteScope::Default, "default".to_string())
+            } else if let Some(wave) = wave {
+                let cwd = std::env::current_dir()?;
+                let repo = crate::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
+                let wave = crate::work::wave::context::resolve_managed_wave(
+                    Some(&store),
+                    Some(&repo),
+                    Some(wave),
+                    None,
+                )
+                .await?;
+                (
+                    RouteScope::Wave(wave.id().clone()),
+                    format!("Wave {}", wave.slug()),
+                )
+            } else {
+                let repo = resolve_repo_id(repo.as_deref())?.ok_or_else(|| anyhow!(
+                    "Run lf account route set in a repository with an origin, or pass --repo owner/name, --wave or --default."
+                ))?;
+                let label = repo.to_string();
+                (RouteScope::Repo(repo), label)
+            };
+            set_route(&store, scope, &label, provider, accounts).await
         }
         None => {
             let repo_id = if default {
@@ -216,6 +233,7 @@ async fn show_routes(
 async fn set_route(
     store: &SharedStore,
     scope: RouteScope,
+    label: &str,
     raw_provider: &str,
     raw_accounts: &[String],
 ) -> Result<()> {
@@ -231,17 +249,13 @@ async fn set_route(
     let now = now_unix();
     store
         .set_provider_route(&ProviderRoute {
-            scope: scope.clone(),
+            scope,
             provider,
             accounts: account_ids,
             created_at: now,
             updated_at: now,
         })
         .await?;
-    let label = match scope {
-        RouteScope::Repo(repo_id) => repo_id.to_string(),
-        RouteScope::Default => "default".to_string(),
-    };
     println!(
         "{label} {provider}: {}",
         accounts

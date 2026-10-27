@@ -188,11 +188,40 @@ command in your own crontab:
 # 0 9 * * *  cd ~/src/product && lf -b --wave billing wave-operate
 ```
 
+### Set it up once
+
+```yaml
+# .lf/wave/billing/config.yaml: committed, inherited by the Wave's Tasks
+workflow: code
+agent: claude
+skill_agents:
+  implement: claude:opus
+context_budgets:
+  memory_tokens: 20000
+```
+
+```bash
+lf machine use mini billing                                   # your Machine for its Tasks
+lf account route set claude work@example.com --wave billing   # the login that pays
+lf wave status billing                                        # each setting and its source
+```
+
+`config.yaml` has the shape of `.lf/config.yaml` and holds only what the Wave
+changes; launches in the Wave layer it over the repository's and your
+`~/.lf/config.yaml`. Repository settings (`planning`, `release`, `exclude`,
+`merge_method`, `land`, `pr`) are an error there. It also carries the Wave's
+`id`, `linear.initiative` and `chat`. A Task with no Wave uses the repository's
+settings. Machines and account routes are yours, stored on your Machine: a
+launch uses the nearest of Wave, repository and default.
+
+A Wave without `config.yaml` reads these keys from `GOAL.md` frontmatter, which
+released lf still reads (LOO-640 removes that).
+
 ### Plan a chapter: Projects and KRs
 
 ```bash
 lf wave update-plan --wave billing --plan plan.json
-lf wave workflow set feature billing     # the Workflow its new Tasks take up
+lf wave workflow set feature billing     # writes workflow: to .lf/wave/billing/config.yaml
 ```
 
 ```json
@@ -220,7 +249,7 @@ comes first and applies with no Wave selected.
 ### Talk to it from Discord
 
 ```yaml
-# .lf/wave/billing/GOAL.md frontmatter
+# .lf/wave/billing/config.yaml
 chat:
   provider: discord
   guild_id: "123456789012345678"

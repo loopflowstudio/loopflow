@@ -26,7 +26,7 @@ use crate::store::{
     ProviderTokenReplacement, StorageConfig, Store,
 };
 use crate::work::task::Task;
-use crate::work::wave::config::{read_wave_config, update_wave_goal_config};
+use crate::work::wave::config::{read_wave_config, update_wave_config};
 use crate::work::wave::Wave;
 
 // ── Options and results ─────────────────────────────────────────────
@@ -599,7 +599,7 @@ async fn connect_async(
         }
     };
     if initiative_missing {
-        write_initiative_to_goal(repo, &wave, &initiative_id)?;
+        write_initiative_to_wave(repo, &wave, &initiative_id)?;
     }
     let connection_changed = write_repository_linear_config(repo, &team.id)?;
 
@@ -1754,8 +1754,8 @@ pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
 
 // ── helpers ─────────────────────────────────────────────────────────
 
-fn write_initiative_to_goal(repo: &Path, wave: &str, initiative_id: &str) -> OpsResult<()> {
-    update_wave_goal_config(repo, wave, |map| {
+fn write_initiative_to_wave(repo: &Path, wave: &str, initiative_id: &str) -> OpsResult<()> {
+    update_wave_config(repo, wave, |map| {
         let linear_key = serde_yaml_ng::Value::String("linear".to_string());
         let mut linear_map = map
             .get(&linear_key)
@@ -2381,7 +2381,7 @@ mod tests {
         let goal = repo.path().join(".lf/wave/product/GOAL.md");
 
         write_repository_linear_config(repo.path(), "team-product").unwrap();
-        write_initiative_to_goal(repo.path(), "product", "initiative-product").unwrap();
+        write_initiative_to_wave(repo.path(), "product", "initiative-product").unwrap();
         let config = crate::config::load_repo_config(repo.path())
             .unwrap()
             .unwrap();
@@ -2394,8 +2394,11 @@ mod tests {
         assert_eq!(config.agent.as_deref(), Some("codex"));
         let updated = std::fs::read_to_string(goal).unwrap();
         assert!(updated.ends_with("---\nDrive the work.\n"));
-        let wave = read_wave_config(repo.path(), "product").unwrap();
+        let wave = crate::config::load_wave_config(Some(repo.path()), Some("product"))
+            .unwrap()
+            .unwrap();
         assert_eq!(wave.agent.as_deref(), Some("claude"));
+        let wave = read_wave_config(repo.path(), "product").unwrap();
         assert_eq!(
             wave.linear.unwrap().initiative.as_deref(),
             Some("initiative-product")

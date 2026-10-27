@@ -133,9 +133,12 @@ for line in sys.stdin:
     repo.commit("Define agent selection fixtures");
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    store
-        .select_wave_workflow(registered.task.wave_id.as_ref().unwrap(), "feature")
-        .unwrap();
+    support::select_wave_workflow(
+        repo.path(),
+        &store,
+        registered.task.wave_id.as_ref().unwrap(),
+        "feature",
+    );
     // Direct Task binding used to prefer the saved Task agent over -a.
     for args in [
         vec![
@@ -922,7 +925,12 @@ fn a_refused_bare_task_run_returns_its_refusal() {
 /// A headless Task requires an account record even when the provider is a
 /// stand-in. Its synthetic credential never leaves the network sandbox.
 fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
-    let account_home = home.join("accounts/claude/fixture");
+    connect_claude_account(home, store, "fixture");
+}
+
+/// Connect a managed Claude account `name`, signed in as `name@example.com`.
+fn connect_claude_account(home: &Path, store: &loopflow::store::Store, name: &str) {
+    let account_home = home.join("accounts/claude").join(name);
     fs::create_dir_all(&account_home).unwrap();
     let credential =
         r#"{"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000}}"#;
@@ -931,13 +939,13 @@ fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
         .unwrap()
         .block_on(store.upsert_provider_account(&ProviderAccount {
             provider: "claude".into(),
-            account_id: ProviderAccountId::parse("fixture").unwrap(),
+            account_id: ProviderAccountId::parse(name).unwrap(),
             home: Some(account_home),
             login_email: Some(
-                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
+                loopflow::profile::EmailAddress::parse(&format!("{name}@example.com")).unwrap(),
             ),
-            observed_email: Some("fixture@example.com".into()),
-            observed_subject: Some("fixture".into()),
+            observed_email: Some(format!("{name}@example.com")),
+            observed_subject: Some(name.into()),
             observed_credential_digest: Some(format!(
                 "{:x}",
                 Sha256::digest(credential.as_bytes())
@@ -955,6 +963,97 @@ fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
             updated_at: 1,
         }))
         .unwrap();
+}
+
+/// A Claude stand-in that records each launch's arguments and account home.
+const CLAUDE_RECORDER: &str = r#"#!/usr/bin/python3
+import json
+import os
+import sys
+
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
+    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR')}) + '\n')
+message = json.loads(sys.stdin.readline())
+message['session_id'] = 'agent-fixture'
+print(json.dumps(message), flush=True)
+print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'agent-fixture'}), flush=True)
+print(json.dumps({'type': 'result', 'uuid': 'fixture-result', 'session_id': 'agent-fixture', 'subtype': 'success', 'is_error': False, 'result': 'done'}), flush=True)
+for line in sys.stdin:
+    pass
+"#;
+
+#[test]
+fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    repo.create_branch("wave-setup");
+    let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(
+        &[
+            ("open", "#!/bin/sh\nexit 0\n"),
+            ("gh", "#!/bin/sh\nexit 1\n"),
+            ("claude", CLAUDE_RECORDER),
+        ],
+        Some(home.path()),
+    );
+    let registered = support::register_task_without_pr(
+        home.path(),
+        &repo.path().canonicalize().unwrap(),
+        "wave-setup",
+        &repo.head_sha(),
+    );
+    connect_claude_account(home.path(), &registered.store, "fixture");
+    connect_claude_account(home.path(), &registered.store, "work");
+    for (path, content) in [
+        (".lf/skills/probe.md", "Probe."),
+        (".lf/graphs/proof.yaml", "- step: {name: probe}\n"),
+        (
+            ".lf/wave/task-pr-tests/config.yaml",
+            "linear:\n  initiative: initiative-task-pr-tests\nagent: claude:opus\n",
+        ),
+    ] {
+        repo.create_file(path, content);
+    }
+    repo.stage_all();
+    repo.commit("Set up the Wave once");
+    for args in [
+        &[
+            "account",
+            "route",
+            "set",
+            "claude",
+            "work@example.com",
+            "--wave",
+            "task-pr-tests",
+        ][..],
+        &["-b", "task", "run", "INF-123", "proof"],
+    ] {
+        let output = command(repo.path(), home.path(), args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let launches = fs::read_to_string(home.path().join("launches.jsonl")).unwrap();
+    let launch: serde_json::Value = serde_json::from_str(launches.lines().next().unwrap()).unwrap();
+    let args = launch["args"].as_array().unwrap();
+    assert!(
+        args.windows(2).any(|pair| pair == ["--model", "opus"]),
+        "{launch}"
+    );
+    assert_eq!(
+        Path::new(launch["claude_home"].as_str().unwrap())
+            .canonicalize()
+            .unwrap(),
+        home.path()
+            .join("accounts/claude/work")
+            .canonicalize()
+            .unwrap()
+    );
 }
 
 /// A registered Task whose repository defines the Graphs and workflows below.
@@ -1042,9 +1141,12 @@ impl WorkflowTask {
         let store =
             loopflow::store::sqlite::SqliteStore::new(&self.home.path().join("loopflow.db"))
                 .unwrap();
-        store
-            .select_wave_workflow(self.registered.task.wave_id.as_ref().unwrap(), name)
-            .unwrap();
+        support::select_wave_workflow(
+            self.repo.path(),
+            &store,
+            self.registered.task.wave_id.as_ref().unwrap(),
+            name,
+        );
     }
 
     fn publish(&self, merged: bool) {
@@ -1213,9 +1315,12 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
             "- graph: proof\n- interactive: {name: demo, id: review}\n",
         )
         .unwrap();
-        sqlite
-            .select_wave_workflow(task.wave_id.as_ref().unwrap(), name)
-            .unwrap();
+        support::select_wave_workflow(
+            fixture.repo.path(),
+            &sqlite,
+            task.wave_id.as_ref().unwrap(),
+            name,
+        );
     };
     select("before-checkout");
     fixture.ok(&["task", "checkout", "INF-124", "--name", "first-workflow"]);

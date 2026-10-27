@@ -1025,7 +1025,7 @@ pub enum WaveWorkflowCommand {
         json: bool,
     },
     /// Select the graph future Tasks take up; captured Tasks stay unchanged.
-    /// Graphs are committed `.lf/graphs/<name>.yaml` files or builtins.
+    /// Writes `workflow:` to the Wave's committed `.lf/wave/<name>/config.yaml`.
     Set { name: String, wave: Option<String> },
 }
 
@@ -2346,8 +2346,11 @@ pub enum RouteCommand {
         provider: String,
         #[arg(required = true)]
         accounts: Vec<String>,
-        #[arg(long, conflicts_with = "default")]
+        #[arg(long, conflicts_with_all = ["default", "wave"])]
         repo: Option<String>,
+        /// Route this Wave's work; it wins over the repository's route
+        #[arg(long, conflicts_with = "default")]
+        wave: Option<String>,
         #[arg(long)]
         default: bool,
     },

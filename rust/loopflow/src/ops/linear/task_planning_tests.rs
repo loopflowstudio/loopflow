@@ -645,6 +645,19 @@ async fn wave_workflow_selects_a_committed_definition_offline() {
                 .unwrap();
             assert_eq!(selected.workflow.as_deref(), Some("review"));
             assert_eq!(selected.wave_id, *wave.id());
+            assert_eq!(
+                crate::ops::project::workflow(&repo, Some(wave.slug()))
+                    .await
+                    .unwrap()
+                    .workflow
+                    .as_deref(),
+                Some("review")
+            );
+            assert!(
+                std::fs::read_to_string(crate::work::wave::config::config_path(&repo, wave.slug()))
+                    .unwrap()
+                    .contains("workflow: review")
+            );
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
         })
         .await;

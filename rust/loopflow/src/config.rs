@@ -1,9 +1,11 @@
 //! Configuration loading for loopflow.
 //!
-//! Loads config from `~/.lf/config.yaml` (global) and `.lf/config.yaml` (repo).
-//! Repo config overrides global. Additive keys (docs, context, exclude, summaries) combine.
+//! Loads config from `~/.lf/config.yaml` (global), `.lf/config.yaml` (repo) and,
+//! for work in a Wave, `.lf/wave/<name>/config.yaml`. Each nearer layer overrides
+//! the one before; additive keys (docs, context, exclude, summaries) combine and
+//! keyed maps (context_budgets, skill_agents) merge per key.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -148,6 +150,28 @@ const ADDITIVE_KEYS: &[&str] = &[
     "summaries",
     "supported_harnesses",
 ];
+
+/// Keys whose maps merge entry by entry, the nearer layer winning per entry.
+const MAPPED_KEYS: &[&str] = &["context_budgets", "skill_agents"];
+
+/// Keys only a repository or your personal config may set; a Wave file
+/// naming one is an error.
+const REPO_ONLY_KEYS: &[&str] = &[
+    "planning",
+    "release",
+    "exclude",
+    "merge_method",
+    "land",
+    "pr",
+];
+
+/// The config layer a value came from, farthest first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigLayer {
+    Global,
+    Repo,
+    Wave,
+}
 
 /// Summary configuration for a specific path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -446,6 +470,10 @@ pub struct Config {
     #[serde(default)]
     pub agent: Option<String>,
 
+    /// Agent for one skill by name, ahead of the skill's own choice and `agent`.
+    #[serde(default)]
+    pub skill_agents: BTreeMap<String, String>,
+
     /// Supported harnesses for model selection UI.
     #[serde(default)]
     pub supported_harnesses: Vec<String>,
@@ -546,6 +574,7 @@ impl Default for Config {
             context_budgets: Default::default(),
             context_budget_sources: Default::default(),
             agent: None,
+            skill_agents: BTreeMap::new(),
             supported_harnesses: Vec::new(),
             yolo: false,
             chrome: false,
@@ -655,7 +684,7 @@ fn merge_config_values(
                     } else {
                         global_map.insert(key, value);
                     }
-                } else if key_str == "context_budgets" {
+                } else if MAPPED_KEYS.contains(&key_str) {
                     let previous = global_map.remove(&key);
                     global_map.insert(key, merge_config_values(previous, Some(value)));
                 } else {
@@ -671,46 +700,157 @@ fn merge_config_values(
 
 /// Load config, merging global (~/.lf/config.yaml) with repo (.lf/config.yaml).
 pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError> {
-    let global_path = global_config_path();
+    load_wave_config(repo_root, None)
+}
 
-    let repo_path = repo_root.map(|r| r.join(".lf").join("config.yaml"));
-
-    let global_data = load_yaml_file(&global_path)?;
-    let repo_data = repo_path
-        .as_ref()
-        .map(|p| load_yaml_file(p))
-        .transpose()?
-        .flatten();
-
-    if global_data.is_none() && repo_data.is_none() {
+/// Load config for work in a Wave: global, then repo, then the Wave's
+/// `config.yaml`. With no Wave this is [`load_config`].
+pub fn load_wave_config(
+    repo_root: Option<&Path>,
+    wave: Option<&str>,
+) -> Result<Option<Config>, LoadError> {
+    let layers = config_layers(repo_root, wave)?;
+    if layers.is_empty() {
         return Ok(None);
     }
-
     let mut sources = BTreeMap::new();
-    for (data, path) in [
-        (&global_data, Some(&global_path)),
-        (&repo_data, repo_path.as_ref()),
-    ] {
-        if let (Some(data), Some(path)) = (data, path) {
-            if let Some(budgets) = data.get("context_budgets") {
-                let budgets: BTreeMap<BudgetKey, usize> =
-                    serde_yaml_ng::from_value(budgets.clone()).map_err(|e| {
-                        LoadError::InvalidGraph(format!(
-                            "Invalid context_budgets in {}: {e}",
-                            path.display()
-                        ))
-                    })?;
-                sources.extend(budgets.keys().map(|key| (*key, path.display().to_string())));
-            }
+    let mut merged = None;
+    for layer in layers {
+        if let Some(budgets) = layer.value.get("context_budgets") {
+            let budgets: BTreeMap<BudgetKey, usize> = serde_yaml_ng::from_value(budgets.clone())
+                .map_err(|e| {
+                    LoadError::InvalidGraph(format!(
+                        "Invalid context_budgets in {}: {e}",
+                        layer.path.display()
+                    ))
+                })?;
+            sources.extend(
+                budgets
+                    .keys()
+                    .map(|key| (*key, layer.path.display().to_string())),
+            );
         }
+        merged = Some(merge_config_values(merged, Some(layer.value)));
     }
-    let merged = merge_config_values(global_data, repo_data);
+    let merged = merged.expect("at least one layer");
 
     let mut config: Config = serde_yaml_ng::from_value(merged)
         .map_err(|e| LoadError::InvalidGraph(format!("Config validation error: {}", e)))?;
 
     config.context_budget_sources = sources;
     Ok(Some(config))
+}
+
+/// One present config file's values.
+#[derive(Debug, Clone)]
+pub struct ConfigLayerValues {
+    pub layer: ConfigLayer,
+    pub path: PathBuf,
+    pub value: serde_yaml_ng::Value,
+}
+
+/// The present config layers for work in a Wave, farthest first.
+pub fn config_layers(
+    repo_root: Option<&Path>,
+    wave: Option<&str>,
+) -> Result<Vec<ConfigLayerValues>, LoadError> {
+    let mut layers = Vec::new();
+    let global_path = global_config_path();
+    if let Some(value) = load_yaml_file(&global_path)? {
+        layers.push(ConfigLayerValues {
+            layer: ConfigLayer::Global,
+            path: global_path,
+            value,
+        });
+    }
+    let Some(repo_root) = repo_root else {
+        return Ok(layers);
+    };
+    let repo_path = repo_root.join(".lf").join("config.yaml");
+    if let Some(value) = load_yaml_file(&repo_path)? {
+        layers.push(ConfigLayerValues {
+            layer: ConfigLayer::Repo,
+            path: repo_path,
+            value,
+        });
+    }
+    if let Some(wave) = wave {
+        if let Some((path, value)) = crate::work::wave::config::read_wave_layer(repo_root, wave)
+            .map_err(|error| LoadError::InvalidGraph(error.to_string()))?
+        {
+            validate_wave_keys(&path, &value)?;
+            layers.push(ConfigLayerValues {
+                layer: ConfigLayer::Wave,
+                path,
+                value,
+            });
+        }
+    }
+    Ok(layers)
+}
+
+/// The nearest layer setting the value at `path`, such as
+/// `["skill_agents", "implement"]`, with that value.
+pub fn layer_setting<'a>(
+    layers: &'a [ConfigLayerValues],
+    path: &[&str],
+) -> Option<(ConfigLayer, &'a serde_yaml_ng::Value)> {
+    layers.iter().rev().find_map(|layer| {
+        let mut value = &layer.value;
+        for key in path {
+            value = value.get(*key)?;
+        }
+        (!value.is_null()).then_some((layer.layer, value))
+    })
+}
+
+/// The nearest layer selecting a Workflow. Personal config never selects one
+/// for a repository's Tasks, and it is the farthest layer, so a global
+/// selection is simply ignored.
+pub fn workflow_setting(
+    layers: &[ConfigLayerValues],
+) -> Option<(ConfigLayer, &serde_yaml_ng::Value)> {
+    layer_setting(layers, &["workflow"]).filter(|(layer, _)| *layer != ConfigLayer::Global)
+}
+
+/// Keys a Wave's `config.yaml` may set: every `Config` key a repository may
+/// share with its Waves.
+pub fn wave_config_keys() -> BTreeSet<String> {
+    let Ok(serde_yaml_ng::Value::Mapping(defaults)) = serde_yaml_ng::to_value(Config::default())
+    else {
+        unreachable!("Config serializes as a mapping");
+    };
+    defaults
+        .keys()
+        .filter_map(|key| key.as_str())
+        .filter(|key| !REPO_ONLY_KEYS.contains(key))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn validate_wave_keys(path: &Path, value: &serde_yaml_ng::Value) -> Result<(), LoadError> {
+    let Some(mapping) = value.as_mapping() else {
+        return Err(LoadError::InvalidGraph(format!(
+            "{} must be a mapping",
+            path.display()
+        )));
+    };
+    let allowed = wave_config_keys();
+    for key in mapping.keys().filter_map(|key| key.as_str()) {
+        if REPO_ONLY_KEYS.contains(&key) {
+            return Err(LoadError::InvalidGraph(format!(
+                "{}: `{key}` belongs to the repository's .lf/config.yaml, not a Wave",
+                path.display()
+            )));
+        }
+        if !allowed.contains(key) {
+            return Err(LoadError::InvalidGraph(format!(
+                "{}: unknown key `{key}`",
+                path.display()
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Load only Machine-local user configuration.
@@ -1169,6 +1309,40 @@ supported_harnesses:
         let merged = merge_config_values(Some(global), Some(repo));
         let config: Config = serde_yaml_ng::from_value(merged).unwrap();
         assert_eq!(config.supported_harnesses, vec!["claude", "codex"]);
+    }
+
+    #[test]
+    fn skill_agents_merge_per_skill_and_a_wave_layer_rejects_repository_keys() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".lf/wave/infra")).unwrap();
+        std::fs::write(
+            repo.path().join(".lf/config.yaml"),
+            "agent: codex\nskill_agents:\n  implement: codex:o3\n  design: claude\n",
+        )
+        .unwrap();
+        let wave = repo.path().join(".lf/wave/infra/config.yaml");
+        std::fs::write(&wave, "skill_agents:\n  implement: claude:opus\n").unwrap();
+        let layers = config_layers(Some(repo.path()), Some("infra")).unwrap();
+        let config = load_wave_config(Some(repo.path()), Some("infra"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(config.agent.as_deref(), Some("codex"));
+        assert_eq!(config.skill_agents["implement"], "claude:opus");
+        assert_eq!(config.skill_agents["design"], "claude");
+        assert_eq!(
+            layer_setting(&layers, &["skill_agents", "implement"]).map(|(layer, _)| layer),
+            Some(ConfigLayer::Wave)
+        );
+        assert_eq!(
+            layer_setting(&layers, &["agent"]).map(|(layer, _)| layer),
+            Some(ConfigLayer::Repo)
+        );
+
+        std::fs::write(&wave, "planning:\n  provider: git\n").unwrap();
+        assert!(load_wave_config(Some(repo.path()), Some("infra")).is_err());
+        std::fs::write(&wave, "agnet: claude\n").unwrap();
+        assert!(load_wave_config(Some(repo.path()), Some("infra")).is_err());
+        assert!(load_config(Some(repo.path())).is_ok());
     }
 
     #[test]

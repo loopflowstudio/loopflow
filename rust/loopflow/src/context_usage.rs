@@ -212,14 +212,13 @@ fn budgets(history: &SessionHistory) -> Option<ContextBudgets> {
         .map(Path::new)
         .find(|path| path.is_dir());
     let config = checkout
-        .and_then(|path| crate::config::load_config(Some(path)).ok().flatten())
+        .and_then(|path| {
+            crate::config::load_wave_config(Some(path), history.wave_name.as_deref())
+                .ok()
+                .flatten()
+        })
         .unwrap_or_default();
-    ContextBudgets::resolve(
-        &config,
-        checkout.unwrap_or(Path::new("")),
-        checkout.and(history.wave_name.as_deref()),
-    )
-    .ok()
+    ContextBudgets::resolve(&config).ok()
 }
 
 fn flag(step: &mut StepContext, budgets: &ContextBudgets) {
@@ -744,9 +743,7 @@ mod tests {
         for key in crate::prompt::context_budget::BudgetKey::ALL {
             config.context_budgets.insert(key, 50);
         }
-        let budgets =
-            crate::prompt::context_budget::ContextBudgets::resolve(&config, dir.path(), None)
-                .unwrap();
+        let budgets = crate::prompt::context_budget::ContextBudgets::resolve(&config).unwrap();
         super::flag(&mut step, &budgets);
         let steers = &step.sources[4];
         assert!(!steers.over_budget);

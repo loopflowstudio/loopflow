@@ -22,7 +22,7 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         WorkValue::WaveName(_)
         | WorkValue::WaveParent(_)
         | WorkValue::WaveProject(_)
-        | WorkValue::WaveWorkflow(_) => "waves",
+        | WorkValue::HistoricalWaveWorkflow(_) => "waves",
         WorkValue::ProjectWave(_)
         | WorkValue::ProjectLinearId(_)
         | WorkValue::ProjectSlug(_)
@@ -60,7 +60,7 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::WaveName(_) => "name",
         WorkValue::WaveParent(_) => "parent_wave_id",
         WorkValue::WaveProject(_) => "current_project_id",
-        WorkValue::WaveWorkflow(_) => "workflow",
+        WorkValue::HistoricalWaveWorkflow(_) => "workflow",
         WorkValue::ProjectWave(_) => "wave_id",
         WorkValue::ProjectLinearId(_) => "external_project_id",
         WorkValue::ProjectSlug(_) => "project_slug",
@@ -184,20 +184,6 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
             |row| row.get(0),
         )?));
     }
-    // Released migrations seed this writer before the Wave default column exists.
-    if table == "waves"
-        && conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('waves') WHERE name='workflow')",
-            [],
-            |row| row.get::<_, bool>(0),
-        )?
-    {
-        values.push(WorkValue::WaveWorkflow(conn.query_row(
-            "SELECT workflow FROM waves WHERE id=?1",
-            [id],
-            |row| row.get(0),
-        )?));
-    }
     for value in &values {
         value.validate()?;
     }
@@ -226,7 +212,10 @@ fn write_record(
     let mut columns = BTreeMap::new();
     for edit in edits {
         let edit = &edit.change;
-        if matches!(edit, WorkValue::HistoricalProjectWorkflow(_)) {
+        if matches!(
+            edit,
+            WorkValue::HistoricalProjectWorkflow(_) | WorkValue::HistoricalWaveWorkflow(_)
+        ) {
             continue;
         }
         edit.validate()?;
@@ -795,8 +784,9 @@ mod tests {
             .pending_project_changes(project.as_ref().unwrap())
             .unwrap();
         a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_project_capture BEFORE INSERT ON planning_peer_changes BEGIN SELECT RAISE(ABORT,'injected failure'); END;").unwrap();
-        let selected = a.selected_wave_workflow(&saved.wave_id).unwrap();
-        assert!(a.select_wave_workflow(&saved.wave_id, "another").is_err());
+        assert!(a
+            .edit_project(project.as_ref().unwrap(), Some("Renamed"), None, None)
+            .is_err());
         assert_eq!(
             a.project(project.as_ref().unwrap()).unwrap().unwrap(),
             current
@@ -806,7 +796,6 @@ mod tests {
                 .unwrap(),
             pending
         );
-        assert_eq!(a.selected_wave_workflow(&saved.wave_id).unwrap(), selected);
     }
 
     #[test]

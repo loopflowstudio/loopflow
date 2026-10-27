@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 
 use crate::agent::checkout_execution_boundary;
 use crate::child::ChildRef;
-use crate::config::{load_config_or_default, parse_agent};
+use crate::config::parse_agent;
 use crate::durable::{TaskState, WorkStatus};
 use crate::git::worktree_name::WorktreeName;
 use crate::git::worktrees::{
@@ -541,27 +541,25 @@ pub(crate) fn task_workflow_default(
     store: &Store,
     task: &Task,
 ) -> OpsResult<(String, &'static str)> {
-    if let Some(wave) = &task.wave_id {
-        if let Some(name) = store
-            .sqlite
-            .selected_wave_workflow(wave)
-            .map_err(task_error)?
-        {
-            crate::workflow::validate_workflow_name(&name).map_err(task_error)?;
-            return Ok((name, "wave"));
-        }
-    }
     let repo = repository_for_task(store, task)?;
-    let name = crate::config::load_repo_config(&repo)
-        .map_err(task_error)?
-        .and_then(|c| c.workflow);
-    match name {
-        Some(name) => {
-            crate::workflow::validate_workflow_name(&name).map_err(task_error)?;
-            Ok((name, "repository"))
-        }
-        None => Ok(("code".to_string(), "builtin")),
-    }
+    let wave = match &task.wave_id {
+        Some(id) => store.sqlite.get_wave(id).map_err(task_error)?,
+        None => None,
+    };
+    let layers = crate::config::config_layers(Some(&repo), wave.as_ref().map(|w| w.slug()))
+        .map_err(task_error)?;
+    let Some((layer, name)) = crate::config::workflow_setting(&layers) else {
+        return Ok(("code".to_string(), "builtin"));
+    };
+    let name = name
+        .as_str()
+        .ok_or_else(|| task_error("workflow must be a Workflow name"))?;
+    crate::workflow::validate_workflow_name(name).map_err(task_error)?;
+    let source = match layer {
+        crate::config::ConfigLayer::Wave => "wave",
+        _ => "repository",
+    };
+    Ok((name.to_owned(), source))
 }
 
 pub(crate) fn select_task_run(
@@ -1589,12 +1587,24 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
     title
 }
 
+/// The Task's agent, else its Wave's and repository's configuration.
 pub(crate) fn resolve_task_agent(
     worktree: &Path,
+    wave: Option<&str>,
     agent: Option<&str>,
     skill: Option<&crate::graph::Skill>,
 ) -> String {
-    crate::prompt::process::resolve_agent(agent, skill, &load_config_or_default(Some(worktree)))
+    let config = crate::config::load_wave_config(Some(worktree), wave)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    crate::prompt::process::resolve_agent(agent, skill, &config)
+}
+
+async fn task_wave_name(store: &SharedStore, task: &Task) -> Option<String> {
+    let id = task.wave_id.as_ref()?;
+    let wave = store.get_wave(id).await.ok()??;
+    Some(wave.slug().to_owned())
 }
 
 async fn select_task_agent(
@@ -1614,11 +1624,15 @@ async fn select_task_agent(
     Ok(())
 }
 
-fn task_configuration_refusal(task: &Task, skill: Option<&crate::graph::Skill>) -> Option<String> {
+fn task_configuration_refusal(
+    task: &Task,
+    wave: Option<&str>,
+    skill: Option<&crate::graph::Skill>,
+) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
     checkout_execution_boundary(
         worktree,
-        &resolve_task_agent(worktree, task.agent.as_deref(), skill),
+        &resolve_task_agent(worktree, wave, task.agent.as_deref(), skill),
     )
     .err()
     .map(|error| error.to_string())
@@ -1628,7 +1642,8 @@ pub(crate) async fn task_process_refusal(
     store: &SharedStore,
     task: &Task,
 ) -> crate::store::StoreResult<Option<String>> {
-    if let Some(refusal) = task_configuration_refusal(task, None) {
+    let wave = task_wave_name(store, task).await;
+    if let Some(refusal) = task_configuration_refusal(task, wave.as_deref(), None) {
         return Ok(Some(refusal));
     }
     persisted_task_process_refusal(store, task).await
@@ -3612,7 +3627,7 @@ async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSn
         let launch_refusal = if worktree_blocker.is_some() {
             None
         } else {
-            task_configuration_refusal(&task, None)
+            task_configuration_refusal(&task, wave.as_ref().map(Wave::slug), None)
                 .or_else(|| task_event_process_refusal(latest_event.as_ref()).map(str::to_string))
         };
         let action_evidence = TaskActionEvidence {
@@ -3634,6 +3649,7 @@ async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSn
     };
     let agent = resolve_task_agent(
         task.worktree.as_deref().unwrap_or(&repo),
+        wave.as_ref().map(Wave::slug),
         task.agent.as_deref(),
         None,
     );

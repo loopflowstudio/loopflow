@@ -489,7 +489,7 @@ Show the Wave's default Workflow
 
 ## lf wave workflow set
 
-Select the graph future Tasks take up; captured Tasks stay unchanged. Graphs are committed `.lf/graphs/<name>.yaml` files or builtins
+Select the graph future Tasks take up; captured Tasks stay unchanged. Writes `workflow:` to the Wave's committed `.lf/wave/<name>/config.yaml`
 
 | Argument | What it does |
 |---|---|
@@ -2136,6 +2136,7 @@ Replace a provider's ordered route
 | `<provider>` | provider |
 | `<accounts>` | accounts |
 | `--repo` | repo |
+| `--wave` | Route this Wave's work; it wins over the repository's route |
 | `--default` | default Default: false. |
 | `--help / -h` | Print help |
 

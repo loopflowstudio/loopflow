@@ -293,9 +293,7 @@ pub async fn workflow(repo: &Path, selector: Option<&str>) -> OpsResult<WaveWork
     let store = read_store()?;
     let wave = workflow_wave(&store, repo, selector).await?;
     Ok(WaveWorkflow {
-        workflow: store
-            .sqlite
-            .selected_wave_workflow(wave.id())
+        workflow: crate::work::wave::config::wave_workflow(repo, wave.slug())
             .map_err(project_error)?,
         wave_id: wave.id().clone(),
         wave: wave.slug().into(),
@@ -307,19 +305,20 @@ pub async fn set_workflow(
     selector: Option<&str>,
     name: &str,
 ) -> OpsResult<WaveWorkflow> {
-    let store = super::planning_sync::planning_store().await?;
+    let store = read_store()?;
     let wave = workflow_wave(&store, repo, selector).await?;
+    crate::workflow::validate_workflow_name(name).map_err(project_error)?;
     if crate::workflow::load_workflow(name, repo)
         .map_err(project_error)?
         .is_none()
     {
         return Err(project_error(crate::workflow::missing_workflow(name)));
     }
-    let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
-    store
-        .sqlite
-        .select_wave_workflow(wave.id(), name)
-        .map_err(project_error)?;
+    crate::work::wave::config::update_wave_config(repo, wave.slug(), |map| {
+        map.insert("workflow".into(), name.into());
+        Ok(())
+    })
+    .map_err(project_error)?;
     Ok(WaveWorkflow {
         wave_id: wave.id().clone(),
         wave: wave.slug().into(),

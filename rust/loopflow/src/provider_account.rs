@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::profile::RouteScope;
+use crate::id::WaveId;
+use crate::profile::{ProviderRoute, RouteScope};
 use crate::provider_auth::Provider;
 use crate::repository::RepoId;
 use crate::store::{
@@ -682,13 +683,15 @@ pub(crate) async fn resolve_provider_account(
     provider: Provider,
     agent_session: Option<&AgentSessionId>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    resolve_provider_account_exact(provider, agent_session, None).await
+    resolve_provider_account_exact(provider, agent_session, None, None).await
 }
 
+/// Select an account for a launch in `wave_id`'s work, if any.
 pub(crate) async fn resolve_provider_account_exact(
     provider: Provider,
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
+    wave_id: Option<&WaveId>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     ensure_supported(provider)?;
     let store = route_store().await?;
@@ -711,6 +714,7 @@ pub(crate) async fn resolve_provider_account_exact(
             provider,
             agent_session,
             exact_account_id,
+            wave_id,
             store,
             isolated,
         )
@@ -728,7 +732,7 @@ pub(crate) async fn resolve_provider_account_exact(
 
     let routed_repo_id = current_repo_id()?;
     let Some(candidates) =
-        provider_route_account_ids(&store, routed_repo_id.as_ref(), provider).await?
+        provider_route_account_ids(&store, routed_repo_id.as_ref(), wave_id, provider).await?
     else {
         if let Some(account_id) = exact_account_id {
             return Err(ProviderAccountError::NoEligibleAccount {
@@ -866,6 +870,7 @@ async fn resolve_selected_provider_account(
     provider: Provider,
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
+    wave_id: Option<&WaveId>,
     local_store: Option<SharedStore>,
     isolated: bool,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
@@ -875,6 +880,7 @@ async fn resolve_selected_provider_account(
         agent_session,
         exact_account_id,
         repo_id.as_ref(),
+        wave_id,
         local_store.as_ref(),
         true,
     )
@@ -970,6 +976,7 @@ async fn ordered_selected_candidates(
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
     repo_id: Option<&RepoId>,
+    wave_id: Option<&WaveId>,
     local_store: Option<&SharedStore>,
     verify_identity: bool,
 ) -> Result<Option<Vec<(AccountCandidate, bool)>>, ProviderAccountError> {
@@ -980,7 +987,7 @@ async fn ordered_selected_candidates(
     let mut candidates = Vec::new();
     let mut local_route = Vec::new();
     if let Some(store) = &local_store {
-        local_route = provider_route_account_ids(store, repo_id, provider)
+        local_route = provider_route_account_ids(store, repo_id, wave_id, provider)
             .await?
             .unwrap_or_default();
         let limits = store
@@ -1193,7 +1200,7 @@ pub(crate) async fn inspect_provider_route(
 ) -> Result<Option<Vec<ProviderAccount>>, ProviderAccountError> {
     if !selection::AccountSelection::from_env()?.is_default() {
         return Ok(
-            ordered_selected_candidates(provider, None, None, repo_id, store, false)
+            ordered_selected_candidates(provider, None, None, repo_id, None, store, false)
                 .await?
                 .map(|candidates| {
                     candidates
@@ -1206,7 +1213,7 @@ pub(crate) async fn inspect_provider_route(
     let Some(store) = store else {
         return Ok(None);
     };
-    let Some(ids) = provider_route_account_ids(store, repo_id, provider).await? else {
+    let Some(ids) = provider_route_account_ids(store, repo_id, None, provider).await? else {
         return Ok(None);
     };
     let accounts = store
@@ -1238,26 +1245,39 @@ pub(crate) async fn inspect_provider_route(
     Ok(Some(available))
 }
 
+/// The nearest route for a launch: the Wave's, then the repository's, then
+/// the default.
+pub(crate) async fn nearest_provider_route(
+    store: &SharedStore,
+    repo_id: Option<&RepoId>,
+    wave_id: Option<&WaveId>,
+    provider: Provider,
+) -> Result<Option<ProviderRoute>, ProviderAccountError> {
+    let scopes = wave_id
+        .cloned()
+        .map(RouteScope::Wave)
+        .into_iter()
+        .chain(repo_id.cloned().map(RouteScope::Repo))
+        .chain([RouteScope::Default]);
+    for scope in scopes {
+        if let Some(route) = store.provider_route(&scope, provider).await? {
+            return Ok(Some(route));
+        }
+    }
+    Ok(None)
+}
+
+/// The accounts a launch tries in order: the nearest route's, else every
+/// account eligible for automatic routing.
 pub(crate) async fn provider_route_account_ids(
     store: &SharedStore,
     repo_id: Option<&RepoId>,
+    wave_id: Option<&WaveId>,
     provider: Provider,
 ) -> Result<Option<Vec<ProviderAccountId>>, ProviderAccountError> {
-    let route = match repo_id {
-        Some(repo_id) => {
-            store
-                .provider_route(&RouteScope::Repo(repo_id.clone()), provider)
-                .await?
-        }
-        None => None,
-    };
-    if let Some(route) = route {
+    if let Some(route) = nearest_provider_route(store, repo_id, wave_id, provider).await? {
         return Ok(Some(route.accounts));
     }
-    if let Some(route) = store.provider_route(&RouteScope::Default, provider).await? {
-        return Ok(Some(route.accounts));
-    }
-
     let today = time::OffsetDateTime::now_utc().date();
     let accounts = store
         .list_provider_accounts(Some(provider.as_str()))
@@ -1273,12 +1293,14 @@ pub(crate) fn resolve_provider_account_exact_blocking(
     provider: Provider,
     agent_session: Option<AgentSessionId>,
     exact_account_id: Option<ProviderAccountId>,
+    wave_id: Option<WaveId>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     _run_blocking_account(provider, "route", move |runtime| {
         runtime.block_on(resolve_provider_account_exact(
             provider,
             agent_session.as_ref(),
             exact_account_id.as_ref(),
+            wave_id.as_ref(),
         ))
     })
 }
@@ -2912,6 +2934,7 @@ mod account_first_tests {
             Provider::Codex,
             Some(&"conversation".into()),
             Some(&began),
+            None,
         )
         .await
         .unwrap()

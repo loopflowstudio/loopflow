@@ -373,6 +373,7 @@ impl Harness for CodexHarness {
             Provider::Codex,
             requested_session.as_ref(),
             self.requested_account_id.as_ref(),
+            crate::work::wave::context::ambient_wave_id().as_ref(),
         )
         .await?;
         self.resume_agent_session = match &account_route {

@@ -92,12 +92,20 @@ powered-off Droplet bills; self-delete needs an account-wide token; Machine-loca
 rentals mean a lost laptop leaves the Droplet billing), so Jack dropped
 DigitalOcean. Every provider now keeps the printed deadline.
 
-Smaller, proposed:
-- Region is ambient (`AWS_REGION`, `FLY_ORG`), yet it
-  sets price (EC2 rates are us-east-1 only) and placement. An on-demand could
-  carry `--region` so two on-demands can differ and the quote is true.
-- With `--gpu` on RunPod, `--vcpus`/`--memory-gb` are silently dropped. Treat
-  them as floors the chosen GPU shape must meet, or refuse them with `--gpu`.
+Decided (Jack, 2026-10-26), to build next:
+- **Region stays in the environment** (`AWS_REGION`, `FLY_ORG`). The quote
+  and `lf ondemand add` name the region they priced, so a us-east-1 price
+  shown for another region is visibly an estimate.
+- **`--gpu` combines with `--vcpus`/`--memory-gb`**: they are floors. The
+  chosen GPU shape (RunPod GPU pod, EC2 GPU instance, Modal GPU sandbox) must
+  meet them; if none does, the add or quote fails naming the provider, GPU
+  and hardware. Never silently dropped.
+- **`--spot`** wherever the provider sells interruptible capacity: AWS (spot,
+  `MaxPrice` = the admitted price, so the budget holds) and RunPod
+  (interruptible pods, bid = the admitted price). Daytona, Modal and Fly have
+  none: `--spot` is refused naming the provider. An interrupted machine is
+  found gone by reconcile like any ended rental; the Task's unpushed work on it
+  is lost, which `lf ondemand add --spot` says once.
 
 ## Order
 
@@ -114,8 +122,8 @@ Assumptions in `scratch/questions.md`.
 Remaining:
 - Live run per provider (needs `RUNPOD_API_KEY`, AWS keys + region in Doppler);
   README rental row only after each passes.
-- Still open with Jack: AWS spot. Modal
+- Decided above: region in env, GPU floors, `--spot`. Modal
   Functions are not needed yet (Jack); `--gpu` stays `Sandbox.create(gpu=...)`.
-- No publication until LOO-527 has a PR to stack on.
+- LOO-527 is PR #1704; publish stacked on it when Jack asks.
 
 Check: `cargo test -p loopflow --lib rental` 26 passed, clippy clean after the `offer`/`find_gpu` compress (2026-10-26); bridge pytest unchanged (13 passed).

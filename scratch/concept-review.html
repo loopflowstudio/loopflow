@@ -41,7 +41,7 @@ Built from <code>scratch/design.md</code>, <code>docs/lf.md</code>, <code>docs/a
 </header>
 
 <h1>What does “until 18:30” promise?</h1>
-<p class="lead">The decision needed: what DigitalOcean is in this PR, given it is the one provider whose machines can outlive a lost laptop.</p>
+<p class="lead">Decided: DigitalOcean is dropped, so “until 18:30” is true on every provider. Two smaller questions remain.</p>
 
 <h2>The interaction</h2>
 <pre>doppler run -- lf ondemand add box --provider aws --vcpus 4 --memory-gb 16 --max 2 --max-usd-per-hour 0.40
@@ -94,12 +94,7 @@ lf ondemand list
 
 <h2>Questions</h2>
 <ol class="q">
-<li>What is DigitalOcean in this PR?
-  <ol>
-  <li>Left out until it has a guardian. The code stays on the branch; <code>--provider digitalocean</code> isn't offered.</li>
-  <li>Offered with the weaker promise stated everywhere it prints: “lf ends it at 18:30 (no hard deadline)”.</li>
-  <li>A guardian with a <code>droplet:delete</code> token, scoped by putting rentals in their own DigitalOcean team.</li>
-  </ol></li>
+<li><b>Decided (Jack):</b> DigitalOcean is dropped. Every remaining provider ends its machines at the printed deadline without lf.</li>
 <li>Region:
   <ol>
   <li><code>--region</code> on the on-demand, with prices per region.</li>

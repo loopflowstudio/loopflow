@@ -1,12 +1,7 @@
 # Release evidence
 
-Use `lf release history --wave infrastructure --json` for opportunity and product
-settlement. `lf cron history` and doctor continuity describe scheduling and
-process outcomes; they cannot establish publication or clear failed telemetry.
-
-Keep catch-up to one release execution per wake. Preserve original due times,
-exact candidate ownership, intervention provenance, and failures. A collapsed
-row supplies no additional success toward the two-settlement commitment.
+Scheduled releases are ordinary crontab lines running `lf release run`; the
+job's exit status and the release's public read-back are separate facts.
 
 The publisher host's launcher must retain the exact inherited release-lock
 file descriptor through process. Preserve it through Python subprocesses too;

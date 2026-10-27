@@ -811,6 +811,7 @@ async fn zen_check(token: &str) -> Result<()> {
     bail!("OpenCode Zen refused the login: {reason}")
 }
 
+/// One machine login per provider writes its account credentials at a time.
 fn credential_lock(provider: &str) -> Result<fs::File> {
     let directory = crate::store::lf_home_dir().join("accounts");
     fs::create_dir_all(&directory)?;

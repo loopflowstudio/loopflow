@@ -6,7 +6,7 @@ use loopflow_test_support::TestRepo;
 use serde_json::Value;
 
 fn invoke(repo: &Path, home: &Path, args: &[&str]) -> Output {
-    invoke_lf(repo, home, &[&["repo", "planning"][..], args].concat())
+    invoke_lf(repo, home, &[&["config", "planning"][..], args].concat())
 }
 
 fn invoke_lf(repo: &Path, home: &Path, args: &[&str]) -> Output {

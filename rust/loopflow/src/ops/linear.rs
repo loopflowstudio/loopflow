@@ -176,7 +176,7 @@ pub(crate) fn repository_team_id(repo: &Path) -> OpsResult<String> {
     selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
             ".lf/config.yaml has no repository `planning.team`. \
-             Run `lf repo connect <wave> --team-key <KEY>` before creating or mutating work."
+             Run `lf wave connect <wave> --team-key <KEY>` before creating or mutating work."
                 .to_string(),
         )
     })
@@ -199,7 +199,7 @@ fn repository_id(repo: &Path) -> OpsResult<RepoId> {
     RepoId::discover(repo).map_err(|error| {
         OpsError::Message(format!(
             "cannot establish repository Linear identity from Git origin: {error}. \
-             Configure an origin before running `lf repo connect`."
+             Configure an origin before running `lf wave connect`."
         ))
     })
 }
@@ -239,7 +239,7 @@ pub(crate) async fn resolve_context(
     let initiative = read_initiative(repo, wave).ok_or_else(|| {
         OpsError::Message(format!(
             ".lf/wave/{wave}/GOAL.md has no `linear.initiative`. \
-             Run `lf repo connect {wave}` to connect its Linear Initiative."
+             Run `lf wave connect {wave}` to connect its Linear Initiative."
         ))
     })?;
     Ok((repository, initiative))
@@ -608,7 +608,7 @@ async fn connect_async(
             repo,
             &crate::ops::CommitOptions {
                 add: true,
-                message: Some(format!("lf repo connect: {wave} to Linear")),
+                message: Some(format!("lf wave connect: {wave} to Linear")),
                 ..crate::ops::CommitOptions::for_task("linear")
             },
             progress,
@@ -1021,7 +1021,7 @@ async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext>
     let team_id = selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
             ".lf/config.yaml has no repository `planning.team`. \
-             Run `lf repo connect <wave> --team-key <KEY>` to establish the migration target."
+             Run `lf wave connect <wave> --team-key <KEY>` to establish the migration target."
                 .to_string(),
         )
     })?;
@@ -1481,7 +1481,7 @@ async fn refresh_async(
     }
 
     if team_id.is_none() {
-        let message = ".lf/config.yaml has no repository `planning.team`; run `lf repo connect <wave> --team-key <KEY>`".to_string();
+        let message = ".lf/config.yaml has no repository `planning.team`; run `lf wave connect <wave> --team-key <KEY>`".to_string();
         diagnostics.push(message.clone());
         blocking.push(message);
     }
@@ -1614,7 +1614,7 @@ async fn refresh_async(
             if let Some(team_id) = &team_id {
                 if project.team_ids.as_slice() != [team_id.as_str()] {
                     let message = format!(
-                        "Linear Project `{}` ({}) in wave/{wave} belongs to Teams [{}]; expected exactly repository Team {team_id}. Run `lf repo reteam`.",
+                        "Linear Project `{}` ({}) in wave/{wave} belongs to Teams [{}]; expected exactly repository Team {team_id}. Run `lf reteam`.",
                         project.name,
                         project.id,
                         project.team_ids.join(", ")
@@ -1652,7 +1652,7 @@ async fn refresh_async(
                 if let Some(team_id) = &team_id {
                     if item.team_id.as_deref() != Some(team_id.as_str()) {
                         let message = format!(
-                            "Linear task {} belongs to Team {}, expected repository Team {team_id}. Run `lf repo reteam`.",
+                            "Linear task {} belongs to Team {}, expected repository Team {team_id}. Run `lf reteam`.",
                             item.identifier, item.team_id.as_deref().unwrap_or("unmapped")
                         );
                         diagnostics.push(message.clone());
@@ -1844,7 +1844,7 @@ fn matching_initiative_id(
         [] => Ok(None),
         [initiative] => Ok(Some(initiative.id.clone())),
         many => Err(OpsError::Message(format!(
-            "multiple Linear Initiatives are named `{title}`: {}. Rename duplicates before running `lf repo connect`",
+            "multiple Linear Initiatives are named `{title}`: {}. Rename duplicates before running `lf wave connect`",
             many.iter()
                 .map(|initiative| initiative.id.as_str())
                 .collect::<Vec<_>>()
@@ -1955,7 +1955,7 @@ fn validate_project_ownership(
     crate::linear::validate_project_ownership(wave, initiative_id, Some(team_id), project).map_err(
         |error| {
             OpsError::Message(format!(
-                "{error}. Repair the associations and run `lf repo refresh {wave}`."
+                "{error}. Repair the associations and run `lf wave status {wave} --sync`."
             ))
         },
     )

@@ -103,7 +103,7 @@ repository content:
 ```bash
 lf machine use mini infrastructure            # this Wave's new Tasks and its Session
 lf machine use laptop infrastructure --session  # only the Wave Session
-lf machine use mini --repo --tasks             # only the repository's new Tasks
+lf --repo loopflow machine use mini --tasks    # only the repository's new Tasks
 lf machine list                               # each Machine with the defaults naming it
 ```
 
@@ -118,8 +118,8 @@ repository identity, and is copied to the
 person's other added Machines over `lf --machine`, so the laptop launches there and
 mini receives the runs. An unreachable Machine gets a warning; rerun later.
 Resolution for an unowned Task walks its Wave, its parent Waves, its repository, then this Machine,
-so single-Machine use needs no setup. Cron install and `lf wave show`'s `machine`
-field read the same resolver.
+so single-Machine use needs no setup. `lf wave show`'s `machine` field reads the
+same resolver.
 
 Setting the Session Machine moves the Wave Session: the old Machine completes its Wave primary
 Session and the new Machine admits a fresh one (fresh Wave context, as with
@@ -153,8 +153,8 @@ metrics and Session history; no process needs to be running.
 `RepositoryId` identifies the selected repository plan. `repository_plans` binds
 that ID to the Machine-local repository locator; it contains no copied Work or
 execution. Existing repository paths receive distinct opaque IDs; new Wave writes
-use the same binding, and `lf repo identity` covers repositories without Work.
-`lf repo identity --bind ID` explicitly associates even an established checkout.
+use the same binding, and `lf repository` covers repositories without Work.
+`lf repository --bind ID` explicitly associates even an established checkout.
 The same table retains prior IDs as local locators and exactly one selected ID
 per path; Work, provider mappings, pending effects and execution are untouched.
 An ID already bound to another local path is not reassigned. Binding selects no
@@ -247,7 +247,7 @@ resent. With `LF_RENT_LINUX_BIN` naming a Linux build, the laptop uploads that
 binary instead of the published `lf`, so a development build rents sandboxes
 running its own code.
 
-`lf machine use R [WAVE]` or `--repo`, naming a pool or on-demand, sets the
+`lf [--repo REPO] machine use R [WAVE]`, naming a pool or on-demand, sets the
 scope's Tasks capacity (`scope_defaults.tasks_capacity`) in place of a Tasks
 Machine; the nearest scope that sets either wins. `lf task run` places an
 unowned Task by that default as `--pool` or `--rent` would. Its Session stays
@@ -340,7 +340,7 @@ recorded endpoints alone do not prove liveness.
 
 `lf discord serve <wave>` is a foreground bridge from a configured channel to
 bounded conversations. It has no Wave cursor or inbox authority. Cron and Task execution
-do not require a daemon or bridge. See [Discord](../waves.md#discord-bridge).
+do not require a daemon or bridge. See [Discord](../work.md#talk-to-it-from-discord).
 
 ## Move a Wave without changing its identity
 

@@ -12,7 +12,7 @@
         "credential_state": "connected",
         "routing": "automatic",
         "cooldown_until": null,
-        "demotion": "weekly 95% used"
+        "tightest": "weekly 95% used"
       }
     ],
     "diagnostic": null

@@ -1,352 +1,146 @@
 # Get Started
 
+The first hour: install, one prompt, one Skill, one Task that comes back as a
+pull request, and the conversation you pick back up to land it.
+
 ## Install
 
 ```bash
-curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
-lf init
+curl -fsSL https://loopflow.studio/install.sh | sh
+lf init                          # checks your agent and logins, then names one command to try
 ```
 
-Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`.
-Or install with cargo:
+`lf` lands in `~/.local/bin`; set `LF_INSTALL_DIR=/path` to put it elsewhere.
+You need `git`, a project in a git repository, and one of Claude Code, Codex,
+OpenCode or Pi (1.3+) signed in. Pull requests also need `gh`, signed in.
+
+## 1. Launch an agent
 
 ```bash
-cargo install --git https://github.com/loopflowstudio/loopflow --bin lf
+lf : "fix the typo in README"            # on whichever of your logins has room
+lf -a codex : "fix the typo in README"   # the same prompt on Codex
 ```
 
-The Mac app — Sessions, the roadmap, every Task's worktree — is
-[`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg).
-It bundles `lf`.
+Run on `main`, and lf first carries your local commits and uncommitted files
+into a sibling worktree, so the conversation cannot dirty `main`. Bare `lf`
+opens the same general-purpose conversation without a prompt.
 
-```bash
-lf install                       # update to the latest published release, from any directory
-LF_INSTALL_CLI_ONLY=1 lf install # update the CLI while keeping Desktop and its clients running
-lf schedule                      # check at login and weekly (macOS)
-lf schedule daily                # also accepts weekly, hourly, 5min
-```
-
-Run `lf install` from any checkout, including a Task checkout. Promotion checks
-the candidate release against the installed database before changing it.
-Use `lf sync` inside a repository to update its checkout.
-
-### Before you install
-
-| You need | For |
-|---|---|
-| macOS or Linux | Everything |
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://github.com/anomalyco/opencode), or [Pi](https://github.com/earendil-works/pi) (1.3+), signed in | Every run. Loopflow uses the one you have; these have their own cost |
-| `git`, and a project in a git repository | Every run |
-| [GitHub CLI](https://cli.github.com) (`gh`), signed in | Pull requests |
-| A [Linear](https://linear.app) workspace | Optional Linear-backed planning; planning defaults to Git |
-
-A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
-
-### Setup Paths
-
-| I want to... | Start here |
-|---|---|
-| Try loopflow from terminal | `lf init` |
-| Run autonomous waves | Author `.lf/wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
-| Steer and inspect from terminal | `lf --wave <name> wave-operate` → `lf wave status` |
-| Run on another machine | `lf --machine <machine-id> --wave <name> wave-operate` ([Go Remote](#go-remote)) |
-| Join a repository a teammate already runs | `lf user`, then `lf planning status` ([Work with another person](lf.md#work-with-another-person)) |
-
----
-
-## Try It
+## 2. Run a Skill
 
 Copy an error, run one command.
 
 ```bash
-lf debug -c
+lf debug -c                     # paste the clipboard; it finds and fixes the cause
+lf --context debug -c           # print what the agent would receive, launch nothing
 ```
 
+`-c` pastes your clipboard. lf assembles the rest: operating guidance, your
+`scratch/` notes, and any docs you name.
+
+```bash
+lf gate --docs 'docs/*.md'      # add files, globs or directories
+lf gate --diff files            # add the bodies of files changed on the branch
 ```
-Tokens: 8,247
 
-system         4,892 ████
-skill           1,854 █
-scratch          867 ▏
-clipboard        634 ▏
-```
-
-The `-c` flag pastes your clipboard. `lf` assembles context—operating guidance,
-scratch notes, and clipboard—and passes it to the coding agent. Before the
-provider starts, Loopflow reserves the LfSession and captures its input in
-this Machine. The store must be writable even for unbound work. Native history
-retains provider outcomes and usage; Process records the command result. Add repo
-docs explicitly with `--docs` and changed file bodies with `--diff files`.
-
-`LOOPFLOW.md` supplies launcher guidance; Task- and Wave-associated launches
-also receive Work guidance. Standalone native skills retain their own instructions.
-
-Or try the demo repo:
+Try it on the demo repo:
 
 ```bash
 git clone https://github.com/loopflowstudio/loopflow-demos
 cd loopflow-demos/calculator
-python -m pytest test_calc.py    # see the bug
-# copy error to clipboard
-lf debug -c                            # fix it
+python -m pytest test_calc.py    # see the bug; copy the error
+lf debug -c                      # fix it
 ```
 
-### Open a conversation
-
-```bash
-lf                         # ask a question or start work
-lf operate                 # review and operate the repository’s open work
-lf repo-operate            # canonical name for the same skill
-lf --wave designer wave-operate  # operate one Wave
-```
-
-Bare `lf` starts the general-purpose terminal conversation. On canonical main, it
-first carries local commits and uncommitted files into an author-scoped sibling
-worktree so the conversation cannot dirty main.
-
-### Inline prompts
-
-```bash
-lf : "fix the typo in README"
-lf : "add type hints to utils.py"
-```
-
-### Worktree placement
-
-```bash
-lf wt create fix-login
-lf wt switch fix-login
-```
-
-New sibling worktrees use `../<repo>.fix-login`, with the primary checkout's
-current directory name as `<repo>`. Renaming that checkout changes the prefix
-for new siblings; existing worktrees keep their paths.
-
-If at least two live, branch-bearing worktrees share a parent directory other
-than the primary checkout's parent, lf creates new worktrees there as
-`fix-login`. Directory names can differ from branch names, as with city-named
-workspaces or branches renamed after checkout creation. No lf configuration is
-needed. New branches remain `<author>/fix-login`.
-
-With fewer examples or conflicting parent directories, lf uses its default
-sibling path, `../<repo>.fix-login`. Detached and missing checkouts do not
-establish a layout. Existing branch checkouts are reused wherever they live.
-Matching a host's worktree directory does not register a workspace in that host
-or run its setup scripts. Git checkout-hook failures retain the checkout and
-report the setup error instead of reporting success.
-
-Task checkout adds its readable identifier: `lf checkout ENG-123` creates
-`<author>/eng-123-fix-login` for “Fix login”, with `eng-123-fix-login` as the
-workspace segment. Local Tasks use six hex characters, extended only for
-collisions. Known Linear IDs work offline. Later Linear synchronization changes
-Task labels and generated Session names; existing branches and checkouts stay put.
-
-Reusing an existing worktree stays local, even when its remote is unavailable.
-For new work, lf refreshes the default branch from its configured Git upstream;
-a repository without a remote uses its local base. Advertised remote defaults,
-existing local branch conventions and the primary checkout supply the default
-branch without requiring `main` or lf configuration. In a fork, configure the
-base branch to track the integration remote using ordinary Git tracking.
-Publication and stacked PR remotes still have GitHub/origin assumptions.
-
-`lf sync --manual main` integrates an explicit local branch without fetching an
-unrelated remote. An explicitly selected remote-tracking target fetches that
-remote; a fetch failure remains an error.
-
-### Context flags
-
-| Flag | What it adds |
-|------|--------------|
-| `-c` | Clipboard content |
-| `--docs PATH,PATH` | Add specific files, globs, or directories to context |
-| `--diff files` | Full content of files changed on the branch |
-| `--diff patch` | Raw `git diff` output |
-| `-i` | Interactive mode |
-| `-b` | Batch/headless mode |
-
----
-
-## Build Features
-
-Start from a Task; Loopflow creates and retains its worktree.
-
-```bash
-lf task create --wave <wave> --title "add OAuth login"
-lf task run <issue-id>
-lf task status <issue-id>
-lf comment <issue-id> "support passkeys too"
-lf task wait <issue-id> --until terminal
-```
-
-Turn a reviewed design into work without another planning subsystem:
-
-```bash
-lf design                  # author and review one design
-lf launch-plan             # keep the core here; launch independent Tasks
-```
-
-### Skills chain
-
-| Skill | What it does |
-|------|--------------|
-| `prompt` | Author or audit a skill, Wave goal, or inline prompt |
-| `design` | Explore the problem, write spec to `scratch/<branch>.md` |
-| `implement` | Read spec, build it |
-| `compress` | Simplify the implementation without changing behavior |
-| `gate` | Verify the branch for shipping: tests, static checks and docs |
-| `qa` | Thorough quality assessment of the current branch |
-
-### How steps chain
-
-| Skill | Reads | Writes |
-|------|-------|--------|
-| design | — | `scratch/<branch>.md` |
-| implement | `scratch/<branch>.md` | code |
-| gate | code, tests | code, docs and proof |
-| qa | code | findings and fixes on branch |
-
-### Named graphs
-
-Chain skills manually, or use a named graph (a graph is a sequence of steps; each step names a skill, an op, or a subgraph):
-
-```bash
-lf incident                            # unbreak → 5whys → launch-plan
-lf code                                # pursue: implement until it holds, publish the PR
-lf feature                             # kickoff → pursue; ends at a published PR
-lf deliver                             # gate → land --wait-and-fix
-```
-
-Use bare names for both skills and Graphs: `lf debug`, `lf code`, `lf incident`.
-`lf graph incident` explicitly selects the Graph when a name also names a skill
-or CLI command; the prefix is otherwise optional.
-
-Graph YAML owns step order and explicit backward edges. An `interactive: <skill>`
-step is a Workflow stage where a person takes part in the Task conversation;
-`lf ship` runs it headless instead. A Graph
-with backward edges is a loopflow; it runs with or without a Task. `deliver`
-gates the branch and lands it.
-
-### Custom skills
-
-Author one from intent:
-
-```bash
-lf prompt: create a dependency-audit skill
-```
-
-Or add one directly in `.lf/skills/`:
+`debug`, `design`, `implement`, `gate` and `qa` are built in. Your own Skill is a
+Markdown file:
 
 ```markdown
-# .lf/skills/audit.md
+<!-- .lf/skills/audit.md -->
 Check this branch for security issues.
 Focus on input validation and auth boundaries.
 ```
 
 ```bash
-lf audit                               # runs your custom skill
+lf audit                         # runs your Skill by name
+lf audit: focus on the login form
 ```
 
-The [Authoring guide](authoring.md) covers prompt contracts, evidence loops,
-and Wave goals.
+## 3. Hand off a Task
 
-### Shipping
+A Task gets its own worktree, branch and pull request. Start one and walk away:
 
 ```bash
-lf pr open      # push + create or update a draft, then open its page
-lf pr publish   # push + create or update PR and mark ready (no browser)
-lf submit    # prepare the exact head; you click merge
-lf arm       # arm exact-head auto-merge and return
-lf land      # request auto-merge, record delivery, and return
-lf pr reconcile # check recorded landings once and settle merges
+lf task create --title "add a divide-by-zero error"   # prints the Task ID
+lf -b task run <ID> code                              # its own worktree; returns with a published PR
+lf comment <ID> "raise ValueError, not ZeroDivisionError"   # reaches the run before its next step
 ```
 
-Use the same delivery verbs for Task and non-Task branches. They act on the
-branch and Task PR record when present; they do not require a running Task Graph.
+`code` is the built-in Workflow: build until it holds and publish the PR, stop
+for you to try the change, then deliver it and stop again for you to check it on
+`main`. Name it once; the Task keeps it. Set
+`workflow: code` in `.lf/config.yaml` and `lf task run <ID>` picks it up for
+every new Task. `auto` skips both stops: `lf wave workflow set auto <wave>` and
+that Wave's Tasks run from request to merged PR without you.
+
+While it runs:
 
 ```bash
-lf ship           # run the Task's remaining steps to merge and completion
-lf ship --stop    # withdraw it; disarms auto-merge it armed
+lf task status <ID>              # where it is, and why
+lf ps                            # live lf call trees: each Graph, its steps, their agents
 ```
 
-`lf ship` (or `lf ship ISSUE`) makes the Task shipping, stands in for you at each
-Workflow stage, running its skill headless, and keeps going after it returns
-until the Task completes (`-b` waits for that); `lf task status` follows it. On a branch with no Task it first creates one for the branch
-and its checkout. A second `lf ship` while one runs exits 0; `lf task defer`
-holds it, and the next read of the Task (`lf task status`, Desktop) restarts one
-that died. Choosing a
-route into `end` (`lf task run X deliver`) ships the Task the same way.
+## 4. Pick up the conversation
 
----
-
-## Scale with Waves
+When the PR is published, the Task waits at its demo: you try the change, in the
+Task's own conversation.
 
 ```bash
-lf --wave shipper wave-operate "Review the release blockers"
-lf wave status shipper
-lf ps --json
+lf resume --task <ID>            # from any terminal, on whatever agent it ran
 ```
 
-Author `.lf/wave/shipper/GOAL.md` with an objective and operating guidance.
-`lf cron add` schedules recurring commands on your Machine; `pm:` connects shared planning. Each
-`wave-operate` invocation keeps your started Tasks moving and leaves the plan alone.
-Tasks own implementation in stable worktrees; `lf ship` lands them and repairs
-failed CI until merge; `lf pr reconcile` settles verified merges.
+Ask for changes there. Close the window; the conversation is still there next
+week. After a crash or reboot, `lf resume --all` brings back every conversation
+it interrupted.
 
-Open the repository in Loopflow on macOS to read Waves, Tasks and conversations.
-`lf session list` finds conversations and Graph reviews; open one with
-`lf session connect <session-id>`. Completing it returns its saved feedback.
-
-[Waves →](waves.md) · [Conducting →](conducting.md)
-
-## Go Remote
-
-Run agents while you sleep. A Machine is a stable machine identity with local
-planning, process, journal, and conversation history; its SSH route can change.
-Bootstrap the remote identity once:
+## 5. Land it
 
 ```bash
-lf machine add jack@mini.local --label mini
-lf machine list --json
-lf wave list --json
-lf --machine mini --wave shipper wave-operate
-lf machine use mini --task LOO-123  # move one Task's ownership to mini
+lf ship <ID>                     # the remaining steps, then merge; repairs failing CI until it lands
+lf ship <ID> --stop              # withdraw it; disarms the auto-merge it armed
 ```
 
-Pick the Machine that runs your new Tasks for a Wave:
+`lf ship` stands in for you at each remaining stage and runs `deliver`: `gate`,
+then `lf land --wait-and-fix`. It returns once the Task is shipping (`-b` waits);
+`lf task status` follows it. The Task completes when the PR merges, and its
+worktree is cleaned up later by `lf wt prune`.
+
+Outside a Task, the same verbs work on any branch:
 
 ```bash
-lf machine use mini shipper        # stored here and on your other Machines
-lf session connect --wave shipper  # your Wave Session, now on mini
+lf land                          # request auto-merge and return
+lf land --wait-and-fix           # stay until it merges, fixing CI on the way
 ```
 
-The choice is yours alone and never committed. Existing Tasks stay put; move one
-with `lf machine use <machine> --task <task>`.
-
-The target Machine proves its identity before running the command and keeps the
-resulting execution locally.
-
-Reads follow the same rule: `lf history list`, `lf usage`, `lf wave list`, and `lf wave status`
-read the executing Machine. Prefix the command with `lf --machine <machine-id>` to read
-another Machine. Loopflow does not silently aggregate or replicate execution records.
-
-`lf machine connect <machine> <provider> [email]` installs a separate login
-(github, claude, codex, opencode or linear) on an added machine. Account-selected
-`lf --machine` launches connect a missing login in the foreground and then use its
-resident credential. See
-[Subscription Management](subscriptions.md#use-subscriptions-over-ssh).
-
-Auth connects your providers locally:
+## Keep it current
 
 ```bash
-lf account connect github    # connect GitHub
-lf account connect claude    # connect Claude
-lf account connect linear    # connect Linear with OAuth; needs LINEAR_CLIENT_ID/SECRET or Doppler
-lf account connect asana     # or plan in Asana; needs ASANA_CLIENT_ID/SECRET or Doppler
-lf account connect notion    # or plan in Notion; needs NOTION_CLIENT_ID/SECRET or Doppler
-lf account    # refresh managed identity and usage
+lf install                       # the latest published release, from any directory
+lf schedule                      # check at login and weekly (macOS); also daily, hourly, 5min
+lf doctor                        # installation, store and process health
 ```
 
----
+Prefer cargo? `cargo install --git https://github.com/loopflowstudio/loopflow --bin lf`.
+The Mac app, [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg),
+bundles `lf`.
 
-## Reference
+| Flag | What it does |
+|---|---|
+| `-c` | Paste the clipboard into the prompt |
+| `--docs PATH,…` | Add files, globs or directories |
+| `--diff files` / `--diff patch` | Add changed file bodies / the raw diff |
+| `--context` | Preview the assembled input; launch nothing |
+| `-a HARNESS[:MODEL]` | Run on claude, codex, opencode or pi |
+| `-i` / `-b` | Interactive / headless, returning when the work ends |
 
-[`lf` commands](lf.md) · [Authoring](authoring.md) · [Configuration](config.md) · [Waves](waves.md) · [The Agent API](agent-api.md)
+Next: [Work](work.md): many Tasks, their status, and Waves that keep a longer
+objective moving.

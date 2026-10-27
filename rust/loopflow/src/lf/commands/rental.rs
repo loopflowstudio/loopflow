@@ -706,7 +706,7 @@ fn hand_off(
     Ok(())
 }
 
-/// Logins, then this repository cloned and bound to the same identity, so the
+/// Logins (Linear too when it holds the plan), then this repository cloned and bound to the same identity, so the
 /// forwarded run finds its plan there.
 fn prepare(
     runtime: &tokio::runtime::Runtime,
@@ -727,6 +727,18 @@ fn prepare(
     runtime.block_on(super::machine_credentials::connect_claude_accounts(
         &machine, batch,
     ))?;
+    let planning = crate::config::load_config(Some(repo))?
+        .unwrap_or_default()
+        .planning_transport();
+    if matches!(planning, crate::config::PlanningConfig::Linear { .. }) {
+        runtime.block_on(super::machine_credentials::connect(
+            &machine,
+            Login::Linear,
+            None,
+            None,
+            batch,
+        ))?;
+    }
     let key = crate::repository::CanonicalRepo::discover(repo)?.to_string();
     let id = sqlite
         .repository_id(&key)?

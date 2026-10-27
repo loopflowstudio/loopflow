@@ -916,15 +916,19 @@ impl LinearClient {
                 }
             }
         }
-        let request = GraphqlRequest { query, variables };
+        let request_body = GraphqlRequest { query, variables };
 
         let cooldown = cooldown::Cooldown::for_endpoint(&self.base_url);
         cooldown.check().await?;
-        let response = self
-            .client
-            .post(&self.base_url)
-            .bearer_auth(&self.token)
-            .json(&request)
+        let request = self.client.post(&self.base_url);
+        // Linear takes a personal API key bare and an OAuth token as a bearer.
+        let request = if self.token.starts_with("lin_api_") {
+            request.header(reqwest::header::AUTHORIZATION, &self.token)
+        } else {
+            request.bearer_auth(&self.token)
+        };
+        let response = request
+            .json(&request_body)
             .send()
             .await
             .map_err(|err| LinearError::Message(format!("linear request failed: {err}")))?;

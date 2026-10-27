@@ -44,12 +44,11 @@ enum Credential {
         subject: String,
         credential: String,
     },
+    /// A personal API key: it never expires or rotates, so every machine shares it
+    /// and none needs a browser approval.
     Linear {
         login: String,
-        access_token: String,
-        refresh_token: String,
-        oauth_client_id: String,
-        expires_at: Option<i64>,
+        api_key: String,
     },
     /// One `opencode auth export` entry; `login` is its OpenCode account, or the
     /// entry itself for an API key.
@@ -144,22 +143,18 @@ pub(super) async fn connect(
             if remote_has(machine, provider, &login)? {
                 return Ok(());
             }
-            require_foreground(batch)?;
-            let fresh = super::account::fresh_linear_login(&store, chrome_profile).await?;
-            if linear_login(&fresh.access_token).await? != login {
-                bail!("fresh Linear login belongs to a different account; discarded");
+            let env_name = provider
+                .api_key_env_name()
+                .expect("Linear takes a personal API key");
+            let api_key = std::env::var(env_name)
+                .ok()
+                .map(|key| key.trim().to_string())
+                .filter(|key| !key.is_empty())
+                .ok_or_else(|| anyhow!("{env_name} is not set; create a personal API key in Linear (Settings → Security & access), store it with `doppler secrets set {env_name} > /dev/null`, and run under `doppler run --`"))?;
+            if linear_login(&api_key).await? != login {
+                bail!("{env_name} belongs to a different Linear account than this laptop's");
             }
-            Credential::Linear {
-                login,
-                access_token: fresh.access_token,
-                refresh_token: fresh
-                    .refresh_token
-                    .ok_or_else(|| anyhow!("Linear did not return a refresh token"))?,
-                oauth_client_id: fresh
-                    .oauth_client_id
-                    .ok_or_else(|| anyhow!("Linear did not return a client identity"))?,
-                expires_at: fresh.expires_at,
-            }
+            Credential::Linear { login, api_key }
         }
         Provider::OpenCodeZen => {
             let entries = opencode_export(None, "laptop")?;
@@ -645,30 +640,24 @@ async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
             }
             Ok(())
         }
-        Credential::Linear {
-            login,
-            access_token,
-            refresh_token,
-            oauth_client_id,
-            expires_at,
-        } => {
+        Credential::Linear { login, api_key } => {
             let _lock = credential_lock("linear")?;
             if installed(store, Provider::Linear, &login).await? {
                 return Ok(());
             }
-            if linear_login(&access_token).await? != login {
+            if linear_login(&api_key).await? != login {
                 bail!("Linear credential identity mismatch");
             }
             store
                 .upsert_provider_token(&ProviderToken {
                     provider: "linear".into(),
-                    access_token,
-                    refresh_token: Some(refresh_token),
-                    oauth_client_id: Some(oauth_client_id),
-                    expires_at,
+                    access_token: api_key,
+                    refresh_token: None,
+                    oauth_client_id: None,
+                    expires_at: None,
                     login: Some(login),
                     updated_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-                    credential_type: CredentialType::OAuth,
+                    credential_type: CredentialType::ApiKey,
                 })
                 .await?;
             Ok(())
@@ -1079,7 +1068,7 @@ mod tests {
     use clap::Parser;
     use serde_json::json;
 
-    use super::{install, install_managed, installed, write_private, Credential};
+    use super::{install, install_managed, installed, write_private, Credential, CredentialType};
     use crate::provider_account::{account_home_path, account_id_for_login};
     use crate::provider_auth::Provider;
     use crate::store::{SharedStore, StorageConfig};
@@ -1712,7 +1701,7 @@ esac
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
-    async fn linear_retains_an_independent_encrypted_refresh_grant() {
+    async fn linear_installs_a_shared_api_key_that_never_refreshes() {
         let _lock = crate::journal::test_env_lock();
         let root = tempfile::tempdir().unwrap();
         let _environment = Environment::isolate(root.path());
@@ -1720,30 +1709,29 @@ esac
             identity_server(json!({"data":{"viewer":{"id":"viewer-123"}}})).await;
         std::env::set_var("LF_TEST_MACHINE_LINEAR_URL", endpoint);
         let store = store(root.path()).await;
-        let grant = |refresh: &str| Credential::Linear {
+        let key = |api_key: &str| Credential::Linear {
             login: "viewer-123".into(),
-            access_token: "fresh-access".into(),
-            refresh_token: refresh.into(),
-            oauth_client_id: "fixture-client".into(),
-            expires_at: Some(4102444800),
+            api_key: api_key.into(),
         };
-        install(&store, grant("target-refresh-chain"))
-            .await
-            .unwrap();
-        install(&store, grant("ignored-retry")).await.unwrap();
+        install(&store, key("lin_api_first")).await.unwrap();
+        install(&store, key("lin_api_ignored-retry")).await.unwrap();
         let token = store.get_provider_token("linear").await.unwrap().unwrap();
-        assert_eq!(token.refresh_token.as_deref(), Some("target-refresh-chain"));
-        assert_eq!(token.oauth_client_id.as_deref(), Some("fixture-client"));
+        assert_eq!(token.access_token, "lin_api_first");
+        assert_eq!(token.credential_type, CredentialType::ApiKey);
+        assert!(!crate::provider_auth::provider_token_refresh_due(
+            &token,
+            i64::MAX
+        ));
         let db = rusqlite::Connection::open(root.path().join("loopflow.db")).unwrap();
-        let (refresh, encrypted): (String, bool) = db
+        let (stored, encrypted): (String, bool) = db
             .query_row(
-                "SELECT refresh_token, encrypted FROM provider_tokens WHERE provider='linear'",
+                "SELECT access_token, encrypted FROM provider_tokens WHERE provider='linear'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
         assert!(encrypted);
-        assert!(!refresh.contains("target-refresh-chain"));
+        assert!(!stored.contains("lin_api_first"));
         assert!(installed(&store, Provider::Linear, "other-person")
             .await
             .is_err());

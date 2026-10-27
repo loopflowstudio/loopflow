@@ -167,7 +167,9 @@ impl Provider {
             Self::Claude => Some("ANTHROPIC_API_KEY"),
             Self::Codex => Some("OPENAI_API_KEY"),
             Self::OpenCodeZen => Some("OPENCODE_API_KEY"),
-            Self::GitHub | Self::Linear | Self::Asana | Self::Notion | Self::Doppler => None,
+            // A personal API key: it never expires, so rented machines share it.
+            Self::Linear => Some("LINEAR_API_KEY"),
+            Self::GitHub | Self::Asana | Self::Notion | Self::Doppler => None,
         }
     }
 
@@ -177,9 +179,6 @@ impl Provider {
 
     pub fn api_key_configure_error(self) -> Option<&'static str> {
         match self {
-            Self::Linear => {
-                Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
-            }
             Self::Asana => Some("Asana requires OAuth. Run 'lf account connect asana' to connect."),
             Self::Notion => {
                 Some("Notion requires OAuth. Run 'lf account connect notion' to connect.")
@@ -5169,8 +5168,8 @@ attributes:
         assert_eq!(Provider::Linear.as_str(), "linear");
         assert!(!Provider::Linear.api_key_bills_per_token());
         assert_eq!(
-            Provider::Linear.api_key_configure_error(),
-            Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
+            Provider::Asana.api_key_configure_error(),
+            Some("Asana requires OAuth. Run 'lf account connect asana' to connect.")
         );
         // Refresh is wired: Linear resolves a PM OAuth endpoint.
         assert!(pm_oauth(Provider::Linear).is_some());
@@ -5622,14 +5621,14 @@ esac
 
     #[test]
     fn pm_providers_do_not_support_api_key_env_auth() {
-        assert_eq!(Provider::Linear.api_key_env_name(), None);
+        assert_eq!(Provider::Asana.api_key_env_name(), None);
     }
 
     #[test]
     fn pm_provider_configure_errors_point_to_oauth() {
         assert_eq!(
-            Provider::Linear.api_key_configure_error(),
-            Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
+            Provider::Asana.api_key_configure_error(),
+            Some("Asana requires OAuth. Run 'lf account connect asana' to connect.")
         );
         assert_eq!(Provider::Claude.api_key_configure_error(), None);
     }

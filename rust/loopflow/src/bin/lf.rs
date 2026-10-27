@@ -1321,6 +1321,18 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             print_planning_sync(&result.sync);
             Ok(())
         }
+        TaskCommand::Move {
+            issue,
+            machine: Some(machine),
+            json,
+            ..
+        } => {
+            let ownership = loopflow::lf::commands::session_move::move_task(issue, machine)?;
+            if *json {
+                println!("{}", serde_json::to_string(&ownership)?);
+            }
+            Ok(())
+        }
         TaskCommand::Move { issue, wave, .. } => {
             let result = loopflow::ops::task::task_move_membership(repo, issue, wave.as_deref())?;
             println!("{}: membership saved", result.id);
@@ -2054,7 +2066,12 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             },
         )),
         Some(Commands::Task {
-            cmd: TaskCommand::Move { wave, .. },
+            cmd:
+                TaskCommand::Move {
+                    wave,
+                    machine: None,
+                    ..
+                },
         }) => Some((
             cli.wave.as_deref(),
             loopflow::ops::task::TaskPlanningRequest::Move {

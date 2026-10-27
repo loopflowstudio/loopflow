@@ -202,6 +202,8 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     /// Provider harness recorded on the Session's capture manifest; nil when the
     /// capture is on another Machine or its manifest is unreadable.
     public let provider: String?
+    /// The login its conversation is pinned to; nil for a shared or unrouted one.
+    public let account: String?
     public let cwd: String
     public let state: SessionState
     public let readySummary: String?
@@ -224,7 +226,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, interactive, work, workspace, title, detail, provider, cwd, state, availability
+        case id, interactive, work, workspace, title, detail, provider, account, cwd, state, availability
         case preview
         case programStatus = "program_status"
         case agentProcessId = "agent_process_id"
@@ -284,6 +286,7 @@ extension SessionRecord {
         graphMembership = try values.decode(SessionGraphMembership.self, forKey: .graphMembership)
         detail = try values.decode(String.self, forKey: .detail)
         provider = try values.decodeIfPresent(String.self, forKey: .provider)
+        account = try values.decodeIfPresent(String.self, forKey: .account)
         cwd = try values.decode(String.self, forKey: .cwd)
         state = try values.decode(SessionState.self, forKey: .state)
         readySummary = try values.decodeIfPresent(String.self, forKey: .readySummary)

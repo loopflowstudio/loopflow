@@ -1061,9 +1061,10 @@ done
         let mut first = ClaudeHarness::new(tx);
         first.config = Some(claude.attach("first"));
         first.send_input("remember").await.unwrap();
-        let (status, answer, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
-            .await
-            .unwrap();
+        let (status, answer, _) =
+            tokio::time::timeout(Duration::from_secs(30), drive_turn(&mut rx))
+                .await
+                .unwrap();
         assert_eq!(status, Lifecycle::Completed);
         assert!(answer.contains("created"));
         let agent_session: AgentSessionId = first.agent_session().unwrap();
@@ -1073,9 +1074,10 @@ done
         resumed.set_agent_session(Some(agent_session.clone()));
         resumed.config = Some(claude.attach("second"));
         resumed.send_input("recall").await.unwrap();
-        let (status, answer, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
-            .await
-            .unwrap();
+        let (status, answer, _) =
+            tokio::time::timeout(Duration::from_secs(30), drive_turn(&mut rx))
+                .await
+                .unwrap();
         let different_process = first.pid() != resumed.pid();
         first.stop().await.unwrap();
         resumed.stop().await.unwrap();
@@ -1110,7 +1112,7 @@ done
         let mut harness = ClaudeHarness::new(tx);
         harness.config = Some(claude.attach("step"));
         harness.send_input("run the suites").await.unwrap();
-        let (status, _, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
+        let (status, _, _) = tokio::time::timeout(Duration::from_secs(30), drive_turn(&mut rx))
             .await
             .unwrap();
         let survived = claude.home.path().join("survived").exists();
@@ -1151,7 +1153,7 @@ cat > /dev/null
             harness.send_current("also lint").await,
             SendCurrentOutcome::Sent { .. }
         ));
-        let (status, _, _) = tokio::time::timeout(Duration::from_secs(5), drive_turn(&mut rx))
+        let (status, _, _) = tokio::time::timeout(Duration::from_secs(30), drive_turn(&mut rx))
             .await
             .expect("the turn completes once the tasks finish");
         harness.stop().await.unwrap();

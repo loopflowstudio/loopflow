@@ -23,3 +23,4 @@ Status: acceptance 1 and 3 met; acceptance 2 met as the headless.md contract lin
 Check: `cargo test -p loopflow --lib harness::claude` 41 pass (new steer test fails/hangs without the fix); clippy clean.
 Check: `cargo test -p loopflow --lib format_prompt_default_components_has_headless_surface` pass (headless.md background-process line).
 Check (compress): reader result counter folded into one `try_update`; test output helper shared. `harness::claude` 41 pass; clippy clean.
+Check (sync onto #1702 decoder): `harness::claude` 44 pass x3 at load ~45 after raising the two background tests' hang guard 5s→30s (one 5s expiry under load); clippy clean.

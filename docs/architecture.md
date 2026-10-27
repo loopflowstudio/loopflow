@@ -15,7 +15,7 @@ map and the checked current-source inventory.
 
 This guide is for developers changing Loopflow. It starts with the smallest
 complete path, then opens into the six areas that own the system. Command
-syntax lives in the [`lf` reference](lf.md); the exhaustive checked inventory
+syntax lives in the [`lf` reference](lf-reference.md); the exhaustive checked inventory
 lives in [Architecture Reference](architecture-reference.md).
 
 ## Run one Skill

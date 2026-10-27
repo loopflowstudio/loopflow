@@ -1,6 +1,6 @@
 import Foundation
 
-/// One owner of a repository's Tasks, from `lf repo people --json`: their Git email,
+/// One owner of a repository's Tasks, from `lf ops people --json`: their Git email,
 /// the claim's name, and the GitHub user the email resolves to.
 public struct RepoPerson: Codable, Sendable, Equatable {
     public let email: String

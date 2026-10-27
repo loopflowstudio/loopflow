@@ -1,11 +1,11 @@
-//! `lf repo people`: the people who own this repository's Tasks.
+//! `lf ops people`: the people who own this repository's Tasks.
 use anyhow::{anyhow, Result};
 
 use crate::ops::people::repo_people;
 
 pub fn run(json: bool) -> Result<()> {
     let repo = crate::repository::CanonicalRepo::current()?
-        .ok_or_else(|| anyhow!("run `lf repo people` in a repository"))?;
+        .ok_or_else(|| anyhow!("run `lf ops people` in a repository"))?;
     let runtime = tokio::runtime::Runtime::new()?;
     let store = runtime.block_on(crate::store::open_store(
         &crate::store::storage_config_from_env()?,

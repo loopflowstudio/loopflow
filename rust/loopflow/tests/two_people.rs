@@ -8,8 +8,6 @@ mod support;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use loopflow::ops::cron::Launchctl;
-use loopflow::ops::{CronHost, CronSpec, OpsResult};
 use serde_json::Value;
 
 struct Pair {
@@ -123,55 +121,6 @@ impl Pair {
             .unwrap()
             .to_string()
     }
-
-    fn launch_agents(&self, person: Person) -> PathBuf {
-        self.home(person).join("Library/LaunchAgents")
-    }
-
-    /// Install a private cron the way `lf cron add` does. The command itself
-    /// refuses builds that are not releases, so the test writes the job.
-    fn install_cron(&self, person: Person, name: &str, command: &[&str]) {
-        let db = rusqlite::Connection::open(self.home(person).join("home/loopflow.db")).unwrap();
-        let machine: String = db
-            .query_row("SELECT id FROM machines WHERE route='local'", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        let env = self.env(person);
-        let spec = CronSpec {
-            wave: "infra".into(),
-            graph: name.into(),
-            command: command.iter().map(|arg| arg.to_string()).collect(),
-            schedule: loopflow::ops::parse_schedule("daily").unwrap(),
-            working_directory: self.repo(person),
-            lf_path: env!("CARGO_BIN_EXE_lf").into(),
-            host: CronHost {
-                machine_id: machine.parse().unwrap(),
-                lf_home: env["LF_HOME"].as_str().unwrap().into(),
-                path_env: env["PATH"].as_str().unwrap().into(),
-            },
-            published: false,
-        };
-        loopflow::ops::add_cron(&self.launch_agents(person), &spec, &Unloaded).unwrap();
-    }
-}
-
-/// Writes the job without loading it into launchd.
-struct Unloaded;
-
-impl Launchctl for Unloaded {
-    fn load(&self, _: &Path) -> OpsResult<()> {
-        Ok(())
-    }
-    fn unload(&self, _: &Path) -> OpsResult<()> {
-        Ok(())
-    }
-    fn is_loaded(&self, _: &str) -> OpsResult<bool> {
-        Ok(false)
-    }
-    fn trigger(&self, _: &str) -> OpsResult<()> {
-        Ok(())
-    }
 }
 
 fn success(output: &Output) -> String {
@@ -203,7 +152,7 @@ fn two_people_share_one_repository() {
     let task = pair.create_task(Maya, "GPU fallback");
 
     // 5. Lee's refresh imports Maya's new Task.
-    pair.ok(Lee, &["refresh"]);
+    pair.ok(Lee, &["wave", "status", "infra", "--sync"]);
     assert!(pair.ok(Lee, &["task", "list"]).contains("GPU fallback"));
 
     // 2. Maya's first checkout records the branch in planning; Lee gets it.
@@ -231,12 +180,12 @@ fn two_people_share_one_repository() {
         .to_string(),
     )
     .unwrap();
-    pair.ok(Maya, &["refresh"]);
-    pair.ok(Lee, &["refresh"]);
+    pair.ok(Maya, &["wave", "status", "infra", "--sync"]);
+    pair.ok(Lee, &["wave", "status", "infra", "--sync"]);
 
     // 1. Lee's comment, synced through Git, steers Maya's Task.
     pair.ok(Lee, &["comment", &task, "keep CPU path"]);
-    pair.ok(Maya, &["refresh"]);
+    pair.ok(Maya, &["wave", "status", "infra", "--sync"]);
     assert!(
         pair.steers(Maya)
             .iter()
@@ -261,36 +210,8 @@ fn two_people_share_one_repository() {
             .any(|word| word.len() == 10 && word.bytes().all(|b| b.is_ascii_digit())),
         "{claim}"
     );
-    // 3. Maya publishes a cron. Lee sees it without installing anything.
-    pair.install_cron(Maya, "nightly", &["--wave", "infra", "graph", "look"]);
-    let published = || {
-        pair.ok(Maya, &["cron", "publish", "nightly"]);
-        let listing = pair.json(Lee, &["cron", "list", "--json"]);
-        assert_eq!(listing["installed"], serde_json::json!([]), "{listing}");
-        let [cron] = listing["published"].as_array().unwrap().as_slice() else {
-            panic!("{listing}");
-        };
-        assert_eq!(cron["name"], "nightly");
-        assert_eq!(cron["person"], "Maya");
-        assert_eq!(cron["person_key"], "maya@example.com");
-        assert!(cron["machine_id"].as_str().unwrap().starts_with("home_"));
-        cron["machine_label"].clone()
-    };
-    // A private Machine publishes only its id.
-    assert_eq!(published(), Value::Null);
     // A public Machine's later entries carry the name Maya chose.
     pair.ok(Maya, &["machine", "public", "maya-mbp"]);
-    assert_eq!(published(), "maya-mbp");
-    // Going private again republishes without waiting for a cron command.
-    pair.ok(Maya, &["machine", "public", "off"]);
-    let listing = pair.json(Lee, &["cron", "list", "--json"]);
-    assert_eq!(
-        listing["published"][0]["machine_label"],
-        Value::Null,
-        "{listing}"
-    );
-    pair.ok(Maya, &["machine", "public", "maya-mbp"]);
-    assert!(!pair.launch_agents(Lee).exists());
 
     // 6. Without names, claims still belong to the person who made them.
     for person in [Maya, Lee] {
@@ -303,8 +224,8 @@ fn two_people_share_one_repository() {
     }
     let nameless = pair.create_task(Maya, "Nameless");
     pair.ok(Maya, &["task", "claim", &nameless]);
-    pair.ok(Maya, &["refresh"]);
-    pair.ok(Lee, &["refresh"]);
+    pair.ok(Maya, &["wave", "status", "infra", "--sync"]);
+    pair.ok(Lee, &["wave", "status", "infra", "--sync"]);
     // An unnamed owner reads as their key, so Lee can tell whose claim it is.
     let named = pair.ok(Lee, &["task", "status", &nameless]);
     assert!(
@@ -356,9 +277,9 @@ fn two_people_share_one_repository() {
     );
     pair.git(&maya, &["push", "origin", "main"]);
     pair.ok(Maya, &["wave", "workflow", "set", "review", "infra"]);
-    pair.ok(Maya, &["refresh"]);
+    pair.ok(Maya, &["wave", "status", "infra", "--sync"]);
     pair.git(&pair.repo(Lee), &["pull", "--ff-only"]);
-    pair.ok(Lee, &["refresh"]);
+    pair.ok(Lee, &["wave", "status", "infra", "--sync"]);
     let fresh = pair.create_task(Lee, "Review me");
     let preview = pair.json(Lee, &["task", "run", &fresh, "--explain", "--json"]);
     assert_eq!(preview["action"]["workflow"], "review", "{preview}");

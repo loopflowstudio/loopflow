@@ -141,7 +141,7 @@ pub enum HistoryCommand {
         #[arg(long)]
         context: bool,
     },
-    /// Launch a new execution from an immutable captured provider request
+    /// Launch a new execution from a captured provider request, while this Machine retains its capture
     Replay {
         /// Captured input identity or an unambiguous displayed prefix
         run: String,

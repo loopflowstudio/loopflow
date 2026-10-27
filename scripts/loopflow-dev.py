@@ -353,7 +353,7 @@ def _check_repository_opening(repo: Path, world: Path | None = None) -> bool:
     print(f"Checking repository opening through {cli}...", flush=True)
     try:
         result = subprocess.run(
-            [str(cli), "repo", "identity", "--json"],
+            [str(cli), "config", "repository", "--json"],
             cwd=repo,
             env=env,
             stdin=subprocess.DEVNULL,

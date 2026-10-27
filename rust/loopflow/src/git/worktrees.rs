@@ -1724,6 +1724,7 @@ pub fn ensure_agent_worktree(
         .truncate(false)
         .write(true)
         .open(lock_path)?;
+    // Two launches placing the same persistent worktree agree on one checkout.
     fs2::FileExt::lock_exclusive(&lock)?;
     let mut plan = plan_placement(&main_repo, segment)?;
     if plan.strategy == PlacementStrategy::UseExistingWorktree && !plan.worktree_path.exists() {

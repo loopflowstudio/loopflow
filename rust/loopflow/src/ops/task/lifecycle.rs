@@ -31,6 +31,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         );
         return Ok(());
     }
+    // Removal waits for running work; writing alongside it never does.
     let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;
     if !blockers.is_empty() {
         eprintln!(
@@ -99,6 +100,7 @@ async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore
     Ok(Some((store, task)))
 }
 
+/// Abandon and `wt delete` remove the checkout; running work keeps it in place.
 fn require_idle(store: &SharedStore, task: &Task) -> OpsResult<()> {
     let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;
     if !blockers.is_empty() {

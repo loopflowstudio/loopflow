@@ -7,7 +7,7 @@
 Writes `rust/loopflow/src/store/migrations/drafts/<name>.sql`. A Task keeps one
 draft and edits it in place until it lands, so when the branch already carries a
 draft that its merge base with main lacks, this prints that file and creates
-nothing. A draft has no ordinal: the release cut (`lf repo release run`) orders
+nothing. A draft has no ordinal: the release cut (`lf release run`) orders
 the accumulated drafts and publishes one canonical
 `<major>.<minor>.<patch>.001_release` batch.
 

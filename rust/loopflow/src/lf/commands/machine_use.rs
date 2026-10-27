@@ -25,12 +25,12 @@ enum Scope {
     Repository,
 }
 
-pub fn run(repo: &Path, command: &MachineCommand) -> anyhow::Result<()> {
+/// `repository_scope` is the global `--repo` or `--repository` selector.
+pub fn run(repo: &Path, command: &MachineCommand, repository_scope: bool) -> anyhow::Result<()> {
     let MachineCommand::Use {
         machine,
         wave,
         task,
-        repo: repository_scope,
         session,
         tasks,
         here,
@@ -52,7 +52,7 @@ pub fn run(repo: &Path, command: &MachineCommand) -> anyhow::Result<()> {
             repo,
             wave.as_deref(),
             task.as_deref(),
-            *repository_scope,
+            repository_scope,
             *session || *tasks,
         )
         .await?;
@@ -131,9 +131,9 @@ pub fn run(repo: &Path, command: &MachineCommand) -> anyhow::Result<()> {
             "machine".into(),
             "use".into(),
             target.to_string(),
-            wave_name.unwrap_or_else(|| "--repo".into()),
-            "--here".into(),
         ];
+        args.extend(wave_name);
+        args.push("--here".into());
         if *session {
             args.push("--session".into());
         }
@@ -189,9 +189,10 @@ fn use_capacity(
     Ok(())
 }
 
-/// `--task`, `--repo` and a Wave argument are explicit; bare, the worktree's
-/// Task, then its Wave, then this repository. `--session` or `--tasks` names a
-/// part of a Wave or repository, so a bare one skips the worktree's Task.
+/// `--task`, a Wave argument and a selected repository are explicit, in that
+/// order; bare, the worktree's Task, then its Wave, then this repository.
+/// `--session` or `--tasks` names a part of a Wave or repository, so a bare one
+/// skips the worktree's Task.
 async fn select_scope(
     store: &SharedStore,
     repo: &Path,
@@ -202,9 +203,6 @@ async fn select_scope(
 ) -> anyhow::Result<Scope> {
     if let Some(task) = task {
         return Ok(Scope::Task(task.to_string()));
-    }
-    if repository {
-        return Ok(Scope::Repository);
     }
     if let Some(wave) = wave {
         let selected = crate::work::wave::context::resolve_managed_wave(
@@ -218,6 +216,9 @@ async fn select_scope(
             id: selected.id().clone(),
             name: selected.name().to_string(),
         });
+    }
+    if repository {
+        return Ok(Scope::Repository);
     }
     let cwd = std::env::current_dir()?;
     let selected = crate::ops::select_execution_work(store, &cwd).await?;
@@ -240,7 +241,7 @@ async fn select_scope(
 fn repository_id(store: &SqliteStore, repo: &CanonicalRepo) -> anyhow::Result<RepositoryId> {
     store
         .repository_id(&repo.to_string())?
-        .ok_or_else(|| anyhow!("repository identity unavailable; run `lf repo identity`"))
+        .ok_or_else(|| anyhow!("repository identity unavailable; run `lf repository`"))
 }
 
 fn describe(store: &SqliteStore, machine: &MachineId) -> anyhow::Result<String> {

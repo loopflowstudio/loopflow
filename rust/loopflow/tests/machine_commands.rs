@@ -319,7 +319,7 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
     let repo = loopflow_test_support::TestRepo::new();
     let path = repo.path().canonicalize().unwrap();
     let identity = fixture
-        .command(&["repo", "identity"])
+        .command(&["config", "repository"])
         .current_dir(&path)
         .output()
         .unwrap();
@@ -329,7 +329,14 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
         .trim()
         .to_string();
     let set = fixture
-        .command(&["machine", "use", "mini", "--repo", "--session"])
+        .command(&[
+            "--repo",
+            path.to_str().unwrap(),
+            "machine",
+            "use",
+            "mini",
+            "--session",
+        ])
         .current_dir(&path)
         .output()
         .unwrap();
@@ -771,10 +778,15 @@ fn transport_options_require_machine_and_retired_commands_are_gone() {
 fn remote_command_exit_is_retained_in_local_process_history() {
     let fixture = Machines::new();
     assert_success(&fixture.run(&["machine", "add", "mini"]));
-    let output = fixture.run(&["--machine", "mini", "fail"]);
+    let database = fixture.root.path().join("local/loopflow.db");
+    let db = rusqlite::Connection::open(&database).unwrap();
+    let parent = loopflow_test_support::RunningParent::insert(&database);
+    let output = parent
+        .adopt(&mut fixture.command(&["--machine", "mini", "fail"]))
+        .output()
+        .unwrap();
     assert_eq!(output.status.code(), Some(42));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("Error:"));
-    let db = rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db")).unwrap();
     let outcome: (String, i32, bool) = db.query_row(
         "SELECT outcome, exit_code, completed_at IS NOT NULL FROM processes WHERE command LIKE '%--machine%fail%' ORDER BY started_at DESC LIMIT 1", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
     ).unwrap();
@@ -1678,7 +1690,7 @@ fn machine_use_copies_wave_and_repository_defaults_to_your_other_machines() {
     assert_success(&output);
     assert!(String::from_utf8_lossy(&output.stdout).starts_with("Wave owners:"));
     assert!(String::from_utf8_lossy(&output.stderr).contains("copied to mini"));
-    // Bare, outside a Task or Wave worktree, it sets the repository's default.
+    // A selected repository with no Wave sets the repository's default.
     let mut bare = repository.to_vec();
     bare.extend(["machine", "use", "mini"]);
     let output = fixture.run(&bare);

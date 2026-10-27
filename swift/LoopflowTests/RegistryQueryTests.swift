@@ -24,7 +24,7 @@ struct RegistryQueryTests {
             if command == ["graph", "show", expected.entry.id, "--processes", "--json"] { return detail }
             throw RegistryQueryError("Unexpected execution")
         }
-        let graphs = try await query.onMachine("peer", repository: "plan").taskGraphProcesses(task: "task", cwd: "/peer/checkout")
+        let graphs = try await query.onMachine("peer", repository: "plan").taskGraphProcesses(task: "task")
         #expect(graphs == [expected])
     }
 
@@ -442,10 +442,10 @@ struct RegistryQueryTests {
         #expect(result.history.items.isEmpty)
     }
 
-    @Test("Task workspace queries preserve paths and binary/truncation evidence")
+    @Test("Task workspace queries preserve paths and binary/truncation evidence, outside the checkout")
     func taskWorkspaceQueriesDecode() async throws {
         let query = RegistryQuery { args, cwd in
-            #expect(cwd == "/tmp/repo")
+            #expect(cwd == nil)
             switch args {
             case ["task", "diff", "INF-123", "--files", "--base", "parent", "--json"]:
                 return #"{"issue_identifier":"INF-123","task_id":"ts_1","base_commit":"abc","head_commit":"def","files":[{"path":"src/parser.rs","old_path":null,"committed":true,"staged":false,"unstaged":true,"untracked":false}],"scratch":[],"scratch_truncated":false}"#
@@ -458,23 +458,21 @@ struct RegistryQueryTests {
             }
         }
 
-        let changes = try await query.taskChanges(issue: "INF-123", cwd: "/tmp/repo")
+        let changes = try await query.taskChanges(issue: "INF-123")
         #expect(changes.taskId == "ts_1")
         #expect(changes.files[0].path == "src/parser.rs")
         #expect(changes.files[0].committed && changes.files[0].unstaged)
 
         let diff = try await query.taskDiff(
             issue: "INF-123",
-            path: "src/parser.rs",
-            cwd: "/tmp/repo"
+            path: "src/parser.rs"
         )
         #expect(diff.patch == "@@ -1 +1 @@")
         #expect(!diff.binary && !diff.truncated)
 
         let file = try await query.taskFile(
             issue: "INF-123",
-            path: "src/parser.rs",
-            cwd: "/tmp/repo"
+            path: "src/parser.rs"
         )
         #expect(file.content == "fn parse() {}\n")
         #expect(file.sizeBytes == 14)
@@ -619,8 +617,7 @@ struct RegistryQueryTests {
         let json = try String(contentsOf: fixture, encoding: .utf8)
         let query = RegistryQuery { args, cwd in
             #expect(cwd == "/tmp/repo")
-            if args == ["repo", "refresh", "infrastructure"] { return "" }
-            #expect(args == ["wave", "status", "infrastructure", "--json"])
+            #expect(args == ["wave", "status", "infrastructure", "--json", "--sync"])
             return json
         }
         let plan = try await query.plan(wave: "infrastructure", objective: "Ship it.", cwd: "/tmp/repo", sync: true)

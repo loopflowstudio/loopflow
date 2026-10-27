@@ -1020,8 +1020,8 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
     };
     // The released checkout predates Git locators; establish it as the original.
     let bound = lf(&[
-        "repo",
-        "identity",
+        "config",
+        "repository",
         "--bind",
         "REPO_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     ]);

@@ -18,23 +18,21 @@ use crate::store::sqlite::TaskShipping;
 use crate::work::task::{PrPhase, Task};
 use crate::workflow::{END, START};
 
-use super::{block_on_task, task_error, task_store, SharedStore, TaskRunSelection};
+use super::{block_on_task, task_error, task_store, SharedStore};
 
 /// What `lf ship` found before running anything.
 #[derive(Debug)]
 pub enum ShipStart {
     /// This process now ships the Task.
     Begun(Box<Task>),
-    /// A live process already ships it.
+    /// A live process already ships it. `route` names the route a route-only
+    /// approval is running: it ends there and does not land the PR.
     AlreadyShipping {
         issue: String,
         process: LfProcessId,
+        route: Option<String>,
     },
     Deferred {
-        issue: String,
-    },
-    /// The Task already stands at `end`.
-    AtEnd {
         issue: String,
     },
 }
@@ -53,12 +51,23 @@ pub enum ShipStep {
     },
     /// Take this edge, or run it again when it stopped.
     Edge(String),
+    /// The Task stands at `end` and this PR has not merged: take up `deliver`
+    /// to land it.
+    Deliver(String),
+    /// The Task stands at `end` with nothing left to deliver, yet is not done.
+    AtEnd,
+    /// A route-only approval stands at a stage; it ended there, for this reason.
+    Ended(String),
     Deferred,
     /// Someone stopped shipping; the approval is withdrawn.
     Stopped,
-    /// The Task reached `end`, completed, or was abandoned.
+    /// The Task completed or was abandoned.
     Finished,
 }
+
+/// The graph that lands a Task's PR, taken up when the Task reached `end` before
+/// its PR merged.
+const DELIVER: &str = "deliver";
 
 /// What a shipping Task is doing, derived from its ship process, its state
 /// and its landing. Nothing here waits on a person.
@@ -201,6 +210,11 @@ pub(crate) fn shipping_snapshot(
             WorkflowPosition::Node { node } if workflow.definition.node(node).is_some() => {
                 format!("{node} (stand-in)")
             }
+            WorkflowPosition::Node { node }
+                if node == START && workflow.definition.name == DELIVER =>
+            {
+                "delivering its PR".to_string()
+            }
             WorkflowPosition::Node { node } => format!("from {node}"),
         },
     };
@@ -231,9 +245,17 @@ pub(crate) fn read_shipping(
 }
 
 /// Hand the Task off and claim it for this process, unless a live process
-/// already ships it. A Task with no graph takes up its default first; naming
-/// `graph` takes that one up in place of the remaining steps.
-pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsResult<ShipStart> {
+/// already carries it. A Task with no graph takes up its default first; naming
+/// `graph` takes that one up in place of the remaining steps. The stand-in, not
+/// this, chooses the route from the stage the Task stands at. A handoff grants
+/// landing the PR; `recover` continues an existing approval with only the
+/// authority it already has, as automatic restart does.
+pub fn ship_begin(
+    issue: &str,
+    graph: Option<&str>,
+    note: Option<&str>,
+    recover: bool,
+) -> OpsResult<ShipStart> {
     let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| task_error("lf ship requires a registered Process"))?;
     block_on_task(async {
@@ -250,65 +272,159 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
             }
             _ => {}
         }
-        store
-            .sqlite
-            .require_task_launch(&task.id)
-            .map_err(task_error)?;
-        if let Some(carrier) = store
-            .sqlite
-            .task_shipping(&task.id)
-            .map_err(task_error)?
-            .and_then(|shipping| shipping.process)
-        {
-            if carrier != process
-                && crate::journal::process_evidence(&store.sqlite, &carrier)
-                    != ProcessIdentityEvidence::Dead
-            {
-                return Ok(ShipStart::AlreadyShipping {
-                    issue,
-                    process: carrier,
-                });
-            }
+        let approved = store.sqlite.task_shipping(&task.id).map_err(task_error)?;
+        if recover && approved.is_none() {
+            return Err(task_error(format!(
+                "Task {issue} is not shipping; nothing to recover"
+            )));
         }
+        let lands = !recover;
         let current = store.sqlite.workflow(&task.id).map_err(task_error)?;
-        let workflow = match (current, graph) {
-            (Some(workflow), None) => workflow,
-            (current, graph) => {
-                let TaskRunSelection { take_up, .. } =
-                    super::select_task_run(&store, &task, task.worktree()?, graph)?;
-                match take_up {
-                    Some(graph) => {
-                        store
-                            .sqlite
-                            .take_up_workflow(&task.id, &graph, &process, None)
-                            .map_err(task_error)?;
-                        store
-                            .sqlite
-                            .workflow(&task.id)
-                            .map_err(task_error)?
-                            .expect("the graph was just taken up")
-                    }
-                    // The graph named is the one the Task is already on.
-                    None => current.expect("a Task that takes nothing up keeps its graph"),
-                }
-            }
-        };
-        if matches!(&workflow.position, WorkflowPosition::Node { node } if node == END) {
-            return Ok(ShipStart::AtEnd { issue });
-        }
         let by = participant_or("someone");
-        let mut handoff = format!("{by} shipped it");
+        let mut handoff = match recover {
+            true => "restarted to recover it".to_string(),
+            false => format!("{by} shipped it"),
+        };
         if let Some(graph) = graph {
             handoff.push_str(&format!(" with {graph}"));
         }
         if let Some(note) = note {
             handoff.push_str(&format!(": {note}"));
         }
+        // A live carrier keeps carrying the Task: another ship process, or a
+        // Graph still on an edge, after which the ship restarts from where it
+        // arrived. A handoff grants it landing.
+        let live_ship = approved
+            .as_ref()
+            .and_then(|shipping| shipping.process.clone())
+            .filter(|carrier| {
+                *carrier != process
+                    && crate::journal::process_evidence(&store.sqlite, carrier)
+                        != ProcessIdentityEvidence::Dead
+            });
+        let running_edge = match current.as_ref().map(|workflow| &workflow.position) {
+            Some(WorkflowPosition::Edge {
+                lf_process_id,
+                running: true,
+                ..
+            }) => Some(LfProcessId::parse(lf_process_id).map_err(task_error)?),
+            _ => None,
+        };
+        if let Some(carrier) = live_ship.or(running_edge) {
+            let shipping = store
+                .sqlite
+                .ship_task(&task.id, &carrier, &handoff, lands)
+                .map_err(task_error)?;
+            let route = (!shipping.lands).then(|| {
+                current
+                    .as_ref()
+                    .and_then(|workflow| match workflow.position {
+                        WorkflowPosition::Edge { edge, .. } => {
+                            Some(workflow.definition.edges[edge as usize].name.clone())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| "its route".to_string())
+            });
+            return Ok(ShipStart::AlreadyShipping {
+                issue,
+                process: carrier,
+                route,
+            });
+        }
+        // A restart claims the approval before anything can fail, so a failure
+        // from here on is this process's own and its restart waits from it.
+        if approved.is_some() {
+            store
+                .sqlite
+                .ship_task(&task.id, &process, &handoff, lands)
+                .map_err(task_error)?;
+        }
         store
             .sqlite
-            .ship_task(&task.id, &process, &handoff)
+            .require_task_launch(&task.id)
             .map_err(task_error)?;
+        let named = graph
+            .map(|name| {
+                crate::workflow::CapturedGraph::load(name, task.worktree()?)
+                    .map_err(task_error)?
+                    .ok_or_else(|| task_error(crate::workflow::missing_workflow(name)))
+            })
+            .transpose()?;
+        if let Some(graph) = super::task_graph_to_take_up(&store, &task, current.as_ref(), named)? {
+            store
+                .sqlite
+                .take_up_workflow(&task.id, &graph, &process, None)
+                .map_err(task_error)?;
+        }
+        if approved.is_none() {
+            store
+                .sqlite
+                .ship_task(&task.id, &process, &handoff, lands)
+                .map_err(task_error)?;
+        }
         Ok(ShipStart::Begun(Box::new(task)))
+    })
+}
+
+/// Take up `deliver` for a Task that stands at `end` with its PR unmerged. It
+/// is placed at `start`: `end` is no stage of it, and nothing already done runs again.
+pub fn ship_deliver(issue: &str, pr: &str) -> OpsResult<()> {
+    let process = crate::journal::current_lf_process_id()
+        .ok_or_else(|| task_error("lf ship requires a registered Process"))?;
+    block_on_task(async {
+        let store = task_store().await?;
+        let task = task_by_issue(&store, issue).await?;
+        let graph = crate::workflow::CapturedGraph::load(DELIVER, task.worktree()?)
+            .map_err(task_error)?
+            .ok_or_else(|| task_error(crate::workflow::missing_workflow(DELIVER)))?;
+        store
+            .sqlite
+            .take_up_workflow(
+                &task.id,
+                &graph,
+                &process,
+                Some(&format!("{pr} has not merged")),
+            )
+            .map_err(task_error)
+    })
+}
+
+/// End the approval of a Task that stands at `end` with nothing left to
+/// deliver: settle a pending completion once, and when the Task is still not
+/// done, record why shipping ended. Completion keeps its own retry.
+pub fn ship_end(issue: &str) -> OpsResult<String> {
+    block_on_task(async {
+        let store = task_store().await?;
+        let mut task = task_by_issue(&store, issue).await?;
+        let mut reason = "nothing is left to run".to_string();
+        if let Some((request, pending)) = store
+            .sqlite
+            .task_completion_pending(&task.id)
+            .map_err(task_error)?
+        {
+            reason = match super::settle_completion(&store, &mut task, request).await {
+                Ok(()) => pending,
+                Err(error) => error.to_string(),
+            };
+        }
+        if store.sqlite.task_state(&task.id).map_err(task_error)? == TaskState::Done {
+            return Ok("completed".to_string());
+        }
+        let lands = store
+            .sqlite
+            .task_shipping(&task.id)
+            .map_err(task_error)?
+            .is_some_and(|shipping| shipping.lands);
+        if let (false, Some(pr)) = (lands, unmerged_pr(&store, &task).await?) {
+            reason = format!("{reason}. This approval ran its route, not a merge; `lf ship {}` hands {pr} off to land", task.identifier);
+        }
+        let summary = format!("Shipping reached end: {reason}");
+        store
+            .sqlite
+            .end_shipping(&task.id, &summary)
+            .map_err(task_error)?;
+        Ok(summary)
     })
 }
 
@@ -325,7 +441,7 @@ pub fn ship_stop(issue: &str, note: Option<&str>) -> OpsResult<bool> {
         };
         let stopped = store
             .sqlite
-            .stop_shipping(&task.id, &note)
+            .end_shipping(&task.id, &format!("Stopped shipping: {note}"))
             .map_err(task_error)?;
         if let Some(process) = stopped
             .as_ref()
@@ -396,8 +512,12 @@ pub enum ShipMerge {
     Done,
 }
 
-/// The stage that checks merged work: the one whose route into `end` runs nothing.
+/// The stage that checks merged work: the one whose route into `end` runs
+/// nothing. A Task already at `end` has none; a merge there means completion.
 fn post_merge_stage(workflow: &Workflow) -> Option<&str> {
+    if matches!(&workflow.position, WorkflowPosition::Node { node } if node == END) {
+        return None;
+    }
     workflow
         .definition
         .edges
@@ -426,6 +546,14 @@ pub fn ship_settle_merge(issue: &str) -> OpsResult<ShipMerge> {
     block_on_task(async {
         let store = task_store().await?;
         let mut task = task_by_issue(&store, issue).await?;
+        if store
+            .sqlite
+            .task_state(&task.id)
+            .map_err(task_error)?
+            .is_terminal()
+        {
+            return Ok(ShipMerge::Open);
+        }
         let Some(pr) =
             super::reconcile_task_pr_observation(&store, &mut task, PrReadFreshness::Fresh).await?
         else {
@@ -479,27 +607,66 @@ pub fn ship_next(issue: &str) -> OpsResult<ShipStep> {
             TaskState::Done | TaskState::Abandoned => return Ok(ShipStep::Finished),
             _ => {}
         }
-        if store
-            .sqlite
-            .task_shipping(&task.id)
-            .map_err(task_error)?
-            .is_none()
-        {
+        let Some(shipping) = store.sqlite.task_shipping(&task.id).map_err(task_error)? else {
             return Ok(ShipStep::Stopped);
-        }
+        };
         let workflow = store
             .sqlite
             .workflow(&task.id)
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} has no Workflow to ship")))?;
-        next_step(&workflow, &task.identifier)
+        if !shipping.lands {
+            if let Some(summary) = route_only_end(&workflow, &task.identifier) {
+                store
+                    .sqlite
+                    .end_shipping(&task.id, &summary)
+                    .map_err(task_error)?;
+                return Ok(ShipStep::Ended(summary));
+            }
+        }
+        let landable = match shipping.lands {
+            true => unmerged_pr(&store, &task).await?,
+            false => None,
+        };
+        next_step(&workflow, &task.identifier, landable)
     })
 }
 
-fn next_step(workflow: &Workflow, issue: &str) -> OpsResult<ShipStep> {
+/// The Task's PR, named, while it is open.
+async fn unmerged_pr(store: &SharedStore, task: &Task) -> OpsResult<Option<String>> {
+    Ok(store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(task_error)?
+        .filter(|pr| matches!(pr.phase(), PrPhase::Open | PrPhase::Publishing))
+        .map(|pr| match pr.github() {
+            Some(github) => format!("PR #{}", github.number),
+            None => "its PR".to_string(),
+        }))
+}
+
+/// Why a route-only approval ends where `workflow` stands. It carries the route
+/// into `end` it was granted, run again after a failure, and nothing else: at
+/// any stage a person, or a fresh `lf ship`, decides what follows.
+fn route_only_end(workflow: &Workflow, issue: &str) -> Option<String> {
+    match &workflow.position {
+        WorkflowPosition::Node { node } if node != END => Some(format!(
+            "Shipping ended at {node}: this approval ran a route, not a handoff; `lf ship {issue}` hands it off"
+        )),
+        _ => None,
+    }
+}
+
+/// What runs next from where `workflow` stands. `landable` names the Task's
+/// open PR when its approval may land it.
+fn next_step(workflow: &Workflow, issue: &str, landable: Option<String>) -> OpsResult<ShipStep> {
     let definition = &workflow.definition;
     match &workflow.position {
-        WorkflowPosition::Node { node } if node == END => Ok(ShipStep::Finished),
+        // `deliver` lands the PR once; arriving at its end unmerged ends shipping.
+        WorkflowPosition::Node { node } if node == END => Ok(match landable {
+            Some(pr) if definition.name != DELIVER => ShipStep::Deliver(pr),
+            _ => ShipStep::AtEnd,
+        }),
         WorkflowPosition::Edge {
             edge,
             running: true,
@@ -621,6 +788,7 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
                 "--task".into(),
                 task.identifier.clone(),
                 "ship".into(),
+                "--recover".into(),
             ];
             if failure.is_some() {
                 store.sqlite.count_ship_restart(&id).map_err(task_error)?;
@@ -656,6 +824,7 @@ mod tests {
             shipped_at: 5,
             process: Some(LfProcessId::new()),
             restarts: 0,
+            lands: true,
         };
         let minutes = |handoff: &TaskShipping| super::restart_due(handoff, 0) / 60;
         assert_eq!(minutes(&handoff), 1);
@@ -704,7 +873,7 @@ mod tests {
                 WorkflowPosition::Node { node: node.into() },
                 Vec::new(),
             );
-            next_step(&workflow, "INF-1").unwrap()
+            next_step(&workflow, "INF-1", None).unwrap()
         };
         assert_eq!(at("start"), ShipStep::Edge("kickoff".into()));
         assert_eq!(
@@ -746,7 +915,7 @@ mod tests {
         );
         assert_eq!(super::post_merge_stage(&workflow), Some("verify"));
         assert!(!super::reached(&workflow, "verify"));
-        assert_eq!(at("end"), ShipStep::Finished);
+        assert_eq!(at("end"), ShipStep::AtEnd);
         // A stopped edge runs again.
         let stopped = Workflow::new(
             definition.clone(),
@@ -759,9 +928,75 @@ mod tests {
             Vec::new(),
         );
         assert_eq!(
-            next_step(&stopped, "INF-1").unwrap(),
+            next_step(&stopped, "INF-1", None).unwrap(),
             ShipStep::Edge("deliver".into())
         );
+    }
+
+    #[test]
+    fn a_route_only_approval_ends_at_a_stage_instead_of_standing_in() {
+        let repo = tempfile::tempdir().unwrap();
+        let (definition, routes) = CapturedGraph::load("feature", repo.path())
+            .unwrap()
+            .unwrap()
+            .project()
+            .unwrap();
+        let at = |position: WorkflowPosition| {
+            let workflow = Workflow::new(definition.clone(), routes.clone(), position, Vec::new());
+            super::route_only_end(&workflow, "INF-1")
+        };
+        assert_eq!(
+            at(WorkflowPosition::Node {
+                node: "demo".into()
+            })
+            .as_deref(),
+            Some("Shipping ended at demo: this approval ran a route, not a handoff; `lf ship INF-1` hands it off")
+        );
+        // Its route into `end` runs again after a failure, and arriving there settles.
+        assert_eq!(
+            at(WorkflowPosition::Edge {
+                edge: 4,
+                lf_process_id: "gone".into(),
+                running: false,
+            }),
+            None
+        );
+        assert_eq!(at(WorkflowPosition::Node { node: "end".into() }), None);
+    }
+
+    #[test]
+    fn a_task_at_end_with_its_pr_open_is_delivered_once_and_a_merge_there_completes() {
+        let repo = tempfile::tempdir().unwrap();
+        let at_end = |name: &str| {
+            let (definition, routes) = CapturedGraph::load(name, repo.path())
+                .unwrap()
+                .unwrap()
+                .project()
+                .unwrap();
+            Workflow::new(
+                definition,
+                routes,
+                WorkflowPosition::Node { node: "end".into() },
+                Vec::new(),
+            )
+        };
+        let open = || Some("PR #1719".to_string());
+        assert_eq!(
+            next_step(&at_end("pursue"), "INF-1", open()).unwrap(),
+            ShipStep::Deliver("PR #1719".into())
+        );
+        // Merged, or no PR: nothing is left to deliver.
+        assert_eq!(
+            next_step(&at_end("pursue"), "INF-1", None).unwrap(),
+            ShipStep::AtEnd
+        );
+        // `deliver` that arrived with its PR still open is not taken up again.
+        assert_eq!(
+            next_step(&at_end("deliver"), "INF-1", open()).unwrap(),
+            ShipStep::AtEnd
+        );
+        // A merge at `end` completes instead of returning to verify.
+        assert_eq!(super::post_merge_stage(&at_end("feature")), None);
     }
 
     #[test]
@@ -783,6 +1018,7 @@ mod tests {
             shipped_at: 5,
             process: Some(LfProcessId::new()),
             restarts: 0,
+            lands: true,
         };
         let read = |status, alive, landing: Option<&PrLanding>| {
             shipping_snapshot(Some(&workflow), &handoff, status, alive, None, landing).unwrap()

@@ -109,6 +109,12 @@ corrections are applied: the below-floor runner reason covers taskless Graphs,
 and both lists share `ListedProcess` (JSON field names unchanged; no Swift
 mirror or fixture).
 
+Third pass (2026-10-27, headless, against ccb5a9c9a2): both corrections are in
+the code (`graph_runner`'s "rerun the Graph" reason, one `ListedProcess` list
+type), and nothing in the f66d7acdee merge touches rollover. Compatible switch
+→ `NextStep`; below the store floor → stays with the rerun reason; Desktop
+helper → stays with "update Desktop". No rename, merge or open product choice.
+
 ## Graph steps at a boundary (implemented 2026-10-27)
 
 - `rollover::disposition` checks `SqliteStore::runs_graph` first; a Graph runner

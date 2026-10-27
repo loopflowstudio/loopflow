@@ -50,6 +50,7 @@ pub fn resolve_child(
         let owner = match name {
             "resume" | "connect" => Some("session"),
             "comment" => Some("task"),
+            "sync" => Some("ops"),
             _ => None,
         };
         if let Some(owner) = owner.and_then(|name| command.find_subcommand(name)) {
@@ -143,7 +144,9 @@ pub fn machine_invocation(args: &[String]) -> Result<Option<(Cli, Vec<String>)>,
         }
         if value.starts_with('-') {
             let name = value.split('=').next().expect("split has a first item");
-            let is_transport = matches!(name, "--machine" | "--forward-agent");
+            // A command that names its own `--machine` (`lf task move`) keeps it.
+            let is_transport = matches!(name, "--machine" | "--forward-agent")
+                && (path.is_empty() || flag(current, name).is_none());
             let start = index;
             if takes_separate_value(&tree, current, value, boundary) && index + 1 < args.len() {
                 index += 1;
@@ -347,7 +350,12 @@ pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Comma
         let Some(expansion) = resolve_child(current, name, &canonical)? else {
             return Err(clap::Error::raw(
                 clap::error::ErrorKind::InvalidSubcommand,
-                format!("unknown command: lf {}", path.join(" ")),
+                format!(
+                    "unknown command: lf {}",
+                    [canonical.as_slice(), std::slice::from_ref(name)]
+                        .concat()
+                        .join(" ")
+                ),
             )
             .into());
         };
@@ -432,7 +440,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
             ));
         }
         output.push_str("\nSelect: --repo <name-or-path>, --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>, --cwd <path>\n--repo resolves names under repo_root (default ~/src) on the selected Machine.\n--machine otherwise uses its saved remote repository.\nWith --machine: --forward-agent\nAgent selection: -a, --agent <harness[:model]> overrides agents in Tasks, Graphs, skills and child commands\n");
-        output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf skill NAME and lf graph NAME select definitions.\n");
+        output.push_str("\nOmit owners when a command is unique: lf land → lf ops pr land.\nCommands take precedence; lf skill NAME and lf graph NAME select definitions.\n");
         return Ok(output);
     }
     let definition = match path {

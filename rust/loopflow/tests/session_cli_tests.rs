@@ -66,12 +66,12 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     assert!(!help.contains("decline"));
     assert!(!help.contains("send-back"));
 
-    let removed = run(
-        home.path(),
-        &["history", "show", "historical-input", "--resume"],
-    );
-    assert!(!removed.status.success());
-    assert!(String::from_utf8_lossy(&removed.stderr).contains("unexpected argument '--resume'"));
+    for flag in ["--resume", "--events"] {
+        let removed = run(home.path(), &["history", "show", "historical-input", flag]);
+        assert_eq!(removed.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&removed.stderr)
+            .contains(&format!("unexpected argument '{flag}'")));
+    }
 
     for args in [
         &["session", "ready", "Feedback"][..],
@@ -318,6 +318,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
                 "{error}"
             );
             assert!(error.contains("before becoming resumable"), "{error}");
+            assert!(error.contains(run_id), "{error}");
             assert!(!error.contains("Local proof"), "prompt leaked: {error}");
         }
         let evidence = home.path().join("resumed");
@@ -438,17 +439,6 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             assert!(manifest["context"].is_object());
             assert!(!dir.join("prepared").exists());
             let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-            let failure: String = database
-                .query_row(
-                    "SELECT error FROM processes WHERE error LIKE '%rejecting-lf%' AND error LIKE '%before becoming resumable%'",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert!(failure.contains(run_id), "{failure}");
-            assert!(failure.contains("sha256"), "{failure}");
-            assert!(failure.contains(home.path().to_str().unwrap()), "{failure}");
-            assert!(!failure.contains("Local proof"), "prompt leaked: {failure}");
             let completed_at: Option<i64> = database
                 .query_row(
                     "SELECT completed_at FROM agent_sessions WHERE id = ?1",

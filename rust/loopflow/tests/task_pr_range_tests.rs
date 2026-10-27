@@ -238,7 +238,7 @@ fn failed_sync_push_does_not_advance_the_recorded_task_base() {
     )
     .expect_err("the remote must reject the rewritten branch");
     assert!(
-        error.to_string().contains("git push --force-with-lease"),
+        error.to_string().contains("push --force-with-lease"),
         "expected the push failure, got: {error}"
     );
     assert!(

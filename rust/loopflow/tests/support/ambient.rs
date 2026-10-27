@@ -9,7 +9,6 @@ pub const AMBIENT_TASK_ENV: &[&str] = &[
     "LF_BIN",
     "LF_TRACE_ID",
     "LF_PROCESS_ID",
-    "LF_GIT_OPERATION_ID",
     "LF_CAPTURE_KEY",
     "LF_AGENT_CALLER",
     "LF_AS",

@@ -77,7 +77,7 @@ pub struct Step {
     pub id: Option<String>,
     /// A stage: a person takes part here, in the Task conversation. Written
     /// `interactive: <skill>`.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, alias = "human", skip_serializing_if = "std::ops::Not::not")]
     pub interactive: bool,
     /// A deciding occurrence's authored target: the occurrence name or skill
     /// of an earlier step it can return to.
@@ -137,6 +137,10 @@ impl Command {
         {
             self.command = self.args.remove(0);
         }
+        // `lf repo` dissolved; its commands keep their names under new owners.
+        if self.command == "repo" && !self.args.is_empty() {
+            self.command = self.args.remove(0);
+        }
         // Captured commands keep their arguments, but use the current owner.
         if self.command == "monitor"
             && self
@@ -155,8 +159,7 @@ impl Command {
             "doctor" | "install" => Some("self"),
             "ps" | "top" => Some("monitor"),
             "usage" | "replay" => Some("history"),
-            "release" | "tokens" | "ci" => Some("repo"),
-            "cron" => Some("wave"),
+            "release" | "ci" | "tokens" => Some("ops"),
             _ => None,
         };
         if let Some(owner) = owner {
@@ -214,6 +217,7 @@ pub struct ConcreteSkill {
     pub skill: Skill,
     pub id: Option<String>,
     /// A stage where a person takes part; its id is `id`, else the skill name.
+    #[serde(alias = "human")]
     pub interactive: bool,
     /// A deciding occurrence returns this many steps back in its own body.
     pub returns: Option<usize>,

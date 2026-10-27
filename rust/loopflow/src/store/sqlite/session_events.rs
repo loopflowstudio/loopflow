@@ -194,6 +194,30 @@ impl SqliteStore {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// What filled the context of each provider turn one input started, in
+    /// order; `None` for a turn completed before turns retained it.
+    pub(crate) fn input_turn_context(
+        &self,
+        input: &str,
+    ) -> StoreResult<Vec<Option<crate::session::TurnContext>>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT json_extract(done.payload,'$.context') FROM session_events start
+             JOIN session_events done ON done.session_id=start.session_id
+               AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn
+               AND done.kind='completed'
+             WHERE start.kind='started' AND start.captured_event=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1)
+             ORDER BY done.seq",
+        )?;
+        let rows = query.query_map([input], |row| row.get::<_, Option<String>>(0))?;
+        rows.map(|row| {
+            row?.map(|context| serde_json::from_str(&context))
+                .transpose()
+                .map_err(Into::into)
+        })
+        .collect()
+    }
+
     pub(crate) fn input_final_answer(&self, input: &str) -> StoreResult<Option<String>> {
         let native: Option<String> = {
             let conn = self.conn.lock().expect("store mutex poisoned");
@@ -311,6 +335,50 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// The launching process's latest CPU sample of its provider body. Only
+    /// the attachment that owns the reading may update it, and a Session that
+    /// has not spoken yet has no row to update.
+    pub(crate) fn record_session_cpu(
+        &self,
+        session: &str,
+        attachment: &crate::process::SessionAttachment,
+        sampled_at: i64,
+        quiet_since: Option<i64>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE session_activity SET cpu_sampled_at=?3,cpu_quiet_since=?4
+             WHERE session_id=?1 AND attachment_token=?2",
+            params![session, attachment.token, sampled_at, quiet_since],
+        )?;
+        Ok(())
+    }
+
+    /// The current attachment's last provider signal and CPU sample.
+    pub(crate) fn session_liveness(
+        &self,
+        session: &str,
+    ) -> StoreResult<Option<crate::session::SessionLiveness>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT act.observed_at,act.cpu_sampled_at,act.cpu_quiet_since FROM session_activity act
+                 JOIN agent_sessions s ON s.id=act.session_id
+                 JOIN processes p ON p.id=s.agent_process_id
+                 WHERE act.session_id=?1 AND act.attachment_token=p.attachment_token
+                 AND act.agent_process_id=p.id",
+                [session],
+                |row| {
+                    Ok(crate::session::SessionLiveness {
+                        observed_at: row.get(0)?,
+                        cpu_sampled_at: row.get(1)?,
+                        cpu_quiet_since: row.get(2)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
     /// When the next open Session becomes Available through quiet alone, which
     /// no write announces. `None` when no reading is counting toward it.
     pub(crate) fn next_quiet_available(&self, now: i64) -> StoreResult<Option<i64>> {
@@ -344,6 +412,26 @@ impl SqliteStore {
         let seq = record_event_in(&tx, session, thread, turn, kind, payload)?;
         tx.commit()?;
         Ok(seq)
+    }
+
+    /// Whether the turn's completion is already retained; a provider snapshot
+    /// replays completions of turns it has finished before.
+    pub(crate) fn session_turn_completed(
+        &self,
+        session: &str,
+        thread: &AgentSessionId,
+        turn: &str,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT 1 FROM session_events WHERE session_id=?1 AND provider_thread=?2
+                 AND provider_turn=?3 AND kind=?4",
+                params![session, thread, turn, SessionEventKind::Completed.as_str()],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
     }
 
     /// Freeze the request's attribution while its attachment still owns dispatch.
@@ -646,7 +734,15 @@ fn record_event_in(
             &serde_json::from_str(&payload)?,
         );
         payload = serde_json::to_string(&merged)?;
-        tx.execute("DELETE FROM session_events WHERE seq=?1", [seq])?;
+        tx.execute(
+            "UPDATE session_events SET payload=?2, observed_at=?3 WHERE seq=?1",
+            params![
+                seq,
+                payload,
+                time::OffsetDateTime::now_utc().unix_timestamp()
+            ],
+        )?;
+        return Ok(seq);
     }
     tx.execute(
         "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
@@ -1771,6 +1867,61 @@ mod tests {
         assert_eq!(keys.len(), 2);
         assert_eq!(keys[0], "");
         assert!(keys[1].starts_with(":after:"));
+    }
+
+    #[test]
+    fn a_later_usage_receipt_replaces_its_row_in_place() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        record_captured_start(&store, "conversation", "a");
+        let usage = |total: u64| {
+            let counts = json!({"inputTokens":total,"outputTokens":0});
+            store
+                .record_session_event(
+                    "conversation",
+                    &"thread".into(),
+                    "a",
+                    SessionEventKind::Usage,
+                    &json!({"total":counts,"last":counts}),
+                )
+                .unwrap()
+        };
+        let first = usage(10);
+        assert_eq!(usage(20), first);
+        let payload: String = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT payload FROM session_events WHERE seq=?1",
+                [first],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(payload.contains("20"));
+    }
+
+    #[test]
+    fn deleting_a_session_event_probes_captured_event_by_index() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let plan: Vec<String> = {
+            let conn = store.conn.lock().unwrap();
+            let mut statement = conn
+                .prepare("EXPLAIN QUERY PLAN SELECT 1 FROM session_events WHERE captured_event=?1")
+                .unwrap();
+            statement
+                .query_map([1], |row| row.get::<_, String>(3))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        assert!(
+            plan.iter()
+                .any(|step| step.contains("session_events_captured_event")),
+            "{plan:?}"
+        );
     }
 
     #[test]

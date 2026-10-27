@@ -163,8 +163,6 @@ struct Resolved {
     execution_machine: Option<String>,
     /// Why the Task's execution owner could not be read; opening refuses.
     execution_unavailable: Option<String>,
-    /// Where the Task stands, such as `Available · Design`; links omit it.
-    standing: Option<String>,
 }
 
 impl Resolved {
@@ -172,11 +170,11 @@ impl Resolved {
         self.session.as_deref().or(self.primary.as_deref())
     }
 
-    /// What a host names the destination it creates: the label, then where
-    /// the Task stands. Destinations are found by their IDs, never this name.
+    /// What a host names the destination it creates: a Task's workspace name,
+    /// otherwise the label. Destinations are found by their IDs, never this name.
     fn destination_name(&self) -> String {
-        match &self.standing {
-            Some(standing) => format!("{} · {standing}", self.label),
+        match &self.task {
+            Some(task) => crate::terminal_title::workspace_name(&task.identifier, &task.title),
             None => self.label.clone(),
         }
     }
@@ -298,7 +296,7 @@ pub(crate) fn selected_context(
     session: Option<&str>,
 ) -> Result<ContextExplanation> {
     let resolution = work_context(cli.task.as_deref(), cli.wave.as_deref(), session)?;
-    if cli.repo.is_some() || cli.repository.is_some() {
+    if cli.selects_repository() {
         if let ContextFact::Bound { value, .. } = &resolution.repository_path {
             anyhow::ensure!(
                 crate::repository::CanonicalRepo::current()?.as_ref()
@@ -515,16 +513,8 @@ fn describe(
         }
         None => (None, None),
     };
-    let standing = match (store, &task) {
-        (Some(store), Some(task)) => crate::terminal_title::standing(
-            &store.sqlite,
-            &task.id,
-            session.as_deref().or(primary.as_deref()),
-        )?,
-        _ => None,
-    };
     let label = match (&task, &wave) {
-        (Some(task), _) => format!("{} · {}", task.identifier, task.title),
+        (Some(task), _) => crate::terminal_title::workspace_name(&task.identifier, &task.title),
         (None, Some(wave)) => format!("{short_name} · {wave} Wave"),
         (None, None) => short_name,
     };
@@ -541,7 +531,6 @@ fn describe(
         primary_machine,
         execution_machine,
         execution_unavailable,
-        standing,
     })
 }
 
@@ -660,7 +649,7 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
         &crate::store::storage_config_from_env().context("resolve the shared Loopflow store")?,
     ))?;
     let store = std::sync::Arc::new(store);
-    let scoped = cli.repo.is_some() || cli.repository.is_some();
+    let scoped = cli.selects_repository();
     let wave = cli
         .wave
         .as_deref()
@@ -756,7 +745,7 @@ fn available_target(
     )?;
     if exact.is_some() {
         resolved.label = match &resolved.task {
-            Some(task) => format!("{} · {}", task.identifier, session.title),
+            Some(task) => format!("{} · {}", session.title, task.identifier),
             None => session.title.clone(),
         };
     }

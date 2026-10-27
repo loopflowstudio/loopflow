@@ -1033,4 +1033,37 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/0.14.16.002_release.sql"),
         reader_floor: Some("0.14.16"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 14,
+            patch: Some(17),
+            ordinal: 1,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.14.17.001_release.sql"),
+        reader_floor: Some("0.14.17"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 14,
+            patch: Some(17),
+            ordinal: 2,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.14.17.002_release.sql"),
+        reader_floor: Some("0.14.17"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 14,
+            patch: Some(19),
+            ordinal: 1,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.14.19.001_release.sql"),
+        reader_floor: Some("0.14.19"),
+    },
 ];

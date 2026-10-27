@@ -26,8 +26,6 @@ pub enum OpsError {
     Message(String),
     #[error("{0}")]
     DeliveryHeld(String),
-    #[error("checkout is busy: {0}")]
-    CheckoutBusy(String),
     #[error("release deferred: {reason}; continuation: {continuation}")]
     ReleaseDeferred {
         reason: String,

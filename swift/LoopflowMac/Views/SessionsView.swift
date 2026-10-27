@@ -1265,9 +1265,6 @@ struct SessionsContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(PaneGeometry.workspaceShape)
-        .overlay {
-            PaneGeometry.workspaceShape.strokeBorder(palette.borderActive, lineWidth: 1).allowsHitTesting(false)
-        }
         .accessibilityIdentifier("work-workspace-\(key.id)")
     }
 
@@ -1493,7 +1490,7 @@ extension SessionsWorkspace {
                     // Reconcile every recovered base, including documents with closed tabs.
                     for draft in restored.drafts where draft.location == place {
                         do {
-                            let disk = try await fileQuery.taskFile(issue: key.id, path: draft.path, cwd: place.cwd)
+                            let disk = try await fileQuery.taskFile(issue: key.id, path: draft.path)
                             await documents.document(draft.path).reconcile(disk)
                         } catch { persistenceError = error.localizedDescription }
                     }

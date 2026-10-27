@@ -149,7 +149,7 @@ fn emit_build_provenance(manifest_dir: &Path, out_dir: &Path) {
             "LOOPFLOW_MIGRATION_AUTHORITY must be `published` or `validation_only`, got `{migration_authority}`"
         );
     }
-    emit_migration_draft_manifest(manifest_dir, out_dir);
+    let has_drafts = emit_migration_draft_manifest(manifest_dir, out_dir);
     let source_revision = git_root
         .and_then(|root| {
             Command::new("git")
@@ -199,13 +199,40 @@ fn emit_build_provenance(manifest_dir: &Path, out_dir: &Path) {
                             .any(|tag| tag == version_tag)
                 })
         });
-    let build_version = if is_release_candidate || is_tagged_release || source_revision == "unknown"
-    {
+    let is_release = is_release_candidate || is_tagged_release || source_revision == "unknown";
+    let short_revision = source_revision.get(..9).unwrap_or(&source_revision);
+    // An unreleased build names what it is built on. Without drafts it migrates
+    // nothing, so it can serve an exact-frontier store as a hotfix.
+    let label = if is_release {
+        String::new()
+    } else {
+        let kind = if has_drafts { "development" } else { "hotfix" };
+        let dirty = if dirty { "dirty " } else { "" };
+        let base = git_root
+            .and_then(|root| {
+                Command::new("git")
+                    .args(["describe", "--tags", "--abbrev=0", "--match", "v[0-9]*"])
+                    .current_dir(root)
+                    .output()
+                    .ok()
+                    .filter(|output| output.status.success())
+            })
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .filter(|tag| !tag.is_empty())
+            .map(|tag| format!(" on {tag}"))
+            .unwrap_or_default();
+        format!("{dirty}{kind} {short_revision}{base}")
+    };
+    let build_version = if is_release {
         package_version
     } else {
-        let short_revision = source_revision.get(..9).unwrap_or(&source_revision);
         let dirty_suffix = if dirty { ".dirty" } else { "" };
         format!("{package_version}+{short_revision}{dirty_suffix}")
+    };
+    let version_line = if label.is_empty() {
+        build_version.clone()
+    } else {
+        format!("{build_version} ({label})")
     };
     let mut source_revision = source_revision;
     if dirty {
@@ -218,6 +245,8 @@ fn emit_build_provenance(manifest_dir: &Path, out_dir: &Path) {
     println!("cargo:rustc-env=LOOPFLOW_COMPILED_MIGRATION_AUTHORITY={migration_authority}");
     println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_REVISION={source_revision}");
     println!("cargo:rustc-env=LOOPFLOW_BUILD_VERSION={build_version}");
+    println!("cargo:rustc-env=LOOPFLOW_BUILD_LABEL={label}");
+    println!("cargo:rustc-env=LOOPFLOW_VERSION_LINE={version_line}");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_BUILD_PROVENANCE");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_MIGRATION_AUTHORITY");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_RELEASE_TAG");
@@ -264,8 +293,10 @@ fn emit_build_provenance(manifest_dir: &Path, out_dir: &Path) {
     }
 }
 
-fn emit_migration_draft_manifest(manifest_dir: &Path, out_dir: &Path) {
+/// Embed the draft manifest; returns whether the build carries any drafts.
+fn emit_migration_draft_manifest(manifest_dir: &Path, out_dir: &Path) -> bool {
     let drafts = migration_drafts(manifest_dir);
+    let has_drafts = !drafts.is_empty();
     let mut code = String::from("static MIGRATION_DRAFT_MANIFEST: &[MigrationDraft] = &[\n");
     for draft in drafts {
         writeln!(code, "    MigrationDraft {{").expect("write draft manifest");
@@ -276,6 +307,7 @@ fn emit_migration_draft_manifest(manifest_dir: &Path, out_dir: &Path) {
     code.push_str("];\n");
     fs::write(out_dir.join("migration_draft_manifest.rs"), code)
         .expect("write embedded migration draft manifest");
+    has_drafts
 }
 
 /// Collect each kind once so registration, shortcuts and categories share names.

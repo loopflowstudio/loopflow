@@ -506,7 +506,8 @@ pub fn task_place(
         reason,
         ..
     } = options.clone();
-    let mut task = prepare_task(repo, issue, options, None)?;
+    let source = remote::source_for_task(issue)?;
+    let mut task = prepare_task(repo, issue, options, None, source)?;
     block_on_task(async {
         let store = task_store().await?;
         let reason = reason
@@ -535,10 +536,12 @@ pub(crate) struct TaskRunSelection {
     pub take_up: Option<crate::workflow::CapturedGraph>,
 }
 
+/// The Workflow a Task takes up when it names none: its Wave's, then the
+/// repository's `workflow:`, then the builtin `code`.
 pub(crate) fn task_workflow_default(
     store: &Store,
     task: &Task,
-) -> OpsResult<Option<(String, &'static str)>> {
+) -> OpsResult<(String, &'static str)> {
     if let Some(wave) = &task.wave_id {
         if let Some(name) = store
             .sqlite
@@ -546,17 +549,20 @@ pub(crate) fn task_workflow_default(
             .map_err(task_error)?
         {
             crate::workflow::validate_workflow_name(&name).map_err(task_error)?;
-            return Ok(Some((name, "wave")));
+            return Ok((name, "wave"));
         }
     }
     let repo = repository_for_task(store, task)?;
     let name = crate::config::load_repo_config(&repo)
         .map_err(task_error)?
         .and_then(|c| c.workflow);
-    if let Some(name) = &name {
-        crate::workflow::validate_workflow_name(name).map_err(task_error)?;
+    match name {
+        Some(name) => {
+            crate::workflow::validate_workflow_name(&name).map_err(task_error)?;
+            Ok((name, "repository"))
+        }
+        None => Ok(("code".to_string(), "builtin")),
     }
-    Ok(name.map(|name| (name, "repository")))
 }
 
 pub(crate) fn select_task_run(
@@ -611,16 +617,7 @@ pub(crate) fn select_task_run(
         }
         (_, Some(named)) => Some(named),
         (_, None) => {
-            let selection = task_workflow_default(store, task)?;
-            let Some((name, source)) = selection else {
-                let available = crate::graph::available_graph_names(checkout)
-                    .map_err(task_error)?
-                    .join(", ");
-                return Err(task_error(format!(
-                    "No graph selected. Use `lf task run {} <graph>`. Available: {available}",
-                    task.identifier
-                )));
-            };
+            let (name, source) = task_workflow_default(store, task)?;
             Some(
                 crate::workflow::CapturedGraph::load(&name, &repository_for_task(store, task)?)
                     .map_err(task_error)?
@@ -871,6 +868,7 @@ pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> 
             ..Default::default()
         },
         options.recover_from.as_deref(),
+        remote::source_for_task(issue)?,
     )?;
     if let Some(design) = design {
         handoff::write_design(&task, &design)?;
@@ -878,16 +876,29 @@ pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> 
     Ok(task)
 }
 
+/// Check out a Task that moved here on its carried branch and commit.
+pub(crate) fn check_out_moved_task(repo: &Path, source: remote::TaskSource) -> OpsResult<Task> {
+    let issue = source.task_id.to_string();
+    prepare_task(
+        repo,
+        &issue,
+        TaskProcessOptions::default(),
+        None,
+        Some(source),
+    )
+}
+
+/// `source` is the branch and commit another Machine pushed for this Task.
 fn prepare_task(
     repo: &Path,
     issue: &str,
     options: TaskProcessOptions,
     recover_from: Option<&str>,
+    source: Option<remote::TaskSource>,
 ) -> OpsResult<Task> {
     options.validate_directive(None)?;
     block_on_task(async {
         let store = task_store().await?;
-        let source = remote::source_for_task(issue)?;
         if let Some(source) = &source {
             source.require_pushed(repo)?;
         }
@@ -1055,7 +1066,7 @@ async fn restore_task_checkout(
     if worktree.join(".git").try_exists()? {
         return finish_task_checkout(store, task).await;
     }
-    validate_checkout_restoration(store, task, &repo)?;
+    validate_checkout_restoration(task, &repo)?;
     let mut args = vec!["worktree".to_string(), "add".into(), "--force".into()];
     // --force replaces only the stale registration at this absent exact path.
     // A different registered path was rejected above; no branch is reset.
@@ -1106,7 +1117,7 @@ async fn restore_task_checkout(
     finish_task_checkout(store, task).await
 }
 
-fn validate_checkout_restoration(store: &SharedStore, task: &Task, repo: &Path) -> OpsResult<()> {
+fn validate_checkout_restoration(task: &Task, repo: &Path) -> OpsResult<()> {
     let worktree = task.worktree()?;
     if match worktree.symlink_metadata() {
         Ok(_) => true,
@@ -1132,10 +1143,6 @@ fn validate_checkout_restoration(store: &SharedStore, task: &Task, repo: &Path) 
                 worktree.display()
             )));
         }
-    }
-    let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;
-    if !blockers.is_empty() {
-        return Err(task_error(blockers.join("; ")));
     }
     Ok(())
 }
@@ -2080,7 +2087,7 @@ fn _valid_task_url(value: &str) -> bool {
 
 fn _missing_task_pr_url(task: &Task) -> OpsError {
     task_error(format!(
-        "Task {} has no valid provider URL in the cached PM snapshot. Run `lf repo refresh` before publishing this Task PR",
+        "Task {} has no valid provider URL in the cached PM snapshot. Run `lf wave status --sync` before publishing this Task PR",
         task.identifier,
     ))
 }

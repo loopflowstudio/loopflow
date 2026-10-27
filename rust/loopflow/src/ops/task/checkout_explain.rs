@@ -145,7 +145,7 @@ async fn read_checkout(
             stack_on: options.stack_on.clone(),
         });
         if !present {
-            match super::validate_checkout_restoration(store, &task, &repo) {
+            match super::validate_checkout_restoration(&task, &repo) {
                 Ok(()) => {}
                 Err(super::OpsError::Message(reason)) => report.impediments.push(reason),
                 Err(error) => return Err(error.into()),

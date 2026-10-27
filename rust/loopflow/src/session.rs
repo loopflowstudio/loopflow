@@ -152,6 +152,30 @@ pub struct SessionActivity {
     pub yielded: bool,
 }
 
+/// Whether a Session's provider is still making progress: its last provider
+/// signal and the launching process's last CPU sample of the provider body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionLiveness {
+    pub observed_at: i64,
+    pub cpu_sampled_at: Option<i64>,
+    /// Since when the body and its tools used no CPU; absent when the last
+    /// sample could not read them.
+    pub cpu_quiet_since: Option<i64>,
+}
+
+/// What filled one provider turn's context, retained on its `completed`
+/// receipt. A request figure is absent when the provider reported none.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnContext {
+    pub first_request_tokens: Option<u64>,
+    pub peak_request_tokens: Option<u64>,
+    pub tool_results: u64,
+    /// Tool output in cl100k tokens.
+    pub tool_output_tokens: u64,
+    pub compactions: u64,
+    pub compaction_tokens: Option<u64>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TitleSource {
@@ -255,6 +279,8 @@ pub(crate) struct SessionSummary {
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
     pub provider: Option<String>,
+    /// The login its current conversation is pinned to.
+    pub account: Option<crate::store::ProviderAccountId>,
     pub model: Option<String>,
     pub node: Option<u32>,
     pub iterations: Option<Vec<Vec<u32>>>,

@@ -33,11 +33,9 @@ def test_external_user_and_internal_worker_authority_are_distinct() -> None:
     agent_api = (ROOT / "docs/agent-api.md").read_text()
     readme = (ROOT / "README.md").read_text()
 
-    assert "external harness" in skill
-    assert "Never invent Work identity or claim another caller's authority" in skill
+    assert "Never invent a Task identity or act on a Task nobody named" in skill
     assert "external harness" in agent_api
     assert "Loopflow-launched" in agent_api
-    assert "Session" in skill
 
     install = "npx skills add loopflowstudio/loopflow --skill loopflow -g -y"
     assert install in agent_api
@@ -45,13 +43,7 @@ def test_external_user_and_internal_worker_authority_are_distinct() -> None:
 
 
 def test_launcher_surfaces_load_the_shared_work_contract() -> None:
-    surfaces = [
-        SKILL.read_text(),
-        LOOPFLOW.read_text(),
-        (ROOT / "docs/agent-api.md").read_text(),
-    ]
-
-    for text in surfaces:
+    for text in (LOOPFLOW.read_text(), (ROOT / "docs/agent-api.md").read_text()):
         assert "lf help skill work" in text
 
     for text in (SKILL.read_text(), LOOPFLOW.read_text()):

@@ -14,6 +14,7 @@ pub(crate) mod changes;
 mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
+pub mod contention;
 pub mod copy;
 mod durable;
 mod metrics;
@@ -1114,7 +1115,6 @@ impl RoutingState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderAccountSelection {
     pub account: ProviderAccount,
-    pub resume_requested_session: bool,
 }
 
 /// One observed subscription rate-limit window: how much of the plan's

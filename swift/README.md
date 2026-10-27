@@ -386,8 +386,8 @@ one tool pane. A lone terminal omits the redundant pane header. A neutral edge a
 distinguish the selected pane without recoloring its reported activity.
 Terminal surfaces sit inside the rounded edge, so text wraps before the border
 in both single and split panes.
-The enclosing workspace curve follows the pane radius plus its inset, keeping
-the gap even around nested corners.
+The workspace has square top corners without an outer border. Its rounded lower
+corners follow the pane radius plus its inset, keeping the gap even around nested corners.
 The workspace also leaves clearance from the native window's larger lower corners.
 
 Copy selected text with **⌘C**: the pane header briefly confirms the line count,
@@ -641,7 +641,7 @@ Main-Machine commands forward to installed lf; new Sessions and agent children
 use its stable entry. Private-Home launches retain the bundled helper selection.
 Existing providers keep their environment when reattached.
 
-`run` and `run-debug` check `repo identity --json` through that helper before
+`run` and `run-debug` check `config repository --json` through that helper before
 launching. This checks repository registration, not all Desktop actions. Schema
 compatibility is checked by the store; ordinary commands cannot migrate the main
 database. Private `LF_HOME` experiments remain disposable and explicit.
@@ -827,7 +827,7 @@ content incarnation; inspection never creates a surface or cleans up an exited
 child. Neither token authorizes terminal input.
 
 `lf open` delivers the resolved Task/Session to this same repository
-window. After explicit `repo identity --bind`, the next open reuses the existing
+window. After explicit `config repository --bind`, the next open reuses the existing
 scene, including one still registering. Retained local IDs come from `lf`, not
 path matching. Drafts, native views and pending links stay in place; old pane
 targets become stale, so inspect again before control. Restoration accepts a
@@ -861,7 +861,7 @@ name (the `lf desktop` verb), title, arguments, default keys and `perform`.
 the Desktop socket look actions up there; nothing else mutates navigation or panes.
 Keys and menus act on the shown workspace's focused pane; a socket request names an
 exact window and pane, and `lf desktop` resolves those from one inspection (see the
-[CLI examples](../docs/lf.md#desktop-navigation)).
+[CLI examples](../docs/surfaces.md#drive-desktop-from-a-script)).
 
 `DesktopServer` (`LoopflowMac/DesktopServer.swift`) binds
 `$LF_HOME/run/desktop/<bundle-id>.sock` at launch (0700 directory, 0600 socket,

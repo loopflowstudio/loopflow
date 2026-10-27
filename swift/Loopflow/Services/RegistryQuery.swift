@@ -176,11 +176,11 @@ public struct RegistryQuery: Sendable {
 
     /// Explicit workspace opening binds a plain repository to its local plan.
     public func repositoryIdentity(cwd: String) async throws -> RepositoryIdentity {
-        try Self.decode(RepositoryIdentity.self, from: await run(["repo", "identity", "--json"], cwd))
+        try Self.decode(RepositoryIdentity.self, from: await run(["config", "repository", "--json"], cwd))
     }
 
     public func repositoryPath(id: String) async throws -> String {
-        try await run(["--repository", id, "repo", "identity", "--path"], nil)
+        try await run(["--repository", id, "config", "repository", "--path"], nil)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -215,7 +215,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func realignProjects(name: String, plan: String, preview: Bool, cwd: String) async throws -> ProjectRotationPreview {
-        var args = ["repo", "new-chapter", name, "--plan", "/dev/stdin", "--json"]
+        var args = ["wave", "new-chapter", "--all", name, "--plan", "/dev/stdin", "--json"]
         if preview { args.append("--dry-run") }
         return try Self.decode(ProjectRotationPreview.self, from: await runWithInput(args, cwd, plan))
     }
@@ -250,7 +250,7 @@ public struct RegistryQuery: Sendable {
 
     public func peerPlanningStatus(cwd: String) async throws -> [PeerPlanningStatus] {
         struct Status: Decodable { let destinations: [PeerPlanningStatus] }
-        return try Self.decode(Status.self, from: await run(["planning", "status", "--json"], cwd)).destinations
+        return try Self.decode(Status.self, from: await run(["config", "planning", "status", "--json"], cwd)).destinations
     }
 
     public func localMachineId() async throws -> String {
@@ -292,25 +292,28 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(WorkActivitySnapshot.self, from: stdout)
     }
 
+    // Task content reads and saves address the Task by issue and run outside its
+    // checkout, so a Desktop poll is never counted as the Task's execution.
+
     /// Files changed by one Task, classified across commits, index, worktree,
     /// and untracked state relative to the Task's recorded base.
-    public func taskChanges(issue: String, base: String = "parent", cwd: String?) async throws -> TaskChangesSnapshot {
-        let stdout = try await run(["task", "diff", issue, "--files", "--base", base, "--json"], cwd)
+    public func taskChanges(issue: String, base: String = "parent") async throws -> TaskChangesSnapshot {
+        let stdout = try await run(["task", "diff", issue, "--files", "--base", base, "--json"], nil)
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
     }
 
     /// Read a Task's captured Graphs through its content-owned transport.
-    public func taskGraphProcesses(task: String, cwd: String?) async throws -> [GraphProcessDetail] {
+    public func taskGraphProcesses(task: String) async throws -> [GraphProcessDetail] {
         struct Page: Decodable { let entries: [GraphProcessInventoryEntry]; let next: String? }
         var after: String?
         var result: [GraphProcessDetail] = []
         repeat {
             var args = ["graph", "list", "--processes", "--for-task", task, "--json"]
             if let after { args += ["--after", after] }
-            let page = try Self.decode(Page.self, from: await run(args, cwd))
+            let page = try Self.decode(Page.self, from: await run(args, nil))
             for entry in page.entries {
                 let detail = try Self.decode(GraphProcessDetail.self,
-                    from: await run(["graph", "show", entry.id, "--processes", "--json"], cwd))
+                    from: await run(["graph", "show", entry.id, "--processes", "--json"], nil))
                 result.append(detail)
             }
             after = page.next
@@ -430,8 +433,7 @@ public struct RegistryQuery: Sendable {
         issue: String,
         path: String?,
         base: String = "parent",
-        draft: String? = nil,
-        cwd: String?
+        draft: String? = nil
     ) async throws -> TaskDiffSnapshot {
         var args = ["task", "diff", issue]
         if let path { args.append(path) }
@@ -439,35 +441,34 @@ public struct RegistryQuery: Sendable {
         let stdout: String
         if let draft {
             args.append("--draft")
-            stdout = try await runWithInput(args, cwd, draft)
+            stdout = try await runWithInput(args, nil, draft)
         } else {
-            stdout = try await run(args, cwd)
+            stdout = try await run(args, nil)
         }
         return try Self.decode(TaskDiffSnapshot.self, from: stdout)
     }
 
     /// One page of immediate directory entries in the Task checkout.
     public func taskFiles(issue: String, directory: String, cursor: String? = nil,
-                          showIgnored: Bool = false, cwd: String?) async throws -> TaskDirectory {
+                          showIgnored: Bool = false) async throws -> TaskDirectory {
         var args = ["task", "files", issue, directory.isEmpty ? "." : directory, "--json"]
         if let cursor { args += ["--cursor", cursor] }
         if showIgnored { args.append("--show-ignored") }
-        return try Self.decode(TaskDirectory.self, from: try await run(args, cwd))
+        return try Self.decode(TaskDirectory.self, from: try await run(args, nil))
     }
 
     /// Current contents of one file, constrained to the Task worktree.
     public func taskFile(
         issue: String,
-        path: String,
-        cwd: String?
+        path: String
     ) async throws -> TaskFileSnapshot {
-        let stdout = try await run(["task", "file", issue, path, "--json"], cwd)
+        let stdout = try await run(["task", "file", issue, path, "--json"], nil)
         return try Self.decode(TaskFileSnapshot.self, from: stdout)
     }
 
-    public func saveTaskFile(issue: String, path: String, revision: String, content: String,
-                             cwd: String?) async throws -> TaskFileSave {
-        let stdout = try await runWithInput(["task", "save", issue, path, "--revision", revision, "--json"], cwd, content)
+    public func saveTaskFile(issue: String, path: String, revision: String,
+                             content: String) async throws -> TaskFileSave {
+        let stdout = try await runWithInput(["task", "save", issue, path, "--revision", revision, "--json"], nil, content)
         return try Self.decode(TaskFileSave.self, from: stdout)
     }
 
@@ -570,8 +571,7 @@ public struct RegistryQuery: Sendable {
         cwd: String?,
         sync: Bool = false
     ) async throws -> WavePlan {
-        if sync { _ = try await run(["repo", "refresh", wave], cwd) }
-        let stdout = try await run(["wave", "status", wave, "--json"], cwd)
+        let stdout = try await run(["wave", "status", wave, "--json"] + (sync ? ["--sync"] : []), cwd)
         let snapshot = try Self.decode(WaveDetailSnapshot.self, from: stdout)
         return WavePlan(objective: objective, projects: snapshot.projects)
     }
@@ -593,10 +593,10 @@ public struct RegistryQuery: Sendable {
     }
 
     /// The codebase on disk, as a tree of directories weighted by tokens.
-    /// Mirrors Rust `CodeNode`. Runs in `repoPath` — `lf repo tokens` measures the
+    /// Mirrors Rust `CodeNode`. Runs in `repoPath` — `lf tokens` measures the
     /// repo it is invoked in.
     public func codebase(repoPath: String) async throws -> CodeNode {
-        let stdout = try await run(["repo", "tokens", "--json"], repoPath)
+        let stdout = try await run(["ops", "tokens", "--json"], repoPath)
         return try Self.decode(CodeNode.self, from: stdout)
     }
 
@@ -604,7 +604,7 @@ public struct RegistryQuery: Sendable {
     /// `CodeSnapshot`. Blob counts are cached by sha, so only the first walk of
     /// a window pays to tokenize.
     public func codebaseHistory(repoPath: String, days: Int = 30) async throws -> [CodeSnapshot] {
-        let stdout = try await run(["repo", "tokens", "--json", "--days", String(days)], repoPath)
+        let stdout = try await run(["ops", "tokens", "--json", "--days", String(days)], repoPath)
         return try Self.decode([CodeSnapshot].self, from: stdout)
     }
 

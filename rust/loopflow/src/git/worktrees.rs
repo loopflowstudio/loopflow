@@ -404,14 +404,22 @@ pub(crate) fn github_repo_nwo(repo: &Path) -> Option<(String, String)> {
     if !output.status.success() {
         return None;
     }
-    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    // Handle SSH (git@github.com:owner/repo.git) and HTTPS (https://github.com/owner/repo.git)
-    let path = url
-        .strip_prefix("git@github.com:")
-        .or_else(|| url.strip_prefix("https://github.com/"))?;
+    github_nwo(String::from_utf8_lossy(&output.stdout).trim())
+}
+
+/// Owner and name of a GitHub remote URL, in its SSH, `ssh://` or HTTPS form.
+pub(crate) fn github_nwo(url: &str) -> Option<(String, String)> {
+    let path = [
+        "git@github.com:",
+        "ssh://git@github.com/",
+        "https://github.com/",
+    ]
+    .iter()
+    .find_map(|prefix| url.strip_prefix(prefix))?;
+    let path = path.trim_end_matches('/');
     let path = path.strip_suffix(".git").unwrap_or(path);
     let (owner, name) = path.split_once('/')?;
-    Some((owner.to_string(), name.to_string()))
+    (!name.contains('/')).then(|| (owner.to_string(), name.to_string()))
 }
 
 /// Remote enrichment may be slow or unreachable. It never holds a listing
@@ -1724,6 +1732,7 @@ pub fn ensure_agent_worktree(
         .truncate(false)
         .write(true)
         .open(lock_path)?;
+    // Two launches placing the same persistent worktree agree on one checkout.
     fs2::FileExt::lock_exclusive(&lock)?;
     let mut plan = plan_placement(&main_repo, segment)?;
     if plan.strategy == PlacementStrategy::UseExistingWorktree && !plan.worktree_path.exists() {
@@ -2173,6 +2182,21 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn github_remotes_parse_in_every_url_form() {
+        for url in [
+            "git@github.com:loopflowstudio/loopflow.git",
+            "ssh://git@github.com/loopflowstudio/loopflow",
+            "https://github.com/loopflowstudio/loopflow.git",
+        ] {
+            assert_eq!(
+                super::github_nwo(url),
+                Some(("loopflowstudio".into(), "loopflow".into()))
+            );
+        }
+        assert_eq!(super::github_nwo("git@gitlab.com:team/repo.git"), None);
     }
 
     #[test]

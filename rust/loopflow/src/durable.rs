@@ -54,12 +54,6 @@ prefixed_uuid_id!(
     DurableDataError,
     DurableDataError::InvalidId
 );
-prefixed_uuid_id!(
-    CronReceiptId,
-    "cron_",
-    DurableDataError,
-    DurableDataError::InvalidId
-);
 
 impl TaskId {
     /// Linear UUIDs are also the creation UUID used by locally authored Tasks.
@@ -149,7 +143,7 @@ pub enum TaskExecutionSource {
 pub enum OwningMachineSource {
     /// `lf machine use <machine> <wave>`, set on the Task's Wave or a parent Wave.
     Wave(String),
-    /// `lf machine use <machine> --repo`, set on the Task's repository.
+    /// `lf --repo <repo> machine use <machine>`, set on the Task's repository.
     Repository,
     /// No default is set: the Machine running the command.
     ThisMachine,
@@ -308,6 +302,13 @@ pub struct Machine {
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
     pub observed_at: OffsetDateTime,
+}
+
+impl Machine {
+    /// Its label, else its id.
+    pub fn name(&self) -> String {
+        self.label.clone().unwrap_or_else(|| self.id.to_string())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

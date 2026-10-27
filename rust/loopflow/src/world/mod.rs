@@ -10,7 +10,7 @@
 //! Session from its transcript and echoes each input line, so Sessions open live
 //! without an account or network; a `gh` answers pull-request reads from files
 //! under `github/pulls/` and refuses everything else, so nothing run inside a
-//! World reaches GitHub; a `launchctl` records cron jobs instead of loading them.
+//! World reaches GitHub; a `launchctl` records launchd jobs instead of loading them.
 
 pub mod recipes;
 
@@ -119,16 +119,15 @@ refuse "$@"
 "#;
 
 const LAUNCHCTL: &str = r#"#!/bin/sh
-# lf-world's launchd. Records the jobs `lf cron` loads under ../launchd, so
+# lf-world's launchd. Records the jobs `lf ci watch --install` loads under ../launchd, so
 # nothing run inside a World schedules a real job; refuses everything else.
 jobs="$(dirname "$0")/../launchd"
 mkdir -p "$jobs"
 case "$1" in
 load) touch "$jobs/$(basename "$2" .plist)"; exit 0 ;;
 unload) rm -f "$jobs/$(basename "$2" .plist)"; exit 0 ;;
-print) [ -e "$jobs/${2##*/}" ]; exit ;;
 esac
-echo "lf-world's launchd answers only load, unload and print: $*" >&2
+echo "lf-world's launchd answers only load and unload: $*" >&2
 exit 1
 "#;
 
@@ -612,9 +611,9 @@ impl World {
         };
         let (started, ended) = self.span(&steps, ended_days_ago, minutes, outcome)?;
         // The Task run starts its Graph, which starts the first step.
+        // Each Process is recorded running, then finished once its references
+        // exist, as live commands do; otherwise its exit would forget it.
         let mut run = self.process(&trace, None, &checkout, argv, started - 2);
-        run.completed_at = Some(ended);
-        outcome.complete(&mut run);
         store.sqlite.record_process(&run)?;
         if let Some(graph) = &take_up {
             store
@@ -634,6 +633,9 @@ impl World {
         if outcome == Outcome::Succeeded {
             store.sqlite.arrive_workflow_edge(&task.id, &run.id)?;
         }
+        run.completed_at = Some(ended);
+        outcome.complete(&mut run);
+        store.sqlite.record_process(&run)?;
         Ok(run.id)
     }
 
@@ -653,12 +655,13 @@ impl World {
             vec!["lf", "task", "workflow", "move", issue, node],
             self.now,
         );
-        mover.completed_at = Some(self.now);
-        Outcome::Succeeded.complete(&mut mover);
         store.sqlite.record_process(&mover)?;
         store
             .sqlite
             .set_workflow_node(&task.id, node, &mover.id, Some(note))?;
+        mover.completed_at = Some(self.now);
+        Outcome::Succeeded.complete(&mut mover);
+        store.sqlite.record_process(&mover)?;
         Ok(())
     }
 
@@ -724,8 +727,7 @@ impl World {
                 break;
             }
         }
-        graph.completed_at = Some(begin);
-        outcome.complete(&mut graph);
+        // Its steps finish while it runs, so exit forgets none of them.
         store.sqlite.record_process(&graph)?;
         store.sqlite.record_graph_process(&graph.id, &compiled)?;
         for (process, key) in records {
@@ -734,6 +736,9 @@ impl World {
                 .sqlite
                 .record_graph_step(&graph.id, &process.id, key, &[Vec::new()])?;
         }
+        graph.completed_at = Some(begin);
+        outcome.complete(&mut graph);
+        store.sqlite.record_process(&graph)?;
         Ok(())
     }
 

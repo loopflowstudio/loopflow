@@ -171,6 +171,8 @@ fn open_task(store: &SqliteStore) -> TaskId {
 
 #[test]
 fn an_ended_rental_hands_its_open_tasks_back_here() {
+    // Claiming reads the global Git identity, which isolating tests replace.
+    let _env = crate::journal::test_env_lock();
     let (_dir, store) = store();
     store.add_ondemand(&code(1)).unwrap();
     let rental = store.admit_rental("code", None, None, false).unwrap();
@@ -234,4 +236,77 @@ fn hardware_rented_before_spot_existed_reads_as_on_demand() {
         let hardware: Hardware = serde_json::from_str(&json).unwrap();
         assert!(!hardware.spot, "{sql}");
     }
+}
+
+#[test]
+fn runpod_rows_from_0_14_16_go_and_current_ones_stay() {
+    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_before_current_draft(&conn, "scope_tasks_capacity");
+    conn.execute_batch(include_str!(
+        "../../../tests/fixtures/migrations/scope_tasks_capacity_released.sql"
+    ))
+    .unwrap();
+    conn.execute_batch(&current_draft_sql("scope_tasks_capacity"))
+        .unwrap();
+    let names: Vec<String> = conn
+        .prepare("SELECT name FROM ondemands ORDER BY name")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(names, ["gpu"]);
+    let rentals: i64 = conn
+        .query_row("SELECT count(*) FROM rentals", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(rentals, 0);
+}
+
+#[test]
+fn fly_rows_from_0_14_17_stay_as_history_and_none_stays_live() {
+    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_before_current_draft(&conn, "retire_fly_rentals");
+    conn.execute_batch(include_str!(
+        "../../../tests/fixtures/migrations/retire_fly_rentals_released.sql"
+    ))
+    .unwrap();
+    conn.execute_batch(&current_draft_sql("retire_fly_rentals"))
+        .unwrap();
+    let rows = |sql: &str| -> Vec<(String, String)> {
+        conn.prepare(sql)
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    };
+    let ondemands = rows("SELECT name, provider FROM ondemands ORDER BY name");
+    assert_eq!(
+        ondemands,
+        [
+            ("code".into(), "daytona".into()),
+            ("fly1".into(), "fly".into())
+        ]
+    );
+    assert!(ondemands
+        .iter()
+        .all(|(_, provider)| Provider::parse(provider).is_some()));
+    let rentals = rows("SELECT id, state FROM rentals ORDER BY id");
+    assert_eq!(
+        rentals,
+        [
+            ("rent_0f".into(), "ended".into()),
+            ("rent_1a".into(), "lost".into())
+        ]
+    );
+    let capacity: Option<String> = conn
+        .query_row("SELECT tasks_capacity FROM scope_defaults", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(capacity, None);
 }

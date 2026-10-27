@@ -10,7 +10,7 @@
 //! unknown reply keeps it; the create is never resent. At the hard deadline
 //! the provider deletes the machine whatever else fails: its own lifetime
 //! (Daytona, Modal) or the guardian on the machine (`guardian.py`: RunPod,
-//! AWS, Fly).
+//! AWS).
 
 pub mod sandbox;
 
@@ -39,6 +39,9 @@ pub const GRACE_SECONDS: i64 = 15 * 60;
 pub const MAX_HOURS: f64 = 24.0;
 /// An unconfirmed create absent under its name after this long is lost.
 pub const CREATE_SECONDS: i64 = 20 * 60;
+/// A rental still booting this long after admission lost the lf booting it
+/// (its create, SSH wait and install each fit well inside); nothing ran on it.
+pub const BOOT_SECONDS: i64 = 60 * 60;
 
 // ---------------------------------------------------------------------------
 // Money
@@ -152,8 +155,13 @@ pub enum Provider {
     Modal,
     Runpod,
     Aws,
+    /// Retired 2026-10-27: its disk cannot hold a Rust build. 0.14.17's Fly
+    /// on-demands and rentals stay readable as history; nothing rents there.
+    #[value(skip)]
     Fly,
 }
+
+const RETIRED: &str = "Fly no longer rents; `lf ondemand remove` forgets its on-demand";
 
 impl Provider {
     pub fn as_str(self) -> &'static str {
@@ -177,7 +185,7 @@ impl Provider {
         }
     }
 
-    /// The SDK the bridge runs with, pinned; RunPod and Fly speak plain HTTP.
+    /// The SDK the bridge runs with, pinned; RunPod speaks plain HTTP.
     pub fn sdk(self) -> Option<&'static str> {
         match self {
             Self::Daytona => Some("daytona==0.226.1"),
@@ -202,6 +210,7 @@ impl Provider {
                         .to_string(),
                 )
             }
+            Self::Fly => Some(RETIRED.to_string()),
             Self::Runpod if !set("RUNPOD_API_KEY") => Some(doppler("RUNPOD_API_KEY is")),
             Self::Aws
                 if !set("AWS_ACCESS_KEY_ID")
@@ -212,7 +221,6 @@ impl Provider {
                     "AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_REGION are not all",
                 ))
             }
-            Self::Fly if !set("FLY_API_TOKEN") => Some(doppler("FLY_API_TOKEN is")),
             _ => None,
         }
     }
@@ -235,7 +243,7 @@ impl Provider {
             ));
         }
         match (self, hardware.gpu.as_deref()) {
-            (Self::Daytona | Self::Fly, Some(_)) => Err(format!(
+            (Self::Daytona, Some(_)) => Err(format!(
                 "{self} rents no GPUs; --gpu works on runpod, aws and modal"
             )),
             (Self::Daytona, None) => Ok(offer(
@@ -254,7 +262,6 @@ impl Provider {
                     per_size(70_956, 24_012, *usd),
                 ))
             }
-            (Self::Fly, None) => Ok(offer(None, per_size(29_167, 8_333, FLY_IPV4_MICROS))),
             (Self::Runpod, None) => RUNPOD_CPUS
                 .iter()
                 .find(|(_, gib_per_vcpu, _)| gib_per_vcpu * vcpus >= memory)
@@ -275,6 +282,7 @@ impl Provider {
                         .then(|| offer(Some(format!("{family}.{size}")), usd * size_vcpus))
                 })
                 .ok_or_else(no_shape),
+            (Self::Fly, _) => Err(RETIRED.to_string()),
             (Self::Aws, Some(gpu)) => {
                 let (family, sizes) = find_gpu(self, AWS_GPUS, gpu)?;
                 sizes
@@ -392,10 +400,6 @@ const AWS_GPUS: &[(&str, &str, GpuSizes)] = &[
         ],
     ),
 ];
-
-/// Fly bills performance vCPUs at $21/month beside 2 GiB at $6/GiB-month, and
-/// $2/month for the app's dedicated IPv4.
-const FLY_IPV4_MICROS: i64 = 2_778;
 
 /// The provider's name for a `--gpu` name and what its table holds beside it.
 fn find_gpu<T>(
@@ -581,6 +585,14 @@ impl Rental {
 
     pub fn soft_deadline(&self) -> OffsetDateTime {
         self.deadline - time::Duration::seconds(SOFT_DEADLINE_SECONDS)
+    }
+
+    /// Created but never made a Machine, long after admission: the lf booting
+    /// it died, and nothing ran on it.
+    pub fn boot_abandoned(&self, now: OffsetDateTime) -> bool {
+        self.state == RentalState::Booting
+            && self.machine_id.is_none()
+            && now - self.created_at >= time::Duration::seconds(BOOT_SECONDS)
     }
 }
 

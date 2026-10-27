@@ -1266,7 +1266,7 @@ fn first_release_cli_needs_no_baseline_and_retries_without_another_release() {
     let _env = EnvGuard::new(&[("gh", &gh), ("lf", &lf)]);
     let run = || {
         Command::new(env!("CARGO_BIN_EXE_lf"))
-            .args(["repo", "release", "run", "0.1.0"])
+            .args(["release", "run", "0.1.0"])
             .current_dir(repo.path())
             .output()
             .unwrap()
@@ -2034,7 +2034,7 @@ fn active_candidate_preparation_blocks_concurrent_cleanup_until_exit() {
     let _env = EnvGuard::new(&[("gh", fixture.gh_script.as_str())]);
 
     let release = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["repo", "release", "run", "patch"])
+        .args(["release", "run", "patch"])
         .current_dir(repo.path())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -2454,7 +2454,7 @@ exec '{}' "$@"
     git(&repo, &["remote", "set-url", "origin", github_remote]);
 
     let outcome = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["repo", "release", "run", "patch"])
+        .args(["release", "run", "patch"])
         .env("LF_BIN", &repair_bin)
         .current_dir(repo.path())
         .output()
@@ -2604,7 +2604,7 @@ while read -r line; do :; done
     git(&repo, &["remote", "set-url", "origin", github_remote]);
 
     let outcome = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["repo", "release", "run", "patch"])
+        .args(["release", "run", "patch"])
         .env("LF_BIN", &repair_bin)
         .current_dir(repo.path())
         .output()
@@ -2981,7 +2981,7 @@ exit 1
         .join(format!("{repo_name}.publish-default-v0-9-1"));
 
     let release = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["repo", "release", "run", "patch"])
+        .args(["release", "run", "patch"])
         .current_dir(repo.path())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

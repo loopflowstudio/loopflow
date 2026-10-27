@@ -1,23 +1,24 @@
 # Using lf
 
 `lf` launches coding agents, keeps their Sessions, and runs saved Skills and
-Graphs. Use as much of it as the request needs. A Graph is an authored sequence
-of steps; it runs with or without a Task.
+Graphs. Changes that end in a pull request run as Tasks: each has its own
+worktree, branch and PR.
 
-Work in the supplied checkout. Read its agent guide and existing work, preserve
-other contributions, and carry out the request here. Do not launch another
-agent or create a worktree merely to do the work already assigned to this one.
-Follow a supplied Graph's steps and boundaries; finishing it selects no next work,
-but steps a stopped Graph never reached remain yours.
+**Launched for a Task or a Graph step:** do that work in the supplied checkout.
+Read its agent guide and existing work, preserve other contributions, and follow
+the Graph's steps and boundaries. Don't start another agent, Task or worktree for
+work already assigned to you. Finishing a Graph selects no next work, but steps a
+stopped Graph never reached remain yours. Read `lf help skill work` before using
+Task, Wave or Project commands unless that guidance was preloaded.
 
-Use the requested tools and repository conventions. Read
-`lf help <command-or-skill>` for instructions on Sessions, Skills, Graphs,
-worktrees and PRs.
+**Launched without a Task, talking with a person:** when they ask for a change
+that should end in a PR, hand it off: `lf task create --title "<outcome>"`, then
+`lf task run <ID>`, and give back `lf open --task <ID> --link --format markdown`.
+Questions, reading and small fixes they want here stay in this checkout. Check on
+Tasks with `lf task status <ID>`; steer with `lf comment <ID> "<direction>"`.
 
-When continuing an existing Task or when the request calls for Tasks, Waves,
-or Projects, read `lf help skill work` unless that guidance was preloaded. It is also
-available as `lf skill work`. Work association supplies context; the request
-or selected Skill/Graph determines what to do. Stay within that chosen scope.
+Use the requested tools and repository conventions. `lf help <command-or-skill>`
+is the current reference for Sessions, Skills, Graphs, worktrees and PRs.
 
 Name the Session for the work in two or three specific words. Read `session_id`
 from `LF_AGENT_CALLER` and use `lf session rename <id> "<name>" --suggest` when

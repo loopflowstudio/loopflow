@@ -81,7 +81,7 @@ Graphs may invoke the named internal operations that own their exact boundary.
 | `lf account` | provider credential and account authority |
 | `lf install`, `release` | artifact selection and release workflow |
 
-Argument-level behavior belongs in the [`lf` reference](../lf.md). Wire DTOs
+Argument-level behavior belongs in the [`lf` reference](../lf-reference.md). Wire DTOs
 have required fields unless their type is explicitly optional. Rust and Swift
 round-trip the same fixtures under `tests/fixtures/dto/`.
 

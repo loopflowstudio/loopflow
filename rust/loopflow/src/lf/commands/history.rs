@@ -68,11 +68,8 @@ pub enum HistoryCommand {
     /// Inspect a process or Session by identity
     Show {
         id: String,
-        #[arg(long, conflicts_with_all = ["events", "final_answer"])]
-        json: bool,
-        /// Print a Session's retained raw input events
         #[arg(long, conflicts_with = "final_answer")]
-        events: bool,
+        json: bool,
         /// Print a Session's last recorded provider conclusion
         #[arg(long = "final")]
         final_answer: bool,
@@ -80,13 +77,13 @@ pub enum HistoryCommand {
         #[arg(long)]
         input: Option<String>,
         /// Print only what the step's submitted input was made of, by source
-        #[arg(long, conflicts_with_all = ["events", "final_answer", "instructions"])]
+        #[arg(long, conflicts_with_all = ["final_answer", "instructions"])]
         context: bool,
         /// Explain recorded instruction inclusion and omission
-        #[arg(long, conflicts_with_all = ["events", "final_answer", "context"])]
+        #[arg(long, conflicts_with_all = ["final_answer", "context"])]
         instructions: bool,
         /// Print only the Session's conversation, as its providers kept it
-        #[arg(long, conflicts_with_all = ["events", "final_answer", "context", "instructions", "input"])]
+        #[arg(long, conflicts_with_all = ["final_answer", "context", "instructions", "input"])]
         transcript: bool,
     },
     /// Show how much Session history providers still keep, and what they remove next
@@ -144,7 +141,7 @@ pub enum HistoryCommand {
         #[arg(long)]
         context: bool,
     },
-    /// Launch a new execution from an immutable captured provider request
+    /// Launch a new execution from a captured provider request, while this Machine retains its capture
     Replay {
         /// Captured input identity or an unambiguous displayed prefix
         run: String,
@@ -242,7 +239,6 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
         HistoryCommand::Show {
             id,
             json,
-            events,
             final_answer,
             input,
             context,
@@ -250,7 +246,6 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
             transcript,
         } => {
             let view = [
-                (*events, SessionView::Events),
                 (*final_answer, SessionView::Final),
                 (*context, SessionView::Context),
                 (*instructions, SessionView::Instructions),
@@ -373,19 +368,11 @@ fn show(id: &str, json: bool, input: Option<&str>, view: SessionView) -> anyhow:
         Shown::Local(process) => process,
         Shown::Copied(copied) => {
             anyhow::ensure!(
-                !json
-                    && input.is_none()
-                    && matches!(view, SessionView::Summary | SessionView::Events),
-                "Session {id} is a copy from {}; it reads as text, or as raw rows with --events",
+                !json && input.is_none() && view == SessionView::Summary,
+                "Session {id} is a copy from {}; it reads as text",
                 copied.session.origin_name()
             );
-            if view == SessionView::Events {
-                for event in &copied.events {
-                    println!("{}", serde_json::to_string(&event.row)?);
-                }
-            } else {
-                println!("{}", copied.render(&crate::store::lf_home_dir()));
-            }
+            println!("{}", copied.render(&crate::store::lf_home_dir()));
             return Ok(());
         }
     };
@@ -393,7 +380,7 @@ fn show(id: &str, json: bool, input: Option<&str>, view: SessionView) -> anyhow:
         Some(process) => {
             anyhow::ensure!(
                 view == SessionView::Summary,
-                "--events, --final, --context, --instructions and --transcript inspect Session evidence; Processes record command outcomes"
+                "--final, --context, --instructions and --transcript inspect Session evidence; Processes record command outcomes"
             );
             if !json {
                 print_process(&process);

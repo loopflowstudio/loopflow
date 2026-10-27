@@ -375,18 +375,8 @@ Observe active conversations and missing process evidence
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--watch` | Stream NDJSON until stdin closes Default: false. |
+| `--watch` | Print a JSON line now and each time the conversations change, until stdin closes Default: false. |
 | `--task` | task |
-| `--help / -h` | Print help |
-
-## lf monitor work
-
-Stream planning and activity for the selected Work, each part again only when it changes
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--watch` | Stream NDJSON until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
 ## lf monitor ps
@@ -754,6 +744,7 @@ Show selection, retained imports and held records without contacting Git
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
+| `--watch` | Keep the repository's planning exchanged, printing a JSON line now and each time the status changes, until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
 ## lf repo connect
@@ -1074,6 +1065,16 @@ Show a Work selection, or derive a passive plan for external hosts
 | `<expression>` | wave/task/query/kind/state expression; omitted uses the repository default |
 | `--plan` | Print the derived plan as JSON without opening Desktop or starting a provider Default: false. |
 | `--json` | Print the opening receipt as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop plans
+
+Print the repository's default and saved Dashboard plans as JSON
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--watch` | Print a JSON line now and each time the plans change, until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
 ## lf desktop query
@@ -1781,6 +1782,7 @@ Read chapter plans and Tasks without starting work; an explicit Wave includes hi
 | `--task` | Find an exact Task, including historical planning |
 | `--json` | json Default: false. |
 | `--all` | Read every repository on this Machine Default: false. |
+| `--watch` | Print a JSON line now and each time the plan changes, until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave workflow
@@ -2014,6 +2016,7 @@ Show one Wave's current plan, Task details, and execution evidence
 | `<wave>` | Wave name (default: the ambient wave) |
 | `--json` | Emit the status snapshot as JSON Default: false. |
 | `--sync` | Refresh planning from Linear before reading Default: false. |
+| `--watch` | Print a JSON line now and each time the status changes, until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave rename
@@ -2474,6 +2477,7 @@ Read what Sessions did, tagged with their Work: turns, commands and provider usa
 | `--project` | Scope to one Project by slug |
 | `--task` | Scope to one Task by Linear identifier |
 | `--json` | Emit the typed activity snapshot as JSON Default: false. |
+| `--watch` | Print a JSON line now and each time the history changes, until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
 ## lf history list

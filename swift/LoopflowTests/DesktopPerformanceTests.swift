@@ -84,11 +84,14 @@ struct DesktopPerformanceTests {
         child["LF_HOME"] = home
         let reader = child
         let query = RegistryQuery(watchWork: {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: lf)
-            process.arguments = ["monitor", "work", "--watch", "--json"]
-            process.environment = reader
-            return try LocalWorkObservation.start(process: process, configurationChanged: { false })
+            try LocalWorkObservation.start(process: { args, cwd in
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: lf)
+                process.arguments = args
+                process.environment = reader
+                if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
+                return process
+            }, configurationChanged: { false })
         }) { args, _ in
             // The window under measurement reads through its one reader.
             throw RegistryQueryError("write-to-visible ran lf \(args.joined(separator: " "))")
@@ -1126,10 +1129,9 @@ private final class PerformanceReader {
     private func answer(_ request: WorkRequest) async {
         if case .scope(_, let scope) = request { self.scope = scope }
         let roadmap = await planning.read()
-        send("planning", request.id, #"{"roadmap":\#(roadmap),"waves":[]}"#)
-        guard let scope, let repo = scope.repo else { return }
-        send("sessions", request.id,
-             #"{"repo":"\#(repo)","includes_headless":\#(scope.headless),"entries":\#(sessions)}"#)
+        send(.planning, request.id, roadmap)
+        guard let scope, scope.repo != nil else { return }
+        send(.sessions, request.id, sessions)
         guard let task = scope.task else { return }
         // Only the first Task has a Graph process.
         let graphs = task == "PERF-0" ? #"""
@@ -1149,16 +1151,20 @@ private final class PerformanceReader {
                 }
             }
         }
-        send("task", request.id, #"""
-            {"task":"\#(task)","work":{"sessions":[],"graph_processes":\#(graphs),"processes":[],"workflow":null},"graph_processes":\#(runs),"comments":{"identifier":"\#(task)","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}}
+        send(.task, request.id, #"""
+            {"overview":{"sessions":[],"graph_processes":\#(graphs),"processes":[],"workflow":null},"graph_processes":\#(runs),"comments":{"identifier":"\#(task)","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null},"execution":null}
             """#)
     }
 
-    private func send(_ part: String, _ answers: Int, _ body: String) {
+    /// One watch line, as `lf … --json --watch` prints it for this scope.
+    private func send(_ part: WorkPart, _ answers: Int, _ body: String) {
+        let scope = scope ?? WorkScope(repo: nil, headless: false, task: nil, wave: nil, activity: nil)
         sequence += 1
-        let line = #"{"part":"\#(part)","sequence":\#(sequence),"answers":\#(answers),"home":"benchmark-fixture","copy":null,"revisions":null,"unavailable":null,"body":\#(body)}"#
+        let line = #"{"answers":\#(answers),"home":"benchmark-fixture","copy":null,"revisions":null,"unavailable":null,"body":\#(body)}"#
         // A frame this file wrote; one that does not decode fails the wait on it.
-        if let frame = try? WorkFrame.decode(line: Data(line.utf8)) { continuation?.yield(frame) }
+        if let frame = try? WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: Data(line.utf8)) {
+            continuation?.yield(frame)
+        }
     }
 }
 

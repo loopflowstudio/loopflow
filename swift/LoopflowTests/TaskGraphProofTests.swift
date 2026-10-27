@@ -318,8 +318,8 @@ private actor CallLog {
     func add(_ args: [String]) { calls.append(args) }
 }
 
-/// A scripted workspace reader: every request is answered with the planning,
-/// Sessions and Task parts as they stand, the way `lf monitor work` does.
+/// Scripted watches: every request is answered with the plan, Sessions and
+/// Task status as they stand.
 @MainActor
 private final class ScriptedReader {
     private let repo: String
@@ -369,20 +369,28 @@ private final class ScriptedReader {
         case .scope(let request, let scope): (id, task) = (request, scope.task)
         case .refresh(let request): id = request
         case .checkpoint(let request, _): id = request
-        case .taskHistory(let request, _): id = request
         }
-        send("planning", answers: id, body: planning)
-        send("sessions", answers: id, body: ["repo": repo, "includes_headless": false, "entries": sessions])
-        if let task { send("task", answers: id, body: ["task": task, "work": work, "graph_processes": runs, "comments": ["identifier": task, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]) }
-        if case .checkpoint = request { send("checkpoint", answers: id, body: [:]) }
+        send(.planning, answers: id, body: planning["roadmap"] as Any)
+        send(.sessions, answers: id, body: sessions)
+        if task != nil {
+            send(.task, answers: id, body: ["overview": work, "graph_processes": runs, "execution": NSNull(),
+                                            "comments": ["identifier": task as Any, "comments": [], "pending_sync": [],
+                                                         "conflicts": [String: String](), "refresh_error": NSNull()]])
+        }
+        if case .checkpoint = request {
+            sequence += 1
+            continuation?.yield(WorkFrame(sequence: sequence, answers: id, home: fixtureMachineId, copy: nil,
+                                          revisions: nil, unavailable: nil, content: .checkpoint, wire: nil))
+        }
     }
 
-    private func send(_ part: String, answers: Int, body: [String: Any]) {
+    private func send(_ part: WorkPart, answers: Int, body: Any) {
         sequence += 1
-        let line: [String: Any] = ["part": part, "sequence": sequence, "answers": answers, "home": fixtureMachineId, "copy": NSNull(),
+        let line: [String: Any] = ["answers": answers, "home": fixtureMachineId, "copy": NSNull(),
                                    "revisions": NSNull(), "unavailable": NSNull(), "body": body]
+        let scope = WorkScope(repo: repo, headless: false, task: task, wave: nil, activity: nil)
         guard let data = try? JSONSerialization.data(withJSONObject: line),
-              let frame = try? WorkFrame.decode(line: data) else { return }
+              let frame = try? WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: data) else { return }
         continuation?.yield(frame)
     }
 }

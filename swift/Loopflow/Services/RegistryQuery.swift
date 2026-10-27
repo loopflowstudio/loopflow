@@ -1,7 +1,7 @@
 // RegistryQuery — typed `lf` reads over the machine registry.
 //
 // History and explicit lookups are one-shot queries. What a window shows is kept
-// current by one foreground workspace reader per window.
+// current by the same reads run with `--watch`, one process per part.
 //
 // Reads run `lf` subprocesses and decode shared wire types into app models.
 // The injected runner on macOS launches the `lf` shipped inside the app. There is no

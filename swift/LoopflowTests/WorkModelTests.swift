@@ -501,8 +501,7 @@ struct WorkModelStreamTests {
                 : ["state": "unavailable", "reason": "Task snapshot: no such column: t.paused"]
             wire["tasks"] = failure
             let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
-            await feed.send(try fixture.frame("planning", sequence: index + 2, answers: scope.id,
-                body: "{\"roadmap\":\(roadmap),\"waves\":\(fixture.wavesJSON)}"))
+            await feed.send(try fixture.frame("planning", sequence: index + 2, answers: scope.id, body: roadmap))
             try await eventually { model.roadmap.errorMessage?.contains(truncated ? "incomplete" : "Task snapshot") == true }
             #expect(model.visibleWork.waves.flatMap(\.tasks).map(\.id) == initial.map(\.id))
             #expect(model.selection == key.work)
@@ -537,8 +536,10 @@ struct WorkModelStreamTests {
         let workURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/task_work.json")
         let work = try String(contentsOf: workURL, encoding: .utf8)
-        await feed.send(try fixture.frame("task", sequence: 2, answers: scope.id,
-            body: "{\"task\":\"\(found.task.task.identifier)\",\"work\":\(work),\"comments\":{\"identifier\":\"\(found.task.task.identifier)\",\"comments\":[],\"conflicts\":{},\"pending_sync\":[],\"refresh_error\":null},\"graph_processes\":[]}"))
+        let shown = WorkScope(repo: "/src/loopflow", headless: false, task: found.task.task.identifier,
+                              wave: nil, activity: nil)
+        await feed.send(try fixture.frame("task", sequence: 2, answers: scope.id, scope: shown,
+            body: "{\"overview\":\(work),\"comments\":{\"identifier\":\"\(found.task.task.identifier)\",\"comments\":[],\"conflicts\":{},\"pending_sync\":[],\"refresh_error\":null},\"graph_processes\":[],\"execution\":null}"))
         try await eventually { model.taskWork[found.task.id].value?.workflow != nil }
         let workflow = model.taskWork[found.task.id].value?.workflow
         await feed.send(WorkFrame(sequence: 3, answers: scope.id, home: "/home", copy: nil, revisions: nil,
@@ -567,8 +568,10 @@ struct WorkModelStreamTests {
             .appendingPathComponent("tests/fixtures/dto/peer_planning_status.json")
         let statuses = String(decoding: try Data(contentsOf: url), as: UTF8.self)
         func peers(_ sequence: Int, _ answers: Int, repo: String, statuses: String) throws -> WorkFrame {
-            let body = #"{"repo":"\#(repo)","destinations":\#(statuses)}"#
-            return try fixture.frame("peer_planning", sequence: sequence, answers: answers, body: body)
+            let body = #"{"transport":"git","destinations":\#(statuses)}"#
+            return try fixture.frame("peer_planning", sequence: sequence, answers: answers,
+                                     scope: WorkScope(repo: repo, headless: false, task: nil, wave: nil, activity: nil),
+                                     body: body)
         }
         await feed.send(try fixture.planningFrame(sequence: 1, answers: scope.id))
         await feed.send(try peers(2, scope.id, repo: "/src/loopflow", statuses: statuses))
@@ -626,7 +629,7 @@ struct WorkModelStreamTests {
 
         // Sequence 2 was read before sequence 3; another Machine's frame names nothing here.
         await feed.send(try fixture.planningFrame(sequence: 2, answers: nil))
-        await feed.send(try fixture.heartbeat(sequence: 4))
+        await feed.send(try fixture.activityFrame(sequence: 4))
         try await Task.sleep(for: .milliseconds(50))
         #expect(model.task(id: "issue-now")?.task.task.name == "Renamed elsewhere")
         #expect(!model.roadmap.isLoading)
@@ -649,9 +652,6 @@ struct WorkModelStreamTests {
         model.select(.task(id: "issue-now"))
 
         // The other Machine has the same repository path and none of these Sessions.
-        await feed.send(try fixture.heartbeat(sequence: 3, home: "/elsewhere"))
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(model.selection == .task(id: "issue-now"))
         await feed.send(try fixture.planningFrame(sequence: 4, answers: scope.id, renaming: "Other Machine", home: "/elsewhere"))
         try await eventually { model.task(id: "issue-now")?.task.task.name == "Other Machine" }
         #expect(model.selection == nil)
@@ -772,33 +772,30 @@ struct WorkModelStreamTests {
         try await feed.opened(1)
         await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
         try await eventually { model.roadmap.value != nil }
-        func heartbeat(_ sequence: Int, planning: Int, sessions: Int) throws -> WorkFrame {
-            try WorkFrame.decode(line: Data("""
-            {"sequence":\(sequence),"answers":null,"home":"/home","copy":null,"unavailable":null,
-             "revisions":{"planning":\(planning),"sessions":\(sessions),"graphs":0,"processes":0,"usage":0},
-             "part":"heartbeat","body":{"projections":{}}}
-            """.utf8))
+        func revised(_ sequence: Int, planning: Int, sessions: Int) throws -> WorkFrame {
+            try fixture.activityFrame(sequence: sequence, revisions:
+                #"{"planning":\#(planning),"sessions":\#(sessions),"graphs":0,"processes":0,"usage":0}"#)
         }
-        await feed.send(try heartbeat(2, planning: 1, sessions: 1))
+        await feed.send(try revised(2, planning: 1, sessions: 1))
         await feed.send(try fixture.planningFrame(sequence: 3, answers: nil))
         try await eventually { model.planningSequence == 3 }
         await model.loadWorkflowCatalog()
         try await eventually { model.workflowCatalog.value?.isEmpty == false }
         let baseline = await catalog.reads
         await catalog.update("[]")
-        await feed.send(try heartbeat(4, planning: 1, sessions: 2))
+        await feed.send(try revised(4, planning: 1, sessions: 2))
         await feed.send(try fixture.planningFrame(sequence: 5, answers: nil))
         try await eventually { model.planningSequence == 5 }
         #expect(await catalog.reads == baseline)
         #expect(model.workflowCatalog.value?.isEmpty == false)
-        await feed.send(try heartbeat(6, planning: 2, sessions: 2))
+        await feed.send(try revised(6, planning: 2, sessions: 2))
         try await eventually { model.workflowCatalog.value?.isEmpty == true }
         #expect(await catalog.reads == baseline + 1)
         await model.rereadDefinitions()
         #expect(await catalog.reads == baseline + 2)
         #expect(model.graphCatalog.isLoading, "An unopened catalogue stays unread on editor return")
         await catalog.fail()
-        await feed.send(try heartbeat(7, planning: 3, sessions: 2))
+        await feed.send(try revised(7, planning: 3, sessions: 2))
         try await eventually { model.workflowCatalog.errorMessage == "catalog unavailable" }
         #expect(model.workflowCatalog.value?.isEmpty == true)
     }
@@ -859,7 +856,7 @@ struct WorkModelStreamTests {
         #expect(model.navigation.taskRunDrafts[found.task.id]?.error == "New draft")
     }
 
-    @Test("A successful Task update stops waiting despite heartbeats, and a late checkpoint is harmless")
+    @Test("A successful Task update stops waiting despite unrelated frames, and a late checkpoint is harmless")
     func taskConfirmationDeadline() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
@@ -881,7 +878,7 @@ struct WorkModelStreamTests {
         #expect(model.navigation.taskRunDrafts[found.task.id]?.phase == .awaitingObservation)
         let heartbeats = Task {
             for sequence in 2...14 {
-                await feed.send(try fixture.heartbeat(sequence: sequence))
+                await feed.send(try fixture.activityFrame(sequence: sequence))
                 try await Task.sleep(for: .seconds(1))
             }
         }
@@ -912,7 +909,7 @@ struct WorkModelStreamTests {
         let confirming = Task { try await model.confirmWorkUpdate(); await finished.set() }
         let request = try await feed.request(2)
         await feed.send(try fixture.frame("checkpoint", sequence: 2, answers: request.id - 1, body: "null"))
-        await feed.send(try fixture.heartbeat(sequence: 3))
+        await feed.send(try fixture.activityFrame(sequence: 3))
         await feed.send(try fixture.planningFrame(sequence: 4, answers: request.id))
         try await eventually { model.planningSequence == 4 }
         #expect(await finished.value == false)
@@ -1147,13 +1144,22 @@ private struct WorkTestFixture {
         }
     }
 
+    static let scope = WorkScope(repo: "/src/loopflow", headless: false, task: nil, wave: nil, activity: nil)
+
+    /// One line of `part`'s watch, as the transport hands it to the window.
     func frame(
-        _ part: String, sequence: Int, answers: Int?, home: String = "/home", copy: String? = nil, body: String
+        _ part: String, sequence: Int, answers: Int?, home: String = "/home", copy: String? = nil,
+        revisions: String = "null", scope: WorkScope = Self.scope, body: String
     ) throws -> WorkFrame {
+        if part == "checkpoint" {
+            return WorkFrame(sequence: sequence, answers: answers, home: home, copy: copy, revisions: nil,
+                             unavailable: nil, content: .checkpoint, wire: nil)
+        }
         let answers = answers.map(String.init) ?? "null"
         let copy = copy.map { #""\#($0)""# } ?? "null"
-        let line = #"{"part":"\#(part)","sequence":\#(sequence),"answers":\#(answers),"home":"\#(home)","copy":\#(copy),"revisions":null,"unavailable":null,"body":\#(body)}"#
-        return try WorkFrame.decode(line: Data(line.utf8))
+        let line = #"{"answers":\#(answers),"home":"\#(home)","copy":\#(copy),"revisions":\#(revisions),"unavailable":null,"body":\#(body)}"#
+        return try WorkFrame.decode(part: try #require(WorkPart(rawValue: part)), scope: scope,
+                                    sequence: sequence, line: Data(line.utf8))
     }
 
     /// `completing` settles that Task successfully a minute ago, with no runtime left.
@@ -1185,17 +1191,18 @@ private struct WorkTestFixture {
             root["tasks"] = evidence
             roadmap = try #require(String(data: JSONSerialization.data(withJSONObject: root), encoding: .utf8))
         }
-        return try frame("planning", sequence: sequence, answers: answers, home: home, copy: copy,
-                         body: #"{"roadmap":\#(roadmap),"waves":\#(wavesJSON)}"#)
+        return try frame("planning", sequence: sequence, answers: answers, home: home, copy: copy, body: roadmap)
     }
 
     func sessionsFrame(sequence: Int, answers: Int?, repo: String, entries: String) throws -> WorkFrame {
         try frame("sessions", sequence: sequence, answers: answers,
-                  body: #"{"repo":"\#(repo)","includes_headless":false,"entries":\#(entries)}"#)
+                  scope: WorkScope(repo: repo, headless: false, task: nil, wave: nil, activity: nil), body: entries)
     }
 
-    func heartbeat(sequence: Int, home: String = "/home") throws -> WorkFrame {
-        try frame("heartbeat", sequence: sequence, answers: nil, home: home, body: #"{"projections":{}}"#)
+    /// A live-process reading: a frame that confirms and changes no Work.
+    func activityFrame(sequence: Int, home: String = "/home", revisions: String = "null") throws -> WorkFrame {
+        try frame("activity", sequence: sequence, answers: nil, home: home, revisions: revisions,
+                  body: #"{"schema_version":1,"observed_at":1,"nodes":[]}"#)
     }
 
     func sessionEntries(sourceFile: String = #filePath) throws -> (json: String, ids: [String]) {

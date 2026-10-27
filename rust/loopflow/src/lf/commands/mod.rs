@@ -28,7 +28,6 @@ pub mod replay;
 pub mod run;
 pub mod session;
 pub mod session_history;
-mod session_watch;
 pub mod ssh;
 pub mod tokens;
 pub mod top;
@@ -39,7 +38,6 @@ pub mod wave_rename;
 pub mod waves;
 pub(crate) mod work_catalog;
 pub mod work_route;
-pub mod work_watch;
 
 /// One drill over the Wave → Project → Task Work hierarchy.
 #[derive(Debug, Clone, Copy, Default)]

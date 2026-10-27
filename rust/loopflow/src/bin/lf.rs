@@ -1483,7 +1483,9 @@ fn desktop_intent_read(cli: &Cli) -> bool {
     matches!(
         cli.command,
         Some(Commands::Desktop {
-            cmd: DesktopCommand::View { .. } | DesktopCommand::Layout { save: false, .. }
+            cmd: DesktopCommand::View { .. }
+                | DesktopCommand::Plans { .. }
+                | DesktopCommand::Layout { save: false, .. }
         })
     )
 }
@@ -2642,7 +2644,14 @@ fn execute_command(
             cmd: WaveCommand::List { json, all, current },
         }) => loopflow::lf::commands::waves::ls(*json, *all, *current),
         Some(Commands::Wave {
-            cmd: WaveCommand::Status { wave, json, sync },
+            cmd: WaveCommand::Status {
+                wave, watch: true, ..
+            },
+        }) => loopflow::lf::commands::waves::watch_status(wave.clone()),
+        Some(Commands::Wave {
+            cmd: WaveCommand::Status {
+                wave, json, sync, ..
+            },
         }) => {
             let refreshed = if *sync {
                 Some(loopflow::lf::commands::ops::refresh_status(
@@ -2669,8 +2678,19 @@ fn execute_command(
                 WaveCommand::Show {
                     wave,
                     task,
+                    all,
+                    watch: true,
+                    ..
+                },
+        }) => loopflow::lf::commands::waves::watch_show(wave.clone(), task.clone(), *all),
+        Some(Commands::Wave {
+            cmd:
+                WaveCommand::Show {
+                    wave,
+                    task,
                     json,
                     all,
+                    ..
                 },
         }) => loopflow::lf::commands::waves::show(wave.as_deref(), task.as_deref(), *json, *all),
         Some(Commands::Wave { cmd }) => in_repo_runtime(args, |repo| run_wave_command(repo, cmd)),

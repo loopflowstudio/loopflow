@@ -626,6 +626,24 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
     })
 }
 
+/// `lf wave status --watch`: `lf wave status --json` now and each time it
+/// changes. The watch reads the store; it does not observe the tracker.
+pub fn watch_status(wave: Option<String>) -> Result<()> {
+    super::watch::run(
+        (),
+        super::watch::Watched::following_checkouts(super::watch::PLANNING_CLOCK),
+        |store, ()| {
+            let wave = wave.clone();
+            async move {
+                let store =
+                    store.ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
+                let wave = resolve_status_wave(&store, wave.as_deref()).await?;
+                wave_detail(&store, &wave).await
+            }
+        },
+    )
+}
+
 /// One Wave's `lf wave status` reading.
 pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<WaveDetailSnapshot> {
     let repository_waves = store
@@ -666,83 +684,10 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
 /// answers "is it healthy"; this answers "what is being worked on and what
 /// could be".
 pub fn show(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) -> Result<()> {
-    let include_history = wave.is_some() || task.is_some();
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
-        let evaluation_time = now();
-        let Some(store) = crate::store::read_existing_registry()?.map(std::sync::Arc::new) else {
-            if task.is_some() {
-                anyhow::bail!("Task lookup unavailable: local registry could not be opened");
-            }
-            let roadmap = RoadmapSnapshot {
-                generated_at: format_time(evaluation_time)
-                    .expect("current timestamp formats as RFC 3339"),
-                waves: Vec::new(),
-                tasks: Evidence::complete(Vec::new()),
-            };
-            if json {
-                println!("{}", serde_json::to_string(&roadmap)?);
-            } else {
-                print_roadmap(&roadmap);
-            }
-            return Ok(());
-        };
-        // An explicit all-repositories query must not inherit the Wave of
-        // the process that launched the GUI. An explicit --wave still wins.
-        let env_wave_id = if all || task.is_some() {
-            None
-        } else {
-            std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok()
-        };
-        let repo = crate::repo::find_repo_root().ok().or_else(|| {
-            (task.is_some() && !all)
-                .then(|| std::env::current_dir().ok())
-                .flatten()
-        });
-        let waves = match crate::work::wave::context::resolve_managed_wave(
-            Some(&store),
-            repo.as_deref(),
-            wave,
-            env_wave_id.as_deref(),
-        )
-        .await
-        {
-            Ok(wave) => vec![wave],
-            Err(crate::work::wave::context::WaveResolveError::NoContext) => {
-                let waves = store
-                    .list_waves(None)
-                    .await
-                    .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
-                if task.is_some() && !all {
-                    // Exact destinations carry a repository even when only its
-                    // cached registration survives, without Git metadata.
-                    let scope =
-                        crate::repository::CanonicalRepo::discover(&std::env::current_dir()?)?;
-                    waves
-                        .into_iter()
-                        .filter(|wave| scope.contains(Path::new(wave.repo())))
-                        .collect()
-                } else {
-                    scope_waves_to_repo(waves, all)?
-                }
-            }
-            Err(other) => return Err(anyhow!(other)),
-        };
-        let mut checked = std::collections::HashSet::new();
-        for wave in &waves {
-            if checked.insert(wave.repo()) {
-                crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
-            }
-        }
-        let roadmap = roadmap_snapshot(
-            &store,
-            waves,
-            include_history,
-            task,
-            if all { None } else { repo.as_deref() },
-            evaluation_time,
-        )
-        .await?;
+        let store = crate::store::read_existing_registry()?.map(std::sync::Arc::new);
+        let roadmap = show_roadmap(store.as_ref(), wave, task, all, true).await?;
         if json {
             println!("{}", serde_json::to_string(&roadmap)?);
         } else {
@@ -750,6 +695,102 @@ pub fn show(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) -> Re
         }
         Ok(())
     })
+}
+
+/// `lf wave show --watch`: `lf wave show --json` now and each time it changes.
+/// The watch reads the store; it does not observe the tracker.
+pub fn watch_show(wave: Option<String>, task: Option<String>, all: bool) -> Result<()> {
+    super::watch::run(
+        (),
+        super::watch::Watched::following_checkouts(super::watch::PLANNING_CLOCK),
+        |store, ()| {
+            let (wave, task) = (wave.clone(), task.clone());
+            async move {
+                show_roadmap(store.as_ref(), wave.as_deref(), task.as_deref(), all, false).await
+            }
+        },
+    )
+}
+
+/// What `lf wave show` prints. `observe` first asks the tracker about each
+/// repository read.
+async fn show_roadmap(
+    store: Option<&SharedStore>,
+    wave: Option<&str>,
+    task: Option<&str>,
+    all: bool,
+    observe: bool,
+) -> Result<RoadmapSnapshot> {
+    let include_history = wave.is_some() || task.is_some();
+    let evaluation_time = now();
+    let Some(store) = store else {
+        if task.is_some() {
+            anyhow::bail!("Task lookup unavailable: local registry could not be opened");
+        }
+        return Ok(RoadmapSnapshot {
+            generated_at: format_time(evaluation_time)
+                .expect("current timestamp formats as RFC 3339"),
+            waves: Vec::new(),
+            tasks: Evidence::complete(Vec::new()),
+        });
+    };
+    // An explicit all-repositories query must not inherit the Wave of
+    // the process that launched the GUI. An explicit --wave still wins.
+    let env_wave_id = if all || task.is_some() {
+        None
+    } else {
+        std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok()
+    };
+    let repo = crate::repo::find_repo_root().ok().or_else(|| {
+        (task.is_some() && !all)
+            .then(|| std::env::current_dir().ok())
+            .flatten()
+    });
+    let waves = match crate::work::wave::context::resolve_managed_wave(
+        Some(&**store),
+        repo.as_deref(),
+        wave,
+        env_wave_id.as_deref(),
+    )
+    .await
+    {
+        Ok(wave) => vec![wave],
+        Err(crate::work::wave::context::WaveResolveError::NoContext) => {
+            let waves = store
+                .list_waves(None)
+                .await
+                .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
+            if task.is_some() && !all {
+                // Exact destinations carry a repository even when only its
+                // cached registration survives, without Git metadata.
+                let scope = crate::repository::CanonicalRepo::discover(&std::env::current_dir()?)?;
+                waves
+                    .into_iter()
+                    .filter(|wave| scope.contains(Path::new(wave.repo())))
+                    .collect()
+            } else {
+                scope_waves_to_repo(waves, all)?
+            }
+        }
+        Err(other) => return Err(anyhow!(other)),
+    };
+    if observe {
+        let mut checked = std::collections::HashSet::new();
+        for wave in &waves {
+            if checked.insert(wave.repo()) {
+                crate::ops::linear_observe::sync_repository(store, wave.repo()).await;
+            }
+        }
+    }
+    roadmap_snapshot(
+        store,
+        waves,
+        include_history,
+        task,
+        if all { None } else { repo.as_deref() },
+        evaluation_time,
+    )
+    .await
 }
 
 /// What `lf task list` narrows the repository's open Tasks to; the flags of
@@ -795,7 +836,7 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
 pub fn watch_tasks(repo: &Path, args: TaskListArgs) -> Result<()> {
     super::watch::run(
         args,
-        super::watch::Watched::every(super::watch::PLANNING_CLOCK),
+        super::watch::Watched::following_checkouts(super::watch::PLANNING_CLOCK),
         |store, args| {
             let repo = repo.to_owned();
             async move {
@@ -999,22 +1040,6 @@ async fn closed_task_page(
         tasks: details,
         next: page.next.map(|id| id.to_string()),
     })
-}
-
-/// The current Waves a roadmap already read, ordered as `wave_snapshots` orders them.
-pub(crate) fn current_waves(roadmap: &RoadmapSnapshot) -> Vec<WaveSnapshot> {
-    let mut waves: Vec<_> = roadmap.waves.iter().map(|wave| wave.wave.clone()).collect();
-    waves.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
-    waves
-}
-
-/// `lf wave show --all`: every current Wave in every repository.
-pub(crate) async fn roadmap_all(store: &SharedStore) -> Result<RoadmapSnapshot> {
-    let waves = store
-        .list_waves(None)
-        .await
-        .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
-    roadmap_snapshot(store, waves, false, None, None, now()).await
 }
 
 async fn roadmap_snapshot(
@@ -3946,5 +3971,51 @@ mod tests {
         );
 
         assert_eq!(next.owner, NextMoveOwner::Ci);
+    }
+
+    /// A store whose Task state cannot be derived still answers the plan, with
+    /// its Tasks unavailable rather than empty, and keeps the Task's Workflow.
+    #[test]
+    fn planning_failure_keeps_the_stored_workflow_readable() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("released.db");
+        let conn = rusqlite::Connection::open(&database).unwrap();
+        crate::store::migrations::apply_before_current_draft(&conn, "task_paused");
+        let task = crate::durable::TaskId::new();
+        let fixture = include_str!("../../../tests/fixtures/migrations/work_stream_released.sql")
+            .replace("{wave}", crate::id::WaveId::new().as_str())
+            .replace("{project}", crate::durable::ProjectId::new().as_str())
+            .replace("{task}", task.as_str())
+            .replace("{repo}", directory.path().to_str().unwrap());
+        conn.execute_batch(&fixture).unwrap();
+        crate::store::migrations::upgrade_from_draft(&conn, "task_paused");
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN paused")
+            .unwrap();
+        let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
+        let store: crate::store::SharedStore = Arc::new(crate::store::Store {
+            sqlite: crate::store::sqlite::SqliteStore::open_read_only(&database).unwrap(),
+        });
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let roadmap = runtime
+            .block_on(super::show_roadmap(Some(&store), None, None, true, false))
+            .unwrap();
+        assert_eq!(roadmap.waves.len(), 1);
+        let super::Evidence::Unavailable { reason } = roadmap.tasks else {
+            panic!(
+                "the plan's Tasks are unavailable, not empty: {:?}",
+                roadmap.tasks
+            );
+        };
+        assert!(reason.contains("no such column: t.paused"), "{reason}");
+        let workflow = store.sqlite.task_overview(&task).unwrap().workflow.unwrap();
+        assert_eq!(workflow.definition.name, "feature");
+        assert!(
+            matches!(workflow.position, crate::ops::workflow::WorkflowPosition::Node { ref node } if node == "demo")
+        );
+        assert_eq!(
+            crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap(),
+            frontier
+        );
     }
 }

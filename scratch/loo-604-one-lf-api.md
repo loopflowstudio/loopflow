@@ -1,6 +1,6 @@
 # LOO-604: one lf API for Loopflow state
 
-Status: draft plan + first slice (2026-10-26). Jack Heart requested the Task;
+Status: implementing; `lf monitor work` deleted (2026-10-26). Jack Heart requested the Task;
 his LOO-602 steer (same day) sets the data the API reads: a facts-only store
 (LOO-611 Session facts + one usage record per turn, LOO-612 ProviderFact,
 LOO-615 Process rows deleted at exit unless referenced). Transcript reads
@@ -24,10 +24,9 @@ to store queries.
 - Jack Heart, 2026-10-26: delete `lf monitor work`. Desktop runs one process
   per watch (`lf task list --watch`, `lf session list --watch`,
   `lf task status <id> --watch`, the live-process read); each watch is
-  internally consistent, panes no longer share one snapshot. The watch
-  machinery moves out of `work_watch.rs` into the shared reads; the monitor,
-  its part vocabulary and its Desktop transport go in the change that moves
-  Desktop over.
+  internally consistent, panes no longer share one snapshot. Done: the monitor,
+  its part vocabulary and `session_watch.rs` are gone; `watch.rs` is the one
+  `--watch`.
 - Jack Heart, 2026-10-26: `lf history` is Session history: Session records
   (turns, usage, Processes they ran, `show`, replay) tagged with Task/Wave/
   Project; `--task/--wave/--project` filter by tag. Work changes no Session
@@ -44,25 +43,28 @@ to store queries.
 
 ## Direction
 
-Order: Graph execution batched (done), `lf task list [query]` (done),
-`--watch` (done for task list, session list, task status, monitor top), then
-Desktop moves over and `lf monitor work` is deleted.
-
 `--watch` (`lf/commands/watch.rs`, one implementation): a frame
-`{answers, revisions, unavailable, body}` per line, `body` = the `--json`
-output, sent first and whenever its identity (reading-time fields stripped)
-changes (`Watched::stamp` names a top-level field that restates the reading
-time, such as the activity snapshot's `observed_at`). Wakes on the read's revision domains (all but usage) or its clock
-(task list 300 s, session list, task status and monitor top 2 s); settles
-bursts; rests
-`BUSY_SHARE` × last cost; retries failures with backoff. Stdin
-`{"id": N, "args": {...}}` replaces the arguments (`args` absent = confirm);
-the next frame answers N even if unchanged — this is the monitor's scope +
-checkpoint in one. Ends on stdin close, parent exit or a failed write.
-`task status --watch` runs the one-shot status (with its planning exchange)
-once, then re-reads `read_task_status` read-only. The monitor imports the
-shared constants, `retry_due` and `strip_reading_time` until it is deleted.
+`{answers, home, copy, revisions, unavailable, body}` per line, `body` = the
+`--json` output, sent first and whenever its identity (reading-time fields and
+`Watched::stamp`, on the result or each row, stripped) changes. Wakes on the
+read's revision domains (all but usage), its clock, or — with
+`Watched::following_checkouts` — a Task checkout whose Git answer changed;
+settles bursts; rests `BUSY_SHARE` × last cost; retries failures with backoff.
+A store that exists but cannot be opened is `unavailable`, not empty. Stdin
+`{"id": N, "args": {...}}` replaces the arguments (`args` absent = confirm); the
+next frame answers N. Ends on stdin close, parent exit or a failed write.
 Usage is in `docs/planning.md`.
+
+Desktop (`WorkWatches`, `swift/Loopflow/Services/WorkObservation.swift`) runs per
+window: `wave show --all` (plan; Waves derived from it), `desktop plans`
+(Dashboard plans), `planning status` (receipts; holds the repository's planning
+sync), `session list`, `task status <id>` (overview, Graph processes, comments,
+recorded work), `wave status <id>`, `history --since 7d --limit 50 [filters]`,
+`monitor top`. A scope change restarts watches whose argv/cwd changed and
+replays the others' last frame answering the new id. A checkpoint confirms each
+running watch (or only `replay` parts) and follows once each answered with a
+reading begun after the request. Any watch ending ends the observation and the
+window reopens all.
 
 ## Measured on Jack's store (10.3 GB, 762 Tasks, 6,248 Sessions, 944k Processes)
 
@@ -128,6 +130,16 @@ CPU: a descendant still held its stdin open, which was the only stop signal.
   their icons and the PR link.
 - Desktop: WavesView reads `planning.roadmap.waves[].projects` instead of one
   `lf wave status` per Wave. Deleted dead `RegistryQuery` reads.
+- `lf monitor work` deleted (`work_watch.rs`, its part/heartbeat/scope
+  vocabulary, the task_history part, `work_frame.json`); its checkout follower
+  moved to `watch/checkouts.rs`. New watches: `wave show`, `wave status`,
+  `planning status` (with the sync lifetime; works in a non-Git Work folder),
+  `history`, `desktop plans` (new command), `monitor active` (onto `watch.rs`;
+  `session_watch.rs` and its `refresh`/`rescan` requests deleted).
+  `TaskStatus` gains `overview`, `graph_processes`, `comments`; Desktop's Debug
+  disclosure reads `execution.work` from it. Watch frames carry `home`/`copy`.
+  Deleted `next_quiet_available`, `roadmap_all`, `current_waves`,
+  `observeTaskDiagnostics`. Fixture: `watch_frames.json`.
 
 ## Plan per read
 
@@ -158,67 +170,37 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
 
 ## Remaining work
 
-1. Gaps between the watches and what Desktop reads from the monitor, found
-   while sizing the move:
-   - Machine identity: monitor frames carry `home`/`copy` and Desktop drops
-     Machine content when they change; watch frames carry neither.
-   - Planning: the part is `{selections, roadmap, waves}`. `lf task list`
-     returns `RoadmapTask` rows only; Waves/Projects need their own watched
-     read (`lf wave list --json --watch`), and Dashboard `selections` need a
-     home (ad-hoc view plans, `lf desktop view --plan`).
-   - Task pane: the part is `{work: TaskOverview, graph_processes, comments}`;
-     `lf task status --json` is `TaskStatus`. Either status carries those or
-     Desktop reads them from status's shape.
-   - Checkpoint: `confirmWorkUpdate` waits for one answered checkpoint; with
-     several watches it waits for each affected watch's answer to a request.
-   - `lf history --watch` does not exist yet.
-   `lf task list --watch` does not follow checkout Git changes (the monitor's
-   `checkouts` watch); it rereads on its 300 s clock. Session list uses the
-   2 s clock, not `next_quiet_available`.
-2. Move Desktop onto those watches; Wave detail becomes `RoadmapTask` rows
-   filtered by `--wave` (closed pages switch from `wave status` rows to
-   `RoadmapTask` with it); delete `lf monitor work`, its parts and transport,
-   and the task_history part. work_activity → `lf history --since --watch`.
-3. Sessions: incremental or paged rows instead of 5.7 MB per reading.
-4. `lf task status`: 5k statements / 20 connections for one Task; reuse
-   `TaskDetailFacts` and `GraphExecutionFacts` for its Task. Needed before the
-   Task pane watches it on a 2 s clock.
-5. Delete remaining Desktop duplicates; catalog and machine reads.
-6. `lf monitor active --watch` is a second watch loop (`session_watch.rs`: its
-   own 2 s period, `{"action": "refresh"|"rescan"}` requests, bare frames).
-   No Desktop caller; tests in `tests/active_runs_watch.rs`. Move it onto
-   `watch.rs` or delete its `--watch`, so `--watch` has one implementation.
+1. Wave detail as `RoadmapTask` rows (`lf task list --wave W --watch`) plus the
+   Wave's own fields; closed pages switch from `wave status` rows to
+   `RoadmapTask` with it. Deferred this pass: `WaveDetailSnapshot` also carries
+   readiness, metrics, unavailable Tasks and Session history, which need their
+   own reads first. Desktop watches `lf wave status <id>` meanwhile.
+2. Sessions: incremental or paged rows instead of 5.7 MB per reading; a quiet
+   Session turns Waiting on the 2 s clock (`next_quiet_available` is gone).
+3. `lf task status`: 5k statements / 20 connections for one Task, now with
+   overview, Graph processes and comments, on a 2 s clock; reuse
+   `TaskDetailFacts` and `GraphExecutionFacts`.
+4. Delete remaining Desktop duplicates; catalog and machine reads
+   (`wave workflow list`, `graph list`, `portfolio`, `machine id/list`).
+5. Known differences from the monitor: usage alone no longer refreshes Wave
+   detail token totals (next change or 300 s clock); a store that cannot derive
+   Task state fails `lf task status` too, so the Task pane keeps its last
+   reading marked unavailable (the monitor read only `task_overview`); a
+   confirmation re-reads each watch (the monitor replayed unchanged parts).
+6. Live p99 A/B with an installed build: gate/demo.
 
 ## Delete — do not maintain
 
 - Done: `RegistryQuery.plan/waves(repoPath:)/userName/taskFiles/repositoryWaves`,
-  WavesView per-Wave `lf wave status`.
-- Next: `lf monitor work` (`work_watch.rs` parts vocabulary, Desktop
-  transport), task_history part, `taskComments` read, `allWaves` after createWave, no-stream-only reads
-  (`roadmap`, `sessionPage`, `peerPlanningStatus`, `workActivity`) if the
-  one-shot transport is not kept for remote Machines.
-  `session_watch.rs` (Remaining 6).
+  WavesView per-Wave `lf wave status`, `lf monitor work` and `work_watch.rs`,
+  `session_watch.rs`, task_history part, `work_frame.json`, `LocalWorkObservation`'s
+  single reader.
+- Next: `taskComments` read (comments arrive with `task status`), `allWaves`
+  after createWave, no-stream-only reads (`roadmap`, `sessionPage`,
+  `peerPlanningStatus`, `workActivity`) if the one-shot transport is not kept
+  for remote Machines.
 
 ## Check results
 
-- `cargo test -p loopflow --lib work_watch`: 29 passed (first slice).
-- `scripts/test_desktop.sh --filter 'RegistryQueryTests|DTOFixtureTests'`: 63 passed (first slice).
-- `cargo test --test integration -- planning_statements closed_task_pages lifecycle_world`: 3 passed (open-Task slice; statements flat 2 → 6 Tasks).
-- `cargo test --lib -- waves task_ownership planning_sync children`: 53 passed; `chapter_deletion_stays_absent…` passes once its surviving Task is started rather than completed.
-- `scripts/test_desktop.sh --filter 'TaskHistoryFilterTests|DTOFixtureTests|RegistryQueryTests'`: 72 passed (Done view paging).
-- `docs/lf-reference.md` regenerated for `task list --done/--after/--limit`; `reference_matches_the_compiled_cli` passes.
-- `cargo test --test integration -- task_list_query planning_statements lifecycle_world`: passed (Graph batching, `task list [query]`, `--done --since`); `--test two_people`: passed.
-- `cargo test --lib -- local_planning wave_resolution_matrix task_execution graph_inventory task_work`: 58 passed, 1 failed — `store::tests::separate_task_worktree_tracks_and_collapses_its_parent_pr` needs a global Git `user.email` the test HOME lacks; untouched code, left to CI (which sets one).
-- `cargo clippy --all-targets -- -D warnings`: clean; `docs/lf-reference.md` regenerated.
-- Compress (one `ids_json` for batch-read ID arrays, one `repository_scope` for `lf task list` reads): clippy clean; `--test integration -- task_list_query planning_statements closed_task_pages lifecycle_world` 4 passed; `--lib -- planning_sync task_ownership graph_inventory task_work children` 38 passed, same 1 global-`user.email` failure (CI).
-- `--watch` (task list, session list, task status), clippy clean: `--test integration -- task_list_watch session_list_and_task_status_watch task_list_query` 3 passed; `reference_matches_the_compiled_cli` regenerated.
-- `--lib -- work_watch`: 29 passed, 2 failed, both monitor tests that predate this pass and still expect the old planning shape (`planning_failure_keeps_the_stored_workflow_readable` expects a hard planning error, now `tasks: Unavailable`; `offline_cli_completion_and_reopening_reach_desktop_without_refresh` expects a completed Task in planning). They go with the monitor (Remaining 2); keep their behaviour (a failed planning read leaves the Task read available; completion reaches the client) as `--watch` tests when Desktop moves over.
-- `monitor top --watch` and Session-only `lf history`: clippy clean;
-  `--test integration -- session_list_task_status_and_top_watch` and
-  `reference_matches_the_compiled_cli` passed; `--test session_lifecycle_tests
-  -- headless_history_is_discoverable…` passed; `--lib -- activity
-  work_catalog steer work_identities` passed except Pi-not-installed
-  (environment) and the two monitor tests above; Swift `DTOFixtureTests` 48
-  passed.
-- Compress (one `TaskListArgs` for `lf task list` and its watch requests; `Watched` keeps only clock and stamp): clippy clean; `--test integration -- task_list_query task_list_watch session_list_task_status_and_top_watch` 3 passed.
-- Realign (2026-10-26): no tests run; plan matched code except the unlisted `monitor active --watch` loop. Live p99 A/B with an installed build: deferred to gate/demo.
+- Earlier slices (open-Task scope, batching, `task list [query]`, `--watch` on task/session list, task status, monitor top): passed; detail in git history of this file (515ed2f3bf).
+- This pass: `cargo clippy --all-targets -- -D warnings` clean; `--lib -- watch:: lf::commands::watch planning_failure_keeps` passed (22 + 3 after fixes); `--test integration -- watch_frames_carry composed_lifecycle task_status_ reference_matches_the_compiled_cli` passed (reference regenerated); `scripts/test_desktop.sh --filter 'DTOFixtureTests|RegistryQueryTests|WorkObservationTransportTests|WorkModelTests|WorkSelectionTests|DesktopHeadlessTests|TaskHistoryFilterTests'` 130 passed. Linux-only `planning_reconnect` e2e (watch mode ported) and `active_runs_watch` macOS run: see below / CI.

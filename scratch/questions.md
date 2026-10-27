@@ -3,7 +3,7 @@
 - Assumption (2026-10-26): on a slow store, live parts may arrive up to
   `BUSY_SHARE` × projection time late (~8 s for planning on Jack Heart's store)
   in exchange for bounded CPU. User actions confirm via checkpoint, which never
-  waits. Reversible: raise or remove `BUSY_SHARE` in `work_watch.rs`.
+  waits. Reversible: raise or remove `BUSY_SHARE` in `watch.rs`.
 - Assumption: Waves outside `planning.roadmap` (abandoned/retired or
   authored-only) show objective-only rows in WavesView, without Projects.
   Previously each got a `wave status` read.
@@ -15,17 +15,23 @@
 - Assumption: `--done` pages done and abandoned Tasks together (both left the
   plan), ordered by abandonment, else completion, else last update.
 - Note (2026-10-26): LOO-594's steer says "keep the closed row type as
-  RoadmapTask", but closed pages return `wave status` rows (Swift
+  RoadmapTask", but closed pages still return `wave status` rows (Swift
   `WaveTaskWork`) so Desktop can merge them with the Wave view's open rows.
-  They switch to `RoadmapTask` with Wave detail becoming Task rows (Remaining 2).
+  They switch with Wave detail (Remaining 1, deferred this pass).
 - Assumption: a graph's inventory entry in Task reads names the Task being read
   and its Wave, not `task_of_process`'s longest-worktree owner; they differ only
   for a Graph run in a nested Task checkout.
 - Assumption (2026-10-26): a `--watch` frame wraps the `--json` result as
-  `{answers, revisions, unavailable, body}` instead of printing it bare, so a
-  client can tell which request a frame answers and see a failed reading.
-  Stdin requests are `{"id", "args"}`; `args` uses the flag names. No DTO
-  fixture yet; it comes with the Swift mirror when Desktop moves over.
-- Assumption: `lf task status --watch` exchanges planning with the tracker
-  only for its first reading, then rereads the store; a request for another
-  Task resolves it among registered Tasks only.
+  `{answers, home, copy, revisions, unavailable, body}`; stdin requests are
+  `{"id", "args"}` with flag names. Pinned by `watch_frames.json`.
+- Assumption: `lf task status --watch` exchanges planning only for its first
+  reading, then rereads the store; Desktop's planning exchange is held by
+  `lf planning status --watch` (one per window with a repository).
+- Assumption (2026-10-26): Desktop's planning watch is `lf wave show --all`
+  (Waves and Projects come with the plan), not `lf wave list --watch`, which
+  would carry no Projects and read the plan twice.
+- Assumption: the Task pane's shape comes from `lf task status` (now with
+  `overview`, `graph_processes`, `comments`), rather than Desktop assembling it
+  from separate reads. Every `lf task status --json` caller pays for them.
+- Assumption: Dashboard selections live in a new `lf desktop plans --json
+  [--watch]` (the repository's default and saved plans).

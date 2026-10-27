@@ -31,6 +31,9 @@ pub struct HistoryFeed {
     /// Emit the typed activity snapshot as JSON
     #[arg(long)]
     pub json: bool,
+    /// Print a JSON line now and each time the history changes, until stdin closes
+    #[arg(long, requires = "json")]
+    pub watch: bool,
 }
 
 #[derive(Debug, Subcommand)]

@@ -10,11 +10,14 @@ lf task list --watch                   # a JSON line each time the list changes
 lf capture-tasks                       # talk it through; the session files the Tasks
 ```
 
-`--watch` also works on `lf task status <id>`, `lf session list` and
-`lf monitor top --json`. Each line is
-`{"answers", "revisions", "unavailable", "body"}`, where `body` is what `--json`
-prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to change what
-it reads; the next line answers `1`. It stops when stdin closes.
+`--watch` also works on `lf task status <id>`, `lf wave show`, `lf wave status`,
+`lf session list`, `lf history`, `lf planning status`, `lf desktop plans`,
+`lf monitor top` and `lf monitor active`, always with `--json`. Each line is
+`{"answers", "home", "copy", "revisions", "unavailable", "body"}`, where `body` is
+what `--json` prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to
+change what it reads, or `{"id": 2}` to ask for a fresh reading; the next line
+answers that id. It stops when stdin closes. `lf planning status --watch` also
+keeps the repository's planning exchanged while it runs.
 
 Loopflow keeps the plan — Tasks, comments, status — on your machine and syncs it to
 one place per repository. That place serves two jobs:

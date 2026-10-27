@@ -14,19 +14,11 @@ pub enum MonitorCommand {
     Active {
         #[arg(long)]
         json: bool,
-        /// Stream NDJSON until stdin closes
+        /// Print a JSON line now and each time the conversations change, until stdin closes
         #[arg(long, requires = "json")]
         watch: bool,
         #[arg(long)]
         task: Option<String>,
-    },
-    /// Stream planning and activity for the selected Work, each part again only when it changes
-    Work {
-        #[arg(long, required = true)]
-        json: bool,
-        /// Stream NDJSON until stdin closes
-        #[arg(long)]
-        watch: bool,
     },
     /// Print one parseable snapshot of live Loopflow call trees
     Ps {
@@ -59,7 +51,6 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
         MonitorCommand::Active { json, watch, task } => {
             super::session_history::list_active(*json, *watch, task.as_deref())
         }
-        MonitorCommand::Work { watch, .. } => super::work_watch::run(*watch),
         MonitorCommand::Ps { json } => super::top::run_ps(*json),
         MonitorCommand::Top { watch: true, .. } => super::top::watch_top(),
         MonitorCommand::Top { json, .. } => super::top::run_top(*json),

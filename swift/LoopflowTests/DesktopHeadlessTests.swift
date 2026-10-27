@@ -153,18 +153,24 @@ struct DesktopHeadlessTests {
             try #require(JSONSerialization.jsonObject(
                 with: Data(contentsOf: fixtures.appendingPathComponent(name))) as? [String: Any])
         }
-        func frame(_ part: String, sequence: Int, answers: Int, body: [String: Any]) throws -> WorkFrame {
+        func frame(_ part: String, sequence: Int, answers: Int, task: String? = nil,
+                   body: Any) throws -> WorkFrame {
+            if part == "checkpoint" {
+                return WorkFrame(sequence: sequence, answers: answers, home: fixtureMachineId, copy: nil,
+                                 revisions: nil, unavailable: nil, content: .checkpoint, wire: nil)
+            }
             let line: [String: Any] = [
-                "part": part, "sequence": sequence, "answers": answers, "home": fixtureMachineId, "copy": NSNull(),
+                "answers": answers, "home": fixtureMachineId, "copy": NSNull(),
                 "revisions": NSNull(), "unavailable": NSNull(), "body": body,
             ]
-            return try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: line))
+            return try WorkFrame.decode(part: try #require(WorkPart(rawValue: part)),
+                                        scope: WorkScope(repo: nil, headless: false, task: task, wave: nil, activity: nil),
+                                        sequence: sequence, line: JSONSerialization.data(withJSONObject: line))
         }
         let roadmap = try object("roadmap_snapshot.json")
-        let waves = try #require(roadmap["waves"] as? [[String: Any]]).map { try #require($0["wave"]) }
         var work = try object("task_work.json")
         let run = try object("graph_detail.json")
-        let planning: [String: Any] = ["roadmap": roadmap, "waves": waves]
+        let planning = roadmap
 
         let calls = Recorder()
         let (oldReads, releaseOldReads) = AsyncStream<Void>.makeStream()
@@ -199,14 +205,12 @@ struct DesktopHeadlessTests {
         }
         #expect(scope.task == task.task.identifier)
 
-        feed.send(try frame("task", sequence: 2, answers: 2,
-                            body: ["task": task.task.identifier, "work": work, "graph_processes": [run], "comments": ["identifier": task.task.identifier, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]))
+        // `lf task status`: its work, Graph processes, comments and recorded execution.
+        feed.send(try frame("task", sequence: 2, answers: 2, task: task.task.identifier,
+                            body: ["overview": work, "graph_processes": [run], "execution": ["work": work],
+                                   "comments": ["identifier": task.task.identifier, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]))
         try await eventually { model.taskWork[task.id].value != nil }
         let shown = try #require(model.taskWork[task.id].value)
-        #expect(model.taskDiagnostics[task.id].value == nil)
-        model.observeTaskDiagnostics(task, visible: true)
-        feed.send(try frame("task_history", sequence: 3, answers: feed.requests.last?.id ?? 2,
-                            body: ["task": task.task.identifier, "work": work]))
         try await eventually { model.taskDiagnostics[task.id].value != nil }
         let diagnostics = try #require(model.taskDiagnostics[task.id].value)
         let view = TaskWorkView(model: model, task: task)
@@ -238,7 +242,7 @@ struct DesktopHeadlessTests {
 
         // The subscription updates normally; command confirmation is separate.
         let moving = Task { await model.moveTask(to: "demo", task: task) }
-        try await eventually { feed.requests.last == .checkpoint(id: 4, replay: []) }
+        try await eventually { feed.requests.last == .checkpoint(id: 3, replay: []) }
         var workflow = try #require(work["workflow"] as? [String: Any])
         workflow["position"] = ["kind": "node", "node": "demo"]
         work["workflow"] = workflow
@@ -251,18 +255,18 @@ struct DesktopHeadlessTests {
         incomingComments["identifier"] = task.task.identifier
         incomingComments["pending_sync"] = ["c-1"]
         let moved: [String: Any] = [
-            "task": task.task.identifier,
-            "work": work.merging(["graph_processes": [try #require((work["graph_processes"] as? [[String: Any]])?.first), second]]) { $1 },
+            "execution": NSNull(),
+            "overview": work.merging(["graph_processes": [try #require((work["graph_processes"] as? [[String: Any]])?.first), second]]) { $1 },
             "graph_processes": [run, secondRun],
             "comments": incomingComments,
         ]
         // A frame read before the write cannot stand for it.
-        feed.send(try frame("task", sequence: 4, answers: 2, body: moved))
+        feed.send(try frame("task", sequence: 4, answers: 2, task: task.task.identifier, body: moved))
         try await eventually { model.taskWork[task.id].value?.graphProcesses.count == 2 }
         #expect(model.navigation.taskRunDrafts[task.id]?.acting == true)
-        feed.send(try frame("task", sequence: 5, answers: 4, body: moved))
-        feed.send(try frame("planning", sequence: 6, answers: 4, body: planning))
-        feed.send(try frame("checkpoint", sequence: 7, answers: 4, body: [:]))
+        feed.send(try frame("task", sequence: 5, answers: 3, task: task.task.identifier, body: moved))
+        feed.send(try frame("planning", sequence: 6, answers: 3, body: planning))
+        feed.send(try frame("checkpoint", sequence: 7, answers: 3, body: [:]))
         await moving.value
         try await eventually { model.taskWork[task.id].value?.graphProcesses.count == 2 }
         #expect(model.taskWork[task.id].value?.workflow?.position == .node("demo"))

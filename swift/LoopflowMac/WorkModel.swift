@@ -937,8 +937,8 @@ final class WorkModel {
     private(set) var comments = TaskReadings<TaskComments>()
     /// The shown Task's work, from the workspace reader's `task` part.
     private(set) var taskWork = TaskReadings<TaskOverview>()
+    /// Its recorded Sessions and Processes, from the same part.
     private(set) var taskDiagnostics = TaskReadings<TaskWork>()
-    @ObservationIgnored private var diagnosticTask: String?
     /// That Task's Graph processes keyed by Graph process, from the same part.
     private(set) var graphProcesses: [String: GraphProcessDetail] = [:]
     /// Conversation history, read only on disclosure.
@@ -1186,13 +1186,12 @@ final class WorkModel {
                 workflowCatalogRequests = [:]
                 (planningFloor, sessionsFloor, scopeFloor, taskFloor, sentScope) = (0, 0, 0, 0, nil)
                 syncWorkScope()
-                if let diagnosticTask { _ = send { .taskHistory(id: $0, task: diagnosticTask) } }
                 for try await frame in opened.frames {
                     guard !Task.isCancelled else { break }
                     Perf.begin(Perf.workFrameApply, frame.content.part, id: String(frame.sequence))
                     await apply(frame)
                     Perf.end(Perf.workFrameApply, id: String(frame.sequence))
-                    if frame.content.part != "heartbeat" { delay = .seconds(1) }
+                    delay = .seconds(1)
                 }
                 if !Task.isCancelled { throw RegistryQueryError("Workspace observation ended") }
             } catch WorkObservationError.configurationChanged {
@@ -1208,15 +1207,6 @@ final class WorkModel {
             do { try await Task.sleep(for: delay) } catch { return }
             delay = min(delay * 2, .seconds(30))
         }
-    }
-
-    func observeTaskDiagnostics(_ task: RoadmapTask, visible: Bool) {
-        if visible { diagnosticTask = task.task.identifier }
-        else {
-            guard diagnosticTask == task.task.identifier else { return }
-            diagnosticTask = nil
-        }
-        _ = send { .taskHistory(id: $0, task: diagnosticTask) }
     }
 
     var workScope: WorkScope {
@@ -1269,7 +1259,7 @@ final class WorkModel {
     }
 
     /// Confirmation follows the command's commit. Subscriptions choose what
-    /// to read; a heartbeat or unrelated frame cannot confirm a saved draft.
+    /// to read; an unrelated frame cannot confirm a saved draft.
     func confirmWorkUpdate(after home: String? = nil) async throws {
         if let home, home != workDataDirectory {
             throw RegistryQueryError("Machine changed before the update was confirmed")
@@ -1319,15 +1309,15 @@ final class WorkModel {
 
     private func apply(_ frame: WorkFrame) async {
         let part = frame.content.part
+        if case .checkpoint = frame.content {
+            // The transport's confirmation names no Machine of its own.
+            await observeDefinitions(frame.revisions?.planning)
+            finishCheckpoints(through: frame.answers ?? 0, reason: frame.unavailable)
+            return
+        }
         if previewCopy != frame.copy { previewCopy = frame.copy }
         // A preview copy is where the data lives, so it is the data identity.
         let dataDirectory = frame.copy ?? frame.home
-        if case .heartbeat = frame.content {
-            // Heartbeats can carry a stored-definition commit whose planning
-            // body stayed equal. They do not establish a new Machine identity.
-            if workDataDirectory == dataDirectory { await observeDefinitions(frame.revisions?.planning) }
-            return
-        }
         guard frame.sequence > appliedSequence[part] ?? 0 else { return }
         if let workDataDirectory, workDataDirectory != dataDirectory {
             // The stream names its data directory, not the opaque Machine ID
@@ -1341,11 +1331,14 @@ final class WorkModel {
         switch frame.content {
         case .planning(let body):
             guard answers >= planningFloor else { return }
-            if answers >= scopeFloor { applySelectionPlans(body?.selections, reason: reason) }
             await applyPlanning(body, wire: frame.wire, reason: reason)
             if body != nil, answers >= scopeFloor { await refreshSelectedView() }
             planningSequence = frame.sequence
             resumePlanningWaiters(through: answers)
+        case .selections(let body):
+            guard answers >= max(planningFloor, scopeFloor) else { return }
+            applySelectionPlans(body, reason: reason)
+            if body != nil { await refreshSelectedView() }
         case .peerPlanning(let body):
             guard answers >= max(planningFloor, scopeFloor), let repoPath else { return }
             guard let body else {
@@ -1382,6 +1375,7 @@ final class WorkModel {
                   let task = task(id: shown.id)?.task else { return }
             guard let body else {
                 taskWork.values[task.id] = .unavailable(lastGood: taskWork[task.id].value, reason: reason)
+                taskDiagnostics.values[task.id] = .unavailable(lastGood: taskDiagnostics[task.id].value, reason: reason)
                 break
             }
             guard body.task == task.task.identifier else { return }
@@ -1393,16 +1387,9 @@ final class WorkModel {
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
             let runs = Dictionary(body.graphProcesses.map { ($0.entry.id, $0) }) { _, newer in newer }
             if graphProcesses != runs { graphProcesses = runs }
-        case .taskHistory(let body):
-            guard answers >= scopeFloor, let shown = selection, shown.kind == .task,
-                  let task = task(id: shown.id)?.task else { return }
-            guard let body else {
-                taskDiagnostics.values[task.id] = .unavailable(lastGood: taskDiagnostics[task.id].value, reason: reason)
-                break
+            if let work = body.diagnostics, taskDiagnostics[task.id] != .available(work) {
+                taskDiagnostics.values[task.id] = .available(work)
             }
-            guard body.task == task.task.identifier else { return }
-            let diagnostics = WorkReading.available(body.work)
-            if taskDiagnostics[task.id] != diagnostics { taskDiagnostics.values[task.id] = diagnostics }
         case .wave(let body):
             guard answers >= scopeFloor, let detailWaveId else { return }
             guard body == nil || body?.wave == detailWaveId else { return }
@@ -1427,9 +1414,6 @@ final class WorkModel {
             let next = WorkReading.available(body)
             if processActivity != next { processActivity = next }
         case .checkpoint:
-            await observeDefinitions(frame.revisions?.planning)
-            finishCheckpoints(through: answers, reason: frame.unavailable)
-        case .heartbeat:
             break
         }
         appliedSequence[part] = frame.sequence
@@ -1491,7 +1475,6 @@ final class WorkModel {
         waveDetail = nil
         taskWork = TaskReadings<TaskOverview>()
         taskDiagnostics = TaskReadings<TaskWork>()
-        diagnosticTask = nil
         graphProcesses = [:]
     }
 

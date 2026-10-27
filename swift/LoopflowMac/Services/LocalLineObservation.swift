@@ -30,6 +30,8 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
     private var exited = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private let frameLimit: Int
+    /// A reader silent this long has stalled; nil for one that speaks only on change.
+    private let silence: TimeInterval?
 
     struct Handle: Sendable {
         let frames: AsyncThrowingStream<Frame, any Error>
@@ -39,16 +41,17 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
         let cancel: @Sendable () async -> Void
     }
 
-    /// `name` labels failures ("Workspace"). Every frame is kept.
+    /// `name` labels failures ("Task files"). Every frame is kept.
     static func start(
         name: String,
         process: Process,
         frameLimit: Int,
+        silence: TimeInterval? = 10,
         configurationChanged: @escaping @Sendable () throws -> Bool,
         decode: @escaping (Data) throws -> Frame
     ) throws -> Handle {
         let (stream, continuation) = AsyncThrowingStream<Frame, any Error>.makeStream()
-        let reader = LocalLineObservation(name, process, frameLimit, continuation, configurationChanged, decode)
+        let reader = LocalLineObservation(name, process, frameLimit, silence, continuation, configurationChanged, decode)
         // Stream cancellation also covers a consumer disappearing without an explicit stop.
         continuation.onTermination = { [weak reader] _ in
             reader?.queue.async { [weak reader] in reader?.stop() }
@@ -71,6 +74,7 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
         _ name: String,
         _ process: Process,
         _ frameLimit: Int,
+        _ silence: TimeInterval?,
         _ continuation: AsyncThrowingStream<Frame, any Error>.Continuation,
         _ configurationChanged: @escaping @Sendable () throws -> Bool,
         _ decode: @escaping (Data) throws -> Frame
@@ -79,6 +83,7 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
         self.queue = DispatchQueue(label: "studio.loopflow.reader.\(name)", qos: .utility)
         self.process = process
         self.frameLimit = frameLimit
+        self.silence = silence
         self.continuation = continuation
         self.configurationChanged = configurationChanged
         self.decode = decode
@@ -203,8 +208,8 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
                     return
                 }
             }
-            if now - lastFrame >= 10 {
-                fail(RegistryQueryError("\(name) reader sent no observation for ten seconds"))
+            if let silence, now - lastFrame >= silence {
+                fail(RegistryQueryError("\(name) reader sent no observation for \(Int(silence)) seconds"))
                 return
             }
             flushRequest()
@@ -253,21 +258,19 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
 }
 
 enum LocalWorkObservation {
-    /// Every frame is kept: the reader already holds at most one per part.
+    /// One `lf` watch per part. Watches send a frame only when their read changes,
+    /// so silence is not a stall; process exit and configuration changes still end them.
     static func start(
-        process: Process,
+        process: @escaping @Sendable ([String], String?) throws -> Process,
         configurationChanged: @escaping @Sendable () throws -> Bool
     ) throws -> WorkObservation {
-        let reader = try LocalLineObservation<WorkFrame>.start(
-            name: "Workspace", process: process, frameLimit: 64 * 1024 * 1024,
-            configurationChanged: configurationChanged, decode: { line in
-                try Perf.measure(Perf.workFrameDecode, "bytes=\(line.count)") {
-                    try WorkFrame.decode(line: line)
-                }
-            })
-        return WorkObservation(frames: reader.frames, request: { request in
-            reader.send(request.line)
-        }, cancel: reader.cancel)
+        try WorkWatches.observe { args, cwd in
+            let reader = try LocalLineObservation<Data>.start(
+                name: args.prefix(2).joined(separator: " "), process: try process(args, cwd),
+                frameLimit: 64 * 1024 * 1024, silence: nil,
+                configurationChanged: configurationChanged, decode: { $0 })
+            return LineWatch(lines: reader.frames, send: reader.send, cancel: reader.cancel)
+        }
     }
 }
 #endif

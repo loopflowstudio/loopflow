@@ -28,7 +28,25 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
         Ok::<_, anyhow::Error>((home, store, task))
     })?;
     if watch {
-        return super::session_watch::run(&home, &store, task);
+        // Provider liveness is observed, never committed.
+        return super::watch::run(
+            (),
+            super::watch::Watched {
+                stamp: Some("observed_at"),
+                ..super::watch::Watched::every(super::watch::ACTIVITY_CLOCK)
+            },
+            |store, ()| {
+                let snapshot = match store {
+                    Some(store) => Ok(crate::session_record::active::snapshot(
+                        &home,
+                        &store.sqlite,
+                        task.clone(),
+                    )),
+                    None => Err(anyhow!("no Loopflow store exists on this Machine")),
+                };
+                async move { snapshot }
+            },
+        );
     }
     let snapshot = crate::session_record::active::snapshot(&home, &store.sqlite, task);
     if json {

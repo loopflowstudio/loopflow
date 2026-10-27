@@ -240,7 +240,9 @@ impl Cli {
             ),
             Some(Commands::Desktop { cmd }) => !matches!(
                 cmd,
-                DesktopCommand::View { .. } | DesktopCommand::Layout { save: false, .. }
+                DesktopCommand::View { .. }
+                    | DesktopCommand::Plans { .. }
+                    | DesktopCommand::Layout { save: false, .. }
             ),
             _ => true,
         }
@@ -641,6 +643,14 @@ pub enum DesktopCommand {
         /// Print the opening receipt as JSON
         #[arg(long)]
         json: bool,
+    },
+    /// Print the repository's default and saved Dashboard plans as JSON
+    Plans {
+        #[arg(long, required = true)]
+        json: bool,
+        /// Print a JSON line now and each time the plans change, until stdin closes
+        #[arg(long)]
+        watch: bool,
     },
     /// Create or edit a Dashboard query with revision checking; prints the Dashboard as JSON
     Query {
@@ -1248,6 +1258,9 @@ pub enum WaveCommand {
         /// Read every repository on this Machine
         #[arg(long)]
         all: bool,
+        /// Print a JSON line now and each time the plan changes, until stdin closes
+        #[arg(long, requires = "json")]
+        watch: bool,
     },
     /// Select and inspect the Wave default Workflow
     Workflow {
@@ -1324,8 +1337,11 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
         /// Refresh planning from Linear before reading
-        #[arg(long)]
+        #[arg(long, conflicts_with = "watch")]
         sync: bool,
+        /// Print a JSON line now and each time the status changes, until stdin closes
+        #[arg(long, requires = "json")]
+        watch: bool,
     },
     /// Rename or relocate an authored Wave and its provider mapping
     Rename {
@@ -2108,6 +2124,9 @@ pub enum PlanningCommand {
     Status {
         #[arg(long)]
         json: bool,
+        /// Keep the repository's planning exchanged, printing a JSON line now and each time the status changes, until stdin closes
+        #[arg(long, requires = "json")]
+        watch: bool,
     },
 }
 

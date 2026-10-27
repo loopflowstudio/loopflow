@@ -301,7 +301,7 @@ a locally active Project alone is not proof of Linear activation. Ensure never s
 Projects; status and roadmap never call it. Desktop
 ensures on explicit opening or retry while retaining cached planning and independent
 Session reads. Both primary and Portfolio surfaces render the same SQLite-derived
-`project_readiness` through `lf monitor work --watch --json`. Committed selection,
+`project_readiness` through `lf wave show --watch --json`. Committed selection,
 accepted facts, transitions and exact activation Process outcomes invalidate that reading.
 A pending transition or unfinished Process is unresolved evidence, not proof of liveness.
 Watchers and status reads never provision or import.

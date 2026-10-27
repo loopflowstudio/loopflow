@@ -5,9 +5,15 @@ listener and `lf wave status` contracts consumed by the Mac app. Every absent fi
 is a parse error or an explicit null.
 
 `task_status.json` pins the planning/execution envelope for available, unavailable,
-invalid, removed and absent planning. Rust round-trips it. This CLI-only contract
-has no Swift mirror: the Mac app reads a Task's work from the workspace stream's
-`task` part (`work_frame.json`). These cases have no execution.
+invalid, removed and absent planning, with the Task's overview, Graph processes and
+comments. Rust round-trips it. The Mac app reads the overview, Graph processes,
+comments and recorded work from `lf task status --watch` (`watch_frames.json`).
+These cases have no execution.
+
+`watch_frames.json` pins one `--watch` frame per read a window runs:
+`{answers, home, copy, revisions, unavailable, body}`, where `body` is what the
+read prints with `--json`, or `null` with `unavailable` set. Rust checks each body
+against its read's type; Swift decodes each through its part.
 
 `task_execution.json` pins the execution boundary inside the status envelope's
 optional Task snapshot (`execution.execution`).
@@ -104,7 +110,7 @@ it without manufacturing defaults.
 
 `view_plan.json` pins the shared headless selection/arrangement plan, including
 repeated Work, duplicate suppression and a backlog Task without a primary Session.
-Rust round-trips it; Swift decodes the same plan directly and in `work_frame.json`.
+Rust round-trips it; Swift decodes the same plan directly and from `lf desktop plans --watch` in `watch_frames.json`.
 
 `pane_layout.json` covers portable pane content, focus versus explicit zoom, hidden
 members, two Shell tabs, two Files tabs, selected-tab identities and file-draft

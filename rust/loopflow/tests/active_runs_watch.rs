@@ -40,12 +40,14 @@ fn command(home: &Path, args: &[&str]) -> Command {
     command
 }
 
-fn next_ready(frames: &Receiver<ActiveSessionsSnapshot>, count: usize) -> ActiveSessionsSnapshot {
+fn next_ready(frames: &Receiver<serde_json::Value>, count: usize) -> ActiveSessionsSnapshot {
     let deadline = Instant::now() + Duration::from_secs(12);
     loop {
-        let snapshot = frames
+        let frame = frames
             .recv_timeout(deadline.saturating_duration_since(Instant::now()))
             .unwrap();
+        let snapshot: ActiveSessionsSnapshot =
+            serde_json::from_value(frame["body"].clone()).unwrap_or_else(|_| panic!("{frame}"));
         assert_ne!(
             snapshot.discovery,
             DiscoveryState::Unavailable,
@@ -135,8 +137,8 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
     let (sender, frames) = mpsc::channel();
     let output = std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
-            let snapshot = serde_json::from_str::<ActiveSessionsSnapshot>(&line.unwrap()).unwrap();
-            if sender.send(snapshot).is_err() {
+            let frame = serde_json::from_str::<serde_json::Value>(&line.unwrap()).unwrap();
+            if sender.send(frame).is_err() {
                 break;
             }
         }
@@ -156,15 +158,7 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
         .stdin
         .as_mut()
         .unwrap()
-        .write_all(b"{\"action\":\"refresh\"}\n")
-        .unwrap();
-    next_ready(&frames, 0);
-    watch
-        .0
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(b"{\"action\":\"rescan\"}\n")
+        .write_all(b"{\"id\":1}\n")
         .unwrap();
     next_ready(&frames, 0);
     drop(watch.0.stdin.take());

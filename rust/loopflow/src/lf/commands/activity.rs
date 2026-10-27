@@ -55,42 +55,73 @@ pub enum WorkActivityFact {
     },
 }
 
+/// What `lf history` reads; the flags of the same name, which a `--watch`
+/// request can replace.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HistoryWindow {
+    since: String,
+    limit: usize,
+    wave: Option<String>,
+    project: Option<String>,
+    task: Option<String>,
+}
+
 pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
-    let limit = options.limit;
-    let generated_at = OffsetDateTime::now_utc();
-    let since = parse_since(&options.since, generated_at)?.unix_timestamp();
-    if limit == 0 || limit > MAX_LIMIT {
-        return Err(anyhow!(
-            "--limit must be between 1 and {MAX_LIMIT}; got {}",
-            limit
-        ));
+    let window = HistoryWindow {
+        since: options.since.clone(),
+        limit: options.limit,
+        wave: options.wave.clone(),
+        project: options.project.clone(),
+        task: options.task.clone(),
+    };
+    if options.watch {
+        return super::watch::run(
+            window,
+            super::watch::Watched {
+                // A relative window's start moves with every reading.
+                stamp: Some("since"),
+                ..super::watch::Watched::every(super::watch::ACTIVITY_CLOCK)
+            },
+            |store, window| async move { read(store.as_ref().map(|store| &store.sqlite), &window) },
+        );
     }
-
-    let filter = WorkFilter {
-        wave: options.wave.as_deref(),
-        project: options.project.as_deref(),
-        task: options.task.as_deref(),
-    };
     let path = crate::store::database_path_from_env()?;
-    let snapshot = if path.exists() {
-        let store = SqliteStore::new(&path)?;
-        build_snapshot(&store, generated_at.unix_timestamp(), since, limit, filter)?
-    } else {
-        WorkActivitySnapshot {
-            generated_at: generated_at.unix_timestamp(),
-            since,
-            limit,
-            truncated: false,
-            items: Vec::new(),
-        }
-    };
-
+    let store = path.exists().then(|| SqliteStore::new(&path)).transpose()?;
+    let snapshot = read(store.as_ref(), &window)?;
     if options.json {
         println!("{}", serde_json::to_string(&snapshot)?);
     } else {
         print_snapshot(&snapshot);
     }
     Ok(())
+}
+
+fn read(store: Option<&SqliteStore>, window: &HistoryWindow) -> Result<WorkActivitySnapshot> {
+    let limit = window.limit;
+    let generated_at = OffsetDateTime::now_utc();
+    let since = parse_since(&window.since, generated_at)?.unix_timestamp();
+    if limit == 0 || limit > MAX_LIMIT {
+        return Err(anyhow!(
+            "--limit must be between 1 and {MAX_LIMIT}; got {}",
+            limit
+        ));
+    }
+    let filter = WorkFilter {
+        wave: window.wave.as_deref(),
+        project: window.project.as_deref(),
+        task: window.task.as_deref(),
+    };
+    match store {
+        Some(store) => build_snapshot(store, generated_at.unix_timestamp(), since, limit, filter),
+        None => Ok(WorkActivitySnapshot {
+            generated_at: generated_at.unix_timestamp(),
+            since,
+            limit,
+            truncated: false,
+            items: Vec::new(),
+        }),
+    }
 }
 
 pub(crate) fn build_snapshot(

@@ -3072,6 +3072,11 @@ pub struct TaskStatus {
     pub planning_state: crate::store::PlanningState,
     pub execution: Option<TaskSnapshot>,
     pub ownership: Option<crate::durable::TaskOwnership>,
+    /// Its Sessions, Graphs and Workflow; `null` for an unregistered Task.
+    pub overview: Option<crate::task_work::TaskOverview>,
+    /// `lf graph show --processes` for each of `overview`'s Graphs, in order.
+    pub graph_processes: Vec<crate::durable::GraphProcessDetail>,
+    pub comments: Option<crate::work::task::comment::TaskComments>,
 }
 
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
@@ -3126,6 +3131,9 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
                     planning_state: crate::store::PlanningState::Unavailable,
                     execution: None,
                     ownership: None,
+                    overview: None,
+                    graph_processes: Vec::new(),
+                    comments: None,
                 };
                 if let Some(read) = inspection {
                     // Foreign observations remain acquisition evidence, not owned Work.
@@ -3168,6 +3176,17 @@ async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<Ta
         .sqlite
         .task_acquisition(&task.id)
         .map_err(task_error)?;
+    let overview = store.sqlite.task_overview(&task.id).map_err(task_error)?;
+    let mut graph_processes = Vec::with_capacity(overview.graph_processes.len());
+    for graph in &overview.graph_processes {
+        let id = graph.summary.id.as_str();
+        let (process, entry) = store
+            .sqlite
+            .graph_process(id)
+            .map_err(task_error)?
+            .ok_or_else(|| task_error(format!("Graph {id} has no Graph process record")))?;
+        graph_processes.push(process.detail(entry));
+    }
     let mut result = TaskStatus {
         sync: Some(
             store
@@ -3185,6 +3204,9 @@ async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<Ta
         planning_state: acquisition.state,
         execution: Some(read_task_snapshot(store, task.clone()).await?),
         ownership: Some(store.sqlite.task_ownership(&task.id).map_err(task_error)?),
+        overview: Some(overview),
+        graph_processes,
+        comments: Some(store.sqlite.task_comments(&task.id).map_err(task_error)?),
         task: Some(task),
     };
     result.planning_stale = planning_stale(&result);

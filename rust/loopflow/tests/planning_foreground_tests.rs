@@ -1,7 +1,6 @@
 use crate::support;
 
 use std::fs::{self, File};
-use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::{fs::PermissionsExt, process::CommandExt};
 use std::path::Path;
@@ -62,22 +61,13 @@ impl Watch {
     fn start(repo: &Path, home: &Path) -> Self {
         let output = File::create(home.join("watch.jsonl")).unwrap();
         let errors = File::create(home.join("watch.stderr")).unwrap();
-        let mut child = command(repo, home)
-            .args(["monitor", "work", "--watch", "--json"])
+        let child = command(repo, home)
+            .args(["repo", "planning", "status", "--json", "--watch"])
             .stdin(Stdio::piped())
             .stdout(output)
             .stderr(errors)
             .spawn()
             .unwrap();
-        writeln!(
-            child.stdin.as_mut().unwrap(),
-            "{}",
-            json!({
-                "action":"scope", "id":1, "repo":repo, "wave":null, "task":null,
-                "headless":true, "activity":null,
-            })
-        )
-        .unwrap();
         Self(child)
     }
 }

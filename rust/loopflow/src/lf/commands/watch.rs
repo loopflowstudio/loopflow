@@ -13,6 +13,8 @@
 //! Either way the next frame answers it, changed or not. The watch ends, after
 //! answering what it was asked, when stdin closes or its parent exits.
 
+mod checkouts;
+
 use std::io::{BufRead, Write};
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -28,17 +30,17 @@ use crate::store::sqlite::StoreRevisions;
 use crate::store::{SharedStore, StorageConfig};
 
 /// A burst is read once it has been quiet this long…
-pub(super) const QUIET: Duration = Duration::from_millis(100);
+const QUIET: Duration = Duration::from_millis(100);
 /// …or this long after its first commit, so a steady writer cannot postpone it.
-pub(super) const BURST: Duration = Duration::from_millis(250);
+const BURST: Duration = Duration::from_millis(250);
 /// Revisions are read again on this clock in case a filesystem event was lost.
-pub(super) const CHECK: Duration = Duration::from_secs(1);
+const CHECK: Duration = Duration::from_secs(1);
 /// A read that keeps failing is tried again after 1 s, 2 s, 4 s… up to this.
-pub(super) const RETRY_CAP: Duration = Duration::from_secs(60);
+const RETRY_CAP: Duration = Duration::from_secs(60);
 /// A read spends at most this share of the watch's time: after a reading that
 /// took `d`, a change is read once `BUSY_SHARE × d` has passed since it began.
 /// Requests read at once.
-pub(super) const BUSY_SHARE: u32 = 5;
+const BUSY_SHARE: u32 = 5;
 /// Git and filesystem facts are not store commits; this bounds how stale they get.
 pub(crate) const PLANNING_CLOCK: Duration = Duration::from_secs(300);
 /// Process liveness is observed, never committed.
@@ -51,6 +53,12 @@ const MAX_REQUEST: usize = 16 * 1024;
 pub struct WatchFrame<'a, T> {
     /// The newest request this reading began after.
     pub answers: Option<u64>,
+    /// The Loopflow home this watch reads; a client drops what it showed from
+    /// another one.
+    pub home: &'a str,
+    /// The preview copy directory a draft-carrying build reads; `null` on the
+    /// shared store.
+    pub copy: Option<&'a str>,
     /// The store revisions it was read at; `null` before a store exists.
     pub revisions: Option<StoreRevisions>,
     /// Why the read failed. `body` is then `null`.
@@ -71,13 +79,28 @@ struct Request<A> {
 pub(crate) struct Watched {
     /// Facts outside the store are read again this often.
     pub clock: Duration,
-    /// A top-level field of the result that restates when it was read.
+    /// A field of the result, or of each of its rows, that restates when it
+    /// was read.
     pub stamp: Option<&'static str>,
+    /// The result shows Git facts of Task checkouts: read again when one
+    /// changes on disk and Git's answer about it differs.
+    pub checkouts: bool,
 }
 
 impl Watched {
     pub(crate) fn every(clock: Duration) -> Self {
-        Self { clock, stamp: None }
+        Self {
+            clock,
+            stamp: None,
+            checkouts: false,
+        }
+    }
+
+    pub(crate) fn following_checkouts(clock: Duration) -> Self {
+        Self {
+            checkouts: true,
+            ..Self::every(clock)
+        }
     }
 }
 
@@ -110,6 +133,27 @@ where
     Fut: std::future::Future<Output = Result<T>>,
 {
     let database = crate::store::database_path_from_env()?;
+    let home = crate::store::lf_home_dir();
+    let home = home
+        .canonicalize()
+        .unwrap_or(home)
+        .to_string_lossy()
+        .into_owned();
+    let copy = crate::store::copy::selected().map(|database| {
+        database
+            .parent()
+            .expect("copy database has a directory")
+            .to_string_lossy()
+            .into_owned()
+    });
+    if watched.checkouts {
+        // Every reading asks Git the same questions about the same checkouts;
+        // only a checkout that changed on disk is asked again.
+        crate::git::retain_reads();
+    }
+    let mut checkouts = checkouts::Checkouts::default();
+    let mut followed_at = None;
+    let mut stale = false;
     let shared: Shared<A> = Arc::new((
         Mutex::new(Mailbox {
             requests: Vec::new(),
@@ -129,6 +173,8 @@ where
     let mut stdout = std::io::stdout().lock();
     let mut args = args;
     let mut store: Option<SharedStore> = None;
+    // Why the store that exists cannot be opened; a refused store is not an empty one.
+    let mut refused: Option<String> = None;
     let mut answers = None;
     let mut force = true;
     let mut read_at = None;
@@ -155,13 +201,30 @@ where
         };
         if store.is_none() && database.exists() {
             let config = StorageConfig::sqlite(database.clone());
-            if let Ok(opened) = runtime.block_on(crate::store::open_read_only_store(&config)) {
-                store = Some(Arc::new(opened));
+            match runtime.block_on(crate::store::open_read_only_store(&config)) {
+                Ok(opened) => {
+                    store = Some(Arc::new(opened));
+                    refused = None;
+                }
+                Err(error) => refused = Some(format!("{error:#}")),
             }
         }
         let revisions = store
             .as_ref()
             .and_then(|store| store.sqlite.revisions().ok());
+        if watched.checkouts {
+            if let (Some(store), Some(revisions)) = (&store, revisions) {
+                if followed_at != Some(revisions.planning) {
+                    follow_checkouts(&mut checkouts, store, &shared);
+                    followed_at = Some(revisions.planning);
+                }
+            }
+            let changed = checkouts.take(Instant::now());
+            // Every one is asked again, not only up to the first that differs.
+            for worktree in &changed {
+                stale |= crate::git::reread_retained(worktree);
+            }
+        }
         let now = Instant::now();
         let due = force
             || match read_on {
@@ -174,7 +237,7 @@ where
                     };
                     retry_due(failures, read_on, now)
                         || (now - read_on >= cost.saturating_mul(BUSY_SHARE)
-                            && (changed || now - read_on >= watched.clock))
+                            && (changed || stale || now - read_on >= watched.clock))
                 }
             };
         if due {
@@ -191,7 +254,11 @@ where
                 .map(|store| store.sqlite.revisions())
                 .transpose()?;
             let began = Instant::now();
-            let (unavailable, body) = match runtime.block_on(read(store.clone(), args.clone())) {
+            let reading = match &refused {
+                Some(reason) => Err(anyhow::anyhow!("Loopflow store cannot be read: {reason}")),
+                None => runtime.block_on(read(store.clone(), args.clone())),
+            };
+            let (unavailable, body) = match reading {
                 Ok(body) => (None, Some(body)),
                 Err(error) => (Some(format!("{error:#}")), None),
             };
@@ -201,6 +268,8 @@ where
             if force || sent != Some(identity) {
                 let frame = WatchFrame {
                     answers,
+                    home: &home,
+                    copy: copy.as_deref(),
                     revisions,
                     unavailable,
                     body: body.as_ref(),
@@ -222,6 +291,7 @@ where
             read_at = revisions;
             read_on = Some(began);
             force = false;
+            stale = false;
         }
         if closing {
             return Ok(());
@@ -251,7 +321,7 @@ where
 
 /// A failed reading is retried without a change, each time after twice the
 /// wait, so a read that cannot succeed does not spin.
-pub(super) fn retry_due(failures: u32, read_on: Instant, now: Instant) -> bool {
+fn retry_due(failures: u32, read_on: Instant, now: Instant) -> bool {
     failures > 0
         && now - read_on
             >= CHECK
@@ -260,7 +330,7 @@ pub(super) fn retry_due(failures: u32, read_on: Instant, now: Instant) -> bool {
 }
 
 /// Remove the fields that restate when a result was read.
-pub(super) fn strip_reading_time(value: &mut serde_json::Value) {
+fn strip_reading_time(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(fields) => {
             fields.remove("generated_at");
@@ -283,8 +353,18 @@ fn identity<T: Serialize>(
 ) -> Result<[u8; 32]> {
     let mut value = serde_json::to_value(body)?;
     strip_reading_time(&mut value);
-    if let (Some(stamp), Some(fields)) = (stamp, value.as_object_mut()) {
-        fields.remove(stamp);
+    if let Some(stamp) = stamp {
+        match &mut value {
+            serde_json::Value::Object(fields) => {
+                fields.remove(stamp);
+            }
+            serde_json::Value::Array(rows) => {
+                for fields in rows.iter_mut().filter_map(|row| row.as_object_mut()) {
+                    fields.remove(stamp);
+                }
+            }
+            _ => {}
+        }
     }
     let mut hash = Sha256::new();
     hash.update(serde_json::to_vec(unavailable)?);
@@ -297,6 +377,8 @@ fn encode<T: Serialize>(frame: &WatchFrame<'_, T>) -> Result<Vec<u8>> {
     if bytes.len() > MAX_FRAME {
         bytes = serde_json::to_vec(&WatchFrame::<()> {
             answers: frame.answers,
+            home: frame.home,
+            copy: frame.copy,
             revisions: frame.revisions,
             unavailable: Some("watch frame exceeds the 64 MiB transport limit".into()),
             body: None,
@@ -353,6 +435,29 @@ fn observe<A>(shared: &Shared<A>, database: &Path) {
     }
 }
 
+/// Follow the checkouts of the Tasks registered now and the repositories
+/// they belong to; a change wakes the watch.
+fn follow_checkouts<A>(
+    checkouts: &mut checkouts::Checkouts,
+    store: &SharedStore,
+    shared: &Shared<A>,
+) where
+    A: Send + 'static,
+{
+    let Ok(rows) = store.sqlite.task_checkouts() else {
+        return;
+    };
+    let mut paths: Vec<_> = rows.into_iter().map(|row| row.worktree).collect();
+    if let Ok(repositories) = store.sqlite.repository_paths() {
+        paths.extend(repositories);
+    }
+    let wake = shared.clone();
+    checkouts.watch(paths, move || {
+        lock(&wake).look = true;
+        wake.1.notify_all();
+    });
+}
+
 /// Let a burst of related commits land before reading any of it.
 fn settle<A>(shared: &Shared<A>) {
     let first = Instant::now();
@@ -366,5 +471,65 @@ fn settle<A>(shared: &Shared<A>) {
         if !again || first.elapsed() >= BURST {
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::{changed, identity, retry_due};
+    use crate::store::sqlite::StoreRevisions;
+
+    #[test]
+    fn a_failing_read_waits_longer_before_each_retry() {
+        let read_on = Instant::now();
+        let due =
+            |failures, secs| retry_due(failures, read_on, read_on + Duration::from_secs(secs));
+        assert!(!due(0, 3600));
+        assert!(due(1, 1));
+        assert!(!due(3, 3));
+        assert!(due(3, 4));
+        assert!(!due(40, 59));
+        assert!(due(40, 60));
+    }
+
+    #[test]
+    fn usage_alone_is_not_a_change() {
+        let old = StoreRevisions {
+            planning: 1,
+            sessions: 1,
+            graphs: 1,
+            processes: 1,
+            usage: 1,
+        };
+        assert!(!changed(old, StoreRevisions { usage: 9, ..old }));
+        assert!(changed(
+            old,
+            StoreRevisions {
+                processes: 2,
+                ..old
+            }
+        ));
+    }
+
+    #[test]
+    fn the_time_of_a_reading_is_not_a_change() {
+        let at = |observed_at| serde_json::json!({"observed_at": observed_at, "nodes": []});
+        let rows = |observed_at| serde_json::json!([{"observed_at": observed_at, "id": 1}]);
+        let stamped = |body, stamp| identity(&None, &Some(body), stamp).unwrap();
+        assert_eq!(
+            stamped(at(1), Some("observed_at")),
+            stamped(at(2), Some("observed_at"))
+        );
+        assert_eq!(
+            stamped(rows(1), Some("observed_at")),
+            stamped(rows(2), Some("observed_at"))
+        );
+        assert_ne!(stamped(at(1), None), stamped(at(2), None));
+        assert_ne!(
+            stamped(at(1), Some("observed_at")),
+            identity(&Some("gone".into()), &Some(at(1)), Some("observed_at")).unwrap()
+        );
     }
 }

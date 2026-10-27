@@ -40,8 +40,9 @@ struct BuiltLf: Sendable {
         RegistryQuery(runWithInput: { args, cwd, input in
             try await run(args, cwd: cwd.map(URL.init(fileURLWithPath:)), input: input)
         }, watchWork: {
-            try LocalWorkObservation.start(process: process(["monitor", "work", "--watch", "--json"]),
-                                           configurationChanged: { false })
+            try LocalWorkObservation.start(process: { args, cwd in
+                process(args, cwd: cwd.map(URL.init(fileURLWithPath:)))
+            }, configurationChanged: { false })
         }) { args, cwd in
             try await run(args, cwd: cwd.map(URL.init(fileURLWithPath:)))
         }

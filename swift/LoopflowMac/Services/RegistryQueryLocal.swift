@@ -24,12 +24,13 @@ enum RegistryQueryLocal {
     }, watchWork: {
         try await Task.detached(priority: .userInitiated) {
             let configuration = try ReaderLaunchConfiguration.current()
-            let process = LocalWaveAgentLauncher.queryProcess(
-                [configuration.helper, "monitor", "work", "--watch", "--json"]
-            )
-            process.environment = configuration.environment
             return try LocalWorkObservation.start(
-                process: process,
+                process: { args, cwd in
+                    let process = LocalWaveAgentLauncher.queryProcess([configuration.helper] + args)
+                    process.environment = configuration.environment
+                    if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
+                    return process
+                },
                 configurationChanged: { try ReaderLaunchConfiguration.current() != configuration }
             )
         }.value

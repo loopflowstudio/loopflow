@@ -561,6 +561,40 @@ fn selection_repository(
         .context("repository has no recorded Work identity")
 }
 
+/// `lf desktop plans`: every plan a repository window shows, the default and
+/// each saved Dashboard, as Desktop reads them.
+fn plans(cli: &crate::lf::Cli, watch: bool) -> Result<()> {
+    if !watch {
+        let store = crate::store::read_existing_registry()?
+            .ok_or(crate::store::StoreError::NotFound)
+            .context("Work registry is unavailable")?;
+        let repository = selection_repository(cli, &store.sqlite)?;
+        println!(
+            "{}",
+            serde_json::to_string(&store.sqlite.selection_plans(&repository)?)?
+        );
+        return Ok(());
+    }
+    super::watch::run(
+        (),
+        super::watch::Watched {
+            // Each plan restates when it was read.
+            stamp: Some("observed_at"),
+            ..super::watch::Watched::every(super::watch::PLANNING_CLOCK)
+        },
+        |store, ()| {
+            let result = store
+                .ok_or(crate::store::StoreError::NotFound)
+                .context("Work registry is unavailable")
+                .and_then(|store| {
+                    let repository = selection_repository(cli, &store.sqlite)?;
+                    Ok(store.sqlite.selection_plans(&repository)?)
+                });
+            async move { result }
+        },
+    )
+}
+
 fn view_plan(
     cli: &crate::lf::Cli,
     expression: Option<&str>,
@@ -805,6 +839,7 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             plan,
             json,
         } => return view_plan(cli, expression.as_deref(), *plan, *json || cli.json),
+        DesktopCommand::Plans { watch, .. } => return plans(cli, *watch),
         _ => {}
     }
     // Arguments are checked before Desktop is contacted.
@@ -1164,6 +1199,7 @@ impl Verb {
                 )
             }
             DesktopCommand::View { .. }
+            | DesktopCommand::Plans { .. }
             | DesktopCommand::Query { .. }
             | DesktopCommand::Pin { .. }
             | DesktopCommand::Unpin { .. }
@@ -1341,6 +1377,7 @@ pub fn runs_without_desktop(command: &crate::lf::DesktopCommand) -> bool {
     use crate::lf::DesktopCommand;
     match command {
         DesktopCommand::View { .. }
+        | DesktopCommand::Plans { .. }
         | DesktopCommand::Query { .. }
         | DesktopCommand::Pin { .. }
         | DesktopCommand::Unpin { .. }

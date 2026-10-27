@@ -98,8 +98,13 @@ writers and Linear sync. Nothing to delete; the proof test pins it.
 ## Forbidden outcomes
 
 - Any `cmux` read (`list-workspaces`, `current-workspace`, …) feeding a store write.
+  (Reading the current name only to skip renaming a hand-edited workspace is allowed;
+  Jack Heart, October 26.)
 - A second name for the same workspace (e.g. creation with ID, runtime with title).
-- A guard that skips renames "if the user renamed it"; lf only writes on Task title change.
+- Overwriting a workspace name someone edited by hand (Jack Heart, October 26,
+  reversing the earlier "no guard" line): lf renames only names it wrote.
+- `<identifier> · <title>` in `lf open` receipts or other Task labels; they read
+  `<title> · <identifier>` too (Jack Heart, October 26).
 
 ## Slices
 

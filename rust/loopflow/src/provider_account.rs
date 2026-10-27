@@ -190,6 +190,21 @@ impl std::fmt::Debug for ProviderAccountRoute {
 }
 
 impl ProviderAccountRoute {
+    #[cfg(test)]
+    pub(crate) fn isolated_for_test(
+        provider: Provider,
+        account_id: &str,
+        store: SharedStore,
+        profile: PathBuf,
+    ) -> Self {
+        Self {
+            provider,
+            account_id: parse_account_id(account_id).expect("test account id"),
+            home: RouteHome::Isolated,
+            login: AccountLogin::Stored { store, profile },
+        }
+    }
+
     fn shared_home(named: bool) -> RouteHome {
         RouteHome::Shared {
             // A launch that named its account switches on a person's behalf;

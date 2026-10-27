@@ -150,7 +150,26 @@ pub struct CodexConnection {
     pub session_id: crate::id::LfSessionId,
     pub thread_id: Option<AgentSessionId>,
     pub attachment: Option<SessionAttachment>,
-    pub account_id: Option<crate::store::ProviderAccountId>,
+    /// The login this conversation runs on; the relay pins the thread to it
+    /// as soon as Codex reports it, so a move while it is open finds its home.
+    pub(crate) account_route: Option<crate::provider_account::ProviderAccountRoute>,
+}
+
+impl CodexConnection {
+    pub fn new(
+        store: SqliteStore,
+        session_id: crate::id::LfSessionId,
+        thread_id: Option<AgentSessionId>,
+        attachment: Option<SessionAttachment>,
+    ) -> Self {
+        Self {
+            store,
+            session_id,
+            thread_id,
+            attachment,
+            account_route: None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -430,7 +449,7 @@ impl CodexConnection {
             self.store.clone(),
             self.session_id.to_string(),
             self.attachment.clone(),
-            None,
+            self.account_route.clone(),
             Default::default(),
         ));
         let mut startup_request = None;
@@ -592,7 +611,7 @@ impl CodexConnection {
                                     let session = self.store.session(&self.session_id)?
                                         .ok_or_else(|| anyhow!("Session disappeared during native startup"))?;
                                     crate::session_record::write_provider_session(
-                                        &crate::session_record::capture_dir(session.input_key()?)?, thread, self.account_id.clone())?;
+                                        &crate::session_record::capture_dir(session.input_key()?)?, thread, self.account_route.as_ref().map(|route| route.account_id().clone()))?;
                                 }
                             }
                             history.inbound(&rpc, thread.as_ref()).await.1?;
@@ -765,6 +784,8 @@ mod tests {
     use super::{CodexConnection, NativeInput};
     use crate::context_block::{codex_delivery_path, ContextDelivery};
     use crate::id::LfProcessId;
+    use crate::provider_account::ProviderAccountRoute;
+    use crate::provider_auth::Provider;
     use crate::store::sqlite::SqliteStore;
     use futures_util::{SinkExt, StreamExt};
     use serde_json::json;
@@ -792,7 +813,7 @@ mod tests {
             session_id: "conversation".into(),
             thread_id: None,
             attachment: Some(attachment),
-            account_id: None,
+            account_route: None,
         }
     }
 
@@ -1183,6 +1204,102 @@ mod tests {
                 outcome == "lost-before-creation"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn an_open_conversation_is_pinned_to_its_login_when_codex_reports_it() {
+        let home = tempfile::tempdir_in("/tmp").unwrap();
+        let mut connection = attached_connection(home.path());
+        rusqlite::Connection::open(home.path().join("store.db"))
+            .unwrap()
+            .execute(
+                "INSERT INTO provider_accounts(provider,account_id,credential_state,
+                    routing_state,created_at,updated_at)
+                 VALUES('codex','engineering','connected','automatic',1,1)",
+                [],
+            )
+            .unwrap();
+        connection.account_route = Some(ProviderAccountRoute::isolated_for_test(
+            Provider::Codex,
+            "engineering",
+            Arc::new(crate::store::Store {
+                sqlite: connection.store.clone(),
+            }),
+            home.path().join("engineering"),
+        ));
+        let endpoint = home.path().join("provider.sock");
+        let listener = UnixListener::bind(&endpoint).unwrap();
+        let provider = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            let start = fixture_rpc(&mut socket).await;
+            assert_eq!(start["method"], "thread/start");
+            fixture_send(
+                &mut socket,
+                json!({"method":"thread/started","params":{"thread":{"id":"open-thread"}}}),
+            )
+            .await;
+            fixture_send(
+                &mut socket,
+                json!({"id":start["id"],"result":{"thread":{"id":"open-thread","turns":[]}}}),
+            )
+            .await;
+            let _ = socket.next().await;
+        });
+        let input = Arc::new(tokio::sync::Mutex::new(NativeInput {
+            params: Some(json!({})),
+            text: None,
+            context: None,
+        }));
+        let (terminal, relay) = UnixStream::pair().unwrap();
+        let relay_connection = connection.clone();
+        let relay = tokio::spawn(async move {
+            relay_connection
+                .serve_with_input(relay, &endpoint, Some(input))
+                .await
+        });
+        let (mut terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
+        fixture_send(
+            &mut terminal,
+            json!({"id":1,"method":"thread/start","params":{}}),
+        )
+        .await;
+        let within = std::time::Duration::from_secs(5);
+        let started = tokio::time::timeout(within, fixture_rpc(&mut terminal))
+            .await
+            .unwrap();
+        assert_eq!(started["method"], "thread/started", "{started}");
+        let response = tokio::time::timeout(within, fixture_rpc(&mut terminal))
+            .await
+            .unwrap();
+        assert_eq!(
+            response["result"]["thread"]["id"], "open-thread",
+            "{response}"
+        );
+
+        // Still open: the pin exists before the terminal exits.
+        assert_eq!(
+            connection
+                .store
+                .provider_session_account(Provider::Codex, &"open-thread".into())
+                .unwrap()
+                .map(|account| account.to_string()),
+            Some("engineering".to_owned())
+        );
+        assert_eq!(
+            connection
+                .store
+                .provider_session_isolated(Provider::Codex, &"open-thread".into())
+                .unwrap(),
+            Some(true)
+        );
+        terminal.close(None).await.unwrap();
+        tokio::time::timeout(within, relay)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        provider.await.unwrap();
     }
 
     #[tokio::test]
@@ -1615,7 +1732,7 @@ mod tests {
                 session_id: "conversation".into(),
                 thread_id: None,
                 attachment: None,
-                account_id: None,
+                account_route: None,
             };
             let (terminal, relay) = UnixStream::pair().unwrap();
             let store = connection.store.clone();

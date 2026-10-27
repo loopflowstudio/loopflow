@@ -1,7 +1,7 @@
 # LOO-633: promote exact-frontier hotfix builds without claiming release authority
 
-Status: implemented and verified on the branch 2026-10-26; plan reconciled with main
-2026-10-27 (draft PR pending). Source: Task definition; evidence in
+Status: implemented and verified on the branch 2026-10-26; rebased on main and
+hotfix skill updated 2026-10-27. Source: Task definition; evidence in
 `scratch/database-locked-5-whys.md` (Why 3). Jack Heart asked (Task comment) to ship
 without stopping for review.
 
@@ -57,13 +57,11 @@ Kept: `LOOPFLOW_BUILD_PROVENANCE`/`LOOPFLOW_MIGRATION_AUTHORITY` (release CI nee
 
 ## Remaining
 
-- Rebase onto main. Expect conflicts from #1708 (CLI reorg: `lf doctor` → `lf self
-  doctor`, `doctor.rs`, `lf/mod.rs`, `docs/architecture-reference.md`). `install.rs` and
-  `installation.rs` are untouched on main.
-- Update `.lf/skills/hotfix.md` per the delete list; step 5's verdict text is unchanged.
+- Demo: promote the plain build and show `lf --version` / `lf self doctor`; add an empty
+  draft, rebuild, preview → `REFUSED`. Preview of the branch tip already reads `VERDICT:
+  promote (no migration to apply)` with `dirty hotfix c683600a5 on v0.14.17` (2026-10-27).
 - Coordinate with open #1656 (newcomer install) on `commands/install.rs` /
   `installation.rs`: whichever lands second rebases; no shared API changes.
-- Run the demo.
 
 ## Done when
 
@@ -78,4 +76,4 @@ Kept: `LOOPFLOW_BUILD_PROVENANCE`/`LOOPFLOW_MIGRATION_AUTHORITY` (release CI nee
 Gate check: `cargo test -p loopflow --lib` (compatibility, build_info, version,
 installation) + `--test global_commands` + `--test one_machine_tests`, `cargo fmt
 --check`, `cargo clippy --all-targets -- -D warnings`.
-Check (2026-10-26, pre-rebase): above set — pass.
+Check (2026-10-27, rebased on 66ad233139): focused lib tests + global_commands + fmt — pass; clippy and one_machine_tests left to gate.

@@ -25,14 +25,24 @@ Evidence: `scratch/database-locked-5-whys.md` (Why 1).
 - The call site depends on the symbol table. Release keeps it (`strip` is the default
   `debuginfo`). Inlined helpers report their caller.
 
+## Concept review (2026-10-26)
+
+Behaviour matches the Task's three outcomes; no open product choice. lf.log became its
+own concept: `crate::diagnostic_log` owns the path, the `DiagnosticLog` writer, the
+`IdentifiedLines` suffix (`pid= lf= rev=`), the `field` reader and the tail read.
+`store/contention.rs` keeps the write-hold hooks and `read_contention`. Done.
+
 ## Remaining
 
 - Demo (clone the store, run the 0.14.16 delete under lf). Belongs to the demo step.
-- Rebase onto #1708 (doctor.rs layout) / #1705 (sqlite.rs), whichever lands first.
+- Rebase onto #1708 (doctor.rs layout) / #1705 (sqlite.rs), whichever lands first; both still open
+  and the branch contains origin/main (2026-10-26).
+- Demo detail: `lf doctor` reads `logs/lf.log` under `LF_HOME`, so the cloned store's
+  demo runs with `LF_HOME` pointed at the clone's home.
 
 ## Checks
 
-- `cargo test -p loopflow --lib -- contention doctor`, fmt, clippy `--all-targets -D warnings`: pass after compress (2026-10-26). Full suites: gate.
+- `cargo test -p loopflow --lib -- contention doctor`, fmt, clippy `--all-targets -D warnings`: pass after the diagnostic_log move (2026-10-26). Full suites: gate.
 
 ## Delete — do not maintain
 

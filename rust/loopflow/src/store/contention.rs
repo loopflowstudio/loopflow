@@ -4,18 +4,13 @@
 //! and binary that wrote it, and `lf doctor` reads both back grouped by binary.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rusqlite::{ffi, Connection};
-use tracing::{Event, Subscriber};
-use tracing_subscriber::fmt::format::Writer;
-use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
-use tracing_subscriber::registry::LookupSpan;
 
-use crate::build_info::{short_revision, source_revision, BUILD_VERSION};
+use crate::diagnostic_log::{field, read_tail};
 
 /// Longer than any healthy write, and well inside the 15 s other writers wait.
 const SLOW_WRITE: Duration = if cfg!(test) {
@@ -29,13 +24,6 @@ const PROGRESS_STEPS: i32 = 1000;
 
 const SLOW_WRITE_MESSAGE: &str = "held the store write lock";
 const LOCK_FAILURE: &str = "database is locked";
-
-/// How much of lf.log `lf doctor` reads back: hours of warnings, not the history.
-const LOG_TAIL_BYTES: u64 = 16 * 1024 * 1024;
-
-pub fn log_path() -> PathBuf {
-    super::lf_home_dir().join("logs").join("lf.log")
-}
 
 // ---------------------------------------------------------------------------
 // Writer side
@@ -148,40 +136,6 @@ fn frame_function(line: &str) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Diagnostic lines
-// ---------------------------------------------------------------------------
-
-/// Ends every diagnostic line with the process and binary that wrote it, so a
-/// lock failure from one of dozens of concurrent lf processes is attributable.
-#[derive(Debug)]
-pub struct IdentifiedLines<F>(pub F);
-
-impl<S, N, F> FormatEvent<S, N> for IdentifiedLines<F>
-where
-    S: Subscriber + for<'a> LookupSpan<'a>,
-    N: for<'a> FormatFields<'a> + 'static,
-    F: FormatEvent<S, N>,
-{
-    fn format_event(
-        &self,
-        ctx: &FmtContext<'_, S, N>,
-        mut writer: Writer<'_>,
-        event: &Event<'_>,
-    ) -> std::fmt::Result {
-        let mut line = String::new();
-        self.0.format_event(ctx, Writer::new(&mut line), event)?;
-        writeln!(
-            writer,
-            "{} pid={} lf={} rev={}",
-            line.trim_end_matches('\n'),
-            std::process::id(),
-            BUILD_VERSION,
-            short_revision(source_revision()),
-        )
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Reading it back
 // ---------------------------------------------------------------------------
 
@@ -204,7 +158,7 @@ pub fn read_contention(
     log: &Path,
     since: i64,
 ) -> std::io::Result<BTreeMap<String, BinaryContention>> {
-    Ok(summarize(&read_log_tail(log)?, since))
+    Ok(summarize(&read_tail(log)?, since))
 }
 
 fn summarize(log: &str, since: i64) -> BTreeMap<String, BinaryContention> {
@@ -244,39 +198,13 @@ fn summarize(log: &str, since: i64) -> BTreeMap<String, BinaryContention> {
     binaries
 }
 
-/// The last `name=value` on a line; identity fields close every line.
-fn field<'a>(line: &'a str, name: &str) -> Option<&'a str> {
-    let start = line.rfind(&format!(" {name}="))? + name.len() + 2;
-    line[start..].split_whitespace().next()
-}
-
-/// The end of lf.log, starting at a line boundary. A missing log is empty.
-fn read_log_tail(path: &Path) -> std::io::Result<String> {
-    let mut file = match std::fs::File::open(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
-        Err(error) => return Err(error),
-    };
-    let offset = file.metadata()?.len().saturating_sub(LOG_TAIL_BYTES);
-    file.seek(SeekFrom::Start(offset))?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)?;
-    let text = String::from_utf8_lossy(&bytes).into_owned();
-    if offset == 0 {
-        return Ok(text);
-    }
-    Ok(text
-        .split_once('\n')
-        .map(|(_, rest)| rest.to_owned())
-        .unwrap_or_default())
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::Write;
     use std::sync::{Arc, Mutex};
 
-    use super::{field, frame_function, summarize, IdentifiedLines, UNIDENTIFIED};
+    use super::{frame_function, summarize, UNIDENTIFIED};
+    use crate::diagnostic_log::{field, IdentifiedLines};
     use crate::store::sqlite::SqliteStore;
 
     #[derive(Clone, Default)]

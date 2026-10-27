@@ -119,7 +119,7 @@ pub fn run(json: bool) -> Result<()> {
     checks.extend(check_installation(&database_path));
     checks.push(check_binary_freshness());
     checks.push(check_contention(
-        &crate::store::contention::log_path(),
+        &crate::diagnostic_log::log_path(),
         now - CONTENTION_WINDOW_SECONDS,
     ));
     if json {

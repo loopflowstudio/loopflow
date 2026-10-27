@@ -1385,8 +1385,8 @@ fn init_tracing(verbose: bool) {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::new("warn"))
         .with_ansi(false)
-        .with_writer(|| DiagnosticLog)
-        .event_format(loopflow::store::contention::IdentifiedLines(
+        .with_writer(|| loopflow::diagnostic_log::DiagnosticLog)
+        .event_format(loopflow::diagnostic_log::IdentifiedLines(
             tracing_subscriber::fmt::format(),
         ))
         .init();
@@ -1400,34 +1400,6 @@ fn desktop_intent_read(cli: &Cli) -> bool {
             cmd: DesktopCommand::View { .. } | DesktopCommand::Layout { save: false, .. }
         })
     )
-}
-
-/// Opened per event, so a command that logs nothing creates no home.
-struct DiagnosticLog;
-
-impl std::io::Write for DiagnosticLog {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        let path = loopflow::store::contention::log_path();
-        let log = path
-            .parent()
-            .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| {
-                std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&path)
-            });
-        match log {
-            Ok(mut log) => log.write_all(bytes),
-            // An unwritable home still runs; its diagnostics stay visible.
-            Err(_) => std::io::stderr().write_all(bytes),
-        }?;
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
 }
 
 fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {

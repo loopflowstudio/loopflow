@@ -152,3 +152,5 @@ credentials, and the live store.
   is absent.
 
 Check: `uv run pytest python/tests/test_release_automation.py -q` 15 passed; `bash -n scripts/bootstrap-cron-host.sh` ok. Host cutover (delivery step 2) and scheduled receipts remain.
+
+Concept review (2026-10-27, headless): no change. One wrapper per job is the scheduled command and the bootstrap's proof; the 1,000-byte refusal stays as the loud form of a silent failure. Host crontab still holds the 1,430/1,419-byte lines, so the 2026-10-28 09:00 run fails until delivery step 2 runs.

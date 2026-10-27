@@ -25,3 +25,4 @@ replacement and run the ordinary release from current main.
 `cargo test -p loopflow --test integration scheduled_release_tests` — 13 passed (new
 `superseded-candidate` fails without the fix with "release verification", the production
 error); clippy/fmt clean. Live proof waits for an installed lf with this fix (questions.md).
+Gate: `cargo fmt --all --check`, `cargo clippy --all-targets -p loopflow -- -D warnings`, `cargo test -p loopflow --test integration scheduled_release_tests` (13 passed, 401s — fixture suite drives real lf runs) — clean.

@@ -2308,22 +2308,14 @@ pub enum OndemandCommand {
         name: String,
         #[arg(long, value_enum)]
         provider: crate::rental::Provider,
-        /// A GPU type; without one, the cheapest CPU pod covering vCPUs and memory
-        #[arg(long)]
-        gpu: Option<String>,
         #[arg(long)]
         vcpus: u32,
         #[arg(long)]
         memory_gb: u32,
-        #[arg(long)]
-        disk_gb: Option<u32>,
-        /// Image, pinned by digest when added (default: RunPod's stock Ubuntu)
-        #[arg(long)]
-        image: Option<String>,
-        /// A data center (US-IL-1) or a region prefix (US); rents where it is in stock
-        #[arg(long)]
-        data_center: Option<String>,
-        /// Hard deadline for each machine it rents
+        /// Daytona only; Modal sizes disk itself
+        #[arg(long, default_value_t = 10)]
+        disk_gb: u32,
+        /// Hard deadline for each machine it rents, at most 24
         #[arg(long, default_value_t = crate::rental::DEFAULT_HOURS)]
         hours: f64,
         /// Machines rented at once
@@ -2335,12 +2327,6 @@ pub enum OndemandCommand {
     },
     /// Templates, budgets and the machines each has rented
     List {
-        #[arg(long)]
-        json: bool,
-    },
-    /// What it would rent now and at what price; rents nothing
-    Availability {
-        name: String,
         #[arg(long)]
         json: bool,
     },

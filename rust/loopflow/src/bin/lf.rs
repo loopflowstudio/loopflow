@@ -2257,8 +2257,9 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     ) {
         loopflow::ops::recovery::recover();
     }
-    // Placement chooses or rents the Machine and hands the Task to it; the
-    // ordinary dispatch below then forwards the run to its new owner.
+    // Placement chooses or rents the Machine and hands the Task to it, from
+    // the flags or the scope's default capacity; the ordinary dispatch below
+    // then forwards the run to its new owner.
     if let Some(Commands::Task {
         cmd:
             TaskCommand::Run {
@@ -2285,6 +2286,10 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             if loopflow::lf::commands::rental::place(&repo, issue, &placement, cli.batch)? {
                 return Ok(());
             }
+        } else if let Some(issue) = issue.as_deref().or(cli.task.as_deref()) {
+            let directory = loopflow::repo::working_directory()?;
+            let repo = selected_task_repository(&cli, &directory, Some(issue))?;
+            loopflow::lf::commands::rental::place_by_default(&repo, issue, cli.batch)?;
         }
     }
     if loopflow::lf::commands::work_route::dispatch(&cli, args)? {

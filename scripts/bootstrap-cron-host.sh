@@ -47,7 +47,7 @@ else
 fi
 
 lf_home="${LF_HOME:-$HOME/.lf}"
-# The checks below and both cron lines run in this one environment.
+# The checks below and both cron wrappers run in this one environment.
 minimal_env=(
   env -i
   "HOME=$HOME"

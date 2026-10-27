@@ -10,11 +10,11 @@ crontab -l | grep loopflow:infrastructure
 ```
 
 With no Wave Machine default, the Wave runs where it is read, so any Machine
-may bootstrap it. To pin it elsewhere, set the default first and bootstrap from
-that Machine:
+may bootstrap it. To pin it elsewhere, set your Machine for the Wave (a personal
+value in this Machine's local store) and bootstrap from that Machine:
 
 ```bash
-lf machine use mini infrastructure
+lf set machine mini --wave infrastructure
 lf wave status infrastructure --json | jq -r '.wave.machine.id'   # must equal `lf machine id`
 ```
 

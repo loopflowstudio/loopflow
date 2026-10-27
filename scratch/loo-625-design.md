@@ -131,9 +131,6 @@ tests, docs and skills moved.
 
 ## Remaining
 
-- Implement: `release/CRON_HOST.md:17` still teaches the deleted `lf machine use mini
-  infrastructure`; write `lf set machine mini --wave infrastructure` (concept review
-  2026-10-27; `bootstrap-cron-host.sh` reads `.wave.machine.id`, which still exists).
 - Gate: full suites (incl. `machine_commands`, `two_people`, `auth_tests`, Swift
   `WorkCLISubscriptionTests`), clippy, DTO fixtures.
 

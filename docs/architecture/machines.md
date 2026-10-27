@@ -225,29 +225,44 @@ Session bindings retain membership independently of checkout location.
 ## Own and rent Machines
 
 A **pool** names machines you own (`machines.pool`, with `cost_usd` and
-`expires_at`); it knows no provider. An **on-demand** (`ondemands`) is a provider
-template and a budget: machines at once and the most per hour. They share one
-namespace. A **rental** (`rentals`, `rent_…` ids) is one paid window: hardware,
-price, cap, deadline, state and billed cost, separate from the Machine it
-becomes once reachable. Task execution never learns a Machine is rented.
+`expires_at`); it knows no provider. An **on-demand** (`ondemands`) is a
+provider (Daytona or Modal), hardware and a budget: machines at once and the
+most per hour. They share one namespace. A **rental** (`rentals`, `rent_…` ids)
+is one paid window: hardware, price, cap, deadline, state and cost, separate
+from the Machine it becomes once reachable. Task execution never learns a
+Machine is rented.
 
 `lf task run --pool P` hands the Task to the first machine in P that holds no
 unfinished Task and has not expired; there is no queue. `--rent R` admits
-(limit, stock, price), writes the rental as `requested` with its provider name
-`lf-<id>` before the create, creates once, waits for SSH, adds the Machine,
-forwards GitHub and installs every Claude account's long-lived token, clones
-and binds the repository, then hands off. An unanswered create is `unconfirmed` until the inventory shows the name
-(adopt) or the create's window passes (`lost`); it is never resent.
-The pod installs the published `lf`; with `LF_RENT_LINUX_BIN` naming a Linux
-build, boot instead waits for the laptop to upload that binary, so a development
-build rents pods running its own code.
+(limit, then the price from the provider's published per-second rates), writes
+the rental as `requested` with its sandbox name `lf-<id>` before the create,
+creates once, waits for SSH, installs `lf`, adds the Machine, forwards GitHub
+and installs every Claude account's long-lived token, clones and binds the
+repository, then hands off. A sandbox that never answers SSH is deleted at once.
+An unanswered create is `unconfirmed` until its name finds it (then deleted,
+since it has no route) or the create's window passes (`lost`); it is never
+resent. With `LF_RENT_LINUX_BIN` naming a Linux build, the laptop uploads that
+binary instead of the published `lf`, so a development build rents sandboxes
+running its own code.
 
-The pod's start command runs the standard-library guardian first
-(`rust/loopflow/src/rental/guardian.py`): it deletes the pod at its deadline,
-or sooner when its cap runs out at the charged price, with the pod-scoped key.
-The laptop gives back by drain (Task rentals), soft deadline (15 minutes
-before the hard one) or `lf machine end`; any of them refuses while the pod
-holds uncommitted or unpushed work. Owned machines are never deleted.
+`lf machine use R [WAVE]` or `--repo`, naming a pool or on-demand, sets the
+scope's Tasks capacity (`scope_defaults.tasks_capacity`) in place of a Tasks
+Machine; the nearest scope that sets either wins. `lf task run` places an
+unowned Task by that default as `--pool` or `--rent` would. Its Session stays
+where it runs, and pools and on-demands are this Machine's own, so the default
+is not copied to your other Machines.
+
+Providers are reached through one embedded bridge
+(`rust/loopflow/src/rental/sandbox.py`) under `uv` with the provider's pinned
+SDK; it builds the image (an `lf` user, git, gh, Node and Claude Code, Rust,
+uv) and creates, finds and deletes sandboxes. Modal runs key-only sshd behind a
+TCP tunnel; Daytona's SSH gateway takes a token valid for the sandbox's life,
+which rides in the Machine route. Each provider deletes the sandbox at its
+deadline itself (Daytona `ttl_minutes`, Modal `timeout`). The laptop gives back
+when a Task rental has drained and its last Task finished 15 minutes ago, at
+the soft deadline (15 minutes before the hard one), or on `lf machine end`; any
+of them refuses while the sandbox holds uncommitted or unpushed work. Owned
+machines are never deleted.
 
 Before it deletes, the laptop pulls `lf history export --since <rental start>`:
 the worker's Process, Session, session-event and Graph rows as JSON lines, origin
@@ -256,7 +271,7 @@ row, and captures under `~/.lf/machines/<origin>/runs`, never in this Machine's
 own tables, so no reconciler, attachment or Task judgment acts on a copy. An
 export from any Machine but the one expected is refused; a failed copy deletes
 nothing. `lf session list` and `lf task status` name copies "from <machine>"
-after the pod is gone, and `lf history show <session>` opens one. The give-back
+after the sandbox is gone, and `lf history show <session>` opens one. The give-back
 pass runs at the end of a forwarded `lf task run` for its rented Machine and in
 lazy recovery (any lf read of this Machine's work) for every rental; `lf ondemand list` only
 refreshes provider state and never ends a machine.

@@ -175,7 +175,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             };
             let mut statuses = Vec::new();
             for machine in machines {
-                // A given-back pod is gone; probing it would only time out.
+                // A given-back sandbox is gone; probing it would only time out.
                 let ended = store
                     .sqlite
                     .rental_for_machine(&machine.id)?
@@ -304,7 +304,7 @@ pub(super) struct Probe {
 pub(super) const REMOTE_PATH: &str = "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; if command -v npm >/dev/null 2>&1; then PATH=\"$PATH:$(npm config get prefix 2>/dev/null)/bin\"; fi";
 
 // Public installer, identical to the first-install command in README.md.
-const INSTALL_COMMAND: &str = "curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh";
+pub(super) const INSTALL_COMMAND: &str = "curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FailureKind {

@@ -1,16 +1,16 @@
 //! Machines you own and machines you rent.
 //!
 //! A **Pool** groups machines you own; it knows no provider. An **OnDemand**
-//! is what you rent: a provider template and a budget (how many at once, the
+//! is what you rent: a provider, hardware and a budget (how many at once, the
 //! most per hour). They share one namespace. A **Rental** is one paid window
 //! on a provider: its price, hardware, cap, deadline and cost. It becomes an
 //! ordinary Machine once reachable; Task execution never learns it is rented.
 //!
 //! Admission writes the Rental's identity before the provider is asked, so an
-//! unknown reply keeps it; the create is never resent. The pod's guardian
-//! deletes it at the hard deadline whatever else fails.
+//! unknown reply keeps it; the create is never resent. The provider itself
+//! deletes the sandbox at the hard deadline whatever else fails.
 
-pub mod runpod;
+pub mod sandbox;
 
 use std::fmt;
 
@@ -31,10 +31,12 @@ prefixed_uuid_id!(
 pub const DEFAULT_HOURS: f64 = 4.0;
 /// Before the hard deadline, give back now rather than when drained.
 pub const SOFT_DEADLINE_SECONDS: i64 = 15 * 60;
-/// An unconfirmed create absent from the inventory after this long is lost.
-pub const CREATE_SECONDS: i64 = 5 * 60;
-/// LOO-554: RunPod's stock Ubuntu image, pinned by digest when an on-demand is added.
-pub const STOCK_IMAGE: &str = "runpod/base:1.0.2-ubuntu2404";
+/// After its last Task finishes, a rental waits this long before going back.
+pub const GRACE_SECONDS: i64 = 15 * 60;
+/// The longest window either provider keeps a sandbox (Modal's limit).
+pub const MAX_HOURS: f64 = 24.0;
+/// An unconfirmed create absent under its name after this long is lost.
+pub const CREATE_SECONDS: i64 = 20 * 60;
 
 // ---------------------------------------------------------------------------
 // Money
@@ -129,131 +131,97 @@ impl std::str::FromStr for Usd {
 }
 
 // ---------------------------------------------------------------------------
-// Templates and hardware
+// Providers and hardware
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Provider {
-    Runpod,
+    Daytona,
+    Modal,
 }
 
 impl Provider {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Runpod => "runpod",
+            Self::Daytona => "daytona",
+            Self::Modal => "modal",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
         match value {
-            "runpod" => Some(Self::Runpod),
+            "daytona" => Some(Self::Daytona),
+            "modal" => Some(Self::Modal),
             _ => None,
         }
     }
-}
 
-/// What an on-demand asks a provider for. No GPU rents the cheapest CPU pod
-/// covering `vcpus` and `memory_gb`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Template {
-    pub gpu: Option<String>,
-    pub vcpus: u32,
-    pub memory_gb: u32,
-    pub disk_gb: Option<u32>,
-    /// Pinned by digest when the on-demand is added.
-    pub image: String,
-    pub data_center: Option<String>,
-}
-
-/// What was priced, asked for and recorded: create asks for exactly this.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Hardware {
-    Cpu {
-        flavor: String,
-        vcpus: u32,
-    },
-    Gpu {
-        id: String,
-        min_vcpus: u32,
-        min_memory_gb: u32,
-    },
-}
-
-impl Hardware {
-    /// Container disk: 40 GB, or 10 GB per vCPU on CPU flavors that cap it.
-    pub fn disk_gb(&self) -> u32 {
+    /// The SDK the bridge runs with, pinned.
+    pub fn sdk(self) -> &'static str {
         match self {
-            Self::Gpu { .. } => 40,
-            Self::Cpu { vcpus, .. } => (10 * vcpus).min(40),
+            Self::Daytona => "daytona==0.226.1",
+            Self::Modal => "modal==1.6.2",
         }
     }
+
+    /// Why this lf process cannot reach the provider's account, if it cannot.
+    pub fn missing_credentials(self) -> Option<String> {
+        let set = |name: &str| std::env::var(name).is_ok_and(|value| !value.is_empty());
+        match self {
+            Self::Daytona if !set("DAYTONA_API_KEY") => Some(
+                "DAYTONA_API_KEY is not set; run with `doppler run -- lf …`".to_string(),
+            ),
+            Self::Modal
+                if !set("MODAL_TOKEN_ID")
+                    && !dirs::home_dir().is_some_and(|home| home.join(".modal.toml").is_file()) =>
+            {
+                Some(
+                    "no Modal token: set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET, or `uvx modal token new`"
+                        .to_string(),
+                )
+            }
+            _ => None,
+        }
+    }
+
+    /// The published per-second rates, as one hourly price for this hardware.
+    /// Daytona: $0.0504/vCPU-h, $0.0162/GiB-h, $0.000108/GiB-h of disk past 5.
+    /// Modal sandboxes: $0.00003942/core-s (two vCPUs a core), $0.00000667/GiB-s.
+    pub fn usd_per_hour(self, hardware: &Hardware) -> Usd {
+        let (vcpu, gib, disk) = match self {
+            Self::Daytona => (
+                50_400,
+                16_200,
+                108 * i64::from(hardware.disk_gb.saturating_sub(5)),
+            ),
+            Self::Modal => (70_956, 24_012, 0),
+        };
+        Usd::from_micros(
+            vcpu * i64::from(hardware.vcpus) + gib * i64::from(hardware.memory_gb) + disk,
+        )
+    }
+}
+
+impl fmt::Display for Provider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// What an on-demand rents and a rental was granted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hardware {
+    pub vcpus: u32,
+    pub memory_gb: u32,
+    pub disk_gb: u32,
 }
 
 impl fmt::Display for Hardware {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Cpu { flavor, vcpus } => write!(f, "{flavor}×{vcpus}"),
-            Self::Gpu { id, .. } => f.write_str(id),
-        }
+        write!(f, "{} vCPU {} GB", self.vcpus, self.memory_gb)
     }
-}
-
-/// What a provider would rent now, at what price.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Quote {
-    pub hardware: Hardware,
-    pub usd_per_hour: Usd,
-    /// False only when the catalog positively reports none.
-    pub available: bool,
-    /// Where it is in stock within the template's pin, for placement; empty
-    /// when unpinned, and the provider's scheduler chooses.
-    pub data_centers: Vec<String>,
-}
-
-/// One CPU flavor from a provider catalog.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CpuFlavor {
-    pub id: String,
-    pub min_vcpus: u32,
-    pub max_vcpus: u32,
-    pub ram_gb_per_vcpu: f64,
-    pub usd_per_vcpu_hour: Usd,
-    pub available: bool,
-    pub data_centers: Vec<String>,
-}
-
-/// CPU pods come in power-of-two vCPU counts with memory a fixed multiple of
-/// them. Take the smallest size covering both needs in each flavor, then the
-/// cheapest, preferring flavors in stock.
-pub fn cpu_quote(flavors: &[CpuFlavor], vcpus: u32, memory_gb: u32) -> Option<Quote> {
-    let smallest = catalog_vcpus(vcpus);
-    flavors
-        .iter()
-        .filter_map(|flavor| {
-            let mut size = smallest.max(flavor.min_vcpus);
-            while (size as f64) * flavor.ram_gb_per_vcpu < memory_gb as f64 {
-                size = size.checked_mul(2)?;
-            }
-            let usd_per_hour = flavor.usd_per_vcpu_hour.times(size as i64);
-            (size <= flavor.max_vcpus && usd_per_hour > Usd::ZERO).then(|| Quote {
-                hardware: Hardware::Cpu {
-                    flavor: flavor.id.clone(),
-                    vcpus: size,
-                },
-                usd_per_hour,
-                available: flavor.available,
-                data_centers: flavor.data_centers.clone(),
-            })
-        })
-        .min_by_key(|quote| (!quote.available, quote.usd_per_hour))
-}
-
-/// The smallest power-of-two vCPU count RunPod's catalog is asked about.
-pub fn catalog_vcpus(vcpus: u32) -> u32 {
-    vcpus.max(2).next_power_of_two()
 }
 
 // ---------------------------------------------------------------------------
@@ -273,12 +241,18 @@ pub struct Pool {
 pub struct OnDemand {
     pub name: String,
     pub provider: Provider,
-    pub template: Template,
+    pub hardware: Hardware,
     pub max_machines: u32,
     pub max_usd_per_hour: Usd,
     pub hours: f64,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+}
+
+impl OnDemand {
+    pub fn usd_per_hour(&self) -> Usd {
+        self.provider.usd_per_hour(&self.hardware)
+    }
 }
 
 /// An owned machine's commitments: its pool, what it cost, when it stops
@@ -299,7 +273,7 @@ pub enum RentalState {
     Requested,
     /// The create's reply was lost; the provider name finds it.
     Unconfirmed,
-    /// The provider confirmed the pod; not reachable yet.
+    /// The provider confirmed the sandbox; not reachable yet.
     Booting,
     /// Added as a Machine.
     Running,
@@ -373,9 +347,15 @@ pub struct Rental {
 }
 
 impl Rental {
-    /// The pod's name at the provider: our identity, sent before any reply.
+    /// The sandbox's name at the provider: our identity, sent before any reply.
     pub fn provider_name_for(id: &RentalId) -> String {
         format!("lf-{id}")
+    }
+
+    /// Billed by the second: the hourly price from admission until `end`.
+    pub fn cost_until(&self, end: OffsetDateTime) -> Usd {
+        let seconds = (end - self.created_at).whole_seconds().max(0);
+        self.usd_per_hour.over_hours(seconds as f64 / 3600.0)
     }
 
     pub fn soft_deadline(&self) -> OffsetDateTime {
@@ -405,13 +385,6 @@ pub enum Refusal {
         live: u32,
         max: u32,
     },
-    #[error("no {hardware} available for {ondemand} now{place}")]
-    Unavailable {
-        ondemand: String,
-        hardware: String,
-        /// `" in <data center>"` when the template pins one, else empty.
-        place: String,
-    },
     #[error("{ondemand}: {hardware} costs {seen}/h, above its {max}/h limit")]
     OverPrice {
         ondemand: String,
@@ -421,11 +394,11 @@ pub enum Refusal {
     },
 }
 
-/// Etude's order: the machine limit, then stock and price, then the cap.
+/// The machine limit, then the price, then the cap. The window is at most
+/// `MAX_HOURS`.
 pub fn admit(
     ondemand: &OnDemand,
     live: u32,
-    quote: &Quote,
     hours: Option<f64>,
     max_usd: Option<Usd>,
     now: OffsetDateTime,
@@ -437,36 +410,22 @@ pub fn admit(
             max: ondemand.max_machines,
         });
     }
-    if !quote.available {
-        return Err(Refusal::Unavailable {
-            ondemand: ondemand.name.clone(),
-            hardware: quote.hardware.to_string(),
-            place: ondemand
-                .template
-                .data_center
-                .as_deref()
-                .map(|place| format!(" in {place}"))
-                .unwrap_or_default(),
-        });
-    }
-    if quote.usd_per_hour > ondemand.max_usd_per_hour {
+    let usd_per_hour = ondemand.usd_per_hour();
+    if usd_per_hour > ondemand.max_usd_per_hour {
         return Err(Refusal::OverPrice {
             ondemand: ondemand.name.clone(),
-            hardware: quote.hardware.to_string(),
-            seen: quote.usd_per_hour,
+            hardware: ondemand.hardware.to_string(),
+            seen: usd_per_hour,
             max: ondemand.max_usd_per_hour,
         });
     }
-    let hours = hours.unwrap_or(ondemand.hours);
-    let window = quote.usd_per_hour.over_hours(hours);
+    let hours = hours.unwrap_or(ondemand.hours).min(MAX_HOURS);
+    let window = usd_per_hour.over_hours(hours);
     let cap_usd = max_usd.map_or(window, |max| max.min(window));
-    let paid = cap_usd
-        .hours_at(quote.usd_per_hour)
-        .unwrap_or(hours)
-        .min(hours);
+    let paid = cap_usd.hours_at(usd_per_hour).unwrap_or(hours).min(hours);
     Ok(Admission {
-        hardware: quote.hardware.clone(),
-        usd_per_hour: quote.usd_per_hour,
+        hardware: ondemand.hardware.clone(),
+        usd_per_hour,
         cap_usd,
         deadline: now + time::Duration::seconds((paid * 3600.0) as i64),
     })
@@ -487,7 +446,7 @@ pub fn resolve_unconfirmed<P>(
     now: OffsetDateTime,
 ) -> Resolution<P> {
     match found {
-        Some(pod) => Resolution::Adopt(pod),
+        Some(sandbox) => Resolution::Adopt(sandbox),
         None if now - created_at >= time::Duration::seconds(CREATE_SECONDS) => Resolution::Lost,
         None => Resolution::Wait,
     }
@@ -574,6 +533,8 @@ pub struct Holdings {
     pub placed: bool,
     pub tasks: Vec<TaskId>,
     pub live_processes: usize,
+    /// When the last Task it held was completed or abandoned.
+    pub finished_at: Option<OffsetDateTime>,
     /// Worktrees with uncommitted changes or commits not on their upstream.
     pub unpushed: Vec<String>,
 }
@@ -582,14 +543,14 @@ pub struct Holdings {
 pub enum GiveBack {
     /// Keep it: work is still there and no deadline forces the end.
     Keep(String),
-    /// The pod holds the only copy of this work; never delete it.
+    /// The sandbox holds the only copy of this work; never delete it.
     Refuse(Vec<String>),
     /// Copy records up, then delete.
     End,
 }
 
-/// Drain for Task rentals, the soft deadline for every rental, and an explicit
-/// end. Unpushed work refuses every one of them unless forced.
+/// Drain plus the grace for Task rentals, the soft deadline for every rental,
+/// and an explicit end. Unpushed work refuses every one of them unless forced.
 pub fn give_back(
     rental: &Rental,
     holdings: &Holdings,
@@ -599,9 +560,15 @@ pub fn give_back(
 ) -> GiveBack {
     let due = explicit || now >= rental.soft_deadline();
     let drained = holdings.placed && holdings.tasks.is_empty() && holdings.live_processes == 0;
-    if !due && (rental.by_hand || !drained) {
+    let grace_ends = holdings
+        .finished_at
+        .map(|at| at + time::Duration::seconds(GRACE_SECONDS));
+    let in_grace = grace_ends.is_some_and(|ends| now < ends);
+    if !due && (rental.by_hand || !drained || in_grace) {
         let reason = if rental.by_hand {
             format!("rented by hand until {}", rental.deadline)
+        } else if drained {
+            format!("idle until {}", grace_ends.expect("in grace has an end"))
         } else {
             format!(
                 "{} Task(s) and {} live Process(es) remain",

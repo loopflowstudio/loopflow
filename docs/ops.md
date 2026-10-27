@@ -190,17 +190,20 @@ Group machines you own into a pool, and rent more when none is free:
 ```bash
 lf pool add lab && lf machine add jack@mini --pool lab
 lf account token claude jack@example.com          # once a year: Claude for rented machines
-lf ondemand add code --provider runpod --vcpus 8 --memory-gb 16 --max 1 --max-usd-per-hour 0.40
+lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-usd-per-hour 0.40
 lf task run LOO-570 --pool lab --rent code --quote   # where it would run, the most it could cost
 lf task run LOO-570 --pool lab --rent code           # a free lab machine, else rent one
+lf machine use code infrastructure                   # the Wave's new Tasks rent from code
 lf machine end code-1                                # give a rented machine back now
 ```
 
-Renting reads `RUNPOD_API_KEY` from the environment (`doppler run -- lf …`). A
-rented machine deletes itself at its deadline or when its budget runs out. Before
-any give-back, its Sessions and Processes are copied home, so `lf session list`
-shows them "from code-1". Unpushed work refuses the give-back unless you pass
-`--force`.
+Renting from Daytona reads `DAYTONA_API_KEY` (`doppler run -- lf …`); Modal
+reads `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or `~/.modal.toml`. Its provider
+deletes a rented machine at its deadline. `lf machine use code infrastructure`
+(or `--repo`) sends a scope's unowned Tasks to `code` when they run. A machine
+goes back 15 minutes after its last Task finished; first its Sessions and
+Processes are copied home, so `lf session list` shows them "from code-1".
+Unpushed work refuses the give-back unless you pass `--force`.
 
 ## Accounts
 

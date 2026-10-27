@@ -11,20 +11,19 @@ use anyhow::{anyhow, Context};
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use crate::durable::{Machine, MachineId};
+use crate::durable::{CapacityDefault, Machine, MachineId};
 use crate::lf::{OndemandCommand, PoolCommand};
 use crate::machine_records::CopyCounts;
-use crate::rental::runpod::{self, CreatePod, RunPod};
+use crate::rental::sandbox::{CreateSandbox, Sandboxes};
 use crate::rental::{
-    self, GiveBack, Holdings, OnDemand, Pool, PoolMachine, Provider, Rental, RentalState,
-    Resolution, Template, Usd,
+    self, GiveBack, Hardware, Holdings, OnDemand, Pool, PoolMachine, Rental, RentalState,
+    Resolution, Usd,
 };
 use crate::store::sqlite::SqliteStore;
 use crate::store::Store;
 
-/// A booted pod has its address within minutes; tools take longer.
-const ADDRESS_WAIT: Duration = Duration::from_secs(10 * 60);
-const READY_WAIT: Duration = Duration::from_secs(20 * 60);
+/// A created sandbox answers SSH within seconds; installing lf takes longer.
+const SSH_WAIT: Duration = Duration::from_secs(5 * 60);
 
 fn open_store(runtime: &tokio::runtime::Runtime) -> anyhow::Result<Store> {
     runtime
@@ -52,6 +51,25 @@ struct PoolListing {
     #[serde(flatten)]
     pool: Pool,
     machines: Vec<PoolMachine>,
+    /// The Waves and repositories whose new Tasks it takes.
+    defaults: Vec<CapacityDefault>,
+}
+
+/// The scopes whose new Tasks go to this pool or on-demand.
+fn defaults_for(sqlite: &SqliteStore, capacity: &str) -> anyhow::Result<Vec<CapacityDefault>> {
+    let mut defaults = sqlite.capacity_defaults()?;
+    defaults.retain(|default| default.capacity == capacity);
+    Ok(defaults)
+}
+
+fn print_defaults(defaults: &[CapacityDefault]) {
+    for default in defaults {
+        let scope = match default.scope {
+            crate::durable::DefaultScope::Wave(_) => "Wave",
+            crate::durable::DefaultScope::Repository(_) => "repository",
+        };
+        println!("  takes new Tasks of {scope} {}", default.name);
+    }
 }
 
 pub fn run_pool(cmd: &PoolCommand) -> anyhow::Result<()> {
@@ -69,7 +87,12 @@ pub fn run_pool(cmd: &PoolCommand) -> anyhow::Result<()> {
                 .into_iter()
                 .map(|pool| {
                     let machines = sqlite.pool_machines(&pool.name)?;
-                    Ok(PoolListing { pool, machines })
+                    let defaults = defaults_for(sqlite, &pool.name)?;
+                    Ok(PoolListing {
+                        pool,
+                        machines,
+                        defaults,
+                    })
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
             if *json {
@@ -80,6 +103,7 @@ pub fn run_pool(cmd: &PoolCommand) -> anyhow::Result<()> {
             for listing in &listings {
                 let off = if listing.pool.off { " (off)" } else { "" };
                 println!("{}{off}", listing.pool.name);
+                print_defaults(&listing.defaults);
                 for machine in &listing.machines {
                     let expiry = match machine.ownership.expires_at {
                         Some(at) if at <= now => "expired".to_string(),
@@ -125,6 +149,8 @@ struct OndemandListing {
     #[serde(flatten)]
     ondemand: OnDemand,
     rentals: Vec<RentalListing>,
+    /// The Waves and repositories whose new Tasks it rents for.
+    defaults: Vec<CapacityDefault>,
 }
 
 #[derive(Debug, Serialize)]
@@ -137,19 +163,6 @@ struct RentalListing {
     copied: Option<CopyCounts>,
 }
 
-#[derive(Debug, Serialize)]
-struct Availability {
-    ondemand: String,
-    hardware: rental::Hardware,
-    usd_per_hour: Usd,
-    max_usd_per_hour: Usd,
-    available: bool,
-    in_use: u32,
-    max: u32,
-    #[serde(with = "time::serde::rfc3339")]
-    observed_at: OffsetDateTime,
-}
-
 pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     let store = open_store(&runtime)?;
@@ -158,44 +171,42 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
         OndemandCommand::Add {
             name,
             provider,
-            gpu,
             vcpus,
             memory_gb,
             disk_gb,
-            image,
-            data_center,
             hours,
             max,
             max_usd_per_hour,
         } => {
-            let image = pin_image(image.as_deref().unwrap_or(rental::STOCK_IMAGE))?;
-            sqlite.add_ondemand(&OnDemand {
+            let ondemand = OnDemand {
                 name: name.clone(),
                 provider: *provider,
-                template: Template {
-                    gpu: gpu.clone(),
+                hardware: Hardware {
                     vcpus: *vcpus,
                     memory_gb: *memory_gb,
                     disk_gb: *disk_gb,
-                    image,
-                    data_center: data_center.clone(),
                 },
                 max_machines: *max,
                 max_usd_per_hour: *max_usd_per_hour,
-                hours: *hours,
+                hours: hours.min(rental::MAX_HOURS),
                 created_at: now(),
-            })?;
+            };
+            sqlite.add_ondemand(&ondemand)?;
+            let price = ondemand.usd_per_hour();
             println!(
-                "Added on-demand {name}: at most {max} at {max_usd_per_hour}/h, {hours}h each; \
-                 `lf ondemand availability {name}` quotes it"
+                "Added on-demand {name}: {} on {provider} at {price}/h; at most {max} at once, \
+                 {}h each",
+                ondemand.hardware, ondemand.hours
             );
+            if price > *max_usd_per_hour {
+                eprintln!(
+                    "{price}/h is above its {max_usd_per_hour}/h limit, so it rents nothing yet"
+                );
+            }
         }
         OndemandCommand::List { json } => {
             // A listing, even one a client polls, never ends a paid machine.
-            let api = RunPod::from_env().ok();
-            if let Some(api) = &api {
-                refresh_all(sqlite, api)?;
-            }
+            let unreached = refresh_all(sqlite);
             let listings = sqlite
                 .ondemands()?
                 .into_iter()
@@ -205,59 +216,23 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                         .into_iter()
                         .map(|rental| listing(sqlite, rental))
                         .collect::<anyhow::Result<Vec<_>>>()?;
-                    Ok(OndemandListing { ondemand, rentals })
+                    let defaults = defaults_for(sqlite, &ondemand.name)?;
+                    Ok(OndemandListing {
+                        ondemand,
+                        rentals,
+                        defaults,
+                    })
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
             if *json {
                 println!("{}", serde_json::to_string(&listings)?);
                 return Ok(());
             }
-            if api.is_none() && !listings.is_empty() {
-                eprintln!(
-                    "RUNPOD_API_KEY is not set; showing recorded states without asking RunPod"
-                );
+            for reason in unreached {
+                eprintln!("{reason}; showing recorded states");
             }
             for listing in &listings {
                 print_ondemand(listing);
-            }
-        }
-        OndemandCommand::Availability { name, json } => {
-            let ondemand = require_ondemand(sqlite, name)?;
-            let api = RunPod::from_env()?;
-            let quote = api.quote(&ondemand.template)?;
-            let in_use = sqlite.live_rentals(name)?;
-            let availability = Availability {
-                ondemand: name.clone(),
-                hardware: quote.hardware,
-                usd_per_hour: quote.usd_per_hour,
-                max_usd_per_hour: ondemand.max_usd_per_hour,
-                available: quote.available,
-                in_use,
-                max: ondemand.max_machines,
-                observed_at: now(),
-            };
-            if *json {
-                println!("{}", serde_json::to_string(&availability)?);
-            } else {
-                let price = if availability.usd_per_hour <= availability.max_usd_per_hour {
-                    "≤"
-                } else {
-                    ">"
-                };
-                let stock = if availability.available {
-                    ""
-                } else {
-                    " · none in stock"
-                };
-                println!(
-                    "{} · {}/h {price} {} · {}/{} in use · observed {}{stock}",
-                    availability.hardware,
-                    availability.usd_per_hour,
-                    availability.max_usd_per_hour,
-                    availability.in_use,
-                    availability.max,
-                    clock(availability.observed_at),
-                );
             }
         }
         OndemandCommand::Max { name, max } => {
@@ -270,8 +245,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             max_usd,
             json,
         } => {
-            let api = RunPod::from_env()?;
-            let (rental, machine) = rent(&runtime, sqlite, &api, name, *hours, *max_usd, true)?;
+            let (rental, machine) = rent(&runtime, sqlite, name, *hours, *max_usd, true)?;
             if *json {
                 println!("{}", serde_json::to_string(&rental)?);
             } else {
@@ -301,7 +275,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
 
 fn require_ondemand(sqlite: &SqliteStore, name: &str) -> anyhow::Result<OnDemand> {
     sqlite.ondemand(name)?.ok_or_else(|| {
-        anyhow!("no on-demand {name}; `lf ondemand add {name} --provider runpod …` names one")
+        anyhow!("no on-demand {name}; `lf ondemand add {name} --provider daytona …` names one")
     })
 }
 
@@ -324,22 +298,21 @@ fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing
 
 fn print_ondemand(listing: &OndemandListing) {
     let ondemand = &listing.ondemand;
-    let shape = match &ondemand.template.gpu {
-        Some(gpu) => gpu.clone(),
-        None => format!(
-            "{} vCPU {} GB",
-            ondemand.template.vcpus, ondemand.template.memory_gb
-        ),
-    };
+    let shape = format!("{} on {}", ondemand.hardware, ondemand.provider);
     let live = listing
         .rentals
         .iter()
         .filter(|r| r.rental.state.is_live())
         .count();
     println!(
-        "{} · {shape} · {live}/{} · ≤ {}/h · {}h",
-        ondemand.name, ondemand.max_machines, ondemand.max_usd_per_hour, ondemand.hours
+        "{} · {shape} · {live}/{} · {}/h ≤ {}/h · {}h",
+        ondemand.name,
+        ondemand.max_machines,
+        ondemand.usd_per_hour(),
+        ondemand.max_usd_per_hour,
+        ondemand.hours
     );
+    print_defaults(&listing.defaults);
     for entry in &listing.rentals {
         let rental = &entry.rental;
         let name = entry.machine.as_deref().unwrap_or(rental.id.as_str());
@@ -373,122 +346,69 @@ fn print_ondemand(listing: &OndemandListing) {
     }
 }
 
-/// Pin a registry image to its current digest so every rental boots the same bytes.
-fn pin_image(image: &str) -> anyhow::Result<String> {
-    if image.contains("@sha256:") {
-        return Ok(image.to_string());
-    }
-    let (repository, tag) = image.rsplit_once(':').unwrap_or((image, "latest"));
-    if repository.contains('.') && repository.contains('/') {
-        return Err(anyhow!(
-            "only Docker Hub images are pinned automatically; pass {image} as REF@sha256:DIGEST"
-        ));
-    }
-    let repository = if repository.contains('/') {
-        repository.to_string()
-    } else {
-        format!("library/{repository}")
-    };
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()?;
-    let query = serde_urlencoded::to_string([
-        ("service", "registry.docker.io"),
-        ("scope", &format!("repository:{repository}:pull")),
-    ])?;
-    let token: serde_json::Value = client
-        .get(format!("https://auth.docker.io/token?{query}"))
-        .send()?
-        .error_for_status()?
-        .json()?;
-    let token = token["token"]
-        .as_str()
-        .ok_or_else(|| anyhow!("Docker Hub gave no pull token for {image}"))?;
-    let reply = client
-        .head(format!(
-            "https://registry-1.docker.io/v2/{repository}/manifests/{tag}"
-        ))
-        .bearer_auth(token)
-        .header(
-            "Accept",
-            "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json",
-        )
-        .send()?
-        .error_for_status()
-        .with_context(|| format!("could not resolve {image}"))?;
-    let digest = reply
-        .headers()
-        .get("Docker-Content-Digest")
-        .and_then(|value| value.to_str().ok())
-        .filter(|digest| digest.starts_with("sha256:"))
-        .ok_or_else(|| anyhow!("Docker Hub returned no digest for {image}"))?;
-    let name = image.rsplit_once(':').map_or(image, |(name, _)| name);
-    Ok(format!("{name}@{digest}"))
-}
-
 // ---------------------------------------------------------------------------
 // Renting
 // ---------------------------------------------------------------------------
 
-/// Admit, create once, then wait until the pod is an added Machine.
+/// Admit, create once, then install lf and add the sandbox as a Machine.
 pub(crate) fn rent(
     runtime: &tokio::runtime::Runtime,
     sqlite: &SqliteStore,
-    api: &RunPod,
     name: &str,
     hours: Option<f64>,
     max_usd: Option<Usd>,
     by_hand: bool,
 ) -> anyhow::Result<(Rental, Machine)> {
     let ondemand = require_ondemand(sqlite, name)?;
-    if ondemand.provider != Provider::Runpod {
-        return Err(anyhow!("{name} names a provider this lf cannot rent from"));
-    }
+    let api = Sandboxes::from_env(ondemand.provider)?;
     let public_key = public_key()?;
     let linux_lf = linux_lf()?;
-    let quote = api.quote(&ondemand.template)?;
-    let rental = sqlite.admit_rental(name, &quote, hours, max_usd, by_hand)?;
-    let (env, entrypoint) = runpod::boot(
-        rental.deadline,
-        rental.cap_usd,
-        &public_key,
-        linux_lf.is_some(),
+    let rental = sqlite.admit_rental(name, hours, max_usd, by_hand)?;
+    eprintln!(
+        "Renting {} on {} at {}/h until {}",
+        rental.hardware,
+        ondemand.provider,
+        rental.usd_per_hour,
+        clock(rental.deadline)
     );
-    let request = CreatePod {
+    let request = CreateSandbox {
         name: rental.provider_name.clone(),
         hardware: rental.hardware.clone(),
-        image: ondemand.template.image.clone(),
-        disk_gb: ondemand
-            .template
-            .disk_gb
-            .unwrap_or_else(|| rental.hardware.disk_gb()),
-        data_centers: quote.data_centers.clone(),
-        env,
-        entrypoint,
+        lifetime_minutes: u32::try_from((rental.deadline - now()).whole_minutes().max(1))
+            .unwrap_or(u32::MAX),
+        public_key,
     };
-    let pod = match api.create(&request) {
-        Ok(pod) => pod,
+    let sandbox = match api.create(&request) {
+        Ok(sandbox) => sandbox,
         Err(error) => {
             sqlite.set_rental_state(&rental.id, RentalState::Unconfirmed)?;
             return Err(anyhow!(
-                "{error}; it is unknown whether RunPod created {}. `lf ondemand list` finds it by name \
-                 and adopts or forgets it; its guardian ends it by {} if it exists",
+                "{error}; it is unknown whether {} created {}. `lf ondemand list` finds it by name \
+                 and gives it back; {} deletes it by {} if it exists",
+                ondemand.provider,
                 rental.provider_name,
+                ondemand.provider,
                 clock(rental.deadline)
             ));
         }
     };
-    let rental = sqlite.confirm_rental(&rental.id, &pod.id, pod.usd_per_hour)?;
-    eprintln!(
-        "Rented {} ({}) at {}/h; waiting for it to boot",
-        rental.hardware, pod.id, rental.usd_per_hour
-    );
-    let machine = attach(runtime, sqlite, api, &rental, linux_lf.as_deref())?;
+    let rental = sqlite.confirm_rental(&rental.id, &sandbox.id, rental.usd_per_hour)?;
+    let route = sandbox.route.expect("a created sandbox has a route");
+    let machine = match attach(runtime, sqlite, &rental, &route, linux_lf.as_deref()) {
+        Ok(machine) => machine,
+        Err(error) => {
+            // Nothing ran on it yet, so nothing is lost by giving it back now.
+            if let Err(cleanup) = delete_sandbox(sqlite, &api, &rental) {
+                eprintln!("{}: {cleanup:#}", rental.provider_name);
+            }
+            return Err(error);
+        }
+    };
     Ok((sqlite.rental(&rental.id)?, machine))
 }
 
-/// `LF_RENT_LINUX_BIN`: a Linux `lf` the pod runs instead of the published
-/// release, so a development build can rent a pod running its own code.
+/// `LF_RENT_LINUX_BIN`: a Linux `lf` the sandbox runs instead of the published
+/// release, so a development build can rent a sandbox running its own code.
 fn linux_lf() -> anyhow::Result<Option<std::path::PathBuf>> {
     let Some(path) = std::env::var_os(LINUX_LF_ENV).filter(|value| !value.is_empty()) else {
         return Ok(None);
@@ -502,104 +422,86 @@ fn linux_lf() -> anyhow::Result<Option<std::path::PathBuf>> {
 
 const LINUX_LF_ENV: &str = "LF_RENT_LINUX_BIN";
 
-/// Upload the binary the pod's boot is waiting for; sshd may not be up yet.
-fn upload_lf(route: &str, binary: &std::path::Path, deadline: Instant) -> anyhow::Result<()> {
-    println!("Uploading {} as the pod's lf", binary.display());
-    loop {
-        let uploaded = Command::new("ssh")
-            .args([
-                "-o",
-                "StrictHostKeyChecking=accept-new",
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=10",
-                route,
-                "mkdir -p ~/.local/bin && cat > ~/.local/bin/lf.new && chmod 755 ~/.local/bin/lf.new && mv ~/.local/bin/lf.new ~/.local/bin/lf",
-            ])
-            .stdin(std::fs::File::open(binary)?)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success());
-        if uploaded {
-            return Ok(());
-        }
-        if Instant::now() > deadline {
-            return Err(anyhow!("could not upload {} to {route}", binary.display()));
-        }
-        std::thread::sleep(Duration::from_secs(10));
-    }
+/// SSH that trusts a sandbox's fresh host key once; Machine routes then
+/// check it strictly like any other.
+fn first_contact(route: &str, script: &str, stdin: Stdio) -> std::io::Result<bool> {
+    Command::new("ssh")
+        .args([
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            route,
+            script,
+        ])
+        .stdin(stdin)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
 }
 
-/// Wait for an address and the pod's ready marker, then add it as a Machine.
+/// A tunnel port may be reused by a later sandbox with another host key.
+fn forget_host_key(route: &str) {
+    let address = route.trim_start_matches("ssh://");
+    let address = address.rsplit_once('@').map_or(address, |(_, host)| host);
+    let entry = match address.rsplit_once(':') {
+        Some((host, port)) if port != "22" => format!("[{host}]:{port}"),
+        Some((host, _)) => host.to_string(),
+        None => address.to_string(),
+    };
+    let _ = Command::new("ssh-keygen")
+        .args(["-R", &entry])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+/// Wait for SSH, install lf (published, or `LF_RENT_LINUX_BIN`), then add it
+/// as a Machine.
 fn attach(
     runtime: &tokio::runtime::Runtime,
     sqlite: &SqliteStore,
-    api: &RunPod,
     rental: &Rental,
+    route: &str,
     linux_lf: Option<&std::path::Path>,
 ) -> anyhow::Result<Machine> {
-    let pod_id = rental
-        .provider_id
-        .as_deref()
-        .ok_or_else(|| anyhow!("rental {} has no confirmed pod", rental.id))?;
+    forget_host_key(route);
     let started = Instant::now();
-    let (ip, port) = loop {
-        match api.pod(pod_id)? {
-            Some(pod) if pod.is_gone() => {
-                return Err(anyhow!("pod {pod_id} stopped before it booted"))
-            }
-            Some(pod) if pod.ssh.is_some() => break pod.ssh.expect("checked above"),
-            None => return Err(anyhow!("pod {pod_id} disappeared before it booted")),
-            Some(_) if started.elapsed() > ADDRESS_WAIT => {
-                return Err(anyhow!(
-                    "pod {pod_id} has no SSH address after {} minutes; its guardian ends it by {}",
-                    ADDRESS_WAIT.as_secs() / 60,
-                    clock(rental.deadline)
-                ))
-            }
-            Some(_) => std::thread::sleep(Duration::from_secs(5)),
-        }
-    };
-    let route = format!("ssh://lf@{ip}:{port}");
-    // A fresh pod has a fresh host key; accept it once, then wait for its tools.
-    let started = Instant::now();
-    if let Some(binary) = linux_lf {
-        upload_lf(&route, binary, started + READY_WAIT)?;
-    }
-    loop {
-        let ready = Command::new("ssh")
-            .args([
-                "-o",
-                "StrictHostKeyChecking=accept-new",
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=10",
-                &route,
-                "test -e /run/lf/ready",
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success());
-        if ready {
-            break;
-        }
-        if started.elapsed() > READY_WAIT {
+    while !first_contact(route, "true", Stdio::null())? {
+        if started.elapsed() > SSH_WAIT {
             return Err(anyhow!(
-                "{route} did not finish installing lf within {} minutes; its guardian ends it by {}",
-                READY_WAIT.as_secs() / 60,
+                "{} does not answer SSH after {} minutes; it is deleted by {}",
+                rental.provider_name,
+                SSH_WAIT.as_secs() / 60,
                 clock(rental.deadline)
             ));
         }
-        std::thread::sleep(Duration::from_secs(10));
+        std::thread::sleep(Duration::from_secs(2));
     }
-    let probe = runtime.block_on(super::machine::probe(&route, false))?;
+    let installed = match linux_lf {
+        Some(binary) => {
+            println!("Uploading {} as its lf", binary.display());
+            first_contact(
+                route,
+                "mkdir -p ~/.local/bin && cat > ~/.local/bin/lf.new && chmod 755 ~/.local/bin/lf.new && mv ~/.local/bin/lf.new ~/.local/bin/lf",
+                Stdio::from(std::fs::File::open(binary)?),
+            )?
+        }
+        None => first_contact(route, super::machine::INSTALL_COMMAND, Stdio::null())?,
+    };
+    if !installed {
+        return Err(anyhow!(
+            "could not install lf on {}; it is deleted by {}",
+            rental.provider_name,
+            clock(rental.deadline)
+        ));
+    }
+    let probe = runtime.block_on(super::machine::probe(route, false))?;
     let label = next_label(sqlite, &rental.ondemand)?;
-    let machine = sqlite.add_machine(&probe.id?, &route, &label)?;
+    let machine = sqlite.add_machine(&probe.id?, route, &label)?;
     sqlite.attach_rental(&rental.id, &machine.id)?;
     Ok(machine)
 }
@@ -682,15 +584,17 @@ pub fn place(
         }
     }
     let name = placement.rent.expect("checked: a pool or an on-demand");
-    let api = RunPod::from_env()?;
     if placement.quote {
         let ondemand = require_ondemand(sqlite, name)?;
-        let quote = api.quote(&ondemand.template)?;
         let live = sqlite.live_rentals(name)?;
-        let admission = rental::admit(&ondemand, live, &quote, None, None, now())?;
+        let admission = rental::admit(&ondemand, live, None, None, now())?;
         println!(
-            "would rent {} at {}/h, ≤ {} for {}h; runs nothing",
-            admission.hardware, admission.usd_per_hour, admission.cap_usd, ondemand.hours
+            "would rent {} on {} at {}/h, ≤ {} until {}; runs nothing",
+            admission.hardware,
+            ondemand.provider,
+            admission.usd_per_hour,
+            admission.cap_usd,
+            clock(admission.deadline)
         );
         return Ok(true);
     }
@@ -700,7 +604,7 @@ pub fn place(
             super::machine_credentials::require_unattended_logins(&accounts).await
         })?;
     }
-    let (_, machine) = rent(&runtime, sqlite, &api, name, None, None, false)?;
+    let (_, machine) = rent(&runtime, sqlite, name, None, None, false)?;
     let label = machine
         .label
         .clone()
@@ -708,6 +612,39 @@ pub fn place(
     prepare(&runtime, &label, repo, sqlite, batch)?;
     hand_off(&runtime, repo, issue, &label)?;
     Ok(false)
+}
+
+/// An unowned Task whose Wave or repository names a pool or on-demand goes
+/// there, as `--pool` or `--rent` would send it. Claimed Tasks stay put.
+pub fn place_by_default(repo: &std::path::Path, issue: &str, batch: bool) -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    // A Task not saved yet has no scope; the run itself reports why.
+    let Ok((store, task)) =
+        runtime.block_on(crate::ops::task::resolve_saved_task(repo, None, issue))
+    else {
+        return Ok(());
+    };
+    let sqlite = &store.sqlite;
+    if sqlite.task_ownership(&task.id)?.owner.is_some() {
+        return Ok(());
+    }
+    let Some(capacity) = sqlite.task_capacity(&task.id)? else {
+        return Ok(());
+    };
+    let is_pool = sqlite.pool(&capacity)?.is_some();
+    if !is_pool && sqlite.ondemand(&capacity)?.is_none() {
+        return Err(anyhow!(
+            "{issue}'s default capacity {capacity} is no pool or on-demand here; \
+             `lf machine use <machine>` replaces it"
+        ));
+    }
+    let placement = Placement {
+        pool: is_pool.then_some(capacity.as_str()),
+        rent: (!is_pool).then_some(capacity.as_str()),
+        quote: false,
+    };
+    drop(store);
+    place(repo, issue, &placement, batch).map(|_| ())
 }
 
 /// Your claim moves to the Machine; an unowned Task is claimed first.
@@ -814,7 +751,7 @@ pub fn end(label: &str, force: bool) -> anyhow::Result<()> {
         println!("{label} was already given back ({})", rental.state);
         return Ok(());
     }
-    let api = RunPod::from_env()?;
+    let api = Sandboxes::from_env(rental.provider)?;
     give_back(sqlite, &api, &rental, &machine, true, force)
 }
 
@@ -825,18 +762,26 @@ fn live_rentals(sqlite: &SqliteStore) -> anyhow::Result<Vec<Rental>> {
 }
 
 /// Bring every live rental up to date with its provider, ending none.
-fn refresh_all(sqlite: &SqliteStore, api: &RunPod) -> anyhow::Result<()> {
-    for rental in live_rentals(sqlite)? {
-        if let Err(error) = refresh(sqlite, api, &rental) {
-            eprintln!("{}: {error:#}", rental.provider_name);
+/// Returns why some could not be asked.
+fn refresh_all(sqlite: &SqliteStore) -> Vec<String> {
+    let mut unreached = Vec::new();
+    let rentals = match live_rentals(sqlite) {
+        Ok(rentals) => rentals,
+        Err(error) => return vec![format!("{error:#}")],
+    };
+    for rental in rentals {
+        let result = Sandboxes::from_env(rental.provider)
+            .and_then(|api| refresh(sqlite, &api, &rental).map(|_| ()));
+        if let Err(error) = result {
+            unreached.push(format!("{}: {error:#}", rental.provider_name));
         }
     }
-    Ok(())
+    unreached
 }
 
 /// Refresh one rental, then give it back if it is a Task rental whose work
 /// has drained or whose soft deadline came.
-fn reconcile(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Result<()> {
+fn reconcile(sqlite: &SqliteStore, api: &Sandboxes, rental: &Rental) -> anyhow::Result<()> {
     let Some(rental) = refresh(sqlite, api, rental)? else {
         return Ok(());
     };
@@ -849,44 +794,50 @@ fn reconcile(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Res
     give_back(sqlite, api, &rental, &machine, false, false)
 }
 
-/// Adopt or lose an unconfirmed create, notice a pod already gone, and update
-/// cost. Returns the rental when its pod is still there.
-fn refresh(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Result<Option<Rental>> {
-    let pod = match &rental.provider_id {
-        // Requested or unconfirmed: only the name can find it.
-        None => {
-            match rental::resolve_unconfirmed(
-                api.named(&rental.provider_name)?,
-                rental.created_at,
-                now(),
-            ) {
-                Resolution::Adopt(pod) => {
-                    sqlite.confirm_rental(&rental.id, &pod.id, pod.usd_per_hour)?;
-                    pod
-                }
-                Resolution::Lost => {
-                    sqlite.set_rental_state(&rental.id, RentalState::Lost)?;
-                    return Ok(None);
-                }
-                Resolution::Wait => return Ok(None),
-            }
-        }
-        Some(id) => match api.pod(id)? {
-            Some(pod) if !pod.is_gone() => pod,
-            // Its guardian, or someone, already deleted it.
-            _ => {
-                mark_ended(sqlite, rental)?;
+/// Settle an unconfirmed create, notice a sandbox already gone, and update
+/// cost. Returns the rental when its sandbox is still there and usable.
+fn refresh(
+    sqlite: &SqliteStore,
+    api: &Sandboxes,
+    rental: &Rental,
+) -> anyhow::Result<Option<Rental>> {
+    let id = match &rental.provider_id {
+        // Requested or unconfirmed: only the name can find it. A sandbox whose
+        // create never answered has no route, so it is given back unused.
+        None => match rental::resolve_unconfirmed(
+            api.named(&rental.provider_name)?,
+            rental.created_at,
+            now(),
+        ) {
+            Resolution::Adopt(sandbox) => {
+                sqlite.confirm_rental(&rental.id, &sandbox.id, rental.usd_per_hour)?;
+                delete_sandbox(sqlite, api, &sqlite.rental(&rental.id)?)?;
                 return Ok(None);
             }
+            Resolution::Lost => {
+                sqlite.set_rental_state(&rental.id, RentalState::Lost)?;
+                return Ok(None);
+            }
+            Resolution::Wait => return Ok(None),
         },
+        Some(id) => id,
     };
-    sqlite.set_rental_cost(&rental.id, api.billed(&pod, now())?)?;
+    match api.get(id)? {
+        Some(sandbox) if !sandbox.gone => {}
+        // Its lifetime passed, or someone deleted it.
+        _ => {
+            sqlite.set_rental_cost(&rental.id, rental.cost_until(rental.deadline.min(now())))?;
+            mark_ended(sqlite, rental)?;
+            return Ok(None);
+        }
+    }
+    sqlite.set_rental_cost(&rental.id, rental.cost_until(now()))?;
     Ok(Some(sqlite.rental(&rental.id)?))
 }
 
 fn give_back(
     sqlite: &SqliteStore,
-    api: &RunPod,
+    api: &Sandboxes,
     rental: &Rental,
     machine: &Machine,
     explicit: bool,
@@ -904,6 +855,7 @@ fn give_back(
     });
     holdings.tasks = sqlite.tasks_held_by(&machine.id)?;
     holdings.placed = sqlite.machine_ever_held(&machine.id)?;
+    holdings.finished_at = sqlite.work_finished_at(&machine.id)?;
     match rental::give_back(rental, &holdings, explicit, force, now()) {
         GiveBack::Keep(reason) => {
             if explicit {
@@ -941,7 +893,7 @@ fn give_back(
                 }
                 Ended::Uncopied(error) => {
                     eprintln!("Discarded on {label}: Session and Process records ({error:#})");
-                    delete_pod(sqlite, api, rental)?;
+                    delete_sandbox(sqlite, api, rental)?;
                     None
                 }
             };
@@ -968,37 +920,36 @@ enum Ended {
     Uncopied(anyhow::Error),
 }
 
-/// Copy the machine's records here, then delete its pod. A failed copy
-/// deletes nothing: the pod may hold the only record of its work.
+/// Copy the machine's records here, then delete its sandbox. A failed copy
+/// deletes nothing: the sandbox may hold the only record of its work.
 fn end_rental(
     sqlite: &SqliteStore,
-    api: &RunPod,
+    api: &Sandboxes,
     rental: &Rental,
     copy: impl FnOnce() -> anyhow::Result<CopyCounts>,
 ) -> anyhow::Result<Ended> {
     match copy() {
         Ok(counts) => {
-            delete_pod(sqlite, api, rental)?;
+            delete_sandbox(sqlite, api, rental)?;
             Ok(Ended::Copied(counts))
         }
         Err(error) => Ok(Ended::Uncopied(error)),
     }
 }
 
-fn delete_pod(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Result<()> {
+fn delete_sandbox(sqlite: &SqliteStore, api: &Sandboxes, rental: &Rental) -> anyhow::Result<()> {
     sqlite.set_rental_state(&rental.id, RentalState::Ending)?;
-    let pod_id = rental
+    let id = rental
         .provider_id
         .as_deref()
-        .ok_or_else(|| anyhow!("rental {} has no confirmed pod", rental.id))?;
-    if let Some(pod) = api.delete(pod_id, &rental.provider_name)? {
-        sqlite.set_rental_cost(&rental.id, api.billed(&pod, now())?)?;
-    }
+        .ok_or_else(|| anyhow!("rental {} has no confirmed sandbox", rental.id))?;
+    api.delete(id)?;
+    sqlite.set_rental_cost(&rental.id, rental.cost_until(now()))?;
     mark_ended(sqlite, rental)
 }
 
 /// Every path to `ended` comes here: the Tasks the Machine still owns come
-/// back to this one, so the next `lf task run` runs here, not on a gone pod.
+/// back to this one, so the next `lf task run` runs here, not on a gone sandbox.
 fn mark_ended(sqlite: &SqliteStore, rental: &Rental) -> anyhow::Result<()> {
     let (_, returned) = sqlite.set_rental_state(&rental.id, RentalState::Ended)?;
     let here = crate::store::sqlite::task_ownership::local_label();
@@ -1013,7 +964,7 @@ fn mark_ended(sqlite: &SqliteStore, rental: &Rental) -> anyhow::Result<()> {
 
 /// Pull the machine's records since its rental began (`lf history export`).
 fn copy_up(sqlite: &SqliteStore, rental: &Rental, machine: &Machine) -> anyhow::Result<CopyCounts> {
-    // An hour early absorbs clock skew between the laptop and the pod.
+    // An hour early absorbs clock skew between the laptop and the sandbox.
     let since = (rental.created_at - time::Duration::hours(1))
         .format(&time::format_description::well_known::Rfc3339)?;
     let script = format!(
@@ -1058,8 +1009,8 @@ pub fn settle(machine: &MachineId) {
         if !rental.state.is_live() {
             return Ok(());
         }
-        let api = RunPod::from_env()
-            .context("`lf machine end` gives it back once RUNPOD_API_KEY is set")?;
+        let api = Sandboxes::from_env(rental.provider)
+            .context("`lf machine end` gives it back once its provider can be reached")?;
         reconcile(sqlite, &api, &rental)
     })();
     if let Err(error) = result {
@@ -1067,39 +1018,36 @@ pub fn settle(machine: &MachineId) {
     }
 }
 
-/// Lazy recovery's give-back pass. Without `RUNPOD_API_KEY` it
-/// reports only rentals already past their soft deadline, which then wait for
-/// `lf machine end` or their guardian.
+/// Lazy recovery's give-back pass. A rental whose provider this process
+/// cannot reach is reported only once its soft deadline passes; its provider
+/// deletes it at the hard deadline either way.
 ///
 /// # Errors
-/// When the store cannot be read, or a rental is due and the key is missing.
+/// When the store cannot be read, or a due rental's provider cannot be reached.
 pub fn check() -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     let store = open_store(&runtime)?;
     let sqlite = &store.sqlite;
-    let live = live_rentals(sqlite)?;
-    if live.is_empty() {
-        return Ok(());
-    }
-    let Ok(api) = RunPod::from_env() else {
-        let due: Vec<&str> = live
-            .iter()
-            .filter(|rental| now() >= rental.soft_deadline())
-            .map(|rental| rental.provider_name.as_str())
-            .collect();
-        anyhow::ensure!(
-            due.is_empty(),
-            "{} past the soft deadline, and RUNPOD_API_KEY is not set here; \
-             `lf machine end` gives each back, or its guardian deletes it at the deadline",
-            due.join(", ")
-        );
-        return Ok(());
-    };
-    for rental in &live {
-        if let Err(error) = reconcile(sqlite, &api, rental) {
+    let mut due = Vec::new();
+    for rental in live_rentals(sqlite)? {
+        let api = match Sandboxes::from_env(rental.provider) {
+            Ok(api) => api,
+            Err(error) => {
+                if now() >= rental.soft_deadline() {
+                    due.push(format!("{}: {error:#}", rental.provider_name));
+                }
+                continue;
+            }
+        };
+        if let Err(error) = reconcile(sqlite, &api, &rental) {
             eprintln!("{}: {error:#}", rental.provider_name);
         }
     }
+    anyhow::ensure!(
+        due.is_empty(),
+        "past the soft deadline: {}; `lf machine end` gives each back, or its provider deletes it at the deadline",
+        due.join("; ")
+    );
     Ok(())
 }
 
@@ -1148,6 +1096,7 @@ fn read_holdings(text: &str) -> Holdings {
         placed: false,
         tasks: Vec::new(),
         live_processes,
+        finished_at: None,
         unpushed,
     }
 }
@@ -1157,31 +1106,26 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use serde_json::json;
-
-    use super::{end_rental, read_holdings, refresh_all, Ended};
+    use super::{end_rental, read_holdings, refresh, Ended};
     use crate::durable::MachineId;
     use crate::machine_records::CopyCounts;
-    use crate::rental::runpod::RunPod;
-    use crate::rental::{Hardware, OnDemand, Provider, Quote, Rental, RentalState, Template, Usd};
+    use crate::rental::sandbox::Sandboxes;
+    use crate::rental::{Hardware, OnDemand, Provider, Rental, RentalState, Usd};
     use crate::store::sqlite::SqliteStore;
 
     type Log = Rc<RefCell<Vec<String>>>;
 
-    /// A running rental of `code-1` and a RunPod that knows its pod.
-    fn running(dir: &std::path::Path) -> (SqliteStore, Rental, RunPod, Log) {
+    /// A running rental of `code-1` and a provider that knows its sandbox.
+    fn running(dir: &std::path::Path) -> (SqliteStore, Rental, Sandboxes, Log) {
         let store = SqliteStore::open_ephemeral(&dir.join("db")).unwrap();
         store
             .add_ondemand(&OnDemand {
                 name: "code".into(),
-                provider: Provider::Runpod,
-                template: Template {
-                    gpu: None,
-                    vcpus: 8,
-                    memory_gb: 16,
-                    disk_gb: None,
-                    image: "runpod/base@sha256:ab".into(),
-                    data_center: None,
+                provider: Provider::Daytona,
+                hardware: Hardware {
+                    vcpus: 4,
+                    memory_gb: 8,
+                    disk_gb: 10,
                 },
                 max_machines: 1,
                 max_usd_per_hour: Usd::parse("0.40").unwrap(),
@@ -1189,20 +1133,9 @@ mod tests {
                 created_at: time::OffsetDateTime::now_utc(),
             })
             .unwrap();
-        let quote = Quote {
-            hardware: Hardware::Cpu {
-                flavor: "cpu3c".into(),
-                vcpus: 8,
-            },
-            usd_per_hour: Usd::parse("0.24").unwrap(),
-            available: true,
-            data_centers: Vec::new(),
-        };
-        let rental = store
-            .admit_rental("code", &quote, None, None, false)
-            .unwrap();
+        let rental = store.admit_rental("code", None, None, false).unwrap();
         store
-            .confirm_rental(&rental.id, "pod1", quote.usd_per_hour)
+            .confirm_rental(&rental.id, "sb-1", rental.usd_per_hour)
             .unwrap();
         let machine = MachineId::new();
         store
@@ -1211,22 +1144,18 @@ mod tests {
         let rental = store.attach_rental(&rental.id, &machine).unwrap();
         let log: Log = Rc::default();
         let kept = log.clone();
-        let name = rental.provider_name.clone();
-        let api = RunPod::with_send(Box::new(move |method, url, _| {
-            kept.borrow_mut().push(format!("{method} {url}"));
-            let reply = if url.contains("billing") {
-                json!({"records": []})
-            } else {
-                json!({"id": "pod1", "name": name, "cost": 0.24,
-                       "createdAt": "2026-10-21T20:10:00Z", "status": "RUNNING"})
-            };
-            Ok((200, reply.to_string().into_bytes()))
-        }));
+        let api = Sandboxes::with_call(
+            Provider::Daytona,
+            Box::new(move |op, _| {
+                kept.borrow_mut().push(op.to_string());
+                Ok(br#"{"id": "sb-1", "gone": false, "route": null}"#.to_vec())
+            }),
+        );
         (store, rental, api, log)
     }
 
     fn deleted(log: &Log) -> bool {
-        log.borrow().iter().any(|call| call.starts_with("DELETE"))
+        log.borrow().iter().any(|op| op == "delete")
     }
 
     #[test]
@@ -1236,7 +1165,7 @@ mod tests {
         let ended = end_rental(&store, &api, &rental, || {
             assert!(
                 !deleted(&log),
-                "the pod was deleted before its records were copied"
+                "the sandbox was deleted before its records were copied"
             );
             Ok(CopyCounts {
                 sessions: 3,
@@ -1266,12 +1195,12 @@ mod tests {
     }
 
     #[test]
-    fn listing_a_drained_rental_leaves_it_and_its_pod() {
+    fn refreshing_a_drained_rental_leaves_it_and_its_sandbox() {
         let dir = tempfile::tempdir().unwrap();
         let (store, rental, api, log) = running(dir.path());
-        // Rented for a Task, holding none, with its pod still billing: drained.
+        // Rented for a Task, holding none, with its sandbox still billing: drained.
         assert!(!rental.by_hand);
-        refresh_all(&store, &api).unwrap();
+        assert!(refresh(&store, &api, &rental).unwrap().is_some());
         assert!(!deleted(&log));
         assert_eq!(
             store.rental(&rental.id).unwrap().state,

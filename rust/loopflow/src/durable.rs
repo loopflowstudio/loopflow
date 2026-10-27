@@ -179,6 +179,16 @@ pub struct MachineDefault {
     pub machine_id: MachineId,
 }
 
+/// A scope whose new Tasks take a machine from a pool or an on-demand.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CapacityDefault {
+    pub scope: DefaultScope,
+    /// The Wave's name, or the repository's path on this Machine.
+    pub name: String,
+    /// The pool or on-demand.
+    pub capacity: String,
+}
+
 prefixed_uuid_id!(
     OwnershipEntryId,
     "own_",

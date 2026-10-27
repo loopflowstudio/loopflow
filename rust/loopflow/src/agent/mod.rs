@@ -4,7 +4,6 @@
 //! supported coding agent. Output can be captured or streamed.
 
 mod session;
-pub mod stream;
 pub(crate) use session::{
     build_session_command, native_connection_command, resolve_session_config, session_environment,
     NativeConnection, ProviderInvocation, SessionCommand,
@@ -22,7 +21,6 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::agent::stream::StreamFormat;
 use crate::config::{default_agent, parse_agent};
 use crate::error::CoreError;
 use crate::os_process::wait_for_exit;
@@ -370,8 +368,6 @@ pub struct ProcessConfig {
     /// Path to context file for system prompt loading (model-agnostic).
     /// For Claude, this uses --append-system-prompt-file.
     pub context_file: Option<std::path::PathBuf>,
-    /// How to display streaming output (Raw = dump JSON, Human = formatted).
-    pub stream_format: StreamFormat,
     /// Optional timeout for the subprocess.
     pub timeout: Option<Duration>,
     /// Durable local capture for this harness launch.
@@ -1180,16 +1176,11 @@ fn _begin_implicit_capture(
             )),
         )
     };
-    capture
-        .map(|capture| {
-            capture.record_input("initial", &launch.task_prompt);
-            capture.into()
-        })
-        .map_err(|error| {
-            CoreError::ExecutionFailed(format!(
-                "failed to publish Session capture manifest before agent launch: {error}"
-            ))
-        })
+    capture.map(Into::into).map_err(|error| {
+        CoreError::ExecutionFailed(format!(
+            "failed to publish Session capture manifest before agent launch: {error}"
+        ))
+    })
 }
 
 fn _run_harness_once(
@@ -1262,7 +1253,6 @@ fn _run_harness_once(
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     let result = runtime.block_on(async {
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (raw_tx, mut raw_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut harness = crate::harness::default_create_harness(
             &provider,
             ApprovalPolicy::AutoApprove,
@@ -1276,9 +1266,6 @@ fn _run_harness_once(
         );
         harness.set_agent_session(launch.resume_token.clone());
         harness.set_capture(process.capture.clone());
-        if capture.is_some() {
-            harness.set_raw_provider_sender(Some(raw_tx));
-        }
         harness
             .start(&config)
             .await
@@ -1312,16 +1299,6 @@ fn _run_harness_once(
                     _ = activity_tick.tick(), if capture.is_some() => {
                         if let Some(capture) = capture { capture.observe_activity(harness.pid()).await; }
                     }
-                    raw = raw_rx.recv(), if capture.is_some() => {
-                        if let Some(raw) = raw {
-                            if let Some(capture) = capture {
-                                capture.record_raw(raw.stream, &raw.line);
-                            }
-                            if process.stream && process.stream_format == StreamFormat::Raw {
-                                println!("{}", raw.line);
-                            }
-                        }
-                    }
                     event = event_rx.recv() => {
                         let Some(event) = event else {
                             stderr.push_str(&format!("{provider} event stream closed\n"));
@@ -1335,7 +1312,7 @@ fn _run_harness_once(
                         match event {
                             ConversationEvent::TextDelta { content, .. } => {
                                 stdout.push_str(&content);
-                                if process.stream && process.stream_format != StreamFormat::Raw {
+                                if process.stream {
                                     print!("{content}");
                                     let _ = std::io::stdout().flush();
                                 }
@@ -1366,18 +1343,7 @@ fn _run_harness_once(
                     stderr.push_str(&format!("{code}: {message}\n"));
                 }
             }
-            while let Ok(raw) = raw_rx.try_recv() {
-                if let Some(capture) = capture {
-                    capture.record_raw(raw.stream, &raw.line);
-                }
-                if process.stream && process.stream_format == StreamFormat::Raw {
-                    println!("{}", raw.line);
-                }
-            }
-            if process.stream
-                && process.stream_format != StreamFormat::Raw
-                && !stdout.ends_with('\n')
-            {
+            if process.stream && !stdout.ends_with('\n') {
                 println!();
             }
             Ok(AgentProcessResult {

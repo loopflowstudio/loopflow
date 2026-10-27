@@ -16,16 +16,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
-def _output_events(output: str) -> list[dict]:
-    events = []
-    for line in output.splitlines():
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return events
-
-
 def _content_texts(content: str | list[dict]) -> list[str]:
     return (
         [content]
@@ -270,17 +260,6 @@ def _probe(claude: str, model: str, lf: str, graph: bool, terminal: bool, comman
             origins = [
                 (manifest.get("exec") or {}).get("skill_invocation") for manifest in manifests
             ]
-            events = [
-                json.loads(line)
-                for path in (root / "lf/runs").glob("*/*/events.jsonl")
-                for line in path.read_text().splitlines()
-            ]
-            raw = "\n".join(
-                event["line"]
-                for event in events
-                if event.get("type") == "provider_output" and event.get("stream") == "stdout"
-            )
-            provider_events = _output_events(raw)
             observation["checks"].update(
                 exit_zero=result.returncode == 0,
                 declared_model_applied=all("haiku" in body["model"] for body in requests),
@@ -332,9 +311,6 @@ def _probe(claude: str, model: str, lf: str, graph: bool, terminal: bool, comman
             print(json.dumps({"channel": "lf-graph" if graph else "lf", **observation}), flush=True)
             if result.returncode:
                 print(result.stderr, file=sys.stderr)
-                for event in provider_events:
-                    if event.get("is_error"):
-                        print(event.get("result"), file=sys.stderr)
             return all(observation["checks"].values())
         finally:
             server.shutdown()

@@ -616,7 +616,7 @@ its `settings.json`); Codex, OpenCode and Pi keep everything. Raise
 what is readable by provider, account and age, and lists the next removals.
 
 `lf history show SESSION` also prints private Codex relay failures with their
-AgentProcess identity. `--events` includes the diagnostic JSON. Retention keeps
+AgentProcess identity. Retention keeps
 the first 16 failures per captured input, with each error capped at 2048 bytes;
 explicit client closes stay quiet. These observations never settle a turn.
 
@@ -1415,22 +1415,33 @@ See [machine connections](architecture/machines.md) for repository paths and ver
 ```bash
 lf pool add lab && lf machine add jack@mini --pool lab        # machines you own
 lf account token claude jack@example.com                      # once a year: Claude for rented machines
-lf ondemand add code --provider runpod --vcpus 8 --memory-gb 16 --max 1 --max-usd-per-hour 0.40
+lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-usd-per-hour 0.40
+lf ondemand add gpu --provider runpod --vcpus 8 --memory-gb 32 --gpu A40 --max 1 --max-usd-per-hour 1
 lf task run LOO-570 --pool lab --rent code --quote            # where it would run, the most it could cost
 lf task run LOO-570 --pool lab --rent code                    # a free lab machine, else rent one
+lf machine use code infrastructure                            # the Wave's new Tasks rent from code
 lf machine end code-1                                         # give a rented machine back now
 ```
 
-Renting reads `RUNPOD_API_KEY` from the environment (`doppler run -- lf …`).
-A rented machine gets GitHub forwarded and every Claude account with a stored
-long-lived token (`claude setup-token`, approved once in the account's Chrome
-profile; API keys are refused). A rented machine's own guardian deletes it at
-its deadline or when its budget runs out. The end of a forwarded `lf task run`,
-and the scheduled `lf task reconcile`, give back drained machines: first their
-Sessions and Processes are copied here (`lf session list` shows them "from
-code-1", `lf history show` opens one), then the pod is deleted. A failed copy or
-unpushed work refuses every give-back but `--force`. `lf ondemand list` never
-ends a machine. See [own and rent Machines](architecture/machines.md#own-and-rent-machines)
+Providers read their keys from the environment (`doppler run -- lf …`):
+Daytona `DAYTONA_API_KEY`; Modal `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or
+`~/.modal.toml`; RunPod `RUNPOD_API_KEY`; AWS `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY` and `AWS_REGION`; Fly `FLY_API_TOKEN` (and `FLY_ORG`,
+default `personal`). Each runs under `uv`. `--gpu` rents one GPU on RunPod, AWS
+or Modal, on a machine with at least `--vcpus` and `--memory-gb`. `--spot` rents
+interruptible capacity on AWS or RunPod, never charged above the admitted price;
+the provider may end it early, losing unpushed work. EC2 prices are us-east-1's,
+so AWS names the region it rents in and the region it priced. A rented machine gets GitHub forwarded and every Claude account with a
+stored long-lived token (`claude setup-token`, approved once in the account's
+Chrome profile; API keys are refused). Its provider deletes it at its deadline.
+`lf machine use code infrastructure` (or `--repo`) sends a scope's unowned
+Tasks to `code` when they run; the Wave Session stays where it is. The end of a
+forwarded `lf task run`, and the scheduled `lf task reconcile`, give back a
+machine 15 minutes after its last Task finished: first its Sessions and
+Processes are copied here (`lf session list` shows them "from code-1", `lf
+history show` opens one), then the sandbox is deleted. A failed copy or unpushed
+work refuses every give-back but `--force`. `lf ondemand list` never ends a
+machine. See [own and rent Machines](architecture/machines.md#own-and-rent-machines)
 for pools, rentals and give-back.
 
 ### Defer a Task without discarding work

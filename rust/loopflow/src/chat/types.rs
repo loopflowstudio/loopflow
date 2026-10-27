@@ -151,11 +151,11 @@ impl TurnUsage {
 
 /// Durable, structured failure evidence attached to `ConversationEvent::Error`
 /// for disconnect-class failures. Internal to Rust — not mirrored in Swift or
-/// Python, not in `tests/fixtures/dto/`. Serialized to `events.jsonl` via
-/// the capture recorder and visible in `lf history show` through the `Debug`
-/// derive. One record names the model, the endpoint that died, when the stream
-/// started and ended, the last event that parsed, and the terminal error class
-/// — no credential material, no raw auth.
+/// Python, not in `tests/fixtures/dto/`. Kept on the capture's stored turn-end
+/// fact and visible in `lf history show` through the `Debug` derive. One record
+/// names the model, the endpoint that died, when the stream started and ended,
+/// the last event that parsed, and the terminal error class — no credential
+/// material, no raw auth.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct FailureEvidence {
     /// The agent model (e.g. `opencode/glm-5.2`), from `AgentConfig`.

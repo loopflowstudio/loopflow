@@ -1681,13 +1681,12 @@ Name what to rent and the most it may cost
 |---|---|
 | `<name>` | name |
 | `--provider` | provider |
-| `--gpu` | A GPU type; without one, the cheapest CPU pod covering vCPUs and memory |
 | `--vcpus` | vcpus |
 | `--memory-gb` | memory gb |
-| `--disk-gb` | disk gb |
-| `--image` | Image, pinned by digest when added (default: RunPod's stock Ubuntu) |
-| `--data-center` | A data center (US-IL-1) or a region prefix (US); rents where it is in stock |
-| `--hours` | Hard deadline for each machine it rents Default: 4. |
+| `--disk-gb` | Modal and Fly size disk themselves Default: 10. |
+| `--gpu` | One GPU, on runpod (A40, A6000, L4, RTX4090, L40S, A100, H100), aws (L4, A10G) or modal (T4, L4, A10G, L40S, A100, H100) |
+| `--spot` | Interruptible capacity on aws or runpod, bid at the admitted price; the provider may end it early, losing unpushed work Default: false. |
+| `--hours` | Hard deadline for each machine it rents, at most 24 Default: 4. |
 | `--max` | Machines rented at once |
 | `--max-usd-per-hour` | Above this hourly price nothing is rented |
 | `--help / -h` | Print help |
@@ -1698,16 +1697,6 @@ Templates, budgets and the machines each has rented
 
 | Argument | What it does |
 |---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf ondemand availability
-
-What it would rent now and at what price; rents nothing
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -2459,7 +2448,6 @@ Inspect a process or Session by identity
 |---|---|
 | `<id>` | id |
 | `--json` | json Default: false. |
-| `--events` | Print a Session's retained raw input events Default: false. |
 | `--final` | Print a Session's last recorded provider conclusion Default: false. |
 | `--input` | Inspect an exact retained input belonging to this Session |
 | `--context` | Print only what the step's submitted input was made of, by source Default: false. |

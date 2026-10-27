@@ -2322,22 +2322,22 @@ pub enum OndemandCommand {
         name: String,
         #[arg(long, value_enum)]
         provider: crate::rental::Provider,
-        /// A GPU type; without one, the cheapest CPU pod covering vCPUs and memory
-        #[arg(long)]
-        gpu: Option<String>,
         #[arg(long)]
         vcpus: u32,
         #[arg(long)]
         memory_gb: u32,
+        /// Modal and Fly size disk themselves
+        #[arg(long, default_value_t = 10)]
+        disk_gb: u32,
+        /// One GPU, on runpod (A40, A6000, L4, RTX4090, L40S, A100, H100),
+        /// aws (L4, A10G) or modal (T4, L4, A10G, L40S, A100, H100)
         #[arg(long)]
-        disk_gb: Option<u32>,
-        /// Image, pinned by digest when added (default: RunPod's stock Ubuntu)
+        gpu: Option<String>,
+        /// Interruptible capacity on aws or runpod, bid at the admitted price;
+        /// the provider may end it early, losing unpushed work
         #[arg(long)]
-        image: Option<String>,
-        /// A data center (US-IL-1) or a region prefix (US); rents where it is in stock
-        #[arg(long)]
-        data_center: Option<String>,
-        /// Hard deadline for each machine it rents
+        spot: bool,
+        /// Hard deadline for each machine it rents, at most 24
         #[arg(long, default_value_t = crate::rental::DEFAULT_HOURS)]
         hours: f64,
         /// Machines rented at once
@@ -2349,12 +2349,6 @@ pub enum OndemandCommand {
     },
     /// Templates, budgets and the machines each has rented
     List {
-        #[arg(long)]
-        json: bool,
-    },
-    /// What it would rent now and at what price; rents nothing
-    Availability {
-        name: String,
         #[arg(long)]
         json: bool,
     },

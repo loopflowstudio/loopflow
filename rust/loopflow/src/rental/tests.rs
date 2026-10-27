@@ -1,9 +1,9 @@
 use time::OffsetDateTime;
 
 use super::{
-    admit, cpu_quote, free_machine, give_back, resolve_unconfirmed, CpuFlavor, GiveBack, Hardware,
-    Holdings, OnDemand, Ownership, Pool, PoolMachine, PoolRefusal, Provider, Quote, Refusal,
-    Rental, RentalId, RentalState, Resolution, Template, Usd,
+    admit, free_machine, give_back, resolve_unconfirmed, GiveBack, Hardware, Holdings, OnDemand,
+    Ownership, Pool, PoolMachine, PoolRefusal, Provider, Refusal, Rental, RentalId, RentalState,
+    Resolution, Usd, GRACE_SECONDS,
 };
 use crate::durable::{Machine, MachineId, TaskId};
 
@@ -19,46 +19,25 @@ fn usd(text: &str) -> Usd {
     Usd::parse(text).unwrap()
 }
 
-fn flavor(id: &str, per_vcpu: &str, ram: f64, available: bool) -> CpuFlavor {
-    CpuFlavor {
-        id: id.into(),
-        min_vcpus: 2,
-        max_vcpus: 32,
-        ram_gb_per_vcpu: ram,
-        usd_per_vcpu_hour: usd(per_vcpu),
-        available,
-        data_centers: Vec::new(),
+fn box4() -> Hardware {
+    Hardware {
+        vcpus: 4,
+        memory_gb: 8,
+        disk_gb: 10,
+        gpu: None,
+        spot: false,
     }
 }
 
 fn code(max: u32, max_per_hour: &str) -> OnDemand {
     OnDemand {
         name: "code".into(),
-        provider: Provider::Runpod,
-        template: Template {
-            gpu: None,
-            vcpus: 8,
-            memory_gb: 16,
-            disk_gb: None,
-            image: "runpod/base@sha256:00".into(),
-            data_center: None,
-        },
+        provider: Provider::Daytona,
+        hardware: box4(),
         max_machines: max,
         max_usd_per_hour: usd(max_per_hour),
         hours: 4.0,
         created_at: now(),
-    }
-}
-
-fn quote(price: &str, available: bool) -> Quote {
-    Quote {
-        hardware: Hardware::Cpu {
-            flavor: "cpu3c".into(),
-            vcpus: 8,
-        },
-        usd_per_hour: usd(price),
-        available,
-        data_centers: Vec::new(),
     }
 }
 
@@ -74,40 +53,98 @@ fn dollars_parse_exactly_and_print_as_people_read_them() {
 }
 
 #[test]
-fn cpu_quote_takes_the_cheapest_in_stock_power_of_two_covering_memory() {
-    let flavors = [
-        flavor("cpu3c", "0.03", 2.0, true),
-        flavor("cpu3g", "0.04", 4.0, true),
-        flavor("cpu5c", "0.02", 2.0, false),
-    ];
-    // 6 vCPUs round up to 8; cpu3c at 2 GB/vCPU covers 16 GB at 8.
-    let quote = cpu_quote(&flavors, 6, 16).unwrap();
-    assert_eq!(
-        quote.hardware,
-        Hardware::Cpu {
-            flavor: "cpu3c".into(),
-            vcpus: 8
-        }
-    );
-    assert_eq!(quote.usd_per_hour, usd("0.24"));
-    assert!(quote.available);
+fn prices_follow_each_providers_published_rates() {
+    // Daytona: 4 × $0.0504 + 8 × $0.0162 + 5 GiB of disk past the free 5 × $0.000108.
+    assert_eq!(Provider::Daytona.usd_per_hour(&box4()), Ok(usd("0.33174")));
+    // Modal sandboxes: 2 cores × $0.141912 + 8 × $0.024012.
+    assert_eq!(Provider::Modal.usd_per_hour(&box4()), Ok(usd("0.475920")));
+    // Fly: 4 performance vCPUs × $21/month, 8 GiB × $6/month, one IPv4 at $2/month.
+    assert_eq!(Provider::Fly.usd_per_hour(&box4()), Ok(usd("0.18611")));
+}
+
+fn gpu(name: &str) -> Hardware {
+    Hardware {
+        gpu: Some(name.into()),
+        ..box4()
+    }
 }
 
 #[test]
-fn cpu_quote_grows_for_memory_and_respects_the_flavor_maximum() {
-    let mut small = flavor("cpu3c", "0.03", 2.0, true);
-    small.max_vcpus = 8;
-    let large = flavor("cpu3g", "0.04", 4.0, true);
-    // 64 GB needs 32 vCPUs of cpu3c (over its max of 8) or 16 of cpu3g.
-    let quote = cpu_quote(&[small.clone(), large], 2, 64).unwrap();
-    assert_eq!(quote.hardware.to_string(), "cpu3g×16");
-    assert_eq!(cpu_quote(&[small], 2, 64), None);
+fn fixed_shapes_take_the_smallest_that_holds_the_hardware() {
+    let runpod = Provider::Runpod.offer(&box4()).unwrap();
+    assert_eq!(runpod.machine_type.as_deref(), Some("cpu3c"));
+    let aws = Provider::Aws
+        .offer(&Hardware {
+            vcpus: 3,
+            memory_gb: 12,
+            ..box4()
+        })
+        .unwrap();
+    assert_eq!(aws.machine_type.as_deref(), Some("m7i.xlarge"));
+    assert_eq!(aws.usd_per_hour, usd("0.2016"));
+    let l4 = Provider::Aws.offer(&gpu("L4")).unwrap();
+    assert_eq!(l4.machine_type.as_deref(), Some("g6.xlarge"));
 }
 
 #[test]
-fn admission_refuses_at_the_limit_out_of_stock_and_over_price() {
+fn gpus_rent_where_the_provider_offers_them() {
+    let a40 = Provider::Runpod.offer(&gpu("A40")).unwrap();
+    assert_eq!(a40.machine_type.as_deref(), Some("NVIDIA A40"));
+    assert_eq!(a40.usd_per_hour, usd("0.59"));
+    let modal = Provider::Modal.offer(&gpu("A100")).unwrap();
+    assert_eq!(modal.machine_type.as_deref(), Some("A100-80GB"));
+    assert!(Provider::Daytona
+        .offer(&gpu("A40"))
+        .unwrap_err()
+        .contains("--gpu works on runpod, aws and modal"));
+    assert!(Provider::Fly.offer(&gpu("A40")).is_err());
+    assert!(Provider::Aws
+        .offer(&gpu("H100"))
+        .unwrap_err()
+        .contains("it rents L4, A10G"));
+}
+
+#[test]
+fn gpu_hardware_is_a_floor_the_shape_must_meet() {
+    let big = Provider::Aws
+        .offer(&Hardware {
+            vcpus: 8,
+            memory_gb: 20,
+            ..gpu("L4")
+        })
+        .unwrap();
+    assert_eq!(big.machine_type.as_deref(), Some("g6.2xlarge"));
+    let refused = Provider::Aws
+        .offer(&Hardware {
+            vcpus: 32,
+            ..gpu("A10G")
+        })
+        .unwrap_err();
+    assert_eq!(refused, "aws rents nothing with 32 vCPU 8 GB + A10G");
+}
+
+#[test]
+fn spot_rents_only_where_the_provider_sells_it() {
+    let spot = Hardware {
+        spot: true,
+        ..box4()
+    };
+    assert!(Provider::Aws.offer(&spot).is_ok());
+    assert!(Provider::Runpod.offer(&spot).is_ok());
+    for provider in [Provider::Daytona, Provider::Modal, Provider::Fly] {
+        let refused = provider.offer(&spot).unwrap_err();
+        assert!(refused.starts_with(provider.as_str()), "{refused}");
+        assert!(
+            refused.contains("--spot works on aws and runpod"),
+            "{refused}"
+        );
+    }
+}
+
+#[test]
+fn admission_refuses_at_the_limit_and_over_price() {
     assert!(matches!(
-        admit(&code(1, "0.40"), 1, &quote("0.24", true), None, None, now()),
+        admit(&code(1, "0.40"), 1, None, None, now()),
         Err(Refusal::AtLimit {
             live: 1,
             max: 1,
@@ -115,52 +152,28 @@ fn admission_refuses_at_the_limit_out_of_stock_and_over_price() {
         })
     ));
     assert!(matches!(
-        admit(&code(0, "0.40"), 0, &quote("0.24", true), None, None, now()),
+        admit(&code(0, "0.40"), 0, None, None, now()),
         Err(Refusal::AtLimit { .. })
     ));
-    assert!(matches!(
-        admit(
-            &code(1, "0.40"),
-            0,
-            &quote("0.24", false),
-            None,
-            None,
-            now()
-        ),
-        Err(Refusal::Unavailable { .. })
-    ));
-    let mut pinned = code(1, "0.40");
-    pinned.template.data_center = Some("US-KS-2".into());
-    assert_eq!(
-        admit(&pinned, 0, &quote("0.24", false), None, None, now())
-            .unwrap_err()
-            .to_string(),
-        "no cpu3c×8 available for code now in US-KS-2"
-    );
-    let refused = admit(&code(1, "0.20"), 0, &quote("0.24", true), None, None, now()).unwrap_err();
+    let refused = admit(&code(1, "0.30"), 0, None, None, now()).unwrap_err();
     assert_eq!(
         refused.to_string(),
-        "code: cpu3c×8 costs $0.24/h, above its $0.20/h limit"
+        "code: 4 vCPU 8 GB costs $0.33174/h, above its $0.30/h limit"
     );
 }
 
 #[test]
-fn admission_caps_spend_by_hours_or_a_lower_budget() {
-    let admitted = admit(&code(1, "0.40"), 0, &quote("0.24", true), None, None, now()).unwrap();
-    assert_eq!(admitted.cap_usd, usd("0.96"));
+fn admission_caps_spend_by_hours_a_lower_budget_or_the_longest_window() {
+    let admitted = admit(&code(1, "0.40"), 0, None, None, now()).unwrap();
+    assert_eq!(admitted.cap_usd, usd("1.32696"));
     assert_eq!(admitted.deadline, now() + time::Duration::hours(4));
 
-    let capped = admit(
-        &code(1, "0.40"),
-        0,
-        &quote("0.24", true),
-        Some(2.0),
-        Some(usd("0.12")),
-        now(),
-    )
-    .unwrap();
-    assert_eq!(capped.cap_usd, usd("0.12"));
-    assert_eq!(capped.deadline, now() + time::Duration::minutes(30));
+    let capped = admit(&code(1, "0.40"), 0, Some(2.0), Some(usd("0.33174")), now()).unwrap();
+    assert_eq!(capped.cap_usd, usd("0.33174"));
+    assert_eq!(capped.deadline, now() + time::Duration::hours(1));
+
+    let longest = admit(&code(1, "0.40"), 0, Some(48.0), None, now()).unwrap();
+    assert_eq!(longest.deadline, now() + time::Duration::hours(24));
 }
 
 #[test]
@@ -174,7 +187,7 @@ fn an_unconfirmed_create_is_adopted_by_name_or_lost_after_its_deadline() {
         Resolution::Wait
     );
     assert_eq!(
-        resolve_unconfirmed::<u8>(None, now(), now() + time::Duration::minutes(5)),
+        resolve_unconfirmed::<u8>(None, now(), now() + time::Duration::minutes(20)),
         Resolution::Lost
     );
 }
@@ -237,17 +250,17 @@ fn a_pool_refuses_when_off_empty_or_busy_and_names_why() {
     );
 }
 
-fn rented(by_hand: bool) -> Rental {
+pub(super) fn rented(by_hand: bool) -> Rental {
     let id = RentalId::new();
     Rental {
         provider_name: Rental::provider_name_for(&id),
         id,
         ondemand: "code".into(),
-        provider: Provider::Runpod,
-        provider_id: Some("pod1".into()),
+        provider: Provider::Daytona,
+        provider_id: Some("sb-1".into()),
         machine_id: Some(MachineId::new()),
         by_hand,
-        hardware: quote("0.24", true).hardware,
+        hardware: box4(),
         usd_per_hour: usd("0.24"),
         cap_usd: usd("0.96"),
         deadline: now() + time::Duration::hours(4),
@@ -279,6 +292,30 @@ fn a_task_rental_ends_when_its_work_drains() {
     };
     assert_eq!(
         give_back(&rented(false), &drained, false, false, now()),
+        GiveBack::End
+    );
+}
+
+#[test]
+fn a_task_rental_waits_out_its_grace_after_the_task_finishes() {
+    let finished = Holdings {
+        placed: true,
+        finished_at: Some(now()),
+        ..Holdings::default()
+    };
+    let rental = rented(false);
+    assert!(matches!(
+        give_back(&rental, &finished, false, false, now()),
+        GiveBack::Keep(_)
+    ));
+    let later = now() + time::Duration::seconds(GRACE_SECONDS);
+    assert_eq!(
+        give_back(&rental, &finished, false, false, later),
+        GiveBack::End
+    );
+    // An explicit end does not wait.
+    assert_eq!(
+        give_back(&rental, &finished, true, false, now()),
         GiveBack::End
     );
 }

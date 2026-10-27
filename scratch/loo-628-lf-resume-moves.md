@@ -285,6 +285,11 @@ commands and for `--context`/`--explain` previews, which move nothing;
 `lf resume --machine M` already parses like `--account` (`reorder_args`
 lifts any non-local global flag). Nothing else changes.
 
+Third pass (2026-10-27, headless): every acceptance line of the Task maps to
+built behavior or the demo. The Task text's "reuse `lf machine use --task`"
+is superseded by Jack's later `lf task move --machine` direction. Nothing to
+change; no open product choice.
+
 ## Alternatives considered
 
 - **Rendered log for Machine moves** (the Task text's "copies the Session

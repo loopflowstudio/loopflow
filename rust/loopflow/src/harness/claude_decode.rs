@@ -18,6 +18,8 @@ pub(super) struct ClaudeDecoder {
     outbound: HashSet<String>,
     /// Echoed requests whose results are still owed, oldest first.
     pending: VecDeque<ProviderTurn>,
+    /// Backgrounded tasks are still running.
+    background: bool,
     state: ReaderState,
 }
 
@@ -45,7 +47,14 @@ impl ClaudeDecoder {
         if let Some(signal) = rate_limit_signal(&value) {
             return Ok(vec![ProviderFact::RateLimit(signal).into()]);
         }
-        let mut out = fact::activity(signals(&value));
+        let signals = signals(&value);
+        if let Some(tasks) = signals.iter().find_map(|signal| match signal {
+            Signal::Background(tasks) => Some(tasks),
+            _ => None,
+        }) {
+            self.background = !tasks.is_empty();
+        }
+        let mut out = fact::activity(signals);
         if value["type"] == "user" {
             if let (Some(thread), Some(request)) =
                 (value["session_id"].as_str(), value["uuid"].as_str())
@@ -68,7 +77,10 @@ impl ClaudeDecoder {
         }
         let start = out.len();
         let ended = process_line(&value, turn_id, &mut out, &mut self.state);
-        let result = value["type"] == "result";
+        // Backgrounded tasks still running: Claude starts its own turn when
+        // they finish, and that turn's result answers the last request.
+        let deferred = value["type"] == "result" && self.background && self.pending.len() == 1;
+        let result = value["type"] == "result" && !deferred;
         let turn = result.then(|| self.pending.pop_front()).flatten();
         if let Some(turn) = &turn {
             anyhow::ensure!(
@@ -102,7 +114,9 @@ impl ClaudeDecoder {
                 .into(),
             );
         }
-        if result || ended.is_some() {
+        if deferred {
+            self.state = ReaderState::default();
+        } else if result || ended.is_some() {
             let succeeded = value["subtype"] == "success" && value["is_error"] != true;
             out.push(
                 ProviderFact::TurnCompleted {
@@ -166,6 +180,16 @@ fn signals(line: &Value) -> Vec<Signal> {
             } else {
                 results.into_iter().map(Signal::ToolResolved).collect()
             }
+        }
+        Some("system") if event["subtype"] == "background_tasks_changed" => {
+            vec![Signal::Background(
+                event["tasks"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|task| task["task_id"].as_str().map(str::to_owned))
+                    .collect(),
+            )]
         }
         Some("message_start" | "content_block_start" | "content_block_delta") => {
             vec![Signal::Working]

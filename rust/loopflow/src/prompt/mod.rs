@@ -2155,6 +2155,7 @@ mod tests {
         assert!(!prompt.contains("lf --task"));
         assert!(prompt.contains("explain the failure in ordinary output and stop"));
         assert!(prompt.contains("For reversible ambiguity"));
+        assert!(prompt.contains("Stop any\nlong-lived background process you started"));
     }
 
     #[test]

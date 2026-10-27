@@ -113,7 +113,9 @@ lf session bind <session> --task LOO-12      # file a loose conversation under i
 New Sessions are named from the request or the skill; Task conversations take
 the Task's title. A name you set is never replaced by a suggestion
 (`rename --suggest` proposes one). Interactive terminal titles follow the name,
-Task identifier first.
+Task identifier first. In cmux, a Task's workspace is named
+`<Task title> · <identifier>` and changes only when the Task title does; a
+workspace you renamed in cmux keeps your name.
 
 Launching in a Task's checkout binds the Session to that Task automatically.
 `bind` is for the rest: it assigns a Task to a Session that has none,

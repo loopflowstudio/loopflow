@@ -62,7 +62,7 @@ impl Watch {
         let output = File::create(home.join("watch.jsonl")).unwrap();
         let errors = File::create(home.join("watch.stderr")).unwrap();
         let child = command(repo, home)
-            .args(["repo", "planning", "status", "--json", "--watch"])
+            .args(["planning", "status", "--json", "--watch"])
             .stdin(Stdio::piped())
             .stdout(output)
             .stderr(errors)
@@ -757,7 +757,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|task| task["runtime"]["work_id"] == fixture.task.id.as_str()));
+            .any(|task| task["id"] == fixture.task.id.as_str()));
         let list: serde_json::Value =
             serde_json::from_str(&run(&target, right.path(), &["wave", "list", "--json"])).unwrap();
         let wave = list

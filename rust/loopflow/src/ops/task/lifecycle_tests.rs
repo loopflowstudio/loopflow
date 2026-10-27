@@ -71,7 +71,7 @@ fn task_row(roadmap: &Value) -> Value {
 }
 
 fn capture(binary: &Path, repo: &Path, home: &Path) -> Value {
-    let status = read(binary, repo, home, &["task", "status", "FIX-1", "--json"]);
+    let status = read(binary, repo, home, &["desktop", "task", "FIX-1", "--json"]);
     // A completed Task has left the open plan; the exact lookup still finds it.
     let roadmap = read(
         binary,

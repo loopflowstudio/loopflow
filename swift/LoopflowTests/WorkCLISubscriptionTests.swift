@@ -17,7 +17,7 @@ struct WorkCLISubscriptionTests {
         try await fixture.prepare()
         let seed = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Backlog", "--json"])
         let seedID = try #require(seed["id"] as? String)
-        let status = try await fixture.json(["task", "status", seedID, "--json"])
+        let status = try await fixture.json(["desktop", "task", seedID, "--json"])
         let waveName = try #require((status["execution"] as? [String: Any])?["wave"] as? String)
         _ = try await fixture.run(["wave", "workflow", "set", "proof", waveName])
         let query = fixture.lf.query

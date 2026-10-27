@@ -1123,7 +1123,7 @@ private final class PerformanceReader {
         self.continuation = continuation
         return WorkObservation(frames: stream, request: { request in
             Task { @MainActor in await self.answer(request) }
-        }, cancel: { continuation.finish() })
+        }, cancel: { continuation.finish() }, copy: nil)
     }
 
     private func answer(_ request: WorkRequest) async {
@@ -1160,7 +1160,7 @@ private final class PerformanceReader {
     private func send(_ part: WorkPart, _ answers: Int, _ body: String) {
         let scope = scope ?? WorkScope(repo: nil, headless: false, task: nil, activity: nil)
         sequence += 1
-        let line = #"{"answers":\#(answers),"home":"benchmark-fixture","copy":null,"revisions":null,"unavailable":null,"body":\#(body)}"#
+        let line = #"{"answers":\#(answers),"unavailable":null,"body":\#(body)}"#
         // A frame this file wrote; one that does not decode fails the wait on it.
         if let frame = try? WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: Data(line.utf8)) {
             continuation?.yield(frame)
@@ -1482,8 +1482,8 @@ actor SnapshotReads {
             }.value
             guard let fixture else { return .success(output) }
             var value = try JSONSerialization.jsonObject(with: Data(output.utf8))
-            if args.prefix(2) == ["wave", "show"], !args.contains("--task") {
-                let owned = try await fixture.read(["wave", "show", "--all", "--json"])
+            if args.prefix(2) == ["desktop", "plan"], !args.contains("--task") {
+                let owned = try await fixture.read(["desktop", "plan", "--all", "--json"])
                 var page = try #require(value as? [String: Any])
                 let extra = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [String: Any])
                 page["waves"] = (try #require(page["waves"] as? [Any])) + (try #require(extra["waves"] as? [Any]))

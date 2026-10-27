@@ -221,7 +221,7 @@ fn task_checkout_blockers_are_rows_in_the_activity_list() {
         .expect("reserved AgentProcess is listed");
     assert_eq!(row.kind, ActivityNodeKind::AgentProcess);
 
-    let status = json(repo.path(), &["task", "status", id, "--json"]);
+    let status = json(repo.path(), &["desktop", "task", id, "--json"]);
     assert!(status.to_string().contains(agent), "{status}");
 
     // Cancellation is the Task's decision; only checkout cleanup is held.

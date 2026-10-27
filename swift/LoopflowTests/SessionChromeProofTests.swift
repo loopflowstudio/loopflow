@@ -121,7 +121,7 @@ struct SessionChromeProofTests {
         let graphs = try String(contentsOf: repoRoot.appendingPathComponent("tests/fixtures/dto/graph_catalog.json"), encoding: .utf8)
         let inventory = PaletteSessionInventory(sessions)
         let query = RegistryQuery { args, _ in
-            if args.prefix(2) == ["wave", "show"] { return roadmap }
+            if args.prefix(2) == ["desktop", "plan"] { return roadmap }
             if args.first == "session" { return await inventory.read() }
             if args.first == "graph" { return graphs }
             if args.first == "wave" { return "[]" }

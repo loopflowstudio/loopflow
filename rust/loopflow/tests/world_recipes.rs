@@ -67,8 +67,7 @@ impl Built {
             .as_array()
             .unwrap()
             .iter()
-            .map(|entry| &entry["task"])
-            .find(|task| task["name"] == name)
+            .find(|task| task["title"] == name)
             .unwrap_or_else(|| panic!("no Task {name:?}"))["identifier"]
             .as_str()
             .unwrap()
@@ -76,7 +75,7 @@ impl Built {
     }
 
     fn workflow(&self, issue: &str) -> Value {
-        self.lf(&["task", "status", issue, "--json"])["execution"]["work"]["workflow"].clone()
+        self.lf(&["desktop", "task", issue, "--json"])["execution"]["work"]["workflow"].clone()
     }
 
     /// The steps of the Task's latest Graph `name`.
@@ -108,13 +107,13 @@ impl Built {
 #[test]
 fn lifecycle_world_reports_each_state() {
     let built = Built::new("lifecycle");
-    let shown = built.lf(&["wave", "show", "--all", "--json"]);
+    let shown = built.lf(&["desktop", "plan", "--all", "--json"]);
     let tasks = shown["tasks"]["items"].as_array().unwrap();
     // The plan holds open Tasks; closed ones page in from the history read.
-    let closed_page = built.lf(&["task", "list", "--done", "--limit", "3", "--json"]);
+    let closed_page = built.lf(&["desktop", "done", "--limit", "3", "--json"]);
     let mut closed = closed_page["tasks"].as_array().unwrap().clone();
     let after = closed_page["next"].as_str().unwrap();
-    let rest = built.lf(&["task", "list", "--done", "--after", after, "--json"]);
+    let rest = built.lf(&["desktop", "done", "--after", after, "--json"]);
     assert!(rest["next"].is_null());
     closed.extend(rest["tasks"].as_array().unwrap().iter().cloned());
     let closed_names: Vec<&str> = closed
@@ -141,7 +140,7 @@ fn lifecycle_world_reports_each_state() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|task| task["task"]["name"].as_str().unwrap())
+        .map(|task| task["title"].as_str().unwrap())
         .filter(|name| name.starts_with("Shipped"))
         .collect();
     assert_eq!(shipped, ["Shipped yesterday", "Shipped this week"]);
@@ -211,17 +210,12 @@ fn task_list_query_finds_open_tasks_only() {
     let built = Built::new("lifecycle");
     let search = |args: &[&str]| {
         let found = built.lf(&[&["task", "list"], args, &["--json"]].concat());
-        found
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|task| task["task"].clone())
-            .collect::<Vec<_>>()
+        found.as_array().unwrap().to_vec()
     };
     let names = |args: &[&str]| {
         let mut names: Vec<String> = search(args)
             .iter()
-            .map(|task| task["name"].as_str().unwrap().to_owned())
+            .map(|task| task["title"].as_str().unwrap().to_owned())
             .collect();
         names.sort_unstable();
         names
@@ -232,10 +226,15 @@ fn task_list_query_finds_open_tasks_only() {
         names(&["STANDALONE"]),
         ["Standalone fix", "Standalone idea"]
     );
-    assert_eq!(names(&["", "--state", "paused"]), ["Paused mid-flight"]);
-    let paused = &search(&["paused mid"])[0];
+    assert_eq!(names(&["", "--state", "deferred"]), ["Deferred mid-flight"]);
+    let paused = &search(&["deferred mid"])[0];
+    assert_eq!(paused["state"], "deferred");
+    assert_eq!(
+        paused["next"],
+        format!("lf task resume {}", paused["identifier"].as_str().unwrap())
+    );
     let identifier = paused["identifier"].as_str().unwrap().to_lowercase();
-    assert_eq!(names(&[&identifier]), ["Paused mid-flight"]);
+    assert_eq!(names(&[&identifier]), ["Deferred mid-flight"]);
 }
 
 #[test]
@@ -271,8 +270,8 @@ fn task_list_watch_sends_a_frame_only_when_the_list_changes() {
             .as_array()
             .unwrap()
             .iter()
-            .find(|row| row["task"]["identifier"] == issue.as_str())
-            .map(|row| row["runtime"]["status"].clone())
+            .find(|row| row["identifier"] == issue.as_str())
+            .map(|row| row["state"].clone())
     };
     let first = next();
     assert!(first["answers"].is_null(), "{first}");
@@ -283,9 +282,9 @@ fn task_list_watch_sends_a_frame_only_when_the_list_changes() {
         .recv_timeout(std::time::Duration::from_secs(3))
         .is_err());
 
-    success(built.command(&["task", "pause", &issue]).output().unwrap());
-    let paused = next();
-    assert_ne!(state(&paused), state(&first), "{paused}");
+    success(built.command(&["task", "defer", &issue]).output().unwrap());
+    let deferred = next();
+    assert_eq!(state(&deferred), Some("deferred".into()), "{deferred}");
 
     // A request replaces the arguments and is always answered.
     let stdin = watch.stdin.as_mut().unwrap();
@@ -352,6 +351,17 @@ fn one_task_waits_at_demo_after_an_eight_step_pursue() {
     let workflow = built.workflow(&issue);
     assert_eq!(workflow["name"], "feature");
     assert_eq!(workflow["position"]["node"], "demo");
+    // `lf task status` says each fact once: the row, then what belongs to it.
+    let status = built.lf(&["task", "status", &issue, "--json"]);
+    let mut keys: Vec<_> = status.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+    assert_eq!(keys, ["comments", "graph_processes", "sessions", "task"]);
+    assert_eq!(status["task"]["state"], "active");
+    assert_eq!(
+        status["task"]["workflow"],
+        serde_json::json!({"name": "feature", "stage": "demo"})
+    );
+    assert_eq!(status["task"]["next"], format!("lf task run {issue}"));
     let moves: Vec<&str> = workflow["history"]
         .as_array()
         .unwrap()

@@ -376,10 +376,11 @@ failure there does not undo the selected Projects or their KRs.
 ## Inspect planning before starting execution
 
 ```bash
-lf task status INF-124 --json
+lf task status INF-124 --json      # the Task row, Sessions, Graph processes, comments
+lf desktop task INF-124 --json     # the planning evidence below
 ```
 
-Status returns canonical `task` and `project` records, `planning_state`,
+`lf desktop task` returns canonical `task` and `project` records, `planning_state`,
 `observed_at`, `planning_error`, `planning_stale`, delivery `sync` and optional
 `execution`. Local IDs and explicit Linear bindings stay distinct. A foreign or
 Project-less observation returns acquisition evidence without fabricating owned

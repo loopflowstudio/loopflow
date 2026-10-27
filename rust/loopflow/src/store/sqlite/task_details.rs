@@ -28,8 +28,8 @@ pub struct TaskDetailFacts {
     pub latest_events: HashMap<TaskId, TaskEvent>,
     /// The name of each Task's own Workflow.
     pub workflow_names: HashMap<TaskId, String>,
-    /// Tasks whose Workflow stands at `end`.
-    pub at_end: HashSet<TaskId>,
+    /// The stage each Task's Workflow stands at; absent while it is on a route.
+    pub stages: HashMap<TaskId, String>,
     /// Tasks handed off to Auto-Ship.
     pub shipped: HashSet<TaskId>,
     pub planning_sync: HashMap<TaskId, PlanningSyncStatus>,
@@ -101,11 +101,12 @@ impl SqliteStore {
                 &json,
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
             )?,
-            at_end: task_set(
+            stages: keyed(
                 &snapshot,
-                "SELECT task_id FROM task_workflows
-                 WHERE task_id IN (SELECT value FROM json_each(?1)) AND node='end' AND edge IS NULL",
+                "SELECT task_id,node FROM task_workflows
+                 WHERE task_id IN (SELECT value FROM json_each(?1)) AND edge IS NULL",
                 &json,
+                |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
             )?,
             shipped: task_set(
                 &snapshot,

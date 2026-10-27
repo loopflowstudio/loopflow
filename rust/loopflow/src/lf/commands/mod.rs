@@ -30,6 +30,7 @@ pub mod session;
 pub mod session_history;
 pub mod ship;
 pub mod ssh;
+pub mod task_row;
 pub mod tokens;
 pub mod top;
 pub mod usage;

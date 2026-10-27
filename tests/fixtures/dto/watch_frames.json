@@ -1,18 +1,9 @@
 [
   {
-    "read": "lf wave show --all --json --watch",
+    "read": "lf desktop plan --all --json --watch",
     "part": "planning",
     "frame": {
       "answers": null,
-      "home": "/Users/fixture/.lf",
-      "copy": null,
-      "revisions": {
-        "planning": 911,
-        "sessions": 402,
-        "graphs": 88,
-        "processes": 5120,
-        "usage": 77
-      },
       "unavailable": null,
       "body": {
         "generated_at": "2026-10-05T00:00:00Z",
@@ -30,15 +21,6 @@
     "part": "selections",
     "frame": {
       "answers": null,
-      "home": "/Users/fixture/.lf",
-      "copy": null,
-      "revisions": {
-        "planning": 911,
-        "sessions": 402,
-        "graphs": 88,
-        "processes": 5120,
-        "usage": 77
-      },
       "unavailable": null,
       "body": [
         {
@@ -225,33 +207,15 @@
     "part": "sessions",
     "frame": {
       "answers": 7,
-      "home": "/Users/fixture/.lf",
-      "copy": null,
-      "revisions": {
-        "planning": 911,
-        "sessions": 403,
-        "graphs": 88,
-        "processes": 5120,
-        "usage": 77
-      },
       "unavailable": null,
       "body": []
     }
   },
   {
-    "read": "lf task status LOO-1 --json --watch",
+    "read": "lf desktop task LOO-1 --json --watch",
     "part": "task",
     "frame": {
       "answers": 7,
-      "home": "/Users/fixture/.lf",
-      "copy": null,
-      "revisions": {
-        "planning": 911,
-        "sessions": 403,
-        "graphs": 88,
-        "processes": 5120,
-        "usage": 77
-      },
       "unavailable": "Task LOO-1 is not registered",
       "body": null
     }
@@ -261,15 +225,6 @@
     "part": "work_activity",
     "frame": {
       "answers": 7,
-      "home": "/Users/fixture/.lf",
-      "copy": null,
-      "revisions": {
-        "planning": 911,
-        "sessions": 403,
-        "graphs": 88,
-        "processes": 5120,
-        "usage": 77
-      },
       "unavailable": null,
       "body": {
         "generated_at": 1791220000,
@@ -285,9 +240,6 @@
     "part": "activity",
     "frame": {
       "answers": 7,
-      "home": "/Users/fixture/.lf",
-      "copy": null,
-      "revisions": null,
       "unavailable": null,
       "body": {
         "schema_version": 1,
@@ -297,19 +249,10 @@
     }
   },
   {
-    "read": "lf task status LOO-1 --json --watch",
+    "read": "lf desktop task LOO-1 --json --watch",
     "part": "task",
     "frame": {
       "answers": 8,
-      "home": "/Users/fixture/.lf",
-      "copy": "/Users/fixture/.lf/copies/3f2a9c1b",
-      "revisions": {
-        "planning": 912,
-        "sessions": 403,
-        "graphs": 89,
-        "processes": 5121,
-        "usage": 77
-      },
       "unavailable": null,
       "body": {
         "sync": null,
@@ -342,9 +285,6 @@
     "part": "peer_planning",
     "frame": {
       "answers": 7,
-      "home": "/home",
-      "copy": null,
-      "revisions": null,
       "unavailable": null,
       "body": {
         "transport": "git",

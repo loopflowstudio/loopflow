@@ -404,7 +404,7 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
     assert!(prompt.contains("What do you want to work on?"));
     assert!(prompt.contains("do not require a Wave, Task, setup checklist or operating pass first"));
     assert!(prompt.contains("When Work exists, apply it"));
-    let empty = fixture.json(&["wave", "show", "--all", "--json"]);
+    let empty = fixture.json(&["desktop", "plan", "--all", "--json"]);
     let primary = fixture.json(&["session", "connect", "--prepare", "--json"]);
     let again = fixture.json(&["session", "connect", "--prepare", "--json"]);
     assert_eq!(primary["id"], again["id"]);
@@ -451,7 +451,7 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
         "reopened": again,
         "task_primary": task_primary,
         "sessions": fixture.json(&["session", "list", "--history", "--all", "--json"]),
-        "roadmap": fixture.json(&["wave", "show", "--all", "--json"]),
+        "roadmap": fixture.json(&["desktop", "plan", "--all", "--json"]),
     });
     assert_eq!(fixture.count("agent_sessions"), 3);
     assert_eq!(fixture.count("graph_processes"), 0);
@@ -598,7 +598,7 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
         .output()
         .unwrap();
     assert!(run.status.success(), "{run:?}");
-    let final_status = fixture.json(&["task", "status", task_id, "--json"]);
+    let final_status = fixture.json(&["desktop", "task", task_id, "--json"]);
     assert_eq!(final_status["execution"]["status"], "active");
     assert_eq!(fixture.count("agent_sessions"), 2);
     let graphs = support::recorded_graphs(fixture.home.path());
@@ -635,7 +635,7 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
     assert_eq!(fixture.count("agent_sessions"), 2);
     let removed = fixture.run(&["task", "delete", task_id]);
     assert!(removed.status.success(), "{removed:?}");
-    let history = fixture.json(&["task", "status", task_id, "--json"]);
+    let history = fixture.json(&["desktop", "task", task_id, "--json"]);
     assert_eq!(history["planning_state"], "removed");
     assert_eq!(
         history["execution"]["actions"]["reason"],

@@ -1031,7 +1031,7 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
         String::from_utf8_lossy(&bound.stderr)
     );
     for args in [
-        vec!["task", "status", "lOo-506", "--json"],
+        vec!["desktop", "task", "lOo-506", "--json"],
         vec![
             "task",
             "status",

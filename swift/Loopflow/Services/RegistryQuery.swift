@@ -195,7 +195,7 @@ public struct RegistryQuery: Sendable {
     /// One page of a Wave's closed Tasks, most recently closed first. The
     /// Wave's status carries only its open Tasks.
     public func closedTasks(wave: String, after: String? = nil, cwd: String) async throws -> ClosedTaskPage {
-        var args = ["task", "list", "--done", "--wave", wave, "--json"]
+        var args = ["desktop", "done", "--wave", wave, "--json"]
         if let after { args += ["--after", after] }
         return try Self.decode(ClosedTaskPage.self, from: await run(args, cwd))
     }
@@ -203,7 +203,7 @@ public struct RegistryQuery: Sendable {
     /// One Wave's Project/Task work and recorded execution state.
     public func status(wave: String, cwd: String?) async throws
         -> WaveDetailSnapshot {
-        let stdout = try await run(["wave", "status", wave, "--json"], cwd)
+        let stdout = try await run(["desktop", "wave", wave, "--json"], cwd)
         return try Self.decode(WaveDetailSnapshot.self, from: stdout)
     }
 
@@ -220,7 +220,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
-        var args = ["wave", "show"]
+        var args = ["desktop", "plan"]
         if let wave {
             args.append(wave)
         } else {
@@ -242,7 +242,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func taskDestination(issue: String, repo: String?) async throws -> RoadmapSnapshot {
-        var args = ["wave", "show", "--task", issue, "--json"]
+        var args = ["desktop", "plan", "--task", issue, "--json"]
         if repo == nil { args.append("--all") }
         return try Self.decode(RoadmapSnapshot.self, from: await run(args, repo))
     }

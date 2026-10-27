@@ -33,7 +33,7 @@ struct WorkObservationTransportTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         try Data((1...200).map { frame(answers: $0) }.joined().utf8).write(to: directory.appendingPathComponent("frames"))
         let launched = Launched(cwd: directory) { args in
-            args.starts(with: ["wave", "show"]) ? "/bin/cat frames; IFS= read -r request" : "IFS= read -r request"
+            args.starts(with: ["desktop", "plan"]) ? "/bin/cat frames; IFS= read -r request" : "IFS= read -r request"
         }
         let reader = try launched.observe()
         var frames = reader.frames.makeAsyncIterator()
@@ -53,7 +53,7 @@ struct WorkObservationTransportTests {
         try Data(frame(answers: nil).utf8).write(to: directory.appendingPathComponent("first"))
         try Data(frame(answers: 1).utf8).write(to: directory.appendingPathComponent("refreshed"))
         let launched = Launched(cwd: directory) { args in
-            guard args.starts(with: ["wave", "show"]) else { return "while IFS= read -r request; do :; done" }
+            guard args.starts(with: ["desktop", "plan"]) else { return "while IFS= read -r request; do :; done" }
             return """
             /usr/bin/head -c 131072 /dev/zero >&2
             /usr/bin/head -c 25 first
@@ -75,8 +75,8 @@ struct WorkObservationTransportTests {
         // the Task's and repository's watches.
         reader.request(.scope(id: 2, WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1", activity: nil)))
         #expect(try await frames.next()?.answers == 2)
-        try await eventually { launched.arguments.contains { $0.starts(with: ["task", "status", "LOO-1"]) } }
-        #expect(launched.arguments.filter { $0.starts(with: ["wave", "show"]) }.count == 1)
+        try await eventually { launched.arguments.contains { $0.starts(with: ["desktop", "task", "LOO-1"]) } }
+        #expect(launched.arguments.filter { $0.starts(with: ["desktop", "plan"]) }.count == 1)
         await reader.cancel()
         #expect(launched.processes.allSatisfy { !$0.isRunning && $0.terminationStatus == 0 })
     }
@@ -84,10 +84,10 @@ struct WorkObservationTransportTests {
     @Test("A checkpoint follows once every running watch has answered it")
     func checkpointPerWatch() async throws {
         let watches = FakeWatches()
-        let observation = try WorkWatches.observe(launch: watches.launch)
+        let observation = try WorkWatches.observe(copy: nil, launch: watches.launch)
         var frames = observation.frames.makeAsyncIterator()
         observation.request(.checkpoint(id: 5, replay: []))
-        try await watches.answer(["wave", "show"], 5)
+        try await watches.answer(["desktop", "plan"], 5)
         #expect(try await frames.next()?.answers == 5)
         #expect(watches.requests(["monitor", "ps"]) == [#"{"id":5}"#])
         // The live-process watch has not answered, so nothing is confirmed yet.
@@ -98,6 +98,17 @@ struct WorkObservationTransportTests {
         #expect(checkpoint?.content.part == "checkpoint")
         #expect(checkpoint?.answers == 5)
         await observation.cancel()
+    }
+
+    @Test("The observation reads the store `lf --version` names")
+    func previewCopyFromVersion() async throws {
+        let shared = try Launched { _ in "IFS= read -r request" }.observe()
+        #expect(shared.copy == nil)
+        await shared.cancel()
+        let copy = try Launched(version: "lf 0.0.0+abc\ncopy: /home/.lf/copies/3f2a") { _ in "IFS= read -r request" }
+            .observe()
+        #expect(copy.copy == "/home/.lf/copies/3f2a")
+        await copy.cancel()
     }
 
     @Test("A stalled or noncooperative watch is reaped without touching other processes")
@@ -132,7 +143,7 @@ struct WorkObservationTransportTests {
         try Data(payload.utf8).write(to: directory.appendingPathComponent("frame"))
         // Only the cut-off watch exits; the others stay open after their bad frame.
         let launched = Launched(cwd: directory) { args in
-            guard args.starts(with: ["wave", "show"]) else { return "IFS= read -r request" }
+            guard args.starts(with: ["desktop", "plan"]) else { return "IFS= read -r request" }
             return kind == "partial-exit" ? "/bin/cat frame" : "/bin/cat frame; IFS= read -r request"
         }
         let reader = try launched.observe()
@@ -197,11 +208,11 @@ struct WorkObservationTransportTests {
         let launched = Launched(cwd: directory, configurationChanged: {
             FileManager.default.fileExists(atPath: marker.path)
         }) { args in
-            args.starts(with: ["wave", "show"]) ? "/bin/cat frame; IFS= read -r request" : "IFS= read -r request"
+            args.starts(with: ["desktop", "plan"]) ? "/bin/cat frame; IFS= read -r request" : "IFS= read -r request"
         }
         let reader = try launched.observe()
         var iterator = reader.frames.makeAsyncIterator()
-        #expect(try await iterator.next()?.home == "/fixture")
+        #expect(try await iterator.next()?.unavailable == "plan unavailable")
         try Data().write(to: marker)
         do {
             _ = try await iterator.next()
@@ -219,9 +230,7 @@ struct WorkObservationTransportTests {
 
     /// One failed `lf wave show --all --watch` line.
     private func frame(answers: Int?) -> String {
-        #"{"answers":\#(answers.map(String.init) ?? "null"),"home":"/fixture","copy":null,"# +
-            #""revisions":{"planning":911,"sessions":403,"graphs":88,"processes":5120,"usage":77},"# +
-            #""unavailable":"plan unavailable","body":null}"# + "\n"
+        #"{"answers":\#(answers.map(String.init) ?? "null"),"unavailable":"plan unavailable","body":null}"# + "\n"
     }
 
     private func eventually(_ condition: () -> Bool) async throws {
@@ -254,7 +263,7 @@ private final class FakeWatches: @unchecked Sendable {
         for _ in 0..<400 where !requests(prefix).contains(#"{"id":\#(id)}"#) {
             try await Task.sleep(for: .milliseconds(5))
         }
-        let line = #"{"answers":\#(id),"home":"/fixture","copy":null,"revisions":null,"unavailable":"gone","body":null}"#
+        let line = #"{"answers":\#(id),"unavailable":"gone","body":null}"#
         lock.withLock { watches.first { $0.args.starts(with: prefix) }?.lines.yield(Data(line.utf8)) }
     }
 }
@@ -266,11 +275,14 @@ private final class Launched: @unchecked Sendable {
     private let cwd: URL?
     private let configurationChanged: @Sendable () throws -> Bool
     private let script: @Sendable ([String]) -> String
+    /// What `lf --version` prints for this build.
+    private let version: String
 
     init(cwd: URL? = nil, configurationChanged: @escaping @Sendable () throws -> Bool = { false },
-         script: @escaping @Sendable ([String]) -> String) {
+         version: String = "lf 0.0.0", script: @escaping @Sendable ([String]) -> String) {
         self.cwd = cwd
         self.configurationChanged = configurationChanged
+        self.version = version
         self.script = script
     }
 
@@ -279,6 +291,7 @@ private final class Launched: @unchecked Sendable {
 
     func observe() throws -> WorkObservation {
         try LocalWorkObservation.start(process: { [self] args, _ in
+            if args == ["--version"] { return shell("printf '%s\\n' '\(version)'") }
             let process = shell(script(args), cwd: cwd)
             lock.withLock { launched.append((args, process)) }
             return process

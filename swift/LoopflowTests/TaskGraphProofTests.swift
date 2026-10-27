@@ -218,7 +218,7 @@ struct TaskGraphTests {
             case ("session", "attach"):
                 return try await reader.ensure(issue: String(args[2].dropFirst("ensured-".count)))
             case ("session", "list"): return try await reader.inventory()
-            case ("wave", "show"): return roadmapJSON
+            case ("desktop", "plan"): return roadmapJSON
             case ("machine", "id"): return #"{"id":"\#(fixtureMachineId)"}"#
             default: throw RegistryQueryError("The fixture has no \(args.prefix(2).joined(separator: " "))")
             }
@@ -340,7 +340,7 @@ private final class ScriptedReader {
         self.continuation = continuation
         return WorkObservation(frames: stream, request: { request in
             Task { @MainActor in self.answer(request) }
-        }, cancel: { continuation.finish() })
+        }, cancel: { continuation.finish() }, copy: nil)
     }
 
     /// `lf session connect --task --prepare`: the Task gets one conversation, its primary.
@@ -379,15 +379,13 @@ private final class ScriptedReader {
         }
         if case .checkpoint = request {
             sequence += 1
-            continuation?.yield(WorkFrame(sequence: sequence, answers: id, home: fixtureMachineId, copy: nil,
-                                          revisions: nil, unavailable: nil, content: .checkpoint, wire: nil))
+            continuation?.yield(WorkFrame(sequence: sequence, answers: id, unavailable: nil, content: .checkpoint, wire: nil))
         }
     }
 
     private func send(_ part: WorkPart, answers: Int, body: Any) {
         sequence += 1
-        let line: [String: Any] = ["answers": answers, "home": fixtureMachineId, "copy": NSNull(),
-                                   "revisions": NSNull(), "unavailable": NSNull(), "body": body]
+        let line: [String: Any] = ["answers": answers, "unavailable": NSNull(), "body": body]
         let scope = WorkScope(repo: repo, headless: false, task: task, activity: nil)
         guard let data = try? JSONSerialization.data(withJSONObject: line),
               let frame = try? WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: data) else { return }
@@ -699,7 +697,7 @@ private actor GraphSource {
 
     func respond(_ args: [String]) throws -> String {
         switch (args.first, args.dropFirst().first) {
-        case ("wave", "show"):
+        case ("desktop", "plan"):
             return String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
         case ("wave", "list"): return "[]"
         case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#

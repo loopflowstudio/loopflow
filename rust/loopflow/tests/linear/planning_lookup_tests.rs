@@ -112,7 +112,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
         }
         let output = command
             .current_dir(repo.path())
-            .args(["task", "status", selector, "--json"])
+            .args(["desktop", "task", selector, "--json"])
             .env("LF_HOME", home.path())
             .output()
             .unwrap();

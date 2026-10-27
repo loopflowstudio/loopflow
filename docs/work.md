@@ -43,7 +43,7 @@ conversation, use `lf resume` ([Sessions](sessions.md)).
 
 ```bash
 lf wave show                       # each Wave's plan and Tasks, sorted by what they need
-lf task status LOO-12              # owner, state, PR, and every Session and Graph on it
+lf task status LOO-12              # state, Workflow stage, PR, and every Session and Graph on it
 lf task workflow show LOO-12       # where it is in its Workflow, and how it got there
 lf task diff LOO-12 --files        # what it changed so far
 lf task wait LOO-13                # block until its run ends, with no agent polling
@@ -52,7 +52,7 @@ lf task wait LOO-13                # block until its run ends, with no agent pol
 ```bash
 lf task list                                  # open Tasks in this repository
 lf task list loo-60                           # identifier or title contains "loo-60"
-lf task list --wave infra --state active
+lf task list --wave infra --state idle
 lf task list --done --wave infra --since 7d   # closed in the last week
 lf task list --watch                          # a JSON line each time the list changes
 ```
@@ -61,9 +61,9 @@ lf task list --watch                          # a JSON line each time the list c
 it answers instantly and offline.
 
 `--watch` also works on `lf task status <id>`, `lf wave show`, `lf wave status`,
-`lf session list`, `lf history`, `lf planning status`, `lf desktop plans`
-and `lf ps`, always with `--json`. Each line is
-`{"answers", "home", "copy", "revisions", "unavailable", "body"}`, where `body` is
+`lf session list`, `lf history`, `lf planning status`, `lf ps` and the
+`lf desktop` reads, always with `--json`. Each line is
+`{"answers", "unavailable", "body"}`, where `body` is
 what `--json` prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to
 change what it reads, or `{"id": 2}` to ask for a fresh reading; the next line
 answers that id. It stops when stdin closes. `lf planning status --watch` also

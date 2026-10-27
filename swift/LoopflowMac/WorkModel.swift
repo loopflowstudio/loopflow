@@ -927,8 +927,9 @@ final class WorkModel {
         graphCatalogReadings[repoPath ?? ""] ?? .loading
     }
     private var workflowCatalogReadings: [String: WorkReading<[WorkflowCatalogEntry]>] = [:]
-    @ObservationIgnored private var definitionRevision: Int64?
-    @ObservationIgnored private var workflowCatalogRevisions: [String: Int64] = [:]
+    /// Counts the frames after which Workflow definitions may have changed.
+    @ObservationIgnored private var definitionRevision = 0
+    @ObservationIgnored private var workflowCatalogRevisions: [String: Int] = [:]
     @ObservationIgnored private var workflowCatalogRequests: [String: UUID] = [:]
     private var workflowCatalogKey: String { repoPath ?? "" }
     var workflowCatalog: WorkReading<[WorkflowCatalogEntry]> {
@@ -1184,10 +1185,18 @@ final class WorkModel {
                 guard !Task.isCancelled else { await opened.cancel(); return }
                 // A new reader numbers its frames from one and reads the store
                 // as it is now, which includes every local write so far.
+                // The store is the data identity: a preview copy, else the shared one.
+                let dataDirectory = opened.copy ?? ""
+                if let workDataDirectory, workDataDirectory != dataDirectory {
+                    dropMachineContent()
+                    finishCheckpoints(through: .max, reason: "Machine changed before the update was confirmed")
+                }
+                workDataDirectory = dataDirectory
+                if previewCopy != opened.copy { previewCopy = opened.copy }
                 workObservation = opened
                 workOpened = .now
                 appliedSequence = [:]
-                definitionRevision = nil
+                definitionRevision = 0
                 workflowCatalogRevisions = [:]
                 workflowCatalogRequests = [:]
                 (planningFloor, sessionsFloor, scopeFloor, taskFloor, sentScope) = (0, 0, 0, 0, nil)
@@ -1315,22 +1324,12 @@ final class WorkModel {
     private func apply(_ frame: WorkFrame) async {
         let part = frame.content.part
         if case .checkpoint = frame.content {
-            // The transport's confirmation names no Machine of its own.
-            await observeDefinitions(frame.revisions?.planning)
+            // A confirmed command may have changed Workflow definitions.
+            await observeDefinitions()
             finishCheckpoints(through: frame.answers ?? 0, reason: frame.unavailable)
             return
         }
-        if previewCopy != frame.copy { previewCopy = frame.copy }
-        // A preview copy is where the data lives, so it is the data identity.
-        let dataDirectory = frame.copy ?? frame.home
         guard frame.sequence > appliedSequence[part] ?? 0 else { return }
-        if let workDataDirectory, workDataDirectory != dataDirectory {
-            // The stream names its data directory, not the opaque Machine ID
-            // returned by machine id and used by Session locations.
-            dropMachineContent()
-            finishCheckpoints(through: .max, reason: "Machine changed before the update was confirmed")
-        }
-        workDataDirectory = dataDirectory
         let answers = frame.answers ?? 0
         let reason = frame.unavailable ?? "Work reader returned no \(part) reading"
         switch frame.content {
@@ -1415,12 +1414,12 @@ final class WorkModel {
             break
         }
         appliedSequence[part] = frame.sequence
-        await observeDefinitions(frame.revisions?.planning)
+        // A changed plan may come with changed Workflow definitions.
+        if part == WorkPart.planning.rawValue { await observeDefinitions() }
     }
 
-    private func observeDefinitions(_ revision: Int64?) async {
-        guard let revision, definitionRevision.map({ revision > $0 }) ?? true else { return }
-        definitionRevision = revision
+    private func observeDefinitions() async {
+        definitionRevision &+= 1
         if workflowCatalogReadings[workflowCatalogKey] != nil { await loadWorkflowCatalog() }
     }
 
@@ -1456,7 +1455,7 @@ final class WorkModel {
     private func dropMachineContent() {
         applySelectionPlans(nil, reason: "Work reading changed; showing retained membership")
         selectionReadings = [:]
-        definitionRevision = nil
+        definitionRevision = 0
         workflowCatalogRevisions = [:]
         workflowCatalogRequests = [:]
         workflowCatalogReadings = [:]

@@ -61,7 +61,7 @@ to store queries.
 ## Direction
 
 `--watch` (`lf/commands/watch.rs`, one implementation): a frame
-`{answers, home, copy, revisions, unavailable, body}` per line, `body` = the
+`{answers, unavailable, body}` per line, `body` = the
 `--json` output, sent first and whenever its identity (reading-time fields and
 `Watched::stamp`, on the result or each row, stripped) changes. Wakes on the
 read's revision domains (all but usage), its clock, or — with
@@ -73,9 +73,9 @@ next frame answers N. Ends on stdin close, parent exit or a failed write.
 Usage is in `docs/planning.md`.
 
 Desktop (`WorkWatches`, `swift/Loopflow/Services/WorkObservation.swift`) runs per
-window: `wave show --all` (plan; Waves derived from it), `desktop plans`
+window: `desktop plan --all` (plan; Waves derived from it), `desktop plans`
 (Dashboard plans), `planning status` (receipts; holds the repository's planning
-sync), `session list`, `task status <id>` (overview, Graph processes, comments,
+sync), `session list`, `desktop task <id>` (overview, Graph processes, comments,
 recorded work), `history --since 7d --limit 50 [filters]`, `monitor ps` (`lf ps`). Wave
 detail is the selected Wave's `WaveRoadmap` from the planning watch. A scope change restarts watches whose argv/cwd changed and
 replays the others' last frame answering the new id. A checkpoint confirms each
@@ -198,14 +198,14 @@ unless "Work needed" says otherwise.
 
 | Read | Desktop caller / cadence | Scope | Work needed |
 |---|---|---|---|
-| `wave show --all` | watch | M | Waves and Projects ride the plan |
+| `desktop plan --all` | watch | M | Waves and Projects ride the plan |
 | `session list` | watch | R | page or diff (Remaining 1) |
-| `task status <id>` | watch | T | flat in Graphs; Sessions/Processes unmeasured (Remaining 2) |
+| `desktop task <id>` | watch | T | flat in Graphs; Sessions/Processes unmeasured (Remaining 2) |
 | `history --since 7d` | watch | W/P/T | |
 | `ps` | watch | M | shrinks with LOO-615 |
 | `planning status` | watch | R | holds the repository's planning sync |
 | `desktop plans` | watch | R | |
-| `wave status` per Wave | `openHistoricalReference`, `ProjectHistoryView`; user action | W | check historical Projects are in the plan |
+| `desktop wave` per Wave | `openHistoricalReference`, `ProjectHistoryView`; user action | W | check historical Projects are in the plan |
 | `wave list --all --current` | before first frame; after createWave | M | delete once a checkpoint covers createWave |
 | `desktop view --plan` | each planning frame while a `.view` is open | R | ad-hoc expression in `desktop plans` args |
 | `wave workflow list`, `graph list` | frames whose planning moved; palette | R | catalog watch (Remaining 3) |
@@ -216,15 +216,21 @@ unless "Work needed" says otherwise.
 
 ## Remaining work
 
-0. Minimal streamed JSON (Jack Heart, 2026-10-27), in slices:
-   a. frame `{answers, unavailable, body}`; `lf --version` names a preview
-      copy; Desktop takes Machine identity from `machine id`, the copy from
-      `--version`, and reloads the workflow catalog on planning frames.
-   b. `lf task list --state` takes TaskState labels.
-   c. One Task row (`TaskRow`) for Task reads; Desktop's rich shapes move to
-      `lf desktop plan|wave|done|task` unchanged, so Swift changes are argv.
-   d. `lf task status` = row + sessions + graph processes + comments.
-
+0. Minimal streamed JSON (Jack Heart, 2026-10-27). Done: frame
+   `{answers, unavailable, body}`; `lf --version` adds `copy: <dir>` on a
+   draft build and Desktop reads it once per observation (Machine identity from
+   `machine id`; workflow catalog reloads on planning frames and checkpoints);
+   `--state` takes TaskState labels; `TaskRow` (`lf/commands/task_row.rs`) is
+   the row of `task list`, `task list --done`, `wave show`, `wave status`;
+   `lf task status` is `TaskDetail` (row, sessions, graph_processes,
+   comments). Desktop's shapes moved unchanged to `lf desktop plan|done|wave|
+   task` (`Shape::Desktop`), so Swift changed only argv. Left: the other
+   watches' bodies (`session list`, `history`, `ps`, `planning status`,
+   `desktop plans`) are not yet trimmed; rich `TaskStatus.task` still
+   serializes `created_at`/`updated_at` as arrays (Desktop-only now).
+   Desktop regression from the open-Task slice: completing the selected Task
+   drops it from planning and the pane keeps its retained, uncompleted row
+   (`WorkCLISubscriptionTests.taskLifecycleUpdatesOpenSidebar`).
 1. Sessions: incremental or paged rows instead of 5.7 MB per reading; a quiet
    Session turns Waiting on the 2 s clock (`next_quiet_available` is gone).
 2. `lf task status`: flat in Graphs; measure what still grows on Jack's store

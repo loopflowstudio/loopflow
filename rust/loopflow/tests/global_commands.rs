@@ -640,9 +640,13 @@ fn repo_selection_rejects_another_tasks_identity_before_edit_or_checkout() {
         );
     }
     let status = success(
-        command(home.path(), other.path(), &["task", "status", id, "--json"])
-            .output()
-            .unwrap(),
+        command(
+            home.path(),
+            other.path(),
+            &["desktop", "task", id, "--json"],
+        )
+        .output()
+        .unwrap(),
     );
     assert!(status.contains("Keep original"));
     assert!(!status.contains("Wrong repository"));
@@ -692,7 +696,7 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
         command(
             home.path(),
             selected.path(),
-            &["task", "status", "abcd", "--json"],
+            &["desktop", "task", "abcd", "--json"],
         )
         .output()
         .unwrap(),
@@ -716,7 +720,7 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
             command(
                 home.path(),
                 other.path(),
-                &[flag, value, "task", "status", "abcd", "--json"],
+                &[flag, value, "desktop", "task", "abcd", "--json"],
             )
             .output()
             .unwrap(),

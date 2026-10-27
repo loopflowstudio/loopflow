@@ -350,18 +350,16 @@ impl Watch {
     }
 }
 
-const PLANNING: &[&str] = &["wave", "show", "--all"];
+const PLANNING: &[&str] = &["desktop", "plan", "--all"];
 
 #[test]
-fn frames_name_the_home_they_read() {
+fn a_frame_is_its_answer_and_body() {
     let home = Machine::new();
     let watch = home.watch(PLANNING);
     let frame = watch.next(Duration::from_secs(30)).expect("no frame");
-    assert_eq!(
-        frame["home"],
-        home.path().canonicalize().unwrap().display().to_string()
-    );
-    assert_eq!(frame["copy"], serde_json::Value::Null);
+    let mut keys: Vec<_> = frame.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+    assert_eq!(keys, ["answers", "body", "unavailable"]);
 }
 
 #[test]
@@ -485,11 +483,10 @@ fn offline_completion_and_reopening_reach_an_open_watch() {
     // An open window keeps the repository's planning exchanged; no Task is selected.
     let _sync = home.watch(&["planning", "status"]);
     let tasks = home.watch(&["task", "list"]);
-    let status = home.watch(&["task", "status", "FIX-1"]);
+    let status = home.watch(&["desktop", "task", "FIX-1"]);
     let listed = |body: &serde_json::Value, listed: bool| {
-        body.as_array().is_some_and(|rows| {
-            rows.iter().any(|row| row["task"]["identifier"] == "FIX-1") == listed
-        })
+        body.as_array()
+            .is_some_and(|rows| rows.iter().any(|row| row["identifier"] == "FIX-1") == listed)
     };
     tasks.body(Duration::from_secs(30), |body| listed(body, true));
     for (operation, completed, open) in [("complete", true, false), ("reopen", false, true)] {
@@ -627,7 +624,7 @@ fn planning_git_commands(home: &Path) -> Vec<String> {
     std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     let mut search = vec![shim.path().to_path_buf()];
     search.extend(std::env::split_paths(&path));
-    let output = lf(home, &["wave", "show", "--all", "--json"])
+    let output = lf(home, &["desktop", "plan", "--all", "--json"])
         .env("PATH", std::env::join_paths(search).unwrap())
         .stderr(Stdio::piped())
         .output()

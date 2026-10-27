@@ -3,6 +3,7 @@ use crate::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use super::waves::Shape;
 use crate::ops::human_session::SessionAction;
 use crate::ops::task_actions::TaskActionModel;
 use crate::ops::task_run::TaskRunControl;
@@ -432,7 +433,8 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         ["desktop", "actions"] => Some(schema::<Vec<DesktopActionDescriptor>>()),
         ["desktop", "capture"] => Some(schema::<DesktopTextReading>()),
         ["desktop", "events"] => Some(schema::<DesktopChange>()),
-        ["desktop", "wait"] => None,
+        // Work reads print Desktop's presentation types, which carry no schema.
+        ["desktop", "wait" | "plan" | "done" | "wave" | "task"] => None,
         // Saved-intent commands answered above; `rename` writes a shared owner's record.
         ["desktop", verb] if !READING_VERBS.contains(verb) && *verb != "rename" => {
             Some(schema::<DesktopVerbResult>())
@@ -563,6 +565,21 @@ fn selection_repository(
 
 /// `lf desktop plans`: every plan a repository window shows, the default and
 /// each saved Dashboard, as Desktop reads them.
+/// `lf desktop task`: what the Task pane shows, from the same reading as
+/// `lf task status`.
+fn task_pane(issue: &str, watch: bool) -> Result<()> {
+    let repo = crate::ops::task::task_repository(&crate::repo::working_directory()?, Some(issue))?;
+    let status = crate::ops::task::task_status(&repo, Some(issue))?;
+    if watch {
+        let task = status
+            .task
+            .context("only a registered Task can be watched")?;
+        return super::waves::watch_task_status(&repo, task.identifier, Shape::Desktop);
+    }
+    println!("{}", serde_json::to_string(&status)?);
+    Ok(())
+}
+
 fn plans(cli: &crate::lf::Cli, watch: bool) -> Result<()> {
     if !watch {
         let store = crate::store::read_existing_registry()?
@@ -840,6 +857,40 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             json,
         } => return view_plan(cli, expression.as_deref(), *plan, *json || cli.json),
         DesktopCommand::Plans { watch, .. } => return plans(cli, *watch),
+        DesktopCommand::Plan {
+            wave,
+            task,
+            all,
+            watch,
+            ..
+        } => {
+            return if *watch {
+                super::waves::watch_show(wave.clone(), task.clone(), *all, Shape::Desktop)
+            } else {
+                super::waves::show(wave.as_deref(), task.as_deref(), true, *all, Shape::Desktop)
+            };
+        }
+        DesktopCommand::Done {
+            wave,
+            since,
+            after,
+            limit,
+            ..
+        } => {
+            return super::waves::list_closed_tasks(
+                &crate::repo::working_directory()?,
+                wave.as_deref(),
+                since.as_deref(),
+                after.as_deref(),
+                *limit,
+                true,
+                Shape::Desktop,
+            );
+        }
+        DesktopCommand::Wave { wave, .. } => {
+            return super::waves::status(wave.as_deref(), true, Shape::Desktop);
+        }
+        DesktopCommand::Task { issue, watch, .. } => return task_pane(issue, *watch),
         _ => {}
     }
     // Arguments are checked before Desktop is contacted.
@@ -1200,6 +1251,10 @@ impl Verb {
             }
             DesktopCommand::View { .. }
             | DesktopCommand::Plans { .. }
+            | DesktopCommand::Plan { .. }
+            | DesktopCommand::Done { .. }
+            | DesktopCommand::Wave { .. }
+            | DesktopCommand::Task { .. }
             | DesktopCommand::Query { .. }
             | DesktopCommand::Pin { .. }
             | DesktopCommand::Unpin { .. }
@@ -1378,6 +1433,10 @@ pub fn runs_without_desktop(command: &crate::lf::DesktopCommand) -> bool {
     match command {
         DesktopCommand::View { .. }
         | DesktopCommand::Plans { .. }
+        | DesktopCommand::Plan { .. }
+        | DesktopCommand::Done { .. }
+        | DesktopCommand::Wave { .. }
+        | DesktopCommand::Task { .. }
         | DesktopCommand::Query { .. }
         | DesktopCommand::Pin { .. }
         | DesktopCommand::Unpin { .. }

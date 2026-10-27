@@ -53,14 +53,6 @@ const MAX_REQUEST: usize = 16 * 1024;
 pub struct WatchFrame<'a, T> {
     /// The newest request this reading began after.
     pub answers: Option<u64>,
-    /// The Loopflow home this watch reads; a client drops what it showed from
-    /// another one.
-    pub home: &'a str,
-    /// The preview copy directory a draft-carrying build reads; `null` on the
-    /// shared store.
-    pub copy: Option<&'a str>,
-    /// The store revisions it was read at; `null` before a store exists.
-    pub revisions: Option<StoreRevisions>,
     /// Why the read failed. `body` is then `null`.
     pub unavailable: Option<String>,
     pub body: Option<&'a T>,
@@ -138,19 +130,6 @@ where
     Fut: std::future::Future<Output = Result<T>>,
 {
     let database = crate::store::database_path_from_env()?;
-    let home = crate::store::lf_home_dir();
-    let home = home
-        .canonicalize()
-        .unwrap_or(home)
-        .to_string_lossy()
-        .into_owned();
-    let copy = crate::store::copy::selected().map(|database| {
-        database
-            .parent()
-            .expect("copy database has a directory")
-            .to_string_lossy()
-            .into_owned()
-    });
     if watched.checkouts {
         // Every reading asks Git the same questions about the same checkouts;
         // only a checkout that changed on disk is asked again.
@@ -273,9 +252,6 @@ where
             if force || sent != Some(identity) {
                 let frame = WatchFrame {
                     answers,
-                    home: &home,
-                    copy: copy.as_deref(),
-                    revisions,
                     unavailable,
                     body: body.as_ref(),
                 };
@@ -382,9 +358,6 @@ fn encode<T: Serialize>(frame: &WatchFrame<'_, T>) -> Result<Vec<u8>> {
     if bytes.len() > MAX_FRAME {
         bytes = serde_json::to_vec(&WatchFrame::<()> {
             answers: frame.answers,
-            home: frame.home,
-            copy: frame.copy,
-            revisions: frame.revisions,
             unavailable: Some("watch frame exceeds the 64 MiB transport limit".into()),
             body: None,
         })?;

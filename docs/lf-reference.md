@@ -1007,6 +1007,53 @@ Print the repository's default and saved Dashboard plans as JSON
 | `--watch` | Print a JSON line now and each time the plans change, until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
+## lf desktop plan
+
+Print the plan as Desktop shows it: each Task's section, condition and controls
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | One Wave; omitted reads the repository's Waves |
+| `--task` | Only this Task, open or closed |
+| `--all` | Every repository's Waves Default: false. |
+| `--json` | json Default: false. |
+| `--watch` | Print a JSON line now and each time the plan changes, until stdin closes Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop done
+
+Print one page of closed Tasks as Desktop shows them, most recently closed first
+
+| Argument | What it does |
+|---|---|
+| `--wave` | wave |
+| `--since` | Only Tasks closed since then: 7d, 24h, 30m or RFC3339 |
+| `--after` | Previous page's `next` Task; keep the same filters |
+| `--limit` | Closed Tasks per page Default: 50. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop wave
+
+Print one Wave's Projects and Tasks as Desktop shows them
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop task
+
+Print one Task as Desktop's Task pane shows it
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--json` | json Default: false. |
+| `--watch` | Print a JSON line now and each time the Task changes, until stdin closes Default: false. |
+| `--help / -h` | Print help |
+
 ## lf desktop query
 
 Create or edit a Dashboard query with revision checking; prints the Dashboard as JSON

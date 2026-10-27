@@ -21,7 +21,7 @@ const COPIES: &str = "copies";
 
 /// The copy this build works on, when it must use one: a validation-only
 /// build with drafts on the Machine's default home.
-pub(crate) fn selected() -> Option<PathBuf> {
+pub fn selected() -> Option<PathBuf> {
     if super::custom_home_selected()
         || crate::build_info::migration_authority()
             == crate::build_info::MigrationAuthority::Published

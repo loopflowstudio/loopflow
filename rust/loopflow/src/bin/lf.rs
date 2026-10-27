@@ -1046,7 +1046,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             watch,
         } => {
             use loopflow::lf::commands::waves::{
-                list_closed_tasks, list_tasks, watch_tasks, TaskListArgs,
+                list_closed_tasks, list_tasks, watch_tasks, Shape, TaskListArgs,
             };
             let args = TaskListArgs {
                 query: query.clone(),
@@ -1064,6 +1064,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     after.as_deref(),
                     *limit,
                     *json,
+                    Shape::Tasks,
                 )
             } else {
                 list_tasks(repo, &args, *json)
@@ -1129,10 +1130,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 let task = status
                     .task
                     .context("only a registered Task can be watched")?;
-                return loopflow::lf::commands::waves::watch_task_status(repo, task.identifier);
+                return loopflow::lf::commands::waves::watch_task_status(
+                    repo,
+                    task.identifier,
+                    loopflow::lf::commands::waves::Shape::Tasks,
+                );
             }
             if *json {
-                println!("{}", serde_json::to_string_pretty(&status)?);
+                loopflow::lf::commands::waves::print_task_detail(status)?;
             } else {
                 println!(
                     "Planning evidence: {}",
@@ -1517,6 +1522,10 @@ fn desktop_intent_read(cli: &Cli) -> bool {
         Some(Commands::Desktop {
             cmd: DesktopCommand::View { .. }
                 | DesktopCommand::Plans { .. }
+                | DesktopCommand::Plan { .. }
+                | DesktopCommand::Done { .. }
+                | DesktopCommand::Wave { .. }
+                | DesktopCommand::Task { .. }
                 | DesktopCommand::Layout { save: false, .. }
         })
     )
@@ -1632,6 +1641,13 @@ fn run() -> anyhow::Result<()> {
         Err(error) => {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
+            // Which store this build reads: a draft-carrying build names its copy.
+            if error.kind() == clap::error::ErrorKind::DisplayVersion {
+                if let Some(copy) = loopflow::store::copy::selected() {
+                    let copy = copy.parent().expect("copy database has a directory");
+                    println!("copy: {}", copy.display());
+                }
+            }
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
@@ -2378,6 +2394,11 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             cmd: TaskCommand::Status { .. } | TaskCommand::List { .. }
         }) | Some(Commands::Wave {
             cmd: WaveCommand::Status { .. } | WaveCommand::List { .. } | WaveCommand::Show { .. }
+        }) | Some(Commands::Desktop {
+            cmd: loopflow::lf::DesktopCommand::Plan { .. }
+                | loopflow::lf::DesktopCommand::Done { .. }
+                | loopflow::lf::DesktopCommand::Wave { .. }
+                | loopflow::lf::DesktopCommand::Task { .. }
         }) | Some(Commands::History {
             cmd: None | Some(loopflow::lf::commands::history::HistoryCommand::List { .. }),
             ..
@@ -2707,7 +2728,10 @@ fn execute_command(
             cmd: WaveCommand::Status {
                 wave, watch: true, ..
             },
-        }) => loopflow::lf::commands::waves::watch_status(wave.clone()),
+        }) => loopflow::lf::commands::waves::watch_status(
+            wave.clone(),
+            loopflow::lf::commands::waves::Shape::Tasks,
+        ),
         Some(Commands::Wave {
             cmd: WaveCommand::Status {
                 wave, json, sync, ..
@@ -2718,7 +2742,11 @@ fn execute_command(
             } else {
                 None
             };
-            loopflow::lf::commands::waves::status(refreshed.as_deref().or(wave.as_deref()), *json)
+            loopflow::lf::commands::waves::status(
+                refreshed.as_deref().or(wave.as_deref()),
+                *json,
+                loopflow::lf::commands::waves::Shape::Tasks,
+            )
         }
 
         Some(Commands::Wave {
@@ -2740,7 +2768,12 @@ fn execute_command(
                     watch: true,
                     ..
                 },
-        }) => loopflow::lf::commands::waves::watch_show(wave.clone(), task.clone(), *all),
+        }) => loopflow::lf::commands::waves::watch_show(
+            wave.clone(),
+            task.clone(),
+            *all,
+            loopflow::lf::commands::waves::Shape::Tasks,
+        ),
         Some(Commands::Wave {
             cmd:
                 WaveCommand::Show {
@@ -2750,7 +2783,13 @@ fn execute_command(
                     all,
                     ..
                 },
-        }) => loopflow::lf::commands::waves::show(wave.as_deref(), task.as_deref(), *json, *all),
+        }) => loopflow::lf::commands::waves::show(
+            wave.as_deref(),
+            task.as_deref(),
+            *json,
+            *all,
+            loopflow::lf::commands::waves::Shape::Tasks,
+        ),
         Some(Commands::Wave { cmd }) => in_repo_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Scratch {
             cmd: loopflow::lf::ScratchCommand::Clear,

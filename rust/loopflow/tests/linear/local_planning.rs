@@ -94,10 +94,10 @@ fn stored_task_publishes_and_completes_after_verified_merge() {
             "Local planning through delivery.",
         ],
     );
-    let published = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    let published = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     assert_ne!(published["execution"]["status"], "done");
     lf(worktree, home.path(), &["land"]);
-    let armed = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    let armed = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     assert_ne!(armed["execution"]["status"], "done");
     assert!(home.path().join("gh-armed").exists());
     let head = std::fs::read_to_string(home.path().join("gh-head")).unwrap();
@@ -110,14 +110,14 @@ fn stored_task_publishes_and_completes_after_verified_merge() {
         .success());
     std::fs::write(home.path().join("gh-merged"), "confirmed").unwrap();
     lf(repo.path(), home.path(), &["pr", "reconcile"]);
-    let merged = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    let merged = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     assert_ne!(merged["execution"]["status"], "done");
     assert!(
         worktree.exists(),
         "retain checkout until explicit completion"
     );
     lf(repo.path(), home.path(), &["task", "complete", id]);
-    let completed = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    let completed = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     assert_eq!(completed["execution"]["status"], "done");
     assert_eq!(completed["execution"]["task_id"], id);
     assert!(completed["task"]["completed_at"].is_string());
@@ -212,7 +212,7 @@ fn concurrent_creations_are_distinct_and_failed_checkout_retains_its_task() {
     let retained = lf(
         repo.path(),
         home.path(),
-        &["task", "status", id.as_str(), "--json"],
+        &["desktop", "task", id.as_str(), "--json"],
     );
     assert_eq!(retained["execution"]["task_id"], id.as_str());
     assert!(retained["execution"]["pr"].is_null());
@@ -341,7 +341,7 @@ fn stored_rotation_commits_all_waves_and_serializes_new_work() {
         let created: Value = serde_json::from_slice(&output.stdout).unwrap();
         let id = created["id"].as_str().unwrap();
         assert!(identities.insert(id.to_string()));
-        let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+        let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
         let project = &status["project"]["id"];
         assert!(project == destination || project == &predecessors[0]["id"]);
         assert!(status["execution"]["worktree"].is_null());
@@ -462,7 +462,7 @@ fn stored_fields_preserve_order_assignment_and_project_summary() {
             fields["assignee"].as_str().unwrap(),
         ],
     );
-    let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     for field in ["name", "description", "rank", "assignee"] {
         assert_eq!(
             status["task"][if field == "name" { "title" } else { field }],
@@ -484,7 +484,7 @@ fn stored_fields_preserve_order_assignment_and_project_summary() {
             fields["summary"].as_str().unwrap(),
         ],
     );
-    let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     assert_eq!(status["project"]["summary"], fields["summary"]);
     assert_eq!(status["project"]["name"], "Current");
     lf(
@@ -492,7 +492,7 @@ fn stored_fields_preserve_order_assignment_and_project_summary() {
         home.path(),
         &["task", "edit", id, "--unassign", "--notes", ""],
     );
-    let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     assert!(status["task"]["assignee"].is_null());
     assert_eq!(status["task"]["description"], "");
     assert_eq!(status["task"]["rank"], 0);
@@ -526,7 +526,7 @@ fn nested_waves_create_files_and_store_project_identity() {
     let status = lf(
         repo.path(),
         home.path(),
-        &["task", "status", created["id"].as_str().unwrap(), "--json"],
+        &["desktop", "task", created["id"].as_str().unwrap(), "--json"],
     );
     let again = lf(
         repo.path(),
@@ -544,7 +544,7 @@ fn nested_waves_create_files_and_store_project_identity() {
     let other = lf(
         repo.path(),
         home.path(),
-        &["task", "status", again["id"].as_str().unwrap(), "--json"],
+        &["desktop", "task", again["id"].as_str().unwrap(), "--json"],
     );
     assert_eq!(status["project"]["id"], other["project"]["id"]);
     lf(
@@ -577,7 +577,7 @@ fn nested_waves_create_files_and_store_project_identity() {
     let moved = lf(
         repo.path(),
         home.path(),
-        &["task", "status", created["id"].as_str().unwrap(), "--json"],
+        &["desktop", "task", created["id"].as_str().unwrap(), "--json"],
     );
     assert_ne!(moved["project"]["id"], status["project"]["id"]);
     let wave = lf(
@@ -649,7 +649,7 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
         let status = lf(
             repo.path(),
             home.path(),
-            &["task", "status", selector, "--json"],
+            &["desktop", "task", selector, "--json"],
         );
         assert_eq!(status["execution"]["task_id"], first);
         assert_eq!(status["task"]["identifier"], "abcd1234");
@@ -673,13 +673,13 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
     let status = lf(
         repo.path(),
         home.path(),
-        &["task", "status", first, "--json"],
+        &["desktop", "task", first, "--json"],
     );
     assert_eq!(status["task"]["title"], "Chosen target");
     let other = lf(
         repo.path(),
         home.path(),
-        &["task", "status", second, "--json"],
+        &["desktop", "task", second, "--json"],
     );
     assert_eq!(other["task"]["title"], "Second");
 }
@@ -747,7 +747,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     let status = lf(
         repo.path(),
         home.path(),
-        &["task", "status", identity.as_str(), "--json"],
+        &["desktop", "task", identity.as_str(), "--json"],
     );
     assert_eq!(status["task"]["title"], "Retain quoted input");
     assert_eq!(status["execution"]["task_id"], identity.as_str());
@@ -807,7 +807,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     let project = lf(
         repo.path(),
         home.path(),
-        &["task", "status", identity.as_str(), "--json"],
+        &["desktop", "task", identity.as_str(), "--json"],
     );
     assert_eq!(
         project["project"]["krs"][0]["text"],
@@ -839,7 +839,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     let completed = lf(
         repo.path(),
         home.path(),
-        &["task", "status", identity.as_str(), "--json"],
+        &["desktop", "task", identity.as_str(), "--json"],
     );
     assert_eq!(completed["execution"]["status"], "done");
     assert!(completed["task"]["completed_at"].is_string());
@@ -858,7 +858,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     let canceled = lf(
         repo.path(),
         home.path(),
-        &["task", "status", other_id, "--json"],
+        &["desktop", "task", other_id, "--json"],
     );
     assert_eq!(canceled["execution"]["status"], "abandoned");
     assert_eq!(canceled["task"]["state"], "canceled");
@@ -878,7 +878,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     let retained = lf(
         repo.path(),
         home.path(),
-        &["task", "status", other_id, "--json"],
+        &["desktop", "task", other_id, "--json"],
     );
     assert_eq!(retained["execution"]["status"], "abandoned");
     assert_eq!(retained["planning_state"], "removed");
@@ -936,7 +936,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         ],
     );
     let id = created["id"].as_str().unwrap();
-    let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     let project_id = status["project"]["id"].as_str().unwrap();
     lf(
         repo.path(),
@@ -977,7 +977,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         .unwrap()
         .starts_with(&format!("jack/{}-", &id.trim_start_matches("task_")[..6])));
     lf(repo.path(), home.path(), &["-b", "task", "run", id]);
-    let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     // The run stops at the Workflow's first stage, where a person takes part.
     assert_eq!(status["execution"]["status"], "active");
     assert_eq!(status["execution"]["task_id"], id);
@@ -989,7 +989,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     assert!(!landing.status.success());
     let error = String::from_utf8_lossy(&landing.stderr);
     assert!(error.contains("remote"), "{error}");
-    let retained = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    let retained = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     assert_eq!(retained["execution"]["status"], "active");
     assert!(retained["execution"]["pr"].is_null());
     let backlog = lf(
@@ -1034,7 +1034,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let conflict = command(repo.path(), home.path(), &rotate).output().unwrap();
     assert!(!conflict.status.success());
     std::fs::write(&plan_file, original_plan).unwrap();
-    let moved = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    let moved = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     assert_eq!(
         moved["project"]["id"],
         format!("proj_{}", successor.simple())
@@ -1050,7 +1050,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let retained = lf(
         repo.path(),
         home.path(),
-        &["task", "status", backlog["id"].as_str().unwrap(), "--json"],
+        &["desktop", "task", backlog["id"].as_str().unwrap(), "--json"],
     );
     assert_eq!(retained["project"]["id"], project_id);
     let retry = lf(
@@ -1080,7 +1080,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
             "Inspection completed",
         ],
     );
-    let completed = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    let completed = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     assert_eq!(completed["execution"]["status"], "done");
     if Path::new(worktree).exists() {
         std::fs::remove_dir_all(worktree).unwrap();
@@ -1960,7 +1960,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         let status = lf(
             repo.path(),
             home.path(),
-            &["task", "status", selector, "--json"],
+            &["desktop", "task", selector, "--json"],
         );
         assert_eq!(status["task"]["title"], "Saved offline");
         assert_eq!(status["task"]["description"], "");
@@ -2909,7 +2909,7 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         assert_eq!(removed.worktree, before.worktree);
         assert_eq!(removed.linear_id, before.linear_id);
         assert_eq!(removed.revision, before.revision + 1);
-        let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+        let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
         assert_eq!(status["planning_state"], "removed");
         assert!(store.list_tasks(None).unwrap().is_empty());
         drop(store);
@@ -2954,7 +2954,7 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
         (second.path(), &tasks[1]),
     ] {
         for selector in ["DUP-1", "dup-1", "Dup-1"] {
-            let status = lf(repo, home.path(), &["task", "status", selector, "--json"]);
+            let status = lf(repo, home.path(), &["desktop", "task", selector, "--json"]);
             assert_eq!(status["task"]["id"], task["id"]);
             assert_eq!(status["task"]["identifier"], "DUP-1");
         }
@@ -2972,7 +2972,7 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
     let status = lf(
         first.path(),
         home.path(),
-        &["task", "status", foreign, "--json"],
+        &["desktop", "task", foreign, "--json"],
     );
     assert!(status["task"].is_null());
     let rejected = command(
@@ -2991,19 +2991,19 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
     let status = lf(
         second.path(),
         home.path(),
-        &["task", "status", "DUP-1", "--json"],
+        &["desktop", "task", "DUP-1", "--json"],
     );
     assert_eq!(status["task"]["title"], "Original");
     let status = lf(
         first.path(),
         home.path(),
-        &["task", "status", "DUP-1", "--json"],
+        &["desktop", "task", "DUP-1", "--json"],
     );
     assert_eq!(status["task"]["title"], "First only");
     let missing = lf(
         first.path(),
         home.path(),
-        &["task", "status", "MISSING-1", "--json"],
+        &["desktop", "task", "MISSING-1", "--json"],
     );
     assert!(missing["task"].is_null());
     assert_eq!(missing["planning_state"], "unavailable");
@@ -3059,7 +3059,7 @@ fn ordinary_task_creation_returns_resolvable_identifier_without_a_public_retry_t
     let status = lf(
         repo.path(),
         home.path(),
-        &["task", "status", identifier, "--json"],
+        &["desktop", "task", identifier, "--json"],
     );
     assert_eq!(status["task"]["identifier"], identifier);
     assert_eq!(status["task"]["title"], "Saved task");
@@ -3112,7 +3112,8 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
     );
     assert_eq!(comments["pending_sync"].as_array().unwrap().len(), 1);
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let status = || lf(repo.path(), home.path(), &["task", "status", id, "--json"])["sync"].clone();
+    let status =
+        || lf(repo.path(), home.path(), &["desktop", "task", id, "--json"])["sync"].clone();
     let initial = status();
     for field in ["creation", "task_title", "comment"] {
         assert!(initial["changes"]
@@ -3576,7 +3577,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         lf(
             repo.path(),
             home.path(),
-            &["task", "status", id.as_str(), "--json"],
+            &["desktop", "task", id.as_str(), "--json"],
         )
     };
     let initial = read();
@@ -3809,7 +3810,7 @@ fn waveless_task_lifecycle() {
         home.path(),
         &["task", "move", id, "--wave", "product"],
     );
-    let attached = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    let attached = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     assert_eq!(attached["execution"]["worktree"], placed["worktree"]);
     assert_eq!(attached["execution"]["wave"], "product");
     assert_eq!(
@@ -3833,7 +3834,7 @@ fn waveless_task_lifecycle() {
     );
     lf(repo.path(), home.path(), &["task", "complete", id]);
     assert_eq!(
-        lf(repo.path(), home.path(), &["task", "status", id, "--json"])["execution"]["status"],
+        lf(repo.path(), home.path(), &["desktop", "task", id, "--json"])["execution"]["status"],
         "done"
     );
 
@@ -3856,7 +3857,7 @@ fn waveless_task_lifecycle() {
     let completed = lf(
         repo.path(),
         home.path(),
-        &["task", "status", standalone_id, "--json"],
+        &["desktop", "task", standalone_id, "--json"],
     );
     assert_eq!(completed["execution"]["status"], "done");
     assert!(completed["execution"]["wave"].is_null());

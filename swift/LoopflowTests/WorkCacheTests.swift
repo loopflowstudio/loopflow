@@ -202,7 +202,7 @@ struct WorkCacheTests {
         saving.flush()
 
         let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: WorkCache(directory: directory))
-        await source.hold(["wave", "show"])
+        await source.hold(["desktop", "plan"])
         let read = Task { await returning.refresh() }
         await source.waitForHeldRead()
 
@@ -231,7 +231,7 @@ struct WorkCacheTests {
         let cache = WorkCache(directory: directory)
         let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
         #expect(returning.selection == nil)
-        await source.hold(["wave", "show"])
+        await source.hold(["desktop", "plan"])
         let read = Task { await returning.refresh() }
         await source.waitForHeldRead()
         returning.select(.wave(id: "wave-1"))
@@ -369,7 +369,7 @@ private actor Source {
             }
         }
         switch args.first {
-        case "wave" where args.dropFirst().first == "show": return roadmap
+        case "desktop" where args.dropFirst().first == "plan": return roadmap
         case "session": return sessions
         case "wave": return "[]"
         case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#

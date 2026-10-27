@@ -8,15 +8,24 @@ public struct WorkObservation: Sendable {
     public let request: @Sendable (WorkRequest) -> Void
     /// Returns only after every owned watch has exited.
     public let cancel: @Sendable () async -> Void
+    /// The preview copy directory a draft-carrying build reads; nil on the shared store.
+    public let copy: String?
 
     public init(
         frames: AsyncThrowingStream<WorkFrame, any Error>,
         request: @escaping @Sendable (WorkRequest) -> Void,
-        cancel: @escaping @Sendable () async -> Void
+        cancel: @escaping @Sendable () async -> Void,
+        copy: String?
     ) {
         self.frames = frames
         self.request = request
         self.cancel = cancel
+        self.copy = copy
+    }
+
+    /// The copy `lf --version` names on its `copy:` line.
+    public static func copy(fromVersion output: String) -> String? {
+        output.split(separator: "\n").first { $0.hasPrefix("copy: ") }.map { String($0.dropFirst(6)) }
     }
 }
 
@@ -71,15 +80,6 @@ public enum WorkRequest: Equatable, Sendable {
     }
 }
 
-/// Store revisions a frame was read at. Mirrors Rust `StoreRevisions`.
-public struct StoreRevisions: Decodable, Equatable, Sendable {
-    public let planning: Int64
-    public let sessions: Int64
-    public let graphs: Int64
-    public let processes: Int64
-    public let usage: Int64
-}
-
 /// One watch a window runs, and the `lf` read behind it.
 public enum WorkPart: String, CaseIterable, Sendable {
     case task, sessions, planning, selections, activity
@@ -90,7 +90,7 @@ public enum WorkPart: String, CaseIterable, Sendable {
     /// nil when the scope shows no such part.
     public func command(for scope: WorkScope) -> (args: [String], cwd: String?)? {
         switch self {
-        case .planning: return (["wave", "show", "--all"], nil)
+        case .planning: return (["desktop", "plan", "--all"], nil)
         case .activity: return (["monitor", "ps"], nil)
         case .selections:
             return scope.repo.map { (["desktop", "plans"], $0) }
@@ -99,7 +99,7 @@ public enum WorkPart: String, CaseIterable, Sendable {
         case .sessions:
             return scope.repo.map { (["session", "list"] + (scope.headless ? ["--interactive", "all"] : []), $0) }
         case .task:
-            return scope.task.map { (["task", "status", $0], scope.repo) }
+            return scope.task.map { (["desktop", "task", $0], scope.repo) }
         case .workActivity:
             guard let activity = scope.activity else { return nil }
             var args = ["history", "--since", "7d", "--limit", "50"]
@@ -173,10 +173,6 @@ public struct WorkFrame: Sendable {
     /// Orders every frame of one observation.
     public let sequence: Int
     public let answers: Int?
-    public let home: String
-    /// The preview copy directory a draft-carrying build runs on; nil on the shared store.
-    public let copy: String?
-    public let revisions: StoreRevisions?
     public let unavailable: String?
     public let content: Content
     /// Wire text of the parts a saved workspace keeps, exactly as a one-shot
@@ -189,13 +185,9 @@ public struct WorkFrame: Sendable {
         public let sessionPage: String?
     }
 
-    public init(sequence: Int, answers: Int?, home: String, copy: String?, revisions: StoreRevisions?,
-                unavailable: String?, content: Content, wire: Wire?) {
+    public init(sequence: Int, answers: Int?, unavailable: String?, content: Content, wire: Wire?) {
         self.sequence = sequence
         self.answers = answers
-        self.home = home
-        self.copy = copy
-        self.revisions = revisions
         self.unavailable = unavailable
         self.content = content
         self.wire = wire
@@ -203,27 +195,20 @@ public struct WorkFrame: Sendable {
 
     /// The same reading answering a later request.
     func answering(_ answers: Int, sequence: Int) -> WorkFrame {
-        WorkFrame(sequence: sequence, answers: answers, home: home, copy: copy, revisions: revisions,
-                  unavailable: unavailable, content: content, wire: wire)
+        WorkFrame(sequence: sequence, answers: answers, unavailable: unavailable, content: content, wire: wire)
     }
 
     /// Every field is required; an absent one is a parse error, not a nil.
     private struct Envelope<Body: Decodable>: Decodable {
         let answers: Int?
-        let home: String
-        let copy: String?
-        let revisions: StoreRevisions?
         let unavailable: String?
         let body: Body?
 
-        enum CodingKeys: String, CodingKey { case answers, home, copy, revisions, unavailable, body }
+        enum CodingKeys: String, CodingKey { case answers, unavailable, body }
 
         init(from decoder: any Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             answers = try container.decode(Int?.self, forKey: .answers)
-            home = try container.decode(String.self, forKey: .home)
-            copy = try container.decode(String?.self, forKey: .copy)
-            revisions = try container.decode(StoreRevisions?.self, forKey: .revisions)
             unavailable = try container.decode(String?.self, forKey: .unavailable)
             body = try container.decode(Body?.self, forKey: .body)
         }
@@ -253,8 +238,7 @@ public struct WorkFrame: Sendable {
         }
         func frame<Body>(_ envelope: Envelope<Body>, _ content: Content, unavailable: String? = nil,
                          wire: Wire? = nil) -> WorkFrame {
-            WorkFrame(sequence: sequence, answers: envelope.answers, home: envelope.home, copy: envelope.copy,
-                      revisions: envelope.revisions, unavailable: envelope.unavailable ?? unavailable,
+            WorkFrame(sequence: sequence, answers: envelope.answers, unavailable: envelope.unavailable ?? unavailable,
                       content: content, wire: wire)
         }
         func text(_ value: Any?) -> String? {
@@ -363,11 +347,12 @@ public final class WorkWatches: @unchecked Sendable {
     private var checkpoints: [(id: Int, waiting: Set<WorkPart>, failed: [String])] = []
     private var finished = false
 
-    public static func observe(launch: @escaping Launch) throws -> WorkObservation {
+    public static func observe(copy: String?, launch: @escaping Launch) throws -> WorkObservation {
         let (frames, continuation) = AsyncThrowingStream<WorkFrame, any Error>.makeStream()
         let watches = WorkWatches(launch: launch, continuation: continuation)
         try watches.lock.withLock { try watches.select(id: 0) }
-        return WorkObservation(frames: frames, request: { watches.handle($0) }, cancel: { await watches.stop() })
+        return WorkObservation(frames: frames, request: { watches.handle($0) }, cancel: { await watches.stop() },
+                               copy: copy)
     }
 
     private init(launch: @escaping Launch, continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation) {
@@ -478,9 +463,7 @@ public final class WorkWatches: @unchecked Sendable {
             sequence += 1
             let reason = first.failed.isEmpty ? nil
                 : "Work confirmation unavailable: \(first.failed.joined(separator: ", "))"
-            let source = running.values.compactMap(\.last).first
-            continuation.yield(WorkFrame(sequence: sequence, answers: first.id, home: source?.home ?? "",
-                                         copy: source?.copy, revisions: source?.revisions,
+            continuation.yield(WorkFrame(sequence: sequence, answers: first.id,
                                          unavailable: reason, content: .checkpoint, wire: nil))
         }
     }

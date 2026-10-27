@@ -20,9 +20,9 @@
 - Assumption: a graph's inventory entry in Task reads names the Task being read
   and its Wave, not `task_of_process`'s longest-worktree owner; they differ only
   for a Graph run in a nested Task checkout.
-- Assumption (2026-10-26): a `--watch` frame wraps the `--json` result as
-  `{answers, home, copy, revisions, unavailable, body}`; stdin requests are
-  `{"id", "args"}` with flag names. Pinned by `watch_frames.json`.
+- Assumption (2026-10-26, frame per Jack Heart 2026-10-27): a `--watch` frame
+  wraps the `--json` result as `{answers, unavailable, body}`; stdin requests
+  are `{"id", "args"}` with flag names. Pinned by `watch_frames.json`.
 - Assumption: `lf task status --watch` exchanges planning only for its first
   reading, then rereads the store; Desktop's planning exchange is held by
   `lf planning status --watch` (one per window with a repository).
@@ -44,3 +44,17 @@
   to Remaining 1's cost for detail `lf ps` already gives. The per-process
   activity (`waiting`/`working`) is no longer per Session. Reversible: add
   `processes` to the row from `lf ps`'s sample.
+- Assumption (2026-10-27): `TaskRow.wave`/`project` are names (what `--wave`
+  and `--project` accept), `reason` is the next-move reason, `pr` appears once
+  published on GitHub, and `next` is `lf task resume` (deferred), `lf task
+  complete` (merged PR), else `lf task run` when runnable; `null` while moving,
+  shipping or closed. Reversible in `task_row.rs`.
+- Assumption (2026-10-27): `lf task status --json` drops worktree, branch,
+  ownership, planning evidence and project records; they stay in `lf desktop
+  task` (tests needing them read it). `lf task location` gives the checkout.
+  An unregistered (Linear-only) Task is an error on `lf task status --json`.
+- Assumption (2026-10-27): Desktop's reads are `lf desktop plan|done|wave|task`
+  rather than one combined Desktop read; each is today's rich shape verbatim.
+- Assumption (2026-10-27): the store/build a Desktop observation reads comes
+  from one `lf --version` per observation (`copy:` line), not per frame;
+  Machine identity stays with `lf machine id`.

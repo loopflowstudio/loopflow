@@ -83,14 +83,14 @@ real shell tab, so the tab outlives the command.
 
 ## Build your own view
 
-Desktop is one client of the reads below; a herdr, tmux or other GUI pane uses
-the same ones. Each streams with `--watch --json`: one JSON line now, another
-each time its answer changes, until stdin closes.
+A herdr, tmux or other GUI pane uses the reads below. Each streams with
+`--watch --json`: one JSON line now, another each time its answer changes,
+until stdin closes.
 
 ```bash
 lf wave show --all --watch --json         # every Wave's plan and Tasks
 lf task list --watch --json               # open Tasks, as your sidebar would list them
-lf task status LOO-12 --watch --json      # one Task: its plan, PR, Graph steps and conversations
+lf task status LOO-12 --watch --json      # one Task with its conversations, Graph processes and comments
 lf session list --watch --json            # conversations, with which ones are available for you
 lf history --since 7d --watch --json      # what Sessions did, tagged with their Task and Wave
 lf ps --watch --json                      # live lf call trees
@@ -99,12 +99,30 @@ lf desktop plans --watch --json           # every plan a repository window shows
 ```
 
 ```json
-{"answers": null, "home": "/Users/you/.lf", "copy": null, "revisions": {…}, "unavailable": null, "body": {…}}
+{"answers": null, "unavailable": null, "body": {…}}
 ```
+
+Every Task read prints the same Task row, each fact once:
+
+```json
+{"id": "task_…", "identifier": "LOO-12", "title": "Search transcripts", "wave": "infra",
+ "project": "Search", "state": "active", "reason": "…", "workflow": {"name": "code", "stage": "review"},
+ "pr": {"number": 1719, "url": "…", "phase": "open"}, "next": "lf task run LOO-12"}
+```
+
+`state` is one of `deferred`, `unstarted`, `idle`, `active`, `moving`,
+`shipping`, `done` or `abandoned`; `next` is the command that moves the Task
+on, `null` while it moves by itself.
+
+Desktop's own presentation (sections, conditions, controls) is
+`lf desktop plan`, `lf desktop task`, `lf desktop wave` and `lf desktop done`,
+with the same `--watch`.
 
 `body` is what the same command prints with `--json` alone. Write
 `{"id": 1, "args": {"query": "parser"}}` to stdin to change what it reads; the
 next line answers `1`. The protocol is in [Work](work.md#see-where-it-stands).
+A development build with unreleased migrations reads a preview copy; its
+`lf --version` adds `copy: <directory>`.
 
 One-shot reads for everything else:
 

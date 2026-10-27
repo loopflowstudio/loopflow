@@ -49,7 +49,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args.contains("connect") { return encoded }
-            if args.starts(with: ["wave", "show"]) { return planning }
+            if args.starts(with: ["desktop", "plan"]) { return planning }
             throw RegistryQueryError("Task entry cannot enumerate unrelated Sessions, launch a Workflow or take over a client")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
@@ -81,7 +81,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args.contains("connect") { return encoded }
-            if args.starts(with: ["wave", "show"]) { return planning }
+            if args.starts(with: ["desktop", "plan"]) { return planning }
             throw RegistryQueryError("Opening in a tile reads nothing else")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
@@ -118,7 +118,7 @@ struct WorkDestinationTests {
         let prepared = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
         let owner = ExternalConversationOwner(active: active, prepared: prepared)
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["wave", "show"]) { return data }
+            if args.starts(with: ["desktop", "plan"]) { return data }
             if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(active)],"next":null}"# }
             if ["connect", "attach"].contains(args.dropFirst().first), args.first == "session" { return try await owner.prepare(args) }
             throw RegistryQueryError("Unexpected Task conversation operation")
@@ -174,7 +174,7 @@ struct WorkDestinationTests {
         let barrier = LinkedDestinationBarrier()
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["session", "connect", "--task"]) { await barrier.wait("prepare"); return encoded }
-            if args.starts(with: ["wave", "show"]) { await barrier.wait("planning"); return data }
+            if args.starts(with: ["desktop", "plan"]) { await barrier.wait("planning"); return data }
             throw RegistryQueryError("Unexpected opening operation")
         }
         let (model, registry) = destinationModel(query: query, repoPath: wave.wave.repo)
@@ -235,7 +235,7 @@ struct WorkDestinationTests {
                 if outcome == "updated-inventory" { return #"{"entries":[\#(updated)],"next":null}"# }
             }
             if args.contains("connect") { return encoded }
-            if args.starts(with: ["wave", "show"]) {
+            if args.starts(with: ["desktop", "plan"]) {
                 if outcome == "updated-inventory" { await barrier.wait("planning") }
                 if outcome == "unavailable-plan" { throw RegistryQueryError("Planning disconnected") }
                 return outcome == "missing-task" ? missing : data
@@ -851,7 +851,7 @@ struct WorkDestinationTests {
         let exact = try oneTask(data, taskId: task.id)
         let exactQuery = RegistryQuery { args, _ in
             if args.contains("--task") { return exact }
-            if args.prefix(2) == ["wave", "show"] { return #"{"generated_at":"2026-09-26T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"# }
+            if args.prefix(2) == ["desktop", "plan"] { return #"{"generated_at":"2026-09-26T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"# }
             if args.first == "session" { return #"{"entries":[],"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
@@ -903,7 +903,7 @@ struct WorkDestinationTests {
         let (model, _) = destinationModel(query: RegistryQuery { args, _ in
             if args.contains("connect") { return encoded }
             if args.contains("--task") { return exact }
-            if args.prefix(2) == ["wave", "show"] { return current }
+            if args.prefix(2) == ["desktop", "plan"] { return current }
             if args.first == "session" { return #"{"entries":[\#(encoded)],"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
@@ -937,7 +937,7 @@ struct WorkDestinationTests {
                     if response == "failure" { throw RegistryQueryError("Machine unavailable") }
                     return response
                 }
-                if args.prefix(2) == ["wave", "show"] { return current }
+                if args.prefix(2) == ["desktop", "plan"] { return current }
                 if args.first == "session" { return #"{"entries":[],"next":null}"# }
                 if args.first == "wave" { return "[]" }
                 throw RegistryQueryError("No mutation permitted")
@@ -967,7 +967,7 @@ struct WorkDestinationTests {
         let records = try (0..<30).map { try renameFixtureRecord("\($0)", title: "Session \($0)") }
         let sessions = String(decoding: try JSONEncoder().encode(records), as: UTF8.self)
         let (model, _) = destinationModel(query: RegistryQuery { args, _ in
-            if args.prefix(2) == ["wave", "show"] { return data }
+            if args.prefix(2) == ["desktop", "plan"] { return data }
             if args.first == "session" { return #"{"entries":\#(sessions),"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("Unavailable")
@@ -1006,7 +1006,7 @@ struct WorkDestinationTests {
                     if response == "transport-error" { throw RegistryQueryError("Machine unavailable") }
                     return response
                 }
-                if args.prefix(2) == ["wave", "show"] { return data }
+                if args.prefix(2) == ["desktop", "plan"] { return data }
                 if args.first == "session" { return #"{"entries":[],"next":null}"# }
                 if args.first == "wave" { return "[]" }
                 throw RegistryQueryError("No mutation permitted")
@@ -1829,7 +1829,7 @@ struct WorkDestinationTests {
                 await barrier.wait(issue)
                 return responses[issue]!
             }
-            if args.prefix(2) == ["wave", "show"] { return data }
+            if args.prefix(2) == ["desktop", "plan"] { return data }
             if args.first == "session" { return #"{"entries":[],"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")

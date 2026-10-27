@@ -241,6 +241,10 @@ impl Cli {
                 cmd,
                 DesktopCommand::View { .. }
                     | DesktopCommand::Plans { .. }
+                    | DesktopCommand::Plan { .. }
+                    | DesktopCommand::Done { .. }
+                    | DesktopCommand::Wave { .. }
+                    | DesktopCommand::Task { .. }
                     | DesktopCommand::Layout { save: false, .. }
             ),
             _ => true,
@@ -708,6 +712,53 @@ pub enum DesktopCommand {
         #[arg(long, required = true)]
         json: bool,
         /// Print a JSON line now and each time the plans change, until stdin closes
+        #[arg(long)]
+        watch: bool,
+    },
+    /// Print the plan as Desktop shows it: each Task's section, condition and controls
+    Plan {
+        /// One Wave; omitted reads the repository's Waves
+        wave: Option<String>,
+        /// Only this Task, open or closed
+        #[arg(long)]
+        task: Option<String>,
+        /// Every repository's Waves
+        #[arg(long)]
+        all: bool,
+        #[arg(long, required = true)]
+        json: bool,
+        /// Print a JSON line now and each time the plan changes, until stdin closes
+        #[arg(long)]
+        watch: bool,
+    },
+    /// Print one page of closed Tasks as Desktop shows them, most recently closed first
+    Done {
+        #[arg(long)]
+        wave: Option<String>,
+        /// Only Tasks closed since then: 7d, 24h, 30m or RFC3339
+        #[arg(long)]
+        since: Option<String>,
+        /// Previous page's `next` Task; keep the same filters
+        #[arg(long)]
+        after: Option<String>,
+        /// Closed Tasks per page
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+        #[arg(long, required = true)]
+        json: bool,
+    },
+    /// Print one Wave's Projects and Tasks as Desktop shows them
+    Wave {
+        wave: Option<String>,
+        #[arg(long, required = true)]
+        json: bool,
+    },
+    /// Print one Task as Desktop's Task pane shows it
+    Task {
+        issue: String,
+        #[arg(long, required = true)]
+        json: bool,
+        /// Print a JSON line now and each time the Task changes, until stdin closes
         #[arg(long)]
         watch: bool,
     },
@@ -1473,7 +1524,7 @@ pub enum TaskCommand {
         #[arg(long, conflicts_with = "done")]
         project: Option<String>,
         /// Only Tasks in this state
-        #[arg(long, conflicts_with = "done", value_parser = ["paused", "not_ready", "ready", "active"])]
+        #[arg(long, conflicts_with = "done", value_parser = ["deferred", "unstarted", "idle", "active", "moving", "shipping"])]
         state: Option<String>,
         #[arg(long)]
         json: bool,

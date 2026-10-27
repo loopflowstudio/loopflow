@@ -574,11 +574,11 @@ read-only, and backing delivery trouble stays visible above the transcript.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;
 decisions, deliveries, and actionable failures remain visible. The detail pane
 reads the current chapter plan, Tasks, decisions, PR delivery, and Task conditions
-from `lf wave status <wave> --json`.
+from `lf desktop wave <wave> --json`.
 
 Open a Task from the roadmap in its repository window, start its legal Graph,
 or open its PR. **Worktree** opens the recorded checkout in Warp.
-Rows show the shared condition and reason from `lf wave show`; unknown means
+Rows show the shared condition and reason from `lf desktop plan`; unknown means
 the required evidence could not be read.
 
 Open **Go → Telemetry** for token spend, codebase growth, a token-weighted
@@ -716,13 +716,13 @@ xcodebuild -quiet \
 The repository-wide gate is `uv run python scripts/test.py --all`.
 
 ```bash
-lf wave show --all --json --watch          # the plan: Waves, Projects, open Tasks
-lf task status LOO-1 --json --watch        # the shown Task: work, Graphs, comments
+lf desktop plan --all --json --watch       # the plan: Waves, Projects, open Tasks as Desktop shows them
+lf desktop task LOO-1 --json --watch       # the shown Task: work, Graphs, comments
 lf session list --json --watch             # the repository's Sessions
 lf planning status --json --watch          # sync receipts; keeps planning exchanged
 ```
 
-A window runs the reads any client runs, one `--watch` process per part, through
+A window runs `--watch` reads, one process per part, through
 `RegistryQuery.watchWork()`: the plan, the repository's Dashboard plans
 (`lf desktop plans`), Sessions and planning status, the shown Task's status, its
 activity (`lf history`) and live call trees (`lf monitor ps`). Each watch is

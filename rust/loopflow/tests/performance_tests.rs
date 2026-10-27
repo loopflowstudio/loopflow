@@ -49,9 +49,9 @@ fn cli_volume_records_real_reads_without_contents() {
     assert!(!text.contains("session"));
 }
 
-/// Statements one `lf wave show --all` reading runs, and what it printed.
+/// Statements one `lf desktop plan --all` reading runs, and what it printed.
 fn planning_statements(home: &std::path::Path, repo: &std::path::Path) -> (u64, String) {
-    statements(home, repo, &["wave", "show", "--all", "--json"])
+    statements(home, repo, &["desktop", "plan", "--all", "--json"])
 }
 
 /// Statements one read runs, and what it printed.

@@ -443,14 +443,14 @@ struct WorkModelStreamTests {
         defer { keeping.cancel() }
         try await feed.opened(1)
         let scope = try await feed.request(1)
-        await feed.send(try fixture.planningFrame(sequence: 1, answers: scope.id, home: "/data/lf"))
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: scope.id))
         try await eventually { model.task(id: "issue-now") != nil }
         model.select(.task(id: "issue-now"))
         model.confirmMachine("machine-local")
         #expect(model.task(id: "issue-now") != nil)
         #expect(model.selection == .task(id: "issue-now"))
         #expect(model.observingMachineId == "machine-local")
-        await feed.send(try fixture.planningFrame(sequence: 2, answers: scope.id, renaming: "Updated", home: "/data/lf"))
+        await feed.send(try fixture.planningFrame(sequence: 2, answers: scope.id, renaming: "Updated"))
         try await eventually { model.task(id: "issue-now")?.task.task.name == "Updated" }
         model.confirmMachine("machine-local")
         #expect(model.selection == .task(id: "issue-now"))
@@ -488,7 +488,7 @@ struct WorkModelStreamTests {
         defer { keeping.cancel() }
         try await feed.opened(1)
         let scope = try await feed.request(1)
-        await feed.send(WorkFrame(sequence: 1, answers: scope.id, home: "/home", copy: nil, revisions: nil,
+        await feed.send(WorkFrame(sequence: 1, answers: scope.id,
             unavailable: "sqlite: no such column: t.paused", content: .planning(nil), wire: nil))
         try await eventually { model.roadmap.errorMessage?.contains("t.paused") == true }
         #expect(model.visibleWork.waves.flatMap(\.tasks).map(\.id) == initial.map(\.id))
@@ -542,7 +542,7 @@ struct WorkModelStreamTests {
             body: "{\"overview\":\(work),\"comments\":{\"identifier\":\"\(found.task.task.identifier)\",\"comments\":[],\"conflicts\":{},\"pending_sync\":[],\"refresh_error\":null},\"graph_processes\":[],\"execution\":null}"))
         try await eventually { model.taskWork[found.task.id].value?.workflow != nil }
         let workflow = model.taskWork[found.task.id].value?.workflow
-        await feed.send(WorkFrame(sequence: 3, answers: scope.id, home: "/home", copy: nil, revisions: nil,
+        await feed.send(WorkFrame(sequence: 3, answers: scope.id,
             unavailable: "sqlite: no such column: t.paused", content: .planning(nil), wire: nil))
         try await eventually { model.roadmap.errorMessage != nil }
         #expect(model.taskWork[found.task.id].value?.workflow == workflow)
@@ -580,7 +580,7 @@ struct WorkModelStreamTests {
         #expect(model.peerPlanning.value?[1].active == true)
         #expect(model.roadmap.value != nil)
 
-        await feed.send(WorkFrame(sequence: 3, answers: scope.id, home: "/home", copy: nil, revisions: nil,
+        await feed.send(WorkFrame(sequence: 3, answers: scope.id,
                                  unavailable: "sync read failed", content: .peerPlanning(nil), wire: nil))
         try await eventually { model.peerPlanning.errorMessage == "sync read failed" }
         #expect(model.peerPlanning.value?.count == 2)
@@ -605,8 +605,6 @@ struct WorkModelStreamTests {
         let reopened = try await feed.request(3)
         await feed.send(try peers(1, reopened.id, repo: "/src/context", statuses: statuses))
         try await eventually { model.peerPlanning.value?.count == 2 && model.peerPlanning.errorMessage == nil }
-        await feed.send(try fixture.planningFrame(sequence: 2, answers: reopened.id, home: "/other-machine"))
-        try await eventually { model.peerPlanning.isLoading }
     }
 
     @Test("Frames update planning in place and an older frame cannot replace a newer one")
@@ -635,11 +633,12 @@ struct WorkModelStreamTests {
         #expect(!model.roadmap.isLoading)
     }
 
-    @Test("Another Machine's frame replaces what the previous Machine showed")
+    @Test("Another Machine replaces what the previous Machine showed")
     func anotherMachineDropsPreviousContent() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
         let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
+        model.confirmMachine("machine-a")
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
 
@@ -652,7 +651,8 @@ struct WorkModelStreamTests {
         model.select(.task(id: "issue-now"))
 
         // The other Machine has the same repository path and none of these Sessions.
-        await feed.send(try fixture.planningFrame(sequence: 4, answers: scope.id, renaming: "Other Machine", home: "/elsewhere"))
+        model.confirmMachine("machine-b")
+        await feed.send(try fixture.planningFrame(sequence: 4, answers: scope.id, renaming: "Other Machine"))
         try await eventually { model.task(id: "issue-now")?.task.task.name == "Other Machine" }
         #expect(model.selection == nil)
         #expect(model.sessions.value == nil)
@@ -674,8 +674,12 @@ struct WorkModelStreamTests {
         #expect(throws: (any Error).self) { try crumbs.inspect().find(viewWithAccessibilityIdentifier: "preview-copy") }
 
         model.select(.task(id: "issue-now"))
-        let copy = NSHomeDirectory() + "/.lf/copies/3f2a9c1b"
-        await feed.send(try fixture.planningFrame(sequence: 2, answers: scope.id, renaming: "On the copy", copy: copy))
+        // A draft-carrying build replaces the reader; its observation names the copy.
+        await feed.serve(copy: NSHomeDirectory() + "/.lf/copies/3f2a9c1b")
+        await feed.fail(RegistryQueryError("lf replaced"))
+        try await feed.opened(2, within: .seconds(5))
+        let reopened = try await feed.request(2)
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: reopened.id, renaming: "On the copy"))
         try await eventually { model.task(id: "issue-now")?.task.task.name == "On the copy" }
         // The copy holds different data than the shared store it came from.
         #expect(model.selection == nil)
@@ -738,8 +742,8 @@ struct WorkModelStreamTests {
         #expect(model.task(id: "issue-now")?.task.task.name == "Answered")
     }
 
-    @Test("Stored Workflow changes invalidate an open catalogue without unrelated reloads")
-    func storedDefinitionsFollowRevisions() async throws {
+    @Test("Plan changes invalidate an open catalogue without unrelated reloads")
+    func storedDefinitionsFollowPlanning() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
         let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -772,30 +776,22 @@ struct WorkModelStreamTests {
         try await feed.opened(1)
         await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
         try await eventually { model.roadmap.value != nil }
-        func revised(_ sequence: Int, planning: Int, sessions: Int) throws -> WorkFrame {
-            try fixture.activityFrame(sequence: sequence, revisions:
-                #"{"planning":\#(planning),"sessions":\#(sessions),"graphs":0,"processes":0,"usage":0}"#)
-        }
-        await feed.send(try revised(2, planning: 1, sessions: 1))
-        await feed.send(try fixture.planningFrame(sequence: 3, answers: nil))
-        try await eventually { model.planningSequence == 3 }
         await model.loadWorkflowCatalog()
         try await eventually { model.workflowCatalog.value?.isEmpty == false }
         let baseline = await catalog.reads
         await catalog.update("[]")
-        await feed.send(try revised(4, planning: 1, sessions: 2))
-        await feed.send(try fixture.planningFrame(sequence: 5, answers: nil))
-        try await eventually { model.planningSequence == 5 }
+        await feed.send(try fixture.activityFrame(sequence: 2))
+        try await Task.sleep(for: .milliseconds(50))
         #expect(await catalog.reads == baseline)
         #expect(model.workflowCatalog.value?.isEmpty == false)
-        await feed.send(try revised(6, planning: 2, sessions: 2))
+        await feed.send(try fixture.planningFrame(sequence: 3, answers: nil))
         try await eventually { model.workflowCatalog.value?.isEmpty == true }
         #expect(await catalog.reads == baseline + 1)
         await model.rereadDefinitions()
         #expect(await catalog.reads == baseline + 2)
         #expect(model.graphCatalog.isLoading, "An unopened catalogue stays unread on editor return")
         await catalog.fail()
-        await feed.send(try revised(7, planning: 3, sessions: 2))
+        await feed.send(try fixture.planningFrame(sequence: 4, answers: nil))
         try await eventually { model.workflowCatalog.errorMessage == "catalog unavailable" }
         #expect(model.workflowCatalog.value?.isEmpty == true)
     }
@@ -933,7 +929,7 @@ struct WorkModelStreamTests {
         if readerEnds {
             await feed.fail(RegistryQueryError("reader lost"))
         } else {
-            await feed.send(WorkFrame(sequence: 2, answers: request.id, home: "/home", copy: nil, revisions: nil,
+            await feed.send(WorkFrame(sequence: 2, answers: request.id,
                                       unavailable: "read failed", content: .checkpoint, wire: nil))
         }
         do {
@@ -1041,17 +1037,22 @@ private actor Flag {
 private actor WorkFeed {
     private var continuations: [AsyncThrowingStream<WorkFrame, any Error>.Continuation] = []
     private var requests: [WorkRequest] = []
+    /// The preview copy the next reader's build works on.
+    private var copy: String?
 
     nonisolated func open() async -> WorkObservation {
         let (stream, continuation) = AsyncThrowingStream<WorkFrame, any Error>.makeStream()
-        await add(continuation)
+        let copy = await add(continuation)
         return WorkObservation(frames: stream, request: { request in
             Task { await self.record(request) }
-        }, cancel: { continuation.finish() })
+        }, cancel: { continuation.finish() }, copy: copy)
     }
 
-    private func add(_ continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation) {
+    func serve(copy: String?) { self.copy = copy }
+
+    private func add(_ continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation) -> String? {
         continuations.append(continuation)
+        return copy
     }
 
     private func record(_ request: WorkRequest) { requests.append(request) }
@@ -1115,7 +1116,7 @@ private struct WorkTestFixture {
         let activityArguments = ActivityArguments()
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "wave" where args.dropFirst().first == "show": return roadmapJSON
+            case "desktop" where args.dropFirst().first == "plan": return roadmapJSON
             case "planning": return #"{"destinations":[]}"#
             case "wave" where args.dropFirst().first == "list": return wavesJSON
             case "session": return #"{"entries":[],"next":null}"#
@@ -1148,24 +1149,20 @@ private struct WorkTestFixture {
 
     /// One line of `part`'s watch, as the transport hands it to the window.
     func frame(
-        _ part: String, sequence: Int, answers: Int?, home: String = "/home", copy: String? = nil,
-        revisions: String = "null", scope: WorkScope = Self.scope, body: String
+        _ part: String, sequence: Int, answers: Int?, scope: WorkScope = Self.scope, body: String
     ) throws -> WorkFrame {
         if part == "checkpoint" {
-            return WorkFrame(sequence: sequence, answers: answers, home: home, copy: copy, revisions: nil,
-                             unavailable: nil, content: .checkpoint, wire: nil)
+            return WorkFrame(sequence: sequence, answers: answers, unavailable: nil, content: .checkpoint, wire: nil)
         }
         let answers = answers.map(String.init) ?? "null"
-        let copy = copy.map { #""\#($0)""# } ?? "null"
-        let line = #"{"answers":\#(answers),"home":"\#(home)","copy":\#(copy),"revisions":\#(revisions),"unavailable":null,"body":\#(body)}"#
+        let line = #"{"answers":\#(answers),"unavailable":null,"body":\#(body)}"#
         return try WorkFrame.decode(part: try #require(WorkPart(rawValue: part)), scope: scope,
                                     sequence: sequence, line: Data(line.utf8))
     }
 
     /// `completing` settles that Task successfully a minute ago, with no runtime left.
     func planningFrame(
-        sequence: Int, answers: Int?, renaming name: String? = nil, completing task: String? = nil,
-        home: String = "/home", copy: String? = nil
+        sequence: Int, answers: Int?, renaming name: String? = nil, completing task: String? = nil
     ) throws -> WorkFrame {
         var roadmap = roadmapJSON
         if let name {
@@ -1191,7 +1188,7 @@ private struct WorkTestFixture {
             root["tasks"] = evidence
             roadmap = try #require(String(data: JSONSerialization.data(withJSONObject: root), encoding: .utf8))
         }
-        return try frame("planning", sequence: sequence, answers: answers, home: home, copy: copy, body: roadmap)
+        return try frame("planning", sequence: sequence, answers: answers, body: roadmap)
     }
 
     func sessionsFrame(sequence: Int, answers: Int?, repo: String, entries: String) throws -> WorkFrame {
@@ -1200,8 +1197,8 @@ private struct WorkTestFixture {
     }
 
     /// A live-process reading: a frame that confirms and changes no Work.
-    func activityFrame(sequence: Int, home: String = "/home", revisions: String = "null") throws -> WorkFrame {
-        try frame("activity", sequence: sequence, answers: nil, home: home, revisions: revisions,
+    func activityFrame(sequence: Int) throws -> WorkFrame {
+        try frame("activity", sequence: sequence, answers: nil,
                   body: #"{"schema_version":1,"observed_at":1,"nodes":[]}"#)
     }
 

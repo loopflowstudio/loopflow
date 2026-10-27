@@ -346,6 +346,22 @@ fn session_input_history_retains_distinct_native_results_and_unknown_process() {
 }
 
 #[test]
+fn task_detail_says_each_fact_once() {
+    use loopflow::lf::commands::task_row::TaskDetail;
+    let json = include_str!("../../../tests/fixtures/dto/task_detail.json");
+    let detail: TaskDetail = serde_json::from_str(json).unwrap();
+    assert_eq!(detail.task.state, loopflow::durable::TaskState::Active);
+    assert_eq!(
+        detail.task.workflow.as_ref().unwrap().stage.as_deref(),
+        Some("demo")
+    );
+    assert_eq!(
+        serde_json::to_value(&detail).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
 fn task_status_preserves_canonical_work_and_acquisition_evidence() {
     use loopflow::ops::task::TaskStatus;
     let json = include_str!("../../../tests/fixtures/dto/task_status.json");
@@ -518,9 +534,6 @@ fn watch_frames_carry_each_reads_json_result() {
     };
     let written = serde_json::to_value(WatchFrame::<()> {
         answers: None,
-        home: "/home",
-        copy: None,
-        revisions: None,
         unavailable: Some("gone".into()),
         body: None,
     })

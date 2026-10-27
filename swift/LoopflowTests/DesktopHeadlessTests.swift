@@ -29,7 +29,7 @@ private final class Feed {
         self.continuation = continuation
         return WorkObservation(frames: stream, request: { request in
             Task { @MainActor in self.requests.append(request) }
-        }, cancel: { continuation.finish() })
+        }, cancel: { continuation.finish() }, copy: nil)
     }
 
     func send(_ frame: WorkFrame) { continuation?.yield(frame) }
@@ -42,7 +42,7 @@ struct DesktopHeadlessTests {
     func ownedRowsNameTheirOwner() async throws {
         let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery { args, _ in
-            if args.prefix(2) == ["wave", "show"] { return roadmap }
+            if args.prefix(2) == ["desktop", "plan"] { return roadmap }
             if args.first == "session" { return #"{"entries":[],"next":null}"# }
             if args.first == "planning" { return #"{"destinations":[]}"# }
             throw RegistryQueryError("Unexpected command: \(args)")
@@ -134,12 +134,10 @@ struct DesktopHeadlessTests {
         func frame(_ part: String, sequence: Int, answers: Int, task: String? = nil,
                    body: Any) throws -> WorkFrame {
             if part == "checkpoint" {
-                return WorkFrame(sequence: sequence, answers: answers, home: fixtureMachineId, copy: nil,
-                                 revisions: nil, unavailable: nil, content: .checkpoint, wire: nil)
+                return WorkFrame(sequence: sequence, answers: answers, unavailable: nil, content: .checkpoint, wire: nil)
             }
             let line: [String: Any] = [
-                "answers": answers, "home": fixtureMachineId, "copy": NSNull(),
-                "revisions": NSNull(), "unavailable": NSNull(), "body": body,
+                "answers": answers, "unavailable": NSNull(), "body": body,
             ]
             return try WorkFrame.decode(part: try #require(WorkPart(rawValue: part)),
                                         scope: WorkScope(repo: nil, headless: false, task: task, activity: nil),
@@ -318,7 +316,7 @@ struct DesktopHeadlessTests {
         let started = Recorder()
         let model = WorkModel(query: RegistryQuery(
             run: { args, _ in
-                if args.prefix(2) == ["wave", "show"] { return String(decoding: planning, as: UTF8.self) }
+                if args.prefix(2) == ["desktop", "plan"] { return String(decoding: planning, as: UTF8.self) }
                 if args.prefix(2) == ["task", "run"] || args.prefix(3) == ["task", "workflow", "move"]
                     || args.prefix(2) == ["task", "complete"] || args.last == "ship" || args.last == "--stop" {
                     await started.add(args)

@@ -890,11 +890,7 @@ struct DTOFixtureTests {
         #expect(frames.map(\.content.part) == ["planning", "selections", "sessions", "task", "work_activity",
                                                 "activity", "task", "peer_planning"])
         #expect(frames[0].answers == nil)
-        #expect(frames[0].copy == nil)
-        #expect(frames[0].revisions?.planning == 911)
         #expect(frames[2].answers == 7)
-        #expect(frames[5].revisions == nil)
-        #expect(frames[6].copy == "/Users/fixture/.lf/copies/3f2a9c1b")
         guard case .planning(let planning?) = frames[0].content,
               case .selections(let plans?) = frames[1].content,
               case .sessions(let sessions?) = frames[2].content,
@@ -929,7 +925,7 @@ struct DTOFixtureTests {
         let page = try #require(frames[2].wire?.sessionPage)
         #expect(try RegistryQuery.decode(SessionPage.self, from: page).next == nil)
 
-        for field in ["answers", "home", "copy"] {
+        for field in ["answers", "unavailable", "body"] {
             var missing = try #require(entries[0]["frame"] as? [String: Any])
             missing.removeValue(forKey: field)
             #expect(throws: (any Error).self) {
@@ -1024,8 +1020,7 @@ struct TaskLifecycleCapture {
     }
 
     func taskPart() throws -> WorkFrame.TaskPart {
-        let line: [String: Any] = ["answers": NSNull(), "home": "/home", "copy": NSNull(), "revisions": NSNull(),
-                                   "unavailable": NSNull(), "body": status]
+        let line: [String: Any] = ["answers": NSNull(), "unavailable": NSNull(), "body": status]
         let frame = try WorkFrame.decode(
             part: .task, scope: WorkScope(repo: nil, headless: false, task: "FIX-1", activity: nil),
             sequence: 1, line: JSONSerialization.data(withJSONObject: line))

@@ -177,7 +177,7 @@ private actor RenameSource {
     }
 
     func read(_ args: [String]) async throws -> String {
-        if args == ["wave", "show", "--all", "--json"] {
+        if args == ["desktop", "plan", "--all", "--json"] {
             return try roadmapJSON()
         }
         guard args.count >= 2, args[0] == "session" else { return "[]" }

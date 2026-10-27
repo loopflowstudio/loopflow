@@ -4,14 +4,19 @@ Each fixture pins one live wire shape. Swift fixtures cover the per-Wave
 listener and `lf wave status` contracts consumed by the Mac app. Every absent field
 is a parse error or an explicit null.
 
-`task_status.json` pins the planning/execution envelope for available, unavailable,
-invalid, removed and absent planning, with the Task's overview, Graph processes and
-comments. Rust round-trips it. The Mac app reads the overview, Graph processes,
-comments and recorded work from `lf task status --watch` (`watch_frames.json`).
-These cases have no execution.
+`task_detail.json` pins `lf task status --json`: one Task row (each fact once:
+state, reason, Workflow stage, PR, next command) with its Sessions, Graph
+processes and comments. `lf task list`, `lf wave show` and `lf wave status`
+print the same row. Rust round-trips it; Desktop reads `lf desktop` instead.
+
+`task_status.json` pins `lf desktop task --json`: the planning/execution envelope
+for available, unavailable, invalid, removed and absent planning, with the Task's
+overview, Graph processes and comments. Rust round-trips it. The Mac app reads the
+overview, Graph processes, comments and recorded work from
+`lf desktop task --watch` (`watch_frames.json`). These cases have no execution.
 
 `watch_frames.json` pins one `--watch` frame per read a window runs:
-`{answers, home, copy, revisions, unavailable, body}`, where `body` is what the
+`{answers, unavailable, body}`, where `body` is what the
 read prints with `--json`, or `null` with `unavailable` set. Rust checks each body
 against its read's type; Swift decodes each through its part.
 

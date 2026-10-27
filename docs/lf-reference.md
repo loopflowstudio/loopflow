@@ -387,13 +387,15 @@ Edit a Task's title or notes, before or after placement
 
 ## lf task move
 
-Change Task membership while preserving its recorded work
+Change Task membership, or move the Task to another Machine, preserving its recorded work
 
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
 | `--wave / -w` | wave |
 | `--no-wave` | no wave Default: false. |
+| `--machine` | Move the Task to this Machine, by label or id |
+| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task comment
@@ -770,6 +772,7 @@ Hand a Session to another Machine: commit and push its branch, stop it here and 
 | Argument | What it does |
 |---|---|
 | `<id>` | Session ID or provider conversation ID |
+| `--task` | Send this Task with its Session, as `lf task move --machine` does |
 | `--to` | The Machine it moves to, by label or id |
 | `--help / -h` | Print help |
 
@@ -1877,13 +1880,12 @@ Check reachability and version without prompting
 
 ## lf ops machine use
 
-Run work on a Machine: hand off a Task, or set a Wave's or this repository's default. Bare, it applies to the worktree's Task or Wave, else this repository
+Run work on a Machine: set a Wave's or this repository's default. Bare, it applies to the worktree's Wave, else this repository; `lf task move --machine` moves one Task
 
 | Argument | What it does |
 |---|---|
 | `<machine>` | A registered Machine label, this Machine's hostname, or a Machine id |
 | `<wave>` | Set this Wave's default for new Tasks and its Wave Session |
-| `--task` | Hand this Task to the Machine; you stay its person |
 | `--session` | Set only where the scope's primary Session runs, and move it there Default: false. |
 | `--tasks` | Set only where the scope's new Tasks run Default: false. |
 | `--json` | json Default: false. |

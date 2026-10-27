@@ -2350,3 +2350,95 @@ fn task_move_stops_a_live_graph() {
     assert_eq!(edge, Some(0));
     assert!(carrier.is_some());
 }
+
+#[test]
+fn resume_task_follows_a_task_session_moved_alone() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let laptop = plan.local.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "alone-task");
+    let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a56");
+
+    let moved = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "resume",
+            &session,
+            "--prepare",
+            "--json",
+        ])
+        .current_dir(&worktree)
+        .output()
+        .unwrap();
+    assert_success(&moved);
+    // The conversation went; the Task stayed.
+    assert_eq!(
+        plan.local.task_execution_route(&task).unwrap().machine_id,
+        laptop
+    );
+    let resumed = fixture
+        .command(&["resume", "--task", task.as_str(), "--prepare", "--json"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&resumed);
+    let resumed: Value = serde_json::from_slice(&resumed.stdout).unwrap();
+    assert_eq!(resumed["id"], session.as_str());
+    assert_eq!(resumed["workspace"]["machine_id"], mini.as_str());
+}
+
+#[test]
+fn a_moved_session_clones_its_repository_where_none_is_checked_out() {
+    let fixture = preview_machines();
+    let repo = loopflow_test_support::TestRepo::new();
+    let worktree = repo
+        .create_named_worktree("clone-demo")
+        .canonicalize()
+        .unwrap();
+    let local =
+        loopflow::store::sqlite::SqliteStore::new(&fixture.root.path().join("local/loopflow.db"))
+            .unwrap();
+    local
+        .bind_repository(
+            repo.path().canonicalize().unwrap().to_str().unwrap(),
+            &loopflow::durable::RepositoryId::new(),
+        )
+        .unwrap();
+    let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a57");
+
+    let moved = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "resume",
+            &session,
+            "--prepare",
+            "--json",
+        ])
+        .current_dir(&worktree)
+        .output()
+        .unwrap();
+    assert_success(&moved);
+    let remote = loopflow::store::sqlite::SqliteStore::new(
+        &fixture.root.path().join("remote/store/loopflow.db"),
+    )
+    .unwrap();
+    let arrived = remote.session(&session).unwrap().unwrap();
+    let src = fixture
+        .root
+        .path()
+        .join("remote/src")
+        .canonicalize()
+        .unwrap();
+    assert!(
+        arrived.cwd.canonicalize().unwrap().starts_with(&src),
+        "{}",
+        arrived.cwd.display()
+    );
+    assert_eq!(
+        git(&arrived.cwd, &["branch", "--show-current"]),
+        "clone-demo"
+    );
+}

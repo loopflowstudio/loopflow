@@ -3120,6 +3120,67 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
+    async fn naming_another_login_moves_an_isolated_claude_conversation_with_its_transcript() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
+        let (store, _native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        set_isolation(true);
+        let id = "0199a213-81c0-7800-8aa1-bbab2a035a55";
+        let project = "projects/-Users-jack-src-loopflow";
+        let first_home = temp.path().join("first");
+        fs::create_dir_all(first_home.join(project).join(format!("{id}/subagents"))).unwrap();
+        fs::write(
+            first_home.join(project).join(format!("{id}.jsonl")),
+            format!("{{\"type\":\"user\",\"sessionId\":\"{id}\"}}\n"),
+        )
+        .unwrap();
+        fs::write(
+            first_home
+                .join(project)
+                .join(format!("{id}/subagents/agent.jsonl")),
+            "{}\n",
+        )
+        .unwrap();
+        let conversation: AgentSessionId = id.into();
+        let first = parse_account_id("first").unwrap();
+        store
+            .pin_provider_session_route(Provider::Claude, &conversation, &first, true)
+            .await
+            .unwrap();
+        let selection =
+            selection::AccountSelection::from_flags(&["second@example.com".to_string()], &[])
+                .unwrap();
+        std::env::set_var(
+            selection::ACCOUNT_SELECTION_ENV,
+            selection.env_value().unwrap(),
+        );
+
+        let route = resolve_provider_account(Provider::Claude, Some(&conversation))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(route.account_id().as_str(), "second");
+        assert!(!route.is_shared());
+        let second_project = temp.path().join("second").join(project);
+        assert!(second_project.join(format!("{id}.jsonl")).is_file());
+        assert!(second_project
+            .join(format!("{id}/subagents/agent.jsonl"))
+            .is_file());
+        assert_eq!(
+            store
+                .provider_session_account(Provider::Claude, &conversation)
+                .await
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "second"
+        );
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
     async fn usage_follows_the_switch_log_only_where_a_running_agent_does() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();

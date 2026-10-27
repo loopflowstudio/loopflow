@@ -658,7 +658,7 @@ effects. The unconditional-update race remains a protocol limit.
 | **Code-size measurement** — repository blobs measured in model tokens | Git blob identity owns content; token counts are deterministic memoized measurements, not Run usage. | [`CodeNode`](../rust/loopflow/src/lf/commands/tokens.rs), [`CodeSnapshot`](../rust/loopflow/src/lf/commands/tokens.rs) | `blob_tokens` | Foreground command only | `lf ops tokens` | — |
 | **Store change revision** — which displayed domain a commit changed | Derived inside the writer's transaction by schema triggers, never authored and never bumped at a call site. Transcript lines move nothing; usage moves only its own revision, which Wave detail follows at most every 10 s. The Work reader pins revisions and database-derived joins in one read transaction; nested readers use savepoints. Events only say when to compare revisions. Post-command checkpoints confirm delivery after affected subscriptions catch up, without forcing unchanged queries; explicit Retry still forces reads. OS/Git/file observations are not transactional facts. | [`StoreRevisions`](../rust/loopflow/src/store/sqlite/revisions.rs), [`WorkFrame`](../rust/loopflow/src/lf/commands/work_watch.rs) | `store_revisions` | Store transaction | `lf monitor work` | — |
 | **Schema frontier** — ordered definition of durable control storage | Released migration bytes are immutable authority; drafts join only through deterministic release materialization. | [`Migration`](../rust/loopflow/src/store/migration_catalog.rs), [`MigrationId`](../rust/loopflow/src/store/migration_catalog.rs) | `schema_migrations`; canonical and draft migration files | Store open validates/applies; release cut publishes | `lf ops release` | `process:sh` (release hooks) |
-| **Task ownership** — (person, Machine) or unowned | An append-only log; the later entry wins in provider order. Exactly one writer appends, always one of the caller's own Machines: their Machine holding the claim, else their Wave Machine; nothing routes to another person's Machine. Entries travel as marked Task comments. An inbound entry never ends this Machine's own open claim. | [`TaskOwnership`](../rust/loopflow/src/durable.rs), [`TaskOwnershipEntry`](../rust/loopflow/src/durable.rs) | `task_ownership` (append-only by trigger) | The writer's IMMEDIATE transaction, reached over `lf --machine` | `lf task claim`, `lf ops machine use <machine> --task <task>`, `lf task unclaim`, `lf task run`, `lf task checkout` | Linear assignee; SSH |
+| **Task ownership** — (person, Machine) or unowned | An append-only log; the later entry wins in provider order. Exactly one writer appends, always one of the caller's own Machines: their Machine holding the claim, else their Wave Machine; nothing routes to another person's Machine. Entries travel as marked Task comments. An inbound entry never ends this Machine's own open claim. | [`TaskOwnership`](../rust/loopflow/src/durable.rs), [`TaskOwnershipEntry`](../rust/loopflow/src/durable.rs) | `task_ownership` (append-only by trigger) | The writer's IMMEDIATE transaction, reached over `lf --machine` | `lf task claim`, `lf task move <task> --machine <machine>`, `lf task unclaim`, `lf task run`, `lf task checkout` | Linear assignee; SSH |
 | **Portfolio** — repository selection on one Machine | Rust owns folder discovery and manual membership; Desktop reads and changes the same selection. Removing membership preserves files and retained Work. | [`Portfolio`](../rust/loopflow/src/portfolio.rs), `PortfolioMode`, `PortfolioRepo` | Machine-local config.yaml; locked atomic writes | Foreground CLI; Portfolio controls call its API | `lf portfolio` | — |
 | **Desktop workspace** — retained presentation of repository, Wave or Task | Work identity selects one repository window and retained workspaces through the sidebar. Pane contents own Machine locations; exact window/content/surface lifetimes fence mutations, which all run through the Swift `DesktopAction` registry. Reads acquire no client and receipts promise no readiness. | `WorkWorkspaceKey`, `DesktopInspection`, `DesktopPaneTarget`, `DesktopActionRequest`, `DesktopActionReceipt` | `dashboards`, `dashboard_arrangements`, `task_orders`, `work_pane_layouts` for saved Dashboards, Task order and portable pane layouts; window-owned registry, multiplexer and native surfaces | Loopflow.app on macOS | `lf desktop` | `$LF_HOME/run/desktop/<bundle-id>.sock` |
 <!-- architecture-map:end -->
@@ -1163,18 +1163,17 @@ The setting lives in Machine-local SQLite `scope_defaults`, keyed by Wave or rep
 person's other added Machines over `lf --machine`; an unreachable Machine gets a
 warning and a later rerun. Resolution for an unowned Task walks its Wave, its parent
 Waves, its repository, then this Machine, so single-Machine use needs no setup. A scope's Session Machine is a separate setting with the same
-resolution (`--session`; `--tasks` sets only the Tasks'). Setting it completes the
-old Machine's Wave primary Session and admits a fresh one on the new Machine; native
-provider history stays behind. `lf session connect --wave <w>`, bare connects that
+resolution (`--session`; `--tasks` sets only the Tasks'). Setting it moves the
+Wave primary Session to the new Machine with its native provider history. `lf session connect --wave <w>`, bare connects that
 resolve to a Wave or the repository, and Desktop's Wave Session route to the Session
 Machine. A Task's Machine is captured in its claim: changing the Wave Machine moves
-no existing Task, and `lf machine use <machine> --task <task>` moves one, completing its primary Session
-on the old Machine.
+no existing Task, and `lf task move <task> --machine <machine>` moves one: its Graph stops,
+its worktree is committed and pushed, and its Workflow position and primary Session go with it.
 
 ```bash
 lf machine add jack@mini.local --label mini
 lf task claim LOO-523
-lf machine use mini --task LOO-523
+lf task move LOO-523 --machine mini
 lf task unclaim LOO-523
 ```
 

@@ -1476,6 +1476,34 @@ impl SqliteStore {
         .transpose()
     }
 
+    /// Where a Task's conversation went when it moved without its Task: the
+    /// latest of its Sessions that moved, while none is open here.
+    pub fn task_conversation_moved_to(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Option<(String, crate::durable::MachineId)>> {
+        let ids = super::task_work::session_ids("?1");
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            &format!(
+                "SELECT id,moved_to_machine_id FROM agent_sessions
+                 WHERE id IN ({ids}) AND moved_to_machine_id IS NOT NULL
+                 AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE id IN ({ids}) AND completed_at IS NULL)
+                 ORDER BY completed_at DESC LIMIT 1"
+            ),
+            [task.as_str()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?
+        .map(|(id, machine)| {
+            Ok((
+                id,
+                crate::durable::MachineId::parse(&machine).map_err(invalid)?,
+            ))
+        })
+        .transpose()
+    }
+
     /// `repository` or `wave` for a scope's ongoing conversation.
     pub(crate) fn session_primary_scope(&self, id: &str) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");

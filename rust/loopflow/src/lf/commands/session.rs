@@ -274,9 +274,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             let store = open_shared_store().await?;
             let moved: crate::ops::human_session::moves::Move = moved;
             let task = moved.task.as_ref().map(|task| task.identifier.clone());
-            let session =
-                crate::ops::human_session::moves::receive(&store, &std::env::current_dir()?, moved)
-                    .await?;
+            let session = crate::ops::human_session::moves::receive(&store, moved).await?;
             let Some(session) = session else {
                 let task = task.expect("a move without a Session moves a Task");
                 if *json {

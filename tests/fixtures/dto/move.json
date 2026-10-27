@@ -10,6 +10,7 @@
   },
   "checkout": {
     "repository_id": "repo_00000000000040008000000000000001",
+    "origin": "git@github.com:jack-heart/loopflow.git",
     "branch": "jack/move-demo",
     "commit": "0123456789abcdef0123456789abcdef01234567"
   },
@@ -17,7 +18,8 @@
     "agent_session_id": "0199a213-81c0-7800-8aa1-bbab2a035a53",
     "files": [
       { "path": "0199a213-81c0-7800-8aa1-bbab2a035a53.jsonl", "content": "e30K" }
-    ]
+    ],
+    "log": "## Jack\n\nkeep going\n"
   },
   "task": {
     "task_id": "task_00000000000040008000000000000001",

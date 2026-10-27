@@ -184,7 +184,7 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
         return Ok(false);
     };
     if route.machine_id == store.local_machine()?.id {
-        return Ok(false);
+        return dispatch_moved_task_conversation(cli, args, &store, &route.task_id);
     }
     if std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
         return Err(anyhow!("Task {selector} resolves to Machine {} on the destination; reconcile its planning/location before retrying (no work was started)", route.machine_id));
@@ -275,6 +275,54 @@ fn dispatch_moved_session(cli: &Cli, args: &[String]) -> Result<bool> {
         return Ok(false);
     };
     super::ssh::run(machine.as_str(), false, cli, &args[1..], None)?;
+    Ok(true)
+}
+
+/// `resume --task X` for a Task that stayed here while its conversation moved
+/// on its own resumes that conversation where it went.
+fn dispatch_moved_task_conversation(
+    cli: &Cli,
+    args: &[String],
+    store: &SqliteStore,
+    task: &TaskId,
+) -> Result<bool> {
+    let Some(Commands::Session {
+        cmd: SessionCommand::Connect { connection, .. },
+    }) = &cli.command
+    else {
+        return Ok(false);
+    };
+    let named = connection.task.is_some() || cli.task.is_some();
+    if !named || std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
+        return Ok(false);
+    }
+    let Some((session, machine)) = store.task_conversation_moved_to(task)? else {
+        return Ok(false);
+    };
+    let mut forwarded = Vec::new();
+    let mut rest = args[1..].iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--" => {
+                forwarded.push(session.clone());
+                forwarded.push(arg.clone());
+                forwarded.extend(rest.by_ref().cloned());
+                break;
+            }
+            "--task" => {
+                rest.next();
+            }
+            _ if arg.starts_with("--task=") => {}
+            _ => forwarded.push(arg.clone()),
+        }
+    }
+    if !forwarded.contains(&session) {
+        forwarded.push(session);
+    }
+    let resumed = <Cli as clap::Parser>::try_parse_from(
+        std::iter::once("lf".to_string()).chain(forwarded.iter().cloned()),
+    )?;
+    super::ssh::run(machine.as_str(), false, &resumed, &forwarded, None)?;
     Ok(true)
 }
 

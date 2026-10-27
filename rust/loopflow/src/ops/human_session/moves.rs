@@ -76,6 +76,8 @@ pub(crate) enum MovedPrimary {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct MovedCheckout {
     pub repository_id: RepositoryId,
+    /// Where a Machine without a checkout of the repository clones it from.
+    pub origin: String,
     pub branch: String,
     pub commit: String,
 }
@@ -86,6 +88,9 @@ pub(crate) struct MovedCheckout {
 pub(crate) struct MovedHistory {
     pub agent_session_id: AgentSessionId,
     pub files: Vec<MovedFile>,
+    /// The conversation as plain text, for a Machine whose provider cannot
+    /// read these files.
+    pub log: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -314,6 +319,9 @@ fn checkpoint(
             .ok_or_else(|| {
                 anyhow!("repository identity unavailable; run `lf repo identity` in {canonical}")
             })?,
+        origin: crate::git::git_stdout(root, &["remote", "get-url", "origin"])?
+            .trim()
+            .to_string(),
         branch,
         commit: crate::git::rev_parse(root, "HEAD")?,
     })
@@ -379,6 +387,7 @@ fn history(store: &SqliteStore, session: &LfSession) -> Result<Option<MovedHisto
     Ok(Some(MovedHistory {
         agent_session_id: thread,
         files,
+        log: super::conversation_log::read(store, session)?,
     }))
 }
 
@@ -409,14 +418,10 @@ fn read_file(base: &Path, path: &Path) -> Result<MovedFile> {
 /// Check out the moved branch in a worktree of this repository, admit the
 /// same Session there and place its transcript where its provider resumes it.
 /// A moved Task is taken in first: its handoff, its checkout on the carried
-/// branch and its Workflow. `repo` is this Machine's checkout of the moved
-/// repository. Returns the Session, when one moved.
-pub(crate) async fn receive(
-    store: &SharedStore,
-    repo: &Path,
-    moved: Move,
-) -> Result<Option<LfSession>> {
-    let main = crate::git::worktrees::main_repo_root(repo)?;
+/// branch and its Workflow. Returns the Session, when one moved.
+pub(crate) async fn receive(store: &SharedStore, moved: Move) -> Result<Option<LfSession>> {
+    let repo = repository(store, &moved).await?;
+    let main = crate::git::worktrees::main_repo_root(&repo)?;
     let task = match &moved.task {
         Some(task) => Some(take_in_task(store, &main, task, moved.checkout.as_ref()).await?),
         None => None,
@@ -455,6 +460,16 @@ pub(crate) async fn receive(
     for file in &history.files {
         write_file(&base, file)?;
     }
+    if !readable(provider, &base, &history.files) {
+        // This Machine's provider cannot read the transcript: a fresh
+        // conversation starts from its log instead.
+        let request =
+            super::conversation_log::continue_from(&session, provider.as_str(), &history.log)?;
+        let mut next = session;
+        next.skill = None;
+        next.request = Some(request);
+        return super::append_input(store, next).await.map(Some);
+    }
     provider_conversation::select(
         store,
         &session,
@@ -464,6 +479,64 @@ pub(crate) async fn receive(
     )
     .await
     .map(Some)
+}
+
+/// This Machine's checkout of the moved repository, cloned from its origin
+/// under `repo_root` when there is none.
+async fn repository(store: &SharedStore, moved: &Move) -> Result<PathBuf> {
+    let repository = match (&moved.checkout, &moved.task) {
+        (Some(checkout), _) => checkout.repository_id.clone(),
+        (None, Some(task)) => {
+            store
+                .get_task(&task.task_id)
+                .await?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Task {} is unknown on this Machine; sync its planning here, then move it again",
+                        task.identifier
+                    )
+                })?
+                .repository_id
+        }
+        (None, None) => bail!("the move names neither a checkout nor a Task"),
+    };
+    if let Some(path) = store.sqlite.repository_path(&repository)? {
+        return Ok(PathBuf::from(path));
+    }
+    let checkout = moved
+        .checkout
+        .as_ref()
+        .ok_or_else(|| anyhow!("repository {repository} has no checkout on this Machine"))?;
+    let name = checkout
+        .origin
+        .trim_end_matches('/')
+        .rsplit(['/', ':'])
+        .next()
+        .map(|name| name.trim_end_matches(".git"))
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| anyhow!("cannot name a checkout for {}", checkout.origin))?;
+    let root = crate::config::repository_root()?.unwrap_or_else(|| "~/src".into());
+    let root = match root.strip_prefix("~") {
+        Ok(suffix) => dirs::home_dir()
+            .ok_or_else(|| anyhow!("home directory unavailable"))?
+            .join(suffix),
+        Err(_) => root,
+    };
+    let path = root.join(name);
+    anyhow::ensure!(
+        !path.exists(),
+        "{} exists but is not repository {repository} here; run `lf repository --bind {repository}` in it, then move again",
+        path.display()
+    );
+    fs::create_dir_all(&root)?;
+    crate::git::git_stdout(
+        &root,
+        &["clone", "-q", &checkout.origin, &path.to_string_lossy()],
+    )?;
+    store
+        .sqlite
+        .bind_repository(&path.canonicalize()?.to_string_lossy(), &repository)?;
+    Ok(path.canonicalize()?)
 }
 
 /// This Machine owns the Task from here: the handoff, then its checkout of
@@ -511,6 +584,15 @@ async fn take_in_task(
         .get_task(&moved.task_id)
         .await?
         .ok_or_else(|| anyhow!("Task {name} disappeared while it arrived"))
+}
+
+/// Whether the placed transcript reads as turns here. A provider version this
+/// Machine's reader does not know yields none.
+fn readable(provider: Provider, base: &Path, files: &[MovedFile]) -> bool {
+    files.first().is_some_and(|file| {
+        crate::transcript::read(harness(provider), &Source::File(base.join(&file.path)))
+            .is_ok_and(|turns| !turns.is_empty())
+    })
 }
 
 /// Claude names a project directory for its absolute path, every character

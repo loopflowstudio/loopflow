@@ -6,7 +6,7 @@
 
 use anyhow::{anyhow, Context, Result};
 
-use crate::durable::{Machine, MachineId, RepositoryId, TaskOwnership};
+use crate::durable::{Machine, MachineId, TaskOwnership};
 use crate::ops::human_session::moves::{self, Move};
 use crate::session::LfSession;
 use crate::store::SharedStore;
@@ -39,12 +39,7 @@ pub(crate) async fn relay(
         }
         None => moves::send(store, &id, &target.id).await?,
     };
-    let repository = moved
-        .checkout
-        .as_ref()
-        .map(|checkout| checkout.repository_id.clone())
-        .ok_or_else(|| anyhow!("Session {id} moved without its checkout"))?;
-    receive(store, &moved, &repository, target)
+    receive(store, &moved, Some(target))
         .await
         .map_err(|error| retry(error, &format!("Session {id}"), &id, target))?;
     eprintln!("Moved {} to {}", session.title, label(target));
@@ -81,7 +76,6 @@ async fn relay_task(store: &SharedStore, issue: &str, target: &str) -> Result<Ta
         .as_ref()
         .map_or(local.clone(), |machine| machine.id.clone());
     let route = store.task_execution_route(&task.id).await?;
-    let repository = route.repository_id.clone();
     let name = &task.identifier;
     let moved: Move = if route.machine_id == to {
         anyhow::bail!("{name} already runs on {}", describe(target.as_ref()));
@@ -93,7 +87,7 @@ async fn relay_task(store: &SharedStore, issue: &str, target: &str) -> Result<Ta
             &source,
             &[
                 "--repository".into(),
-                repository.to_string(),
+                route.repository_id.to_string(),
                 "session".into(),
                 "send".into(),
                 "--task".into(),
@@ -113,21 +107,14 @@ async fn relay_task(store: &SharedStore, issue: &str, target: &str) -> Result<Ta
     store
         .sqlite
         .ingest_ownership_marker(&task.id, &moved_task.ownership_marker)?;
-    match &target {
-        Some(target) => receive(store, &moved, &repository, target)
-            .await
-            .map_err(|error| retry(error, name, &format!("--task {}", task.id), target))?,
-        None => {
-            let repo = super::work_route::repository_path(&repository)?;
-            moves::receive(store, &repo, moved.clone()).await?;
-        }
-    }
-    if moved.checkout.is_some() {
-        eprintln!(
-            "Committed and pushed {} on {}",
-            name,
-            moved.checkout.as_ref().expect("checked above").branch
-        );
+    receive(store, &moved, target.as_ref())
+        .await
+        .map_err(|error| match &target {
+            Some(target) => retry(error, name, &format!("--task {}", task.id), target),
+            None => error,
+        })?;
+    if let Some(checkout) = &moved.checkout {
+        eprintln!("Committed and pushed {name} on {}", checkout.branch);
     }
     let place = match moved_task.workflow.as_ref() {
         Some(workflow) => format!(" (Workflow at `{}`)", workflow.node),
@@ -145,29 +132,21 @@ async fn relay_task(store: &SharedStore, issue: &str, target: &str) -> Result<Ta
     Ok(store.sqlite.task_ownership(&task.id)?)
 }
 
-/// Receive on `target` over SSH.
-async fn receive(
-    store: &SharedStore,
-    moved: &Move,
-    repository: &RepositoryId,
-    target: &Machine,
-) -> Result<()> {
-    if target.id == store.sqlite.local_machine()?.id {
-        let repo = super::work_route::repository_path(repository)?;
-        moves::receive(store, &repo, moved.clone()).await?;
-        return Ok(());
+/// Receive on `target`, over SSH unless it is this Machine (`None`).
+async fn receive(store: &SharedStore, moved: &Move, target: Option<&Machine>) -> Result<()> {
+    match target {
+        Some(target) if target.id != store.sqlite.local_machine()?.id => {
+            super::ssh::request(
+                target,
+                &["session".into(), "receive".into()],
+                Some(&serde_json::to_vec(moved)?),
+            )
+            .await?;
+        }
+        _ => {
+            moves::receive(store, moved.clone()).await?;
+        }
     }
-    super::ssh::request(
-        target,
-        &[
-            "--repository".into(),
-            repository.to_string(),
-            "session".into(),
-            "receive".into(),
-        ],
-        Some(&serde_json::to_vec(moved)?),
-    )
-    .await?;
     Ok(())
 }
 

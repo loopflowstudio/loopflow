@@ -1,7 +1,7 @@
 # LOO-628: `lf resume` moves a conversation to another account or Machine
 
-Status: design reviewed with Jack Heart 2026-10-26 (concept review). Slices 1
-and 2 built (2026-10-26); slice 3 (Task move) unbuilt. Product direction is Jack Heart's
+Status: design reviewed with Jack Heart 2026-10-26 (concept review). Slices 1,
+2 and 3 built (2026-10-26/27); the demo remains. Product direction is Jack Heart's
 (LOO-610 conversation, 2026-10-26) and is binding; mechanisms below are chosen
 here and reversible.
 
@@ -208,9 +208,37 @@ Past Graph processes and step Processes stay on S as history; the target
 starts its own. `lf task status X` on S routes to M through ownership.
 
 `Move` (one wire DTO, no defaults): `from_machine_id`, `session`
-{id, name, title_source, task_id, provider, model} or null for a Task with no
-Session, `checkout` {repository_id, branch, commit}, `history`, `task` or null.
-Fixture `tests/fixtures/dto/move.json`.
+{id, title, title_source, provider, model, primary} or null for a Task with no
+Session, `checkout` {repository_id, origin, branch, commit} or null for a Task
+never checked out, `history` {agent_session_id, files, log}, `task`
+{task_id, identifier, ownership_marker, workflow {graph, node, edge, moves}}
+or null. Fixture `tests/fixtures/dto/move.json`.
+
+Decisions made while building slice 3 (2026-10-27, reversible):
+- The initiator orchestrates: `send` on the Task's owner (locally or
+  `lf session send --task X --to M` over SSH), `receive` on M (locally or
+  `lf session receive` over SSH), so either end may be the caller. The
+  initiator also ingests the handoff marker, so it routes to M at once.
+- A Task on a route arrives on the same edge, carried by the receiving
+  Process (`task_workflows` requires a carrier for an edge). That Process
+  ends with the move, so the route reads as stopped and `lf task run` there
+  runs its slice again. Moves already on M are not appended twice.
+- Stopping a Graph: interrupt the Task (so its Task run starts nothing
+  again), then SIGTERM the Graph process and its live step Processes, each
+  only after its recorded identity checks; 20 s, then refuse "did not stop".
+  No process-tree walking.
+- An unowned Task is claimed, then handed off; one already handed to M
+  reuses that entry (idempotent retry).
+- `receive` finds its checkout by repository identity, cloning from the
+  carried `origin` under `repo_root` (default `~/src`) and binding it when
+  M has none.
+- Log fallback: `send` carries the rendered log; `receive` starts from it
+  (`conversation_log::continue_from` + a new input) when M reads no turns
+  from the placed transcript. A provider that refuses at launch is not
+  detected (see questions).
+- `--machine` stays local to a command that declares it
+  (`navigation::machine_invocation`), so `lf task move X --machine M` is not
+  SSH transport.
 
 ### Decided in review (Jack Heart, 2026-10-26)
 
@@ -313,31 +341,23 @@ second Task-to-Machine command beside `lf task move --machine`.
    (`naming_another_login_moves_an_isolated_conversation_with_its_transcript`)
    covers Codex only; a Claude counterpart is unwritten, though the Machine
    move test places a Claude transcript through the same copy.
-2. **Session move.** `send` / `receive` / `Move` (task null) with refusal
-   paths; native transcript placement with the log fallback; `ssh::request`
-   stdin; relay in the `--machine` branch; old-client message; connect-by-id
-   forwarding; `lf machine use --session` through it.
-   Built 2026-10-26: `ops/human_session/moves.rs` (`send`/`receive`/`Move`,
-   fixture `move.json`, no Swift mirror since only lf reads it),
-   `lf/commands/session_move.rs` relay, `lf session send|receive`, the
-   `--machine … resume <id>` relay (also with `--prepare`), forwarding of
-   `lf resume <id>` on the source via `agent_sessions.moved_to_machine_id`,
-   the old client's "moved to" line, and `lf machine use --session` moving the
-   primary (`complete_primary_session` deleted). Remaining in this slice:
-   the `conversation.md` fallback when M's provider refuses the transcript
-   (`moves.rs` has no `conversation_log` use yet);
-   `lf resume --task X` on S following a Task Session moved alone; the
-   account-move line on the old client (slice 1 step 4; no such message exists
-   yet); cloning when M lacks the repository (`check_out` only reuses or adds
-   a worktree of an existing checkout).
-3. **Task move.** `lf task move --machine`, `Move.task` (ownership marker,
-   Workflow position and history), delete `lf machine use --task`;
-   docs/reference.
+2. **Session move.** Built 2026-10-26/27: `ops/human_session/moves.rs`
+   (`send`/`receive`/`Move`), `lf/commands/session_move.rs` relay,
+   `lf session send|receive`, `--machine … resume <id>`, forwarding of
+   `lf resume <id>` and of `lf resume --task X` (a Task Session moved alone)
+   on the source, the old client's Machine and account "moved to" lines,
+   `lf machine use --session` through it, the log fallback, and cloning when M
+   has no checkout.
+3. **Task move.** Built 2026-10-27: `lf task move X --machine M`
+   (`moves::send_task`, `relay_task`), `Move.task`, `place_moved_workflow`,
+   `ingest_ownership_marker`, `check_out_moved_task` (`prepare_task` with an
+   explicit source); `lf machine use --task`, bare `machine use` handing off a
+   worktree's Task, and their hints deleted; docs and reference regenerated.
 
 ## Done when (gate, headless)
 
 - `cargo test -p loopflow provider_account`: isolated move adopts the
-  transcript for Claude and Codex (Codex exists; Claude unwritten); missing
+  transcript for Claude and Codex (both exist); missing
   transcript errors; a login on the same email under the other provider never
   competes (exists).
 - `cargo test -p loopflow --test integration machine_commands` on
@@ -359,5 +379,4 @@ second Task-to-Machine command beside `lf task move --machine`.
   (verifies the Codex cross-account risk), then `lf task move` laptop → mini
   with a real Task and keep talking to it there.
 
-Check results: 2026-10-26 slice 2 — `machine_commands` (30, incl. resume_moves_a_session_to_another_machine, a_mid_merge_worktree_refuses_to_move), `moves::` unit, clippy, CLI reference: pass; slice 3 unbuilt.
-2026-10-26 compress — clippy --all-targets, `machine_commands` (31): pass.
+Check results: 2026-10-27 — `machine_commands` (38, incl. task_move_carries_ownership_workflow_and_session, task_move_stops_a_live_graph, task_move_refuses_a_mid_merge_worktree, resume_task_follows_a_task_session_moved_alone, a_moved_session_clones_its_repository_where_none_is_checked_out), lib `moves::`/`provider_account`/`lf::tests`/`navigation`/`wave_resolution`/`local_planning::`, clippy --all-targets, CLI reference: pass. Demo (real logins, laptop → mini) unrun.

@@ -2133,9 +2133,9 @@ pub enum MachineCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Run work on a Machine: hand off a Task, or set a Wave's or this
-    /// repository's default. Bare, it applies to the worktree's Task or Wave,
-    /// else this repository.
+    /// Run work on a Machine: set a Wave's or this repository's default.
+    /// Bare, it applies to the worktree's Wave, else this repository;
+    /// `lf task move --machine` moves one Task.
     Use {
         /// A registered Machine label, this Machine's hostname, or a Machine id
         machine: String,

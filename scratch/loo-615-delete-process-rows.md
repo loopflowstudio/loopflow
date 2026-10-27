@@ -64,7 +64,8 @@ A finished `lf` Process is **forgettable** when all of these hold:
    `graph_process_steps.{lf_process_id,graph_lf_process_id}`,
    `task_workflows.lf_process_id`, `task_workflow_moves.lf_process_id`,
    `waves.project_activation_lf_process_id`, `ci_incidents.repair_lf_process_id`,
-   `agent_sessions.transport_lf_process_id`, `relocated_task_processes.process_id`.
+   `tasks.ship_lf_process_id`, `agent_sessions.transport_lf_process_id`,
+   `relocated_task_processes.process_id`.
    (`pr_landings.supervisor_process_id` is an OS PID `INTEGER`, not a Process
    reference; implement dropped it from the union.)
 
@@ -126,10 +127,9 @@ first bulk pass costs about 840k × 20k row reads. Add the missing indexes in
 this Task's draft (`uv run python scripts/new_migration.py forget_processes`):
 `agent_sessions(agent_process_id)`, `task_workflows(lf_process_id)`,
 `task_workflow_moves(lf_process_id)`, `waves(project_activation_lf_process_id)`,
-`ci_incidents(repair_lf_process_id)`, each partial `WHERE … IS NOT NULL`
-(written). `graph_process_steps.lf_process_id` is already `UNIQUE`.
-`agent_sessions_transport` already exists in the unreleased
-`index_session_transport.sql` draft. Do not recreate it. Already indexed:
+`ci_incidents(repair_lf_process_id)`, `tasks(ship_lf_process_id)`, each partial
+`WHERE … IS NOT NULL` (written). `graph_process_steps.lf_process_id` is already
+`UNIQUE`. `agent_sessions_transport` was released in 0.14.16; do not recreate it. Already indexed:
 `processes_parent`, `agent_process_attachment`, `session_events_process`,
 `graph_processes` PK, `relocated_process_tasks`. The `agent_sessions` index also
 removes the parent-side FK probe on every exit delete.
@@ -165,6 +165,10 @@ with `nil` cwd; `graph list --processes --for-task` names the Task.
   has the same shape. Rule 2 keeps the finished child while the Graph or
   `task run` process is still running. A focused test must cover an operation
   step that exits before the first poll.
+- **New Process references.** `FORGETTABLE` is a hand-kept inventory; a
+  migration that adds a `processes` reference without extending it makes that
+  writer's exit fail (FK) or forget a referenced row. Gate greps the store
+  schema for `REFERENCES processes` / `_process_id` columns against it.
 - **A reference written after its Process exited.** The exit forgets the row
   first, so the later reference fails its FK (`agent_sessions`, `relocated_task_processes`)
   or names a missing row (the rest have no FK). `lf-world` did exactly this and
@@ -325,6 +329,13 @@ With inherited `LF_*` unset and `< /dev/null`:
   Task content calls carry no checkout cwd.
 - Clone probe above: row count and FK check as stated, plus the
   long-lived-parent count recorded in one line.
+
+Realign (2026-10-26): v0.14.17 (main 8ad349a841, merged) added
+`tasks.ship_lf_process_id REFERENCES processes(id)`; it was missing from
+`FORGETTABLE`, so a ship process's exit delete would fail its FK. Added the probe,
+its index in the draft, and a shipped-Task case in `forget_tests`. The draft now
+builds on the 0.14.17 release batch. Any later column that references
+`processes` must join `FORGETTABLE` in the same change.
 
 Check (2026-10-26): `swift test --filter 'RegistryQueryTests|TaskFilesTests'` 43 ok;
 `--lib journal` 30 ok. Compress (2026-10-26): running-parent fixture shared as `loopflow_test_support::RunningParent`; doctor's test-only `audit` dropped; clippy clean, `--lib doctor failed_placement` 13 ok, `process_ownership_tests` 12 ok, touched integration tests 8 ok. Earlier sweep: everything else touched passes except

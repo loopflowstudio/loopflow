@@ -1,6 +1,6 @@
 //! Work chooses execution; SSH transports the ordinary command unchanged.
 use crate::durable::{RepositoryId, TaskExecutionRoute, TaskId};
-use crate::lf::{Cli, Commands, MachineCommand, OpsCommand, SessionCommand, TaskCommand};
+use crate::lf::{Cli, Commands, SessionCommand, TaskCommand};
 use crate::store::sqlite::SqliteStore;
 use anyhow::{anyhow, Result};
 
@@ -115,42 +115,27 @@ fn launch_task(cli: &Cli) -> Option<&str> {
         Some(Commands::Task {
             cmd: TaskCommand::Run { issue, .. } | TaskCommand::Checkout { issue, .. },
         }) => issue.as_deref().or(cli.task.as_deref()),
+        // `resume --task X` opens the Task's conversation where the Task runs.
+        Some(Commands::Session {
+            cmd:
+                SessionCommand::Connect {
+                    id: None,
+                    connection,
+                    ..
+                },
+        }) if connection.task.is_some() => connection.task.as_deref(),
         // Ownership is written only on the Task's writer.
         Some(Commands::Task {
             cmd: TaskCommand::Claim { issue, .. } | TaskCommand::Unclaim { issue, .. },
         }) => Some(issue.as_str()),
-        Some(Commands::Ops {
-            cmd:
-                OpsCommand::Machine {
-                    cmd:
-                        MachineCommand::Use {
-                            task: Some(task), ..
-                        },
-                },
-        }) => Some(task.as_str()),
         _ => cli.task.as_deref(),
     }
 }
 
-/// Bare `lf machine use` and bare `lf connect` in a Task's worktree act on that
-/// Task, so they route to its Machine exactly as `--task` does. `--session` and
-/// `--tasks` set the worktree's Wave or repository instead, as does a selected
-/// repository.
+/// Bare `lf connect` in a Task's worktree acts on that Task, so it routes to
+/// its Machine exactly as `--task` does.
 fn worktree_task(cli: &Cli) -> Result<Option<String>> {
     let bare = match &cli.command {
-        Some(Commands::Ops {
-            cmd:
-                OpsCommand::Machine {
-                    cmd:
-                        MachineCommand::Use {
-                            wave: None,
-                            task: None,
-                            session: false,
-                            tasks: false,
-                            ..
-                        },
-                },
-        }) => !cli.selects_repository(),
         Some(Commands::Session {
             cmd:
                 SessionCommand::Connect {
@@ -210,10 +195,6 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
         cli.command,
         Some(Commands::Task {
             cmd: TaskCommand::Claim { .. } | TaskCommand::Unclaim { .. }
-        }) | Some(Commands::Ops {
-            cmd: OpsCommand::Machine {
-                cmd: MachineCommand::Use { .. }
-            }
         })
     ) {
         // Ownership needs no checkout on the writer; name the exact Task in place.

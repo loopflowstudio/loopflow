@@ -28,7 +28,7 @@ pub mod replay;
 pub mod run;
 pub mod session;
 pub mod session_history;
-pub(crate) mod session_move;
+pub mod session_move;
 mod session_watch;
 pub mod ship;
 pub mod ssh;

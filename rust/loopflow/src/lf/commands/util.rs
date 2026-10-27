@@ -208,6 +208,18 @@ fn moved_away(environment: &BTreeMap<String, String>) -> Result<Option<String>> 
         .machine_by_id(&machine)?
         .and_then(|machine| machine.label)
         .unwrap_or_else(|| machine.to_string());
+    // A Task that went with its conversation is resumed by its name.
+    for task in store.session_task_ids(&session.id)? {
+        let owner = store.task_ownership(&task)?.owner;
+        if owner.and_then(|owner| owner.machine.id) == Some(machine.clone()) {
+            if let Some(task) = store.task(&task)? {
+                return Ok(Some(format!(
+                    "This conversation moved to {label}: lf resume --task {}",
+                    task.identifier
+                )));
+            }
+        }
+    }
     Ok(Some(format!(
         "This conversation moved to {label}: lf resume {}",
         session.id

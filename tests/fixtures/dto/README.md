@@ -9,8 +9,8 @@ invalid, removed and absent planning. Rust round-trips it. This CLI-only contrac
 has no Swift mirror: the Mac app reads a Task's work from the workspace stream's
 `task` part (`work_frame.json`). These cases have no execution.
 
-`move.json` pins the Session move `lf session send` prints and `lf session
-receive` reads on another Machine. Only lf reads it, so it has no Swift mirror.
+`move.json` pins the Session or Task move `lf session send` prints and `lf
+session receive` reads on another Machine. Only lf reads it, so it has no Swift mirror.
 
 `task_execution.json` pins the execution boundary inside the status envelope's
 optional Task snapshot (`execution.execution`).

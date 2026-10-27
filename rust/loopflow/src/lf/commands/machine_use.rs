@@ -1,6 +1,6 @@
-//! `lf machine use`: run work on one of your Machines. A Task moves by
-//! handoff; a Wave or repository default is personal, stored on this Machine
-//! and copied to your other Machines. A scope's Tasks and its Session each
+//! `lf machine use`: run work on one of your Machines. A Wave or repository
+//! default is personal, stored on this Machine and copied to your other
+//! Machines; `lf task move --machine` moves one Task. A scope's Tasks and its Session each
 //! have their own Machine; `--tasks` or `--session` sets one, neither sets both.
 //! Naming a pool or on-demand instead sends the scope's new Tasks there and
 //! leaves its Session where it runs; pools and on-demands live on this
@@ -8,7 +8,7 @@
 use crate::durable::{DefaultScope, MachineId, MachineSetting, RepositoryId};
 use crate::id::WaveId;
 use crate::lf::MachineCommand;
-use crate::ops::task_ownership::{change, render, resolve_machine, OwnershipChange};
+use crate::ops::task_ownership::resolve_machine;
 use crate::repository::CanonicalRepo;
 use crate::session::PrimaryScope;
 use crate::store::sqlite::SqliteStore;
@@ -20,7 +20,6 @@ use std::sync::Arc;
 /// What `lf machine use` applies to.
 #[derive(Debug)]
 enum Scope {
-    Task(String),
     Wave { id: WaveId, name: String },
     Repository,
 }
@@ -30,7 +29,6 @@ pub fn run(repo: &Path, command: &MachineCommand, repository_scope: bool) -> any
     let MachineCommand::Use {
         machine,
         wave,
-        task,
         session,
         tasks,
         here,
@@ -47,30 +45,13 @@ pub fn run(repo: &Path, command: &MachineCommand, repository_scope: bool) -> any
                 .await
                 .context("open the shared Loopflow store")?,
         );
-        let scope = select_scope(
-            &store,
-            repo,
-            wave.as_deref(),
-            task.as_deref(),
-            repository_scope,
-            *session || *tasks,
-        )
-        .await?;
+        let scope = select_scope(&store, repo, wave.as_deref(), repository_scope).await?;
         anyhow::Ok((store, scope))
     })?;
     let capacity =
         store.sqlite.pool(machine)?.is_some() || store.sqlite.ondemand(machine)?.is_some();
     if capacity {
         return use_capacity(&store.sqlite, repo, scope, machine, *session, *json);
-    }
-    if let Scope::Task(task) = &scope {
-        let ownership = change(repo, task, OwnershipChange::Handoff(machine.clone()))?;
-        if *json {
-            println!("{}", serde_json::to_string(&ownership)?);
-        } else {
-            println!("Task {task} handed off\n{}", render(&ownership));
-        }
-        return Ok(());
     }
     let target = resolve_machine(&store.sqlite, machine)?;
     let canonical = CanonicalRepo::discover(repo)?;
@@ -86,7 +67,6 @@ pub fn run(repo: &Path, command: &MachineCommand, repository_scope: bool) -> any
             PrimaryScope::Repository(canonical),
             None,
         ),
-        Scope::Task(_) => unreachable!("Task scope hands off above"),
     };
     let settings = match (*session, *tasks) {
         (true, _) => vec![MachineSetting::Session],
@@ -160,12 +140,6 @@ fn use_capacity(
         ));
     }
     let (default_scope, label) = match scope {
-        Scope::Task(task) => {
-            return Err(anyhow!(
-            "{capacity} sets a Wave or repository default; `lf task run {task} --rent {capacity}` \
-                 or `--pool {capacity}` runs one Task there"
-        ))
-        }
         Scope::Wave { id, name } => (DefaultScope::Wave(id), format!("Wave {name}")),
         Scope::Repository => {
             let canonical = CanonicalRepo::discover(repo)?;
@@ -189,21 +163,14 @@ fn use_capacity(
     Ok(())
 }
 
-/// `--task`, a Wave argument and a selected repository are explicit, in that
-/// order; bare, the worktree's Task, then its Wave, then this repository.
-/// `--session` or `--tasks` names a part of a Wave or repository, so a bare one
-/// skips the worktree's Task.
+/// A Wave argument and a selected repository are explicit, in that order;
+/// bare, the worktree's Wave, then this repository.
 async fn select_scope(
     store: &SharedStore,
     repo: &Path,
     wave: Option<&str>,
-    task: Option<&str>,
     repository: bool,
-    scope_part: bool,
 ) -> anyhow::Result<Scope> {
-    if let Some(task) = task {
-        return Ok(Scope::Task(task.to_string()));
-    }
     if let Some(wave) = wave {
         let selected = crate::work::wave::context::resolve_managed_wave(
             Some(store),
@@ -222,13 +189,6 @@ async fn select_scope(
     }
     let cwd = std::env::current_dir()?;
     let selected = crate::ops::select_execution_work(store, &cwd).await?;
-    if let Some(task) = selected
-        .as_ref()
-        .and_then(|work| work.task.as_ref())
-        .filter(|_| !scope_part)
-    {
-        return Ok(Scope::Task(task.id.to_string()));
-    }
     Ok(match selected.and_then(|work| work.wave) {
         Some(wave) => Scope::Wave {
             id: wave.id().clone(),

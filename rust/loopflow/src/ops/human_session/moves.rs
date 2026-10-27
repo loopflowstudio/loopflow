@@ -3,6 +3,10 @@
 //! where it lives and completes it there, naming where it went; `receive`
 //! checks out the branch where it arrives and admits the same Session, so the
 //! same provider conversation resumes there.
+//!
+//! A Task moves the same way with its ownership and Workflow: `send_task`
+//! stops its Graph, checkpoints its worktree, takes its conversation along and
+//! hands it off; `receive` takes in the handoff before checking it out.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,24 +16,42 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 use super::{provider_conversation, session_by_id, session_not_found};
-use crate::durable::{MachineId, RepositoryId};
+use crate::durable::{MachineId, OwnershipKind, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
 use crate::harness::HarnessKind;
 use crate::id::{AgentSessionId, LfSessionId, WaveId};
+use crate::journal::ProcessIdentityEvidence;
 use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
-use crate::session::{LfSession, PrimaryScope, TitleSource};
+use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
+use crate::store::sqlite::task_work::WorkflowRecord;
 use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
 use crate::transcript::{Located, Source};
+use crate::work::task::Task;
 
-/// One Session on its way from one Machine to another.
+/// One Session, or one Task with its Session, on its way from one Machine to another.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Move {
     pub from_machine_id: MachineId,
-    pub session: MovedSession,
-    pub checkout: MovedCheckout,
+    /// Absent for a Task with no conversation.
+    pub session: Option<MovedSession>,
+    /// Absent for a Task not checked out where it lived.
+    pub checkout: Option<MovedCheckout>,
     /// Absent before the conversation's first turn: nothing to resume yet.
     pub history: Option<MovedHistory>,
+    /// Present when a Task moves, not only a conversation.
+    pub task: Option<MovedTask>,
+}
+
+/// What a Task carries beyond its conversation and branch.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct MovedTask {
+    pub task_id: TaskId,
+    pub identifier: String,
+    /// The handoff, as the marked comment planning would deliver later.
+    pub ownership_marker: String,
+    /// Absent before the Task takes up a Workflow.
+    pub workflow: Option<WorkflowRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -80,9 +102,73 @@ pub(crate) async fn send(store: &SharedStore, id: &str, to: &MachineId) -> Resul
     let session = session_by_id(store, id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
-    let checkout = checkpoint(&store.sqlite, &session, to)?;
+    let name = &session.title;
+    let root = crate::git::worktree_root(&session.cwd).map_err(|_| {
+        anyhow!(
+            "Session {name} runs outside a repository ({}); only a conversation in a Git checkout moves",
+            session.cwd.display()
+        )
+    })?;
+    refuse_mid_operation(&root, name)?;
+    let checkout = checkpoint(&store.sqlite, &root, name, to)?;
+    let (moved, history) = take(store, &session)?;
+    store.sqlite.complete_moved_session(&session.id, to)?;
+    Ok(Move {
+        from_machine_id: store.sqlite.local_machine()?.id,
+        session: Some(moved),
+        checkout: Some(checkout),
+        history,
+        task: None,
+    })
+}
+
+/// Stop the Task's Graph, commit and push its worktree, take its conversation
+/// and hand it off to `to`. Nothing is handed off when a step before fails;
+/// repeating it after a failed receive reuses the handoff.
+pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) -> Result<Move> {
+    let task = store
+        .get_task_by_issue(issue)
+        .await?
+        .ok_or_else(|| anyhow!("no Task {issue} on this Machine"))?;
+    let name = &task.identifier;
+    let worktree = task.worktree.clone().filter(|path| path.exists());
+    if let Some(root) = &worktree {
+        refuse_mid_operation(root, name)?;
+    }
+    stop_graphs(store, &task).await?;
+    let checkout = worktree
+        .as_deref()
+        .map(|root| checkpoint(&store.sqlite, root, name, to))
+        .transpose()?;
+    let conversation = super::primary::task_conversation(store, &task.id).await?;
+    let taken = conversation
+        .as_ref()
+        .map(|session| take(store, session))
+        .transpose()?;
+    let handoff = hand_off(&store.sqlite, &task.id, to)?;
+    if let Some(session) = &conversation {
+        store.sqlite.complete_moved_session(&session.id, to)?;
+    }
+    let (session, history) =
+        taken.map_or((None, None), |(session, history)| (Some(session), history));
+    Ok(Move {
+        from_machine_id: store.sqlite.local_machine()?.id,
+        session,
+        checkout,
+        history,
+        task: Some(MovedTask {
+            task_id: task.id.clone(),
+            identifier: task.identifier.clone(),
+            ownership_marker: crate::store::sqlite::task_ownership::marker(&handoff)?,
+            workflow: store.sqlite.workflow_record(&task.id)?,
+        }),
+    })
+}
+
+/// The Session as it leaves: its agent stopped, its transcript read.
+fn take(store: &SharedStore, session: &LfSession) -> Result<(MovedSession, Option<MovedHistory>)> {
     crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
-    let history = history(&store.sqlite, &session)?;
+    let history = history(&store.sqlite, session)?;
     let primary = match store.sqlite.session_primary_scope(&session.id)?.as_deref() {
         Some("repository") => Some(MovedPrimary::Repository),
         Some("wave") => Some(MovedPrimary::Wave {
@@ -93,10 +179,8 @@ pub(crate) async fn send(store: &SharedStore, id: &str, to: &MachineId) -> Resul
         }),
         _ => None,
     };
-    store.sqlite.complete_moved_session(&session.id, to)?;
-    Ok(Move {
-        from_machine_id: store.sqlite.local_machine()?.id,
-        session: MovedSession {
+    Ok((
+        MovedSession {
             id: session.id.clone(),
             title: session.title.clone(),
             title_source: session.title_source,
@@ -104,43 +188,126 @@ pub(crate) async fn send(store: &SharedStore, id: &str, to: &MachineId) -> Resul
             model: session.model.clone(),
             primary,
         },
-        checkout,
         history,
-    })
+    ))
 }
 
-/// Bring the Session's code to the remote: commit what is uncommitted and push
-/// its branch. The default branch is never committed to or pushed; it moves
-/// only when clean.
-fn checkpoint(store: &SqliteStore, session: &LfSession, to: &MachineId) -> Result<MovedCheckout> {
-    let name = &session.title;
-    let root = crate::git::worktree_root(&session.cwd).map_err(|_| {
-        anyhow!(
-            "Session {name} runs outside a repository ({}); only a conversation in a Git checkout moves",
-            session.cwd.display()
-        )
-    })?;
-    if let Some(state) = crate::git::intervention_state(&root)? {
+/// The handoff to `to`: this Machine's claim moves there. An unowned Task is
+/// claimed first; one already handed to `to` reuses that entry.
+fn hand_off(store: &SqliteStore, task: &TaskId, to: &MachineId) -> Result<TaskOwnershipEntry> {
+    let ownership = store.task_ownership(task)?;
+    let owner = ownership
+        .owner
+        .as_ref()
+        .and_then(|owner| owner.machine.id.as_ref());
+    if owner == Some(to) {
+        if let Some(entry) = ownership.log.iter().rev().find(|entry| {
+            entry.kind == OwnershipKind::Handoff && entry.machine_id.as_ref() == Some(to)
+        }) {
+            return Ok(entry.clone());
+        }
+    }
+    if owner.is_none() {
+        store.claim_task(task)?;
+    }
+    Ok(store.handoff_task(task, to)?)
+}
+
+/// Interrupt the Task so nothing starts again, then end each Graph still
+/// running and the recorded step Processes it started. Each is signalled
+/// only once its pid is proven to be that recorded Process.
+async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<()> {
+    let live = |process: &crate::process::LfProcess| {
+        process.completed_at.is_none()
+            && crate::journal::process_evidence(&store.sqlite, &process.id)
+                == ProcessIdentityEvidence::Live
+    };
+    let processes: Vec<crate::process::LfProcess> = store
+        .sqlite
+        .task_graphs(&task.id)?
+        .into_iter()
+        .filter(|graph| live(&graph.process))
+        .flat_map(|graph| {
+            std::iter::once(graph.process).chain(graph.steps.into_iter().map(|step| step.process))
+        })
+        .filter(|process| live(process))
+        .collect();
+    if processes.is_empty() {
+        return Ok(());
+    }
+    store
+        .append_interrupt(&WorkRef::Task(task.id.clone()))
+        .await?;
+    for process in &processes {
+        if let Some((pid, birth)) = process.pid.zip(process.os_started_at) {
+            if crate::journal::process_identity_evidence(pid, birth)
+                == ProcessIdentityEvidence::Live
+            {
+                // SAFETY: the pid was just proven to be the recorded Process.
+                unsafe {
+                    libc::kill(pid as i32, libc::SIGTERM);
+                }
+            }
+        }
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let running: Vec<String> = processes
+            .iter()
+            .filter(|process| {
+                crate::journal::process_evidence(&store.sqlite, &process.id)
+                    == ProcessIdentityEvidence::Live
+            })
+            .map(|process| process.id.to_string())
+            .collect();
+        if running.is_empty() {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            bail!(
+                "{}'s Graph did not stop ({}); nothing moved",
+                task.identifier,
+                running.join(", ")
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+fn refuse_mid_operation(root: &Path, name: &str) -> Result<()> {
+    if let Some(state) = crate::git::intervention_state(root)? {
         bail!("{name}'s worktree is mid-{state}; finish or abort the {state}, then move it");
     }
-    let branch = crate::git::current_branch(&root)?.ok_or_else(|| {
+    Ok(())
+}
+
+/// Bring the checkout's code to the remote: commit what is uncommitted and push
+/// its branch. The default branch is never committed to or pushed; it moves
+/// only when clean.
+fn checkpoint(
+    store: &SqliteStore,
+    root: &Path,
+    name: &str,
+    to: &MachineId,
+) -> Result<MovedCheckout> {
+    let branch = crate::git::current_branch(root)?.ok_or_else(|| {
         anyhow!("{name}'s worktree has no branch checked out; check one out, then move it")
     })?;
-    let clean = crate::git::is_clean(&root)?;
-    if branch == crate::git::get_default_branch(&root)? {
+    let clean = crate::git::is_clean(root)?;
+    if branch == crate::git::get_default_branch(root)? {
         anyhow::ensure!(
             clean,
             "{name}'s checkout has uncommitted work on {branch}; move it to a branch first"
         );
     } else {
         if !clean {
-            crate::git::stage_all(&root, &|_| {})?;
-            crate::git::commit(&root, &format!("Move {name} to {to}"), &|_| {})?;
+            crate::git::stage_all(root, &|_| {})?;
+            crate::git::commit(root, &format!("Move {name} to {to}"), &|_| {})?;
         }
-        crate::git::push_with_upstream(&root, "origin", &branch, &|_| {})
+        crate::git::push_with_upstream(root, "origin", &branch, &|_| {})
             .with_context(|| format!("push {branch} before moving {name}"))?;
     }
-    let canonical = CanonicalRepo::discover(&root)?;
+    let canonical = CanonicalRepo::discover(root)?;
     Ok(MovedCheckout {
         repository_id: store
             .repository_id(&canonical.to_string())?
@@ -148,7 +315,7 @@ fn checkpoint(store: &SqliteStore, session: &LfSession, to: &MachineId) -> Resul
                 anyhow!("repository identity unavailable; run `lf repo identity` in {canonical}")
             })?,
         branch,
-        commit: crate::git::rev_parse(&root, "HEAD")?,
+        commit: crate::git::rev_parse(root, "HEAD")?,
     })
 }
 
@@ -241,15 +408,35 @@ fn read_file(base: &Path, path: &Path) -> Result<MovedFile> {
 
 /// Check out the moved branch in a worktree of this repository, admit the
 /// same Session there and place its transcript where its provider resumes it.
-/// `repo` is this Machine's checkout of the moved repository.
-pub(crate) async fn receive(store: &SharedStore, repo: &Path, moved: Move) -> Result<LfSession> {
+/// A moved Task is taken in first: its handoff, its checkout on the carried
+/// branch and its Workflow. `repo` is this Machine's checkout of the moved
+/// repository. Returns the Session, when one moved.
+pub(crate) async fn receive(
+    store: &SharedStore,
+    repo: &Path,
+    moved: Move,
+) -> Result<Option<LfSession>> {
     let main = crate::git::worktrees::main_repo_root(repo)?;
-    let cwd = check_out(&main, &moved.checkout)?;
+    let task = match &moved.task {
+        Some(task) => Some(take_in_task(store, &main, task, moved.checkout.as_ref()).await?),
+        None => None,
+    };
+    let Some(moved_session) = &moved.session else {
+        return Ok(None);
+    };
+    let cwd = match (&task, &moved.checkout) {
+        (Some(task), _) => task
+            .worktree
+            .clone()
+            .ok_or_else(|| anyhow!("Task {} arrived without a checkout", task.identifier))?,
+        (None, Some(checkout)) => check_out(&main, checkout)?,
+        (None, None) => bail!("Session {} moved without its checkout", moved_session.id),
+    };
     let canonical = CanonicalRepo::discover(&cwd)?;
-    let session = admit(store, &moved.session, &cwd, &canonical).await?;
-    let (Some(history), Some(provider)) = (&moved.history, moved.session.provider.as_deref())
+    let session = admit(store, moved_session, task.as_ref(), &cwd, &canonical).await?;
+    let (Some(history), Some(provider)) = (&moved.history, moved_session.provider.as_deref())
     else {
-        return Ok(session);
+        return Ok(Some(session));
     };
     let provider: Provider = provider
         .parse()
@@ -276,6 +463,54 @@ pub(crate) async fn receive(store: &SharedStore, repo: &Path, moved: Move) -> Re
         None,
     )
     .await
+    .map(Some)
+}
+
+/// This Machine owns the Task from here: the handoff, then its checkout of
+/// the carried branch, then its Workflow where it stood.
+async fn take_in_task(
+    store: &SharedStore,
+    main: &Path,
+    moved: &MovedTask,
+    checkout: Option<&MovedCheckout>,
+) -> Result<Task> {
+    let name = &moved.identifier;
+    store.get_task(&moved.task_id).await?.ok_or_else(|| {
+        anyhow!(
+            "Task {name} is unknown on this Machine; sync its planning here, then move it again"
+        )
+    })?;
+    store
+        .sqlite
+        .ingest_ownership_marker(&moved.task_id, &moved.ownership_marker)?;
+    if let Some(checkout) = checkout {
+        let source = crate::ops::task::remote::TaskSource {
+            branch: checkout.branch.clone(),
+            commit: checkout.commit.clone(),
+            task_id: moved.task_id.clone(),
+            identifier: moved.identifier.clone(),
+            issue_id: None,
+        };
+        let main = main.to_path_buf();
+        // Task preparation runs its own runtime; it cannot nest in this one.
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| crate::ops::task::check_out_moved_task(&main, source))
+                .join()
+                .expect("Task checkout thread panicked")
+        })?;
+    }
+    if let Some(workflow) = &moved.workflow {
+        store.sqlite.place_moved_workflow(
+            &moved.task_id,
+            workflow,
+            crate::journal::current_lf_process_id().as_ref(),
+        )?;
+    }
+    store
+        .get_task(&moved.task_id)
+        .await?
+        .ok_or_else(|| anyhow!("Task {name} disappeared while it arrived"))
 }
 
 /// Claude names a project directory for its absolute path, every character
@@ -340,10 +575,11 @@ fn check_out(main: &Path, checkout: &MovedCheckout) -> Result<PathBuf> {
 }
 
 /// The moved Session here, open in `cwd`: the row it left, reopened, or a new
-/// row with its identity.
+/// row with its identity. A moved Task's Session is its conversation here.
 async fn admit(
     store: &SharedStore,
     moved: &MovedSession,
+    task: Option<&Task>,
     cwd: &Path,
     repo: &CanonicalRepo,
 ) -> Result<LfSession> {
@@ -366,13 +602,14 @@ async fn admit(
         model: moved.model.clone(),
         node: None,
         iterations: None,
-        task_id: None,
-        wave_id: match &moved.primary {
-            Some(MovedPrimary::Wave { wave_id }) => Some(wave_id.clone()),
+        task_id: task.map(|task| task.id.clone()),
+        wave_id: match (&moved.primary, task) {
+            (Some(MovedPrimary::Wave { wave_id }), _) => Some(wave_id.clone()),
+            (_, Some(task)) => task.wave_id.clone(),
             _ => None,
         },
         graph_lf_process_id: None,
-        work_source: None,
+        work_source: task.map(|_| WorkSource::Declared),
         bound_at: None,
         interactive: true,
         repo: Some(repo.to_string()),
@@ -383,10 +620,11 @@ async fn admit(
         completed_at: None,
         created_at: crate::store::rows::now_unix(),
     };
-    let scope = match &moved.primary {
-        None => return Ok(store.create_session(session).await?),
-        Some(MovedPrimary::Repository) => PrimaryScope::Repository(repo.clone()),
-        Some(MovedPrimary::Wave { wave_id }) => PrimaryScope::Wave(wave_id.clone()),
+    let scope = match (&moved.primary, task) {
+        (_, Some(task)) => PrimaryScope::Task(task.id.clone()),
+        (None, None) => return Ok(store.create_session(session).await?),
+        (Some(MovedPrimary::Repository), None) => PrimaryScope::Repository(repo.clone()),
+        (Some(MovedPrimary::Wave { wave_id }), None) => PrimaryScope::Wave(wave_id.clone()),
     };
     let caller = crate::journal::current_lf_process_id();
     let admitted = store
@@ -406,15 +644,16 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn a_move_round_trips_and_requires_every_field() {
+    fn a_move_round_trips_and_requires_its_source() {
         let json = include_str!("../../../../../tests/fixtures/dto/move.json");
         let moved: Move = serde_json::from_str(json).unwrap();
         assert_eq!(
             serde_json::from_str::<Move>(&serde_json::to_string(&moved).unwrap()).unwrap(),
             moved
         );
+        assert_eq!(moved.task.unwrap().workflow.unwrap().node, "explore");
         let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
-        missing.as_object_mut().unwrap().remove("checkout");
+        missing.as_object_mut().unwrap().remove("from_machine_id");
         assert!(serde_json::from_value::<Move>(missing).is_err());
     }
 

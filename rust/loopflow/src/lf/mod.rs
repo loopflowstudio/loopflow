@@ -1294,11 +1294,15 @@ pub enum SessionCommand {
     /// Hand a Session to another Machine: commit and push its branch, stop it
     /// here and print the move for `lf session receive` there
     #[command(
-        after_help = "Everyday spelling: `lf --machine <machine> resume <session>` sends, receives and resumes in one step. Run send and receive by hand to retry a move whose receive failed:\n  lf session send <session> --to <machine> | lf --machine <machine> session receive"
+        after_help = "Everyday spelling: `lf --machine <machine> resume <session>` sends, receives and resumes in one step. `lf task move <task> --machine <machine>` moves a Task with its Session. Run send and receive by hand to retry a move whose receive failed:\n  lf session send <session|--task <task>> --to <machine> | lf --machine <machine> session receive"
     )]
     Send {
         /// Session ID or provider conversation ID
-        id: String,
+        #[arg(required_unless_present = "task", conflicts_with = "task")]
+        id: Option<String>,
+        /// Send this Task with its Session, as `lf task move --machine` does
+        #[arg(long)]
+        task: Option<String>,
         /// The Machine it moves to, by label or id
         #[arg(long)]
         to: String,
@@ -1691,18 +1695,26 @@ pub enum TaskCommand {
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },
-    /// Change Task membership while preserving its recorded work
+    /// Change Task membership, or move the Task to another Machine, preserving its recorded work
+    #[command(
+        after_help = "`--machine` stops the Task's Graph, commits and pushes its worktree, and hands it off with its Workflow position and Session; `lf task run` there runs its route again. A worktree mid-merge or mid-rebase refuses to move.\n  lf task move LOO-12 --machine mini"
+    )]
     Move {
         issue: String,
         #[arg(
             short = 'w',
             long,
-            required_unless_present = "no_wave",
-            conflicts_with = "no_wave"
+            required_unless_present_any = ["no_wave", "machine"],
+            conflicts_with_all = ["no_wave", "machine"]
         )]
         wave: Option<String>,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "machine")]
         no_wave: bool,
+        /// Move the Task to this Machine, by label or id
+        #[arg(long, value_name = "LABEL_OR_ID")]
+        machine: Option<String>,
+        #[arg(long, requires = "machine")]
+        json: bool,
     },
     /// Read the thread or publish a comment; agent comments default to progress
     Comment {
@@ -2128,11 +2140,7 @@ pub enum MachineCommand {
         /// A registered Machine label, this Machine's hostname, or a Machine id
         machine: String,
         /// Set this Wave's default for new Tasks and its Wave Session
-        #[arg(conflicts_with = "task")]
         wave: Option<String>,
-        /// Hand this Task to the Machine; you stay its person
-        #[arg(long, conflicts_with_all = ["session", "tasks"])]
-        task: Option<String>,
         /// Set only where the scope's primary Session runs, and move it there
         #[arg(long, conflicts_with = "tasks")]
         session: bool,
@@ -2611,7 +2619,7 @@ mod tests {
             vec!["lf", "ops", "machine", "use", "mini"],
             vec!["lf", "ops", "machine", "use", "mini", "product"],
             vec!["lf", "--repo", "loopflow", "ops", "machine", "use", "mini"],
-            vec!["lf", "ops", "machine", "use", "mini", "--task", "LOO-1"],
+            vec!["lf", "task", "move", "LOO-1", "--machine", "mini"],
             vec!["lf", "discord", "serve", "product"],
             vec!["lf", "self", "doctor", "--planning", "--json"],
             vec!["lf", "wave", "status", "product", "--sync"],

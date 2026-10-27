@@ -1259,7 +1259,7 @@ struct SharedPlan {
     local_path: std::path::PathBuf,
     remote_path: std::path::PathBuf,
     destination: loopflow::planning_git::PlanningDestination,
-    _repos: [loopflow_test_support::TestRepo; 2],
+    _repos: Vec<loopflow_test_support::TestRepo>,
     _person: Person,
 }
 
@@ -1285,15 +1285,45 @@ impl Drop for Person {
 
 impl SharedPlan {
     fn new(fixture: &Machines) -> Self {
-        use loopflow::durable::RepositoryId;
-        use loopflow::planning_git::PlanningDestination;
-        use loopflow::store::sqlite::SqliteStore;
-        let repos = [
+        let repos = vec![
             loopflow_test_support::TestRepo::new(),
             loopflow_test_support::TestRepo::new(),
         ];
         let local_path = repos[0].path().canonicalize().unwrap();
         let remote_path = repos[1].path().canonicalize().unwrap();
+        Self::with(fixture, repos, local_path, remote_path)
+    }
+
+    /// Mini's checkout is a clone of the laptop's origin, so a branch pushed
+    /// from one checks out on the other.
+    fn cloned(fixture: &Machines) -> Self {
+        let repo = loopflow_test_support::TestRepo::new();
+        let local_path = repo.path().canonicalize().unwrap();
+        let remote_path = fixture.root.path().join("remote/checkout");
+        git(
+            fixture.root.path(),
+            &[
+                "clone",
+                "-q",
+                repo.bare_path().to_str().unwrap(),
+                remote_path.to_str().unwrap(),
+            ],
+        );
+        git(&remote_path, &["config", "user.email", "test@test.com"]);
+        git(&remote_path, &["config", "user.name", "Jack"]);
+        let remote_path = remote_path.canonicalize().unwrap();
+        Self::with(fixture, vec![repo], local_path, remote_path)
+    }
+
+    fn with(
+        fixture: &Machines,
+        repos: Vec<loopflow_test_support::TestRepo>,
+        local_path: std::path::PathBuf,
+        remote_path: std::path::PathBuf,
+    ) -> Self {
+        use loopflow::durable::RepositoryId;
+        use loopflow::planning_git::PlanningDestination;
+        use loopflow::store::sqlite::SqliteStore;
         let local = SqliteStore::new(&fixture.root.path().join("local/loopflow.db")).unwrap();
         let remote =
             SqliteStore::new(&fixture.root.path().join("remote/store/loopflow.db")).unwrap();
@@ -1394,15 +1424,15 @@ fn task_ownership_follows_claim_handoff_and_unclaim_through_the_writer() {
     );
     assert!(plan.local.claim_task(&task).is_err());
 
-    // Handoff from the laptop runs on mini, the writer, over `lf --machine`.
+    // Moving it to the laptop sends it from mini, the writer, over SSH.
     let handed = fixture.json(&[
         "--repository",
         plan.repository.as_str(),
-        "machine",
-        "use",
-        laptop.as_str(),
-        "--task",
+        "task",
+        "move",
         task.as_str(),
+        "--machine",
+        laptop.as_str(),
         "--json",
     ]);
     assert_eq!(handed["owner"]["machine"]["id"], laptop.as_str());
@@ -1449,73 +1479,6 @@ fn task_ownership_follows_claim_handoff_and_unclaim_through_the_writer() {
         );
     }
     assert!(!fixture.root.path().join("forbidden-effect").exists());
-}
-
-#[test]
-fn bare_machine_use_in_a_moved_tasks_worktree_hands_it_off_on_the_owner() {
-    use loopflow::durable::OwnershipKind;
-    use loopflow::work::task::{TaskPr, TaskPrId};
-    let fixture = preview_machines();
-    let plan = SharedPlan::new(&fixture);
-    let task = plan.task();
-    plan.to_local();
-    let mini = plan.remote.local_machine().unwrap().id;
-    let laptop = plan.local.local_machine().unwrap().id;
-    let now = time::OffsetDateTime::now_utc();
-    plan.local
-        .place_task(
-            &task,
-            &plan.local_path,
-            "ownership-demo",
-            &TaskPr {
-                id: TaskPrId::new(),
-                task_id: task.clone(),
-                sequence: 1,
-                slug: "ownership-demo".into(),
-                branch: "jack/ownership-demo".into(),
-                base_commit: "deadbeef".into(),
-                parent_pr_id: None,
-                publication: None,
-                merge_commit: None,
-                abandoned_at: None,
-                ci_observation: None,
-                github_observation: None,
-                linear_attachment_id: None,
-                linear_comment_id: None,
-                linear_link_error: None,
-                created_at: now,
-                updated_at: now,
-            },
-        )
-        .unwrap();
-    plan.local.handoff_task(&task, &mini).unwrap();
-    plan.to_remote();
-
-    // The worktree stays here, but mini writes the Task: the bare form goes there.
-    let output = fixture
-        .command(&["machine", "use", laptop.as_str(), "--json"])
-        .current_dir(&plan.local_path)
-        .output()
-        .unwrap();
-    assert_success(&output);
-    let handed: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(handed["owner"]["machine"]["id"], laptop.as_str());
-    let kinds = plan
-        .remote
-        .task_ownership(&task)
-        .unwrap()
-        .log
-        .iter()
-        .map(|entry| entry.kind)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        kinds,
-        [
-            OwnershipKind::Claim,
-            OwnershipKind::Handoff,
-            OwnershipKind::Handoff
-        ]
-    );
 }
 
 #[test]
@@ -2096,4 +2059,294 @@ fn a_mid_merge_worktree_refuses_to_move() {
 
 fn git_dir(worktree: &Path) -> std::path::PathBuf {
     std::path::PathBuf::from(git(worktree, &["rev-parse", "--absolute-git-dir"]))
+}
+
+/// A Task the laptop owns, checked out on `branch` in a worktree of the
+/// laptop's checkout, with mini knowing it through planning.
+fn placed_task(plan: &SharedPlan, branch: &str) -> (loopflow::durable::TaskId, std::path::PathBuf) {
+    use loopflow::work::task::{TaskPr, TaskPrId};
+    let task = plan.task();
+    plan.to_local();
+    let worktree = plan.local_path.with_file_name(format!(
+        "{}.{branch}",
+        plan.local_path.file_name().unwrap().to_str().unwrap()
+    ));
+    git(
+        &plan.local_path,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            branch,
+            worktree.to_str().unwrap(),
+            "main",
+        ],
+    );
+    let worktree = worktree.canonicalize().unwrap();
+    let now = time::OffsetDateTime::now_utc();
+    plan.local
+        .place_task(
+            &task,
+            &worktree,
+            branch,
+            &TaskPr {
+                id: TaskPrId::new(),
+                task_id: task.clone(),
+                sequence: 1,
+                slug: branch.into(),
+                branch: branch.into(),
+                base_commit: git(&worktree, &["rev-parse", "HEAD"]),
+                parent_pr_id: None,
+                publication: None,
+                merge_commit: None,
+                abandoned_at: None,
+                ci_observation: None,
+                github_observation: None,
+                linear_attachment_id: None,
+                linear_comment_id: None,
+                linear_link_error: None,
+                created_at: now,
+                updated_at: now,
+            },
+        )
+        .unwrap();
+    if !plan.local.task_owned(&task).unwrap() {
+        plan.local.claim_task(&task).unwrap();
+    }
+    (task, worktree)
+}
+
+/// A Claude conversation in `cwd`, admitted the way connecting admits it.
+fn claude_conversation(fixture: &Machines, cwd: &Path, conversation: &str) -> String {
+    let project = fixture
+        .root
+        .path()
+        .join("local/.claude/projects")
+        .join(claude_project(cwd));
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        project.join(format!("{conversation}.jsonl")),
+        format!(
+            "{{\"type\":\"user\",\"sessionId\":\"{conversation}\",\"cwd\":\"{}\",\"message\":{{\"role\":\"user\",\"content\":\"keep going\"}}}}\n",
+            cwd.display()
+        ),
+    )
+    .unwrap();
+    let admitted = fixture
+        .command(&["session", "connect", conversation, "--prepare", "--json"])
+        .current_dir(cwd)
+        .output()
+        .unwrap();
+    assert_success(&admitted);
+    serde_json::from_slice::<Value>(&admitted.stdout).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// The Task waits at `explore` of a captured graph it took up.
+fn at_explore(db: &Path, task: &loopflow::durable::TaskId) {
+    let graph = serde_json::json!({"name": "feature", "steps": [{"Skill": {"skill": {"name": "explore"}, "id": null, "interactive": true, "returns": null, "sources": []}}]});
+    let db = rusqlite::Connection::open(db).unwrap();
+    db.execute(
+        "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'explore',1)",
+        rusqlite::params![task.as_str(), graph.to_string()],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,at)
+         VALUES(?1,'feature','took_up','start','explore',1)",
+        [task.as_str()],
+    )
+    .unwrap();
+}
+
+#[test]
+fn task_move_carries_ownership_workflow_and_session() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "move-task");
+    at_explore(&fixture.root.path().join("local/loopflow.db"), &task);
+    let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a55");
+    fs::write(worktree.join("notes.txt"), "uncommitted\n").unwrap();
+
+    let output = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini", "--json"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&output);
+    let ownership: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(ownership["owner"]["machine"]["id"], mini.as_str());
+
+    // The worktree's edit reached origin on the Task's branch.
+    assert_eq!(
+        git(plan._repos[0].bare_path(), &["show", "move-task:notes.txt"]),
+        "uncommitted"
+    );
+    // Mini owns the Task, checked out on its branch, at the same stage with its history.
+    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    assert_eq!(owner.machine.id, Some(mini.clone()));
+    let arrived = plan.remote.task(&task).unwrap().unwrap();
+    let checkout = arrived.worktree.clone().unwrap();
+    assert_eq!(git(&checkout, &["branch", "--show-current"]), "move-task");
+    assert_eq!(
+        fs::read_to_string(checkout.join("notes.txt")).unwrap(),
+        "uncommitted\n"
+    );
+    let remote_db =
+        rusqlite::Connection::open(fixture.root.path().join("remote/store/loopflow.db")).unwrap();
+    let node: String = remote_db
+        .query_row(
+            "SELECT node FROM task_workflows WHERE task_id=?1",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(node, "explore");
+    let history: Vec<(String, Option<String>)> = remote_db
+        .prepare("SELECT kind,lf_process_id FROM task_workflow_moves WHERE task_id=?1 ORDER BY seq")
+        .unwrap()
+        .query_map([task.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(history, [("took_up".to_string(), None)]);
+    // Its conversation came along as the Task's Session, in the Task's checkout.
+    let moved = plan.remote.session(&session).unwrap().unwrap();
+    assert!(moved.completed_at.is_none());
+    assert_eq!(moved.task_id.as_ref(), Some(&task));
+    assert_eq!(
+        moved.cwd.canonicalize().unwrap(),
+        checkout.canonicalize().unwrap()
+    );
+    // The laptop routes the Task and its conversation to mini.
+    assert_eq!(
+        plan.local.task_execution_route(&task).unwrap().machine_id,
+        mini
+    );
+    let resumed = fixture
+        .command(&["resume", "--task", task.as_str(), "--prepare", "--json"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&resumed);
+    let resumed: Value = serde_json::from_slice(&resumed.stdout).unwrap();
+    assert_eq!(resumed["id"], session.as_str());
+    assert_eq!(resumed["workspace"]["machine_id"], mini.as_str());
+}
+
+#[test]
+fn task_move_refuses_a_mid_merge_worktree() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let (task, worktree) = placed_task(&plan, "merging-task");
+    let head = git(&worktree, &["rev-parse", "HEAD"]);
+    fs::write(git_dir(&worktree).join("MERGE_HEAD"), format!("{head}\n")).unwrap();
+    let before = plan.local.task_ownership(&task).unwrap().log.len();
+
+    let refused = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(stderr.contains("mid-merge"), "{stderr}");
+    assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), head);
+    assert_eq!(plan.local.task_ownership(&task).unwrap().log.len(), before);
+}
+
+#[test]
+fn task_move_stops_a_live_graph() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let (task, worktree) = placed_task(&plan, "graph-task");
+    // A route whose step runs until something stops it.
+    fs::create_dir_all(worktree.join(".lf/graphs")).unwrap();
+    fs::write(
+        worktree.join(".lf/graphs/hold.yaml"),
+        format!("- cmd: task wait {task} --timeout 120s\n- interactive: demo\n"),
+    )
+    .unwrap();
+    let mut run = fixture
+        .command(&["-b", "task", "run", task.as_str(), "hold"])
+        .current_dir(&worktree)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let local_db = fixture.root.path().join("local/loopflow.db");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let waiting: i64 = rusqlite::Connection::open(&local_db)
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM processes WHERE command LIKE '%\"wait\"%' AND completed_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if waiting > 0 {
+            break;
+        }
+        if run.try_wait().unwrap().is_some() {
+            let output = run.wait_with_output().unwrap();
+            panic!(
+                "the Task run ended before its step started: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        if std::time::Instant::now() >= deadline {
+            let rows: Vec<(Option<String>, Option<i64>)> = rusqlite::Connection::open(&local_db)
+                .unwrap()
+                .prepare("SELECT command,completed_at FROM processes")
+                .unwrap()
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            panic!("the step never started: {rows:?}");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    // What the step had written so far travels in the checkpoint.
+    fs::write(worktree.join("step-edit.txt"), "halfway\n").unwrap();
+
+    let moved = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    let stopped = (0..100).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        run.try_wait().unwrap().is_some()
+    });
+    if !stopped {
+        run.kill().unwrap();
+    }
+    assert_success(&moved);
+    assert!(stopped, "the Task run outlived its stopped Graph");
+    assert_eq!(
+        git(
+            plan._repos[0].bare_path(),
+            &["show", "graph-task:step-edit.txt"]
+        ),
+        "halfway"
+    );
+    // Mini holds the Task on the same route, which reads as stopped there.
+    let (edge, carrier): (Option<i64>, Option<String>) =
+        rusqlite::Connection::open(fixture.root.path().join("remote/store/loopflow.db"))
+            .unwrap()
+            .query_row(
+                "SELECT edge,lf_process_id FROM task_workflows WHERE task_id=?1",
+                [task.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+    assert_eq!(edge, Some(0));
+    assert!(carrier.is_some());
 }

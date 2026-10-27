@@ -92,7 +92,7 @@ pub fn run(
     if let Some(route) = &work_route {
         if route.machine_id != target.id {
             return Err(anyhow!(
-                "Task is owned on Machine {}, not {}; `lf machine use <machine> --task` moves it",
+                "Task is owned on Machine {}, not {}; `lf task move <task> --machine <machine>` moves it",
                 route.machine_id,
                 target.id
             ));

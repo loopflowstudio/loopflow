@@ -58,7 +58,7 @@ mod task_comments;
 mod task_content;
 pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;
-mod task_work;
+pub(crate) mod task_work;
 pub(crate) mod wave_definitions;
 
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};

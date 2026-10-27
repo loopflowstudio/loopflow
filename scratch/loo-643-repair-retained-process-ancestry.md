@@ -203,4 +203,4 @@ the prevention row is named by its agent child (`parent_lf_process_id`) and as
   never reaches the resume claim, so it proves nothing here. Resuming Jack's MTG-159
   conversation is his call; the store test carries the resumability proof.
 
-Check results (after main sync, through `1931f69fb4`): `cargo test --lib doctor harness::agent_process store::sqlite::processes retention session_record::runtime` → 56 passed; clippy `--all-targets` clean; full lib and integration suites deferred to gate.
+Check results (through `24ea687e7e`: slice 5, `start_record` cwd compression, main sync with #1731): `cargo test -p loopflow --lib -- journal doctor harness::agent_process store::sqlite::processes retention session_record::runtime` → 86 passed; clippy `--all-targets` clean; full lib and integration suites deferred to gate.

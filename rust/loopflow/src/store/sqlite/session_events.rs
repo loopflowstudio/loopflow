@@ -414,6 +414,26 @@ impl SqliteStore {
         Ok(seq)
     }
 
+    /// Whether the turn's completion is already retained; a provider snapshot
+    /// replays completions of turns it has finished before.
+    pub(crate) fn session_turn_completed(
+        &self,
+        session: &str,
+        thread: &AgentSessionId,
+        turn: &str,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT 1 FROM session_events WHERE session_id=?1 AND provider_thread=?2
+                 AND provider_turn=?3 AND kind=?4",
+                params![session, thread, turn, SessionEventKind::Completed.as_str()],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
     /// Freeze the request's attribution while its attachment still owns dispatch.
     pub(crate) fn session_turn_origin(
         &self,

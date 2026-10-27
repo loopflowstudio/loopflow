@@ -179,6 +179,16 @@ impl FactWriter {
                 event(turn, SessionEventKind::Usage, receipt)?;
             }
             ProviderFact::TurnCompleted { turn, detail, .. } => {
+                // A replayed completion keeps its receipt and leaves the live
+                // turn's tally alone.
+                if let Some(turn) = turn {
+                    if self
+                        .store
+                        .session_turn_completed(&self.session, &turn.thread, &turn.turn)?
+                    {
+                        return Ok(());
+                    }
+                }
                 let context = std::mem::take(&mut self.context);
                 if let Some(turn) = turn {
                     let mut detail = detail.clone();
@@ -385,9 +395,10 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{FactWriter, SessionActivityTracker};
+    use crate::chat::types::Lifecycle;
     use crate::harness::claude_decode::ClaudeDecoder;
     use crate::harness::codex_decode::{turn_request, CodexDecoder};
-    use crate::harness::fact::{trace, Decoded, ProviderFact, Signal};
+    use crate::harness::fact::{trace, Decoded, ProviderFact, ProviderTurn, Signal};
     use crate::harness::opencode_decode::OpenCodeDecoder;
     use crate::id::LfProcessId;
     use crate::process::SessionAttachment;
@@ -924,6 +935,42 @@ mod tests {
                 json!({"first_request_tokens":16065,"peak_request_tokens":16065,
                 "tool_results":0,"tool_output_tokens":0,"compactions":0,"compaction_tokens":null})
             ]
+        );
+    }
+
+    #[test]
+    fn a_codex_snapshot_replays_a_completed_turn_without_taking_the_live_tally() {
+        let (_home, store, attachment) = attached(false);
+        let mut live = writer(&store, &attachment);
+        let mut decoder = CodexDecoder::default();
+        for rpc in trace("codex_normal_turn.jsonl") {
+            live.record(&decoder.decode(&rpc, None)).unwrap();
+        }
+        let thread = "0197f00d-aaaa-7000-8000-000000000001";
+        let mut resumed = writer(&store, &attachment);
+        resumed
+            .record(&[ProviderFact::Request { input_tokens: 7 }.into()])
+            .unwrap();
+        let snapshot = json!({"id":9,"result":{"thread":{"id":thread,"turns":[
+            {"id":"0197f00d-bbbb-7000-8000-000000000002","status":"completed"}]}}});
+        resumed
+            .record(&CodexDecoder::default().decode(&snapshot, Some(&thread.into())))
+            .unwrap();
+        resumed
+            .record(&[ProviderFact::TurnCompleted {
+                turn: Some(ProviderTurn {
+                    thread: thread.into(),
+                    turn: "next".into(),
+                }),
+                status: Lifecycle::Completed,
+                detail: json!({}),
+            }
+            .into()])
+            .unwrap();
+        let first = |context: &Value| context["first_request_tokens"].clone();
+        assert_eq!(
+            contexts(&store).iter().map(first).collect::<Vec<_>>(),
+            [json!(16065), json!(7)]
         );
     }
 

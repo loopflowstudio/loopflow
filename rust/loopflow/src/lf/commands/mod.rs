@@ -12,6 +12,7 @@ pub mod doctor;
 pub mod graph;
 pub mod graph_inventory;
 pub mod history;
+pub mod history_transcript;
 pub mod install;
 pub mod list;
 pub mod machine;

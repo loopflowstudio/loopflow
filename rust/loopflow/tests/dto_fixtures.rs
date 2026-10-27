@@ -1195,3 +1195,26 @@ fn desktop_state_retains_outer_and_inner_layouts() {
         reading
     );
 }
+
+#[test]
+fn retention_summary_keeps_states_expiries_and_policies_exactly() {
+    use loopflow::transcript::summary::{AgeBucket, RetentionSummary};
+    use loopflow::transcript::{ExpiryPolicy, RetentionState};
+    let json = include_str!("../../../tests/fixtures/dto/retention_summary.json");
+    let summary: RetentionSummary = serde_json::from_str(json).unwrap();
+    assert_eq!(summary.groups[1].age, AgeBucket::UnderQuarter);
+    assert_eq!(summary.groups[1].state, RetentionState::Facts);
+    assert_eq!(summary.homes[1].policy, ExpiryPolicy::Kept);
+    assert_eq!(summary.harnesses[1].next_expiry, None);
+    // What `lf history retention --json` prints is exactly what Swift decodes.
+    assert_eq!(
+        serde_json::to_value(&summary).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing["harnesses"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("unknown");
+    assert!(serde_json::from_value::<RetentionSummary>(missing).is_err());
+}

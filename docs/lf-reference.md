@@ -2464,6 +2464,31 @@ Inspect a process or Session by identity
 | `--input` | Inspect an exact retained input belonging to this Session |
 | `--context` | Print only what the step's submitted input was made of, by source Default: false. |
 | `--instructions` | Explain recorded instruction inclusion and omission Default: false. |
+| `--transcript` | Print only the Session's conversation, as its providers kept it Default: false. |
+| `--help / -h` | Print help |
+
+## lf history retention
+
+Show how much Session history providers still keep, and what they remove next
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf history search
+
+Find text in the conversations of recent Sessions
+
+| Argument | What it does |
+|---|---|
+| `<text>` | text |
+| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start Default: 7d. |
+| `--wave` | Scope to one Wave by name |
+| `--project` | Scope to one Project by slug |
+| `--task` | Scope to one Task by Linear identifier |
+| `--limit` | limit Default: 50. |
+| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf history usage

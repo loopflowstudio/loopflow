@@ -1,20 +1,18 @@
 //! A native conversation as plain text another provider can read: what people
 //! asked, what the agent said, one line per tool call, and the tail of each
-//! failed call's output. No summarization: Claude and Codex are read from
-//! their transcript files, OpenCode from `opencode session export`.
+//! failed call's output. No summarization: each harness's transcript is read
+//! through `transcript`.
 
 use std::fs;
-use std::io::{BufRead, BufReader};
-use std::path::Path;
-use std::process::Command;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
 
-use super::provider_conversation::{conversation_home, is_user_input, transcript};
-use crate::provider_auth::Provider;
+use crate::chat::types::{ConversationItem, Lifecycle};
+use crate::harness::HarnessKind;
 use crate::session::LfSession;
 use crate::store::sqlite::SqliteStore;
+use crate::transcript::{self, RequestSource, Turn};
 
 const TOOL_INPUT_CHARS: usize = 200;
 const ERROR_TAIL_CHARS: usize = 400;
@@ -23,43 +21,27 @@ const ERROR_TAIL_CHARS: usize = 400;
 const EXCERPT_HEAD_CHARS: usize = 6_000;
 const EXCERPT_TAIL_CHARS: usize = 14_000;
 
-#[derive(Debug)]
-enum Entry {
-    User(String),
-    Assistant(String),
-    Tool {
-        call: String,
-        line: String,
-        error: Option<String>,
-    },
-}
-
 /// Read the history before preparing a provider change or releasing its terminal.
 pub(super) fn read(store: &SqliteStore, session: &LfSession) -> Result<String> {
     let id = &session.id;
     let from = session.provider.as_deref().unwrap_or_default();
+    let harness = HarnessKind::parse(from)
+        .ok_or_else(|| anyhow!("Session {id} has no {from} history another provider can read"))?;
     let reference = store
         .input_provider_session(session.input_key()?)?
         .ok_or_else(|| anyhow!("Session {id} has no native conversation to continue"))?;
-    let thread = reference.agent_session.as_str();
-    let entries = match from {
-        "opencode" => opencode_entries(&opencode_export(&session.cwd, thread)?),
-        "claude" | "codex" => {
-            let provider = if from == "codex" {
-                Provider::Codex
-            } else {
-                Provider::Claude
-            };
-            let source = conversation_home(store, provider, &reference)?
-                .and_then(|home| transcript(provider, &home, thread))
-                .ok_or_else(|| {
-                    anyhow!("The {from} transcript of Session {id} ({thread}) was not found. Keep this conversation open and retry after {from} saves its first turn.")
-                })?;
-            transcript_entries(provider, &source)?
-        }
-        _ => bail!("Session {id} has no {from} history another provider can read"),
+    let thread = &reference.agent_session;
+    let located = transcript::locate(
+        store,
+        harness,
+        thread,
+        reference.account_id.as_ref(),
+        &session.cwd,
+    )?;
+    let transcript::Located::Found { source, .. } = located else {
+        bail!("The {from} transcript of Session {id} ({thread}) was not found. Keep this conversation open and retry after {from} saves its first turn.");
     };
-    Ok(render(&entries))
+    Ok(render(&transcript::read(harness, &source)?))
 }
 
 /// Save the current conversation and return the first turn for another provider.
@@ -94,288 +76,62 @@ fn excerpt(log: &str) -> String {
     )
 }
 
-/// Claude or Codex JSONL transcript entries.
-fn transcript_entries(provider: Provider, transcript: &Path) -> Result<Vec<Entry>> {
-    let file = fs::File::open(transcript)
-        .with_context(|| format!("open transcript {}", transcript.display()))?;
-    let mut entries = Vec::new();
-    for line in BufReader::new(file).lines() {
-        let Ok(row) = serde_json::from_str::<Value>(&line?) else {
-            continue;
-        };
-        match provider {
-            Provider::Codex => codex_row(&row, &mut entries),
-            _ => claude_row(&row, &mut entries),
-        }
-    }
-    Ok(entries)
-}
-
-/// OpenCode keeps history in its own store; its CLI exports one session as JSON.
-fn opencode_export(cwd: &Path, thread: &str) -> Result<Value> {
-    let output = Command::new("opencode")
-        .args(["session", "export", thread, "--standalone"])
-        .current_dir(cwd)
-        .output()
-        .context("run opencode session export")?;
-    if !output.status.success() {
-        bail!(
-            "opencode session export {thread} failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    serde_json::from_slice(&output.stdout).context("parse opencode session export")
-}
-
-/// Entries of an `opencode session export`: messages, each with text and tool parts.
-fn opencode_entries(export: &Value) -> Vec<Entry> {
-    let mut entries = Vec::new();
-    for message in export["messages"].as_array().into_iter().flatten() {
-        if message["type"] == "user" {
-            let text = message["text"].as_str().unwrap_or_default();
-            let request = lf_message(text)
-                .unwrap_or_else(|| text.split("<lf:").next().unwrap_or_default().to_owned());
-            if !request.trim().is_empty() {
-                entries.push(Entry::User(request));
-            }
-        }
-        if message["type"] != "assistant" {
-            continue;
-        }
-        for part in message["content"].as_array().into_iter().flatten() {
-            match part["type"].as_str() {
-                Some("text") => {
-                    if let Some(text) = part["text"].as_str().filter(|t| !t.trim().is_empty()) {
-                        entries.push(Entry::Assistant(text.into()));
-                    }
+/// The conversation as markdown: requests people made or launched, what the
+/// agent said, one line per tool call, and the tail of each failure.
+fn render(turns: &[Turn]) -> String {
+    let mut markdown = String::new();
+    for turn in turns {
+        let request = turn
+            .request
+            .as_ref()
+            .and_then(|request| match request.from {
+                RequestSource::Person => Some(request.text.clone()),
+                RequestSource::Injected => {
+                    transcript::Launch::parse(&request.text).map(|launch| launch.text())
                 }
-                Some("tool") => {
-                    let state = &part["state"];
-                    let mut entry = tool(
-                        part["id"].as_str(),
-                        part["name"].as_str(),
-                        &state["input"].to_string(),
-                    );
-                    if state["status"] == "error" {
-                        if let Entry::Tool { error, .. } = &mut entry {
-                            *error = Some(failure(&text_of(&state["error"])));
-                        }
+            });
+        if let Some(text) = request {
+            markdown.push_str(&format!("## user\n\n{}\n\n", text.trim()));
+        }
+        for item in &turn.items {
+            match item {
+                ConversationItem::Message { text, .. } => {
+                    markdown.push_str(&format!("## assistant\n\n{}\n\n", text.trim()))
+                }
+                ConversationItem::Tool {
+                    name,
+                    status,
+                    input,
+                    output,
+                    ..
+                } => {
+                    let input = match input {
+                        Some(Value::String(input)) => input.clone(),
+                        Some(input) => input.to_string(),
+                        None => String::new(),
+                    };
+                    let input = input.split_whitespace().collect::<Vec<_>>().join(" ");
+                    markdown.push_str(&format!(
+                        "- tool: {name} {}\n",
+                        head(&input, TOOL_INPUT_CHARS)
+                    ));
+                    if *status == Lifecycle::Failed {
+                        markdown.push_str(&format!(
+                            "  failed: {}\n",
+                            failure(output.as_deref().unwrap_or_default())
+                        ));
                     }
-                    entries.push(entry);
+                    markdown.push('\n');
                 }
                 _ => {}
-            }
-        }
-    }
-    entries
-}
-
-fn render(entries: &[Entry]) -> String {
-    let mut markdown = String::new();
-    for entry in entries {
-        match entry {
-            Entry::User(text) => markdown.push_str(&format!("## user\n\n{}\n\n", text.trim())),
-            Entry::Assistant(text) => {
-                markdown.push_str(&format!("## assistant\n\n{}\n\n", text.trim()))
-            }
-            Entry::Tool { line, error, .. } => {
-                markdown.push_str(&format!("- tool: {line}\n"));
-                if let Some(error) = error {
-                    markdown.push_str(&format!("  failed: {error}\n"));
-                }
-                markdown.push('\n');
             }
         }
     }
     markdown
 }
 
-fn claude_row(row: &Value, entries: &mut Vec<Entry>) {
-    if row["isSidechain"].as_bool() == Some(true) {
-        return;
-    }
-    let content = &row["message"]["content"];
-    match row["type"].as_str() {
-        Some("user") => {
-            if is_user_input(row) {
-                entries.push(Entry::User(text_of(content)));
-                return;
-            }
-            if row["isMeta"].as_bool() != Some(true) {
-                if let Some(message) = lf_message(&text_of(content)) {
-                    entries.push(Entry::User(message));
-                }
-            }
-            for block in content.as_array().into_iter().flatten() {
-                if block["type"] == "tool_result" && block["is_error"].as_bool() == Some(true) {
-                    fail(
-                        entries,
-                        block["tool_use_id"].as_str().unwrap_or_default(),
-                        &text_of(&block["content"]),
-                    );
-                }
-            }
-        }
-        Some("assistant") => {
-            for block in content.as_array().into_iter().flatten() {
-                match block["type"].as_str() {
-                    Some("text") => {
-                        let text = block["text"].as_str().unwrap_or_default();
-                        if !text.trim().is_empty() {
-                            entries.push(Entry::Assistant(text.to_owned()));
-                        }
-                    }
-                    Some("tool_use") => entries.push(tool(
-                        block["id"].as_str(),
-                        block["name"].as_str(),
-                        &block["input"].to_string(),
-                    )),
-                    _ => {}
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-fn codex_row(row: &Value, entries: &mut Vec<Entry>) {
-    if row["type"] != "response_item" {
-        return;
-    }
-    let item = &row["payload"];
-    match item["type"].as_str() {
-        Some("message") => {
-            let text = text_of(&item["content"]);
-            match item["role"].as_str() {
-                Some("user") => {
-                    if let Some(request) = codex_request(&text) {
-                        entries.push(Entry::User(request));
-                    }
-                }
-                Some("assistant") if !text.trim().is_empty() => {
-                    entries.push(Entry::Assistant(text));
-                }
-                _ => {}
-            }
-        }
-        Some("function_call") => entries.push(tool(
-            item["call_id"].as_str(),
-            item["name"].as_str(),
-            item["arguments"].as_str().unwrap_or_default(),
-        )),
-        Some("custom_tool_call") => entries.push(tool(
-            item["call_id"].as_str(),
-            item["name"].as_str(),
-            item["input"].as_str().unwrap_or_default(),
-        )),
-        Some("function_call_output" | "custom_tool_call_output") => {
-            let output = text_of(&item["output"]);
-            if exited_nonzero(&output) {
-                fail(
-                    entries,
-                    item["call_id"].as_str().unwrap_or_default(),
-                    &output,
-                );
-            }
-        }
-        _ => {}
-    }
-}
-
-/// A Codex user message, minus the instructions and context Codex and Loopflow inject.
-fn codex_request(text: &str) -> Option<String> {
-    if let Some(message) = lf_message(text) {
-        return Some(message);
-    }
-    let trimmed = text.trim_start();
-    let injected = trimmed.is_empty()
-        || trimmed.starts_with("# AGENTS.md instructions")
-        || trimmed.starts_with("<environment_context>")
-        || trimmed.starts_with("<user_instructions>")
-        || trimmed.contains("<lf:");
-    (!injected).then(|| text.to_owned())
-}
-
-/// A Loopflow launch turn: the skill it invoked and the person's words.
-fn lf_message(text: &str) -> Option<String> {
-    let skill = text.find("<lf:skill:").and_then(|open| {
-        let name_start = open + "<lf:skill:".len();
-        let name_end = text[name_start..].find('>')? + name_start;
-        let name = &text[name_start..name_end];
-        let close = format!("</lf:skill:{name}>");
-        let body_end = text[name_end..].find(&close)? + name_end;
-        Some(format!(
-            "Skill {name}:\n\n{}",
-            text[name_end + 1..body_end].trim()
-        ))
-    });
-    let message = text.find("<lf:message>").and_then(|open| {
-        let start = open + "<lf:message>".len();
-        let end = text[start..].find("</lf:message>")? + start;
-        Some(text[start..end].trim().to_owned())
-    });
-    let turn = [skill, message].into_iter().flatten().collect::<Vec<_>>();
-    (!turn.is_empty()).then(|| turn.join("\n\n"))
-}
-
-fn tool(call: Option<&str>, name: Option<&str>, input: &str) -> Entry {
-    let input = input.split_whitespace().collect::<Vec<_>>().join(" ");
-    Entry::Tool {
-        call: call.unwrap_or_default().to_owned(),
-        line: format!(
-            "{} {}",
-            name.unwrap_or("unknown"),
-            head(&input, TOOL_INPUT_CHARS)
-        ),
-        error: None,
-    }
-}
-
 fn failure(output: &str) -> String {
     tail(output.trim(), ERROR_TAIL_CHARS).replace('\n', "\n    ")
-}
-
-fn fail(entries: &mut [Entry], call_id: &str, output: &str) {
-    let tail = failure(output);
-    if let Some(Entry::Tool { error, .. }) = entries
-        .iter_mut()
-        .rev()
-        .find(|entry| matches!(entry, Entry::Tool { call, .. } if call == call_id))
-    {
-        *error = Some(tail);
-    }
-}
-
-/// Whether a Codex tool output reports a nonzero exit, in any of the shapes
-/// Codex has written: `"exit_code":N`, `Exit code: N`, `exited with code N`.
-fn exited_nonzero(output: &str) -> bool {
-    ["\"exit_code\":", "Exit code: ", "exited with code "]
-        .iter()
-        .any(|marker| {
-            output.match_indices(marker).any(|(at, _)| {
-                let rest = output[at + marker.len()..].trim_start();
-                let digits = rest
-                    .char_indices()
-                    .take_while(|(index, c)| c.is_ascii_digit() || (*index == 0 && *c == '-'))
-                    .map(|(_, c)| c)
-                    .collect::<String>();
-                digits.parse::<i64>().is_ok_and(|code| code != 0)
-            })
-        })
-}
-
-/// Text of a string, or of the text blocks in a content array.
-fn text_of(content: &Value) -> String {
-    if let Some(text) = content.as_str() {
-        return text.to_owned();
-    }
-    content
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|block| block["text"].as_str())
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn head(text: &str, chars: usize) -> String {
@@ -400,6 +156,7 @@ fn tail(text: &str, chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcript::Source;
 
     fn write(lines: &[Value]) -> tempfile::NamedTempFile {
         let file = tempfile::NamedTempFile::new().unwrap();
@@ -429,7 +186,10 @@ mod tests {
             serde_json::json!({"type":"user","userType":"external","isMeta":true,"message":{"content":"meta line"}}),
             serde_json::json!({"type":"user","userType":"external","message":{"content":[{"type":"text","text":"Try again with sudo"}]}}),
         ]);
-        let text = &render(&transcript_entries(Provider::Claude, transcript.path()).unwrap());
+        let text = &render(
+            &transcript::read(HarnessKind::Claude, &Source::File(transcript.path().into()))
+                .unwrap(),
+        );
         assert!(text.contains("## user\n\nSkill fix:\n\nFix things.\n\nFix the parser"));
         assert!(text.contains("## assistant\n\nReading the parser."));
         assert!(text.contains(r#"- tool: Read {"file_path":"src/parser.rs"}"#));
@@ -456,7 +216,9 @@ mod tests {
             serde_json::json!({"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c2","output":[{"type":"input_text","text":"Exit code: 0\nOutput:\npatched cleanly"}]}}),
             serde_json::json!({"type":"event_msg","payload":{"type":"user_message","message":"duplicate"}}),
         ]);
-        let text = &render(&transcript_entries(Provider::Codex, transcript.path()).unwrap());
+        let text = &render(
+            &transcript::read(HarnessKind::Codex, &Source::File(transcript.path().into())).unwrap(),
+        );
         assert!(text.contains("## user\n\nShip the fix"));
         assert!(text.contains("## assistant\n\nRunning tests."));
         assert!(text.contains("- tool: shell"));
@@ -484,7 +246,7 @@ mod tests {
                 {"type":"tool","id":"c1","name":"bash","state":{"status":"completed","input":{"command":"ls"},"content":[{"type":"text","text":"listing output"}]}},
                 {"type":"tool","id":"c2","name":"bash","state":{"status":"error","input":{"command":"git push"},"error":"remote rejected"}}]}
         ]});
-        let text = &render(&opencode_entries(&export));
+        let text = &render(&transcript::opencode::turns(&export));
         assert!(text.contains("## user\n\nFix the build"));
         assert!(text.contains("## assistant\n\nChecking status."));
         assert!(text.contains(r#"- tool: bash {"command":"ls"}"#));

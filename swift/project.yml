@@ -2,7 +2,7 @@ name: LoopflowSwift
 options:
   bundleIdPrefix: com.loopflow
   deploymentTarget:
-    macOS: "15.0"
+    macOS: "26.0"
     iOS: "18.0"
   xcodeVersion: "15.0"
   postGenCommand: "mkdir -p LoopflowSwift.xcodeproj/project.xcworkspace/xcshareddata/swiftpm && cp Package.resolved LoopflowSwift.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"

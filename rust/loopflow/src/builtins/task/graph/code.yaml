@@ -1,0 +1,8 @@
+# Build, deliver and verify. You try the change, then check it on main, in the
+# Task conversation.
+- graph: pursue
+- loop: implement
+  interactive: demo
+- graph: deliver
+- loop: implement
+  interactive: verify

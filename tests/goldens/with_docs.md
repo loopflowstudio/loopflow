@@ -48,7 +48,7 @@ the procedure. Reading this skill creates nothing and starts no work.
 - **Wave**: a durable objective, memory and area of responsibility.
 - **Project**: a Wave's plan, including Tasks, KRs and targets.
 - **Task**: one repository-owned intended outcome with optional Wave membership, its checkout, conversations and a current PR and delivery history.
-- **Workflow**: a Task's selected graph of review nodes and Graph edges.
+- **Workflow**: a Task's selected graph of review stages and the routes between them.
 - **Graph**: one execution of authored steps, with or without a Task.
 - **Session**: a conversation. **Process**: one actual lf process.
 
@@ -74,8 +74,8 @@ Before starting more execution, inspect the Task's live work, previous results
 and effects. Leave a live Graph running. A stopped Graph is history: repair the
 cause and run the steps it did not reach, without replaying effects.
 
-`lf task run` takes up the Task's selected Workflow when applicable and runs an
-edge. `lf task workflow move` changes its position without executing anything.
+`lf task run` takes up the Task's selected Workflow when applicable and runs a
+route. `lf task workflow move` changes its position without executing anything.
 `lf task move --wave/--no-wave` changes membership and preserves existing work. Review
 feedback, Task association, and an idle process are not instructions to launch.
 A finished Graph or published PR does not prove Task completion. Complete the

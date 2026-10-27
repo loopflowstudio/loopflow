@@ -7,19 +7,90 @@ import argparse
 import json
 import os
 import re
+import shlex
 import sqlite3
 import statistics
 import subprocess
 import time
 import uuid
 from collections import Counter, defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from scripts.check_cost import _is_check, _timestamp
-
 STEPS = ("implement", "compress", "loop-or-next")
 TRIMMED_MEMORY_TOKENS = 4_000
+
+_CHECKS = {
+    "cargo": {"build", "test", "nextest", "clippy", "fmt", "check"},
+    "swift": {"build", "test"},
+    "xcodebuild": {"build", "test", "build-for-testing", "test-without-building"},
+    "pytest": None,
+    "ruff": None,
+}
+
+
+def _timestamp(value: str) -> float:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+
+
+def _is_check(command: list[str]) -> bool:
+    # Inspect shell words, not quoted search strings or tool output. This is a
+    # command-family estimate: custom wrappers outside these names are unknown.
+    if len(command) >= 3 and command[1] in {"-c", "-lc"}:
+        source = command[2]
+    elif len(command) == 1:
+        words = shlex.split(command[0])
+        if len(words) >= 3 and words[1] in {"-c", "-lc"}:
+            source = words[2]
+        else:
+            source = command[0]
+    else:
+        source = shlex.join(command)
+    if "<<" in source:
+        raise ValueError("heredoc command batches are not classified")
+    lexer = shlex.shlex(source, posix=True, punctuation_chars=";&|()\n")
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    words = list(lexer)
+    at_command = True
+    skip_value = False
+    for index, word in enumerate(words):
+        if word and all(char in ";&|()\n" for char in word):
+            at_command = True
+            skip_value = False
+            continue
+        if not at_command:
+            continue
+        if skip_value:
+            skip_value = False
+            continue
+        if word in {"--project", "--directory", "--extra", "--with", "-n", "-u"}:
+            skip_value = True
+            continue
+        name = Path(word).name
+        if "=" in word or name in {"env", "time", "nice", "uv", "run"}:
+            continue
+        # Wrapper options are ignored until reaching its executable.
+        if word.startswith("-"):
+            continue
+        following = words[index + 1 : index + 4]
+        if name == "test_desktop.sh":
+            return True
+        if name in _CHECKS:
+            subcommands = _CHECKS[name]
+            if subcommands is None or any(part in subcommands for part in following):
+                return True
+        if name in {"python", "python3"} and following:
+            if following[0].endswith("scripts/test.py") or following[:2] == ["-m", "pytest"]:
+                return True
+        if name in {"npm", "pnpm", "bun"} and any(
+            part in {"test", "build", "lint", "typecheck"} for part in following
+        ):
+            return True
+        at_command = False
+    return False
+
 
 # ── Recorded evidence ────────────────────────────────────────────────────────
 
@@ -40,64 +111,59 @@ def _record(captures: Path, capture: str) -> Path:
     return captures / capture.removeprefix("run_")[:2] / capture
 
 
-def _events(directory: Path) -> list[dict[str, Any]]:
-    path = directory / "events.jsonl"
-    if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+def _history(directory: Path, lf: str, *args: str) -> Any:
+    """`lf history show` JSON or text for a record, read from the Machine that holds it."""
+    environment = {name: value for name, value in os.environ.items() if not name.startswith("LF_")}
+    # A record lives at <home>/runs/<ab>/<capture>.
+    environment["LF_HOME"] = str(directory.parents[2])
+    shown = subprocess.run(
+        [lf, "history", "show", *args], env=environment, capture_output=True, text=True
+    )
+    if shown.returncode != 0:
+        return None
+    return json.loads(shown.stdout) if "--json" in args else shown.stdout.strip() or None
 
 
-def _commands(events: list[dict[str, Any]]) -> list[str]:
-    """Shell commands from Codex command items and Claude Bash tool calls."""
-    commands = []
-    for event in events:
-        if event["type"] == "conversation":
-            item = event["event"].get("item", {})
-            if event["event"]["type"] == "item_completed" and item.get("type") == "command":
-                commands.append(" ".join(item["command"]))
-        elif event["type"] == "provider_output" and '"tool_use"' in event.get("line", ""):
-            try:
-                message = json.loads(event["line"]).get("message", {})
-            except json.JSONDecodeError:
-                continue
-            for part in message.get("content", []):
-                if part.get("type") == "tool_use" and "command" in part.get("input", {}):
-                    commands.append(part["input"]["command"])
-    return commands
+def _commands(transcript: dict[str, Any] | None) -> list[str] | None:
+    """Shell commands the provider transcript kept; None once the provider removed it."""
+    if transcript is None:
+        return None
+    conversations = transcript["conversations"]
+    if not any(conversation["turns"] for conversation in conversations):
+        return None
+    return [
+        " ".join(item["command"])
+        for conversation in conversations
+        for turn in conversation["turns"]
+        for item in turn["items"]
+        if item["type"] == "command"
+    ]
 
 
-def _final_text(events: list[dict[str, Any]]) -> str | None:
-    final = None
-    for event in events:
-        if event["type"] == "text":
-            final = event["text"]
-        elif event["type"] == "conversation":
-            item = event["event"].get("item", {})
-            if item.get("type") == "message" and item.get("text"):
-                final = item["text"]
-    return final
-
-
-def observe(directory: Path) -> dict[str, Any]:
+def observe(directory: Path, lf: str = "lf") -> dict[str, Any]:
     """What one settled record shows about its turn; absent evidence stays None."""
     manifest = json.loads((directory / "manifest.json").read_text())
-    events = _events(directory)
     terminal = directory / "terminal.json"
     receipt = json.loads(terminal.read_text()) if terminal.exists() else None
-    usage = next((e["usage"] for e in reversed(events) if e["type"] == "usage"), {})
-    commands = _commands(events)
+    snapshot = _history(directory, lf, directory.name, "--json")
+    usage = snapshot["usage"] if snapshot else {}
+    session = snapshot["session_id"] if snapshot else None
+    transcript = _history(directory, lf, session, "--transcript", "--json") if session else None
+    commands = _commands(transcript)
+    final = (
+        _history(directory, lf, session, "--input", directory.name, "--final") if session else None
+    )
     checks = []
-    for command in commands:
+    for command in commands or []:
         try:
             if _is_check([command]):
                 checks.append(command)
         except ValueError:
             continue
-    final = _final_text(events)
     # The verdict the agent tried to record; failed recording still states its intent.
     verdicts = [
         match.group(1)
-        for command in commands
+        for command in commands or []
         for match in re.finditer(r"\blf graph (?:decide\s+)?(?!decide\b)(\w+)", command)
     ]
     stated = re.search(r"\b(advance|iterate|blocked|retry)\b", (final or "")[:200], re.I)
@@ -110,7 +176,8 @@ def observe(directory: Path) -> dict[str, Any]:
         "peak_input_tokens": usage.get("peak_input_tokens"),
         "output_tokens": usage.get("output_tokens"),
         "cost_usd": usage.get("cost_usd"),
-        "commands": len(commands),
+        "provider_turns": len(snapshot["providers"]) if snapshot else None,
+        "commands": len(commands) if commands is not None else None,
         "checks": checks,
         "decision": decision.lower() if decision else None,
         "final_text": final,
@@ -183,9 +250,6 @@ def census(captures: Path, since: str | None = None) -> dict[str, Any]:
         counts: Counter[str] = Counter()
         for directory, manifest in records:
             counts["records"] += 1
-            events = _events(directory)
-            if any(e["type"] == "user_input" and e.get("op") != "initial" for e in events):
-                counts["resumed_turns"] += 1
             weights = source_tokens(directory, manifest)
             if weights is None:
                 counts["missing_context"] += 1
@@ -193,6 +257,10 @@ def census(captures: Path, since: str | None = None) -> dict[str, Any]:
                 for source, tokens in weights.items():
                     sources[source].append(tokens)
             turn = observe(directory)
+            if (turn["provider_turns"] or 0) > 1:
+                counts["resumed_turns"] += 1
+            if turn["commands"] is None:
+                counts["transcript_unavailable"] += 1
             for measure in ("minutes", "peak_input_tokens", "output_tokens", "cost_usd"):
                 if turn[measure] is not None:
                     observed[measure].append(turn[measure])
@@ -221,6 +289,7 @@ def census(captures: Path, since: str | None = None) -> dict[str, Any]:
         "method": "Replayable implement, compress and loop-or-next launches. Source tokens are the "
         "record's captured asset weights (cl100k_base); steers are a byte share of the task "
         "channel. Peak input and output tokens exist only where the provider reported them. "
+        "Commands come from provider transcripts, which expire with the provider. "
         "Native resumed history is never part of a recorded launch request.",
     }
 
@@ -424,7 +493,7 @@ def replay(
         "prompt_bytes": len(variant.encode()),
         "prompt_bytes_removed": len(request["task_prompt"].encode()) - len(variant.encode()),
         "changed": changed,
-        "turn": _replayed_turn(out),
+        "turn": _replayed_turn(out, lf),
     }
     (out / "result.json").write_text(json.dumps(result, indent=2))
     return result
@@ -438,14 +507,14 @@ def _overlap(left: dict[str, Any], right: dict[str, Any]) -> float | None:
     return len(set(left) & set(right)) / len(union) if union else None
 
 
-def _replayed_turn(out: Path) -> dict[str, Any] | None:
+def _replayed_turn(out: Path, lf: str = "lf") -> dict[str, Any] | None:
     """The capture `lf replay` created beside the staged (still prepared) record."""
     children = [
         path.parent
         for path in (out / "home" / "runs").glob("*/*/manifest.json")
         if not (path.parent / "prepared").exists()
     ]
-    return observe(children[0]) if len(children) == 1 else None
+    return observe(children[0], lf) if len(children) == 1 else None
 
 
 def report(captures: Path, out: Path, repeat: Path | None = None) -> dict[str, Any]:

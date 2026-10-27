@@ -30,13 +30,12 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::agent::{build_codex_thread_start_params, AgentConfig};
-use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
-use crate::harness::codex_mapping::ItemPhase;
+use crate::chat::types::ConversationEvent;
+use crate::harness::codex_decode::{self, CodexDecoder};
 use crate::harness::common::spawn_stderr_logger;
-use crate::harness::lf_tag::LfTagParser;
-use crate::harness::{
-    codex_mapping, ApprovalPolicy, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome,
-};
+use crate::harness::fact::{Decoded, ProviderFact};
+use crate::harness::fact_writer::FactWriter;
+use crate::harness::{ApprovalPolicy, Harness, HarnessError, SendCurrentOutcome};
 use crate::os_process::{
     agent_process_lifeline_path, hold_agent_process_lifeline, kill_process_group,
 };
@@ -138,431 +137,45 @@ fn classify_steer_rejection(error: String) -> SendCurrentOutcome {
     SendCurrentOutcome::Failed { error }
 }
 
-/// Reader-local state threaded through `process_notification`.
-pub(super) struct NotificationState {
-    turn_in_progress: Arc<AtomicBool>,
-    agent_session: Arc<Mutex<Option<AgentSessionId>>>,
-    /// Shared with the harness so steer/interrupt can address the live turn.
-    current_turn_id: Arc<Mutex<Option<String>>>,
-    thread_id_tx: Option<oneshot::Sender<AgentSessionId>>,
-    /// Latest thread/tokenUsage/updated snapshot, reported at turn/completed.
-    pending_usage: Option<TurnUsage>,
-    /// Cumulative thread totals already attributed to completed turns. Codex
-    /// reports lifetime-of-thread numbers; each turn reports the difference so
-    /// its usage means the same thing as Claude's per-turn report. `None`
-    /// until the first snapshot seeds it — a resumed thread arrives carrying
-    /// history that belongs to earlier launches, not to this turn.
-    reported: Option<ReportedTotals>,
-    /// Codex closes each streamed agent message with the full text again.
-    /// Remember which item ids already arrived as deltas so completion is a
-    /// recovery fallback, not a second copy of the prose.
-    streamed_agent_messages: HashSet<String>,
-    reported_error: Option<String>,
-    tag_parser: LfTagParser,
+/// One connection's decoder and the writer of what it establishes, shared by
+/// the client-to-server and server-to-client tasks.
+#[derive(Debug)]
+pub(super) struct CodexStream {
+    pub(super) decoder: CodexDecoder,
+    pub(super) writer: FactWriter,
 }
 
-impl NotificationState {
-    pub(super) fn new(
-        turn_in_progress: Arc<AtomicBool>,
-        agent_session: Arc<Mutex<Option<AgentSessionId>>>,
-        current_turn_id: Arc<Mutex<Option<String>>>,
-        thread_id_tx: Option<oneshot::Sender<AgentSessionId>>,
-    ) -> Self {
+impl CodexStream {
+    pub(super) fn new(writer: FactWriter) -> Self {
         Self {
-            turn_in_progress,
-            agent_session,
-            current_turn_id,
-            thread_id_tx,
-            pending_usage: None,
-            reported: None,
-            streamed_agent_messages: HashSet::new(),
-            reported_error: None,
-            tag_parser: LfTagParser::default(),
+            decoder: CodexDecoder::default(),
+            writer,
         }
     }
 
-    /// Convert the latest thread-lifetime snapshot into this Turn's cumulative
-    /// usage without advancing the completed-Turn baseline.
-    fn current_turn_usage(&self) -> Option<TurnUsage> {
-        let snapshot = self.pending_usage.as_ref()?;
-        if !snapshot.is_reported() {
-            return None;
-        }
-        let baseline = self.reported.unwrap_or_default();
-        let gross_input = snapshot
-            .input_tokens
-            .map(|value| value.saturating_sub(baseline.gross_input));
-        let output = snapshot
-            .output_tokens
-            .map(|value| value.saturating_sub(baseline.output));
-        let reasoning = snapshot
-            .reasoning_tokens
-            .map(|value| value.saturating_sub(baseline.reasoning));
-        let cached = snapshot
-            .cache_read_tokens
-            .map(|value| value.saturating_sub(baseline.cached));
-        Some(TurnUsage {
-            input_tokens: gross_input.map(|gross| gross.saturating_sub(cached.unwrap_or(0))),
-            output_tokens: output,
-            total_input_tokens: gross_input,
-            peak_input_tokens: snapshot.peak_input_tokens,
-            context_window_tokens: snapshot.context_window_tokens,
-            reasoning_tokens: reasoning,
-            cache_read_tokens: cached,
-            cache_write_tokens: None,
-            model: None,
-            cost_usd: None,
-        })
+    /// Decode and record a server message for the caller's known `thread`.
+    pub(super) async fn inbound(
+        &mut self,
+        rpc: &Value,
+        thread: Option<&AgentSessionId>,
+    ) -> (Vec<Decoded>, Result<()>) {
+        let decoded = self.decoder.decode(rpc, thread);
+        let written = self.writer.write(&decoded).await;
+        (decoded, written)
     }
 
-    /// Finish the Turn and advance the attributed thread baseline.
-    fn take_turn_usage(&mut self) -> Option<TurnUsage> {
-        let usage = self.current_turn_usage()?;
-        let snapshot = self.pending_usage.take()?;
-        let baseline = self.reported.unwrap_or_default();
-        self.reported = Some(ReportedTotals {
-            gross_input: snapshot
-                .input_tokens
-                .unwrap_or(baseline.gross_input)
-                .max(baseline.gross_input),
-            output: snapshot
-                .output_tokens
-                .unwrap_or(baseline.output)
-                .max(baseline.output),
-            reasoning: snapshot
-                .reasoning_tokens
-                .unwrap_or(0)
-                .max(baseline.reasoning),
-            cached: snapshot.cache_read_tokens.unwrap_or(0).max(baseline.cached),
-        });
-        Some(usage)
+    /// Freeze a turn request's origin and record what the client sent.
+    pub(super) async fn outbound(&mut self, rpc: &Value) -> Result<()> {
+        if let Some(request) = codex_decode::turn_request(rpc) {
+            super::dispatch::off_reactor(|| self.writer.outbound(&request))?;
+        }
+        let decoded = self.decoder.outbound(rpc);
+        self.writer.write(&decoded).await
     }
-
-    /// On the first snapshot of the process, everything the thread consumed
-    /// before this request belongs to earlier launches of a resumed session —
-    /// baseline it out using the request-sized `last` report.
-    fn seed_reported_baseline(&mut self, params: &Value) {
-        if self.reported.is_some() {
-            return;
-        }
-        let total = |key: &str| {
-            params
-                .pointer(&format!("/tokenUsage/total/{key}"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0)
-        };
-        let last = |key: &str| {
-            params
-                .pointer(&format!("/tokenUsage/last/{key}"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0)
-        };
-        self.reported = Some(ReportedTotals {
-            gross_input: total("inputTokens").saturating_sub(last("inputTokens")),
-            output: total("outputTokens").saturating_sub(last("outputTokens")),
-            reasoning: total("reasoningOutputTokens").saturating_sub(last("reasoningOutputTokens")),
-            cached: total("cachedInputTokens").saturating_sub(last("cachedInputTokens")),
-        });
-    }
-
-    fn resolve_turn_id(&self, turn_id_from_params: Option<String>) -> String {
-        turn_id_from_params
-            .or_else(|| {
-                self.current_turn_id
-                    .lock()
-                    .expect("codex turn id lock poisoned")
-                    .clone()
-            })
-            .unwrap_or_else(|| "unknown".to_string())
-    }
-
-    fn set_current_turn_id(&self, turn_id: Option<String>) {
-        *self
-            .current_turn_id
-            .lock()
-            .expect("codex turn id lock poisoned") = turn_id;
-    }
-
-    fn record_thread_id(&mut self, thread_id: AgentSessionId) {
-        *self
-            .agent_session
-            .lock()
-            .expect("codex provider session id lock poisoned") = Some(thread_id.clone());
-        if let Some(tx) = self.thread_id_tx.take() {
-            let _ = tx.send(thread_id);
-        }
-    }
-}
-
-/// Dispatch one codex app-server notification into conversation events.
-///
-/// This is the production dispatch: the live reader task and the conformance
-/// replay both call it, so trace tests pin real behavior instead of a copy.
-pub(super) fn process_notification(
-    method: &str,
-    params: &Value,
-    state: &mut NotificationState,
-    events: &mpsc::UnboundedSender<ConversationEvent>,
-) {
-    let turn_id_from_params = codex_mapping::extract_turn_id(params);
-
-    match method {
-        "thread/started" => {
-            if let Some(thread_id) = codex_mapping::extract_thread_id(params) {
-                state.record_thread_id(thread_id);
-            }
-        }
-        "turn/started" => {
-            let tid =
-                turn_id_from_params.unwrap_or_else(|| format!("turn_{}", uuid::Uuid::new_v4()));
-            state.reported_error = None;
-            state.turn_in_progress.store(true, Ordering::Relaxed);
-            state.set_current_turn_id(Some(tid.clone()));
-            let _ = events.send(ConversationEvent::TurnStarted { turn_id: tid });
-        }
-        "turn/completed" => {
-            let tid = state.resolve_turn_id(turn_id_from_params);
-            for parsed_event in state.tag_parser.finish_turn(&tid) {
-                let _ = events.send(parsed_event);
-            }
-            state.turn_in_progress.store(false, Ordering::Relaxed);
-            state.set_current_turn_id(None);
-            let status = codex_mapping::map_turn_status(params);
-            if let Some(usage) = state.take_turn_usage() {
-                let _ = events.send(ConversationEvent::UsageCheckpoint {
-                    turn_id: tid.clone(),
-                    usage,
-                    final_receipt: true,
-                });
-            }
-            if status == crate::chat::types::Lifecycle::Failed {
-                if let Some(message) = params
-                    .pointer("/turn/error/message")
-                    .and_then(Value::as_str)
-                    .filter(|message| state.reported_error.as_deref() != Some(*message))
-                {
-                    let _ = events.send(ConversationEvent::Error {
-                        code: "codex_error".into(),
-                        message: message.to_owned(),
-                        evidence: None,
-                    });
-                }
-            }
-            let _ = events.send(ConversationEvent::TurnCompleted {
-                turn_id: tid,
-                status,
-            });
-        }
-        "thread/tokenUsage/updated" => {
-            // Usage arrives mid-turn as cumulative snapshots. Keep the latest
-            // lifetime totals and the highest single-request window pressure.
-            state.seed_reported_baseline(params);
-            let mut latest = codex_mapping::map_token_usage(params);
-            if let Some(previous) = state.pending_usage.take() {
-                retain_higher_context_pressure(&mut latest, &previous);
-            }
-            state.pending_usage = Some(latest);
-            if let (Some(turn_id), Some(usage)) = (
-                state
-                    .current_turn_id
-                    .lock()
-                    .expect("codex turn id lock poisoned")
-                    .clone(),
-                state.current_turn_usage(),
-            ) {
-                let _ = events.send(ConversationEvent::UsageCheckpoint {
-                    turn_id,
-                    usage,
-                    final_receipt: false,
-                });
-            }
-        }
-        "item/started" | "item/completed" => {
-            // The server echoes the client's own input (turn/start and
-            // turn/steer text) back as userMessage items; the caller already
-            // knows what it sent, so don't surface those as items.
-            let item_type = codex_mapping::map_item_type(params);
-            if item_type == "userMessage" {
-                return;
-            }
-            // agentMessage/delta is the live prose stream. Preserve a matching
-            // final-answer completion as a durable phase receipt; the shared
-            // turn fold recognizes that its prose was already streamed.
-            if item_type == "agentMessage" {
-                if method == "item/started" {
-                    return;
-                }
-                if state
-                    .streamed_agent_messages
-                    .contains(&codex_mapping::map_item_id(params))
-                {
-                    let item = codex_mapping::build_item(params, ItemPhase::Completed);
-                    if matches!(
-                        &item,
-                        ConversationItem::Message { phase, .. }
-                            if phase.as_deref() == Some("final_answer")
-                    ) {
-                        let tid = state.resolve_turn_id(turn_id_from_params);
-                        let _ =
-                            events.send(ConversationEvent::ItemCompleted { turn_id: tid, item });
-                    }
-                    return;
-                }
-            }
-            let tid = state.resolve_turn_id(turn_id_from_params);
-            if method == "item/started" {
-                let item = codex_mapping::build_item(params, ItemPhase::Started);
-                let _ = events.send(ConversationEvent::ItemStarted { turn_id: tid, item });
-            } else {
-                let item = codex_mapping::build_item(params, ItemPhase::Completed);
-                let _ = events.send(ConversationEvent::ItemCompleted { turn_id: tid, item });
-            }
-        }
-        "item/agentMessage/delta" => {
-            if let Some(content) = codex_mapping::delta_content(params) {
-                state
-                    .streamed_agent_messages
-                    .insert(codex_mapping::map_item_id(params));
-                let tid = state.resolve_turn_id(turn_id_from_params);
-                for parsed_event in state.tag_parser.consume_text(&tid, &content) {
-                    let _ = events.send(parsed_event);
-                }
-            }
-        }
-        "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => {
-            if let Some(content) = codex_mapping::delta_content(params) {
-                let tid = state.resolve_turn_id(turn_id_from_params);
-                let _ = events.send(ConversationEvent::ReasoningDelta {
-                    turn_id: tid,
-                    content,
-                });
-            }
-        }
-        "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" | "item/plan/delta" => {
-            if let Some(data) = codex_mapping::map_item_delta(method, params) {
-                let tid = state.resolve_turn_id(turn_id_from_params);
-                let item_id = codex_mapping::map_item_id(params);
-                let _ = events.send(ConversationEvent::ItemUpdated {
-                    turn_id: tid,
-                    item_id,
-                    data,
-                });
-            }
-        }
-        "turn/diff/updated" => {
-            if let Some(diff) = params
-                .get("diff")
-                .and_then(Value::as_str)
-                .map(ToString::to_string)
-            {
-                let tid = state.resolve_turn_id(turn_id_from_params);
-                let _ = events.send(ConversationEvent::DiffUpdated { turn_id: tid, diff });
-            }
-        }
-        "error" => {
-            // ErrorNotification: {threadId, turnId, error: TurnError, willRetry}.
-            let message = params
-                .pointer("/error/message")
-                .and_then(Value::as_str)
-                .unwrap_or("codex error")
-                .to_string();
-            let will_retry = params
-                .get("willRetry")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            if will_retry {
-                // The vendor keeps the turn alive and retries on its own. A
-                // terminal Error here would finalize a turn that is still
-                // running: the next send_input becomes turn/steer into a
-                // "failed" turn, the real turn/completed then finds nothing
-                // open, and the scheduler wedges (verified cascade). Surface
-                // the error non-terminally instead — it still lands in the
-                // journal as a turn item.
-                tracing::warn!(message, "codex reported a retryable error; turn continues");
-                let tid = state.resolve_turn_id(turn_id_from_params);
-                let _ = events.send(ConversationEvent::ItemCompleted {
-                    turn_id: tid,
-                    item: ConversationItem::Thought {
-                        id: format!("retry_{}", uuid::Uuid::new_v4()),
-                        text: format!("codex error (will retry): {message}"),
-                    },
-                });
-            } else {
-                state.reported_error = Some(message.clone());
-                let _ = events.send(ConversationEvent::Error {
-                    code: "codex_error".to_string(),
-                    message,
-                    evidence: None,
-                });
-            }
-        }
-        // Known 0.142.5 chatter with no conversation-level meaning.
-        "thread/status/changed"
-        | "account/rateLimits/updated"
-        | "account/updated"
-        | "mcpServer/startupStatus/updated"
-        | "remoteControl/status/changed" => {
-            tracing::debug!(method, "ignoring codex app-server status notification");
-        }
-        _ => {
-            // Unknown notifications silently ignored.
-        }
-    }
-}
-
-/// Cumulative thread totals (gross input includes cache reads, as codex
-/// reports them) already attributed to completed turns.
-#[derive(Debug, Default, Clone, Copy)]
-struct ReportedTotals {
-    gross_input: u64,
-    output: u64,
-    reasoning: u64,
-    cached: u64,
-}
-
-fn retain_higher_context_pressure(latest: &mut TurnUsage, previous: &TurnUsage) {
-    let Some(previous_peak) = previous.peak_input_tokens else {
-        return;
-    };
-    let Some(previous_window) = previous.context_window_tokens else {
-        return;
-    };
-    let latest_is_higher = match (latest.peak_input_tokens, latest.context_window_tokens) {
-        (Some(peak), Some(window)) => {
-            u128::from(peak) * u128::from(previous_window)
-                >= u128::from(previous_peak) * u128::from(window)
-        }
-        _ => false,
-    };
-    if !latest_is_higher {
-        latest.peak_input_tokens = Some(previous_peak);
-        latest.context_window_tokens = Some(previous_window);
-    }
-}
-
-/// Map a JSON-RPC error response (`{"error":{"code":-32600,"message":..},"id":N}`)
-/// to a harness error event. Called by the reader for any response frame that
-/// carries an `error` object.
-pub(super) fn process_rpc_error(error: &Value, events: &mpsc::UnboundedSender<ConversationEvent>) {
-    let code = error
-        .get("code")
-        .and_then(Value::as_i64)
-        .map(|c| c.to_string())
-        .unwrap_or_else(|| "codex_error".to_string());
-    let _ = events.send(ConversationEvent::Error {
-        code,
-        message: error
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("codex rpc error")
-            .to_string(),
-        evidence: None,
-    });
 }
 
 pub struct CodexHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
-    raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     approval: ApprovalPolicy,
     child: Option<Child>,
     outbound_tx: Option<mpsc::Sender<OutboundRpc>>,
@@ -609,7 +222,6 @@ impl CodexHarness {
     pub fn new(events: mpsc::UnboundedSender<ConversationEvent>, approval: ApprovalPolicy) -> Self {
         Self {
             events,
-            raw_provider: None,
             approval,
             child: None,
             outbound_tx: None,
@@ -743,13 +355,6 @@ impl CodexHarness {
 impl Harness for CodexHarness {
     fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
-    }
-
-    fn set_raw_provider_sender(
-        &mut self,
-        raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
-    ) {
-        self.raw_provider = raw_provider;
     }
 
     fn process_group_id(&self) -> Option<u32> {
@@ -1138,8 +743,14 @@ impl CodexHarness {
         let (outbound_tx, mut outbound_rx) = mpsc::channel::<OutboundRpc>(128);
         let authority = owner.clone();
         let writer_events = self.events.clone();
-        let native_history = Arc::new(Mutex::new(super::codex_history::History::default()));
-        let writer_history = native_history.clone();
+        let stream = Arc::new(tokio::sync::Mutex::new(CodexStream::new(FactWriter::new(
+            owner.0.clone(),
+            owner.1.clone(),
+            Some(owner.2.clone()),
+            self.account_route.clone(),
+            Default::default(),
+        ))));
+        let writer_stream = stream.clone();
         let writer_task = tokio::spawn(async move {
             while let Some(message) = outbound_rx.recv().await {
                 let payload = match message {
@@ -1153,13 +764,7 @@ impl CodexHarness {
                         json!({ "jsonrpc": "2.0", "id": id, "result": result })
                     }
                 };
-                let recorded = writer_history
-                    .lock()
-                    .expect("codex history lock poisoned")
-                    .request(
-                        &payload,
-                        Some((&authority.0, authority.1.as_str(), &authority.2)),
-                    );
+                let recorded = writer_stream.lock().await.outbound(&payload).await;
                 if let Err(error) = recorded {
                     let _ = writer_events.send(ConversationEvent::Error {
                         code: "codex_dispatch_rejected".into(),
@@ -1197,7 +802,6 @@ impl CodexHarness {
         let turn_in_progress = self.turn_in_progress.clone();
         let shutdown_requested = self.shutdown_requested.clone();
         let event_tx = self.events.clone();
-        let raw_provider = self.raw_provider.clone();
         let approval_tx = outbound_tx.clone();
         let approval = self.approval;
         let agent_session = self.agent_session.clone();
@@ -1207,180 +811,150 @@ impl CodexHarness {
         let pending_requests = self.pending_requests.clone();
         let retired_requests = self.retired_requests.clone();
         let account_route = self.account_route.clone();
-        let history = owner.clone();
+        let reader_owner = owner.clone();
         let reader_task = tokio::spawn(async move {
             let mut initialized_tx = Some(initialized_tx);
-            let mut state = NotificationState::new(
-                turn_in_progress.clone(),
-                agent_session,
-                current_turn_id,
-                Some(thread_id_tx),
-            );
+            let mut thread_id_tx = Some(thread_id_tx);
 
             while let Some(Ok(message)) = reader.next().await {
                 let Message::Text(line) = message else {
                     continue;
                 };
-                if let Some(raw_provider) = &raw_provider {
-                    let _ = raw_provider.send(RawProviderEvent {
-                        stream: "notification",
-                        line: line.to_string(),
-                    });
-                }
                 let Ok(value) = serde_json::from_str::<Value>(&line) else {
                     continue;
                 };
-                let (store, session, attachment) = &history;
-                let recorded = super::dispatch::off_reactor(|| {
-                    native_history
+                let (store, session, _) = &reader_owner;
+                let decoded = {
+                    let thread = super::dispatch::off_reactor(|| store.session_thread(session));
+                    let (decoded, written) = stream
                         .lock()
-                        .expect("codex history lock poisoned")
-                        .record(store, session, Some(attachment), None, &value)
-                });
-                if let Err(error) = recorded {
-                    let _ = event_tx.send(ConversationEvent::Error {
-                        code: "conversation_history_unavailable".into(),
-                        message: error.to_string(),
-                        evidence: None,
-                    });
-                }
-
-                let method = value
-                    .get("method")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let params = value.get("params").cloned().unwrap_or_else(|| json!({}));
-
-                if method.is_empty() {
-                    // Response frame.
-                    let id = value.get("id").and_then(Value::as_i64);
-                    let pending = id.and_then(|id| {
-                        pending_requests
-                            .lock()
-                            .expect("codex pending requests lock poisoned")
-                            .remove(&id)
-                    });
-                    if let Some(pending) = pending {
-                        let result = match value.get("error") {
-                            Some(error) => Err(error
-                                .get("message")
-                                .and_then(Value::as_str)
-                                .unwrap_or("codex RPC failed")
-                                .to_string()),
-                            None => Ok(value.get("result").cloned().unwrap_or(Value::Null)),
-                        };
-                        let _ = pending.send(result);
-                        continue;
+                        .await
+                        .inbound(&value, thread.as_ref().ok().and_then(Option::as_ref))
+                        .await;
+                    if let Err(error) = thread.map_err(anyhow::Error::from).and(written) {
+                        let _ = event_tx.send(ConversationEvent::Error {
+                            code: "conversation_history_unavailable".into(),
+                            message: error.to_string(),
+                            evidence: None,
+                        });
                     }
-                    if id.is_some_and(|id| {
-                        retired_requests
-                            .lock()
-                            .expect("codex retired requests lock poisoned")
-                            .remove(&id)
-                    }) {
-                        continue;
-                    }
-                    if let Some(error) = value.get("error") {
-                        process_rpc_error(error, &event_tx);
-                        continue;
-                    }
-                    // The initialize response completes the handshake; the
-                    // harness then sends the client `initialized`
-                    // notification (there is no server-side "initialized").
-                    if id.is_some() && id == Some(initialize_request_id.load(Ordering::Relaxed)) {
-                        initialize_request_id.store(0, Ordering::Relaxed);
-                        if let Some(tx) = initialized_tx.take() {
-                            let _ = tx.send(());
-                        }
-                        continue;
-                    }
-                    // The thread/start response carries the vendor thread id.
-                    if id.is_some() && id == Some(thread_start_request_id.load(Ordering::Relaxed)) {
-                        thread_start_request_id.store(0, Ordering::Relaxed);
-                        if let Some(turn) = value
-                            .pointer("/result/thread/turns")
-                            .and_then(Value::as_array)
-                            .and_then(|turns| {
-                                turns.iter().find(|turn| turn["status"] == "inProgress")
-                            })
-                        {
-                            state.turn_in_progress.store(true, Ordering::Relaxed);
-                            *state
-                                .current_turn_id
-                                .lock()
-                                .expect("codex turn id lock poisoned") =
-                                turn["id"].as_str().map(str::to_owned);
-                        }
-                        if let Some(thread_id) = value
-                            .get("result")
-                            .and_then(codex_mapping::extract_thread_id)
-                        {
-                            state.record_thread_id(thread_id.clone());
-                            if let Some(route) = &account_route {
-                                if let Err(error) = route.pin_session(&thread_id).await {
-                                    tracing::warn!(%error, "failed to pin Codex provider session account");
+                    decoded
+                };
+                for item in decoded {
+                    match item {
+                        Decoded::Display(event) => {
+                            match &event {
+                                ConversationEvent::TurnStarted { turn_id } => {
+                                    turn_in_progress.store(true, Ordering::Relaxed);
+                                    *current_turn_id.lock().expect("codex turn id lock poisoned") =
+                                        Some(turn_id.clone());
                                 }
+                                ConversationEvent::TurnCompleted { .. } => {
+                                    turn_in_progress.store(false, Ordering::Relaxed);
+                                    *current_turn_id.lock().expect("codex turn id lock poisoned") =
+                                        None;
+                                }
+                                _ => {}
+                            }
+                            let _ = event_tx.send(event);
+                        }
+                        Decoded::Fact(ProviderFact::SessionObserved(thread_id)) => {
+                            *agent_session
+                                .lock()
+                                .expect("codex provider session id lock poisoned") =
+                                Some(thread_id.clone());
+                            if let Some(tx) = thread_id_tx.take() {
+                                let _ = tx.send(thread_id);
                             }
                         }
-                    }
-                    continue;
-                }
-
-                // Any server request (method + id) is an approval request
-                // (item/commandExecution/requestApproval and friends); answer
-                // it per the configured Loopflow response policy. The user's
-                // Codex approval policy decides whether these requests occur.
-                if let Some(id) = value.get("id") {
-                    let result = match approval {
-                        ApprovalPolicy::AutoApprove => json!({ "decision": "accept" }),
-                        ApprovalPolicy::NativeClient => continue,
-                    };
-                    let _ = approval_tx
-                        .send(OutboundRpc::Response {
-                            id: id.clone(),
-                            result,
-                        })
-                        .await;
-                    continue;
-                }
-
-                if method == "account/rateLimits/updated" {
-                    if let (Some(route), Some(signal)) = (
-                        account_route.as_ref(),
-                        codex_mapping::rate_limit_signal(&params),
-                    ) {
-                        if let Err(error) = route.record_rate_limit(&signal).await {
-                            tracing::warn!(%error, "failed to record Codex account rate limit");
-                        }
-                        if signal.limited {
+                        Decoded::Fact(ProviderFact::RateLimit(signal))
+                            if signal.limited && account_route.is_some() =>
+                        {
                             let _ = event_tx.send(ConversationEvent::Error {
                                 code: "provider_rate_limited".to_string(),
                                 message: signal.reason,
                                 evidence: None,
                             });
-                            continue;
                         }
+                        Decoded::Fact(_) => {}
                     }
                 }
 
-                let previous_session = state
-                    .agent_session
-                    .lock()
-                    .expect("codex provider session id lock poisoned")
-                    .clone();
-                process_notification(method, &params, &mut state, &event_tx);
-                let current_session = state
-                    .agent_session
-                    .lock()
-                    .expect("codex provider session id lock poisoned")
-                    .clone();
-                if current_session != previous_session {
-                    if let (Some(route), Some(session_id)) =
-                        (account_route.as_ref(), current_session.as_ref())
+                if value.get("method").is_some() {
+                    // Any server request (method + id) is an approval request
+                    // (item/commandExecution/requestApproval and friends); answer
+                    // it per the configured Loopflow response policy. The user's
+                    // Codex approval policy decides whether these requests occur.
+                    if let Some(id) = value.get("id") {
+                        let result = match approval {
+                            ApprovalPolicy::AutoApprove => json!({ "decision": "accept" }),
+                            ApprovalPolicy::NativeClient => continue,
+                        };
+                        let _ = approval_tx
+                            .send(OutboundRpc::Response {
+                                id: id.clone(),
+                                result,
+                            })
+                            .await;
+                    }
+                    continue;
+                }
+
+                // Response frame.
+                let id = value.get("id").and_then(Value::as_i64);
+                let pending = id.and_then(|id| {
+                    pending_requests
+                        .lock()
+                        .expect("codex pending requests lock poisoned")
+                        .remove(&id)
+                });
+                if let Some(pending) = pending {
+                    let result = match value.get("error") {
+                        Some(error) => Err(error
+                            .get("message")
+                            .and_then(Value::as_str)
+                            .unwrap_or("codex RPC failed")
+                            .to_string()),
+                        None => Ok(value.get("result").cloned().unwrap_or(Value::Null)),
+                    };
+                    let _ = pending.send(result);
+                    continue;
+                }
+                if id.is_some_and(|id| {
+                    retired_requests
+                        .lock()
+                        .expect("codex retired requests lock poisoned")
+                        .remove(&id)
+                }) {
+                    continue;
+                }
+                if let Some(error) = value.get("error") {
+                    let _ = event_tx.send(codex_decode::rpc_error(error));
+                    continue;
+                }
+                // The initialize response completes the handshake; the
+                // harness then sends the client `initialized`
+                // notification (there is no server-side "initialized").
+                if id.is_some() && id == Some(initialize_request_id.load(Ordering::Relaxed)) {
+                    initialize_request_id.store(0, Ordering::Relaxed);
+                    if let Some(tx) = initialized_tx.take() {
+                        let _ = tx.send(());
+                    }
+                    continue;
+                }
+                // The thread/start response may resume a turn already running.
+                if id.is_some() && id == Some(thread_start_request_id.load(Ordering::Relaxed)) {
+                    thread_start_request_id.store(0, Ordering::Relaxed);
+                    if let Some(turn) = value
+                        .pointer("/result/thread/turns")
+                        .and_then(Value::as_array)
+                        .and_then(|turns| turns.iter().find(|turn| turn["status"] == "inProgress"))
                     {
-                        if let Err(error) = route.pin_session(session_id).await {
-                            tracing::warn!(%error, "failed to pin Codex provider session account");
-                        }
+                        let turn = turn["id"].as_str().map(str::to_owned);
+                        turn_in_progress.store(true, Ordering::Relaxed);
+                        *current_turn_id.lock().expect("codex turn id lock poisoned") =
+                            turn.clone();
+                        stream.lock().await.decoder.resume_turn(turn);
                     }
                 }
             }
@@ -1709,80 +1283,6 @@ mod tests {
             .all(|event| event.kind != crate::session::SessionEventKind::Completed));
     }
 
-    fn replay_state() -> (NotificationState, Arc<Mutex<Option<AgentSessionId>>>) {
-        let slot = Arc::new(Mutex::new(None));
-        let state = NotificationState::new(
-            Arc::new(AtomicBool::new(false)),
-            slot.clone(),
-            Arc::new(Mutex::new(None)),
-            None,
-        );
-        (state, slot)
-    }
-
-    /// Codex reports cumulative thread totals; each completed turn must
-    /// report only its own spend, with input net of cache reads.
-    #[test]
-    fn a_second_turn_reports_only_its_own_spend() {
-        let (mut state, _slot) = replay_state();
-        let usage = |gross, output, cached| {
-            serde_json::json!({
-                "tokenUsage": {
-                    "total": {"inputTokens": gross, "outputTokens": output,
-                              "cachedInputTokens": cached, "reasoningOutputTokens": 0},
-                    "last": {"inputTokens": gross},
-                    "modelContextWindow": 200_000
-                }
-            })
-        };
-
-        state.pending_usage = Some(codex_mapping::map_token_usage(&usage(16_065, 5, 9_600)));
-        let first = state.take_turn_usage().expect("first usage");
-        assert_eq!(first.input_tokens, Some(6_465));
-        assert_eq!(first.total_input_tokens, Some(16_065));
-        assert_eq!(first.cache_read_tokens, Some(9_600));
-        assert_eq!(first.output_tokens, Some(5));
-
-        state.pending_usage = Some(codex_mapping::map_token_usage(&usage(20_065, 12, 13_100)));
-        let second = state.take_turn_usage().expect("second usage");
-        assert_eq!(
-            second.input_tokens,
-            Some(500),
-            "gross Δ4000 minus cached Δ3500"
-        );
-        assert_eq!(second.total_input_tokens, Some(4_000));
-        assert_eq!(second.cache_read_tokens, Some(3_500));
-        assert_eq!(second.output_tokens, Some(7));
-
-        // A turn that reported no usage stays missing rather than repeating.
-        assert_eq!(state.take_turn_usage(), None);
-    }
-
-    /// A resumed thread's first snapshot carries every earlier launch's
-    /// tokens in `total`; only the request-sized `last` belongs to this turn.
-    #[test]
-    fn a_resumed_thread_baselines_out_prior_history() {
-        let (mut state, _slot) = replay_state();
-        let params = serde_json::json!({
-            "tokenUsage": {
-                "total": {"inputTokens": 100_000, "outputTokens": 9_000,
-                          "cachedInputTokens": 80_000, "reasoningOutputTokens": 500},
-                "last": {"inputTokens": 4_000, "outputTokens": 50,
-                         "cachedInputTokens": 3_000, "reasoningOutputTokens": 10},
-                "modelContextWindow": 200_000
-            }
-        });
-        state.seed_reported_baseline(&params);
-        state.pending_usage = Some(codex_mapping::map_token_usage(&params));
-
-        let usage = state.take_turn_usage().expect("resumed usage");
-        assert_eq!(usage.total_input_tokens, Some(4_000));
-        assert_eq!(usage.cache_read_tokens, Some(3_000));
-        assert_eq!(usage.input_tokens, Some(1_000));
-        assert_eq!(usage.output_tokens, Some(50));
-        assert_eq!(usage.reasoning_tokens, Some(10));
-    }
-
     #[test]
     fn start_and_resume_add_instructions_without_replacing_native_base() {
         let config = AgentConfig {
@@ -1822,56 +1322,6 @@ mod tests {
         let (method, params) = build_thread_request(&AgentConfig::default(), None);
         assert_eq!(method, "thread/start");
         assert!(!params.contains_key("threadId"));
-    }
-
-    #[test]
-    fn thread_started_notification_records_agent_session() {
-        let (tx, _rx) = mpsc::unbounded_channel();
-        let (mut state, slot) = replay_state();
-
-        process_notification(
-            "thread/started",
-            &json!({ "thread": { "id": "thread_abc", "sessionId": "thread_abc" } }),
-            &mut state,
-            &tx,
-        );
-
-        assert_eq!(*slot.lock().unwrap(), Some("thread_abc".into()));
-    }
-
-    #[test]
-    fn turn_started_sets_turn_in_progress_and_turn_id() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let (mut state, _slot) = replay_state();
-        let in_progress = state.turn_in_progress.clone();
-        let turn_slot = state.current_turn_id.clone();
-
-        process_notification(
-            "turn/started",
-            &json!({ "threadId": "thread_1", "turn": { "id": "turn_1", "status": "inProgress" } }),
-            &mut state,
-            &tx,
-        );
-        assert!(in_progress.load(Ordering::Relaxed));
-        assert_eq!(turn_slot.lock().unwrap().as_deref(), Some("turn_1"));
-
-        process_notification(
-            "turn/completed",
-            &json!({ "threadId": "thread_1", "turn": { "id": "turn_1", "status": "interrupted", "error": null } }),
-            &mut state,
-            &tx,
-        );
-        assert!(!in_progress.load(Ordering::Relaxed));
-        assert!(turn_slot.lock().unwrap().is_none());
-
-        let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
-        assert!(matches!(
-            events[1],
-            ConversationEvent::TurnCompleted {
-                status: crate::chat::types::Lifecycle::Interrupted,
-                ..
-            }
-        ));
     }
 
     /// A steer-ready harness plus the channels a test needs to answer it:
@@ -2103,79 +1553,5 @@ mod tests {
                 provider_turn_id: "turn_1".to_string(),
             }
         );
-    }
-
-    #[test]
-    fn completed_agent_message_does_not_repeat_streamed_prose() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let (mut state, _slot) = replay_state();
-
-        process_notification(
-            "item/agentMessage/delta",
-            &json!({
-                "turnId": "turn_1",
-                "itemId": "msg_1",
-                "delta": "Hello"
-            }),
-            &mut state,
-            &tx,
-        );
-        process_notification(
-            "item/completed",
-            &json!({
-                "turnId": "turn_1",
-                "item": {
-                    "id": "msg_1",
-                    "type": "agentMessage",
-                    "text": "Hello",
-                    "phase": "final_answer"
-                }
-            }),
-            &mut state,
-            &tx,
-        );
-
-        let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
-        assert_eq!(events.len(), 2);
-        assert!(matches!(
-            &events[0],
-            ConversationEvent::TextDelta { content, .. } if content == "Hello"
-        ));
-        assert!(matches!(
-            &events[1],
-            ConversationEvent::ItemCompleted {
-                item: ConversationItem::Message { text, phase, .. },
-                ..
-            } if text == "Hello" && phase.as_deref() == Some("final_answer")
-        ));
-    }
-
-    #[test]
-    fn completed_agent_message_is_a_fallback_without_deltas() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let (mut state, _slot) = replay_state();
-
-        process_notification(
-            "item/completed",
-            &json!({
-                "turnId": "turn_1",
-                "item": {
-                    "id": "msg_1",
-                    "type": "agentMessage",
-                    "text": "Recovered",
-                    "phase": "final_answer"
-                }
-            }),
-            &mut state,
-            &tx,
-        );
-
-        assert!(matches!(
-            rx.try_recv().expect("fallback message"),
-            ConversationEvent::ItemCompleted {
-                item: ConversationItem::Message { ref text, .. },
-                ..
-            } if text == "Recovered"
-        ));
     }
 }

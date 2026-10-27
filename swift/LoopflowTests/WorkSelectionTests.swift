@@ -52,9 +52,9 @@ struct WorkSelectionTests {
         let layout = try JSONDecoder().decode(WorkPaneLayout.self, from: bytes)
         #expect(layout.drafts.first?.text == "unsaved edits")
         #expect(layout.drafts.first?.baseContent == "base")
-        #expect(layout.focused == "pane-1")
+        #expect(layout.focused == "pane-0")
         #expect(layout.zoomed == "pane-2")
-        #expect(layout.hidden == ["pane-4"])
+        #expect(layout.hidden == ["pane-1"])
         let encoded = try JSONEncoder().encode(layout)
         #expect(try JSONSerialization.jsonObject(with: encoded) as? NSDictionary == JSONSerialization.jsonObject(with: bytes) as? NSDictionary)
     }

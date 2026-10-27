@@ -5,16 +5,17 @@
 use crate::id::AgentSessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 
 use super::{append_input, local_capture_dir, lock_session_process, publish_prepared_input};
+use crate::harness::HarnessKind;
 use crate::provider_account::activation::native_home;
 use crate::provider_auth::Provider;
 use crate::session::{LfSession, TitleSource};
 use crate::store::{ProviderAccountId, SharedStore};
+use crate::transcript::{conversation_home, is_user_input, json_lines, recorded_cwd, transcript};
 
 pub(super) async fn human_input_times<'a>(
     store: &SharedStore,
@@ -35,7 +36,13 @@ pub(super) async fn human_input_times<'a>(
         let Some(reference) = store.sqlite.input_provider_session(key)? else {
             continue;
         };
-        let Some(home) = conversation_home(&store.sqlite, provider, &reference)? else {
+        let Some(home) = conversation_home(
+            &store.sqlite,
+            provider,
+            &reference.agent_session,
+            reference.account_id.as_ref(),
+        )?
+        else {
             continue;
         };
         let id = reference.agent_session;
@@ -47,7 +54,7 @@ pub(super) async fn human_input_times<'a>(
                 .push((session.id.to_string(), id));
         } else {
             let at = claude.entry((home.clone(), id.clone())).or_insert_with(|| {
-                transcript(provider, &home, id.as_str())
+                transcript(HarnessKind::Claude, &home, id.as_str())
                     .and_then(|path| claude_input_time(&path, id.as_str()))
             });
             if let Some(at) = at {
@@ -65,38 +72,6 @@ pub(super) async fn human_input_times<'a>(
         }
     }
     Ok(times)
-}
-
-fn json_lines(path: &Path) -> impl Iterator<Item = serde_json::Value> {
-    fs::File::open(path).ok().into_iter().flat_map(|file| {
-        BufReader::new(file)
-            .lines()
-            .map_while(Result::ok)
-            .filter_map(|line| serde_json::from_str(&line).ok())
-    })
-}
-
-/// The provider home holding a recorded conversation: its isolated account's
-/// home, else the native one. `None` when the isolated account is gone.
-pub(super) fn conversation_home(
-    store: &crate::store::sqlite::SqliteStore,
-    provider: Provider,
-    reference: &crate::session_record::ProviderSessionRef,
-) -> Result<Option<PathBuf>> {
-    let id = &reference.agent_session;
-    if store.provider_session_isolated(provider, id)? != Some(true) {
-        return Ok(Some(native_home(provider, None)));
-    }
-    let account = match &reference.account_id {
-        Some(account) => Some(account.clone()),
-        None => store.provider_session_account(provider, id)?,
-    };
-    let Some(account) = account else {
-        return Ok(None);
-    };
-    Ok(store
-        .get_provider_account(provider.as_str(), &account)?
-        .and_then(|account| account.home))
 }
 
 fn codex_input_times(path: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i64> {
@@ -134,56 +109,6 @@ fn claude_input_time(path: &Path, id: &str) -> Option<i64> {
             i64::try_from(at.unix_timestamp_nanos() / 1_000_000).ok()
         })
         .max()
-}
-
-/// Whether a Claude transcript row is something a person typed: not a tool
-/// result, sidechain, meta line, compaction, or Loopflow/harness-injected block.
-pub(super) fn is_user_input(row: &serde_json::Value) -> bool {
-    if row["type"] != "user"
-        || row["userType"] != "external"
-        || ["isSidechain", "isMeta", "isCompactSummary", "isSynthetic"]
-            .iter()
-            .any(|key| row[key].as_bool() == Some(true))
-        || ["sourceToolAssistantUUID", "agentId", "toolUseResult"]
-            .iter()
-            .any(|key| !row[key].is_null())
-    {
-        return false;
-    }
-    let content = &row["message"]["content"];
-    let texts = if let Some(text) = content.as_str() {
-        vec![text]
-    } else if let Some(blocks) = content.as_array() {
-        blocks
-            .iter()
-            .filter(|block| block["type"] == "text")
-            .filter_map(|block| block["text"].as_str())
-            .collect::<Vec<_>>()
-    } else {
-        return false;
-    };
-    let image = content
-        .as_array()
-        .is_some_and(|blocks| blocks.iter().any(|block| block["type"] == "image"));
-    (image || texts.iter().any(|text| !text.trim().is_empty()))
-        && !texts.iter().any(|text| {
-            [
-                "<lf:",
-                "<task-notification>",
-                "<local-command",
-                "<command-name>",
-                "<system-reminder>",
-                "<session-start-hook>",
-                "<tick>",
-                "<goal>",
-                "<ide_opened_file>",
-                "<ide_selection>",
-                "[Request interrupted by user",
-                "This session is being continued from a previous conversation",
-            ]
-            .iter()
-            .any(|marker| text.contains(marker))
-        })
 }
 
 /// The Session that recorded `id` as its provider conversation.
@@ -325,7 +250,11 @@ async fn find(store: &SharedStore, id: &str) -> Result<Vec<NativeConversation>> 
             {
                 continue;
             }
-            if let Some(transcript) = transcript(provider, &home, id) {
+            let harness = match provider {
+                Provider::Codex => HarnessKind::Codex,
+                _ => HarnessKind::Claude,
+            };
+            if let Some(transcript) = transcript(harness, &home, id) {
                 found.push(NativeConversation {
                     provider,
                     cwd: recorded_cwd(&transcript),
@@ -338,56 +267,13 @@ async fn find(store: &SharedStore, id: &str) -> Result<Vec<NativeConversation>> 
     Ok(found)
 }
 
-/// Codex keeps `sessions/<year>/<month>/<day>/rollout-<time>-<id>.jsonl`;
-/// Claude keeps `projects/<directory>/<id>.jsonl`.
-pub(super) fn transcript(provider: Provider, home: &Path, id: &str) -> Option<PathBuf> {
-    match provider {
-        Provider::Codex => {
-            let suffix = format!("-{id}.jsonl");
-            find_file(&home.join("sessions"), 3, &|name| {
-                name.starts_with("rollout-") && name.ends_with(&suffix)
-            })
-        }
-        _ => {
-            let name = format!("{id}.jsonl");
-            find_file(&home.join("projects"), 1, &|found| found == name)
-        }
-    }
-}
-
-fn find_file(directory: &Path, depth: usize, matches: &dyn Fn(&str) -> bool) -> Option<PathBuf> {
-    fs::read_dir(directory).ok()?.flatten().find_map(|entry| {
-        let path = entry.path();
-        if depth > 0 {
-            return find_file(&path, depth - 1, matches);
-        }
-        matches(entry.file_name().to_str()?).then_some(path)
-    })
-}
-
-/// The directory the conversation ran in, from the head of its transcript.
-fn recorded_cwd(transcript: &Path) -> Option<PathBuf> {
-    BufReader::new(fs::File::open(transcript).ok()?)
-        .lines()
-        .take(32)
-        .map_while(Result::ok)
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(&line).ok())
-        .find_map(|entry| {
-            entry["cwd"]
-                .as_str()
-                .or_else(|| entry["payload"]["cwd"].as_str())
-                .map(PathBuf::from)
-        })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{recorded, recorded_cwd, transcript};
+    use super::recorded;
     use crate::provider_auth::Provider;
     use crate::session::LfSession;
     use crate::store::SharedStore;
     use std::fs;
-    use std::path::PathBuf;
 
     const ID: &str = "0199a213-81c0-7800-8aa1-bbab2a035a53";
 
@@ -541,23 +427,6 @@ mod tests {
         assert_eq!(super::claude_input_time(&path, ID), Some(1_767_225_600_123));
     }
 
-    #[test]
-    fn a_codex_rollout_is_found_by_its_conversation_id_with_its_directory() {
-        let home = tempfile::tempdir().unwrap();
-        let day = home.path().join("sessions/2026/10/02");
-        fs::create_dir_all(&day).unwrap();
-        fs::write(
-            day.join(format!("rollout-2026-10-02T10-00-00-{ID}.jsonl")),
-            r#"{"type":"session_meta","payload":{"id":"x","cwd":"/work/repo"}}"#,
-        )
-        .unwrap();
-
-        let found = transcript(Provider::Codex, home.path(), ID).unwrap();
-        assert_eq!(recorded_cwd(&found), Some(PathBuf::from("/work/repo")));
-        assert!(transcript(Provider::Codex, home.path(), &ID.replace('3', "4")).is_none());
-        assert!(transcript(Provider::Claude, home.path(), ID).is_none());
-    }
-
     #[tokio::test]
     async fn a_provider_conversation_id_names_the_session_that_recorded_it() {
         let directory = tempfile::tempdir().unwrap();
@@ -607,20 +476,5 @@ mod tests {
                 && error.contains("conversation")
                 && error.contains("other")
         );
-    }
-
-    #[test]
-    fn a_claude_transcript_is_found_by_its_conversation_id() {
-        let home = tempfile::tempdir().unwrap();
-        let project = home.path().join("projects/-work-repo");
-        fs::create_dir_all(&project).unwrap();
-        fs::write(
-            project.join(format!("{ID}.jsonl")),
-            "{\"type\":\"summary\"}\n{\"type\":\"user\",\"cwd\":\"/work/repo\"}\n",
-        )
-        .unwrap();
-
-        let found = transcript(Provider::Claude, home.path(), ID).unwrap();
-        assert_eq!(recorded_cwd(&found), Some(PathBuf::from("/work/repo")));
     }
 }

@@ -1,0 +1,1577 @@
+//! Claude Code stream-json, decoded once per line. Loopflow's own input
+//! carries a UUID that Claude echoes, which correlates each native result with
+//! the request it answers.
+use std::collections::{HashMap, HashSet, VecDeque};
+
+use anyhow::Result;
+use serde_json::{json, Value};
+
+use super::fact::{self, Decoded, ProviderFact, ProviderTurn, Signal};
+use crate::chat::types::{ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage};
+use crate::harness::lf_tag::LfTagParser;
+use crate::provider_account::RateLimitSignal;
+
+/// One persistent Claude process's stream.
+#[derive(Debug, Default)]
+pub(super) struct ClaudeDecoder {
+    /// Request UUIDs Loopflow wrote that Claude has not yet echoed.
+    outbound: HashSet<String>,
+    /// Echoed requests whose results are still owed, oldest first.
+    pending: VecDeque<ProviderTurn>,
+    /// Backgrounded tasks are still running.
+    background: bool,
+    state: ReaderState,
+}
+
+impl ClaudeDecoder {
+    /// Loopflow wrote a user message carrying `request` as its UUID.
+    pub(super) fn outbound(&mut self, request: &str) {
+        self.outbound.insert(request.to_owned());
+    }
+
+    /// Forget display state for a turn that ended outside the stream.
+    pub(super) fn reset_turn(&mut self) {
+        self.state = ReaderState::default();
+    }
+
+    /// Tools still in flight when the stream ended without a result.
+    pub(super) fn drain_open_items(&mut self, status: Lifecycle) -> Vec<ConversationItem> {
+        self.state.drain_open_items(status)
+    }
+
+    /// Decode one line; display events report under the runner's `turn_id`.
+    pub(super) fn decode(&mut self, line: &str, turn_id: &str) -> Result<Vec<Decoded>> {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            return Ok(Vec::new());
+        };
+        if let Some(signal) = rate_limit_signal(&value) {
+            return Ok(vec![ProviderFact::RateLimit(signal).into()]);
+        }
+        let signals = signals(&value);
+        if let Some(tasks) = signals.iter().find_map(|signal| match signal {
+            Signal::Background(tasks) => Some(tasks),
+            _ => None,
+        }) {
+            self.background = !tasks.is_empty();
+        }
+        let mut out = fact::activity(signals);
+        if value["type"] == "user" {
+            if let (Some(thread), Some(request)) =
+                (value["session_id"].as_str(), value["uuid"].as_str())
+            {
+                if self.outbound.remove(request) {
+                    let turn = ProviderTurn {
+                        thread: thread.into(),
+                        turn: request.to_owned(),
+                    };
+                    out.push(
+                        ProviderFact::TurnAnswered {
+                            turn: turn.clone(),
+                            request: request.to_owned(),
+                        }
+                        .into(),
+                    );
+                    self.pending.push_back(turn);
+                }
+            }
+        }
+        let start = out.len();
+        let ended = process_line(&value, turn_id, &mut out, &mut self.state);
+        // Backgrounded tasks still running: Claude starts its own turn when
+        // they finish, and that turn's result answers the last request.
+        let deferred = value["type"] == "result" && self.background && self.pending.len() == 1;
+        let result = value["type"] == "result" && !deferred;
+        let turn = result.then(|| self.pending.pop_front()).flatten();
+        if let Some(turn) = &turn {
+            anyhow::ensure!(
+                value["session_id"] == turn.thread.as_str(),
+                "Claude result changed conversation"
+            );
+            if let Some(output) = value.get("structured_output").filter(|v| !v.is_null()) {
+                out.push(output_fact(turn, json!({"value": output})));
+            } else if let Some(text) = value["result"].as_str() {
+                out.push(output_fact(turn, json!({"text": text})));
+            }
+        }
+        // The turn's one usage row carries the numbers the live view showed:
+        // each assistant response updates it, and the result makes it final.
+        let usage = out[start..].iter().find_map(|decoded| match decoded {
+            Decoded::Display(ConversationEvent::UsageCheckpoint {
+                usage,
+                final_receipt,
+                ..
+            }) => Some((usage.clone(), *final_receipt)),
+            _ => None,
+        });
+        if let (Some((usage, final_receipt)), Some(owner)) =
+            (usage, turn.as_ref().or(self.pending.front()))
+        {
+            out.push(
+                ProviderFact::Usage {
+                    turn: owner.clone(),
+                    receipt: json!({"provider":"claude","usage":usage,"final":final_receipt}),
+                }
+                .into(),
+            );
+        }
+        if deferred {
+            self.state = ReaderState::default();
+        } else if result || ended.is_some() {
+            let succeeded = value["subtype"] == "success" && value["is_error"] != true;
+            out.push(
+                ProviderFact::TurnCompleted {
+                    turn,
+                    status: ended.unwrap_or(Lifecycle::Failed),
+                    detail: json!({
+                        "status": if succeeded { "completed" } else { "failed" },
+                        "result_id": value["uuid"],
+                        "errors": value["errors"],
+                        "subtype": value["subtype"],
+                    }),
+                }
+                .into(),
+            );
+            self.state = ReaderState::default();
+        }
+        Ok(out)
+    }
+}
+
+/// What one line says about availability. Partial messages arrive wrapped as
+/// `{"type":"stream_event","event":…}`.
+fn signals(line: &Value) -> Vec<Signal> {
+    let event = if line["type"] == "stream_event" {
+        &line["event"]
+    } else {
+        line
+    };
+    let blocks = |kind: &str, id: &str| -> Vec<String> {
+        event["message"]["content"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|block| block["type"] == kind)
+            .filter_map(|block| block[id].as_str().map(str::to_owned))
+            .collect()
+    };
+    match event["type"].as_str() {
+        Some("result") => vec![Signal::Yielded(
+            event["is_error"] != true
+                && (event["subtype"].is_null() || event["subtype"] == "success"),
+        )],
+        Some("content_block_start") if event["content_block"]["type"] == "tool_use" => event
+            ["content_block"]["id"]
+            .as_str()
+            .map(|id| Signal::ToolStarted(id.to_owned()))
+            .into_iter()
+            .collect(),
+        Some("assistant") => {
+            let tools = blocks("tool_use", "id");
+            if tools.is_empty() {
+                vec![Signal::Working]
+            } else {
+                tools.into_iter().map(Signal::ToolStarted).collect()
+            }
+        }
+        Some("user") => {
+            let results = blocks("tool_result", "tool_use_id");
+            if results.is_empty() {
+                vec![Signal::Working]
+            } else {
+                results.into_iter().map(Signal::ToolResolved).collect()
+            }
+        }
+        Some("system") if event["subtype"] == "background_tasks_changed" => {
+            vec![Signal::Background(
+                event["tasks"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|task| task["task_id"].as_str().map(str::to_owned))
+                    .collect(),
+            )]
+        }
+        Some("message_start" | "content_block_start" | "content_block_delta") => {
+            vec![Signal::Working]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn output_fact(turn: &ProviderTurn, answer: Value) -> Decoded {
+    ProviderFact::Output {
+        turn: turn.clone(),
+        answer,
+    }
+    .into()
+}
+
+/// Reader-local state for tracking in-flight content blocks.
+#[derive(Debug, Default)]
+struct ReaderState {
+    /// Map block index -> tool use state for streaming deltas.
+    tool_blocks: HashMap<usize, ToolUseState>,
+    /// Map tool_use_id -> block index for direct completion lookup.
+    tool_indexes: HashMap<String, usize>,
+    /// Streaming parser for `<lf:...>` tagged payloads.
+    tag_parser: LfTagParser,
+    /// Largest effective input observed for each model in this turn. Assistant
+    /// events repeat usage snapshots, so retaining maxima also deduplicates them.
+    peak_input_by_model: HashMap<String, u64>,
+    /// Per-response receipts keyed by Claude message id. Repeated assistant
+    /// snapshots replace one entry; distinct tool-loop responses accumulate.
+    assistant_usage: HashMap<String, TurnUsage>,
+}
+
+#[derive(Debug, Default)]
+struct ToolUseState {
+    id: String,
+    name: String,
+    input_json: String,
+    input: Option<Value>,
+}
+
+impl ToolUseState {
+    fn parsed_input(&self) -> Option<Value> {
+        if self.input_json.is_empty() {
+            return self.input.clone();
+        }
+
+        serde_json::from_str(&self.input_json)
+            .ok()
+            .or_else(|| self.input.clone())
+    }
+}
+
+impl ReaderState {
+    fn track_tool(
+        &mut self,
+        index: usize,
+        tool_id: &str,
+        tool_name: &str,
+        input: Option<Value>,
+    ) -> bool {
+        if let Some(existing_index) = self.tool_indexes.get(tool_id).copied() {
+            if let Some(existing) = self.tool_blocks.get_mut(&existing_index) {
+                if existing.input.is_none() {
+                    existing.input = input;
+                }
+            }
+            return false;
+        }
+
+        self.tool_indexes.insert(tool_id.to_string(), index);
+        self.tool_blocks.insert(
+            index,
+            ToolUseState {
+                id: tool_id.to_string(),
+                name: tool_name.to_string(),
+                input_json: String::new(),
+                input,
+            },
+        );
+        true
+    }
+
+    fn append_input_json(&mut self, index: usize, partial_json: &str) {
+        if let Some(tool) = self.tool_blocks.get_mut(&index) {
+            tool.input_json.push_str(partial_json);
+        }
+    }
+
+    fn tool_by_id(&self, tool_use_id: &str) -> Option<&ToolUseState> {
+        let index = self.tool_indexes.get(tool_use_id)?;
+        self.tool_blocks.get(index)
+    }
+
+    /// Drain tools still in flight when the turn ended without a result,
+    /// stamped with the turn's terminal status (Failed for a crash,
+    /// Interrupted for a kill we asked for).
+    fn drain_open_items(&mut self, status: Lifecycle) -> Vec<ConversationItem> {
+        let mut tools: Vec<_> = self.tool_blocks.drain().map(|(_, tool)| tool).collect();
+        self.tool_indexes.clear();
+        tools.sort_by(|left, right| left.id.cmp(&right.id));
+        tools
+            .into_iter()
+            .map(|tool| build_item(&tool.name, &tool.id, tool.parsed_input(), status, None))
+            .collect()
+    }
+
+    fn observe_assistant_pressure(&mut self, value: &Value) {
+        let Some(message) = value.get("message") else {
+            return;
+        };
+        let Some(model) = message.get("model").and_then(Value::as_str) else {
+            return;
+        };
+        let Some(usage) = message.get("usage") else {
+            return;
+        };
+        let input = [
+            "input_tokens",
+            "cache_read_input_tokens",
+            "cache_creation_input_tokens",
+        ]
+        .into_iter()
+        .filter_map(|key| usage.get(key).and_then(Value::as_u64))
+        .sum();
+        self.peak_input_by_model
+            .entry(model.to_string())
+            .and_modify(|peak| *peak = (*peak).max(input))
+            .or_insert(input);
+    }
+
+    /// A request's input the first time its message id appears: one request
+    /// streams several lines repeating the same usage. Call before
+    /// `observe_assistant_usage` records the id.
+    fn observe_request(&self, value: &Value) -> Option<u64> {
+        let message = value.get("message")?;
+        let id = message.get("id").and_then(Value::as_str)?;
+        if self.assistant_usage.contains_key(id) {
+            return None;
+        }
+        total_input(message.get("usage")?)
+    }
+
+    fn observe_assistant_usage(&mut self, value: &Value) -> Option<TurnUsage> {
+        let message = value.get("message")?;
+        let message_id = message.get("id").and_then(Value::as_str)?;
+        let usage = message.get("usage")?;
+        let input_tokens = usage.get("input_tokens").and_then(Value::as_u64);
+        let cache_read_tokens = usage.get("cache_read_input_tokens").and_then(Value::as_u64);
+        let cache_write_tokens = usage
+            .get("cache_creation_input_tokens")
+            .and_then(Value::as_u64);
+        let receipt = TurnUsage {
+            input_tokens,
+            total_input_tokens: total_input(usage),
+            output_tokens: usage.get("output_tokens").and_then(Value::as_u64),
+            reasoning_tokens: usage.get("reasoning_tokens").and_then(Value::as_u64),
+            cache_read_tokens,
+            cache_write_tokens,
+            model: message
+                .get("model")
+                .and_then(Value::as_str)
+                .map(ToString::to_string),
+            ..TurnUsage::default()
+        };
+        if !receipt.is_reported() {
+            return None;
+        }
+        self.assistant_usage.insert(message_id.to_string(), receipt);
+
+        let mut cumulative = TurnUsage::default();
+        for usage in self.assistant_usage.values() {
+            add_optional(&mut cumulative.input_tokens, usage.input_tokens);
+            add_optional(&mut cumulative.total_input_tokens, usage.total_input_tokens);
+            add_optional(&mut cumulative.output_tokens, usage.output_tokens);
+            add_optional(&mut cumulative.reasoning_tokens, usage.reasoning_tokens);
+            add_optional(&mut cumulative.cache_read_tokens, usage.cache_read_tokens);
+            add_optional(&mut cumulative.cache_write_tokens, usage.cache_write_tokens);
+            cumulative.model = usage.model.clone().or(cumulative.model);
+        }
+        Some(cumulative)
+    }
+
+    fn take_peak_pressure(&mut self, event: &Value) -> Option<(u64, u64)> {
+        let peaks = std::mem::take(&mut self.peak_input_by_model);
+        let model_usage = event.get("modelUsage")?.as_object()?;
+        let mut peak: Option<(u64, u64)> = None;
+        for (model, input) in peaks {
+            let Some(window) = model_usage
+                .get(&model)
+                .and_then(|usage| usage.get("contextWindow"))
+                .and_then(Value::as_u64)
+                .filter(|window| *window > 0)
+            else {
+                continue;
+            };
+            let is_higher = peak.is_none_or(|(current_input, current_window)| {
+                u128::from(input) * u128::from(current_window)
+                    > u128::from(current_input) * u128::from(window)
+            });
+            if is_higher {
+                peak = Some((input, window));
+            }
+        }
+        peak
+    }
+}
+
+fn rate_limit_signal(value: &Value) -> Option<RateLimitSignal> {
+    let event = value
+        .get("stream_event")
+        .and_then(|stream| stream.get("event"))
+        .unwrap_or(value);
+    if event.get("type").and_then(Value::as_str)? != "rate_limit_event" {
+        return None;
+    }
+    let info = event
+        .get("rate_limit_info")
+        .or_else(|| event.get("rateLimitInfo"))
+        .or_else(|| event.get("rate_limit"))
+        .unwrap_or(event);
+    let status = info
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("rate_limit_event");
+    let limited = matches!(
+        status.to_ascii_lowercase().as_str(),
+        "rejected" | "blocked" | "limited" | "rate_limit_reached"
+    );
+    let utilization_percent = info
+        .get("utilization")
+        .or_else(|| info.get("used_percent"))
+        .or_else(|| info.get("usedPercent"))
+        .and_then(Value::as_f64)
+        .map(|value| {
+            let percent = if value <= 1.0 { value * 100.0 } else { value };
+            percent.round().clamp(0.0, 100.0) as u8
+        });
+    let resets_at = info
+        .get("resets_at")
+        .or_else(|| info.get("resetsAt"))
+        .or_else(|| info.get("reset_at"))
+        .or_else(|| info.get("reset_timestamp"))
+        .and_then(parse_reset_timestamp);
+    let rate_type = info
+        .get("rate_limit_type")
+        .or_else(|| info.get("rateLimitType"))
+        .and_then(Value::as_str);
+    let reason = rate_type
+        .map(|rate_type| format!("{status}: {rate_type}"))
+        .unwrap_or_else(|| status.to_string());
+    // The stream event carries one window at a time; name it so the stored
+    // observation lands on the same key an on-demand poll would update.
+    let windows = utilization_percent
+        .map(|used_percent| {
+            vec![crate::store::AccountLimitWindow {
+                window: claude_window_name(rate_type).to_string(),
+                used_percent,
+                resets_at,
+                plan: None,
+            }]
+        })
+        .unwrap_or_default();
+    Some(RateLimitSignal {
+        utilization_percent,
+        resets_at,
+        limited,
+        reason,
+        windows,
+    })
+}
+
+fn claude_window_name(rate_type: Option<&str>) -> &'static str {
+    match rate_type {
+        Some(kind) if kind.contains("seven") || kind.contains("week") => "weekly",
+        _ => "session",
+    }
+}
+
+fn parse_reset_timestamp(value: &Value) -> Option<i64> {
+    if let Some(value) = value.as_i64() {
+        return Some(if value > 100_000_000_000 {
+            value / 1000
+        } else {
+            value
+        });
+    }
+    let value = value.as_str()?;
+    if let Ok(timestamp) = value.parse::<i64>() {
+        return Some(if timestamp > 100_000_000_000 {
+            timestamp / 1000
+        } else {
+            timestamp
+        });
+    }
+    time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
+        .ok()
+        .map(|timestamp| timestamp.unix_timestamp())
+}
+
+/// A request's whole input: fresh tokens plus cache reads and writes.
+fn total_input(usage: &Value) -> Option<u64> {
+    let tokens = |key: &str| usage.get(key).and_then(Value::as_u64);
+    Some(
+        tokens("input_tokens")?
+            + tokens("cache_read_input_tokens").unwrap_or(0)
+            + tokens("cache_creation_input_tokens").unwrap_or(0),
+    )
+}
+
+/// Map one NDJSON line to display events. Returns `Some(status)` when the
+/// line is a turn `result`; the driver owns the terminal `TurnCompleted`, so a
+/// persistent reader can coalesce a seed turn and its queued steer turns into a
+/// single boundary.
+fn process_line(
+    value: &Value,
+    turn_id: &str,
+    out: &mut Vec<Decoded>,
+    state: &mut ReaderState,
+) -> Option<Lifecycle> {
+    let event = value
+        .get("stream_event")
+        .and_then(|stream| stream.get("event"))
+        .unwrap_or(value);
+
+    let event_type = event.get("type").and_then(Value::as_str)?;
+    // Subagent traffic has its own context window and conversation; only lines
+    // without a parent tool use belong to this one.
+    let main = value["parent_tool_use_id"].is_null();
+
+    match event_type {
+        "system" => {
+            if event["subtype"] == "compact_boundary" && main {
+                out.push(
+                    ProviderFact::Compacted {
+                        pre_tokens: event["compact_metadata"]["pre_tokens"].as_u64(),
+                    }
+                    .into(),
+                );
+            }
+            if let Some(session_id) = event
+                .get("session_id")
+                .or_else(|| value.get("session_id"))
+                .and_then(Value::as_str)
+            {
+                out.push(ProviderFact::SessionObserved(session_id.into()).into());
+            }
+        }
+
+        "content_block_start" => {
+            let index = event.get("index").and_then(Value::as_u64)?;
+            let block = event.get("content_block")?;
+            let block_type = block.get("type").and_then(Value::as_str)?;
+            let index = index as usize;
+
+            if block_type == "tool_use" {
+                let tool_id = block.get("id").and_then(Value::as_str)?;
+                let tool_name = block.get("name").and_then(Value::as_str)?;
+                if state.track_tool(index, tool_id, tool_name, None) {
+                    let item = infer_item(tool_name, tool_id, None);
+                    out.push(Decoded::from(ConversationEvent::ItemStarted {
+                        turn_id: turn_id.to_string(),
+                        item,
+                    }));
+                }
+            }
+        }
+
+        "content_block_delta" => {
+            let index = event
+                .get("index")
+                .and_then(Value::as_u64)
+                .map(|v| v as usize);
+            let delta = event.get("delta")?;
+            let delta_type = delta.get("type").and_then(Value::as_str)?;
+
+            match delta_type {
+                "text_delta" => {
+                    if let Some(text) = delta.get("text").and_then(Value::as_str) {
+                        emit_text_delta(out, state, turn_id, text);
+                    }
+                }
+                "thinking_delta" | "summary_delta" => {
+                    if let Some(text) = delta
+                        .get("thinking")
+                        .or_else(|| delta.get("summary"))
+                        .and_then(Value::as_str)
+                    {
+                        out.push(Decoded::from(ConversationEvent::ReasoningDelta {
+                            turn_id: turn_id.to_string(),
+                            content: text.to_string(),
+                        }));
+                    }
+                }
+                "input_json_delta" => {
+                    if let (Some(idx), Some(json_chunk)) =
+                        (index, delta.get("partial_json").and_then(Value::as_str))
+                    {
+                        state.append_input_json(idx, json_chunk);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        "content_block_stop" => {
+            // Tool blocks will get completed when we see the tool result.
+            // Text blocks don't need explicit completion.
+        }
+
+        "result" => {
+            flush_text_delta_parser(out, state, turn_id);
+            let usage = map_turn_usage(event, state);
+            let status = if event
+                .get("is_error")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                Lifecycle::Failed
+            } else {
+                Lifecycle::Completed
+            };
+            if status == Lifecycle::Failed {
+                let message = event["result"]
+                    .as_str()
+                    .filter(|message| !message.is_empty())
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        event["errors"].as_array().map(|errors| {
+                            errors
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        })
+                    })
+                    .filter(|message| !message.is_empty())
+                    .unwrap_or_else(|| "Claude turn failed".to_string());
+                out.push(Decoded::from(ConversationEvent::Error {
+                    code: "claude_result".to_string(),
+                    message,
+                    evidence: None,
+                }));
+            }
+            if let Some(usage) = usage {
+                out.push(Decoded::from(ConversationEvent::UsageCheckpoint {
+                    turn_id: turn_id.to_string(),
+                    usage,
+                    final_receipt: true,
+                }));
+            }
+            // The reader owns TurnCompleted so it can coalesce queued steer
+            // turns into one boundary.
+            return Some(status);
+        }
+
+        // Claude emits "assistant" events with full message content.
+        // These contain tool_use blocks and text blocks.
+        "assistant" => {
+            state.observe_assistant_pressure(event);
+            let request = state.observe_request(event).filter(|_| main);
+            if let Some(usage) = state.observe_assistant_usage(event) {
+                out.push(Decoded::from(ConversationEvent::UsageCheckpoint {
+                    turn_id: turn_id.to_string(),
+                    usage,
+                    final_receipt: false,
+                }));
+            }
+            if let Some(input_tokens) = request {
+                out.push(ProviderFact::Request { input_tokens }.into());
+            }
+            if main {
+                process_assistant_message(event, turn_id, out, state);
+            }
+        }
+
+        // Tool result events: type "user" with tool_result content.
+        "user" if main => {
+            process_user_message(event, turn_id, out, state);
+        }
+
+        _ => {}
+    }
+
+    None
+}
+
+fn add_optional(total: &mut Option<u64>, value: Option<u64>) {
+    if let Some(value) = value {
+        *total = Some(total.unwrap_or(0).saturating_add(value));
+    }
+}
+
+fn map_turn_usage(event: &Value, state: &mut ReaderState) -> Option<TurnUsage> {
+    let input_tokens = event.pointer("/usage/input_tokens").and_then(Value::as_u64);
+    let cache_read_tokens = event
+        .pointer("/usage/cache_read_input_tokens")
+        .and_then(Value::as_u64);
+    let cache_write_tokens = event
+        .pointer("/usage/cache_creation_input_tokens")
+        .and_then(Value::as_u64);
+    let (peak_input_tokens, context_window_tokens) = state
+        .take_peak_pressure(event)
+        .map_or((None, None), |(input, window)| (Some(input), Some(window)));
+    let receipt = TurnUsage {
+        input_tokens,
+        output_tokens: event
+            .pointer("/usage/output_tokens")
+            .and_then(Value::as_u64),
+        total_input_tokens: input_tokens
+            .map(|input| input + cache_read_tokens.unwrap_or(0) + cache_write_tokens.unwrap_or(0)),
+        peak_input_tokens,
+        context_window_tokens,
+        reasoning_tokens: event
+            .pointer("/usage/reasoning_tokens")
+            .and_then(Value::as_u64),
+        cache_read_tokens,
+        cache_write_tokens,
+        model: event
+            .get("model")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        cost_usd: event
+            .get("cost_usd")
+            .or_else(|| event.get("total_cost_usd"))
+            .and_then(Value::as_f64),
+    };
+    receipt.is_reported().then_some(receipt)
+}
+
+/// Map Claude tool name to a ConversationItem category.
+fn infer_item(tool_name: &str, tool_use_id: &str, input: Option<Value>) -> ConversationItem {
+    build_item(tool_name, tool_use_id, input, Lifecycle::Running, None)
+}
+
+fn build_item(
+    tool_name: &str,
+    tool_use_id: &str,
+    input: Option<Value>,
+    status: Lifecycle,
+    output: Option<String>,
+) -> ConversationItem {
+    match tool_name {
+        "Bash" => ConversationItem::Command {
+            id: tool_use_id.to_string(),
+            command: command_from_input(input.as_ref()),
+            cwd: String::new(),
+            status,
+            output,
+            exit_code: None,
+            duration_ms: None,
+        },
+        "Edit" | "Write" | "NotebookEdit" => ConversationItem::File {
+            id: tool_use_id.to_string(),
+            changes: file_changes_from_input(tool_name, input.as_ref()),
+            status,
+        },
+        _ => ConversationItem::Tool {
+            id: tool_use_id.to_string(),
+            name: tool_name.to_string(),
+            status,
+            input,
+            output,
+        },
+    }
+}
+
+fn command_from_input(input: Option<&Value>) -> Vec<String> {
+    let command = input
+        .and_then(|value| value.get("command"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if command.is_empty() {
+        Vec::new()
+    } else {
+        vec![command.to_string()]
+    }
+}
+
+fn file_changes_from_input(tool_name: &str, input: Option<&Value>) -> Vec<FileEdit> {
+    let Some(input) = input else {
+        return Vec::new();
+    };
+    let path = input
+        .get("file_path")
+        .or_else(|| input.get("notebook_path"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if path.is_empty() {
+        return Vec::new();
+    }
+
+    let diff = if tool_name == "Edit" {
+        synthesize_edit_diff(path, input)
+    } else {
+        None
+    };
+
+    vec![FileEdit {
+        path: path.to_string(),
+        kind: Some(tool_name.to_lowercase()),
+        diff,
+    }]
+}
+
+fn synthesize_edit_diff(path: &str, input: &Value) -> Option<String> {
+    let old = input.get("old_string").and_then(Value::as_str)?;
+    let new = input.get("new_string").and_then(Value::as_str)?;
+    if old == new {
+        return None;
+    }
+
+    let mut lines = Vec::new();
+    lines.push(format!("--- a/{path}"));
+    lines.push(format!("+++ b/{path}"));
+    for line in old.lines() {
+        lines.push(format!("-{line}"));
+    }
+    for line in new.lines() {
+        lines.push(format!("+{line}"));
+    }
+    Some(lines.join("\n"))
+}
+
+fn process_assistant_message(
+    value: &Value,
+    turn_id: &str,
+    out: &mut Vec<Decoded>,
+    state: &mut ReaderState,
+) {
+    let Some(blocks) = message_content(value) else {
+        return;
+    };
+
+    for (idx, block) in blocks.iter().enumerate() {
+        let Some(block_type) = block.get("type").and_then(Value::as_str) else {
+            continue;
+        };
+        match block_type {
+            "tool_use" => {
+                let tool_id = block
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let tool_name = block
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let input = block.get("input").cloned();
+
+                // If we haven't already emitted ItemStarted via streaming,
+                // emit both started and track it.
+                if state.track_tool(idx, &tool_id, &tool_name, input.clone()) {
+                    let item = infer_item(&tool_name, &tool_id, input);
+                    out.push(Decoded::from(ConversationEvent::ItemStarted {
+                        turn_id: turn_id.to_string(),
+                        item,
+                    }));
+                }
+            }
+            "text" => {
+                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                    if !text.is_empty() {
+                        emit_text_delta(out, state, turn_id, text);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn process_user_message(
+    value: &Value,
+    turn_id: &str,
+    out: &mut Vec<Decoded>,
+    state: &mut ReaderState,
+) {
+    let Some(blocks) = message_content(value) else {
+        return;
+    };
+
+    for block in blocks {
+        let Some(block_type) = block.get("type").and_then(Value::as_str) else {
+            continue;
+        };
+        match block_type {
+            "tool_result" => {
+                let tool_use_id = block
+                    .get("tool_use_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+
+                let Some(tool) = state.tool_by_id(tool_use_id) else {
+                    continue;
+                };
+
+                // Extract output from content array or text.
+                let output = extract_tool_result_text(block);
+                let input = tool.parsed_input();
+                let completed_item =
+                    build_item(&tool.name, &tool.id, input, Lifecycle::Completed, output);
+                out.push(Decoded::from(ConversationEvent::ItemCompleted {
+                    turn_id: turn_id.to_string(),
+                    item: completed_item,
+                }));
+            }
+            // Text blocks in user messages are Claude echoing back input the
+            // client already displayed. Emitting them would duplicate messages.
+            "text" => {}
+            _ => {}
+        }
+    }
+}
+
+fn message_content(value: &Value) -> Option<&[Value]> {
+    value
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+}
+
+fn extract_tool_result_text(block: &Value) -> Option<String> {
+    // Try nested content array first.
+    if let Some(content) = block.get("content").and_then(Value::as_array) {
+        let texts: Vec<&str> = content
+            .iter()
+            .filter_map(|c| {
+                if c.get("type").and_then(Value::as_str) == Some("text") {
+                    c.get("text").and_then(Value::as_str)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if !texts.is_empty() {
+            return Some(texts.join("\n"));
+        }
+    }
+    // Try direct text field.
+    block
+        .get("content")
+        .and_then(Value::as_str)
+        .map(String::from)
+}
+
+fn emit_text_delta(out: &mut Vec<Decoded>, state: &mut ReaderState, turn_id: &str, content: &str) {
+    for event in state.tag_parser.consume_text(turn_id, content) {
+        out.push(Decoded::from(event));
+    }
+}
+
+fn flush_text_delta_parser(out: &mut Vec<Decoded>, state: &mut ReaderState, turn_id: &str) {
+    for event in state.tag_parser.finish_turn(turn_id) {
+        out.push(Decoded::from(event));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A recorded trace decoded alone, without a store, as its fact sequence.
+    /// Loopflow wrote `request`, which Claude echoed in `session` before the
+    /// trace begins; a result the trace left unattributed belongs to it.
+    fn replay(file: &str, session: &str) -> Vec<String> {
+        let mut decoder = ClaudeDecoder::default();
+        decoder.outbound("request");
+        let echo =
+            json!({"type":"user","session_id":session,"uuid":"request","message":{"content":"go"}});
+        let mut decoded = decoder.decode(&echo.to_string(), "turn").unwrap();
+        for mut line in fact::trace(file) {
+            if line["type"] == "result" && line["session_id"].is_null() {
+                line["session_id"] = json!(session);
+            }
+            decoded.extend(decoder.decode(&line.to_string(), "turn").unwrap());
+        }
+        fact::fact_lines(&decoded)
+    }
+
+    #[test]
+    fn trace_claude_normal_turn() {
+        assert_eq!(
+            replay("claude_normal_turn.ndjson", "sess_claude_normal"),
+            [
+                "Activity Working",
+                "TurnAnswered sess_claude_normal/request request=request",
+                "SessionObserved sess_claude_normal",
+                "Activity Working",
+                "Activity Yielded(true)",
+                r#"Output sess_claude_normal/request {"text":"done"}"#,
+                "Usage sess_claude_normal/request",
+                "TurnCompleted sess_claude_normal/request Completed",
+            ]
+        );
+    }
+
+    #[test]
+    fn each_turn_usage_fact_matches_the_live_receipt() {
+        let mut decoder = ClaudeDecoder::default();
+        decoder.outbound("request");
+        let lines = [
+            json!({"type":"user","uuid":"request","session_id":"thread"}),
+            json!({"type":"assistant","session_id":"thread","message":{"id":"msg_1","model":"claude-sonnet-4","content":[],
+                "usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":20}}}),
+            json!({"type":"assistant","session_id":"thread","message":{"id":"msg_2","model":"claude-sonnet-4","content":[],
+                "usage":{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":5}}}),
+            json!({"type":"result","uuid":"result","session_id":"thread","subtype":"success","result":"done",
+                "model":"claude-sonnet-4","total_cost_usd":0.25,
+                "usage":{"input_tokens":13,"output_tokens":6,"cache_read_input_tokens":20,"cache_creation_input_tokens":5},
+                "modelUsage":{"claude-sonnet-4":{"contextWindow":200000}}}),
+        ];
+        let decoded: Vec<_> = lines
+            .iter()
+            .flat_map(|line| decoder.decode(&line.to_string(), "turn").unwrap())
+            .collect();
+        let receipts: Vec<_> = decoded
+            .iter()
+            .filter_map(|decoded| match decoded.fact() {
+                Some(ProviderFact::Usage { turn, receipt }) => {
+                    assert_eq!(turn.turn, "request");
+                    Some(receipt.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        let live = decoded.iter().rev().find_map(|decoded| match decoded {
+            Decoded::Display(ConversationEvent::UsageCheckpoint {
+                usage,
+                final_receipt: true,
+                ..
+            }) => Some(usage.clone()),
+            _ => None,
+        });
+        assert_eq!(receipts.len(), 3);
+        assert_eq!(receipts[1]["final"], false);
+        assert_eq!(receipts[1]["usage"]["total_input_tokens"], 38);
+        assert_eq!(receipts[2]["final"], true);
+        let recorded: TurnUsage = serde_json::from_value(receipts[2]["usage"].clone()).unwrap();
+        assert_eq!(Some(&recorded), live.as_ref());
+        assert_eq!(recorded.cost_usd, Some(0.25));
+        assert_eq!(recorded.peak_input_tokens, Some(30));
+        assert_eq!(recorded.context_window_tokens, Some(200000));
+    }
+
+    #[test]
+    fn trace_claude_multi_tool() {
+        assert_eq!(
+            replay("claude_multi_tool.ndjson", "sess_trace"),
+            [
+                "Activity Working",
+                "TurnAnswered sess_trace/request request=request",
+                r#"Activity ToolStarted("tool_multi_1")"#,
+                r#"Activity ToolResolved("tool_multi_1")"#,
+                r#"Activity ToolStarted("tool_multi_2")"#,
+                r#"Activity ToolResolved("tool_multi_2")"#,
+                "Activity Yielded(true)",
+                r#"Output sess_trace/request {"text":"done"}"#,
+                "TurnCompleted sess_trace/request Completed",
+            ]
+        );
+    }
+
+    /// The stream ends mid-tool: no completion, so the tool stays open.
+    #[test]
+    fn trace_claude_crash_mid_tool() {
+        assert_eq!(
+            replay("claude_crash_mid_tool.ndjson", "sess_trace"),
+            [
+                "Activity Working",
+                "TurnAnswered sess_trace/request request=request",
+                r#"Activity ToolStarted("tool_crash_1")"#,
+                "Activity Working",
+            ]
+        );
+    }
+
+    #[test]
+    fn infer_item_bash_to_command() {
+        let item = infer_item("Bash", "tu_1", Some(json!({"command": "cargo test"})));
+        match item {
+            ConversationItem::Command { id, command, .. } => {
+                assert_eq!(id, "tu_1");
+                assert_eq!(command, vec!["cargo test"]);
+            }
+            other => panic!("expected Command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn infer_item_edit_to_file() {
+        let item = infer_item("Edit", "tu_2", Some(json!({"file_path": "src/main.rs"})));
+        match item {
+            ConversationItem::File { id, changes, .. } => {
+                assert_eq!(id, "tu_2");
+                assert_eq!(changes[0].path, "src/main.rs");
+                assert_eq!(changes[0].kind.as_deref(), Some("edit"));
+            }
+            other => panic!("expected File, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn infer_item_write_to_file() {
+        let item = infer_item("Write", "tu_3", Some(json!({"file_path": "new.txt"})));
+        match item {
+            ConversationItem::File { id, changes, .. } => {
+                assert_eq!(id, "tu_3");
+                assert_eq!(changes[0].path, "new.txt");
+                assert_eq!(changes[0].kind.as_deref(), Some("write"));
+            }
+            other => panic!("expected File, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn infer_item_notebook_edit_to_file() {
+        let item = infer_item(
+            "NotebookEdit",
+            "tu_4",
+            Some(json!({"notebook_path": "analysis.ipynb"})),
+        );
+        match item {
+            ConversationItem::File { id, changes, .. } => {
+                assert_eq!(id, "tu_4");
+                assert_eq!(changes[0].path, "analysis.ipynb");
+            }
+            other => panic!("expected File, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn infer_item_unknown_to_tool() {
+        let item = infer_item("WebSearch", "tu_5", Some(json!({"query": "rust async"})));
+        match item {
+            ConversationItem::Tool {
+                id, name, input, ..
+            } => {
+                assert_eq!(id, "tu_5");
+                assert_eq!(name, "WebSearch");
+                assert_eq!(input, Some(json!({"query": "rust async"})));
+            }
+            other => panic!("expected Tool, got {other:?}"),
+        }
+    }
+
+    /// Display events and facts for one line under runner turn `turn`.
+    fn decode(
+        decoder: &mut ClaudeDecoder,
+        line: &str,
+        turn: &str,
+    ) -> (Vec<ConversationEvent>, Vec<ProviderFact>) {
+        let mut display = Vec::new();
+        let mut facts = Vec::new();
+        for decoded in decoder.decode(line, turn).unwrap() {
+            match decoded {
+                Decoded::Display(event) => display.push(event),
+                Decoded::Fact(fact) => facts.push(fact),
+            }
+        }
+        (display, facts)
+    }
+
+    fn ended(facts: &[ProviderFact]) -> Option<Lifecycle> {
+        facts.iter().find_map(|fact| match fact {
+            ProviderFact::TurnCompleted { status, .. } => Some(*status),
+            _ => None,
+        })
+    }
+
+    fn rate_limit(line: &str) -> RateLimitSignal {
+        let (_, facts) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+        match facts.as_slice() {
+            [ProviderFact::RateLimit(signal)] => signal.clone(),
+            other => panic!("expected one rate limit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn system_event_observes_the_native_session() {
+        for line in [
+            r#"{"type":"system","session_id":"sess_abc123","tools":[]}"#,
+            r#"{"stream_event":{"event":{"type":"system","session_id":"sess_abc123"}}}"#,
+        ] {
+            let (display, facts) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+            assert!(display.is_empty(), "system event should not emit events");
+            assert_eq!(
+                facts,
+                vec![ProviderFact::SessionObserved("sess_abc123".into())]
+            );
+        }
+    }
+
+    #[test]
+    fn rejected_rate_limit_event_marks_a_hard_limit() {
+        let signal = rate_limit(
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"five_hour","utilization":1.0,"resets_at":1900000000}}"#,
+        );
+
+        assert!(signal.limited);
+        assert_eq!(signal.utilization_percent, Some(100));
+        assert_eq!(signal.resets_at, Some(1_900_000_000));
+        assert!(signal.reason.contains("five_hour"));
+    }
+
+    #[test]
+    fn rate_limit_warning_updates_utilization_without_limiting() {
+        let signal = rate_limit(
+            r#"{"stream_event":{"event":{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","utilization":0.72}}}}"#,
+        );
+
+        assert!(!signal.limited);
+        assert_eq!(signal.utilization_percent, Some(72));
+    }
+
+    #[test]
+    fn text_delta_displays_under_the_runner_turn() {
+        let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello world"}}"#;
+        let (display, facts) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+        assert!(matches!(
+            display.as_slice(),
+            [ConversationEvent::TextDelta { turn_id, content }]
+                if turn_id == "turn_1" && content == "Hello world"
+        ));
+        assert_eq!(facts, vec![ProviderFact::Activity(Signal::Working)]);
+    }
+
+    #[test]
+    fn text_delta_emits_suggested_actions_event() {
+        let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"<lf:suggest_actions>[{\"label\":\"Land PR\"}]</lf:suggest_actions>"}}"#;
+        let (display, _) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+        match &display[0] {
+            ConversationEvent::SuggestedActions { turn_id, actions } => {
+                assert_eq!(turn_id, "turn_1");
+                assert_eq!(actions.len(), 1);
+                assert_eq!(actions[0].label, "Land PR");
+            }
+            other => panic!("expected SuggestedActions, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn thinking_delta_displays_reasoning() {
+        let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think..."}}"#;
+        let (display, _) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+        assert!(matches!(
+            display.as_slice(),
+            [ConversationEvent::ReasoningDelta { turn_id, content }]
+                if turn_id == "turn_1" && content == "Let me think..."
+        ));
+    }
+
+    #[test]
+    fn result_ends_the_provider_turn_without_displaying_its_boundary() {
+        let line = r#"{"type":"result","duration_ms":1234,"cost_usd":0.01,"is_error":false,"result":"done","session_id":"sess_abc"}"#;
+        let (display, facts) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+        assert_eq!(ended(&facts), Some(Lifecycle::Completed));
+        match display.as_slice() {
+            [ConversationEvent::UsageCheckpoint { turn_id, usage, .. }] => {
+                assert_eq!(turn_id, "turn_1");
+                assert_eq!(usage.input_tokens, None);
+                assert_eq!(usage.output_tokens, None);
+                assert_eq!(usage.cost_usd, Some(0.01));
+            }
+            other => panic!("expected only usage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn result_error_marks_failed() {
+        for line in [
+            r#"{"type":"result","is_error":true,"result":"failed"}"#,
+            r#"{"type":"result","is_error":true,"result":"","errors":["failed"]}"#,
+        ] {
+            let (display, facts) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+            assert_eq!(ended(&facts), Some(Lifecycle::Failed));
+            assert!(
+                matches!(display.as_slice(), [ConversationEvent::Error { message, .. }] if message == "failed")
+            );
+        }
+    }
+
+    #[test]
+    fn result_extracts_turn_usage_tokens() {
+        let line = r#"{"type":"result","is_error":false,"model":"claude-sonnet-4","total_cost_usd":0.2,"usage":{"input_tokens":321,"output_tokens":123,"reasoning_tokens":9,"cache_read_input_tokens":11,"cache_creation_input_tokens":5}}"#;
+        let (display, facts) = decode(&mut ClaudeDecoder::default(), line, "turn_42");
+        assert_eq!(ended(&facts), Some(Lifecycle::Completed));
+        match display.as_slice() {
+            [ConversationEvent::UsageCheckpoint { turn_id, usage, .. }] => {
+                assert_eq!(turn_id, "turn_42");
+                assert_eq!(usage.input_tokens, Some(321));
+                assert_eq!(usage.total_input_tokens, Some(337));
+                assert_eq!(usage.output_tokens, Some(123));
+                assert_eq!(usage.reasoning_tokens, Some(9));
+                assert_eq!(usage.cache_read_tokens, Some(11));
+                assert_eq!(usage.cache_write_tokens, Some(5));
+                assert_eq!(usage.model.as_deref(), Some("claude-sonnet-4"));
+                assert_eq!(usage.cost_usd, Some(0.2));
+            }
+            other => panic!("expected only usage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn assistant_usage_is_live_and_deduplicated_by_message() {
+        let mut decoder = ClaudeDecoder::default();
+        let first = r#"{"type":"assistant","message":{"id":"msg_1","model":"claude-sonnet-4","content":[],"usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":20}}}"#;
+        let second = r#"{"type":"assistant","message":{"id":"msg_2","model":"claude-sonnet-4","content":[],"usage":{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":5}}}"#;
+
+        let mut checkpoints = Vec::new();
+        for line in [first, first, second] {
+            let (display, facts) = decode(&mut decoder, line, "turn_42");
+            assert_eq!(ended(&facts), None);
+            checkpoints.extend(display);
+        }
+        let [_, _, ConversationEvent::UsageCheckpoint {
+            usage,
+            final_receipt,
+            ..
+        }] = checkpoints.as_slice()
+        else {
+            panic!("expected three live usage checkpoints");
+        };
+        assert!(!final_receipt);
+        assert_eq!(usage.input_tokens, Some(13));
+        assert_eq!(usage.total_input_tokens, Some(38));
+        assert_eq!(usage.output_tokens, Some(6));
+        assert_eq!(usage.cache_read_tokens, Some(20));
+        assert_eq!(usage.cache_write_tokens, Some(5));
+    }
+
+    #[test]
+    fn result_pairs_peak_assistant_input_with_its_model_window() {
+        let mut decoder = ClaudeDecoder::default();
+        let assistant = r#"{"type":"assistant","message":{"model":"claude-sonnet-4","content":[],"usage":{"input_tokens":1,"cache_read_input_tokens":49,"cache_creation_input_tokens":0}}}"#;
+        let result = r#"{"type":"result","is_error":false,"usage":{"input_tokens":2,"output_tokens":3,"cache_read_input_tokens":98,"cache_creation_input_tokens":4},"modelUsage":{"claude-sonnet-4":{"contextWindow":200}}}"#;
+
+        decode(&mut decoder, assistant, "turn_42");
+        let (display, facts) = decode(&mut decoder, result, "turn_42");
+        assert_eq!(ended(&facts), Some(Lifecycle::Completed));
+        let [ConversationEvent::UsageCheckpoint { usage, .. }] = display.as_slice() else {
+            panic!("expected only usage, got {display:?}");
+        };
+        assert_eq!(usage.total_input_tokens, Some(104));
+        assert_eq!(usage.peak_input_tokens, Some(50));
+        assert_eq!(usage.context_window_tokens, Some(200));
+    }
+
+    #[test]
+    fn tool_use_start_displays_its_item_and_opens_a_tool() {
+        let mut decoder = ClaudeDecoder::default();
+        let line = r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_bash_1","name":"Bash"}}"#;
+        let (display, facts) = decode(&mut decoder, line, "turn_1");
+
+        assert_eq!(decoder.state.tool_indexes.get("tu_bash_1"), Some(&1));
+        assert_eq!(
+            facts,
+            vec![ProviderFact::Activity(Signal::ToolStarted(
+                "tu_bash_1".into()
+            ))]
+        );
+        match display.as_slice() {
+            [ConversationEvent::ItemStarted { turn_id, item }] => {
+                assert_eq!(turn_id, "turn_1");
+                assert!(matches!(item, ConversationItem::Command { .. }));
+            }
+            other => panic!("expected ItemStarted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn input_json_delta_accumulates() {
+        let mut decoder = ClaudeDecoder::default();
+        for line in [
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tu_1","name":"Bash"}}"#,
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"com"}}"#,
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"mand\":\"ls\"}"}}"#,
+        ] {
+            decode(&mut decoder, line, "turn_1");
+        }
+        assert_eq!(
+            decoder
+                .state
+                .tool_blocks
+                .get(&0)
+                .map(|tool| tool.input_json.as_str()),
+            Some("{\"command\":\"ls\"}")
+        );
+    }
+
+    #[test]
+    fn user_text_is_not_displayed() {
+        // Text blocks in user messages are Claude echoing back input the
+        // client already displayed — emitting them would duplicate messages.
+        let line = r#"{"type":"user","message":{"content":[{"type":"text","text":"Design the architecture before coding."}]}}"#;
+        let (display, _) = decode(&mut ClaudeDecoder::default(), line, "turn_1");
+        assert!(
+            display.is_empty(),
+            "user text blocks should not emit events"
+        );
+    }
+
+    #[test]
+    fn echoed_requests_correlate_results_without_borrowing_another_request() {
+        let mut decoder = ClaudeDecoder::default();
+        let turn = |id: &str| ProviderTurn {
+            thread: "thread".into(),
+            turn: id.into(),
+        };
+        // A user message Loopflow did not send (a tool result) starts nothing,
+        // and its result has no request to report under.
+        let (_, facts) = decode(
+            &mut decoder,
+            r#"{"type":"user","uuid":"old","session_id":"thread"}"#,
+            "runner",
+        );
+        assert_eq!(facts, vec![ProviderFact::Activity(Signal::Working)]);
+        let (_, facts) = decode(
+            &mut decoder,
+            r#"{"type":"result","uuid":"old-result","session_id":"thread","subtype":"success","result":"old"}"#,
+            "runner",
+        );
+        assert!(matches!(
+            facts.as_slice(),
+            [_, ProviderFact::TurnCompleted { turn: None, .. }]
+        ));
+
+        decoder.outbound("request");
+        let (_, facts) = decode(
+            &mut decoder,
+            r#"{"type":"user","uuid":"request","session_id":"thread"}"#,
+            "runner",
+        );
+        assert_eq!(
+            facts[1],
+            ProviderFact::TurnAnswered {
+                turn: turn("request"),
+                request: "request".into()
+            }
+        );
+        let value = json!({"decision":"advance","summary":"native proof"});
+        let (_, facts) = decode(
+            &mut decoder,
+            &json!({"type":"result","uuid":"result","session_id":"thread","subtype":"success","structured_output":value,"usage":{"input_tokens":1}}).to_string(),
+            "runner",
+        );
+        assert_eq!(
+            facts,
+            vec![
+                ProviderFact::Activity(Signal::Yielded(true)),
+                ProviderFact::Output {
+                    turn: turn("request"),
+                    answer: json!({"value": value})
+                },
+                ProviderFact::Usage {
+                    turn: turn("request"),
+                    receipt: json!({
+                        "provider":"claude",
+                        "usage":{"input_tokens":1,"total_input_tokens":1},
+                        "final":true
+                    })
+                },
+                ProviderFact::TurnCompleted {
+                    turn: Some(turn("request")),
+                    status: Lifecycle::Completed,
+                    detail: json!({"status":"completed","result_id":"result","errors":null,"subtype":"success"})
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn synthesize_edit_diff_formats_unified_lines() {
+        let input = json!({
+            "old_string": "fn old() {}",
+            "new_string": "fn new() {}"
+        });
+
+        let diff = synthesize_edit_diff("src/main.rs", &input).expect("expected diff");
+
+        assert_eq!(
+            diff,
+            "--- a/src/main.rs\n+++ b/src/main.rs\n-fn old() {}\n+fn new() {}"
+        );
+    }
+
+    #[test]
+    fn synthesize_edit_diff_returns_none_for_empty_or_equal_input() {
+        let equal_input = json!({
+            "old_string": "same",
+            "new_string": "same"
+        });
+        assert!(synthesize_edit_diff("src/main.rs", &equal_input).is_none());
+
+        let empty_input = json!({
+            "old_string": "",
+            "new_string": ""
+        });
+        assert!(synthesize_edit_diff("src/main.rs", &empty_input).is_none());
+    }
+
+    #[test]
+    fn edit_tool_synthesizes_diff() {
+        let item = infer_item(
+            "Edit",
+            "tu_10",
+            Some(json!({
+                "file_path": "src/main.rs",
+                "old_string": "fn old() {}",
+                "new_string": "fn new() {}"
+            })),
+        );
+        match item {
+            ConversationItem::File { changes, .. } => {
+                let diff = changes[0].diff.as_deref().unwrap();
+                assert!(diff.contains("--- a/src/main.rs"));
+                assert!(diff.contains("+++ b/src/main.rs"));
+                assert!(diff.contains("-fn old() {}"));
+                assert!(diff.contains("+fn new() {}"));
+            }
+            other => panic!("expected File, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn write_tool_no_diff() {
+        let item = infer_item(
+            "Write",
+            "tu_13",
+            Some(json!({
+                "file_path": "new.txt",
+                "content": "hello world"
+            })),
+        );
+        match item {
+            ConversationItem::File { changes, .. } => {
+                assert!(changes[0].diff.is_none());
+            }
+            other => panic!("expected File, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn synthesize_edit_diff_multiline() {
+        let input = json!({
+            "old_string": "fn old() {\n    println!(\"hi\");\n}",
+            "new_string": "fn new() {\n    println!(\"hello\");\n    println!(\"world\");\n}"
+        });
+
+        let diff = synthesize_edit_diff("src/lib.rs", &input).expect("expected diff");
+        let lines: Vec<&str> = diff.lines().collect();
+
+        assert_eq!(lines[0], "--- a/src/lib.rs");
+        assert_eq!(lines[1], "+++ b/src/lib.rs");
+        assert_eq!(lines[2], "-fn old() {");
+        assert_eq!(lines[3], "-    println!(\"hi\");");
+        assert_eq!(lines[4], "-}");
+        assert_eq!(lines[5], "+fn new() {");
+        assert_eq!(lines[6], "+    println!(\"hello\");");
+        assert_eq!(lines[7], "+    println!(\"world\");");
+        assert_eq!(lines[8], "+}");
+    }
+
+    #[test]
+    fn edit_without_old_string_no_diff() {
+        let item = infer_item(
+            "Edit",
+            "tu_14",
+            Some(json!({
+                "file_path": "src/main.rs",
+                "new_string": "fn new() {}"
+            })),
+        );
+        match item {
+            ConversationItem::File { changes, .. } => {
+                assert!(changes[0].diff.is_none());
+            }
+            other => panic!("expected File, got {other:?}"),
+        }
+    }
+}

@@ -44,7 +44,7 @@ struct WorkCLISubscriptionTests {
         let id = try #require(created["id"] as? String)
         try await eventually { model.task(id: id) != nil }
         // A Wave lists its unstarted Tasks so each can offer Start.
-        try await eventually { selectedPlanMembers(model).first { $0.work.id == id }?.states == [.backlog] }
+        try await eventually { selectedPlanMembers(model).first { $0.work.id == id }?.states == [.unstarted, .backlog] }
         _ = try await fixture.run(["-b", "task", "run", id])
         // Membership and checkout details arrive in separate observation frames.
         try await eventually {
@@ -72,7 +72,7 @@ struct WorkCLISubscriptionTests {
         let surfaceID = TerminalIdentity.session(session.id, machineId: machineID)
         let surface = registry.surfaces.view(for: surfaceID)
         #endif
-        workspace.multiplexer.show(.files(taskId: id))
+        workspace.multiplexer.showBrowser(.files)
         let files = workspace.files(issue: task.task.identifier, cwd: checkout.worktree, query: query)
         let draft = files.document("notes.txt")
         draft.editor.string = "unsaved Task draft"
@@ -211,10 +211,10 @@ struct WorkCLISubscriptionTests {
         }?.contents ?? []
     }
 
-    private func eventually(_ condition: @MainActor () -> Bool) async throws {
+    private func eventually(_ line: Int = #line, _ condition: @MainActor () -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(20)
         while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        try #require(condition(), "CLI mutation did not reach the open Work model")
+        try #require(condition(), "CLI mutation did not reach the open Work model (line \(line))")
     }
 }
 
@@ -234,11 +234,8 @@ private struct WorkCLIFixture: Sendable {
     func prepare() async throws {
         let graphs = repo.appendingPathComponent(".lf/graphs")
         try FileManager.default.createDirectory(at: graphs, withIntermediateDirectories: true)
-        try Data("- cmd: graph show proof\n".utf8).write(to: graphs.appendingPathComponent("proof.yaml"))
-        let workflows = repo.appendingPathComponent(".lf/workflows")
-        try FileManager.default.createDirectory(at: workflows, withIntermediateDirectories: true)
-        try Data("nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: proof}\n".utf8)
-            .write(to: workflows.appendingPathComponent("proof.yaml"))
+        try Data("- cmd: graph show proof\n- interactive: {name: demo, id: review}\n".utf8)
+            .write(to: graphs.appendingPathComponent("proof.yaml"))
         for args in [["init", "-b", "main"], ["config", "user.name", "Fixture Person"],
                      ["config", "user.email", "fixture@example.invalid"], ["add", "."], ["commit", "-m", "Fixture"]] {
             _ = try await run(args, executable: "/usr/bin/git")

@@ -68,10 +68,10 @@ struct WorkNavigationTests {
 
         model.select(.wave(id: wave))
         #expect(model.navigation.sidebarWaveID == wave)
-        #expect(model.sidebarTaskIDs == ["issue-now", "issue-review"])
+        #expect(model.sidebarTaskIDs == ["issue-now"])
         #expect(model.sidebarWaves.isEmpty)
         model.select(.task(id: "issue-review"))
-        #expect(model.sidebarTaskIDs == ["issue-now", "issue-review"])
+        #expect(model.sidebarTaskIDs == ["issue-now"])
         model.select(nil)
         #expect(model.selection == nil)
         #expect(model.sidebarTaskIDs == ["issue-now"])
@@ -110,6 +110,8 @@ struct WorkNavigationTests {
         for scope in ["repository", "wave-wave-1"] {
             _ = try crumbs.inspect().find(viewWithAccessibilityIdentifier: "work-jump-" + scope)
         }
+        // The jump bar is navigation; Auto-Ship lives in the Workflow bar below it.
+        #expect(throws: (any Error).self) { try crumbs.inspect().find(viewWithAccessibilityIdentifier: "task-ship") }
         #expect(throws: (any Error).self) { try crumbs.inspect().find(text: "This Mac") }
         #expect(throws: (any Error).self) { try crumbs.inspect().find(viewWithAccessibilityLabel: "Navigate Tasks, Waves and repositories") }
         #expect(model.jumpRows(.repository, filter: "").map(\.id) == [.wave("wave-1")])
@@ -123,17 +125,18 @@ struct WorkNavigationTests {
         #expect(model.navigation.palette == nil)
     }
 
-    @Test("The heading's started state is durable Task evidence, never Linear's planning state")
+    @Test("The heading reads the Task's lifecycle, never Linear's planning state")
     func headingAgreesWithWorkingTasks() throws {
-        let snapshot = try roadmap()
-        let review = try #require(snapshot.tasks.items.first { $0.id == "issue-review" })
-        #expect(review.task.state == "unstarted")
-        #expect(TaskHeading(task: review).state == "Started")
-        #expect(TaskHeading(task: try #require(snapshot.tasks.items.first { $0.id == "issue-now" })).state == "Unstarted")
+        let tasks = try roadmap().tasks.items
+        func state(_ id: String) throws -> String { TaskHeading(task: try #require(tasks.first { $0.id == id })).state }
+        #expect(tasks.first { $0.id == "issue-now" }?.task.state == "unstarted")
+        #expect(try state("issue-now") == "Shipping")
+        #expect(try state("issue-review") == "Unstarted")
+        #expect(try state("issue-later") == "Done")
     }
 
-    @Test("Working Tasks opens as a Dashboard; a sidebar Task then shows that Task, not a stale trail")
-    func workingTasksDashboardYieldsToSidebarTask() throws {
+    @Test("Working Tasks opens as a Dashboard; a sidebar Task keeps it in the trail, as its tile does")
+    func workingTasksDashboardKeepsSidebarTaskOnTheBoard() throws {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing must not execute") }, repoPath: "/src/loopflow")
         model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
@@ -150,10 +153,65 @@ struct WorkNavigationTests {
         #expect(model.breadcrumb == nil)
         #expect(model.workingTaskMembers.map(\.work.id) == ["issue-review", "issue-now"])
         model.select(.task(id: "issue-now"))
-        #expect(model.navigation.destination == .work(.task(id: "issue-now")))
+        #expect(model.navigation.destination == .entered(from: .workingTasks, work: .task(id: "issue-now")))
         #expect(model.breadcrumb?.task?.task.id == "issue-now")
         model.goBack()
         #expect(model.navigation.destination == .workingTasks)
+    }
+
+    @Test("A Dashboard scopes the sidebar to its visible Tasks in arrangement order; ⌘N, ⌃⇥ and rows keep the board")
+    func dashboardScopeListsMembersAndKeepsTheBoard() throws {
+        let model = try dashboardModel()
+        #expect(model.sidebarTaskIDs == ["issue-review", "issue-now"])
+        model.selectDashboard("review")
+        #expect(model.navigation.sidebarScope == .dashboard("review"))
+        #expect(model.sidebarTaskIDs == ["issue-now", "issue-later", "issue-review"])
+        #expect(model.sidebarWaves.map(\.wave.id) == ["wave-1"])
+        let board = WorkNavigation.Board.saved("review")
+        model.selectSidebarTask(slot: 1)
+        #expect(model.navigation.destination == .entered(from: board, work: .task(id: "issue-later")))
+        model.cycleSidebarTask(1)
+        #expect(model.navigation.destination == .entered(from: board, work: .task(id: "issue-review")))
+        model.cycleSidebarTask(1)
+        #expect(model.navigation.destination == .entered(from: board, work: .task(id: "issue-now")))
+        #expect(model.sidebarTaskIDs == ["issue-now", "issue-later", "issue-review"])
+        model.select(.task(id: "issue-available"))
+        #expect(model.navigation.destination == .work(.task(id: "issue-available")))
+        #expect(model.navigation.sidebarScope == .repository)
+        model.goBack()
+        #expect(model.navigation.destination == .entered(from: board, work: .task(id: "issue-now")))
+        model.select(nil)
+        #expect(model.navigation.sidebarScope == .repository)
+        #expect(model.sidebarTaskIDs == model.workingTaskIDs)
+        model.selectSidebarTask(slot: 0)
+        #expect(model.navigation.destination == .work(.task(id: "issue-review")))
+    }
+
+    @Test("Inside a Wave, the sidebar and ⌘N count its started Tasks; the board keeps unstarted ones")
+    func waveScopeSlotsCountTheWave() throws {
+        let model = try dashboardModel()
+        model.select(.wave(id: "wave-1"))
+        #expect(model.sidebarTaskIDs == ["issue-now"])
+        #expect(model.waveTiles("wave-1").map(\.work.id) == ["issue-later", "issue-now"])
+        model.selectSidebarTask(slot: 0)
+        #expect(model.navigation.destination == .work(.task(id: "issue-now")))
+        #expect(model.navigation.sidebarScope == .wave("wave-1"))
+        model.selectSidebarTask(slot: 1)
+        #expect(model.selection == .task(id: "issue-now"))
+        model.selectDashboard("review")
+        #expect(model.navigation.sidebarWaveID == nil)
+    }
+
+    @Test("The sidebar header names the Dashboard under the repository, and ⌘1 marks its first member")
+    func dashboardSidebarHeader() throws {
+        let model = try dashboardModel()
+        model.selectDashboard("review")
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+        _ = try navigator.inspect().find(text: "REVIEW")
+        _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-repository")
+        #expect(throws: (any Error).self) { try navigator.inspect().find(viewWithAccessibilityIdentifier: "dashboard-review") }
+        let first = try navigator.inspect().find(TaskRowMetadata.self) { try $0.actualView().slotHint == "⌘1" }
+        #expect(try first.actualView().task.id == "issue-now")
     }
 
     @Test("Zooming a Working Tasks tile keeps Working Tasks in the trail, and Back returns to it")
@@ -167,9 +225,8 @@ struct WorkNavigationTests {
         }
         model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: tasks)], reason: "")
         model.selectWorkingTasksDashboard()
-        let plan = try #require(model.selectedViewPlan)
         let member = try #require(model.workingTaskMembers.first { $0.work.id == "issue-now" })
-        model.zoomTile(member, plan: plan, workingTasks: true, origin: nil)
+        model.enterTile(member.work, origin: nil)
         #expect(model.navigation.trailBoard == .workingTasks)
         #expect(model.breadcrumb?.task?.task.id == "issue-now")
         model.goBack()
@@ -214,14 +271,17 @@ struct WorkNavigationTests {
         }
         #expect(WorkNavigationShortcut(characters: "\u{1b}", modifiers: []) == nil)
         #expect(WorkNavigationShortcut(characters: "c", modifiers: .command) == nil)
-        #expect(WorkNavigationShortcut(characters: "1", modifiers: .command) == .task(0))
-        #expect(WorkNavigationShortcut(characters: "9", modifiers: .command) == .task(8))
-        #expect(WorkNavigationShortcut(characters: "0", modifiers: .command) == nil)
-        #expect(WorkNavigationShortcut(characters: "1", modifiers: [.command, .option]) == nil)
-        #expect(WorkNavigationShortcut(characters: "\t", modifiers: .control) == .adjacent(1))
-        #expect(WorkNavigationShortcut(characters: "\t", modifiers: [.control, .shift]) == .adjacent(-1))
-        #expect(WorkNavigationShortcut(characters: "\t", modifiers: []) == nil)
         #expect(WorkNavigationShortcut(characters: "s", modifiers: [.control, .command]) == nil)
+        func action(_ characters: String, _ modifiers: NSEvent.ModifierFlags) -> String? {
+            DesktopAction.binding(characters: characters, modifiers: modifiers).map { "\($0.0.name) \($0.1)" }
+        }
+        #expect(action("1", .command) == "goto [\"index\": \"1\"]")
+        #expect(action("9", [.command, .capsLock]) == "goto [\"index\": \"9\"]")
+        #expect(action("0", .command) == nil)
+        #expect(action("1", [.command, .option]) == nil)
+        #expect(action("\t", .control) == "next [:]")
+        #expect(action("\u{19}", [.control, .shift]) == "previous [:]")
+        #expect(action("\t", []) == nil)
     }
 
     @Test("Repository view reconstruction keeps the Session store's resolved location")
@@ -429,7 +489,7 @@ struct WorkNavigationTests {
         let projection = WorkProjection(roadmaps: try roadmap().waves, inventory: try roadmap().tasks.items, sessions: records)
         #expect(projection.waves[0].sessions.map(\.id) == ["wave", "project"])
         let completed = try #require(projection.waves[0].tasks.first)
-        #expect(completed.task.task.completed)
+        #expect(completed.task.task.isSuccessful)
         #expect(completed.sessions.map(\.id) == ["completed", "another"])
         #expect(projection.unmatchedSessions.map(\.id) == ["repo", "wrong-kind", "planning-id-is-not-work"])
         let missing = WorkProjection(roadmaps: [], inventory: [], sessions: records)
@@ -958,6 +1018,33 @@ struct WorkNavigationTests {
     private func model() throws -> WorkModel {
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
         return WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+    }
+    /// Working Tasks [review, now]; wave-1 [later, now]; Dashboard "Review" [now, later, review] and wave-1.
+    private func dashboardModel() throws -> WorkModel {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing must not execute") }, repoPath: "/src/loopflow")
+        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
+        model.bindWorkspaces(SessionsWorkspaceRegistry(localMachineId: fixtureMachineId), repository: "repo")
+        func content(_ kind: WorkWorkspaceKey.Kind, _ id: String) -> WorkViewPlan.Content {
+            fixtureViewContent(work: .init(repository: "repo", kind: kind, id: id), title: id)
+        }
+        let review = [content(.task, "issue-now"), content(.task, "issue-later"), content(.wave, "wave-1"),
+                      content(.task, "issue-review")]
+        let members = review.map { WorkMemberRef(source: ["root"], work: $0.work) }
+        let hidden = WorkMemberRef(source: ["root"], work: .init(repository: "repo", kind: .task, id: "issue-available"))
+        let dashboard = WorkViewPlan(name: "Review", pinned: true, dashboardID: "review", repository: "repo",
+            observedAt: 0, selection: WorkSelection(id: "root", expression: .filter(.state(.open))), savedRevision: 1,
+            resolution: WorkSelectionResolution(attention: [], members: members + [hidden], unavailable: []),
+            arrangement: WorkArrangement(order: members + [hidden], hidden: [hidden], mode: .touched),
+            projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
+            contents: review)
+        model.applySelectionPlans([
+            fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
+                            members: [content(.task, "issue-review"), content(.task, "issue-now")]),
+            fixtureViewPlan(owner: .init(repository: "repo", kind: .wave, id: "wave-1"),
+                            members: [content(.task, "issue-later"), content(.task, "issue-now")]),
+            dashboard,
+        ], reason: "")
+        return model
     }
     private func roadmap() throws -> RoadmapSnapshot {
         try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))

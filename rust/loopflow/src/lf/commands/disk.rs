@@ -26,17 +26,6 @@ pub enum DiskCommand {
         #[arg(long, default_value_t = 7)]
         keep_days: u64,
     },
-    /// Remove the oldest backups, store copies, captures and logs until ~/.lf fits its disk_budget
-    Rotate {
-        /// Show what would be removed without removing anything
-        #[arg(long)]
-        dry_run: bool,
-        #[arg(long)]
-        json: bool,
-        /// Print nothing; removals are still logged to ~/.lf/logs/disk.log
-        #[arg(short = 'q', long)]
-        quiet: bool,
-    },
 }
 
 #[derive(Debug, Serialize)]
@@ -85,11 +74,6 @@ pub fn run(json: bool, command: Option<&DiskCommand>) -> Result<()> {
             json,
             keep_days,
         }) => clean(*dry_run, *json, *keep_days),
-        Some(DiskCommand::Rotate {
-            dry_run,
-            json,
-            quiet,
-        }) => rotate(*dry_run, *json, *quiet),
     }
 }
 
@@ -164,7 +148,7 @@ fn worktree_usage(
 
 fn footprint(json: bool) -> Result<()> {
     let home = crate::store::lf_home_dir();
-    let home = crate::disk::measure_home(&home, crate::disk::budget_bytes()?)?;
+    let home = crate::disk::measure_home(&home)?;
     let owners = task_worktrees();
     let mut worktrees = worktree_usage(&repositories(&owners), &owners);
     worktrees.sort_by_key(|worktree| std::cmp::Reverse(worktree.checkout_bytes));
@@ -184,11 +168,11 @@ fn footprint(json: bool) -> Result<()> {
 
 fn render_footprint(footprint: &Footprint) -> String {
     let home = &footprint.home;
+    let days = crate::disk::RETENTION.as_secs() / 86400;
     let mut out = format!(
-        "Home {}  {} of {} budget\n",
+        "Home {}  {}\n",
         home.home.display(),
-        format_bytes(home.bytes),
-        format_bytes(home.budget_bytes)
+        format_bytes(home.bytes)
     );
     let mut categories = home.categories.clone();
     categories.sort_by_key(|usage| std::cmp::Reverse(usage.bytes));
@@ -198,11 +182,13 @@ fn render_footprint(footprint: &Footprint) -> String {
             format_bytes(usage.bytes),
             usage.category.as_str(),
             match usage.category {
-                Category::Database | Category::Accounts => "  (never rotated)",
-                Category::Backups => "  (newest per database kept)",
-                Category::Copies | Category::Captures | Category::Logs => "  (rotates)",
-                Category::Runtime => "  (dead receipts cleaned)",
-                Category::Other => "",
+                Category::Database | Category::Accounts => "  (never rotated)".to_owned(),
+                Category::Backups =>
+                    format!("  (newest per database kept; others removed after {days} days)"),
+                Category::Copies | Category::Captures | Category::Logs =>
+                    format!("  (removed after {days} days)"),
+                Category::Runtime => "  (dead receipts cleaned)".to_owned(),
+                Category::Other => String::new(),
             }
         ));
     }
@@ -229,7 +215,7 @@ fn render_footprint(footprint: &Footprint) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Clean and rotate
+// Clean
 
 fn clean(dry_run: bool, json: bool, keep_days: u64) -> Result<()> {
     let home = crate::store::lf_home_dir();
@@ -327,9 +313,7 @@ fn clean(dry_run: bool, json: bool, keep_days: u64) -> Result<()> {
     }
 
     let keep = Duration::from_secs(keep_days.saturating_mul(86400)).max(crate::disk::GRACE);
-    match crate::disk::budget_bytes()
-        .and_then(|budget| crate::disk::rotate_home(&home, budget, Some(keep), dry_run))
-    {
+    match crate::disk::rotate_home(&home, keep, dry_run) {
         Ok(Some(rotation)) => report.home = Some(rotation),
         Ok(None) => report
             .errors
@@ -400,13 +384,13 @@ fn render_clean(report: &CleanReport) -> String {
             report.process_receipts
         ));
     }
-    if let Some(store) = report.store.as_ref().filter(|store| {
-        store.captures + store.usage_rows + store.closed_processes + store.processes > 0
-    }) {
+    if let Some(store) = report
+        .store
+        .as_ref()
+        .filter(|store| store.usage_rows + store.closed_processes + store.processes > 0)
+    {
         out.push_str(&format!(
-            "pruned {} stream rows from {} captures, {} usage rows and {} inspection Processes from the store; closed {} dead Processes{}\n",
-            store.stream_rows,
-            store.captures,
+            "pruned {} usage rows and {} inspection Processes from the store; closed {} dead Processes{}\n",
             store.usage_rows,
             store.processes,
             store.closed_processes,
@@ -446,32 +430,9 @@ fn render_rotation(report: &RotationReport) -> String {
         out.push_str(&format!("error: {error}\n"));
     }
     out.push_str(&format!(
-        "Home {} -> {} of {} budget\n",
+        "Home {} -> {}\n",
         format_bytes(report.before.bytes),
-        format_bytes(report.after_bytes),
-        format_bytes(report.before.budget_bytes)
+        format_bytes(report.after_bytes)
     ));
-    if report.after_bytes > report.before.budget_bytes {
-        out.push_str(
-            "Still over budget: the database, account homes, the newest backups and the last day's material never rotate.\n",
-        );
-    }
     out
-}
-
-fn rotate(dry_run: bool, json: bool, quiet: bool) -> Result<()> {
-    let home = crate::store::lf_home_dir();
-    let budget = crate::disk::budget_bytes()?;
-    let Some(report) = crate::disk::rotate_home(&home, budget, None, dry_run)? else {
-        if !quiet {
-            eprintln!("Another Home rotation is running.");
-        }
-        return Ok(());
-    };
-    if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else if !quiet {
-        print!("{}", render_rotation(&report));
-    }
-    Ok(())
 }

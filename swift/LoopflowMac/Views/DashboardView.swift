@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct DashboardSidebar: View {
     @Bindable var model: WorkModel
+    let scopeTitle: Namespace.ID
     @State private var creating = false
     /// The whole section reveals New Dashboard; only the button reads it.
     @State private var hover = HoverFlag()
@@ -13,6 +14,11 @@ struct DashboardSidebar: View {
         // Hover follows hit testing: the shape makes the section's empty space
         // and the hidden button count, not just its labels.
         VStack(alignment: .leading, spacing: 5) { section }.contentShape(Rectangle()).hoverSource(hover)
+    }
+
+    /// A zoomed member fills the center, so its Dashboard is containing.
+    private func selection(of board: WorkNavigation.Board, shown: Bool) -> SidebarSelection {
+        shown ? .shown : model.navigation.trailBoard == board ? .containing : .none
     }
 
     @ViewBuilder private var section: some View {
@@ -29,18 +35,25 @@ struct DashboardSidebar: View {
         }.padding(10)
             .sheet(isPresented: $creating) { DashboardEditor(model: model, plan: nil) }
         Button { model.selectWorkingTasksDashboard() } label: {
+            let state = selection(of: .workingTasks, shown: model.navigation.destination == .workingTasks)
             Label(WorkNavigation.workingTasksTitle, systemImage: "square.grid.3x2")
                 .frame(maxWidth: .infinity, alignment: .leading).padding(10)
-                .background(model.navigation.destination == .workingTasks ? palette.surface : .clear,
-                            in: RoundedRectangle(cornerRadius: 6))
+                .foregroundStyle(state == .shown ? palette.workSelectedText : palette.text)
+                .background(SidebarSelectionShape(state: state))
+                .contentShape(RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain).accessibilityIdentifier("dashboard-working-tasks")
         ForEach(model.dashboards.filter(\.pinned), id: \.dashboardID) { plan in
             if let id = plan.dashboardID {
+                let state = selection(of: .saved(id), shown: model.navigation.dashboardID == id)
                 Button { model.selectDashboard(id) } label: {
-                    Label(plan.name ?? id, systemImage: "rectangle.split.2x2")
+                    Label {
+                        Text(plan.name ?? id)
+                            .matchedGeometryEffect(id: WorkNavigation.SidebarScope.dashboard(id), in: scopeTitle)
+                    } icon: { Image(systemName: "rectangle.split.2x2") }
                         .frame(maxWidth: .infinity, alignment: .leading).padding(10)
-                        .background(model.navigation.dashboardID == id ? palette.surface : .clear,
-                                    in: RoundedRectangle(cornerRadius: 6))
+                        .foregroundStyle(state == .shown ? palette.workSelectedText : palette.text)
+                        .background(SidebarSelectionShape(state: state))
+                        .contentShape(RoundedRectangle(cornerRadius: 6))
                 }.buttonStyle(.plain).accessibilityIdentifier("dashboard-" + id)
             }
         }
@@ -61,7 +74,7 @@ struct DashboardEditor: View {
             Text(plan == nil ? "New Dashboard" : "Edit Dashboard").font(.headline)
             TextField("Name", text: $name)
             TextField("Query", text: $expression, axis: .vertical).font(.system(.body, design: .monospaced))
-            Text("For example: (wave:product state:open) or state:available")
+            Text("For example: (wave:product state:open), state:available or state:shipping")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Pin in sidebar", isOn: $pinned)
             if let error = model.dashboardError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
@@ -165,7 +178,7 @@ struct DashboardView: View {
                         Text("Hidden")
                         ForEach(plan.arrangement.hidden, id: \.self) { member in
                             Button {
-                                model.hideInDashboard(plan, hidden: plan.arrangement.hidden.filter { $0 != member })
+                                model.setTile(plan, member, hidden: false)
                             } label: {
                                 Text(model.task(id: member.work.id)?.task.task.name
                                     ?? plan.contents.first { $0.work == member.work }?.title ?? member.work.id)
@@ -191,6 +204,24 @@ struct DashboardView: View {
     }
 }
 
+/// A Wave view's Tasks as tiles, filling the Wave plan's slots in the shared order.
+/// `lf desktop move -p N` reorders them; LOO-594 refines this view.
+struct WaveTiles: View {
+    let model: WorkModel
+    let workspaces: SessionsWorkspaceRegistry
+    let sessions: SessionsStore
+    let waveID: String
+
+    var body: some View {
+        if let plan = model.wavePlan(waveID) {
+            DashboardSlotGrid(members: model.waveTiles(waveID), focused: nil, layout: plan.slots) { member in
+                DashboardTile(model: model, workspaces: workspaces, sessions: sessions, member: member, plan: plan,
+                              workingTasks: false, focused: false, takesFocus: false)
+            }.padding(8).accessibilityIdentifier("wave-tiles")
+        }
+    }
+}
+
 /// One Dashboard slot. A view of its own, with value inputs, so a change re-runs
 /// the tiles it touches instead of every tile and its terminals.
 struct DashboardTile: View {
@@ -201,6 +232,8 @@ struct DashboardTile: View {
     let plan: WorkViewPlan
     let workingTasks: Bool
     let focused: Bool
+    /// A Wave view keeps the Wave selected, so its tiles never take the window's focus.
+    var takesFocus = true
     @Environment(\.palette) private var palette
     @State private var frame = TileFrame()
 
@@ -212,7 +245,7 @@ struct DashboardTile: View {
         let arrangeable = plan.dashboardID != nil
         return VStack(spacing: 0) {
             HStack(spacing: Spacing.sm) {
-                Button { zoom() } label: {
+                Button { enter() } label: {
                     if let task { TaskHeading(task: task.task) }
                     else { Text(content?.title ?? member.work.id).lineLimit(1) }
                 }.buttonStyle(.plain)
@@ -222,10 +255,10 @@ struct DashboardTile: View {
                         label: { Image(systemName: "ellipsis") }
                         .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
                 }
-                Button { zoom() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                Button { enter() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
                     .help("Open this Work in full")
                 if arrangeable {
-                    Button { model.hideInDashboard(plan, hidden: plan.arrangement.hidden + [member]) } label: { Image(systemName: "eye.slash") }
+                    Button { model.setTile(plan, member, hidden: true) } label: { Image(systemName: "eye.slash") }
                         .help("Hide this occurrence").disabled(model.dashboardSaving)
                 }
             }.padding(8).background(palette.surface)
@@ -236,9 +269,9 @@ struct DashboardTile: View {
                     if workingTasks, let task = TaskOrderDrag.taskID(value) {
                         Task { await model.reorderWorkingTask(task, to: member.work.id) }; return true
                     }
-                    guard arrangeable, let id = plan.dashboardID, let revision = plan.savedRevision, !model.dashboardSaving,
+                    guard arrangeable, let id = plan.dashboardID, !model.dashboardSaving,
                           let other = plan.resolution.members.first(where: { $0.token == value }), other.work != member.work else { return false }
-                    Task { await model.reorderDashboard(id, member: other.work, to: member.work, revision: revision) }; return true
+                    Task { await model.reorderDashboard(id, member: other.work, to: member.work) }; return true
                 }
             if let entry, let content {
                 if let error = entry.persistenceError { Text(error).foregroundStyle(palette.warning).textSelection(.enabled) }
@@ -251,7 +284,7 @@ struct DashboardTile: View {
                     ?? entry.multiplexer.layout.allPanes.first(where: { $0.sessionId != nil }) {
                     WorkspacePanesView(workspace: entry, isFocused: focused, sessions: sessions, model: model,
                         onFocus: { pane, _ in
-                            workspaces.focus(entry.key)
+                            if takesFocus { workspaces.focus(entry.key) }
                             entry.multiplexer.setFocusedPane(pane)
                         }, face: pane)
                         .equatable()
@@ -273,12 +306,12 @@ struct DashboardTile: View {
                 .strokeBorder(focused ? palette.borderActive : palette.border))
             .contentShape(Rectangle())
             .renderFlash()
-            .simultaneousGesture(TapGesture().onEnded { workspaces.focus(member.work) })
+            .simultaneousGesture(TapGesture().onEnded { if takesFocus { workspaces.focus(member.work) } })
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ZoomFromTile.space)) } action: { frame.rect = $0 }
     }
 
-    private func zoom() {
-        model.zoomTile(member, plan: plan, workingTasks: workingTasks, origin: frame.rect)
+    private func enter() {
+        model.enterTile(member.work, origin: frame.rect)
     }
 }
 
@@ -288,7 +321,7 @@ final class TileFrame {
     var rect: CGRect?
 }
 
-/// Grows a zoomed member's full Work out of its tile. A transform, so the
+/// Grows an entered member's full Work out of its tile. A transform, so the
 /// terminals inside lay out once at full size rather than on every frame.
 struct ZoomFromTile: ViewModifier, Animatable {
     nonisolated static let space = "work-content"
@@ -323,19 +356,26 @@ extension AnyTransition {
 }
 
 extension WorkModel {
-    func zoomTile(_ member: WorkMemberRef, plan: WorkViewPlan, workingTasks: Bool, origin: CGRect?) {
-        let board: WorkNavigation.Board? = plan.dashboardID.map { .saved($0) } ?? (workingTasks ? .workingTasks : nil)
-        guard let board, let work = member.work.reference else { return select(member.work.reference) }
+    /// Enter a tile as full Work from the view showing it; an unsaved query has
+    /// no trail to return through, so its tile is plainly selected.
+    func enterTile(_ key: WorkWorkspaceKey, origin: CGRect?) {
+        let board: WorkNavigation.Board? = switch navigation.destination {
+        case .dashboard(let id): .saved(id)
+        case .workingTasks: .workingTasks
+        case .work(let wave?) where wave.kind == .wave: .wave(wave.id)
+        case .work, .view, .entered: nil
+        }
+        guard let board, let work = key.reference else { return select(key.reference) }
         navigation.zoomOrigin = origin
-        withAnimation(FocusSizing.animation) { zoom(into: work, from: board) }
+        withAnimation(FocusSizing.animation) { enter(work, from: board) }
     }
 
-    /// Hide or restore occurrences. Rust decides the mode; hiding never touches the order.
-    func hideInDashboard(_ plan: WorkViewPlan, hidden: [WorkMemberRef]) {
-        guard let id = plan.dashboardID, let revision = plan.savedRevision else {
+    /// Hide or restore a tile. Rust decides the mode; hiding never touches the order.
+    func setTile(_ plan: WorkViewPlan, _ member: WorkMemberRef, hidden: Bool) {
+        guard let id = plan.dashboardID else {
             dashboardError = "Save this Dashboard before arranging its Work."; return
         }
-        Task { await arrangeDashboard(id, order: plan.arrangement.order, hidden: hidden, revision: revision) }
+        Task { await setDashboardTile(id, member: member.work, hidden: hidden) }
     }
 }
 

@@ -473,19 +473,8 @@ fn context_explanation_works_outside_git_and_preserves_unavailable_registry() {
 fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
     let home = tempfile::tempdir().unwrap();
     for operation in [
-        "state",
-        "hide",
-        "restore",
-        "focus",
-        "move",
-        "resize",
-        "zoom",
-        "shell",
-        "files",
-        "graph-log",
-        "read",
-        "text",
-        "key",
+        "state", "ls", "actions", "events", "wait", "back", "hide", "show", "focus", "move",
+        "resize", "zoom", "run", "capture", "send", "send-key",
     ] {
         let output = command(
             home.path(),
@@ -500,21 +489,20 @@ fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
             ],
         )
         .args(match operation {
-            "state" => vec!["--json"],
-            "text" => vec!["--pane", "absent", "literal"],
-            "key" => vec!["--pane", "absent", "enter"],
-            "read" => vec!["--pane", "absent", "--region", "screen"],
-            "files" | "graph-log" => vec!["--pane", "absent"],
+            "state" | "ls" | "actions" | "events" | "back" => vec!["--json"],
+            "zoom" => vec!["-p", "absent", "--on"],
+            "send" => vec!["-p", "absent", "literal"],
+            "send-key" => vec!["-p", "absent", "enter"],
             "move" => vec![
-                "--pane",
+                "-p",
                 "absent",
                 "--destination",
                 "absent",
                 "--axis",
                 "horizontal",
             ],
-            "resize" => vec!["--pane", "absent", "--toward", "absent", "--ratio", "0.6"],
-            _ => vec!["--pane", "absent"],
+            "resize" => vec!["-p", "absent", "--toward", "absent", "--ratio", "0.6"],
+            _ => vec!["-p", "absent"],
         })
         .output()
         .unwrap();
@@ -1127,7 +1115,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
         &repo.head_sha(),
     );
     // A captured Workflow wins over the Project's feature selection.
-    let graph = serde_json::json!({"name": "captured", "nodes": [{"name":"review", "skill":"demo", "description":null}], "edges":[{"from":"review", "to":"end", "graph":null}]});
+    let graph = serde_json::json!({"name": "captured", "steps": [{"Skill":{"skill":{"name":"demo"},"id":"review","interactive":true,"returns":null,"sources":[]}}]});
     let path = home.path().join(".lf/loopflow.db");
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute(
@@ -1169,7 +1157,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
     }
     assert_eq!(
         explicit["action"],
-        serde_json::json!({"kind":"edge", "workflow":"captured", "take_up":false, "from":"review", "to":"end", "graph":null})
+        serde_json::json!({"kind":"edge", "workflow":"captured", "take_up":false, "from":"review", "to":"end", "name":"end", "runs":false})
     );
     assert_eq!(
         explicit["resolution"]["execution_machine"]["source"],
@@ -1189,17 +1177,20 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
         invalid["resolution"]["task"]["value"],
         registered.task.id.as_str()
     );
-    assert!(invalid["impediments"][0]
-        .as_str()
-        .unwrap()
-        .contains("does not leave review"));
+    assert!(
+        invalid["impediments"][0]
+            .as_str()
+            .unwrap()
+            .contains("is neither a route leaving review"),
+        "{invalid}"
+    );
     let text = success(
         command(home.path(), repo.path(), &["task", "run", "--explain"])
             .output()
             .unwrap(),
     );
     assert!(
-        text.contains("Workflow captured: review → end; run no Graph"),
+        text.contains("graph captured: review → end; run nothing"),
         "{text}"
     );
     assert!(text.contains("Nothing was executed"));
@@ -1909,7 +1900,7 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
     );
     let path = home.path().join(".lf/loopflow.db");
     let db = rusqlite::Connection::open(&path).unwrap();
-    let graph = serde_json::json!({"name":"captured", "nodes":[{"name":"review","skill":"demo","description":null}], "edges":[{"from":"review","to":"end","graph":null}]});
+    let graph = serde_json::json!({"name": "captured", "steps": [{"Skill":{"skill":{"name":"demo"},"id":"review","interactive":true,"returns":null,"sources":[]}}]});
     db.execute(
         "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
         rusqlite::params![registered.task.id.as_str(), graph.to_string()],
@@ -1998,7 +1989,7 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
     }
     let cases = [(
         vec!["task", "workflow", "move", "INF-123", "missing"],
-        "has no node",
+        "has no stage",
     )];
     let mut reasons = Vec::new();
     for (args, expected) in &cases {
@@ -2129,10 +2120,13 @@ fn task_move_explain_keeps_missing_workflow_and_registry_explicit() {
         "--json",
     ]);
     assert!(restart["action"].is_null());
-    assert!(restart["impediments"][0]
-        .as_str()
-        .unwrap()
-        .contains("has no workflow"));
+    assert!(
+        restart["impediments"][0]
+            .as_str()
+            .unwrap()
+            .contains("has no graph"),
+        "{restart}"
+    );
     let end = read(&[
         "task",
         "workflow",

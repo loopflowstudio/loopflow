@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine;
@@ -15,23 +15,24 @@ use tokio::task::JoinHandle;
 use crate::agent::AgentConfig;
 use crate::chat::types::{ConversationEvent, FailureEvidence};
 use crate::config::parse_agent;
+use crate::harness::agent_process::AttachmentOwner;
 use crate::harness::common::TurnInProgressGuard;
-use crate::harness::{
-    opencode_history, opencode_mapping, ApprovalPolicy, Harness, HarnessError, RawProviderEvent,
-    SendCurrentOutcome,
-};
+use crate::harness::fact::Decoded;
+use crate::harness::fact_writer::FactWriter;
+use crate::harness::opencode_decode::{OpenCodeDecoder, ReaderState, Snapshot};
+use crate::harness::{ApprovalPolicy, Harness, HarnessError, SendCurrentOutcome};
 use crate::id::AgentSessionId;
 
 pub(crate) const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 
 pub struct OpenCodeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
-    raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     client: reqwest::Client,
     password: String,
     authorization: reqwest::header::HeaderValue,
     interactive: bool,
-    history: Arc<Mutex<opencode_history::History>>,
+    owner: Option<AttachmentOwner>,
+    stream: Option<Arc<tokio::sync::Mutex<OpenCodeStream>>>,
     config: Option<AgentConfig>,
     should_seed_prompt: bool,
     turn_in_progress: Arc<AtomicBool>,
@@ -40,6 +41,23 @@ pub struct OpenCodeHarness {
     sse_task: Option<JoinHandle<()>>,
     server_base_url: Option<String>,
     agent_session: Option<AgentSessionId>,
+}
+
+/// The server's decoder and the writer of what it establishes, shared by the
+/// event reader and the request senders.
+#[derive(Debug)]
+struct OpenCodeStream {
+    decoder: OpenCodeDecoder,
+    writer: FactWriter,
+}
+
+impl OpenCodeStream {
+    /// A native input ID whose origin is frozen before it is sent.
+    fn request(&mut self, steer: bool) -> Result<String> {
+        let id = self.decoder.request(steer);
+        self.writer.outbound(&id)?;
+        Ok(id)
+    }
 }
 
 impl std::fmt::Debug for OpenCodeHarness {
@@ -55,12 +73,12 @@ impl OpenCodeHarness {
     ) -> Self {
         Self {
             events,
-            raw_provider: None,
             client: reqwest::Client::new(),
             password: String::new(),
             authorization: reqwest::header::HeaderValue::from_static(""),
             interactive: false,
-            history: Arc::new(Mutex::new(opencode_history::History::default())),
+            owner: None,
+            stream: None,
             config: None,
             should_seed_prompt: true,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
@@ -70,6 +88,18 @@ impl OpenCodeHarness {
             server_base_url: None,
             agent_session: None,
         }
+    }
+
+    fn owner(&self) -> Result<AttachmentOwner> {
+        self.owner
+            .clone()
+            .ok_or_else(|| anyhow!("OpenCode server not started"))
+    }
+
+    fn stream(&self) -> Result<Arc<tokio::sync::Mutex<OpenCodeStream>>> {
+        self.stream
+            .clone()
+            .ok_or_else(|| anyhow!("OpenCode server not started"))
     }
 
     pub(crate) fn prepare_terminal(&mut self) {
@@ -87,9 +117,7 @@ impl OpenCodeHarness {
 
     async fn start_inner(&mut self, config: &AgentConfig) -> Result<()> {
         let owner = super::agent_process::open_owner(config.session_attachment.as_ref())?;
-        self.history = Arc::new(Mutex::new(opencode_history::History::new(Some(
-            owner.clone(),
-        ))));
+        self.owner = Some(owner.clone());
         self.password = uuid::Uuid::new_v4().simple().to_string();
         self.authorization = reqwest::header::HeaderValue::from_str(&format!(
             "Basic {}",
@@ -174,28 +202,35 @@ impl OpenCodeHarness {
         let (store, session, attachment) = &owner;
         store.record_session_connection(session, attachment, &base_url, &agent_session)?;
 
-        let messages =
-            opencode_history::read_messages(&self.client, &base_url, &agent_session).await?;
-        self.history
-            .lock()
-            .expect("OpenCode history lock poisoned")
-            .seed(&messages, self.interactive);
-        let authorization = self.authorization.clone();
-        let interactive = self.interactive;
-        let event_tx = self.events.clone();
-        let raw_provider = self.raw_provider.clone();
-        let client = self.client.clone();
-        let shutdown_requested = self.shutdown_requested.clone();
-        let turn_in_progress = self.turn_in_progress.clone();
-        let history = self.history.clone();
-        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-        let reader_base_url = base_url.clone();
-        let reader_session_id = agent_session.clone();
+        let messages = read_messages(&self.client, &base_url, &agent_session).await?;
         let reader_model = opencode_model(config)
             .map(|(provider_id, model_id)| format!("{provider_id}/{model_id}"))
             .or_else(|| config.agent.clone());
+        let mut decoder = OpenCodeDecoder::new(agent_session.clone(), reader_model);
+        decoder.seed(&messages, self.interactive);
+        let stream = Arc::new(tokio::sync::Mutex::new(OpenCodeStream {
+            decoder,
+            writer: FactWriter::new(
+                store.clone(),
+                session.clone(),
+                Some(attachment.clone()),
+                None,
+                Default::default(),
+            ),
+        }));
+        self.stream = Some(stream.clone());
+        let authorization = self.authorization.clone();
+        let interactive = self.interactive;
+        let event_tx = self.events.clone();
+        let client = self.client.clone();
+        let shutdown_requested = self.shutdown_requested.clone();
+        let turn_in_progress = self.turn_in_progress.clone();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let reader_base_url = base_url.clone();
+        let reader_session_id = agent_session.clone();
         let stream_started_at = chrono::Utc::now().timestamp_millis();
 
+        let reader_owner = owner.clone();
         let sse_task = tokio::spawn(async move {
             let stream_url = format!("{reader_base_url}/api/event");
             let request = client
@@ -237,8 +272,6 @@ impl OpenCodeHarness {
 
             let _ = ready_tx.send(());
             let mut parser = SseParser::default();
-            let mut state =
-                opencode_mapping::ReaderState::new(reader_session_id.clone(), reader_model);
 
             // Track how the stream ended so the disconnect evidence names the
             // root cause class: `stream_eof` (clean EOF, chunk == None) vs
@@ -268,12 +301,6 @@ impl OpenCodeHarness {
                     if payload.trim().is_empty() || payload.trim() == "[DONE]" {
                         continue;
                     }
-                    if let Some(raw_provider) = &raw_provider {
-                        let _ = raw_provider.send(RawProviderEvent {
-                            stream: "sse",
-                            line: payload.clone(),
-                        });
-                    }
 
                     let parsed = serde_json::from_str::<Value>(&payload);
                     let raw = match parsed {
@@ -284,14 +311,16 @@ impl OpenCodeHarness {
                         }
                     };
 
-                    history
-                        .lock()
-                        .expect("OpenCode history lock poisoned")
-                        .attend(&reader_session_id, &raw);
+                    {
+                        let mut stream = stream.lock().await;
+                        let decoded = stream.decoder.event(&raw);
+                        if let Err(error) = stream.writer.write(&decoded).await {
+                            tracing::warn!(%error, "failed to record OpenCode activity");
+                        }
+                    }
                     if raw["data"]["sessionID"] != reader_session_id.as_str() {
                         continue;
                     }
-                    state.observe_event(&raw);
                     let kind = raw["type"].as_str().unwrap_or_default();
                     if (kind.ends_with(".delta") || kind == "session.tool.progress")
                         && last_snapshot_at.elapsed() < Duration::from_millis(100)
@@ -300,18 +329,13 @@ impl OpenCodeHarness {
                     }
                     last_snapshot_at = tokio::time::Instant::now();
                     let observation = async {
-                        let messages = opencode_history::read_messages(&client, &reader_base_url, &reader_session_id).await?;
-                        let opencode_history::Observation { events, messages: current_messages } =
-                            history.lock().expect("OpenCode history lock poisoned")
-                                .observe(&reader_session_id, &messages)?;
-                        for event in events.iter().filter(|event| matches!(event, ConversationEvent::TurnStarted { .. })) {
-                            state.observe_lifecycle(event);
-                            let _ = event_tx.send(event.clone());
-                        }
-                        for event in state.observe_messages(&current_messages) { let _ = event_tx.send(event); }
-                        for event in events {
-                            if !matches!(event, ConversationEvent::TurnStarted { .. }) {
-                                state.observe_lifecycle(&event);
+                        let messages = read_messages(&client, &reader_base_url, &reader_session_id).await?;
+                        let mut stream = stream.lock().await;
+                        let Snapshot { decoded, messages: current_messages } = stream.decoder.messages(&messages);
+                        stream.writer.write(&decoded).await?;
+                        drop(stream);
+                        for decoded in decoded {
+                            if let Decoded::Display(event) = decoded {
                                 if matches!(event, ConversationEvent::TurnCompleted { .. }) { turn_in_progress.store(false, Ordering::SeqCst); }
                                 let _ = event_tx.send(event);
                             }
@@ -322,8 +346,7 @@ impl OpenCodeHarness {
                                 .ok_or_else(|| anyhow!("OpenCode permission has no originating assistant"))?;
                             anyhow::ensure!(current_messages.iter().any(|(_, m)| m["id"] == assistant), "OpenCode permission belongs to an unselected request");
                             let id = data["id"].as_str().ok_or_else(|| anyhow!("OpenCode permission has no ID"))?;
-                            let owner = history.lock().expect("OpenCode history lock poisoned").owner()?;
-                            opencode_history::post(owner, authorization.clone(), format!("{reader_base_url}/api/session/{reader_session_id}/permission/{id}/reply"), json!({"reply":"once"})).await?;
+                            post(reader_owner.clone(), authorization.clone(), format!("{reader_base_url}/api/session/{reader_session_id}/permission/{id}/reply"), json!({"reply":"once"})).await?;
                         }
                         Ok::<_, anyhow::Error>(())
                     }.await;
@@ -342,6 +365,8 @@ impl OpenCodeHarness {
             turn_in_progress.store(false, Ordering::SeqCst);
 
             // Disconnect is command failure; absent native completion stays unknown.
+            let stream = stream.lock().await;
+            let state = stream.decoder.display();
             let turn_was_open = state.turn_is_open();
             let turn_had_content = state.turn_has_content();
 
@@ -359,7 +384,7 @@ impl OpenCodeHarness {
                 "OpenCode event stream disconnected"
             };
             let evidence = disconnect_evidence(
-                Some(&state),
+                Some(state),
                 stream_started_at,
                 disconnect_class,
                 disconnect_message.as_deref(),
@@ -382,13 +407,6 @@ impl OpenCodeHarness {
 impl Harness for OpenCodeHarness {
     fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
-    }
-
-    fn set_raw_provider_sender(
-        &mut self,
-        raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
-    ) {
-        self.raw_provider = raw_provider;
     }
 
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
@@ -438,14 +456,12 @@ impl Harness for OpenCodeHarness {
             .clone()
             .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
 
-        let (request, owner) = {
-            let mut history = self.history.lock().expect("OpenCode history lock poisoned");
-            (history.request()?, history.owner()?)
-        };
+        let request = self.stream()?.lock().await.request(false)?;
+        let owner = self.owner()?;
         let payload = json!({"id":request,"text":turn_content});
 
         let message_url = format!("{base_url}/api/session/{agent_session}/prompt");
-        opencode_history::post(owner, self.authorization.clone(), message_url, payload).await?;
+        post(owner, self.authorization.clone(), message_url, payload).await?;
 
         self.should_seed_prompt = false;
         turn_guard.disarm();
@@ -470,20 +486,26 @@ impl Harness for OpenCodeHarness {
             return SendCurrentOutcome::NotSteerable;
         };
 
-        let (provider_turn_id, owner) = {
-            let mut history = self.history.lock().expect("OpenCode history lock poisoned");
-            match (history.steer(), history.owner()) {
-                (Ok(request), Ok(owner)) => (request, owner),
-                (Err(error), _) | (_, Err(error)) => {
-                    return SendCurrentOutcome::Failed {
-                        error: error.to_string(),
-                    }
+        let stream = match self.stream() {
+            Ok(stream) => stream,
+            Err(error) => {
+                return SendCurrentOutcome::Failed {
+                    error: error.to_string(),
+                }
+            }
+        };
+        let steered = stream.lock().await.request(true);
+        let (provider_turn_id, owner) = match (steered, self.owner()) {
+            (Ok(request), Ok(owner)) => (request, owner),
+            (Err(error), _) | (_, Err(error)) => {
+                return SendCurrentOutcome::Failed {
+                    error: error.to_string(),
                 }
             }
         };
         let payload = json!({"id":provider_turn_id,"text":text,"delivery":"steer"});
         let steer_url = format!("{base_url}/api/session/{agent_session}/prompt");
-        match opencode_history::post(owner, self.authorization.clone(), steer_url, payload).await {
+        match post(owner, self.authorization.clone(), steer_url, payload).await {
             Ok(()) => SendCurrentOutcome::Sent { provider_turn_id },
             Err(error) => SendCurrentOutcome::Failed {
                 error: format!("failed to send opencode steer: {error}"),
@@ -506,12 +528,13 @@ impl Harness for OpenCodeHarness {
             .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
 
         let abort_url = format!("{base_url}/api/session/{agent_session}/interrupt?resume=false");
-        let owner = self
-            .history
-            .lock()
-            .expect("OpenCode history lock poisoned")
-            .owner()?;
-        opencode_history::post(owner, self.authorization.clone(), abort_url, json!({})).await?;
+        post(
+            self.owner()?,
+            self.authorization.clone(),
+            abort_url,
+            json!({}),
+        )
+        .await?;
         Ok(())
     }
 
@@ -519,12 +542,7 @@ impl Harness for OpenCodeHarness {
         self.shutdown_requested.store(true, Ordering::SeqCst);
 
         if self.child.is_some() {
-            let owner = self
-                .history
-                .lock()
-                .expect("OpenCode history lock poisoned")
-                .owner()?;
-            super::agent_process::stop(&owner)?;
+            super::agent_process::stop(&self.owner()?)?;
         }
         self.child = None;
 
@@ -655,27 +673,100 @@ pub(crate) fn sanitize_error_message(message: &str) -> String {
     out
 }
 
+async fn read_messages(
+    client: &reqwest::Client,
+    endpoint: &str,
+    thread: &AgentSessionId,
+) -> Result<Vec<Value>> {
+    // Export retains completed history through compaction; context includes live
+    // assistant/tool state omitted from export until settlement.
+    let mut exported: Value = client
+        .get(format!(
+            "{endpoint}/api/experimental/session/{thread}/export"
+        ))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let mut live: Value = client
+        .get(format!("{endpoint}/api/session/{thread}/context"))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let mut messages = std::mem::take(
+        exported
+            .pointer_mut("/data/messages")
+            .and_then(Value::as_array_mut)
+            .ok_or_else(|| anyhow::anyhow!("OpenCode export has no messages"))?,
+    );
+    for message in live
+        .get_mut("data")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| anyhow::anyhow!("OpenCode context has no messages"))?
+        .drain(..)
+    {
+        if let Some(existing) = messages.iter_mut().find(|m| m["id"] == message["id"]) {
+            *existing = message;
+        } else {
+            messages.push(message);
+        }
+    }
+    Ok(messages)
+}
+
+// Freeze dispatch under the attachment fence. Uncertain requests are never replayed.
+async fn post(
+    owner: AttachmentOwner,
+    authorization: reqwest::header::HeaderValue,
+    url: String,
+    payload: Value,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let (store, session, attachment) = owner;
+        store.with_session_dispatch(&session, &attachment, || {
+            reqwest::blocking::Client::new()
+                .post(url)
+                .header(reqwest::header::AUTHORIZATION, authorization)
+                .timeout(std::time::Duration::from_secs(10))
+                .json(&payload)
+                .send()
+                .and_then(reqwest::blocking::Response::error_for_status)
+                .map(|_| ())
+                .map_err(|error| {
+                    crate::store::StoreError::InvalidData(format!(
+                        "OpenCode native request: {error}"
+                    ))
+                })
+        })
+    })
+    .await??;
+    Ok(())
+}
+
 /// Build disconnect evidence for the harness's own `/api/event` SSE stream dropping.
 fn disconnect_evidence(
-    state: Option<&opencode_mapping::ReaderState>,
+    state: Option<&ReaderState>,
     stream_started_at: i64,
     terminal_error_class: &str,
     terminal_error_message: Option<&str>,
 ) -> FailureEvidence {
     let stream_ended_at = chrono::Utc::now().timestamp_millis();
     FailureEvidence {
-        model: state
-            .and_then(opencode_mapping::ReaderState::model)
-            .map(ToString::to_string),
+        model: state.and_then(ReaderState::model).map(ToString::to_string),
         provider: Some("opencode".into()),
         endpoint_class: Some("harness_event_stream".to_string()),
         stream_started_at: Some(stream_started_at),
         stream_ended_at: Some(stream_ended_at),
         duration_ms: Some(stream_ended_at - stream_started_at),
         last_event_type: state
-            .and_then(opencode_mapping::ReaderState::last_event_type)
+            .and_then(ReaderState::last_event_type)
             .map(ToString::to_string),
-        last_event_seq: state.and_then(opencode_mapping::ReaderState::last_event_seq),
+        last_event_seq: state.and_then(ReaderState::last_event_seq),
         terminal_error_class: Some(terminal_error_class.to_string()),
         terminal_error_message: terminal_error_message.map(sanitize_error_message),
         provider_output_tokens: None,
@@ -770,9 +861,9 @@ fn parse_data_frame(frame: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_turn_content, mpsc, open_agent_session, opencode_history, sanitize_error_message,
-        AgentConfig, ApprovalPolicy, Arc, Command, ConversationEvent, Duration, Harness, Mutex,
-        OpenCodeHarness, Ordering, SendCurrentOutcome, SseParser,
+        build_turn_content, mpsc, open_agent_session, sanitize_error_message, AgentConfig,
+        ApprovalPolicy, Command, ConversationEvent, Duration, Harness, OpenCodeHarness, Ordering,
+        SendCurrentOutcome, SseParser,
     };
 
     #[tokio::test]
@@ -805,18 +896,14 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = OpenCodeHarness::new(tx, ApprovalPolicy::AutoApprove);
         harness.child = Some(child);
-        harness.history = Arc::new(Mutex::new(opencode_history::History::new(Some(owner))));
+        harness.owner = Some(owner);
         assert_eq!(harness.process_group_id(), Some(pid));
         let current = store
             .claim_session_attachment("stop", Some(&first), &process, false)
             .unwrap();
         assert!(harness.stop().await.is_err());
         assert!(!crate::journal::OsProcess::group(pid).unwrap().is_empty());
-        harness.history = Arc::new(Mutex::new(opencode_history::History::new(Some((
-            store,
-            "stop".into(),
-            current,
-        )))));
+        harness.owner = Some((store, "stop".into(), current));
         harness.stop().await.unwrap();
         assert_eq!(harness.pid(), None);
         assert_eq!(harness.process_group_id(), None);

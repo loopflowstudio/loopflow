@@ -23,6 +23,25 @@ Follow corrections and update the working design as decisions land. Keep
 proposals distinct from accepted requirements and verified behavior. Use the
 person's name when recording decisions.
 
+Write that screen as a page, `scratch/concept-review.html`: actions →
+concepts → APIs, before and after, with the one consequential mismatch called
+out. The conversation is about what the person sees there; the decisions live
+in the working design.
+
+- One self-contained `.html` under `scratch/`: inline CSS and script, no
+  network, no build step. Escape code. Readable in light and dark and at narrow
+  widths.
+- Lead with the decision you need. End with numbered questions, so "2b" is a
+  complete answer.
+- Show the thing, not a description of it. Mark proposed against existing
+  behavior visibly.
+- One reading column, generous whitespace, no dashboard chrome or badges. Shape
+  the structure to the content; no fixed template.
+- Header: Task, step, date, and the files it is built from.
+- Say its path. Loopflow Desktop shows `scratch/` pages beside the
+  conversation; in a bare terminal, open it in the browser. Regenerate the same
+  path when the conversation changes it, and write it last, after the Markdown.
+
 ## Follow the experience through
 
 Find distinctions users must learn without benefit, awkward actions, and names

@@ -61,28 +61,28 @@ public struct RegistryQuery: Sendable {
         try Self.decode(Dashboard.self, from: await run(["desktop", "rename", "query:" + id, name, "--revision", String(revision)], repoPath))
     }
 
-    /// Rust decides the arrangement's mode from the order it receives.
-    public func saveDashboardArrangement(id: String, order: [WorkMemberRef], hidden: [WorkMemberRef], revision: Int64, repoPath: String) async throws -> Dashboard {
-        let input = String(decoding: try JSONEncoder().encode(["order": order, "hidden": hidden]), as: UTF8.self)
-        return try Self.decode(Dashboard.self, from: await runWithInput(["desktop", "arrange", id, "--revision", String(revision)], repoPath, input))
+    /// Hide or show a Dashboard tile in its shared record; hiding keeps its place and mode.
+    public func setDashboardTile(id: String, member: WorkWorkspaceKey, hidden: Bool, repoPath: String) async throws -> Dashboard {
+        try Self.decode(Dashboard.self, from: await run(["desktop", hidden ? "hide" : "show", "-p", "query:\(id)/\(member.selector)"], repoPath))
     }
 
     /// Nil restores the default slot layout.
     public func saveDashboardSlots(id: String, slots: DashboardSlotLayout?, revision: Int64, repoPath: String) async throws -> Dashboard {
         let input = String(decoding: try JSONEncoder().encode(slots), as: UTF8.self)
-        return try Self.decode(Dashboard.self, from: await runWithInput(["desktop", "slots", id, "--revision", String(revision)], repoPath, input))
+        return try Self.decode(Dashboard.self, from: await runWithInput(["desktop", "layout", "query:" + id, "--save", "--revision", String(revision)], repoPath, input))
     }
 
     /// Move `member`'s tile into `target`'s place in a Dashboard's order, as the
     /// repository order's drop does; Rust applies the move and decides the mode.
-    public func reorderDashboard(id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey, revision: Int64, repoPath: String) async throws -> Dashboard {
-        try Self.decode(Dashboard.self, from: await run(["desktop", "order", member.selector, "--to", target.selector,
-            "--query", id, "--revision", String(revision)], repoPath))
+    public func reorderDashboard(id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey, repoPath: String) async throws -> Dashboard {
+        try Self.decode(Dashboard.self, from: await run(["desktop", "move", "-p", "query:\(id)/\(member.selector)",
+            "--destination", target.selector], repoPath))
     }
 
     /// Move a Working Tasks member into `target`'s place in the repository's one Task order.
     public func reorderTask(_ task: String, to target: String, repoPath: String) async throws -> [String] {
-        try Self.decode([String].self, from: await run(["desktop", "order", "task:" + task, "--to", "task:" + target], repoPath))
+        try Self.decode([String].self, from: await run(["desktop", "move", "-p", "working-tasks/task:" + task,
+            "--destination", "task:" + target], repoPath))
     }
 
     public func paneLayout(work: String, repoPath: String) async throws -> WorkPaneLayout? {
@@ -292,20 +292,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(WorkActivitySnapshot.self, from: stdout)
     }
 
-    public func automationStatus(cwd: String) async throws -> AutomationStatus {
-        try Self.decode(AutomationStatus.self, from: await run(["task", "automation", "--json"], cwd))
-    }
-
-    public func setAutomation(enabled: Bool, cwd: String) async throws {
-        var args = ["cron", "sync", "--repo"]
-        if !enabled { args.append("--disable") }
-        _ = try await run(args, cwd)
-    }
-
-    public func automateTask(issue: String, enabled: Bool, cwd: String) async throws {
-        _ = try await run(["task", "automate", issue, enabled ? "on" : "off"], cwd)
-    }
-
     /// Files changed by one Task, classified across commits, index, worktree,
     /// and untracked state relative to the Task's recorded base.
     public func taskChanges(issue: String, base: String = "parent", cwd: String?) async throws -> TaskChangesSnapshot {
@@ -343,20 +329,28 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([WorkflowCatalogEntry].self, from: stdout)
     }
 
-    public func workflowSource(_ name: String, cwd: String?) async throws -> String {
-        try await run(["wave", "workflow", "source", name], cwd)
-    }
-
     public func customizeGraph(_ name: String, cwd: String?) async throws -> String {
         try await run(["graph", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Start a fresh Graph for the Task, placing it when needed; returns once it
-    /// runs. Without `graph`, Rust takes the Task's edge or its Project's workflow.
+    /// runs. Without `graph`, Rust takes the Task's route or its Wave's Workflow.
     public func runTask(issue: String, graph: String?, cwd: String?) async throws {
         var args = ["task", "run", issue]
         if let graph { args.append(graph) }
         _ = try await run(args, cwd)
+    }
+
+    /// Ship the Task: run its remaining Workflow to the end headless, standing
+    /// in at each stage. Returns once it is shipping; it runs on until the Task lands.
+    public func shipTask(issue: String, cwd: String?) async throws {
+        _ = try await run(["--task", issue, "ship"], cwd)
+    }
+
+    /// Withdraw a Task's Auto-Ship approval: its ship process stops and any
+    /// auto-merge Loopflow armed is disabled.
+    public func stopShipping(issue: String, cwd: String?) async throws {
+        _ = try await run(["--task", issue, "ship", "--stop"], cwd)
     }
 
     /// Reopen every conversation on this Machine that a restart or crash cut off,
@@ -388,8 +382,8 @@ public struct RegistryQuery: Sendable {
         }
     }
 
-    public func pauseTask(issue: String, paused: Bool, cwd: String?) async throws {
-        _ = try await run(["task", paused ? "pause" : "resume", issue], cwd)
+    public func deferTask(issue: String, deferred: Bool, cwd: String?) async throws {
+        _ = try await run(["task", deferred ? "defer" : "resume", issue], cwd)
     }
 
     public func completeTask(issue: String, cwd: String?) async throws {
@@ -612,6 +606,13 @@ public struct RegistryQuery: Sendable {
     public func codebaseHistory(repoPath: String, days: Int = 30) async throws -> [CodeSnapshot] {
         let stdout = try await run(["repo", "tokens", "--json", "--days", String(days)], repoPath)
         return try Self.decode([CodeSnapshot].self, from: stdout)
+    }
+
+    /// How much Session history providers still keep, and what they remove next.
+    /// Mirrors Rust `RetentionSummary`.
+    public func retention() async throws -> RetentionSummary {
+        let stdout = try await run(["history", "retention", "--json"], nil)
+        return try Self.decode(RetentionSummary.self, from: stdout)
     }
 
     /// The ledger's self-audit, including continuity and lineage tripwires.
@@ -980,6 +981,153 @@ public struct StepContext: Decodable, Sendable, Hashable {
 public struct ContextReport: Decodable, Sendable, Hashable {
     public let steps: [StepContext]
     public let totals: [ContextSourceUsage]
+}
+
+/// `lf history retention --json`. Mirrors Rust `RetentionSummary` exactly.
+public struct RetentionSummary: Codable, Sendable, Equatable {
+    public let generatedAt: Int64
+    public let sessions: Int
+    public let harnesses: [HarnessRetention]
+    public let groups: [RetentionGroup]
+    public let nextExpiries: [ExpiringSession]
+    public let expiringWithinWeek: Int
+    public let homes: [HomeRetention]
+
+    enum CodingKeys: String, CodingKey {
+        case sessions, harnesses, groups, homes
+        case generatedAt = "generated_at"
+        case nextExpiries = "next_expiries"
+        case expiringWithinWeek = "expiring_within_week"
+    }
+}
+
+public struct HarnessRetention: Codable, Sendable, Equatable, Identifiable {
+    public var id: String { harness }
+
+    public let harness: String
+    public let provider: Int
+    public let facts: Int
+    public let unknown: Int
+    public let nextExpiry: Int64?
+
+    enum CodingKeys: String, CodingKey {
+        case harness, provider, facts, unknown
+        case nextExpiry = "next_expiry"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(harness, forKey: .harness)
+        try container.encode(provider, forKey: .provider)
+        try container.encode(facts, forKey: .facts)
+        try container.encode(unknown, forKey: .unknown)
+        try container.encode(nextExpiry, forKey: .nextExpiry)
+    }
+}
+
+public enum RetentionState: String, Codable, Sendable, Equatable {
+    case provider, facts, unknown
+}
+
+public enum AgeBucket: String, Codable, Sendable, Equatable {
+    case underWeek = "under_week"
+    case underMonth = "under_month"
+    case underQuarter = "under_quarter"
+    case older
+}
+
+public struct RetentionGroup: Codable, Sendable, Equatable {
+    public let harness: String
+    public let account: String?
+    public let age: AgeBucket
+    public let state: RetentionState
+    public let sessions: Int
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(harness, forKey: .harness)
+        try container.encode(account, forKey: .account)
+        try container.encode(age, forKey: .age)
+        try container.encode(state, forKey: .state)
+        try container.encode(sessions, forKey: .sessions)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case harness, account, age, state, sessions
+    }
+}
+
+public struct ExpiringSession: Codable, Sendable, Equatable, Identifiable {
+    public var id: String { sessionID }
+
+    public let sessionID: String
+    public let title: String
+    public let harness: String
+    public let account: String?
+    public let after: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case title, harness, account, after
+        case sessionID = "session_id"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(title, forKey: .title)
+        try container.encode(harness, forKey: .harness)
+        try container.encode(account, forKey: .account)
+        try container.encode(after, forKey: .after)
+    }
+}
+
+/// How long a provider keeps transcripts in one home. Mirrors Rust `ExpiryPolicy`.
+public enum ExpiryPolicy: Codable, Sendable, Equatable {
+    /// Claude removes conversations idle longer than `cleanupPeriodDays`.
+    case claudeCleanup(days: Int, settings: String?)
+    case kept
+
+    enum CodingKeys: String, CodingKey {
+        case kind, days, settings
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(String.self, forKey: .kind) {
+        case "claude_cleanup":
+            self = .claudeCleanup(
+                days: try container.decode(Int.self, forKey: .days),
+                settings: try container.decodeNil(forKey: .settings)
+                    ? nil : try container.decode(String.self, forKey: .settings)
+            )
+        case "kept":
+            self = .kept
+        case let kind:
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind, in: container, debugDescription: "unknown expiry policy \(kind)")
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .claudeCleanup(days, settings):
+            try container.encode("claude_cleanup", forKey: .kind)
+            try container.encode(days, forKey: .days)
+            try container.encode(settings, forKey: .settings)
+        case .kept:
+            try container.encode("kept", forKey: .kind)
+        }
+    }
+}
+
+public struct HomeRetention: Codable, Sendable, Equatable, Identifiable {
+    public var id: String { "\(harness):\(home)" }
+
+    public let harness: String
+    public let home: String
+    public let policy: ExpiryPolicy
+    public let transcripts: Int
 }
 
 public struct DoctorReport: Decodable, Sendable {

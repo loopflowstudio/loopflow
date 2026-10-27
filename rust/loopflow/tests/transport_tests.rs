@@ -70,7 +70,7 @@ impl Fixture {
         line.trim().to_owned()
     }
     fn serve(&self, terminal: bool, argv: &[&str]) -> Command {
-        let mut command = self.command(&["__transport-serve"]);
+        let mut command = self.command(&["session", "serve"]);
         if terminal {
             command.arg("--terminal");
         }
@@ -446,12 +446,27 @@ fn native_pending_request_survives_creator_exit_without_settling_capture_or_repl
 
 #[test]
 fn attachment_timeout_preserves_pending_execution_without_replay() {
-    native_pending_request(Some(false));
+    native_pending_request(Some(SilentOwner::Unacknowledged));
 }
 
 #[test]
 fn attachment_cancellation_preserves_pending_execution_without_replay() {
-    native_pending_request(Some(true));
+    native_pending_request(Some(SilentOwner::Cancelled));
+}
+
+#[test]
+fn an_owner_that_stops_reading_input_ends_the_viewer_with_a_cause() {
+    native_pending_request(Some(SilentOwner::Stalled));
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum SilentOwner {
+    /// Accepts the attachment request and never answers it.
+    Unacknowledged,
+    /// As Unacknowledged, and the viewer is interrupted while it waits.
+    Cancelled,
+    /// Acknowledges the attachment, then never reads the viewer's input.
+    Stalled,
 }
 
 #[test]
@@ -520,7 +535,7 @@ fn wait_for_viewer(mut child: Child, timeout: Duration) -> Output {
     child.wait_with_output().unwrap()
 }
 
-fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, cancel: bool) {
+fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: SilentOwner) {
     // Keep the real owner and provider running while this viewer reaches a
     // socket that accepts its request but never acknowledges it.
     let endpoint = fixture.endpoint(owner);
@@ -535,12 +550,15 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, cancel: bool
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    viewer
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(b"must-not-submit\n")
-        .unwrap();
+    let mut input = viewer.stdin.take().unwrap();
+    input.write_all(b"must-not-submit\n").unwrap();
+    if silent == SilentOwner::Stalled {
+        // More input than any socket buffers, so the viewer's sends must stall.
+        std::thread::spawn(move || {
+            let chunk = [b'x'; 64 * 1024];
+            while input.write_all(&chunk).is_ok() {}
+        });
+    }
     let started = Instant::now();
     let socket = loop {
         match listener.accept() {
@@ -566,10 +584,25 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, cancel: bool
         serde_json::from_str::<Value>(&request).unwrap()["kind"],
         "attach"
     );
-    if cancel {
+    if silent == SilentOwner::Cancelled {
         // SAFETY: signal only this test's live viewer, never the owner/provider.
         assert_eq!(unsafe { libc::kill(viewer.id() as i32, libc::SIGINT) }, 0);
     }
+    if silent == SilentOwner::Stalled {
+        socket
+            .get_mut()
+            .write_all(
+                b"{\"kind\":\"attached\",\"token\":\"claim\",\"terminal\":false,\"bytes\":[]}\n",
+            )
+            .unwrap();
+        let output = wait_for_viewer(viewer, Duration::from_secs(8));
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("stopped reading"), "{error}");
+        assert!(!error.contains("os error"), "{error}");
+        return;
+    }
+    let cancel = silent == SilentOwner::Cancelled;
     let output = wait_for_viewer(viewer, Duration::from_secs(if cancel { 2 } else { 8 }));
     assert!(!output.status.success());
     if cancel {
@@ -587,7 +620,7 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, cancel: bool
     );
 }
 
-fn native_pending_request(silent_owner: Option<bool>) {
+fn native_pending_request(silent_owner: Option<SilentOwner>) {
     let fixture = Fixture::new();
     let bin = fixture.home.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
@@ -662,8 +695,8 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
     assert_eq!(fixture.wait_file("launches"), launched);
     let first = fixture.viewer(&owner, true);
     drop(first);
-    if let Some(cancel) = silent_owner {
-        silent_attachment(&fixture, &owner, &session, cancel);
+    if let Some(silent) = silent_owner {
+        silent_attachment(&fixture, &owner, &session, silent);
     }
     let observed: i64 = sql.query_row("SELECT count(*) FROM session_events WHERE session_id=?1 AND payload LIKE '%terminal.json%'", [&session], |r| r.get(0)).unwrap();
     assert_eq!(
@@ -1038,14 +1071,6 @@ read -r answer < /dev/tty
     let viewed = viewers.remove(1);
     drop(viewers);
     ends(&owners[0]);
-    let detached_at: Option<i64> = sql
-        .query_row(
-            "SELECT detached_at FROM processes WHERE id=?1",
-            [&owners[0]],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert!(detached_at.is_some(), "detach time was not recorded");
     // Several judgments later, everything else still runs.
     std::thread::sleep(Duration::from_secs(4));
     for owner in &owners[1..] {

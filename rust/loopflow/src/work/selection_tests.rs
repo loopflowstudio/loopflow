@@ -43,7 +43,7 @@ fn defaults_include_child_waves_and_uncompleted_wave_tasks_without_execution_fil
             None,
         ),
         (
-            key("paused", WorkWorkspaceKind::Task),
+            key("deferred", WorkWorkspaceKind::Task),
             Some(root.clone()),
             Some(true),
         ),
@@ -73,6 +73,8 @@ fn defaults_include_child_waves_and_uncompleted_wave_tasks_without_execution_fil
         states: match key.id.as_str() {
             "backlog" => BTreeSet::from([SelectionState::Backlog]),
             "done" => BTreeSet::from([SelectionState::Done]),
+            "deferred" => BTreeSet::from([SelectionState::Deferred]),
+            "idle" => BTreeSet::from([SelectionState::Idle]),
             _ => BTreeSet::new(),
         },
         key,
@@ -93,7 +95,7 @@ fn defaults_include_child_waves_and_uncompleted_wave_tasks_without_execution_fil
         [
             work[1].key.id.as_str(),
             empty.as_str(),
-            "paused",
+            "deferred",
             "idle",
             "backlog"
         ]
@@ -109,13 +111,13 @@ fn defaults_include_child_waves_and_uncompleted_wave_tasks_without_execution_fil
             .iter()
             .map(|member| member.work.id.as_str())
             .collect::<Vec<_>>(),
-        ["paused", "idle"]
+        ["deferred", "idle"]
     );
     assert_eq!(filtered.unavailable.len(), 1);
     let repo = node("root", SelectionExpression::Repository)
         .resolve("repo", &work, &BTreeMap::new())
         .unwrap();
-    assert_eq!(repo.members.len(), 3); // immediate Wave plus both recursive Tasks
+    assert_eq!(repo.members.len(), 2); // immediate Wave plus the idle Task; deferred isn't Working
     let explicit = node(
         "backlog",
         SelectionExpression::Work {
@@ -134,7 +136,7 @@ fn nested_sources_survive_insertions_and_report_unavailable_queries_and_cycles()
         parent_wave: None,
         open: Some(true),
         name: String::new(),
-        states: Default::default(),
+        states: BTreeSet::from([SelectionState::Idle]),
         activity_known: false,
     }];
     let query = DashboardId("saved".into());
@@ -476,7 +478,7 @@ fn query_selection_rejects_bad_syntax_and_ambiguous_refs_without_guessing() {
     assert!(empty.members.is_empty());
     assert_eq!(empty.unavailable, missing.unavailable);
     work[1].activity_known = false;
-    assert!(!Selection::parse("state:running", None)
+    assert!(!Selection::parse("state:busy", None)
         .unwrap()
         .resolve("repo", &work, &BTreeMap::new())
         .unwrap()
@@ -545,4 +547,60 @@ fn selection_portable_panes_round_trip_all_content_and_recovery() {
     );
     assert_eq!(layout.drafts[0].text, "unsaved edits");
     assert_ne!(layout.focused, layout.zoomed);
+}
+
+#[test]
+fn working_tasks_are_idle_active_or_moving_and_shipping_has_its_own_query() {
+    let wave = WaveId::new();
+    let work: Vec<_> = [
+        ("idle", SelectionState::Idle),
+        ("active", SelectionState::Active),
+        ("moving", SelectionState::Moving),
+        ("unstarted", SelectionState::Unstarted),
+        ("deferred", SelectionState::Deferred),
+        ("shipping", SelectionState::Shipping),
+    ]
+    .into_iter()
+    .map(|(id, state)| SelectionWork {
+        key: key(id, WorkWorkspaceKind::Task),
+        parent_wave: Some(wave.clone()),
+        open: Some(true),
+        name: id.into(),
+        states: BTreeSet::from([SelectionState::Open, state]),
+        activity_known: true,
+    })
+    .chain([SelectionWork {
+        key: key(wave.as_str(), WorkWorkspaceKind::Wave),
+        parent_wave: None,
+        open: None,
+        name: "wave".into(),
+        states: BTreeSet::new(),
+        activity_known: false,
+    }])
+    .collect();
+    let ids = |selection: Selection| {
+        selection
+            .resolve("repo", &work, &BTreeMap::new())
+            .unwrap()
+            .task_ids()
+    };
+    assert_eq!(
+        ids(node("repo", SelectionExpression::Repository)),
+        ["idle", "active", "moving"]
+    );
+    assert_eq!(
+        ids(node(
+            "wave",
+            SelectionExpression::Wave { wave: wave.clone() }
+        )),
+        ["idle", "active", "moving", "unstarted", "deferred"]
+    );
+    assert_eq!(
+        ids(Selection::parse("state:shipping", None).unwrap()),
+        ["shipping"]
+    );
+    assert_eq!(
+        ids(Selection::parse("state:moving", None).unwrap()),
+        ["moving"]
+    );
 }

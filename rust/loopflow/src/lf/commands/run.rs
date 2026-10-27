@@ -1,7 +1,6 @@
 use crate::agent::check_cli_available;
 use crate::agent::missing_agent_message;
 use crate::agent::run_agent;
-use crate::agent::stream::StreamFormat;
 use crate::agent::AgentConfig;
 use crate::agent::ProcessConfig;
 use crate::config::parse_agent;
@@ -321,7 +320,7 @@ fn operator_scope(
     use crate::durable::WorkRef;
     use crate::session::PrimaryScope;
 
-    if cli.bound_cwd.is_some() || cli.task.is_some() || cli.wt.is_some() {
+    if cli.cwd.is_some() || cli.task.is_some() || cli.wt.is_some() {
         return Ok(None);
     }
     let skill = resolve_skill(skill, cli, cwd)?;
@@ -750,10 +749,8 @@ fn run_headless_prompt(
         "wrote context log"
     );
 
-    let use_color = std::env::var("NO_COLOR").is_err() && std::io::stderr().is_terminal();
     let mut process = built.process.clone();
     process.context_file = context_file;
-    process.stream_format = StreamFormat::Human(use_color);
     process.capture = Some(capture.clone().into());
 
     // Set up directive relay so agent skills can issue shell directives
@@ -857,7 +854,6 @@ fn begin_capture(
         anyhow!("failed to publish Session capture manifest before agent launch: {error}")
     })?;
     capture.claim_session_attachment()?;
-    capture.record_input("initial", &built.context.task.text);
     debug!(
         elapsed_ms = started.elapsed().as_millis(),
         "published Session capture"

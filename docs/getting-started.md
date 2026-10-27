@@ -174,7 +174,7 @@ lf task create --wave <wave> --title "add OAuth login"
 lf task run <issue-id>
 lf task status <issue-id>
 lf comment <issue-id> "support passkeys too"
-lf wait <issue-id> --until terminal
+lf task wait <issue-id> --until terminal
 ```
 
 Turn a reviewed design into work without another planning subsystem:
@@ -212,17 +212,18 @@ Chain skills manually, or use a named graph (a graph is a sequence of steps; eac
 lf incident                            # unbreak → 5whys → launch-plan
 lf code                                # pursue: implement until it holds, publish the PR
 lf feature                             # kickoff → pursue; ends at a published PR
-lf ship                                # gate → land and complete the Task
+lf deliver                             # gate → land --wait-and-fix
 ```
 
 Use bare names for both skills and Graphs: `lf debug`, `lf code`, `lf incident`.
 `lf graph incident` explicitly selects the Graph when a name also names a skill
 or CLI command; the prefix is otherwise optional.
 
-Graph YAML owns step order and explicit backward edges. Every step is
-autonomous; design review and the demo happen in the Task conversation. A Graph
-with backward edges is a loopflow; it runs with or without a Task. `ship` and
-`deploy` supply explicitly selected delivery steps.
+Graph YAML owns step order and explicit backward edges. An `interactive: <skill>`
+step is a Workflow stage where a person takes part in the Task conversation;
+`lf ship` runs it headless instead. A Graph
+with backward edges is a loopflow; it runs with or without a Task. `deliver`
+gates the branch and lands it.
 
 ### Custom skills
 
@@ -256,11 +257,23 @@ lf submit    # prepare the exact head; you click merge
 lf arm       # arm exact-head auto-merge and return
 lf land      # request auto-merge, record delivery, and return
 lf pr reconcile # check recorded landings once and settle merges
-lf ci watch     # watch PR checks; start a ci-fix when a landing fails
 ```
 
 Use the same delivery verbs for Task and non-Task branches. They act on the
 branch and Task PR record when present; they do not require a running Task Graph.
+
+```bash
+lf ship           # run the Task's remaining steps to merge and completion
+lf ship --stop    # withdraw it; disarms auto-merge it armed
+```
+
+`lf ship` (or `lf ship ISSUE`) makes the Task shipping, stands in for you at each
+Workflow stage, running its skill headless, and keeps going after it returns
+until the Task completes (`-b` waits for that); `lf task status` follows it. On a branch with no Task it first creates one for the branch
+and its checkout. A second `lf ship` while one runs exits 0; `lf task defer`
+holds it, and the next read of the Task (`lf task status`, Desktop) restarts one
+that died. Choosing a
+route into `end` (`lf task run X deliver`) ships the Task the same way.
 
 ---
 
@@ -275,9 +288,8 @@ lf ps --json
 Author `.lf/wave/shipper/GOAL.md` with an objective and operating guidance.
 `lf cron add` schedules recurring commands on your Machine; `pm:` connects shared planning. Each
 `wave-operate` invocation keeps your started Tasks moving and leaves the plan alone.
-Tasks own implementation in stable worktrees; `lf land` hands off delivery and
-`lf pr reconcile` settles verified merges; `lf ci watch` repairs failed CI
-while it runs.
+Tasks own implementation in stable worktrees; `lf ship` lands them and repairs
+failed CI until merge; `lf pr reconcile` settles verified merges.
 
 Open the repository in Loopflow on macOS to read Waves, Tasks and conversations.
 `lf session list` finds conversations and Graph reviews; open one with

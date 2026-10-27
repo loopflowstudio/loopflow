@@ -21,8 +21,8 @@ successful completion of its Graph or Skill.
 For a missing receipt, inspect the executable and log path Doctor prints. Jobs
 installed before the stable entry gate may pin a superseded binary, which a
 later install removes, and fail before recording a receipt. After installing a release with this repair,
-run `lf cron sync` from the repository to reinstall your jobs;
-use `lf cron sync --repo` for repository Task checks. New scheduled invocations
+run `lf cron sync` from the repository to reinstall your jobs; it also removes
+the retired minute repository check. New scheduled invocations
 follow the selected installation across promotions. Existing Sessions
 retain their runtime ownership.
 
@@ -134,30 +134,27 @@ Other options:
 ## Disk space
 
 ```bash
-lf disk                                # ~/.lf by category against its budget, plus every worktree
+lf disk                                # ~/.lf by category, plus every worktree
 lf disk clean --dry-run                # what an aggressive cleanup would remove
 lf disk clean                          # remove it; logs each removal to ~/.lf/logs/disk.log
 ```
 
 `lf disk clean` removes worktrees `lf wt prune` would, completed Tasks' build
 output, dead process receipts, every database backup but the newest, and
-captures and logs older than `--keep-days` (7). It prunes the store to facts
-(provider stream lines stay in `runs/<capture>/events.jsonl`, and usage keeps
-one row per provider turn), closes Processes whose OS process is gone without
-recording an exit, and expires unreferenced inspection Processes older than
-seven days; Loopflow also does this hourly. Provider hooks (`lf __context-block`)
+captures and logs older than `--keep-days` (7). It merges native usage an
+earlier lf recorded per receipt into one row per provider turn, closes
+Processes whose OS process is gone without recording an exit, and expires
+unreferenced inspection Processes older than seven days; Loopflow also does
+this hourly. Provider hooks (`lf __context-block`)
 and Desktop's file and diff polls are never recorded as Processes. It then
-rotates `~/.lf` to its budget. Set the budget in `~/.lf/config.yaml`:
+removes everything else in `~/.lf` that rotates and is older than `--keep-days`.
 
-```yaml
-disk_budget: 20G                       # the default
-```
-
-Starting a Session rotates `~/.lf` at most hourly: the oldest backups, draft
-store copies, captures and logs go first. The database, account homes, the
-newest backup of each database, anything written in the last day and anything a
-process holds open are never removed, so `lf disk` can still show Home over
-budget.
+Starting a Session rotates `~/.lf` at most hourly: backups, draft store copies,
+captures and logs older than 30 days go, the same window Claude Code keeps its
+transcripts. There is no size budget. The database, account homes, the newest
+backup of each database, anything written in the last day and anything a
+process holds open are never removed. Provider transcripts follow each
+provider's own retention; raise Claude's `cleanupPeriodDays` to keep more.
 
 ## Worktree issues
 

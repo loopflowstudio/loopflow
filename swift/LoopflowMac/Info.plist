@@ -30,16 +30,12 @@
         </dict>
     </array>
     <key>LSMinimumSystemVersion</key>
-    <string>15.0</string>
+    <string>26.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>LSUIElement</key>
     <false/>
     <key>NSAppleEventsUsageDescription</key>
     <string>Loopflow needs to control terminal applications to open worktrees and run commands.</string>
-    <key>NSAppleScriptEnabled</key>
-    <true/>
-    <key>OSAScriptingDefinition</key>
-    <string>Loopflow.sdef</string>
 </dict>
 </plist>

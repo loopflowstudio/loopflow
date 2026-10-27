@@ -53,7 +53,7 @@ For each remaining independently shippable outcome, choose one of two actions:
   lf task create --wave <wave> --title "<desired experience>" <<'BRIEF'
   <short user-problem brief; durable design reference>
   BRIEF
-  lf task run <issue>   # its workflow's first edge, or its Wave/repository default
+  lf task run <issue>   # its workflow's first route, or its Wave/repository default
   ```
   Stdin files the Task description; `--directive` on `task run` supplies
   direction, not that durable brief. Use `--stack-on <current-task>` when it
@@ -113,9 +113,9 @@ For an approved design, `--graph pursue` enters implement → compress → refre
 Either decider's Iterate returns to implementation; the second's Advance
 publishes and ends the pursuit. The `code` workflow starts with that
 pursuit; `feature` drafts the design first; both land an accepted PR through
-`ship`. Design review and the demo are workflow nodes in the Task
-conversation, never Graph steps. A Task on a workflow takes only an edge
-leaving its current node: bare `lf task run <issue>` takes the only one or
+`ship`. Design review and the demo are workflow stages in the Task
+conversation, never Graph steps. A Task on a workflow takes only a route
+leaving its current stage: bare `lf task run <issue>` takes the only one or
 names the choices, `lf task run <issue> <graph>` picks one, and naming a
 workflow takes it up from its start. `lf --task <issue> graph <graph>` runs any
 Graph without moving the Task.

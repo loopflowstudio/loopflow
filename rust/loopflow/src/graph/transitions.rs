@@ -120,7 +120,7 @@ mod tests {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(id),
             id: Some(id.to_owned()),
-            human: false,
+            interactive: false,
             returns,
             sources: vec![],
         })
@@ -165,7 +165,7 @@ mod tests {
         for human in [false, true] {
             let mut review = step("review", None);
             if let ConcreteStep::Skill(skill) = &mut review {
-                skill.human = human;
+                skill.interactive = human;
             }
             let steps = [step("work", None), review];
             let mut progress = GraphProgress::default();

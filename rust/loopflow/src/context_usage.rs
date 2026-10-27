@@ -1,24 +1,23 @@
 //! What each recorded agent step's submitted input was made of.
 //!
-//! A Session capture already holds the evidence: `context.json` attributes the
-//! exact assembled prompt to its sources, and `events.jsonl` retains provider
-//! requests, tool results and compaction boundaries. This reader folds both
-//! into one breakdown per step. It writes nothing and owns no store.
+//! The capture's `context.json` attributes the exact assembled prompt to its
+//! sources, and each provider turn's `completed` receipt retains its requests,
+//! tool results and compactions. This reader folds both into one breakdown per
+//! step. It writes nothing.
 //!
 //! Units differ by source and are never converted. Assembled sources and tool
 //! output are cl100k tokens counted locally; `carried` and `compaction` are the
 //! provider's own counts. A source the record cannot measure is `None`, not zero.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::BufRead;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::prompt::context_budget::{BudgetKey, ContextBudgets};
-use crate::prompt::count_tokens;
+use crate::session::TurnContext;
 use crate::session_record::SessionHistory;
+use crate::store::sqlite::SqliteStore;
 use crate::trace::{ContextAsset, ContextAssetKind, ContextDecision};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -180,20 +179,25 @@ fn sum(total: Option<u64>, value: Option<u64>) -> Option<u64> {
     }
 }
 
-/// Explain one recorded step from its capture, flagged against current budgets.
-pub fn step_context(home: &Path, history: &SessionHistory) -> StepContext {
-    let dir = history
-        .artifact_key
-        .as_deref()
-        .and_then(|key| crate::session_record::record_dir(home, key));
-    let mut step = match &dir {
-        Some(dir) => read_capture(dir),
+/// Explain one recorded step from its capture and retained turns, flagged
+/// against current budgets.
+pub fn step_context(home: &Path, store: &SqliteStore, history: &SessionHistory) -> StepContext {
+    let input = history.artifact_key.as_deref();
+    let mut measured = match input.and_then(|key| crate::session_record::record_dir(home, key)) {
+        Some(dir) => read_capture(&dir),
         None => Measured {
             gaps: vec!["this input has no retained capture".to_string()],
             ..Measured::default()
         },
+    };
+    match input.map(|input| store.input_turn_context(input)) {
+        Some(Ok(turns)) => measured.read_turns(turns),
+        Some(Err(error)) => measured
+            .gaps
+            .push(format!("provider turns are unreadable: {error}")),
+        None => {}
     }
-    .into_step(history);
+    let mut step = measured.into_step(history);
     if let Some(budgets) = budgets(history) {
         flag(&mut step, &budgets);
     }
@@ -253,13 +257,8 @@ struct Measured {
     assembled: Option<BTreeMap<ContextSource, (u64, u64)>>,
     steers: Option<u64>,
     authors: BTreeSet<String>,
-    first_request: Option<u64>,
-    peak_request: Option<u64>,
-    tool_results: u64,
-    tool_tokens: u64,
-    compactions: u64,
-    compaction_tokens: Option<u64>,
-    events_read: bool,
+    /// Present only when every provider turn retained its context.
+    provider: Option<TurnContext>,
     gaps: Vec<String>,
 }
 
@@ -308,20 +307,6 @@ fn read_capture(dir: &Path) -> Measured {
             .gaps
             .push(format!("context.json is unreadable: {error}")),
     }
-    match std::fs::File::open(dir.join("events.jsonl")) {
-        Ok(file) => {
-            measured.events_read = true;
-            let mut requests = BTreeSet::new();
-            for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
-                if let Ok(event) = serde_json::from_str::<Value>(&line) {
-                    measured.read_event(&event, &mut requests);
-                }
-            }
-        }
-        Err(_) => measured
-            .gaps
-            .push("no events.jsonl: provider activity was not captured".to_string()),
-    }
     measured
 }
 
@@ -364,110 +349,46 @@ impl Measured {
         self.assembled = Some(assembled);
     }
 
-    fn read_event(&mut self, event: &Value, requests: &mut BTreeSet<String>) {
-        match event["type"].as_str() {
-            Some("provider_output") if event["stream"] == "stdout" => {
-                let Some(line) = event["line"].as_str() else {
-                    return;
-                };
-                // Cheap rejection before parsing megabytes of unrelated output.
-                if !line.starts_with('{') {
-                    return;
-                }
-                if let Ok(output) = serde_json::from_str::<Value>(line) {
-                    self.read_claude_output(&output, requests);
-                }
-            }
-            Some("conversation") if event["event"]["type"] == "item_completed" => {
-                if let Some(output) = event["event"]["item"]["output"].as_str() {
-                    self.add_tool_result(output);
-                }
-            }
-            Some("usage") => {
-                let peak = event["usage"]["peak_input_tokens"].as_u64();
-                self.peak_request = self.peak_request.max(peak);
-            }
-            _ => {}
-        }
-    }
-
-    /// Claude's stream-json. Subagent traffic has its own context window, so
-    /// only lines without a parent tool use describe this step's conversation.
-    fn read_claude_output(&mut self, output: &Value, requests: &mut BTreeSet<String>) {
-        if !output["parent_tool_use_id"].is_null() {
+    /// Sum one step's provider turns: the first turn's first request, the
+    /// largest request, and every tool result and compaction.
+    fn read_turns(&mut self, turns: Vec<Option<TurnContext>>) {
+        if turns.is_empty() {
+            self.gaps
+                .push("no provider turn completed for this step".to_string());
             return;
         }
-        match output["type"].as_str() {
-            Some("assistant") => {
-                let usage = &output["message"]["usage"];
-                let Some(input) = usage["input_tokens"].as_u64() else {
-                    return;
-                };
-                // One request streams several lines repeating the same usage.
-                let id = output["message"]["id"].as_str().unwrap_or_default();
-                if !id.is_empty() && !requests.insert(id.to_string()) {
-                    return;
-                }
-                let request = input
-                    + usage["cache_read_input_tokens"].as_u64().unwrap_or(0)
-                    + usage["cache_creation_input_tokens"].as_u64().unwrap_or(0);
-                self.first_request.get_or_insert(request);
-                self.peak_request = self.peak_request.max(Some(request));
-            }
-            Some("user") => {
-                for block in output["message"]["content"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter(|block| block["type"] == "tool_result")
-                {
-                    match &block["content"] {
-                        Value::String(text) => self.add_tool_result(text),
-                        Value::Array(parts) => {
-                            let text = parts
-                                .iter()
-                                .filter_map(|part| part["text"].as_str())
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            self.add_tool_result(&text);
-                        }
-                        _ => self.add_tool_result(""),
-                    }
-                }
-            }
-            Some("system") if output["subtype"] == "compact_boundary" => {
-                self.compactions += 1;
-                self.compaction_tokens = sum(
-                    self.compaction_tokens,
-                    output["compact_metadata"]["pre_tokens"].as_u64(),
-                );
-            }
-            _ => {}
+        let Some(turns) = turns.into_iter().collect::<Option<Vec<_>>>() else {
+            self.gaps
+                .push("provider context was not recorded for this step".to_string());
+            return;
+        };
+        let mut step = TurnContext::default();
+        for turn in turns {
+            step.first_request_tokens = step.first_request_tokens.or(turn.first_request_tokens);
+            step.peak_request_tokens = step.peak_request_tokens.max(turn.peak_request_tokens);
+            step.tool_results += turn.tool_results;
+            step.tool_output_tokens += turn.tool_output_tokens;
+            step.compactions += turn.compactions;
+            step.compaction_tokens = sum(step.compaction_tokens, turn.compaction_tokens);
         }
-    }
-
-    fn add_tool_result(&mut self, text: &str) {
-        self.tool_results += 1;
-        if !text.is_empty() {
-            self.tool_tokens += count_tokens(text) as u64;
-        }
-    }
-
-    fn into_step(mut self, history: &SessionHistory) -> StepContext {
-        let assembled_tokens = self
-            .assembled
-            .as_ref()
-            .map(|sources| sources.values().map(|(tokens, _)| tokens).sum::<u64>());
-        if self.events_read && self.first_request.is_none() {
+        if step.first_request_tokens.is_none() {
             self.gaps.push(
                 "provider reported no per-request input: carried context is unknown".to_string(),
             );
         }
-        let carried = self
-            .first_request
+        self.provider = Some(step);
+    }
+
+    fn into_step(self, history: &SessionHistory) -> StepContext {
+        let assembled_tokens = self
+            .assembled
+            .as_ref()
+            .map(|sources| sources.values().map(|(tokens, _)| tokens).sum::<u64>());
+        let provider = self.provider.as_ref();
+        let first_request = provider.and_then(|turns| turns.first_request_tokens);
+        let carried = first_request
             .zip(assembled_tokens)
             .map(|(first, assembled)| first.saturating_sub(assembled));
-        let events = self.events_read;
         let sources = ContextSource::ALL
             .into_iter()
             .map(|source| {
@@ -475,12 +396,12 @@ impl Measured {
                 match source {
                     ContextSource::Carried => usage.tokens = carried,
                     ContextSource::ToolOutput => {
-                        usage.tokens = events.then_some(self.tool_tokens);
-                        usage.count = events.then_some(self.tool_results);
+                        usage.tokens = provider.map(|turns| turns.tool_output_tokens);
+                        usage.count = provider.map(|turns| turns.tool_results);
                     }
                     ContextSource::Compaction => {
-                        usage.tokens = self.compaction_tokens;
-                        usage.count = events.then_some(self.compactions);
+                        usage.tokens = provider.and_then(|turns| turns.compaction_tokens);
+                        usage.count = provider.map(|turns| turns.compactions);
                     }
                     _ => {
                         if let Some(assembled) = &self.assembled {
@@ -506,8 +427,8 @@ impl Measured {
             observed_at: history.observed_at,
             sources,
             assembled_tokens,
-            first_request_tokens: self.first_request,
-            peak_request_tokens: self.peak_request,
+            first_request_tokens: first_request,
+            peak_request_tokens: provider.and_then(|turns| turns.peak_request_tokens),
             gaps: self.gaps,
         }
     }
@@ -654,6 +575,7 @@ fn cell(tokens: Option<u64>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{read_capture, ContextReport, ContextSource, StepContext};
+    use crate::session::TurnContext;
     use crate::trace::{
         ContextAssetKind, ContextAssetSpec, ContextChannel, ContextDecision, ContextDecisionKind,
         ContextScope, PreparedTurnContext,
@@ -687,28 +609,14 @@ mod tests {
         }
     }
 
-    fn event(seq: u64, body: serde_json::Value) -> String {
-        let mut event = serde_json::json!({"schema_version": 1, "seq": seq});
-        event
-            .as_object_mut()
-            .unwrap()
-            .extend(body.as_object().unwrap().clone());
-        format!("{event}\n")
-    }
-
-    fn claude(seq: u64, output: serde_json::Value) -> String {
-        event(
-            seq,
-            serde_json::json!({"type": "provider_output", "stream": "stdout", "line": output.to_string()}),
-        )
-    }
-
-    fn step(dir: &std::path::Path) -> StepContext {
+    fn step(dir: &std::path::Path, turns: Vec<Option<TurnContext>>) -> StepContext {
         let history: crate::session_record::SessionHistory = serde_json::from_str(include_str!(
             "../../../tests/fixtures/dto/session_history_summary.json"
         ))
         .unwrap();
-        read_capture(dir).into_step(&history)
+        let mut measured = read_capture(dir);
+        measured.read_turns(turns);
+        measured.into_step(&history)
     }
 
     fn tokens(step: &StepContext, source: ContextSource) -> Option<u64> {
@@ -744,30 +652,26 @@ mod tests {
             serde_json::json!({"schema_version": 1, "context": context}).to_string(),
         )
         .unwrap();
-        let request = |id: &str, cached: u64| {
-            serde_json::json!({"type": "assistant", "parent_tool_use_id": null, "message": {"id": id,
-                "usage": {"input_tokens": 10, "cache_read_input_tokens": cached, "cache_creation_input_tokens": 0}}})
-        };
-        let result = |parent: serde_json::Value, text: &str| {
-            serde_json::json!({"type": "user", "parent_tool_use_id": parent, "message": {"content": [
-                {"type": "tool_result", "content": text}]}})
-        };
-        let events = [
-            claude(0, request("a", 990)),
-            claude(1, request("a", 990)),
-            claude(2, result(serde_json::Value::Null, "tool said this")),
-            claude(3, result(serde_json::json!("toolu_1"), "inside a subagent")),
-            claude(
-                4,
-                serde_json::json!({"type": "system", "subtype": "compact_boundary",
-                    "compact_metadata": {"trigger": "auto", "pre_tokens": 150000}}),
-            ),
-            claude(5, request("b", 4990)),
-        ]
-        .concat();
-        std::fs::write(dir.path().join("events.jsonl"), events).unwrap();
+        let turns = vec![
+            Some(TurnContext {
+                first_request_tokens: Some(1000),
+                peak_request_tokens: Some(3000),
+                tool_results: 1,
+                tool_output_tokens: 4,
+                compactions: 1,
+                compaction_tokens: Some(150000),
+            }),
+            Some(TurnContext {
+                first_request_tokens: Some(4000),
+                peak_request_tokens: Some(5000),
+                tool_results: 2,
+                tool_output_tokens: 6,
+                compactions: 0,
+                compaction_tokens: None,
+            }),
+        ];
 
-        let step = step(dir.path());
+        let step = step(dir.path(), turns);
 
         assert_eq!(step.assembled_tokens, Some(assembled));
         assert_eq!(
@@ -797,8 +701,7 @@ mod tests {
             Some(1000 - assembled)
         );
         let tools = &step.sources[7];
-        assert_eq!(tools.count, Some(1));
-        assert!(tools.tokens.unwrap() > 0);
+        assert_eq!((tools.count, tools.tokens), (Some(3), Some(10)));
         let compaction = &step.sources[8];
         assert_eq!(
             (compaction.count, compaction.tokens),
@@ -810,7 +713,7 @@ mod tests {
     #[test]
     fn missing_evidence_is_unknown_not_zero() {
         let dir = tempfile::tempdir().unwrap();
-        let step = step(dir.path());
+        let step = step(dir.path(), vec![Some(TurnContext::default()), None]);
         assert!(step.sources.iter().all(|usage| usage.tokens.is_none()));
         assert_eq!(step.assembled_tokens, None);
         assert_eq!(step.gaps.len(), 2);
@@ -836,7 +739,7 @@ mod tests {
             serde_json::json!({"schema_version": 1, "context": context}).to_string(),
         )
         .unwrap();
-        let mut step = step(dir.path());
+        let mut step = step(dir.path(), Vec::new());
         let mut config = crate::config::Config::default();
         for key in crate::prompt::context_budget::BudgetKey::ALL {
             config.context_budgets.insert(key, 50);

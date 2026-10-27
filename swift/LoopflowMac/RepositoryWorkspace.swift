@@ -42,7 +42,7 @@ final class WorkLinkRouter {
         let focus: () -> Void
         let receive: (LinkedWork) async -> Void
         let inspect: (String, UUID) -> DesktopWindowInspection
-        let controlPane: (DesktopPaneCommand) throws -> (pane: String, tab: String?)
+        let perform: (DesktopActionRequest) throws -> DesktopActionOutcome
         let readText: (DesktopTextRequest) throws -> DesktopTextReading
     }
     private struct RepositoryOpening {
@@ -93,7 +93,7 @@ final class WorkLinkRouter {
     func register(_ incarnation: UUID, repository: String, openingRequests: Set<UUID> = [],
                   focus: @escaping () -> Void,
                   inspect: @escaping (String, UUID) -> DesktopWindowInspection,
-                  controlPane: @escaping (DesktopPaneCommand) throws -> (pane: String, tab: String?),
+                  perform: @escaping (DesktopActionRequest) throws -> DesktopActionOutcome,
                   readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
                   receive: @escaping (LinkedWork) async -> Void) {
         let previous = targets[repository]
@@ -101,7 +101,7 @@ final class WorkLinkRouter {
             delivering.removeValue(forKey: repository)?.task.cancel()
         }
         let token = previous.flatMap { $0.registration == incarnation ? $0.incarnation : nil } ?? incarnation
-        targets[repository] = Target(registration: incarnation, incarnation: token, focus: focus, receive: receive, inspect: inspect, controlPane: controlPane, readText: readText)
+        targets[repository] = Target(registration: incarnation, incarnation: token, focus: focus, receive: receive, inspect: inspect, perform: perform, readText: readText)
         confirmRegisteredWorkspace(repository, requests: openingRequests)
         deliverPending(repository)
     }
@@ -265,12 +265,21 @@ final class WorkLinkRouter {
         })
     }
 
-    /// Validation and mutation stay in this MainActor turn; no focus fallback.
+    /// Validation, mutation and the following reading stay in this MainActor
+    /// turn, so the receipt is what the next inspection reports. No focus fallback.
     @discardableResult
-    func controlPane(_ request: DesktopPaneCommand) throws -> DesktopPaneReceipt {
-        let receiver = try receiver(for: request.target)
-        let pane = try receiver.controlPane(request)
-        return DesktopPaneReceipt(target: request.target, pane: pane.pane, tab: pane.tab, observedAt: Int64(Date().timeIntervalSince1970))
+    func perform(_ request: DesktopActionRequest) throws -> DesktopActionReceipt {
+        if let pane = request.pane, pane.repository != request.repository || pane.window != request.window {
+            throw DesktopTargetError("The pane belongs to another window; nothing changed.")
+        }
+        let receiver = try receiver(repository: request.repository, window: request.window)
+        let outcome = try receiver.perform(request)
+        let window = receiver.inspect(request.repository, receiver.incarnation)
+        let work = request.pane?.work
+        return DesktopActionReceipt(repository: request.repository, window: request.window, action: request.action,
+            destination: window.destination, history: window.history, pane: outcome.pane, tab: outcome.tab,
+            workspace: work.flatMap { work in window.workspaces.first { $0.work == work } },
+            observedAt: Int64(Date().timeIntervalSince1970), appliesTo: .window)
     }
 
     /// Resolve and read synchronously; no client acquisition or focus fallback.
@@ -282,9 +291,13 @@ final class WorkLinkRouter {
     }
 
     private func receiver(for target: DesktopPaneTarget) throws -> Target {
-        guard let scene = scene(for: target.repository), let receiver = targets[scene],
-              receiver.incarnation.uuidString == target.window else {
-            throw RegistryQueryError("The repository window was closed or replaced. Inspect Desktop again; no pane was changed.")
+        try receiver(repository: target.repository, window: target.window)
+    }
+
+    private func receiver(repository: String, window: String) throws -> Target {
+        guard let scene = scene(for: repository), let receiver = targets[scene],
+              receiver.incarnation.uuidString == window else {
+            throw DesktopTargetError("The repository window was closed or replaced. Inspect Desktop again; nothing was changed.")
         }
         return receiver
     }

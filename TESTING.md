@@ -642,9 +642,9 @@ Rust partitions wait for one shared build; the other suites run independently.
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
 | `e2e-smoke` | ubuntu-latest | both planning-reconnect proofs, then `tests/e2e/test_smoke.sh` |
 | `task-installation` | ubuntu-latest | `uv run python scripts/test_task_installation.py` |
-| `swift-test` | macos-15 | app build, headless model/view tests, boundary check |
+| `swift-test` | macos-26 | app build, headless model/view tests, boundary check |
 | `macos-process-test` | macos-15 | deleted-executable and exact process-authority regression |
-| `loopflow-ui-test` | macos-15 | xcodegen + app/test-runner compile |
+| `loopflow-ui-test` | macos-26 | xcodegen + app/test-runner compile |
 
 Candidate and merge-group jobs must all pass for `tests-result` to pass. Both CI
 and the local runner collect every Rust test failure with `--no-fail-fast`.
@@ -844,7 +844,7 @@ registered-Task fixtures must reuse it rather than insert a second owner.
 
 Planning-owner changes must cover context/catalog reads, Wave relocation, Task
 initialization, Workflow completion/reopening and PR delivery fixtures alongside
-the new planning APIs. Write Wave goal/memory and `.lf/workflows/` fixtures directly in their checkout;
+the new planning APIs. Write Wave goal/memory and `.lf/graphs/` fixtures directly in their checkout;
 writing a Workflow file is not a planning mutation.
 An existing checkout fixture must settle initialization before testing delivery.
 Prompt fixtures nested in the source tree must fence Git discovery so the enclosing
@@ -1387,12 +1387,7 @@ the Session attachment references share the same database. Simulated finite-prov
 harnesses must record their owned child exit; an absent endpoint is not exit
 evidence.
 
-Launch proofs use provider-written evidence and terminal receipts. Session
-completion gives the asynchronous telemetry recorder only 250 ms to drain;
-returning successfully does not guarantee `events.jsonl` is complete. Keep
-usage and account-event assertions in the recorder tests, rather than racing
-its queue in subprocess-launch tests. Reproduce suspected races with a temporary
-recorder delay beyond that drain window; remove the delay before publication.
+Launch proofs use provider-written evidence and terminal receipts.
 
 ### Reproducing races without CPU load
 
@@ -1420,6 +1415,11 @@ changes require `DesktopHeadlessTests` alongside `WaveTests` to verify rendered 
 
 Fixture Machines must set `LF_HOME` explicitly, including when overriding `HOME`.
 Open fixture stores at `$LF_HOME/loopflow.db`; no variable selects another file.
+
+Every integration test binary except the deliberate real-provider `codex_live_smoke` links
+`rust/loopflow/tests/support`, whose pre-main initializer removes inherited
+`CODEX_HOME` and `CLAUDE_CONFIG_DIR`: agent shells export the developer's real
+provider home, and a fixture launch would swap its login there.
 
 Managed-account status fixtures also pin `CLAUDE_CONFIG_DIR` to a disposable
 native home: verification observes the native login before polling managed

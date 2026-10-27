@@ -396,7 +396,6 @@ def release() -> int:
     _copy_app_executable(build_dir, info_plist, app_dir / "MacOS")
     shutil.copy(info_plist, app_dir)
     stamp_bundle_version(app_dir / "Info.plist", version)
-    shutil.copy(SWIFT_DIR / "LoopflowMac" / "Loopflow.sdef", app_dir / "Resources")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS")
     (app_dir / "PkgInfo").write_text("APPL????")

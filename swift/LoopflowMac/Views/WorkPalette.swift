@@ -79,7 +79,7 @@ extension WorkModel {
         var rows = paletteRows
         if sidebarOnly {
             let sidebar = Set(sidebarTaskIDs.map { WorkDestination.task($0) }
-                + visibleRoadmaps.map { WorkDestination.wave($0.wave.id) })
+                + sidebarWaves.map { WorkDestination.wave($0.wave.id) })
             rows.removeAll { !sidebar.contains($0.id) }
         }
         let working = Set(workingTaskIDs)
@@ -289,33 +289,26 @@ struct TaskLinkView: View {
     }
 }
 
+/// Window chrome keys; Work navigation keys are registry actions.
 enum WorkNavigationShortcut: Equatable {
     case search
     case toggleSidebar
-    case task(Int)
-    case adjacent(Int)
 
     init?(characters: String?, modifiers: NSEvent.ModifierFlags) {
         let keys = modifiers.intersection([.command, .shift, .control, .option])
         switch (characters?.lowercased(), keys) {
         case ("k", [.command]): self = .search
         case ("\\", [.command]): self = .toggleSidebar
-        case ("\t", [.control]): self = .adjacent(1)
-        case ("\t", [.control, .shift]), ("\u{19}", [.control, .shift]): self = .adjacent(-1)
-        case (let character?, [.command]) where Int(character).map({ (1...9).contains($0) }) == true:
-            guard let slot = Int(character) else { return nil }
-            self = .task(slot - 1)
         default: return nil
         }
     }
 }
 
-/// Navigation shortcuts are intercepted before a retained terminal can consume them.
+/// Chrome shortcuts are intercepted before a retained terminal can consume them.
 struct WorkPaletteShortcut: NSViewRepresentable {
     let presented: Bool
     let restoreFocus: Bool
     let toggleSidebar: () -> Void
-    let navigate: (WorkNavigationShortcut) -> Void
     var modifiersChanged: (Bool) -> Void = { _ in }
     let open: () -> Void
     func makeNSView(context: Context) -> NSView {
@@ -339,19 +332,17 @@ struct WorkPaletteShortcut: NSViewRepresentable {
                     coordinator.previous = window.firstResponder
                     coordinator.open()
                 }
-            case .task, .adjacent: coordinator.navigate(shortcut)
             }
             return nil
         }
         return view
     }
-    func makeCoordinator() -> Coordinator { Coordinator(open: open, toggleSidebar: toggleSidebar, navigate: navigate) }
+    func makeCoordinator() -> Coordinator { Coordinator(open: open, toggleSidebar: toggleSidebar) }
     func updateNSView(_ view: NSView, context: Context) {
         let coordinator = context.coordinator
         coordinator.modifiersChanged = modifiersChanged
         coordinator.open = open
         coordinator.toggleSidebar = toggleSidebar
-        coordinator.navigate = navigate
         if !coordinator.presented && presented && coordinator.previous == nil {
             coordinator.previous = view.window?.firstResponder
         }
@@ -374,11 +365,9 @@ struct WorkPaletteShortcut: NSViewRepresentable {
         var presented = false
         var open: () -> Void
         var toggleSidebar: () -> Void
-        var navigate: (WorkNavigationShortcut) -> Void
-        init(open: @escaping () -> Void, toggleSidebar: @escaping () -> Void, navigate: @escaping (WorkNavigationShortcut) -> Void) {
+        init(open: @escaping () -> Void, toggleSidebar: @escaping () -> Void) {
             self.open = open
             self.toggleSidebar = toggleSidebar
-            self.navigate = navigate
         }
     }
 }
@@ -398,7 +387,7 @@ struct GraphCatalogInspector: View {
                 Button(entry.source == nil ? "Customize" : "Edit") {
                     Task {
                         do {
-                            let url = try await model.definitionSource(entry)
+                            let url = try await model.definitionFile(entry.name)
                             sourceError = nil
                             NSWorkspace.shared.open(url)
                         } catch { sourceError = error.localizedDescription }
@@ -432,7 +421,7 @@ struct WorkflowCatalogInspector: View {
                 Button(entry.source == nil ? "Customize" : "Edit") {
                     Task {
                         do {
-                            let url = try await model.workflowDefinitionFile(entry)
+                            let url = try await model.definitionFile(entry.name)
                             sourceError = nil
                             NSWorkspace.shared.open(url)
                         } catch { sourceError = error.localizedDescription }

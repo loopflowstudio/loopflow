@@ -9,7 +9,7 @@ first, then the engineering words it borrows.
 |---|---|
 | **Skill** | One step: instructions for the AI, written as a text file in `.lf/skills/`. |
 | **Graph** | Steps in order, written as a file in `.lf/graphs/`. |
-| **Workflow** | A Task's nodes, where you take part in its conversation, joined by the graphs that run between them. Written as a file in `.lf/workflows/`. |
+| **Workflow** | A graph a Task takes up; its `interactive:` steps are stages where you take part in its conversation. Written as a file in `.lf/graphs/`. |
 | **Loopflow** | A graph that can go back and try again. Exactly: a graph with at least one backward edge. |
 | **Deciding step** | The step that chooses between moving on and going back. |
 | **Task** | One piece of work with a finish line. |

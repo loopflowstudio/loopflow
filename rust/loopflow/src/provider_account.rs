@@ -2838,7 +2838,7 @@ mod account_first_tests {
                 .unwrap();
         }
 
-        // `first` is active, first in the route and under the strain line.
+        // `first` is active and first in the route, but `second` has more room.
         let route = resolve_provider_account(Provider::Codex, None)
             .await
             .unwrap()

@@ -1811,12 +1811,12 @@ impl SqliteStore {
                 .iter()
                 .position(|account| account.account_id.as_str() == account_id)
         });
-        let (mut account, resume_requested_session) = match resumed {
-            Some(index) => (available.remove(index), true),
+        let mut account = match resumed {
+            Some(index) => available.remove(index),
             None => {
                 crate::provider_account::order_accounts_by_strain(&mut available, &limits, now);
                 match available.into_iter().next() {
-                    Some(selection) => (selection, false),
+                    Some(selection) => selection,
                     None => {
                         transaction.commit()?;
                         return Ok(None);
@@ -1837,10 +1837,7 @@ impl SqliteStore {
         transaction.commit()?;
         account.last_selected_at = Some(selection_time);
         account.updated_at = selection_time;
-        Ok(Some(ProviderAccountSelection {
-            account,
-            resume_requested_session,
-        }))
+        Ok(Some(ProviderAccountSelection { account }))
     }
 
     pub fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {

@@ -327,7 +327,10 @@ async fn list(
                     SessionState::Closed => "closed",
                 },
                 session.work_path.as_deref().unwrap_or("Repository"),
-                session.title
+                match &session.account {
+                    Some(account) => format!("{}  on {account}", session.title),
+                    None => session.title.clone(),
+                }
             );
             for action in session.actions {
                 println!(

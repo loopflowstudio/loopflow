@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-628 concept review</title>
+<style>
+:root {
+  --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b6760; --rule: #e3dfd6;
+  --code-bg: #f1eee7; --proposed: #9a5b00; --proposed-bg: #fff4e0;
+  --existing: #2f6b3c; --callout: #fdf1ef; --callout-rule: #c2462d;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171614; --fg: #e9e6df; --muted: #9b968c; --rule: #33302b;
+    --code-bg: #24221e; --proposed: #f0b45a; --proposed-bg: #2e2617;
+    --existing: #7fc48f; --callout: #2a1c19; --callout-rule: #e0735a;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 17px/1.6 ui-serif, Georgia, "Iowan Old Style", serif;
+}
+main { max-width: 44rem; margin: 0 auto; padding: 2.5rem 16px 5rem; }
+header { color: var(--muted); font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; border-bottom: 1px solid var(--rule); padding-bottom: 1rem; margin-bottom: 2rem; }
+header code { font-size: 13px; }
+h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 .4rem; color: var(--fg); }
+h2 { font-size: 1.2rem; margin: 2.6rem 0 .6rem; }
+h3 { font: 600 15px/1.4 ui-sans-serif, system-ui, sans-serif; margin: 1.6rem 0 .4rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+code, pre { font: 14px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
+code { background: var(--code-bg); padding: .1em .3em; border-radius: 3px; }
+pre { background: var(--code-bg); padding: .9rem 1rem; border-radius: 6px; overflow-x: auto; white-space: pre; }
+pre code { background: none; padding: 0; }
+.proposed { color: var(--proposed); }
+.existing { color: var(--existing); }
+.tag { font: 600 12px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: .05em; text-transform: uppercase; }
+.box-proposed { border-left: 3px solid var(--proposed); background: var(--proposed-bg); padding: .6rem 1rem; border-radius: 0 6px 6px 0; }
+.callout { border-left: 3px solid var(--callout-rule); background: var(--callout); padding: .9rem 1.1rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+.callout p:first-child { margin-top: 0; }
+.callout p:last-child { margin-bottom: 0; }
+table { border-collapse: collapse; width: 100%; font: 15px/1.45 ui-sans-serif, system-ui, sans-serif; margin: .8rem 0; }
+th, td { text-align: left; vertical-align: top; padding: .5rem .6rem .5rem 0; border-bottom: 1px solid var(--rule); }
+th { color: var(--muted); font-weight: 600; }
+.wrap { overflow-x: auto; }
+ol.q > li { margin-bottom: 1rem; }
+ol.q ol { list-style: lower-alpha; margin-top: .3rem; }
+.lead { font-size: 1.1rem; }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>LOO-628: moving a Session, moving a Task</h1>
+  Task LOO-628 · design review (explore) · 2026-10-26<br>
+  Built from <code>scratch/loo-628-lf-resume-moves.md</code>, <code>scratch/questions.md</code>,
+  <code>provider_account/selection.rs</code>, <code>transcript/mod.rs</code>, <code>config.rs</code> (<code>resume_choice</code>),
+  <code>lf machine use --help</code>, <code>lf session connect --help</code>
+</header>
+
+<p class="lead">Every decision is settled (Jack Heart, 2026-10-26), and the
+design is going to implementation. Only the demo is still open: Codex's
+encrypted reasoning under another ChatGPT login.</p>
+
+<h2>What you do</h2>
+<pre><code># ran out of room on this login (any Session, same Machine)
+lf resume --account jackstah@gmail.com -a claude
+
+# move a Task: ownership, Workflow, branch, and its conversation
+lf task move LOO-12 --machine mini
+#   Committed 3 files on jack/loo-12-… and pushed
+#   LOO-12 now runs on mini (Workflow at `explore`); its Session moved with it
+
+# move only a conversation (you know what you're doing)
+lf --machine mini resume &lt;session&gt;</code></pre>
+
+<h2>Actions → concepts → APIs</h2>
+<div class="wrap">
+<table>
+  <tr><th>Action</th><th>What moves</th><th>Before (today)</th><th class="proposed">After</th></tr>
+  <tr><td>change login</td><td>Session's pinned account</td><td>shared home only; isolated starts empty</td><td class="proposed">any Session; transcript copied, same id</td></tr>
+  <tr><td>move a conversation</td><td>branch + history + Session id</td><td>nothing (<code>--machine</code> forwards and fails)</td><td class="proposed"><code>send</code> → <code>receive</code>; source row records where it went</td></tr>
+  <tr><td>move a Task</td><td>ownership + Workflow + Session move</td><td><code>lf machine use --task</code>: ownership only, Session completed, history left behind</td><td class="proposed"><code>lf task move --machine</code>; <code>machine use --task</code> deleted</td></tr>
+</table>
+</div>
+
+<h3 class="proposed">One payload for both</h3>
+<div class="box-proposed">
+<pre><code>Move {
+  from_machine_id
+  session:  { id, name, title_source, task_id, provider, model } | null
+  checkout: { repository_id, branch, commit }
+  history                                   // carrier: question 2
+  task:     { ownership_marker,
+              workflow: { graph, node, edge, moves[] } } | null
+}</code></pre>
+</div>
+<p>The Workflow's <em>selection</em> already reaches other Machines through
+planning sync. Its <em>position and history</em> (<code>task_workflows</code>,
+<code>task_workflow_moves</code>) are rows on the owner's Machine, so the Task
+move carries them. The process ids in the history are cleared, because those
+processes stay on the laptop.</p>
+
+<h2>Decided</h2>
+<ol>
+  <li><strong>Two moves, layered.</strong> The Session move carries one
+  conversation. <code>lf task move --machine</code> carries the Task and uses the
+  Session move underneath. A Task's Session moved on its own takes only the
+  conversation.</li>
+  <li><strong>A live Graph is stopped</strong> by a Task move. The checkpoint
+  commit keeps whatever it had written, and <code>lf task run</code> on the
+  target runs the slice again.</li>
+  <li><strong>History is the provider's own session file</strong> for every
+  move that keeps the same agent harness, across logins and Machines. The
+  rendered log is only for switching agents, and as a fallback when the target
+  can't read the file. A test confirmed that Claude finds a copied file filed
+  under a different working directory.</li>
+  <li><strong><code>lf machine use --session</code> carries the conversation</strong>
+  for Wave and repository primaries, instead of starting a fresh one.</li>
+  <li><strong>A login you name that can't launch fails</strong> and names it.
+  It never falls back silently.</li>
+  <li><code>lf resume --account &lt;email&gt; -a claude</code> works, and
+  <code>-a claude</code> means the Claude login.</li>
+</ol>
+
+<h2>Next proof</h2>
+<p>Build order: account moves, then moving a conversation, then moving a Task.
+The demo uses two real Claude logins and two real Codex logins on one Machine,
+then <code>lf task move</code> from the laptop to the mini with a real Task.</p>
+</main>
+</body>
+</html>

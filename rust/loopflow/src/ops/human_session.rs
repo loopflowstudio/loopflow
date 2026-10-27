@@ -340,6 +340,9 @@ pub struct SessionRecord {
     /// The provider its current input launched with; absent until a review's
     /// first launch records one.
     pub provider: Option<String>,
+    /// The login its conversation is pinned to; absent for a shared or
+    /// unrouted conversation.
+    pub account: Option<crate::store::ProviderAccountId>,
     pub cwd: String,
     pub state: SessionState,
     pub ready_summary: Option<String>,
@@ -582,6 +585,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             .as_ref()
             .map_or(provider.clone(), |model| format!("{provider}:{model}")),
         provider: session.provider.clone(),
+        account: session.account.clone(),
         cwd: session.cwd.display().to_string(),
         state,
         ready_summary: session.ready_summary.clone(),
@@ -778,8 +782,27 @@ pub(crate) async fn open(
         session
     };
     drop(progress);
+    // Naming another login moves the conversation: its agent on the old login
+    // stops, and it relaunches here rather than attaching to that one.
+    let moving = match (&provider_session, session.provider.as_deref()) {
+        (Some(native), Some(provider)) if resume => match provider.parse() {
+            Ok(provider) => {
+                crate::provider_account::names_another_account(
+                    store,
+                    provider,
+                    &native.agent_session,
+                )
+                .await?
+            }
+            Err(_) => false,
+        },
+        _ => false,
+    };
+    if moving {
+        crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
+    }
     if resume {
-        if session.interactive {
+        if session.interactive && !moving {
             if let Some(owner) = store.sqlite.session_transport(&session.id)? {
                 if crate::transport::current() != Some(&owner)
                     && owner_running(&store.sqlite, &owner)?
@@ -1107,6 +1130,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         graph_membership,
         detail: launch_model(session),
         provider: session.provider.clone(),
+        account: metadata.account.clone(),
         cwd: session.cwd.display().to_string(),
         state,
         ready_summary: session.ready_summary.clone(),
@@ -1771,6 +1795,7 @@ mod tests {
             cwd: "/unavailable".into(),
             skill: Some("review".into()),
             provider: None,
+            account: None,
             model: None,
             node: Some(2),
             iterations: None,

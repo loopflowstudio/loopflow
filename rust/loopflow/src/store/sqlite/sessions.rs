@@ -240,7 +240,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
          AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
         p.started_at,
-        COALESCE((SELECT o.viewed=0 FROM processes o WHERE o.id=a.transport_lf_process_id AND o.completed_at IS NULL),0)
+        COALESCE((SELECT o.viewed=0 FROM processes o WHERE o.id=a.transport_lf_process_id AND o.completed_at IS NULL),0),
+        (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
@@ -347,6 +348,11 @@ fn read_summary(
             cwd: row.get::<_, String>(10)?.into(),
             skill: row.get(11)?,
             provider: row.get(12)?,
+            account: row
+                .get::<_, Option<String>>(39)?
+                .map(|id| crate::store::ProviderAccountId::parse(&id))
+                .transpose()
+                .map_err(invalid)?,
             model: row.get(13)?,
             node: row.get(14)?,
             iterations: row

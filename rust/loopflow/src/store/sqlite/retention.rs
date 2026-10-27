@@ -3,15 +3,14 @@
 //! Captures write only Session facts, and native usage keeps one row per
 //! turn; this prune merges native usage an earlier lf recorded per receipt.
 //! It closes Processes whose OS process is gone without recording its exit,
-//! then expires inspection Processes nothing references, and those of commands
-//! lf no longer records. Each step is one short transaction on its own
-//! connection, so live writers wait well under their busy timeout.
+//! then forgets finished Processes nothing needs, as exit does. Each step is
+//! one short transaction on its own connection, so live writers wait well
+//! under their busy timeout.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
-use clap::{CommandFactory, FromArgMatches};
 use rusqlite::{params, Connection, TransactionBehavior};
 use serde::Serialize;
 
@@ -19,8 +18,6 @@ use crate::journal::{OsProcess, ProcessIdentityEvidence};
 use crate::session_record::{late_usage_key, merge_native_usage, native_usage_key};
 use crate::store::{StoreError, StoreResult};
 
-/// Finished inspection Processes stay listed this long.
-pub(crate) const PROCESS_RETENTION_SECONDS: i64 = 7 * 86_400;
 const PROCESS_BATCH: i64 = 10_000;
 /// Every live writer waits this long; each prune transaction stays well under.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(15);
@@ -52,11 +49,7 @@ pub(crate) fn prune(database: &Path, now: i64) -> StoreResult<RetentionReport> {
     report.usage_rows = compact_usage(&conn, &Cursor::beside(database, "usage"))?;
     let home = database.parent().unwrap_or(Path::new("."));
     report.closed_processes = close_dead_processes(&conn, home, now)?;
-    report.processes = expire_processes(
-        &conn,
-        now - PROCESS_RETENTION_SECONDS,
-        &Cursor::beside(database, "processes"),
-    )?;
+    report.processes = forget_processes(&conn)?;
     report.vacuumed = reclaim(&conn)?;
     Ok(report)
 }
@@ -266,106 +259,26 @@ fn close_dead_processes(conn: &Connection, home: &Path, now: i64) -> StoreResult
     Ok(closed)
 }
 
-/// Finished `lf` Processes older than `before` that nothing references: no
-/// child, attachment, Session event, Graph or step, Workflow or move, Wave
-/// activation, CI repair, landing supervisor, Session agent or transport,
-/// relocation or steer.
-fn expire_processes(conn: &Connection, before: i64, cursor: &Cursor) -> StoreResult<u64> {
-    conn.execute_batch(
-        "DROP TABLE IF EXISTS temp.referenced_processes;
-         CREATE TEMP TABLE referenced_processes(id TEXT PRIMARY KEY) WITHOUT ROWID;
-         INSERT OR IGNORE INTO temp.referenced_processes
-             SELECT lf_process_id FROM session_events WHERE lf_process_id IS NOT NULL
-             UNION SELECT lf_process_id FROM graph_processes WHERE lf_process_id IS NOT NULL
-             UNION SELECT lf_process_id FROM graph_process_steps WHERE lf_process_id IS NOT NULL
-             UNION SELECT graph_lf_process_id FROM graph_process_steps WHERE graph_lf_process_id IS NOT NULL
-             UNION SELECT lf_process_id FROM task_workflows WHERE lf_process_id IS NOT NULL
-             UNION SELECT lf_process_id FROM task_workflow_moves WHERE lf_process_id IS NOT NULL
-             UNION SELECT project_activation_lf_process_id FROM waves WHERE project_activation_lf_process_id IS NOT NULL
-             UNION SELECT repair_lf_process_id FROM ci_incidents WHERE repair_lf_process_id IS NOT NULL
-             UNION SELECT supervisor_process_id FROM pr_landings WHERE supervisor_process_id IS NOT NULL
-             UNION SELECT agent_process_id FROM agent_sessions WHERE agent_process_id IS NOT NULL
-             UNION SELECT transport_lf_process_id FROM agent_sessions WHERE transport_lf_process_id IS NOT NULL
-             UNION SELECT process_id FROM relocated_task_processes WHERE process_id IS NOT NULL
-             UNION SELECT agent_process_id FROM steer_adapters WHERE agent_process_id IS NOT NULL
-             UNION SELECT agent_process_id FROM steer_batches WHERE agent_process_id IS NOT NULL;",
-    )?;
-    let mut expired = 0;
+/// Finished Processes nothing needs ([`super::processes::FORGETTABLE`]): those
+/// crash-closed above, and those a finished parent left behind when it exited
+/// before them. Exit forgets the rest as it happens.
+fn forget_processes(conn: &Connection) -> StoreResult<u64> {
+    let forgettable = super::processes::FORGETTABLE;
+    let mut forgotten = 0;
     loop {
         let deleted = conn.execute(
-            "DELETE FROM processes WHERE id IN (
-                 SELECT p.id FROM processes p
-                 WHERE p.started_at<?1 AND p.kind='lf' AND p.completed_at IS NOT NULL AND p.completed_at<?1
-                   AND p.id NOT IN (SELECT id FROM temp.referenced_processes)
-                   AND NOT EXISTS(SELECT 1 FROM processes c WHERE c.parent_lf_process_id=p.id)
-                   AND NOT EXISTS(SELECT 1 FROM processes a WHERE a.kind='agent' AND a.attached_lf_process_id=p.id)
-                 LIMIT ?2)",
-            params![before, PROCESS_BATCH],
+            &format!(
+                "DELETE FROM processes WHERE id IN (
+                     SELECT p.id FROM processes p WHERE {forgettable} LIMIT ?1)"
+            ),
+            [PROCESS_BATCH],
         )?;
-        expired += deleted as u64;
-        if (deleted as i64) < PROCESS_BATCH {
-            break;
+        forgotten += deleted as u64;
+        // A parent becomes forgettable once its last child goes.
+        if deleted == 0 {
+            return Ok(forgotten);
         }
     }
-    expired += forget_unrecorded(conn, cursor)?;
-    conn.execute_batch("DROP TABLE temp.referenced_processes;")?;
-    Ok(expired)
-}
-
-/// Finished, unreferenced Processes of commands lf no longer records
-/// ([`crate::lf::Cli::records_process`]), at any age. Each row is read once;
-/// one still running when its pass came expires with the rest.
-fn forget_unrecorded(conn: &Connection, cursor: &Cursor) -> StoreResult<u64> {
-    let after = cursor.read();
-    let last: Option<i64> =
-        conn.query_row("SELECT max(rowid) FROM processes", [], |row| row.get(0))?;
-    let Some(last) = last.filter(|last| *last > after) else {
-        return Ok(0);
-    };
-    let candidates = conn
-        .prepare(
-            "SELECT p.id,p.command FROM processes p
-             WHERE p.rowid>?1 AND p.rowid<=?2
-               AND p.kind='lf' AND p.completed_at IS NOT NULL AND p.command IS NOT NULL
-               AND p.id NOT IN (SELECT id FROM temp.referenced_processes)
-               AND NOT EXISTS(SELECT 1 FROM processes c WHERE c.parent_lf_process_id=p.id)
-               AND NOT EXISTS(SELECT 1 FROM processes a WHERE a.kind='agent' AND a.attached_lf_process_id=p.id)",
-        )?
-        .query_map([after, last], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut cli = crate::lf::Cli::command();
-    let unrecorded: Vec<String> = candidates
-        .into_iter()
-        .filter(|(_, command)| {
-            serde_json::from_str::<Vec<String>>(command).is_ok_and(|argv| !records(&mut cli, argv))
-        })
-        .map(|(id, _)| id)
-        .collect();
-    let mut forgotten = 0;
-    for batch in unrecorded.chunks(PROCESS_BATCH as usize) {
-        let tx = conn.unchecked_transaction()?;
-        let mut delete = tx.prepare("DELETE FROM processes WHERE id=?1")?;
-        for id in batch {
-            forgotten += delete.execute([id])? as u64;
-        }
-        drop(delete);
-        tx.commit()?;
-    }
-    cursor.write(last)?;
-    Ok(forgotten)
-}
-
-/// Whether lf records `argv` today; an argv it no longer parses stays recorded.
-fn records(cli: &mut clap::Command, argv: Vec<String>) -> bool {
-    let Ok(argv) = crate::lf::navigation::normalize_args(argv) else {
-        return true;
-    };
-    cli.try_get_matches_from_mut(argv)
-        .ok()
-        .and_then(|matches| crate::lf::Cli::from_arg_matches(&matches).ok())
-        .is_none_or(|parsed| parsed.records_process())
 }
 
 /// Return freed pages to the filesystem. The first reclaim converts the store
@@ -403,7 +316,7 @@ fn is_busy(error: &rusqlite::Error) -> bool {
 mod tests {
     use rusqlite::Connection;
 
-    use super::{prune, PROCESS_RETENTION_SECONDS};
+    use super::prune;
     use crate::store::sqlite::SqliteStore;
 
     #[test]
@@ -453,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_expires_unreferenced_processes_and_retires_the_capture_cursor() {
+    fn prune_forgets_unneeded_processes_and_retires_the_capture_cursor() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         SqliteStore::open_ephemeral(&path).unwrap();
@@ -461,23 +374,34 @@ mod tests {
         std::fs::write(&cursor, "7").unwrap();
 
         let now = time::OffsetDateTime::now_utc().unix_timestamp() + 2 * 86_400;
-        let old = now - PROCESS_RETENTION_SECONDS - 60;
         let conn = Connection::open(&path).unwrap();
-        let process = |id: &str, parent: Option<&str>, at: i64| {
+        let id = |n: u8| format!("00000000-0000-4000-8000-0000000000{n:02}");
+        let process = |n: u8, parent: Option<u8>, finished: bool, via_agent: bool| {
             conn.execute(
-                "INSERT INTO processes(id,trace_id,parent_lf_process_id,started_at,completed_at,outcome)
-                 VALUES(?1,?1,?2,?3,?3,'succeeded')",
-                rusqlite::params![id, parent, at],
+                "INSERT INTO processes(id,trace_id,parent_lf_process_id,started_at,completed_at,outcome,via_agent)
+                 VALUES(?1,?1,?2,?3,?4,?5,?6)",
+                rusqlite::params![
+                    id(n),
+                    parent.map(id),
+                    now,
+                    finished.then_some(now),
+                    finished.then_some("succeeded"),
+                    via_agent
+                ],
             )
             .unwrap();
         };
-        let id = |n: u8| format!("00000000-0000-4000-8000-0000000000{n:02}");
-        process(&id(1), None, old);
-        process(&id(2), None, old);
-        process(&id(3), Some(&id(2)), now);
-        process(&id(4), None, now - 60);
+        // Finished long ago or just now, nothing needs these three.
+        process(1, None, true, false);
+        process(7, None, true, false);
+        process(8, Some(7), true, false);
+        // A running child holds its parent; a running parent holds its child.
+        process(2, None, true, false);
+        process(3, Some(2), false, false);
+        process(4, Some(3), true, false);
+        process(5, None, true, true);
 
-        assert_eq!(prune(&path, now).unwrap().processes, 1);
+        assert_eq!(prune(&path, now).unwrap().processes, 3);
         assert!(!cursor.exists());
 
         let left: Vec<String> = conn
@@ -487,7 +411,7 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        assert_eq!(left, [id(2), id(3), id(4)]);
+        assert_eq!(left, [id(2), id(3), id(4), id(5)]);
         let violations: i64 = conn
             .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
                 row.get(0)
@@ -497,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_closes_dead_processes_and_forgets_unrecorded_commands() {
+    fn prune_closes_dead_processes_and_forgets_those_nothing_needs() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         SqliteStore::open_ephemeral(&path).unwrap();
@@ -511,30 +435,38 @@ mod tests {
         let own = std::process::id();
         let own_start = crate::journal::process_started_at(own).unwrap();
         let id = |n: u8| format!("00000000-0000-4000-8000-0000000000{n:02}");
-        let process = |n: u8, pid: Option<u32>, os: Option<i64>, at: i64, command: &str| {
+        let process = |n: u8, pid: Option<u32>, os: Option<i64>, at: i64, parent: Option<u8>| {
             conn.execute(
-                "INSERT INTO processes(id,trace_id,pid,os_started_at,started_at,command) VALUES(?1,?1,?2,?3,?4,?5)",
-                rusqlite::params![id(n), pid, os, at, command],
+                "INSERT INTO processes(id,trace_id,pid,os_started_at,started_at,parent_lf_process_id)
+                 VALUES(?1,?1,?2,?3,?4,?5)",
+                rusqlite::params![id(n), pid, os, at, parent.map(id)],
             )
             .unwrap();
         };
-        process(1, None, None, now - 7_200, r#"["lf","task","run"]"#);
-        process(2, Some(exited), None, now, r#"["lf","task","run"]"#);
-        process(3, Some(own), own_start, now, r#"["lf","task","run"]"#);
-        let finished = |n: u8, command: &str| {
-            process(n, None, None, now, command);
+        // Crash leftovers: once closed, only the agent-issued one stays.
+        process(1, None, None, now - 7_200, None);
+        process(2, Some(exited), None, now, None);
+        process(3, Some(own), own_start, now, None);
+        process(9, Some(exited), None, now, None);
+        conn.execute(
+            "UPDATE processes SET via_agent=1 WHERE id IN (?1,?2)",
+            [id(1), id(2)],
+        )
+        .unwrap();
+        let finished = |n: u8, parent: Option<u8>| {
+            process(n, None, None, now, parent);
             conn.execute(
                 "UPDATE processes SET completed_at=?2,outcome='succeeded' WHERE id=?1",
                 rusqlite::params![id(n), now],
             )
             .unwrap();
         };
-        finished(4, r#"["lf","__context-block","--moment","start"]"#);
-        finished(5, r#"["lf","task","file","LOO-1","src/lib.rs","--json"]"#);
-        finished(6, r#"["lf","task","status","LOO-1"]"#);
+        finished(4, None);
+        finished(5, None);
+        finished(6, Some(3));
 
         let report = prune(&path, now).unwrap();
-        assert_eq!((report.closed_processes, report.processes), (2, 2));
+        assert_eq!((report.closed_processes, report.processes), (3, 3));
         let rows: Vec<(String, Option<i64>, Option<String>)> = conn
             .prepare("SELECT id,completed_at,outcome FROM processes ORDER BY id")
             .unwrap()

@@ -55,11 +55,12 @@ out) is reversible and stands.
 
 ## Remaining
 
-- Full sync suite and affected gate (gate).
 - Proposed infrastructure Wave memory (not written; standalone realign): a sync
   that restores stashed edits after merging fails once the resolver is gone;
   commit step edits before merging so conflicts reach the resolver.
 
 ## Checks
+
+- Gate 2026-10-27: `scripts/test.py --reuse-passing --rust-filter 'test(sync_tests::) | test(reference_matches_the_compiled_cli) | test(documented_commands)'` rust tests pass; clippy and website were stopped by host syspolicyd pressure, then passed run directly (`cargo clippy --all-targets -- -D warnings`, `website/dev.py test` 72 passed). `--manual` help now says it keeps uncommitted edits local.
 
 - `sync_tests::uncommitted_edits_that_conflict_with_main_reach_the_resolver_not_a_stash`, `saved_graph_sync_follows_task_parent…`, two dirty-branch sync tests: pass; clippy clean. Full sync suite left to gate.

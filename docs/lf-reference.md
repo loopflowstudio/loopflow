@@ -1713,7 +1713,7 @@ Merge upstream into the current branch (default: main or stack parent)
 | Argument | What it does |
 |---|---|
 | `--plan` | Print the planned sync strategy without mutating git Default: false. |
-| `--manual` | Keep the sync local and leave conflicts for this process to resolve Default: false. |
+| `--manual` | Keep the sync and uncommitted edits local; leave conflicts for this process to resolve Default: false. |
 | `--continue` | Stage resolved conflict paths and continue the local sync Default: false. |
 | `--abort` | Abort the local sync in progress Default: false. |
 | `--adopt` | Explicitly claim a raw sync that has no Loopflow owner Default: false. |

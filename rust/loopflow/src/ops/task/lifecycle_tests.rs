@@ -323,10 +323,7 @@ fn fixture(
         "---\nlinear:\n  initiative: initiative-1\n---\nProduct\n",
     )
     .unwrap();
-    repo.create_file(
-        ".lf/workflows/delivery.yaml",
-        "edges:\n  - {from: start, to: end, graph: delivery}\n",
-    );
+    repo.create_file(".lf/graphs/delivery.yaml", "- cmd: sync --plan\n");
     let now = time::OffsetDateTime::now_utc();
     let wave = Wave::new(
         WaveId::new(),
@@ -347,7 +344,6 @@ fn fixture(
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
     };
@@ -371,14 +367,12 @@ fn fixture(
         base_commit: repo.head_sha(),
         parent_pr_id: None,
         agent: None,
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
         rank: 0,
         assignee: None,
         due_date: None,
         state: None,
-        completed: false,
         completed_at: None,
         observation: Observation::NotRequired,
     };

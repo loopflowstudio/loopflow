@@ -398,6 +398,40 @@ impl SqliteStore {
             .optional()?)
     }
 
+    /// When `id` failed, the time it ended and the error that caused it: the
+    /// error of the deepest failed Process under it, following each failed
+    /// Process's last failed child.
+    pub(crate) fn failure_cause(&self, id: &LfProcessId) -> StoreResult<Option<(i64, String)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let Some((at, mut error)) = conn
+            .query_row(
+                "SELECT completed_at,error FROM processes
+                 WHERE id=?1 AND outcome='failed' AND completed_at IS NOT NULL",
+                [id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        let mut parent = id.as_str().to_owned();
+        while let Some((child, child_error)) = conn
+            .query_row(
+                "SELECT id,error FROM processes WHERE parent_lf_process_id=?1
+                 AND outcome='failed' ORDER BY rowid DESC LIMIT 1",
+                [&parent],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .optional()?
+        {
+            if child_error.is_some() {
+                error = child_error;
+            }
+            parent = child;
+        }
+        Ok(Some((at, error.unwrap_or_else(|| "it failed".into()))))
+    }
+
     /// Exact identity wins; otherwise require a unique literal UUID prefix.
     pub fn resolve_process(&self, selector: &str) -> StoreResult<Option<LfProcess>> {
         let canonical = selector.to_ascii_lowercase();

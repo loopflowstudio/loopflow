@@ -914,66 +914,16 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         | TaskCommand::Location { .. } => {
             unreachable!("location reads precede repository commands")
         }
-        TaskCommand::Automation { json } => {
-            let status = loopflow::ops::task_automation::status(repo)?;
-            if *json {
-                println!("{}", serde_json::to_string(&status)?);
-            } else {
-                println!(
-                    "{} · every {} seconds",
-                    status.coverage, status.cadence_seconds
-                );
-                for task in status.tasks {
-                    println!(
-                        "{}: {}",
-                        task.issue,
-                        if task.enabled == Some(false) {
-                            "CI repair held"
-                        } else {
-                            "CI repair enabled"
-                        }
-                    );
-                }
-            }
-            Ok(())
-        }
-        TaskCommand::Reconcile { json } => {
-            // The schedule runs this check every minute; an AgentProcess whose attached lf
-            // was killed is reaped here before delivery is observed.
-            let agents = loopflow::harness::agent_process::reap_agent_processes(false);
-            let mut result = loopflow::ops::pr_landing::reconcile_repository(repo)?;
-            match agents {
-                Ok(agents) => result.errors.extend(agents.errors),
-                Err(error) => result
-                    .errors
-                    .push(format!("AgentProcess settlement: {error}")),
-            }
-            // Rented machines whose work drained, or whose soft deadline came, go back.
-            if let Err(error) = loopflow::lf::commands::rental::check() {
-                result.errors.push(format!("Rentals: {error:#}"));
-            }
-            if *json {
-                println!("{}", serde_json::to_string(&result)?);
-            }
-            if !result.errors.is_empty() {
-                anyhow::bail!("{}", result.errors.join("\n"));
-            }
-            Ok(())
-        }
-        TaskCommand::Automate { issue, state } => Ok(loopflow::ops::task_automation::select(
-            issue,
-            state == "on",
-        )?),
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
         TaskCommand::Workflow { cmd } => match cmd {
             loopflow::lf::TaskWorkflowCommand::Move {
                 issue,
-                node,
+                stage,
                 reason,
             } => {
                 println!(
                     "{}",
-                    loopflow::ops::task::workflow_set(issue, node, reason.as_deref())?
+                    loopflow::ops::task::workflow_set(issue, stage, reason.as_deref())?
                 );
                 Ok(())
             }
@@ -1038,12 +988,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             }
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
-        TaskCommand::Pause { issue } | TaskCommand::Resume { issue } => {
-            let paused = matches!(command, TaskCommand::Pause { .. });
-            loopflow::ops::task::task_pause(issue, paused)?;
+        TaskCommand::Defer { issue } | TaskCommand::Resume { issue } => {
+            let deferred = matches!(command, TaskCommand::Defer { .. });
+            loopflow::ops::task::task_defer(issue, deferred)?;
             println!(
                 "{issue}: {}; execution unchanged",
-                if paused { "paused" } else { "resumed" }
+                if deferred { "deferred" } else { "resumed" }
             );
             Ok(())
         }
@@ -1701,6 +1651,7 @@ fn run() -> anyhow::Result<()> {
             cli.command,
             Some(
                 Commands::Task { .. }
+                    | Commands::Ship { .. }
                     | Commands::Wave { .. }
                     | Commands::Repo { .. }
                     | Commands::ContextBlock {
@@ -1973,6 +1924,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 graph: graph.clone(),
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
+                branch: None,
             },
         )?;
         if json {
@@ -2121,11 +2073,11 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                     cmd:
                         loopflow::lf::TaskWorkflowCommand::Move {
                             issue,
-                            node,
+                            stage,
                             reason,
                         },
                 },
-        }) => Some((issue.as_str(), node.as_str(), reason.as_deref())),
+        }) => Some((issue.as_str(), stage.as_str(), reason.as_deref())),
         Some(Commands::Task {
             cmd:
                 TaskCommand::Workflow {
@@ -2308,7 +2260,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         &cli.command,
         Some(Commands::Task {
             cmd: TaskCommand::Run { issue: None, .. } | TaskCommand::Checkout { issue: None, .. }
-        })
+        }) | Some(Commands::Ship { .. })
     ) && cli.task.is_none()
     {
         let resolution =
@@ -2316,10 +2268,35 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         cli.task = Some(match resolution.task {
             loopflow::ops::context::ContextFact::Bound { value, .. } => value,
             loopflow::ops::context::ContextFact::Unavailable { reason } => anyhow::bail!(reason),
+            // Shipping a branch with no Task first gives it one.
+            loopflow::ops::context::ContextFact::Unbound
+                if matches!(&cli.command, Some(Commands::Ship { stop: false, .. })) =>
+            {
+                let task = loopflow::ops::task::ship::ship_branch_task(
+                    &loopflow::repo::working_directory()?,
+                    cli.wave.as_deref(),
+                )?;
+                eprintln!("Created {} for this branch", task.identifier);
+                task.identifier
+            }
             loopflow::ops::context::ContextFact::Unbound => {
                 anyhow::bail!("No Task selected; name a Task or run from its checkout")
             }
         });
+    }
+    // Reading this Machine's Tasks or processes recovers them first.
+    if matches!(
+        &cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Status { .. } | TaskCommand::List { .. }
+        }) | Some(Commands::Wave {
+            cmd: WaveCommand::Status { .. } | WaveCommand::List { .. } | WaveCommand::Show { .. }
+        }) | Some(Commands::History {
+            cmd: None | Some(loopflow::lf::commands::history::HistoryCommand::List { .. }),
+            ..
+        }) | Some(Commands::Monitor { .. })
+    ) {
+        loopflow::ops::recovery::recover();
     }
     // Placement chooses or rents the Machine and hands the Task to it; the
     // ordinary dispatch below then forwards the run to its new owner.
@@ -2429,21 +2406,49 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 graph: graph.clone(),
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
+                branch: None,
             },
         )?;
-        let Some(graph) = graph else {
+        let Some(edge) = graph else {
             // An edge that runs nothing: setting out on it is the whole move.
             println!(
-                "Task {} moved along a workflow edge that runs no Graph",
+                "Task {} moved along a route that runs nothing",
                 task.identifier
             );
             return Ok(());
         };
         // This process carries the edge and writes where it left the Task: at
-        // the edge's target once an attempt at its Graph succeeded, otherwise
+        // the edge's target once an attempt at its slice succeeded, otherwise
         // still on the edge.
-        loopflow::lf::commands::graph::run_for_task(&cli, &task, &graph)?;
+        loopflow::lf::commands::graph::run_task_edge_for(&cli, &task, &edge, true)?;
         return Ok(loopflow::ops::task::workflow_arrive(&task)?);
+    }
+    if let Some(Commands::Ship {
+        graph,
+        reason,
+        stop,
+        ..
+    }) = &cli.command
+    {
+        journal::admit_process(&std::env::current_dir()?, args);
+        let issue = cli.task.clone().context("No Task selected")?;
+        if *stop {
+            if loopflow::ops::task::ship::ship_stop(&issue, reason.as_deref())? {
+                println!("{issue} stopped shipping");
+            } else {
+                println!("{issue} is not shipping");
+            }
+            return Ok(());
+        }
+        let directory = loopflow::repo::working_directory()?;
+        let repo = selected_task_repository(&cli, &directory, Some(&issue))?;
+        return loopflow::lf::commands::ship::run(
+            &cli,
+            &repo,
+            &issue,
+            graph.as_deref(),
+            reason.as_deref(),
+        );
     }
     if let Some(Commands::Session { cmd }) = &cli.command {
         journal::admit_process(&std::env::current_dir()?, args);
@@ -2575,6 +2580,7 @@ fn execute_command(
             delivery, moment, ..
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
+        Some(Commands::Ship { .. }) => unreachable!("ship dispatch precedes Work binding"),
         Some(Commands::Account {
             cmd,
             provider,
@@ -2587,24 +2593,6 @@ fn execute_command(
         Some(Commands::Repo { cmd }) => match cmd {
             loopflow::lf::RepoCommand::Release { .. } => {
                 in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd))
-            }
-            // The watcher admits repairs, which needs a recorded Process.
-            loopflow::lf::RepoCommand::Ci {
-                cmd:
-                    Some(loopflow::lf::CiCommand::Watch {
-                        uninstall: false,
-                        status: false,
-                        ..
-                    }),
-                ..
-            } => {
-                // It runs from the main checkout so its long-lived Process never
-                // counts as live work in a Task's worktree.
-                let root = loopflow::git::worktrees::main_repo_root(
-                    &loopflow::lf::commands::util::find_repo_root()?,
-                )?;
-                let _cwd = CwdGuard::enter(&root)?;
-                with_runtime(&root, args, || loopflow::lf::commands::ops::run_repo(cmd))
             }
             loopflow::lf::RepoCommand::Tokens { .. } | loopflow::lf::RepoCommand::Ci { .. } => {
                 loopflow::lf::commands::ops::run_repo(cmd)
@@ -2786,6 +2774,12 @@ fn execute_command(
             unreachable!("install dispatches before home routing")
         }
         Some(Commands::Graph { cmd }) => match cmd {
+            GraphCommand::Route => {
+                let repo_root = loopflow::repo::working_directory()?;
+                with_runtime(&repo_root, args, || {
+                    loopflow::lf::commands::graph::run_task_edge(cli, &repo_root, binding)
+                })
+            }
             GraphCommand::List { json, inventory } if inventory.processes => {
                 loopflow::lf::commands::graph_inventory::list(inventory, *json)
             }

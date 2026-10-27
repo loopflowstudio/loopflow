@@ -200,7 +200,7 @@ fn graph_inventory_flags_do_not_select_task_launch_context() {
 }
 
 #[test]
-fn graph_and_workflow_catalogs_keep_same_name_sources_separate() {
+fn flow_and_workflow_catalogs_read_the_same_graphs() {
     let repo = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
     let run = |args: &[&str]| {
@@ -231,7 +231,7 @@ fn graph_and_workflow_catalogs_keep_same_name_sources_separate() {
     };
     assert_eq!(entry(&graphs)["source"], ".lf/graphs/feature.yaml");
     assert!(entry(&workflows)["workflow"].is_object());
-    assert!(entry(&workflows)["source"].is_null());
+    assert_eq!(entry(&workflows)["source"], ".lf/graphs/feature.yaml");
     let shown = run(&["graph", "show", "feature", "--json"]);
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&shown.stdout).unwrap(),
@@ -247,14 +247,8 @@ fn graph_and_workflow_catalogs_keep_same_name_sources_separate() {
             "proof",
         )
         .unwrap();
-    // A Workflow is selected by name; its definition is the committed file.
-    std::fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
-    let definition = repo.path().join(".lf/workflows/feature.yaml");
-    std::fs::write(
-        &definition,
-        "nodes: {}\nedges:\n  - from: start\n    to: end\n    graph: feature\n",
-    )
-    .unwrap();
+    // A Workflow is selected by name; its definition is the committed graph.
+    let definition = repo.path().join(".lf/graphs/feature.yaml");
     let selected = run(&["wave", "workflow", "set", "feature", "proof"]);
     assert!(
         selected.status.success(),
@@ -263,13 +257,12 @@ fn graph_and_workflow_catalogs_keep_same_name_sources_separate() {
     );
     let workflows = run(&["wave", "workflow", "list", "--json"]);
     assert!(entry(&workflows)["workflow"].is_object());
-    assert_eq!(entry(&workflows)["source"], ".lf/workflows/feature.yaml");
+    assert_eq!(entry(&workflows)["source"], ".lf/graphs/feature.yaml");
     std::fs::write(&definition, "invalid: true\n").unwrap();
     assert!(!run(&["wave", "workflow", "set", "feature", "proof"])
         .status
         .success());
     assert!(entry(&run(&["wave", "workflow", "list", "--json"]))["unavailable"].is_string());
-    assert_eq!(entry(&run(&["graph", "list", "--json"])), entry(&graphs));
 }
 
 #[test]

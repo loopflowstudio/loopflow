@@ -77,12 +77,11 @@ pub struct TeamBinding {
     pub created: bool,
 }
 
-pub fn terminal_reason(state: Option<&str>, completed: bool) -> Option<&'static str> {
+pub fn terminal_reason(state: Option<&str>) -> Option<&'static str> {
     match state {
         Some("canceled") => Some("Linear Task is canceled"),
         Some("duplicate") => Some("Linear Task is duplicate"),
         Some("completed") => Some("Linear Task is complete"),
-        None if completed => Some("Linear Task is complete"),
         _ => None,
     }
 }
@@ -2854,10 +2853,10 @@ mod tests {
             assert!(serde_json::from_value::<super::IssueFields>(wire).is_err());
         }
         assert_eq!(
-            crate::linear::terminal_reason(Some("duplicate"), false),
+            crate::linear::terminal_reason(Some("duplicate")),
             Some("Linear Task is duplicate")
         );
-        assert_eq!(crate::linear::terminal_reason(Some("unknown"), false), None);
+        assert_eq!(crate::linear::terminal_reason(Some("unknown")), None);
     }
 
     #[test]

@@ -456,8 +456,8 @@ frontmatter never changes scheduling.
 | **CLI** | `-i` (interactive), `-b` (batch/headless) |
 | **Default** | interactive for a direct TTY; headless otherwise |
 
-Graphs hold autonomous steps only; a `human: true` step is rejected at launch.
-See [Authoring](authoring.md#graphs).
+`lf graph` runs autonomous steps and stops at its first `interactive:` stage;
+a Task carries the graph on from there. See [Authoring](authoring.md#graphs).
 
 ### Chrome
 

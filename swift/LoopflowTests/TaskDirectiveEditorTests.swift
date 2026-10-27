@@ -42,7 +42,7 @@ struct TaskDirectiveEditorTests {
         // Returned provider text deliberately differs from the submitted text.
         let authoritative = draft + "\nProvider-normalized."
         #expect(model.task(id: "issue-review")?.task.task.description == authoritative)
-        #expect(model.task(id: "issue-review")?.task.task.completed == false)
+        #expect(model.task(id: "issue-review")?.task.task.isSuccessful == false)
         #expect(model.roadmap.errorMessage == nil)
         // Description renders as Markdown: inline code loses its backticks,
         // authored line breaks stay.

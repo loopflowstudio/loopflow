@@ -1389,14 +1389,12 @@ mod tests {
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
             agent: None,
-            abandon_intent: None,
             created_at: now,
             updated_at: now,
             rank: 0,
             assignee: None,
             due_date: None,
             state: None,
-            completed: false,
             completed_at: None,
             observation: crate::work::task::Observation::NotRequired,
         }
@@ -1456,7 +1454,6 @@ mod tests {
             pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
             wave_id: wave.id().clone(),
-            abandon_intent: None,
             created_at: now,
             updated_at: now,
         }
@@ -1629,14 +1626,17 @@ mod tests {
                 "INSERT INTO processes(id,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",
                 rusqlite::params![process,crate::id::TraceId::new()],
             ).unwrap();
-            let definition = crate::workflow::WorkflowDefinition {
+            let definition = crate::workflow::CapturedGraph {
                 name: "review".into(),
-                nodes: vec![crate::workflow::WorkflowNode {
-                    name: "review".into(),
-                    skill: "review".into(),
-                    description: None,
-                }],
-                edges: Vec::new(),
+                steps: vec![crate::graph::ConcreteStep::Skill(
+                    crate::graph::ConcreteSkill {
+                        skill: crate::graph::Skill::named("review"),
+                        id: None,
+                        interactive: true,
+                        returns: None,
+                        sources: Vec::new(),
+                    },
+                )],
             };
             store
                 .sqlite
@@ -1695,7 +1695,6 @@ mod tests {
             }
             let record = store.sqlite.task(&task.id).unwrap().unwrap();
             assert_eq!(record.state.as_deref(), Some("unstarted"));
-            assert!(!record.completed);
             assert_eq!(record.completed_at, None);
             assert_eq!(record.assignee, None);
             assert_eq!(record.rank, 0);
@@ -1879,7 +1878,7 @@ mod tests {
                 if completed {
                     crate::durable::TaskState::Done
                 } else {
-                    crate::durable::TaskState::NotReady
+                    crate::durable::TaskState::Unstarted
                 }
             );
             assert!(store.sqlite.workflow(&task.id).unwrap().is_none());

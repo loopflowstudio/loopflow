@@ -829,7 +829,7 @@ struct WorkModelStreamTests {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
         let query = RegistryQuery(watchWork: { await feed.open() }) { args, _ in
-            guard args.starts(with: ["task", "pause"]) else {
+            guard args.starts(with: ["task", "defer"]) else {
                 throw RegistryQueryError("unexpected read: \(args)")
             }
             return ""
@@ -842,7 +842,7 @@ struct WorkModelStreamTests {
         try await eventually { model.roadmap.value != nil }
         let found = try #require(model.task(id: "issue-now"))
         let owner = model.navigation
-        let action = Task { await model.pauseTask(found.task, paused: true) }
+        let action = Task { await model.deferTask(found.task, deferred: true) }
         let request = try await feed.request(2)
         #expect(request == .checkpoint(id: request.id, replay: []))
         await feed.send(try fixture.planningFrame(sequence: 2, answers: request.id, renaming: "Committed"))
@@ -993,7 +993,7 @@ struct WorkModelStreamTests {
         try await eventually { preview() == "Summary · brief" }
         await feed.send(try sessionFrame(4, turn: "New turn output"))
         try await eventually { preview() == "New turn output" }
-        model.navigation.sidebarFilter = .running
+        model.navigation.sidebarFilter = .busy
         #expect(model.sidebarTaskIDs == ["preview-task"])
         await feed.fail(RegistryQueryError("reader exited"))
         try await eventually { model.sessions.errorMessage == "reader exited" }

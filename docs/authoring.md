@@ -84,9 +84,8 @@ Skills that need another Work's perspective launch it directly with
 explain the failure in ordinary output and stop. The Wave operator
 reads existing logs and discusses unresolved judgment in its own chat.
 
-Keep design and review in the Task conversation. Operational Graphs reject
-`human: true` steps, including inside composed Graphs and XOR alternatives, before
-launching work. Save agreed feedback and remaining work in the conversation;
+Keep design and review in the Task conversation: mark those steps
+`interactive: <skill>` in a Task's graph. Save agreed feedback and remaining work in the conversation;
 Session completion controls are retired. Inspect the exact
 Graph and its effects before selecting further work.
 
@@ -110,13 +109,13 @@ lf sync-skills --repo
 
 Select the Graph's name as a native skill. Its `SKILL.md` contains a direct
 checklist: ordinary steps run `lf -b implement` and wait for the result;
-`human: true` steps execute the skill in the current conversation and wait for
+`interactive:` steps execute the skill in the current conversation and wait for
 the participant's response.
 
 ```yaml
 - step: {name: implement, id: build}
 - loop: build
-- step: {name: demo, id: review, human: true}
+- interactive: {name: demo, id: review}
 ```
 
 Default loops use natural-language instructions: continue when this boundary's
@@ -257,60 +256,85 @@ handoff parity; that still requires a configured end-to-end demonstration.
 
 ## Workflows
 
-A workflow is a Task's outer shape: nodes where you take part in the Task
-conversation, joined by edges that each run one Graph.
+A workflow is a graph whose `interactive:` steps are stages: places where you
+take part in the Task conversation. Everything between stages runs on its own.
 
 ```yaml
-# .lf/workflows/feature.yaml
-nodes:
-  explore: explore            # the skill the conversation uses at this node
-  demo: demo
-edges:
-  - { from: start,   to: explore, graph: task-design }
-  - { from: explore, to: explore, graph: task-design }  # re-plan the chosen direction
-  - { from: explore, to: demo,    graph: pursue }
-  - { from: demo,    to: demo,    graph: pursue }       # another pass
-  - { from: demo,    to: end,     graph: ship }         # land
+# .lf/graphs/feature.yaml
+- kickoff
+- loop: kickoff
+  interactive: explore         # you choose what to build; repeat or go on
+- graph: pursue
+- loop: implement
+  interactive: demo            # you try the change
+- graph: deliver                # gate, then land and stay until it merges
+- loop: implement
+  interactive: verify            # you check it on main; fix forward or finish
 ```
 
 ```bash
-lf task run DES-123            # start: the only edge, task-design
-lf task run DES-123 pursue     # at explore: build it
-lf task run DES-123 ship       # at demo: land it
-lf task status DES-123         # node, or the edge it is on
-lf task workflow move DES-123 explore   # go back without running anything
+lf task run DES-123            # start: runs kickoff up to explore
+lf task run DES-123 pursue     # at explore: build it, up to demo
+lf ship DES-123                # run every remaining step to merge (no ISSUE: this checkout's Task)
+lf task status DES-123         # stage, or the route it is on
+lf task workflow move DES-123 explore    # go back without running anything
 ```
 
-`start` and `end` are implicit. A node may say what you do there:
-`explore: { skill: explore, description: you choose what to build }`;
-without one, the skill's first line stands in. An edge names a Graph or skill; Task launch resolves it and uses the explicit
-`graph` or `skill` invocation. Only an edge into `end` may omit `graph:`; take it with
-`lf task run ISSUE end`. A Task with no PR is a workflow with no landing edge,
-like builtin `research`. An edge is named by what it runs, so two edges
-leaving one node run different things.
+`start` and `end` are implicit. Routes between stages are projected from the
+graph, never written: each is named by what it runs first (the composed graph,
+else the skill), so `pursue` and `deliver` above, and `end` for verify's route
+that runs nothing. A stage's description is its
+skill's first line of prose. `interactive:` may sit inside an `xor` path as a
+conditional stage. A graph with no stages runs whole; one with no PR, like
+builtin `research`, ends with a route into `end` that runs nothing.
+
+`lf ship` returns once the Task is shipping and runs the remaining steps, with a headless agent
+standing in for you at each stage: it runs the stage's skill, decides advance or
+repeat, and records why in the Task history. `lf ship DES-123 --graph deliver`
+takes up another graph first.
+
+A Task's state follows what it is doing:
+
+| State | When |
+|---|---|
+| `unstarted` | no checkout yet |
+| `idle` | a checkout, no Graph running, not at a stage |
+| `active` | at a stage, in its Task Session |
+| `moving` | a Graph runs, with a stage ahead that stops for you |
+| `shipping` | a Graph runs and no stage ahead stops it |
+| `deferred` · `done` · `abandoned` | held, completed, dropped |
+
+Auto-Ship (`lf ship`, or any route into `end`) approves stand-ins at the remaining
+stages; the Task reads shipping while its ship process runs, and idle with the
+failure and next restart when it exited. `lf ship --stop` withdraws the approval.
+Working Tasks are the idle, active and moving ones. A Session is separately
+`available` (its turn ended) or `busy`. A PR merged while shipping, by anyone,
+sends the Task to its last stage before `end` (`verify`) once; with no such
+stage it completes. Verify finishes into `end` or fixes forward as a new PR.
 
 On its first `lf task run`, a Task selects the Workflow you name, then its Wave
 default, then repository `workflow:`. It keeps the graph as it was then.
-The Task's position is stored. Choosing an edge puts the Task on it; the
-process that ran the edge puts the Task at its target when the Graph succeeds.
-A Graph that stops or fails leaves the Task on the edge, shown as stopped:
-choose that edge again, choose another one leaving the same node, or
-`lf task workflow move ISSUE NODE`. `task workflow move` puts the Task at any node and runs
+The Task's position is stored. Choosing a route puts the Task on it; the
+process that ran the route puts the Task at its target when the Graph succeeds.
+A Graph that stops or fails leaves the Task on the route, shown as stopped:
+choose it again, choose another one leaving the same stage, or
+`lf task workflow move ISSUE STAGE`. `task workflow move` puts the Task at any stage and runs
 nothing: go back for another round, skip ahead, or record a landing that
-settled after its Graph stopped. An edge cannot be chosen while another is
-running. `lf task status ISSUE --json` carries the position, the edges that
+settled after its Graph stopped. A route cannot be chosen while another is
+running. `lf task status ISSUE --json` carries the position, the routes that
 can be chosen now and every move with who made it and its `--reason`. There
 is no approve or complete command. Give feedback in the Task conversation,
-which is told its node's skill and the command for each edge leaving it. `lf --task ISSUE graph GRAPH` runs a Graph without moving the Task.
+which is told its stage's skill and the command for each route leaving it. `lf --task ISSUE graph GRAPH` runs a Graph without moving the Task.
 
-Builtins are `feature` (design, demo, land), `code` (demo, land) and
-`research` (findings, no PR). `lf wave workflow list` lists Workflows;
-`lf graph list` lists autonomous Graphs. To edit a Workflow, copy its source into
-`.lf/workflows/`, edit and commit it, then select it for the Wave:
+Builtins are `feature` (explore, demo, then `deliver`), `code` (demo,
+then `deliver`) and `research` (research, no PR). `lf wave workflow list`
+lists Workflows; `lf graph list` lists autonomous Graphs. To edit a Workflow,
+copy the builtin into `.lf/graphs/`, edit and commit it, then select it for
+the Wave:
 
 ```bash
-lf wave workflow source feature > .lf/workflows/feature.yaml
-# Edit .lf/workflows/feature.yaml and commit it.
+lf graph customize feature       # prints .lf/graphs/feature.yaml, copied from the builtin
+# Edit .lf/graphs/feature.yaml and commit it.
 lf wave workflow set feature WAVE
 ```
 
@@ -319,7 +343,6 @@ have your commit; until then `lf task run` names the missing file.
 
 `lf graph customize NAME` copies a builtin into `.lf/graphs/`, reusing an
 existing local file and printing its path.
-Overrides stay within their kind: a Graph and a Workflow can share a name.
 An invalid local source stays unavailable and never exposes a hidden builtin.
 
 `lf wave workflow set NAME WAVE` changes what future Tasks take up.

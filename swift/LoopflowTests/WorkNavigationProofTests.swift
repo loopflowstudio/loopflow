@@ -741,7 +741,7 @@ struct WorkNavigationProofTests {
         #expect(terminals[0].surface == sessionSurface)
         #expect(terminals[1].surface == shellSurface)
         #expect(workspace.multiplexer.pane(forSessionId: "navigation-split") != nil)
-        #expect(model.task(id: "issue-review")?.task.task.completed == false)
+        #expect(model.task(id: "issue-review")?.task.task.isSuccessful == false)
 
     }
 

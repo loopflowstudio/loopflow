@@ -24,8 +24,8 @@ A stopped or failed Graph is history: inspect what it finished and the effects i
 recorded; historical review boundaries remain evidence. Launch fresh work with
 `lf task run <issue>` only when the current request identifies the
 next work—for example, implementation after an accepted design. On a
-workflow that is an edge leaving the Task's node; name its Graph when the
-node has more than one. A blocker needs
+workflow that is a route leaving the Task's stage; name its Graph when the
+stage has more than one. A blocker needs
 its stated recovery first, completed work is not repeated, and a finished Graph
 alone is not a request to run it again.
 

@@ -726,7 +726,7 @@ mod tests {
             .nodes
             .iter()
             .all(|node| node.state == ActivityState::Unknown));
-        let blockers = crate::ops::task_automation::task_execution_blockers(&store, &task).unwrap();
+        let blockers = crate::ops::task_execution::task_execution_blockers(&store, &task).unwrap();
         assert_eq!(blockers.len(), 2);
         for node in &snapshot.nodes {
             let id = node.id.strip_prefix("process:").unwrap();

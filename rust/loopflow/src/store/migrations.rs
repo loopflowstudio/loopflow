@@ -2151,14 +2151,15 @@ mod tests {
                 {"metric_id":"recovery","target":{"kind":"at_least","value":1.0}}
             ])
         );
+        // `ship_it` drops Workflows short of `end`; the next run re-places them.
         assert_eq!(
             conn.query_row(
-                "SELECT node FROM task_workflows WHERE task_id='retained-task'",
+                "SELECT count(*) FROM task_workflows WHERE task_id='retained-task'",
                 [],
-                |r| r.get::<_, String>(0)
+                |r| r.get::<_, i64>(0)
             )
             .unwrap(),
-            "review"
+            0
         );
         assert_eq!(
             conn.query_row(
@@ -2450,11 +2451,16 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pending, ("completed".into(), 1, 0));
-        let execution: (String, i64, String, Option<i64>) = conn.query_row(
+        let execution: Option<(String, i64, String, Option<i64>)> = conn.query_row(
             "SELECT w.node,w.edge,w.lf_process_id,p.completed_at FROM task_workflows w JOIN processes p ON p.id=w.lf_process_id WHERE w.task_id='single'",
             [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
-        ).unwrap();
-        assert_eq!(execution, ("start".into(), 0, "held".into(), None));
+        ).optional().unwrap();
+        // A released `ship_it` drops Workflow rows short of `end`; the next run re-places them.
+        if _draft_is_canonical("ship_it") {
+            assert_eq!(execution, None);
+        } else {
+            assert_eq!(execution, Some(("start".into(), 0, "held".into(), None)));
+        }
         assert_eq!(
             conn.query_row(
                 "SELECT task_id FROM agent_sessions WHERE id='conversation'",
@@ -3807,9 +3813,10 @@ mod tests {
                 },
             )
             .unwrap();
+        // That release's Workflow shape; `ship_it` later empties it to a graph.
         assert_eq!(
-            serde_json::from_str::<crate::workflow::WorkflowDefinition>(&placed.0).unwrap(),
-            crate::workflow::unplanned()
+            serde_json::from_str::<serde_json::Value>(&placed.0).unwrap(),
+            serde_json::json!({"name":"unplanned","nodes":[],"edges":[{"from":"start","to":"end","flow":null}]})
         );
         assert_eq!((placed.1, placed.2, placed.3, placed.4), (25, None, 25, 1));
         assert_eq!(
@@ -4177,7 +4184,9 @@ mod tests {
     async fn retired_home_landings_remain_readable_and_fence_old_supervisors() {
         use std::sync::Arc;
 
-        use crate::ops::pr_landing::{reconcile_pr_landing, LandingObservation, ObservePr};
+        use crate::ops::pr_landing::{
+            reconcile_pr_landing, LandingIo, LandingObservation, ObservePr,
+        };
         use crate::pr_landing::{LandingPlacement, LandingSupervisor, PrLandingId, PrLandingState};
         use crate::store::sqlite::SqliteStore;
         use time::OffsetDateTime;
@@ -4338,15 +4347,22 @@ mod tests {
         );
         let id = PrLandingId::from_raw("home_taskless");
         let landing = store.get_pr_landing(&id).await.unwrap().unwrap();
-        let merged = reconcile_pr_landing(store.clone(), landing, merged_observation.clone(), None)
-            .await
-            .unwrap();
+        let merged = reconcile_pr_landing(
+            store.clone(),
+            landing,
+            LandingIo::scripted(merged_observation.clone(), None),
+        )
+        .await
+        .unwrap();
         assert_eq!(merged.state, PrLandingState::Merged);
         assert_eq!(merged.merge_commit.as_deref(), Some("merge"));
-        let repeated =
-            reconcile_pr_landing(store.clone(), merged.clone(), merged_observation, None)
-                .await
-                .unwrap();
+        let repeated = reconcile_pr_landing(
+            store.clone(),
+            merged.clone(),
+            LandingIo::scripted(merged_observation, None),
+        )
+        .await
+        .unwrap();
         assert_eq!(repeated, merged);
         assert_eq!(
             store.pending_pr_landings("owner/repo").await.unwrap().len(),

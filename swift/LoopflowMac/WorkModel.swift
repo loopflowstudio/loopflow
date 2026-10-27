@@ -1713,7 +1713,7 @@ final class WorkModel {
             case .available:
                 guard sessions.errorMessage == nil else { return false }
                 return taskSessions(id).contains { $0.availability == .available && $0.state != .closed }
-            case .running:
+            case .busy:
                 if case .reported(_, let report) = SessionProgramStatus(sessions: taskSessions(id), unavailable: sessions.errorMessage) { return report.state == .working }
                 return false
             }
@@ -1983,24 +1983,12 @@ final class WorkModel {
         workflowCatalogRevisions[key] = revision
     }
 
-    /// The repository file that defines the Workflow; a builtin is first copied
-    /// into `.lf/workflows/` so the edit is committed with the code.
-    func workflowDefinitionFile(_ entry: WorkflowCatalogEntry) async throws -> URL {
-        guard let repoPath else { throw RegistryQueryError("No repository is open") }
-        let root = URL(fileURLWithPath: repoPath)
-        if let source = entry.source { return root.appendingPathComponent(source) }
-        let content = try await query.workflowSource(entry.name, cwd: repoPath)
-        let url = root.appendingPathComponent(".lf/workflows/\(entry.name).yaml")
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(content.utf8).write(to: url, options: .withoutOverwriting)
-        await loadWorkflowCatalog(force: true)
-        return url
-    }
-
-    func definitionSource(_ entry: GraphCatalogEntry) async throws -> URL {
-        let path = try await query.customizeGraph(entry.name, cwd: repoPath)
-        await loadGraphCatalog(force: true)
+    /// The repository file that defines graph `name`; a builtin is first copied
+    /// into `.lf/graphs/` so the edit is committed with the code. A Workflow is
+    /// a graph, so both catalogues may change.
+    func definitionFile(_ name: String) async throws -> URL {
+        let path = try await query.customizeGraph(name, cwd: repoPath)
+        await rereadDefinitions()
         return URL(fileURLWithPath: path)
     }
 
@@ -2012,6 +2000,28 @@ final class WorkModel {
         await performTaskAction(task.id) {
             try await query.runTask(issue: task.task.identifier, graph: graph, cwd: WaveOrigin.resolve(task.task.repo))
         }
+    }
+
+    /// Ship the Task, then confirm its subscription update; it moves to Shipping
+    /// and the window's ship toast offers Undo.
+    func shipTask(_ task: RoadmapTask) async {
+        await performTaskAction(task.id) {
+            try await query.shipTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+        }
+        noteShipping(task, shipped: true)
+    }
+
+    /// Stop Auto-Ship for the Task; it returns to Working and the toast says so.
+    func stopShipping(_ task: RoadmapTask) async {
+        await performTaskAction(task.id) {
+            try await query.stopShipping(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+        }
+        noteShipping(task, shipped: false)
+    }
+
+    private func noteShipping(_ task: RoadmapTask, shipped: Bool) {
+        guard navigation.taskRunDrafts[task.id]?.error == nil else { return }
+        navigation.shipNotice = ShipNotice(task: task, shipped: shipped)
     }
 
     /// The Work the Machine control describes: the current started Task, else the
@@ -2065,9 +2075,9 @@ final class WorkModel {
         }
     }
 
-    func pauseTask(_ task: RoadmapTask, paused: Bool) async {
+    func deferTask(_ task: RoadmapTask, deferred: Bool) async {
         await performTaskAction(task.id) {
-            try await query.pauseTask(issue: task.task.identifier, paused: paused, cwd: WaveOrigin.resolve(task.task.repo))
+            try await query.deferTask(issue: task.task.identifier, deferred: deferred, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 

@@ -607,7 +607,6 @@ fn nested_waves_create_files_and_store_project_identity() {
     assert!(by_id["id"].as_str().unwrap().starts_with("task_"));
     assert!(repo.path().join(".lf/wave").exists());
     assert!(!repo.path().join(".lf/config.yaml").exists());
-    assert!(!repo.path().join(".lf/workflows").exists());
 }
 
 #[test]
@@ -896,7 +895,6 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     assert!(!rejected.status.success());
     assert!(repo.path().join(".lf/wave").exists());
     assert!(!repo.path().join(".lf/config.yaml").exists());
-    assert!(!repo.path().join(".lf/workflows").exists());
     let changed = Command::new("git")
         .current_dir(repo.path())
         .args(["diff", "--name-only"])
@@ -910,9 +908,11 @@ fn public_local_planning_survives_restart_with_generated_identity() {
 fn public_local_task_places_and_runs_without_a_planning_provider() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    repo.create_file(".lf/graphs/proof.yaml", "- cmd: graph show proof\n");
-    let definition = repo.path().join(".lf/workflows/proof.yaml");
-    repo.create_file(".lf/workflows/proof.yaml", "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: proof}\n  - {from: review, to: end, graph: proof}\n");
+    repo.create_file(
+        ".lf/graphs/proof.yaml",
+        "- cmd: graph show proof\n- interactive: demo\n- cmd: graph show proof\n",
+    );
+    let definition = repo.path().join(".lf/graphs/proof.yaml");
     repo.stage_all();
     repo.commit("Fixture workflow");
     assert!(Command::new("git")
@@ -953,7 +953,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         .iter()
         .find(|entry| entry["name"] == "proof")
         .unwrap();
-    assert_eq!(committed["source"], ".lf/workflows/proof.yaml");
+    assert_eq!(committed["source"], ".lf/graphs/proof.yaml");
     assert!(committed["workflow"].is_object());
     let source = lf(
         repo.path(),
@@ -977,6 +977,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         .starts_with(&format!("jack/{}-", &id.trim_start_matches("task_")[..6])));
     lf(repo.path(), home.path(), &["-b", "task", "run", id]);
     let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    // The run stops at the Workflow's first stage, where a person takes part.
     assert_eq!(status["execution"]["status"], "active");
     assert_eq!(status["execution"]["task_id"], id);
     assert!(status["planning_error"].is_null());
@@ -1727,7 +1728,6 @@ fn project_edits_save_offline_in_both_connection_modes() {
         }
         assert!(store.list_tasks(None).unwrap().is_empty());
         assert!(!repo.path().join(".lf/wave").exists());
-        assert!(!repo.path().join(".lf/workflows").exists());
     }
 }
 
@@ -2025,7 +2025,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             assert_eq!(retained.description, "");
             assert_eq!(retained.rank, 0);
             assert_eq!(retained.assignee.as_deref(), Some("person-id"));
-            assert!(retained.completed);
+            assert_eq!(retained.state.as_deref(), Some("completed"));
             let changes = store.pending_task_changes(&second).unwrap();
             for field in ["task_title", "task_assignee"] {
                 assert!(changes.iter().any(|change| change.value.field() == field));
@@ -2177,7 +2177,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 .unwrap();
         }
         db.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
-        db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',0,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![active.id.as_str(),serde_json::json!({"name":"review","nodes":[],"edges":[{"from":"review","to":"end","graph":"implement"}]}).to_string()]).unwrap();
+        db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',1,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![active.id.as_str(),serde_json::json!({"name":"review","steps":[{"Skill":{"skill":{"name":"review"},"id":null,"interactive":true,"returns":null,"sources":[]}},{"Skill":{"skill":{"name":"implement"},"id":null,"interactive":false,"returns":null,"sources":[]}}]}).to_string()]).unwrap();
         let retained_execution = || {
             [
                 ("task_workflows", "task_id", active.id.as_str()),
@@ -2728,7 +2728,7 @@ fn wave_documents_and_workflows_follow_files() {
         let wave_id = loopflow::id::WaveId::new();
         let root = repo.path().join(".lf/wave/tools");
         std::fs::create_dir_all(root.join("parser")).unwrap();
-        std::fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
+        std::fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
         if connected {
             std::fs::write(
                 repo.path().join(".lf/config.yaml"),
@@ -2749,8 +2749,8 @@ fn wave_documents_and_workflows_follow_files() {
             "Additional authored context.\n",
         )
         .unwrap();
-        let workflow = "nodes: {}\nedges: [{from: start, to: end}]\n";
-        std::fs::write(repo.path().join(".lf/workflows/finish.yaml"), workflow).unwrap();
+        let workflow = "- cmd: help\n";
+        std::fs::write(repo.path().join(".lf/graphs/finish.yaml"), workflow).unwrap();
         let project = lf(
             repo.path(),
             home.path(),
@@ -2791,9 +2791,7 @@ fn wave_documents_and_workflows_follow_files() {
             repo.path().join("authored-wave"),
         )
         .unwrap();
-        let definition =
-            std::fs::read_to_string(repo.path().join(".lf/workflows/finish.yaml")).unwrap();
-        std::fs::remove_file(repo.path().join(".lf/workflows/finish.yaml")).unwrap();
+        std::fs::remove_file(repo.path().join(".lf/graphs/finish.yaml")).unwrap();
         let absent = lf(
             repo.path(),
             home.path(),
@@ -2811,20 +2809,16 @@ fn wave_documents_and_workflows_follow_files() {
         .output()
         .unwrap();
         assert!(!missing.status.success());
-        assert!(String::from_utf8_lossy(&missing.stderr).contains(".lf/workflows/finish.yaml"));
-        std::fs::write(repo.path().join(".lf/workflows/finish.yaml"), &definition).unwrap();
+        assert!(String::from_utf8_lossy(&missing.stderr).contains(".lf/graphs/finish.yaml"));
+        std::fs::write(repo.path().join(".lf/graphs/finish.yaml"), workflow).unwrap();
         let source = lf(
             repo.path(),
             home.path(),
             &["wave", "workflow", "source", "finish"],
         );
-        assert!(source.as_str().unwrap().contains("from: start"));
-        std::fs::write(repo.path().join(".lf/workflows/unimported.yaml"), workflow).unwrap();
-        std::fs::write(
-            repo.path().join(".lf/workflows/finish.yaml"),
-            "invalid: true",
-        )
-        .unwrap();
+        assert_eq!(source.as_str().unwrap(), workflow);
+        std::fs::write(repo.path().join(".lf/graphs/unimported.yaml"), workflow).unwrap();
+        std::fs::write(repo.path().join(".lf/graphs/finish.yaml"), "invalid: true").unwrap();
         let catalog = lf(
             repo.path(),
             home.path(),
@@ -2835,7 +2829,7 @@ fn wave_documents_and_workflows_follow_files() {
             .iter()
             .find(|entry| entry["name"] == "finish")
             .unwrap();
-        assert_eq!(edited["source"], ".lf/workflows/finish.yaml");
+        assert_eq!(edited["source"], ".lf/graphs/finish.yaml");
         assert!(edited["unavailable"].is_string());
         let unimported = entries
             .iter()
@@ -3311,7 +3305,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         home.path(),
         &["wave", "workflow", "source", "code"],
     );
-    assert!(source.as_str().unwrap().contains("nodes:"));
+    assert!(source.as_str().unwrap().contains("interactive: demo"));
     connection
         .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
         .unwrap();
@@ -3326,7 +3320,6 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         tasks_before
     );
     assert_eq!(store.task(&task_id).unwrap().unwrap(), task);
-    assert!(!repo.path().join(".lf/workflows").exists());
     // Wave selection uses the same writer; only future take-up changes.
     lf(
         repo.path(),
@@ -3576,7 +3569,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     )
     .unwrap();
     db.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
-    db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',0,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![id.as_str(),json!({"name":"review","nodes":[],"edges":[{"from":"review","to":"end","graph":"implement"}]}).to_string()]).unwrap();
+    db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',1,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![id.as_str(),json!({"name":"review","steps":[{"Skill":{"skill":{"name":"review"},"id":null,"interactive":true,"returns":null,"sources":[]}},{"Skill":{"skill":{"name":"implement"},"id":null,"interactive":false,"returns":null,"sources":[]}}]}).to_string()]).unwrap();
     let saved = store.task(&id).unwrap().unwrap();
     let read = || {
         lf(
@@ -3764,14 +3757,12 @@ fn offline_linear_checkout_uses_known_identifier_and_caps_title() {
 fn waveless_task_lifecycle() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
+    std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
     std::fs::write(repo.path().join(".lf/config.yaml"), "workflow: proof\n").unwrap();
-    std::fs::write(
-        repo.path().join(".lf/workflows/proof.yaml"),
-        "nodes: {review: demo}\nedges: [{from: start, to: review, graph: proof}, {from: review, to: end}]\n",
-    )
-    .unwrap();
-    repo.create_file(".lf/graphs/proof.yaml", "- cmd: graph show proof\n");
+    repo.create_file(
+        ".lf/graphs/proof.yaml",
+        "- cmd: graph show proof\n- interactive: {name: demo, id: review}\n",
+    );
     repo.stage_all();
     repo.commit("Configure repository workflow");
     repo.push();
@@ -3881,7 +3872,10 @@ fn workflow_defaults_follow_task_wave_and_repository() {
         ("wave", "wave-review"),
         ("explicit", "task-review"),
     ] {
-        repo.create_file(&format!(".lf/workflows/{name}.yaml"), &format!("nodes: {{{node}: demo}}\nedges: [{{from: start, to: {node}, graph: proof}}, {{from: {node}, to: end}}]\n"));
+        repo.create_file(
+            &format!(".lf/graphs/{name}.yaml"),
+            &format!("- graph: proof\n- interactive: {{name: demo, id: {node}}}\n"),
+        );
     }
     repo.stage_all();
     repo.commit("Configure selection proof");
@@ -3950,7 +3944,7 @@ fn workflow_defaults_follow_task_wave_and_repository() {
         .output()
         .unwrap();
     assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("invalid Workflow name"));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("invalid graph name"));
     repo.create_file(".lf/config.yaml", "workflow: repository\n");
     let explicit = lf(
         repo.path(),

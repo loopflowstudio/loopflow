@@ -24,7 +24,6 @@ use crate::store::{CredentialState, RoutingState};
 
 const DEFAULT_COOLDOWN_SECS: i64 = 15 * 60;
 const RESET_GRACE_SECS: i64 = 5;
-const STRAINED_UTILIZATION_PERCENT: u8 = 95;
 const PROVIDER_CREDENTIAL_ENV_VARS: [&str; 6] = [
     "CLAUDE_CODE_OAUTH_TOKEN",
     "ANTHROPIC_API_KEY",
@@ -34,45 +33,24 @@ const PROVIDER_CREDENTIAL_ENV_VARS: [&str; 6] = [
     "CODEX_HOME",
 ];
 
-/// The provider-observed limit window that most justifies demoting an account.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AccountStrain {
-    pub window: String,
-    pub used_percent: u8,
-}
-
-/// An account is strained while a provider-observed window sits at or above
-/// [`STRAINED_UTILIZATION_PERCENT`] and has not yet reset. Ties break on window
-/// name so the reported evidence is stable however the rows arrive.
-pub(crate) fn active_account_strain(
+/// The account's least room: its most-used window that has not yet reset.
+/// Ties break on window name so the reported evidence is stable however the
+/// rows arrive.
+pub(crate) fn tightest_window<'a>(
     provider: &str,
     account_id: &ProviderAccountId,
-    limits: &[AccountLimitRow],
+    limits: &'a [AccountLimitRow],
     now: i64,
-) -> Option<AccountStrain> {
+) -> Option<&'a AccountLimitRow> {
     limits
         .iter()
         .filter(|limit| limit.provider == provider && limit.account_id == *account_id)
-        .filter(|limit| limit.used_percent >= STRAINED_UTILIZATION_PERCENT)
         .filter(|limit| limit.resets_at.is_some_and(|reset| reset > now))
         .max_by(|left, right| {
             left.used_percent
                 .cmp(&right.used_percent)
                 .then_with(|| right.window.cmp(&left.window))
         })
-        .map(|limit| AccountStrain {
-            window: limit.window.clone(),
-            used_percent: limit.used_percent,
-        })
-}
-
-fn is_strained(
-    provider: &str,
-    account_id: &ProviderAccountId,
-    limits: &[AccountLimitRow],
-    now: i64,
-) -> bool {
-    active_account_strain(provider, account_id, limits, now).is_some()
 }
 
 pub(crate) fn account_route_eligible(account: &ProviderAccount, now: i64) -> bool {
@@ -83,46 +61,22 @@ pub(crate) fn account_route_eligible(account: &ProviderAccount, now: i64) -> boo
         && account.cooldown_until.is_none_or(|until| until <= now)
 }
 
-/// Stable sort: strained accounts fall behind unstrained ones, then larger
-/// plans lead, then the account with the most weekly headroom; declared route
-/// order breaks the remaining ties.
-pub(crate) fn order_accounts_by_capacity(
+/// Stable sort: larger plans lead, then the account with the most room;
+/// declared route order breaks ties.
+pub(crate) fn order_accounts_by_room(
     accounts: &mut [ProviderAccount],
     limits: &[AccountLimitRow],
     now: i64,
 ) {
-    accounts.sort_by_key(|account| capacity_rank(account, limits, now));
+    accounts.sort_by_key(|account| room_rank(account, limits, now));
 }
 
-fn capacity_rank(
-    account: &ProviderAccount,
-    limits: &[AccountLimitRow],
-    now: i64,
-) -> (bool, u8, u16) {
-    (
-        is_strained(&account.provider, &account.account_id, limits, now),
-        plan_preference(account),
-        weekly_used_percent(&account.provider, &account.account_id, limits, now),
-    )
-}
-
-/// The current weekly window's use. An account without that evidence sorts
-/// after every observed one rather than passing for idle.
-fn weekly_used_percent(
-    provider: &str,
-    account_id: &ProviderAccountId,
-    limits: &[AccountLimitRow],
-    now: i64,
-) -> u16 {
-    limits
-        .iter()
-        .find(|limit| {
-            limit.provider == provider
-                && limit.account_id == *account_id
-                && limit.window == "weekly"
-                && limit.resets_at.is_some_and(|reset| reset > now)
-        })
-        .map_or(u16::from(u8::MAX), |limit| u16::from(limit.used_percent))
+/// Plan preference, then the tightest window's use. A window that has reset
+/// leaves its account full room.
+fn room_rank(account: &ProviderAccount, limits: &[AccountLimitRow], now: i64) -> (u8, u8) {
+    let used_percent = tightest_window(&account.provider, &account.account_id, limits, now)
+        .map_or(0, |limit| limit.used_percent);
+    (plan_preference(account), used_percent)
 }
 
 fn plan_preference(account: &ProviderAccount) -> u8 {
@@ -209,7 +163,7 @@ enum AccountLogin {
 struct AccountCandidate {
     account: ProviderAccount,
     credential_available: bool,
-    rank: (bool, u8, u16),
+    rank: (u8, u8),
     home: PathBuf,
 }
 
@@ -888,7 +842,7 @@ pub(crate) async fn resolve_provider_account_exact(
     }))
 }
 
-/// Shared routing takes the eligible account with the most capacity. The
+/// Shared routing takes the eligible account with the most room. The
 /// active account wins ties, so a launch switches every running conversation
 /// only when another account is ahead.
 async fn select_shared_account(
@@ -991,7 +945,7 @@ async fn resolve_selected_provider_account(
 
 /// A shared launch stays on the active account where its own choice allows:
 /// among the accounts it named, or among all of them when it named none, as
-/// long as no other account there has more capacity.
+/// long as no other account there has more room.
 fn active_candidate(
     active: &ProviderAccountId,
     candidates: &[(AccountCandidate, bool)],
@@ -1006,8 +960,7 @@ fn active_candidate(
     candidates.iter().position(|(candidate, explicit)| {
         *explicit == named
             && candidate.credential_available
-            && !candidate.rank.0
-            && (named || candidate.rank == best)
+            && candidate.rank == best
             && candidate.account.account_id == *active
     })
 }
@@ -1058,7 +1011,7 @@ async fn ordered_selected_candidates(
             candidates.push(AccountCandidate {
                 credential_available: account.credential_state == CredentialState::Connected
                     && identity_matches,
-                rank: capacity_rank(account, &limits, now),
+                rank: room_rank(account, &limits, now),
                 account: account.clone(),
                 home,
             });
@@ -1275,7 +1228,7 @@ pub(crate) async fn inspect_provider_route(
         )
         .cloned()
         .collect::<Vec<_>>();
-    order_accounts_by_capacity(
+    order_accounts_by_room(
         &mut available,
         &store
             .provider_account_limits(Some(provider.as_str()))
@@ -2328,7 +2281,7 @@ mod account_first_tests {
     }
 
     #[tokio::test]
-    async fn automatic_selection_demotes_only_active_strain() {
+    async fn automatic_selection_prefers_the_account_with_more_room() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(
@@ -2379,12 +2332,8 @@ mod account_first_tests {
             .unwrap();
         assert_eq!(only.account.account_id, first.account_id);
 
-        // Under the bar, already reset, or never resetting: declared order stands.
-        for window in [
-            window(94, Some(now_unix() + 3600)),
-            window(95, Some(now_unix() - 1)),
-            window(95, None),
-        ] {
+        // Already reset or never resetting: full room, so declared order stands.
+        for window in [window(95, Some(now_unix() - 1)), window(95, None)] {
             store
                 .upsert_provider_account_limits(
                     Provider::Codex.as_str(),
@@ -2569,6 +2518,31 @@ mod account_first_tests {
         .await
         .unwrap()
         .is_some()
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_switch_the_store_cannot_record_leaves_the_native_login() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
+        rusqlite::Connection::open(temp.path().join("loopflow.db"))
+            .unwrap()
+            .execute_batch("DROP TABLE provider_account_switches")
+            .unwrap();
+
+        let switched = activation::activate(
+            &store,
+            Provider::Codex,
+            &parse_account_id("second").unwrap(),
+            &native,
+            activation::SwitchCause::Person,
+        )
+        .await;
+
+        assert!(switched.is_err());
+        assert_eq!(codex_login(&native), "first@example.com");
     }
 
     #[allow(clippy::await_holding_lock)]

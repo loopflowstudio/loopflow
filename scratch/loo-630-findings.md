@@ -30,6 +30,6 @@
 ## Open decision (Jack)
 Route order loopflow → primary, or primary → loopflow / capacity-first.
 
-Decision (Jack, 2026-10-27): most capacity first. Shared selection ranks by strain,
-plan, then weekly headroom; route order breaks ties and the active account wins
+Decision (Jack, 2026-10-27): most capacity first; later (same day) bias for bigger plans and drop the 95% line. Shared selection ranks by plan,
+then the tightest unreset window; route order breaks ties and the active account wins
 only ties. Also fix defect 1 (switch log vs native install).

@@ -70,7 +70,8 @@ struct RouteAccount {
     credential_state: String,
     routing: String,
     cooldown_until: Option<i64>,
-    demotion: Option<String>,
+    /// The account's most-used window that has not reset.
+    tightest: Option<String>,
 }
 
 async fn show_routes(
@@ -126,20 +127,20 @@ async fn show_routes(
         };
         let mut candidates = Vec::new();
         for account in accounts.unwrap_or_default() {
-            let demotion = crate::provider_account::active_account_strain(
+            let tightest = crate::provider_account::tightest_window(
                 provider.as_str(),
                 &account.account_id,
                 &limits,
                 now_unix(),
             )
-            .map(|strain| format!("{} {}% used", strain.window, strain.used_percent));
+            .map(|limit| format!("{} {}% used", limit.window, limit.used_percent));
             candidates.push(RouteAccount {
                 account_id: account.account_id,
                 login: account.login_email.map(|email| email.to_string()),
                 credential_state: account.credential_state.as_str().into(),
                 routing: account.routing_state.as_str().into(),
                 cooldown_until: account.cooldown_until,
-                demotion,
+                tightest,
             });
         }
         let isolated = crate::provider_account::activation::launch_isolated();
@@ -203,8 +204,8 @@ async fn show_routes(
                     account.login.as_deref().unwrap_or("login unknown"),
                     account.credential_state
                 );
-                if let Some(demotion) = &account.demotion {
-                    println!("     demoted: {demotion}");
+                if let Some(tightest) = &account.tightest {
+                    println!("     {tightest}");
                 }
             }
         }

@@ -211,22 +211,12 @@ def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
     bootstrap = (ROOT / "scripts/bootstrap-cron-host.sh").read_text()
     assert "--remote-native" not in bootstrap
     assert "--git-common-dir" in bootstrap
-    assert 'job "0 9 * * *" telemetry-daily' in bootstrap
-    assert 'job "0 10 * * *" release-run' in bootstrap
     assert "| crontab -" in bootstrap
-    assert "env -i" in bootstrap
     assert "DOPPLER_TOKEN" not in bootstrap
     assert "loopflow-release-publisher" in bootstrap
-    assert "not local Machine %s" not in bootstrap
-    assert "printf '%s\\n' \"$local_machine\"" not in bootstrap
-    assert "bootstrap complete: %s owns" not in bootstrap
     assert bootstrap.index("scripts/publish_release.py check") < bootstrap.index(
         "| crontab -"
     )
-    retire = bootstrap.index('LaunchAgents/loopflow.cron."$wave".*.plist')
-    assert bootstrap.index("scripts/publish_release.py check") < retire
-    assert retire < bootstrap.index("| crontab -")
-    assert 'launchctl bootout "gui/$(id -u)/$label"' in bootstrap
 
     public_contract = "\n".join(
         [
@@ -292,6 +282,8 @@ esac
     for tool in ("jq", "git"):
         os.symlink(shutil.which(tool), tools / tool)
     (home / "crontab").write_text("*/5 * * * * unrelated-job\n")
+    for job in ("telemetry-daily", "release-run"):
+        _executable(home / f"Library/LaunchAgents/loopflow.cron.infrastructure.{job}.plist", "")
 
     env = {
         "HOME": str(home),
@@ -325,12 +317,28 @@ def test_cron_bootstrap_installs_jobs_for_a_wave_running_on_its_local_default(tm
     jobs = {line.split("# loopflow:infrastructure:")[1]: line for line in crontab[1:]}
     assert jobs["telemetry-daily"].startswith("0 9 * * * ")
     assert jobs["release-run"].startswith("0 10 * * * ")
+    assert not list((home / "Library/LaunchAgents").glob("loopflow.cron.*"))
 
     # cron hands the line to sh; it runs the installed gate, not PATH's lf.
     (home / "ran").unlink()
     command = jobs["release-run"].split(" ", 5)[5]
+    assert " && env -i HOME=" in command
     subprocess.run(["/bin/sh", "-c", command], env={}, check=True)
     assert (home / "ran").read_text() == "--wave infrastructure --batch graph release-run\n"
+
+
+def test_cron_bootstrap_keeps_launchd_jobs_when_the_crontab_write_fails(tmp_path):
+    repo, env = _cron_host(tmp_path, wave_machine=None)
+    tools = Path(env["PATH"].split(":")[0])
+    crontab = tools / "crontab"
+    crontab.unlink()
+    _executable(crontab, 'if [ "$1" = -l ]; then cat "$HOME/crontab"; else exit 1; fi\n')
+
+    result = _bootstrap(repo, env)
+
+    assert result.returncode != 0
+    agents = Path(env["HOME"]) / "Library/LaunchAgents"
+    assert len(list(agents.glob("loopflow.cron.infrastructure.*.plist"))) == 2
 
 
 def test_cron_bootstrap_accepts_a_wave_placed_on_this_machine(tmp_path):

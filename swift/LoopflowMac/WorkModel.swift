@@ -1380,14 +1380,12 @@ final class WorkModel {
                   let task = task(id: shown.id)?.task else { return }
             guard let body else {
                 taskWork.values[task.id] = .unavailable(lastGood: taskWork[task.id].value, reason: reason)
+                comments.values[task.id] = .unavailable(lastGood: comments[task.id].value, reason: reason)
                 taskDiagnostics.values[task.id] = .unavailable(lastGood: taskDiagnostics[task.id].value, reason: reason)
                 break
             }
             guard body.task == task.task.identifier else { return }
-            // TaskReadings is not Equatable; skip unchanged comments unless a read is superseded.
-            if comments.inFlight.contains(task.id) || comments[task.id] != .available(body.comments) {
-                comments.receive(body.comments, for: task.id)
-            }
+            if comments[task.id] != .available(body.comments) { comments.values[task.id] = .available(body.comments) }
             let next = WorkReading.available(body.work)
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
             let runs = Dictionary(body.graphProcesses.map { ($0.entry.id, $0) }) { _, newer in newer }
@@ -1908,13 +1906,6 @@ final class WorkModel {
             LaunchJournal.home.refreshed("sessions", ms: started.elapsedMs, ok: false)
             let next = WorkReading.unavailable(lastGood: sessions.value, reason: error.localizedDescription)
             if sessions != next { sessions = next }
-        }
-    }
-
-    /// Read one Task's thread.
-    func loadComments(task: RoadmapTask) async {
-        await loadTaskReading(\.comments, task: task.id) { [query] in
-            try await query.taskComments(id: task.id, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 

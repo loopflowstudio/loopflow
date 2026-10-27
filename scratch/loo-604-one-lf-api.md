@@ -153,6 +153,11 @@ CPU: a descendant still held its stdin open, which was the only stop signal.
   `history` was never rendered and Session history has its own watch. The
   detail lost only the PR `empty` probe, which Desktop decoded but never read.
   `lf wave status [--watch]` stays an ordinary CLI read.
+- Comments: Desktop's one-shot `lf task comment` read is deleted
+  (`RegistryQuery.taskComments`, `WorkModel.loadComments`,
+  `TaskCommentsProofTests`); the thread arrives with the `task status` watch,
+  a failed reading marks it unavailable, and retry asks the watches to reread.
+  Production `WorkModel` always has the watch; only tests lacked one.
 
 ## Plan per read
 
@@ -169,7 +174,6 @@ unless "Work needed" says otherwise.
 | `planning status` | watch | R | holds the repository's planning sync |
 | `desktop plans` | watch | R | |
 | `wave status` per Wave | `openHistoricalReference`, user action | W | check historical Projects are in the plan |
-| `task comment` | TaskCommentsView on appear | T | delete; comments arrive with `task status` |
 | `wave list --all --current` | before first frame; after createWave | M | delete once a checkpoint covers createWave |
 | `desktop view --plan` | each planning frame while a `.view` is open | R | ad-hoc expression in `desktop plans` args |
 | `wave workflow list`, `graph list` | frames whose planning moved; palette | R | catalog watch (Remaining 3) |
@@ -199,8 +203,8 @@ unless "Work needed" says otherwise.
 - Done: `RegistryQuery.plan/waves(repoPath:)/userName/taskFiles/repositoryWaves`,
   WavesView per-Wave `lf wave status`, `lf monitor work` and `work_watch.rs`,
   `session_watch.rs`, task_history part, `work_frame.json`, `LocalWorkObservation`'s
-  single reader, Desktop's `wave status` watch.
-- Next: `taskComments` read (comments arrive with `task status`), `allWaves`
+  single reader, Desktop's `wave status` watch, `taskComments` read.
+- Next: `allWaves`
   after createWave, no-stream-only reads (`roadmap`, `sessionPage`,
   `peerPlanningStatus`, `workActivity`) if the one-shot transport is not kept
   for remote Machines.
@@ -211,3 +215,4 @@ unless "Work needed" says otherwise.
 - Pass b6772c9e3d (monitor deletion): clippy clean; watch lib/integration tests, reference, Desktop suites (130) passed; Linux `planning_reconnect` e2e: CI.
 - One Task row: clippy clean; `--test integration dto_fixtures` 43 passed; `test_desktop.sh --filter 'DTOFixtureTests|WaveLensTests|RegistryQueryTests|TaskHistoryFilterTests|WaveDetailReadingTests|MockWaveFixtureTests'` 103 passed; waves lib tests: gate.
 - Wave detail from planning (Swift only): `test_desktop.sh --filter 'WaveDetailReadingTests|MockWaveFixtureTests|DTOFixtureTests|WorkObservationTransportTests|DesktopPerformanceTests|RegistryQueryTests|WorkModelTests|WorkSelectionTests'` 128 passed; UI capture: gate.
+- Comments from the watch: `test_desktop.sh --filter 'DesktopHeadlessTests|WorkModelTests|DTOFixtureTests|WorkSelectionTests'` 100 passed.

@@ -110,32 +110,18 @@ struct DesktopHeadlessTests {
         _ = try view.inspect().find(button: "Customize")
     }
 
-    @Test("An unplaced Task and its CLI comment thread render without a display")
-    func storedTaskComments() async throws {
+    @Test("An unplaced Task and its CLI comment thread decode without a display")
+    func storedTaskComments() throws {
         struct Proof: Decodable {
             let task: RoadmapTask
             let comments: TaskComments
         }
         let data = try Data(contentsOf: fixtures.appendingPathComponent("local_task.json"))
         let proof = try JSONDecoder().decode(Proof.self, from: data)
-        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let thread = String(decoding: try JSONSerialization.data(withJSONObject: #require(object["comments"])), as: UTF8.self)
-        let model = WorkModel(query: RegistryQuery { args, _ in
-            guard args.prefix(2) == ["task", "comment"] else {
-                throw RegistryQueryError("Unexpected command: \(args)")
-            }
-            return thread
-        })
         #expect(proof.task.reference.workspace == nil)
         #expect(proof.task.task.id == "task_0123456789ab40008000000000000001")
         #expect(proof.task.runControl.unavailable == nil)
-        await model.loadComments(task: proof.task)
-        #expect(model.comments[proof.task.id].value == proof.comments)
-        model.navigation.expandedComments.insert(proof.task.id)
-        let view = TaskCommentsView(model: model, task: proof.task)
-        _ = try view.inspect().find(text: "Fixture Person")
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier:
-            "task-comment-00000000-0000-4000-8000-000000000001")
+        #expect(TaskCommentsView.author(proof.comments.comments[0].author) == "Fixture Person")
         #expect(TaskCommentsView.readableBody(proof.comments.comments[0].body) == "Preserve the escaped quote")
     }
 
@@ -165,14 +151,9 @@ struct DesktopHeadlessTests {
         let planning = roadmap
 
         let calls = Recorder()
-        let (oldReads, releaseOldReads) = AsyncStream<Void>.makeStream()
         let feed = Feed()
         let model = WorkModel(query: RegistryQuery(watchWork: { await feed.open() }) { args, _ in
             await calls.add(args)
-            if args.prefix(2) == ["task", "comment"] {
-                for await _ in oldReads { }
-                return #"{"identifier":"old","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}"#
-            }
             return ""
         })
         model.confirmMachine(fixtureMachineId)
@@ -229,9 +210,6 @@ struct DesktopHeadlessTests {
         #expect(detail.presentation.execution == .running)
         #expect(detail.current == 0)
 
-        let oldRead = Task { await model.loadComments(task: task) }
-        try await eventually { model.comments.inFlight.contains(task.id) }
-
         // The subscription updates normally; command confirmation is separate.
         let moving = Task { await model.moveTask(to: "demo", task: task) }
         try await eventually { feed.requests.last == .checkpoint(id: 3, replay: []) }
@@ -262,8 +240,6 @@ struct DesktopHeadlessTests {
         await moving.value
         try await eventually { model.taskWork[task.id].value?.graphProcesses.count == 2 }
         #expect(model.taskWork[task.id].value?.workflow?.position == .node("demo"))
-        releaseOldReads.finish()
-        await oldRead.value
         #expect(model.comments[task.id].value?.comments.count == 3)
         #expect(model.comments[task.id].value?.pendingSync == ["c-1"])
         model.navigation.expandedComments.insert(task.id)
@@ -272,7 +248,6 @@ struct DesktopHeadlessTests {
         _ = try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-44444444-4444-4444-8444-444444444444")
         #expect(model.graphProcesses["44444444-4444-4444-8444-444444444444"]?.entry.name == "pursue")
         #expect(await calls.calls == [
-            ["task", "comment", task.id, "--json"],
             ["task", "workflow", "move", task.task.identifier, "demo"],
         ])
     }

@@ -392,13 +392,6 @@ public struct RegistryQuery: Sendable {
         _ = try await run(["task", "abandon", issue], cwd)
     }
 
-    /// One planning Task's complete comment thread. Read-only; works before
-    /// the Task is prepared or started.
-    public func taskComments(id: String, cwd: String) async throws -> TaskComments {
-        let stdout = try await run(["task", "comment", id, "--json"], cwd)
-        return try Self.decode(TaskComments.self, from: stdout)
-    }
-
     /// Complete Task-attributed Session input/provider history. Read-only; querying
     /// an unstarted Task neither prepares nor starts it.
     public func taskHistory(task: String, cwd: String?) async throws -> [SessionHistory] {

@@ -595,24 +595,18 @@ fn render_report(report: &RolloverReport) -> String {
             lines.push(format!("  {}", restore::describe(session)));
         }
     }
-    if !report.next_step.is_empty() {
-        lines.push(format!(
-            "Moving at their next step ({}):",
-            report.next_step.len()
-        ));
-        for runner in &report.next_step {
-            lines.push(format!(
-                "  pid {} {} on {}: {}",
-                runner.process.pid, runner.process.label, runner.binary, runner.reason
-            ));
+    for (heading, listed) in [
+        ("Moving at their next step", &report.next_step),
+        ("Staying on their lf", &report.stays),
+    ] {
+        if listed.is_empty() {
+            continue;
         }
-    }
-    if !report.stays.is_empty() {
-        lines.push(format!("Staying on their lf ({}):", report.stays.len()));
-        for staying in &report.stays {
+        lines.push(format!("{heading} ({}):", listed.len()));
+        for entry in listed {
             lines.push(format!(
                 "  pid {} {} on {}: {}",
-                staying.process.pid, staying.process.label, staying.binary, staying.reason
+                entry.process.pid, entry.process.label, entry.binary, entry.reason
             ));
         }
     }

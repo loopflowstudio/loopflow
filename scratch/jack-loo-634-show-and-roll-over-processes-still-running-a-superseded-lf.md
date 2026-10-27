@@ -176,7 +176,7 @@ mirror or fixture).
   OrbStack.app then left /Applications. Deferred to CI `task-installation`.
 - 2026-10-27 realign, Docker Desktop: `scripts/test_task_installation.py --test
   graph_live_across_switch_runs_next_step_on_selected_install` passes (1 test).
-- 2026-10-27 compress (one `place` for every disposition): clippy and `--lib -- rollover` (4) pass.
+- 2026-10-27 compress (one `place` per disposition; one loop renders both process lists): clippy and `--lib -- rollover` (4) pass.
 - Demo: rollover and the `ps` section reach the live store only once installed (a
   branch build re-execs the installed lf for ordinary commands; `lf doctor` doesn't).
 

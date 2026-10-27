@@ -1,8 +1,10 @@
-//! SQLite persistence for watched-landing CI recovery incidents.
+//! SQLite persistence for watched-landing CI recovery incidents and the
+//! admission of the repairs they own.
 
-use rusqlite::{params, types::Type};
+use rusqlite::{params, types::Type, OptionalExtension};
 use time::OffsetDateTime;
 
+use crate::id::LfProcessId;
 use crate::pr_landing::PrLandingId;
 use crate::store::ci_incidents::CiIncidentReportRow;
 use crate::store::{StoreError, StoreResult};
@@ -210,28 +212,6 @@ impl super::SqliteStore {
         )?)
     }
 
-    /// Fill the provider's completion time on this head's incidents that lack one.
-    pub(crate) fn record_ci_provider_completion(
-        &self,
-        repo: &str,
-        pr_number: u32,
-        failed_head_sha: &str,
-        completed_at: OffsetDateTime,
-    ) -> StoreResult<usize> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute(
-            "UPDATE ci_incidents SET provider_completed_at=?4
-             WHERE repo=?1 AND pr_number=?2 AND failed_head_sha=?3
-               AND provider_completed_at IS NULL",
-            params![
-                repo,
-                i64::from(pr_number),
-                failed_head_sha,
-                timestamp(completed_at)
-            ],
-        )?)
-    }
-
     /// Each unfinished repair for this PR, as its incident and Process, newest first.
     pub(crate) fn pr_repair_processes(
         &self,
@@ -334,5 +314,127 @@ impl super::SqliteStore {
                 .flatten();
         }
         Ok(incidents)
+    }
+}
+
+// ---- Repair admission
+
+#[derive(Debug)]
+pub(crate) struct RepairReservation {
+    pub process: Option<LfProcessId>,
+    pub retries: u32,
+    pub finished: Option<i64>,
+    pub conclusion: Option<String>,
+    pub error: Option<String>,
+}
+
+/// One repair attempt for a CI incident, as its row records it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RepairAttempt {
+    /// No repair responded yet, or one is still starting or running.
+    Open,
+    /// The attempt concluded, or its startup exhausted its retries.
+    Finished {
+        /// Unix seconds.
+        ended_at: i64,
+    },
+}
+
+impl super::SqliteStore {
+    /// `None` when no incident row has this identity yet.
+    pub(crate) fn repair_attempt(
+        &self,
+        identity: &str,
+        startup_retries: u32,
+    ) -> StoreResult<Option<RepairAttempt>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT repair_conclusion IS NOT NULL
+                     OR (responded_at IS NOT NULL AND repair_lf_process_id IS NULL)
+                     OR (repair_finished_at IS NOT NULL AND repair_retries >= ?2),
+                     COALESCE(repair_finished_at, responded_at / 1000000000, updated_at / 1000000000)
+                 FROM ci_incidents WHERE identity=?1",
+                params![identity, startup_retries],
+                |row| {
+                    Ok(if row.get::<_, bool>(0)? {
+                        RepairAttempt::Finished {
+                            ended_at: row.get(1)?,
+                        }
+                    } else {
+                        RepairAttempt::Open
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    pub(crate) fn repair_reservation(&self, identity: &str) -> StoreResult<RepairReservation> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row("SELECT repair_lf_process_id,repair_retries,repair_finished_at,repair_error,repair_conclusion FROM ci_incidents WHERE identity=?1", [identity], |row| Ok(RepairReservation {
+            process: row.get(0)?, retries: row.get(1)?, finished: row.get(2)?, error: row.get(3)?, conclusion: row.get(4)?,
+        }))?)
+    }
+
+    /// Reserve an incident's repair for `process`; the run it launches takes
+    /// the reservation over, and settlement records the Session it opened.
+    pub(crate) fn reserve_repair(
+        &self,
+        identity: &str,
+        generation: u64,
+        process: &LfProcessId,
+        retry: bool,
+        task: Option<&crate::durable::TaskId>,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if let Some(task) = task {
+            if super::durable::task_state_in(&tx, task)? == crate::durable::TaskState::Deferred {
+                return Err(StoreError::InvalidAuthority(
+                    "Task is deferred; CI repair is held".into(),
+                ));
+            }
+        }
+        let changed = tx.execute("UPDATE ci_incidents SET repair_lf_process_id=?3,repair_session_id=NULL,repair_retries=repair_retries+?4,repair_finished_at=NULL,repair_error=NULL,claimed_landing_generation=?2
+            WHERE identity=?1 AND EXISTS(SELECT 1 FROM pr_landings p WHERE p.id=ci_incidents.landing_id AND p.generation=?2 AND p.state IN ('watching','repairing','blocked'))",params![identity,generation as i64,process.as_str(),retry])? == 1;
+        if changed {
+            tx.commit()?;
+        }
+        Ok(changed)
+    }
+
+    pub(crate) fn handoff_repair(
+        &self,
+        identity: &str,
+        launcher: &LfProcessId,
+        worker: &LfProcessId,
+    ) -> StoreResult<bool> {
+        Ok(self.conn.lock().expect("store mutex poisoned").execute("UPDATE ci_incidents SET repair_lf_process_id=?3,responded_at=COALESCE(responded_at,?4) WHERE identity=?1 AND repair_lf_process_id=?2 AND repair_finished_at IS NULL", params![identity,launcher.as_str(),worker.as_str(),time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64])? == 1)
+    }
+
+    /// Settle an exited run: the Session and input it captured, if any, and
+    /// its conclusion or the reason it reached none.
+    pub(crate) fn finish_repair(
+        &self,
+        identity: &str,
+        process: &LfProcessId,
+        captured: Option<(&str, Option<i64>)>,
+        error: Option<&str>,
+        conclusion: Option<&str>,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let (session, capture) = captured.unzip();
+        let capture = capture.flatten();
+        if tx.execute("UPDATE ci_incidents SET repair_finished_at=?3,repair_error=?4,repair_conclusion=?5,repair_session_id=?6 WHERE identity=?1 AND repair_lf_process_id=?2 AND repair_finished_at IS NULL",params![identity,process.as_str(),now,error,conclusion,session])? == 0 {
+            // Another check already settled this run.
+            return Ok(());
+        }
+        if conclusion.is_some() {
+            tx.execute("UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND current_capture=?2 AND completed_at IS NULL", params![session,capture,now])?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 }

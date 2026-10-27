@@ -43,7 +43,8 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::TaskDescription(_)
         | WorkValue::TaskRank(_)
         | WorkValue::TaskAssignee(_)
-        | WorkValue::TaskPaused(_)
+        | WorkValue::TaskDeferred(_)
+        | WorkValue::TaskShippedAt(_)
         | WorkValue::TaskDueDate(_)
         | WorkValue::TaskDeletedAt(_)
         | WorkValue::TaskUrl(_)
@@ -77,7 +78,9 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::TaskDescription(_) => "issue_description",
         WorkValue::TaskRank(_) => "planning_rank",
         WorkValue::TaskAssignee(_) => "planning_assignee",
-        WorkValue::TaskPaused(_) => "paused",
+        // The released column keeps its name.
+        WorkValue::TaskDeferred(_) => "paused",
+        WorkValue::TaskShippedAt(_) => "shipped_at",
         WorkValue::TaskDueDate(_) => "planning_due_date",
         WorkValue::TaskDeletedAt(_) => "planning_deleted_at",
         WorkValue::TaskUrl(_) => "planning_url",
@@ -154,7 +157,7 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
         }),
         _ => Err(StoreError::InvalidData("unknown Work table".into())),
     }?;
-    // Historical migrations seed their journal before the pause column exists.
+    // Historical migrations seed their journal before the `paused` column exists.
     if table == "tasks"
         && conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='paused')",
@@ -162,8 +165,21 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
             |row| row.get::<_, bool>(0),
         )?
     {
-        values.push(WorkValue::TaskPaused(conn.query_row(
+        values.push(WorkValue::TaskDeferred(conn.query_row(
             "SELECT paused FROM tasks WHERE id=?1",
+            [id],
+            |row| row.get(0),
+        )?));
+    }
+    if table == "tasks"
+        && conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='shipped_at')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )?
+    {
+        values.push(WorkValue::TaskShippedAt(conn.query_row(
+            "SELECT shipped_at FROM tasks WHERE id=?1",
             [id],
             |row| row.get(0),
         )?));
@@ -682,19 +698,19 @@ mod tests {
         for store in [&a, &b] {
             store.bind_peer_planning("/repo", &route).unwrap();
         }
-        for paused in [true, false] {
-            a.set_task_paused(&task, paused).unwrap();
+        for deferred in [true, false] {
+            a.set_task_deferred(&task, deferred).unwrap();
             let exported = a.export_peer_planning("/repo", &route.id()).unwrap();
             b.import_peer_planning(
                 "/repo",
                 &route.id(),
-                if paused { "paused" } else { "resumed" },
+                if deferred { "deferred" } else { "resumed" },
                 &exported,
             )
             .unwrap();
             assert_eq!(
-                b.task_state(&task).unwrap() == crate::durable::TaskState::Paused,
-                paused
+                b.task_state(&task).unwrap() == crate::durable::TaskState::Deferred,
+                deferred
             );
             assert!(b.workflow(&task).unwrap().is_none());
             assert!(b.task(&task).unwrap().unwrap().worktree.is_none());

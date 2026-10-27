@@ -273,7 +273,7 @@ export from any Machine but the one expected is refused; a failed copy deletes
 nothing. `lf session list` and `lf task status` name copies "from <machine>"
 after the sandbox is gone, and `lf history show <session>` opens one. The give-back
 pass runs at the end of a forwarded `lf task run` for its rented Machine and in
-the scheduled `lf task reconcile` for every rental; `lf ondemand list` only
+lazy recovery (any lf read of this Machine's work) for every rental; `lf ondemand list` only
 refreshes provider state and never ends a machine.
 
 ## Process topology

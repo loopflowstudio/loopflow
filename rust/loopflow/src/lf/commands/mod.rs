@@ -29,6 +29,7 @@ pub mod run;
 pub mod session;
 pub mod session_history;
 mod session_watch;
+pub mod ship;
 pub mod ssh;
 pub mod tokens;
 pub mod top;

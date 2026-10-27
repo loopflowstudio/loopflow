@@ -361,7 +361,7 @@ recorded repository; outside a repository, ticket aliases must be globally uniqu
 lf task edit <id> --rank 0 --assignee <person-id>
 lf task edit <id> --unassign
 lf wave edit-plan WAVE --name "Parser" --summary "Retain quoted input"
-lf wave workflow set review WAVE      # .lf/workflows/review.yaml or a builtin
+lf wave workflow set review WAVE      # .lf/graphs/review.yaml or a builtin
 lf wave edit-plan WAVE --description "Preserve quoted text across machines."
 lf wave update-plan --wave parser --plan /tmp/plan.json
 ```
@@ -771,8 +771,8 @@ Task PR with no new work succeeds and reports whether Task completion remains.
 With new work, the same command prepares its next PR.
 `lf pr reconcile` checks recorded landings once. In a Task checkout it can also
 recover an existing PR whose GitHub identity is missing, without publishing.
-Ambiguous provider evidence remains unresolved. `lf ci watch` repairs actionable
-CI failures while it runs.
+Ambiguous provider evidence remains unresolved. It repairs nothing; the
+waiting landing does.
 
 ```bash
 lf land --wait-and-fix
@@ -837,38 +837,19 @@ teammate's published crons as theirs, not installed here. When the fetch fails,
 it shows the last observed state and when it was published. Existing job names
 and Wave selectors retain installed identities and receipt history.
 
-## Check authorized deliveries in the background
+## Repair failed CI until merge
 
 ```bash
-lf cron sync --repo                 # install this Machine's minute delivery check
-lf task reconcile --json            # check recorded deliveries once
-lf task automation --json           # schedule coverage and CI repair holds
-lf cron sync --repo --disable       # remove the schedule
+lf ship                   # a Task: the remaining steps, then land and repair
+lf land --wait-and-fix    # this PR: land and repair in the foreground
 ```
 
-Checks continue with Desktop closed while this Machine's user is logged in.
-They record CI failures and settle verified merges. Graph recovery belongs to its
-caller: inspect execution and effect history before launching fresh work.
-
-## Repair failed CI
-
-```bash
-lf ci watch               # watch this repository's PR checks until you stop it
-lf ci watch --once        # check every open PR once and exit
-lf ci watch --install     # keep it running as a launchd service
-lf ci watch --uninstall
-lf ci watch --status      # live or not, last poll, what it started and why
-```
-
-The watcher polls GitHub about once a minute and starts one ci-fix when a PR
-with a recorded landing (`lf arm`, `lf land`) fails its required checks. A
-failing PR nobody armed is reported, not repaired; so is a PR with no Task.
-Loopflow Desktop runs the same command for each open repository and stops it
-on quit. A second copy stands by behind a live one. Nothing depends on the
-watcher running during `land --wait-and-fix`: waited landing admits the same repair.
-After bare land returns, failures wait for a watcher or another waited landing.
-An idle check launches no provider. Existing work and GitHub merge requests
-continue when the schedule is disabled or a Task is held.
+The waiting process is the only one that repairs. It starts one ci-fix when its
+PR fails a required check or GitHub drops its merge request, stops when a
+person removes that request, and returns on merge or closure. A shipping Task whose ship process died starts
+again on the next read of this Machine's work (`lf task status`, `lf ps`,
+Desktop); a Machine nothing reads recovers when it is next read. After bare
+`lf land` returns, nothing repairs its PR. `lf task defer` holds repair.
 
 Set repository defaults in `.lf/config.yaml`:
 
@@ -876,10 +857,9 @@ Set repository defaults in `.lf/config.yaml`:
 automation: {retries: 1}
 ```
 
-Use `lf task automate EXP-12 off` to hold future CI repair, and
-`lf task automate EXP-12 on` to enable it again. These settings never resume a
-Graph. One failed repair startup may retry; a completed blocked repair waits for
-changed evidence.
+`retries` caps startup retries within one repair attempt. A finished attempt
+that leaves the PR blocked is followed by a fresh one after a backoff that grows
+from 1 to 30 minutes, so repair never gives up on an open PR.
 Pending or missing CI checks keep waiting; elapsed time alone never starts repair.
 Use an always-available Machine for progress through laptop logout or shutdown.
 
@@ -956,7 +936,7 @@ CLI aliases and captured Graph steps use the same resolved-skill decision.
 `--explain` reads selected Work without executing the invocation. Task commands,
 Desktop opening, Session connection and exact Process history lookup are supported;
 other command shapes fail before effects. Combine both flags for identity plus input.
-`task run --explain` also reports the intended Workflow edge (or ad-hoc Graph),
+`task run --explain` also reports the intended Workflow route (or ad-hoc Graph),
 selected execution Machine, observed impediments and missing evidence. Omit the Task
 to use its checkout or `--task`. JSON separates `resolution`, `action`, `impediments`
 and `unavailable`; no Workflow is taken up or moved. Owned Tasks route to the
@@ -1436,14 +1416,14 @@ work refuses every give-back but `--force`. `lf ondemand list` never ends a
 machine. See [own and rent Machines](architecture/machines.md#own-and-rent-machines)
 for pools, rentals and give-back.
 
-### Pause a Task without discarding work
+### Defer a Task without discarding work
 
 ```sh
-lf task pause LOO-389
+lf task defer LOO-389
 lf task resume LOO-389
 ```
 
-Paused Tasks stay in the Wave plan but leave the default active sidebar. Their
-checkout, conversations and Workflow remain. Pause holds future Task runs and CI
+Deferred Tasks stay in the Wave plan but leave the default active sidebar. Their
+checkout, conversations and Workflow remain. Defer holds future Task runs and CI
 repair; it does not stop an already-running process. Resume starts nothing.
-In Desktop, use the Task header's context menu to pause or resume.
+In Desktop, use the Task header's context menu to defer or resume.

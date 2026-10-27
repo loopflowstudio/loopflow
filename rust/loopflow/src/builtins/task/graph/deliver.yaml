@@ -1,0 +1,3 @@
+# Deliver: gate the branch, then land it and stay until it merges.
+- gate
+- cmd: land --wait-and-fix

@@ -53,6 +53,8 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let latestGraphProcess: GraphProcessDetail?
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
+    public let shipControl: TaskRunControl
+    public let shipping: ShippingSnapshot?
     public let directive: WorkDirectiveSnapshot?
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
@@ -65,6 +67,8 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
         case workflowSource = "workflow_source"
         case latestGraphProcess = "latest_graph_process"
         case runControl = "run_control"
+        case shipControl = "ship_control"
+        case shipping
         case nextMove = "next_move"
     }
 }
@@ -106,13 +110,12 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let state: String?
     public let completedAt: String?
     public let dueDate: String?
-    public let completed: Bool
     public let assignee: String?
 
     enum CodingKeys: String, CodingKey {
         case repositoryId = "repository_id", projectId = "project_id", waveId = "wave_id"
         case repo
-        case id, identifier, name, description, rank, completed, state, assignee, sync, acquisition
+        case id, identifier, name, description, rank, state, assignee, sync, acquisition
         case linearId = "linear_id"
         case completedAt = "completed_at"
         case dueDate = "due_date"
@@ -131,7 +134,7 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     }
 
     public var isTerminal: Bool { isSuccessful || state == "canceled" || state == "duplicate" }
-    public var isSuccessful: Bool { state == "completed" || (state == nil && completed) }
+    public var isSuccessful: Bool { state == "completed" }
 }
 
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
@@ -232,6 +235,8 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let latestGraphProcess: GraphProcessDetail?
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
+    public let shipControl: TaskRunControl
+    public let shipping: ShippingSnapshot?
     public let pr: PrSnapshot?
     public let section: RoadmapSection
 
@@ -241,7 +246,35 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
         case workflowSource = "workflow_source"
         case latestGraphProcess = "latest_graph_process"
         case runControl = "run_control"
+        case shipControl = "ship_control"
+        case shipping
         case nextMove = "next_move"
+    }
+}
+
+/// What a shipped Task is doing, derived in Rust; nothing here waits on a person.
+public struct ShippingSnapshot: Decodable, Sendable, Hashable {
+    public let shippedAt: Int64
+    public let state: State
+    public let reason: String
+
+    public enum State: String, Decodable, Sendable, Hashable {
+        case building, landing, repairing, restarting, deferred
+    }
+
+    public var label: String {
+        switch state {
+        case .building: "Building"
+        case .landing: "Landing"
+        case .repairing: "Repairing"
+        case .restarting: "Restarting"
+        case .deferred: "Deferred"
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case state, reason
+        case shippedAt = "shipped_at"
     }
 }
 

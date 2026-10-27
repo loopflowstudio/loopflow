@@ -18,7 +18,6 @@ use loopflow::work::task::{TaskEventKind, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
 
 const PROJECT: &str = "95159066-9098-4d0b-8903-01459dc7ec14";
-const TRANSCRIPT_LINE: &str = r#"{"evidence":{"schema_version":1,"type":"provider_output"}}"#;
 const INPUT: &str = "run_00000000000000000000000000000001";
 
 struct Watch {
@@ -235,14 +234,14 @@ fn repository(path: &Path) -> std::path::PathBuf {
     repo
 }
 
-/// One uninteresting transcript line, as a provider's output is recorded.
-fn transcript(conn: &rusqlite::Connection, line: usize) {
+/// One native usage receipt, the store's most frequent write during a turn.
+fn usage_receipt(conn: &rusqlite::Connection, line: usize) {
     conn.execute(
-        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-         VALUES('conversation','observed',?1,1,?2)",
+        "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+         VALUES('conversation','thread',?1,'usage','',1,?2)",
         [
-            format!("{INPUT}:events.jsonl:{line}"),
-            TRANSCRIPT_LINE.to_owned(),
+            format!("turn-{line}"),
+            r#"{"provider":"claude","usage":{"input_tokens":1},"final":false}"#.to_owned(),
         ],
     )
     .unwrap();
@@ -685,13 +684,13 @@ fn a_task_committed_elsewhere_appears_once_and_bursts_converge() {
 }
 
 #[test]
-fn transcript_lines_do_not_publish_changes_or_delay_a_task() {
+fn usage_receipts_do_not_publish_changes_or_delay_a_task() {
     let home = Machine::new();
     let mut watch = home.watch();
     watch.planning(Duration::from_secs(30), |_| true);
     let conn = home.raw();
     home.conversation();
-    // Select every scoped part, so a transcript line has all of them to wake.
+    // Select every scoped part, so a usage receipt has all of them to wake.
     watch.request(
         serde_json::json!({"action": "scope", "id": 1, "repo": home.wave.repo(),
         "headless": true, "task": null, "wave": home.wave.id().as_str(),
@@ -700,9 +699,10 @@ fn transcript_lines_do_not_publish_changes_or_delay_a_task() {
     watch.session(|_| true);
     watch.parts(Duration::from_secs(1));
     let before = watch.heartbeat();
+    let started = Instant::now();
 
     for line in 0..2000 {
-        transcript(&conn, line);
+        usage_receipt(&conn, line);
         if line % 100 == 0 {
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -716,10 +716,19 @@ fn transcript_lines_do_not_publish_changes_or_delay_a_task() {
         )));
     let after = watch.heartbeat();
     // Process-backed parts reread on their OS clock even without store writes.
-    // Transcript lines must neither wake planning nor publish unchanged Sessions.
-    for part in ["planning", "wave"] {
-        assert_eq!(before.get(part), after.get(part), "{part} was read again");
-    }
+    // Usage receipts never wake planning; Wave token totals rest between reads.
+    assert_eq!(
+        before.get("planning"),
+        after.get("planning"),
+        "planning was read again"
+    );
+    let rest_budget = started.elapsed().as_secs() / 10 + 1;
+    assert!(
+        after["wave"] - before["wave"] <= rest_budget,
+        "wave read {} times in {:?}",
+        after["wave"] - before["wave"],
+        started.elapsed()
+    );
 
     // An Process can change a planning condition, so planning is read; nothing
     // displayed changed, so nothing is sent.
@@ -734,7 +743,7 @@ fn transcript_lines_do_not_publish_changes_or_delay_a_task() {
         let conn = home.raw();
         move || {
             for line in 2000..3000 {
-                transcript(&conn, line);
+                usage_receipt(&conn, line);
                 std::thread::sleep(Duration::from_millis(2));
             }
         }
@@ -794,7 +803,7 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
     write("UPDATE agent_sessions SET provider='claude',model='opus' WHERE id='conversation'");
     watch.session(|record| record["detail"] == "claude:opus" && record["provider"] == "claude");
 
-    // Graph membership is an `observed` event, like a transcript line.
+    // Graph membership is an `observed` event.
     event(
         "observed",
         &format!("{INPUT}:manifest.json"),
@@ -821,9 +830,9 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
         serde_json::json!({"outcome": "interrupted"}),
     );
     write("UPDATE processes SET attachment_exit_seq=(SELECT seq FROM session_events WHERE session_id='conversation' AND receipt_key='attachment:0:exit') WHERE agent_session_id='conversation'");
-    // Attachment outcomes and transcript writes cannot change provider life.
+    // Attachment outcomes and usage writes cannot change provider life.
     for line in 0..50 {
-        transcript(&conn, line);
+        usage_receipt(&conn, line);
     }
     let frames = watch.parts(Duration::from_millis(1500));
     assert!(
@@ -1151,22 +1160,12 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
                                         change.field == "state" && change.error.is_some()
                                     })
                                 {
-                                    assert_eq!(
-                                        task.task.completed,
-                                        expected == loopflow::durable::TaskState::Done
-                                    );
+                                    let done = expected == loopflow::durable::TaskState::Done;
                                     assert_eq!(
                                         task.task.state.as_deref(),
-                                        Some(if task.task.completed {
-                                            "completed"
-                                        } else {
-                                            "unstarted"
-                                        })
+                                        Some(if done { "completed" } else { "unstarted" })
                                     );
-                                    assert_eq!(
-                                        task.task.completed_at.is_some(),
-                                        task.task.completed
-                                    );
+                                    assert_eq!(task.task.completed_at.is_some(), done);
                                     return runtime;
                                 }
                             }
@@ -1178,7 +1177,7 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     };
     for (operation, state) in [
         ("complete", loopflow::durable::TaskState::Done),
-        ("reopen", loopflow::durable::TaskState::NotReady),
+        ("reopen", loopflow::durable::TaskState::Unstarted),
     ] {
         let output = lf(home.path(), &["task", operation, "FIX-1"])
             .current_dir(home.wave.repo())
@@ -1194,7 +1193,7 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     drop(watch);
     let mut reopened = home.watch();
     reopened.request(scope);
-    await_state(&reopened, loopflow::durable::TaskState::NotReady);
+    await_state(&reopened, loopflow::durable::TaskState::Unstarted);
     let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
     assert!(task.worktree.is_none());
     assert!(home.store.task_prs(&task.id).unwrap().is_empty());

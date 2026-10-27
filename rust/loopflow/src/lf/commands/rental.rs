@@ -1018,9 +1018,9 @@ pub fn settle(machine: &MachineId) {
     }
 }
 
-/// The scheduled Task check's give-back pass. A rental whose provider this
-/// process cannot reach is reported only once its soft deadline passes; its
-/// provider deletes it at the hard deadline either way.
+/// Lazy recovery's give-back pass. A rental whose provider this process
+/// cannot reach is reported only once its soft deadline passes; its provider
+/// deletes it at the hard deadline either way.
 ///
 /// # Errors
 /// When the store cannot be read, or a due rental's provider cannot be reached.

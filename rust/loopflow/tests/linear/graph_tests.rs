@@ -294,8 +294,8 @@ while not repo.joinpath("release").exists():
     kill_recorded_graph(home.path(), read()["entry"]["id"].as_str().unwrap());
     graph_process.kill().unwrap();
     graph_process.wait().unwrap();
-    // Reconciliation before and after the surviving effect completes must not
-    // continue the dead process's Graph or execute its successor.
+    // Recovery on a read, before and after the surviving effect completes, must
+    // not continue the dead process's Graph or execute its successor.
     for effect_finished in [false, true] {
         if effect_finished {
             fs::write(repo.path().join("release"), "").unwrap();
@@ -303,12 +303,7 @@ while not repo.joinpath("release").exists():
                 step_fields(&read(), "outcome") == ["succeeded"]
             });
         }
-        let check = run_lf(
-            repo.path(),
-            home.path(),
-            &["task", "reconcile", "--json"],
-            None,
-        );
+        let check = run_lf(repo.path(), home.path(), &["task", "list"], None);
         assert!(
             check.status.success(),
             "{}",
@@ -793,7 +788,7 @@ fn graph_parsing_parity() {
                 content: None,
             }),
             id: None,
-            human: false,
+            interactive: false,
             returns: None,
         }
     );
@@ -1090,16 +1085,14 @@ fn graph_output_shows_steps_and_agent_messages_with_opt_in_diagnostics() {
 }
 
 #[test]
-fn operational_graph_rejects_review_before_launch_or_capture() {
+fn operational_graph_stops_at_its_stage_without_launching_it() {
     for source in [
-        "- step:
+        "- interactive:
     id: review
     name: review-proof
-    human: true
 ",
         "- graph: nested-review
 ",
-        "- xor:\n    paths:\n      review:\n        graph: nested-review\n        description: Discuss work\n      work:\n        skill: review-proof\n        description: Autonomous work\n",
     ] {
         let repo = loopflow_test_support::TestRepo::new();
         let home = TempDir::new().unwrap();
@@ -1107,10 +1100,9 @@ fn operational_graph_rejects_review_before_launch_or_capture() {
         write_graph(
             repo.path(),
             "nested-review",
-            "- step:
+            "- interactive:
     id: review
     name: review-proof
-    human: true
 ",
         );
         write_graph(repo.path(), "operational", source);
@@ -1120,20 +1112,14 @@ fn operational_graph_rejects_review_before_launch_or_capture() {
             &["--batch", "graph", "operational"],
             None,
         );
-        assert!(!output.status.success());
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("belongs in the Task conversation"),
-            "{output:?}"
-        );
-        assert!(
-            support::recorded_graphs(home.path()).is_empty(),
-            "a rejected definition launched a step"
-        );
+        assert!(output.status.success(), "{output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("Reached review"), "{output:?}");
         let sessions: i64 = rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(sessions, 0, "a rejected definition opened a Session");
+        assert_eq!(sessions, 0, "a stage opened a Session with no one there");
     }
 }
 
@@ -1250,7 +1236,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
     write_graph(
         repo.path(),
         "review-first",
-        "- step:\n    id: review\n    name: review-proof\n    human: true\n",
+        "- interactive:\n    id: review\n    name: review-proof\n",
     );
     let prepared = run_lf(
         repo.path(),
@@ -1258,9 +1244,13 @@ fn observing_and_preparing_a_task_are_not_execution() {
         &["--task", "INF-123", "graph", "review-first", "--batch"],
         None,
     );
-    assert!(!prepared.status.success());
     assert!(
-        String::from_utf8_lossy(&prepared.stderr).contains("belongs in the Task conversation"),
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&prepared.stderr).contains("Reached review"),
         "{}",
         String::from_utf8_lossy(&prepared.stderr)
     );
@@ -1277,7 +1267,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
     );
     let sessions: Vec<serde_json::Value> = serde_json::from_slice(&sessions.stdout).unwrap();
     assert!(sessions.is_empty());
-    assert_eq!(entries(), 1, "rejected review writes no ownership entry");
+    assert_eq!(entries(), 1, "a stage reached writes no ownership entry");
 }
 
 #[test]
@@ -1698,12 +1688,12 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
             1
         );
     }
-    // A human boundary remains explicit and cannot silently run the next step
-    // just because the invocation has Task attribution.
+    // A stage remains explicit and cannot silently run the next step just
+    // because the invocation has Task attribution.
     write_graph(
         repo.path(),
         "review-contribution",
-        "- step:\n    id: accept\n    name: first\n    human: true\n- second\n",
+        "- interactive:\n    id: accept\n    name: first\n- second\n",
     );
     fs::remove_file(home.path().join("prompts")).unwrap();
     let output = run_lf(
@@ -1712,8 +1702,12 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
         &["--task", "INF-123", "review-contribution", "--batch"],
         Some(&path),
     );
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("belongs in the Task conversation"));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Reached accept"));
     assert!(!home.path().join("prompts").exists());
     let listed = run_lf(
         repo.path(),
@@ -1733,7 +1727,8 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
         .iter()
         .all(|session| session["kind"] != "graph"));
     assert!(!home.path().join("prompts").exists());
-    assert_eq!(support::recorded_graphs(home.path()).len(), 6);
+    // The launch that stopped at its stage is one more Graph process.
+    assert_eq!(support::recorded_graphs(home.path()).len(), 7);
     assert_eq!(earlier_graph(), stopped);
     assert_eq!(repo.head_sha(), original_head);
 }
@@ -1919,16 +1914,6 @@ fn adding_a_graph_changes_an_untyped_reference_but_not_an_explicit_skill() {
     let changed = expand_named_graph(repo, "parent");
     assert_skill_name(&changed[0], "replacement");
     assert_skill_name(&changed[1], "custom-review");
-}
-
-#[test]
-fn builtin_deploy_uses_ops_land_item() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-
-    let items = expand_named_graph(repo, "deploy");
-    assert!(!items.is_empty());
-    assert!(matches!(&items[1], ConcreteStep::Command(_)));
 }
 
 fn roadmap_task(repo: &Path, home: &Path) -> serde_json::Value {
@@ -2187,7 +2172,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
     );
     let status = String::from_utf8(status.stdout).unwrap();
     assert!(
-        status.lines().any(|line| line == "INF-123  not ready"),
+        status.lines().any(|line| line == "INF-123  idle"),
         "{status}"
     );
     assert!(
@@ -2334,13 +2319,13 @@ fn the_research_workflow_ends_on_its_edge_that_runs_nothing() {
         "{}",
         String::from_utf8_lossy(&ran.stderr)
     );
-    assert_eq!(position(), "findings");
-    // Two edges leave findings; the refusal names the one that runs nothing.
+    assert_eq!(position(), "research");
+    // Two edges leave research; the refusal names the one that runs nothing.
     let refused = run(&["task", "run", "INF-123"]);
     assert!(!refused.status.success());
     let error = String::from_utf8_lossy(&refused.stderr).to_string();
-    assert!(error.contains("end (runs no Graph)"), "{error}");
-    assert_eq!(position(), "findings");
+    assert!(error.contains("end (runs nothing)"), "{error}");
+    assert_eq!(position(), "research");
     let ended = run(&["task", "run", "INF-123", "end"]);
     assert!(
         ended.status.success(),

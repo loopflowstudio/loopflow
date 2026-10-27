@@ -1141,6 +1141,7 @@ impl SqliteStore {
         session: &str,
         expected: &SessionAttachment,
         outcome: &str,
+        departure: Option<&crate::process::Departure>,
         close_provider: impl FnOnce() -> StoreResult<bool>,
     ) -> StoreResult<()> {
         let canonical = crate::id::canonical_session(session);
@@ -1156,9 +1157,13 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "type": "attachment_exit", "outcome": outcome, "attachment_token": expected.token
         });
+        if let Some(departure) = departure {
+            payload["departure"] = serde_json::to_value(departure)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        }
         let exit_seq: i64 = tx.query_row(
             "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload,captured_event)
              SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1
@@ -1198,6 +1203,40 @@ impl SqliteStore {
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Where the conversation went when `attachment` ended, if a mover said.
+    /// The exit receipt is keyed by the ended token, so a later attachment
+    /// never answers for an earlier one.
+    pub(crate) fn attachment_departure(
+        &self,
+        session: &str,
+        attachment: &SessionAttachment,
+    ) -> StoreResult<Option<crate::process::Departure>> {
+        let canonical = crate::id::canonical_session(session);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let payload = conn
+            .query_row(
+                "SELECT payload FROM session_events WHERE session_id=?1 AND kind='observed'
+                 AND receipt_key=?2",
+                params![
+                    canonical.as_str(),
+                    format!("attachment:{}:exit", attachment.token)
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let Some(payload) = payload else {
+            return Ok(None);
+        };
+        let mut payload: serde_json::Value = serde_json::from_str(&payload)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        match payload.get_mut("departure").map(serde_json::Value::take) {
+            Some(departure) => serde_json::from_value(departure)
+                .map(Some)
+                .map_err(|error| StoreError::InvalidData(error.to_string())),
+            None => Ok(None),
+        }
     }
 
     /// Stale providers retain their historical caller, never the new attachment.
@@ -1796,7 +1835,7 @@ mod attachment_tests {
             Ok(())
         };
         assert!(store
-            .finish_session_attachment("conversation", &attachment, "completed", || {
+            .finish_session_attachment("conversation", &attachment, "completed", None, || {
                 close()?;
                 Err(StoreError::InvalidData("provider close failed".into()))
             })
@@ -1817,7 +1856,7 @@ mod attachment_tests {
             .is_none());
 
         store
-            .finish_session_attachment("conversation", &attachment, "completed", || {
+            .finish_session_attachment("conversation", &attachment, "completed", None, || {
                 close()?;
                 Ok(true)
             })
@@ -2045,9 +2084,13 @@ mod attachment_tests {
                 Err(StoreError::InvalidAuthority(_))
             ));
             assert!(matches!(
-                store.finish_session_attachment("conversation", stale, "interrupted", || panic!(
-                    "stale stop"
-                )),
+                store.finish_session_attachment(
+                    "conversation",
+                    stale,
+                    "interrupted",
+                    None,
+                    || panic!("stale stop")
+                ),
                 Err(StoreError::InvalidAuthority(_))
             ));
             assert!(matches!(

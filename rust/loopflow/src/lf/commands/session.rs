@@ -236,6 +236,32 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             suggest,
             json,
         } => rename(id, name, *suggest, *json).await,
+        SessionCommand::Send { id, to } => {
+            let store = open_shared_store().await?;
+            let to = crate::ops::task_ownership::resolve_machine(&store.sqlite, to)?;
+            let moved = crate::ops::human_session::moves::send(&store, id, &to).await?;
+            println!("{}", serde_json::to_string(&moved)?);
+            Ok(())
+        }
+        SessionCommand::Receive { json } => {
+            let mut input = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut input)?;
+            let moved = serde_json::from_str(&input).context("read the moved Session")?;
+            let store = open_shared_store().await?;
+            let session =
+                crate::ops::human_session::moves::receive(&store, &std::env::current_dir()?, moved)
+                    .await?;
+            let record = crate::ops::human_session::surface(&store, &session).await?;
+            if *json {
+                println!("{}", serde_json::to_string(&record)?);
+            } else {
+                println!(
+                    "Session {} is here in {}; `lf resume {}` continues it",
+                    record.title, record.cwd, record.id
+                );
+            }
+            Ok(())
+        }
         SessionCommand::Bind {
             id,
             task,

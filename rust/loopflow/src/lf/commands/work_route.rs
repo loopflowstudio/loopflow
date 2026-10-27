@@ -178,6 +178,9 @@ fn worktree_task(cli: &Cli) -> Result<Option<String>> {
 /// Return whether dispatch completed remotely. No Workflow or checkout is
 /// mutated before routing. Unknown provider aliases retain ordinary acquisition.
 pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
+    if dispatch_moved_session(cli, args)? {
+        return Ok(true);
+    }
     let worktree_task = worktree_task(cli)?;
     let Some(selector) = launch_task(cli).or(worktree_task.as_deref()) else {
         return dispatch_primary_session(cli, args);
@@ -249,6 +252,32 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
         super::rental::settle(&machine);
     }
     result?;
+    Ok(true)
+}
+
+/// A Session that moved to another Machine resumes there.
+fn dispatch_moved_session(cli: &Cli, args: &[String]) -> Result<bool> {
+    let Some(Commands::Session {
+        cmd:
+            SessionCommand::Connect {
+                id: Some(id),
+                all: false,
+                ..
+            },
+    }) = &cli.command
+    else {
+        return Ok(false);
+    };
+    if std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
+        return Ok(false);
+    }
+    let Some(store) = read_registry()? else {
+        return Ok(false);
+    };
+    let Some(machine) = store.session_moved_to(id)? else {
+        return Ok(false);
+    };
+    super::ssh::run(machine.as_str(), false, cli, &args[1..], None)?;
     Ok(true)
 }
 

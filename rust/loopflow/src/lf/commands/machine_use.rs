@@ -256,8 +256,8 @@ fn describe(store: &SqliteStore, machine: &MachineId) -> anyhow::Result<String> 
         .unwrap_or_else(|| machine.to_string()))
 }
 
-/// The Session lives on your Machine for its scope: admit it there, and
-/// complete it everywhere else. Native history stays where it ran.
+/// The Session lives on your Machine for its scope: admit it here, or move
+/// the conversation running here to that Machine with its history.
 async fn move_primary_session(
     store: &SharedStore,
     repo: &Path,
@@ -267,12 +267,12 @@ async fn move_primary_session(
 ) -> anyhow::Result<()> {
     if *target == store.sqlite.local_machine()?.id {
         crate::ops::human_session::primary::ensure(store, repo, wave, false).await?;
-    } else if let Some(session) = store.sqlite.complete_primary_session(primary)? {
-        eprintln!(
-            "Session {} completed here; it continues on {}",
-            session.id,
-            describe(&store.sqlite, target)?
-        );
+    } else if let Some(session) = store.sqlite.primary_session(primary)? {
+        let machine = store
+            .sqlite
+            .machine_by_id(target)?
+            .ok_or_else(|| anyhow!("Machine {target} is not registered here"))?;
+        crate::lf::commands::session_move::relay(store, &session.id, &machine).await?;
     }
     Ok(())
 }
@@ -286,7 +286,7 @@ async fn copy_to_my_machines(store: &SqliteStore, args: &[String]) -> anyhow::Re
             .label
             .clone()
             .unwrap_or_else(|| machine.id.to_string());
-        match crate::lf::commands::ssh::request(&machine, args).await {
+        match crate::lf::commands::ssh::request(&machine, args, None).await {
             Ok(_) => eprintln!("copied to {name}"),
             Err(error) => eprintln!(
                 "warning: {name} keeps its previous choice ({error}); rerun `lf machine use` to copy it"

@@ -24,6 +24,7 @@ use crate::store::SharedStore;
 use crate::work::task::Task;
 
 pub(crate) mod conversation_log;
+pub(crate) mod moves;
 pub(crate) mod primary;
 pub(crate) mod restore;
 pub(crate) use primary::ensure_scope_worktree;
@@ -1067,7 +1068,7 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
 }
 
 /// A Session as its row and its current input describe it.
-async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionRecord> {
+pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionRecord> {
     let work = match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(WorkRef::Task(task.clone())),
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),

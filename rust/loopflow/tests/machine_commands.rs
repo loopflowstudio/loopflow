@@ -1888,3 +1888,205 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
     assert!(!changed.iter().any(|path| path.starts_with("target")));
     assert!(!fixture.root.path().join("forbidden-effect").exists());
 }
+
+/// Claude's project directory for a checkout.
+fn claude_project(path: &Path) -> String {
+    path.to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert_success(&output);
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
+}
+
+#[test]
+fn resume_moves_a_session_to_another_machine() {
+    use loopflow::store::sqlite::SqliteStore;
+    let fixture = preview_machines();
+    let mini = fixture.json(&["machine", "list", "--json"])[0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let repo = loopflow_test_support::TestRepo::new();
+    let worktree = repo
+        .create_named_worktree("move-demo")
+        .canonicalize()
+        .unwrap();
+    let remote_checkout = fixture.root.path().join("remote/checkout");
+    git(
+        fixture.root.path(),
+        &[
+            "clone",
+            "-q",
+            repo.bare_path().to_str().unwrap(),
+            remote_checkout.to_str().unwrap(),
+        ],
+    );
+    git(&remote_checkout, &["config", "user.email", "test@test.com"]);
+    git(&remote_checkout, &["config", "user.name", "Jack"]);
+    let remote_checkout = remote_checkout.canonicalize().unwrap();
+    let repository = loopflow::durable::RepositoryId::new();
+    let local = SqliteStore::new(&fixture.root.path().join("local/loopflow.db")).unwrap();
+    let remote = SqliteStore::new(&fixture.root.path().join("remote/store/loopflow.db")).unwrap();
+    local
+        .bind_repository(
+            repo.path().canonicalize().unwrap().to_str().unwrap(),
+            &repository,
+        )
+        .unwrap();
+    remote
+        .bind_repository(remote_checkout.to_str().unwrap(), &repository)
+        .unwrap();
+
+    // A Claude conversation in the worktree, admitted the way connecting admits it.
+    let conversation = "0199a213-81c0-7800-8aa1-bbab2a035a53";
+    let transcript = format!(
+        "{{\"type\":\"user\",\"sessionId\":\"{conversation}\",\"cwd\":\"{}\",\"message\":{{\"role\":\"user\",\"content\":\"keep going\"}}}}\n",
+        worktree.display()
+    );
+    let project = fixture
+        .root
+        .path()
+        .join("local/.claude/projects")
+        .join(claude_project(&worktree));
+    fs::create_dir_all(project.join(format!("{conversation}/subagents"))).unwrap();
+    fs::write(project.join(format!("{conversation}.jsonl")), &transcript).unwrap();
+    fs::write(
+        project.join(format!("{conversation}/subagents/agent.jsonl")),
+        "{}\n",
+    )
+    .unwrap();
+    let admitted = fixture
+        .command(&["session", "connect", conversation, "--prepare", "--json"])
+        .current_dir(&worktree)
+        .output()
+        .unwrap();
+    assert_success(&admitted);
+    let session = serde_json::from_slice::<Value>(&admitted.stdout).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    fs::write(worktree.join("notes.txt"), "uncommitted\n").unwrap();
+
+    let moved = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "resume",
+            &session,
+            "--prepare",
+            "--json",
+        ])
+        .current_dir(&worktree)
+        .output()
+        .unwrap();
+    assert_success(&moved);
+    let record: Value = serde_json::from_slice(&moved.stdout).unwrap();
+    assert_eq!(record["id"], session.as_str());
+    assert_eq!(record["workspace"]["machine_id"], mini.as_str());
+
+    // The uncommitted edit reached origin on the Session's branch.
+    let pushed = git(repo.bare_path(), &["show", "move-demo:notes.txt"]);
+    assert_eq!(pushed, "uncommitted");
+    // Mini holds the same Session in a worktree of the branch, with the transcript.
+    let arrived = remote.session(&session).unwrap().unwrap();
+    assert!(arrived.completed_at.is_none());
+    assert_eq!(
+        git(&arrived.cwd, &["branch", "--show-current"]),
+        "move-demo"
+    );
+    assert_eq!(
+        fs::read_to_string(arrived.cwd.join("notes.txt")).unwrap(),
+        "uncommitted\n"
+    );
+    let placed = fixture
+        .root
+        .path()
+        .join("remote/.claude/projects")
+        .join(claude_project(&arrived.cwd.canonicalize().unwrap()));
+    assert_eq!(
+        fs::read_to_string(placed.join(format!("{conversation}.jsonl"))).unwrap(),
+        transcript
+    );
+    assert!(placed
+        .join(format!("{conversation}/subagents/agent.jsonl"))
+        .is_file());
+    // The laptop's row names where it went, and resuming it here follows it there.
+    assert_eq!(
+        local.session_moved_to(&session).unwrap().unwrap().as_str(),
+        mini
+    );
+    let followed = fixture
+        .command(&["resume", &session, "--prepare", "--json"])
+        .current_dir(&worktree)
+        .output()
+        .unwrap();
+    assert_success(&followed);
+    let followed: Value = serde_json::from_slice(&followed.stdout).unwrap();
+    assert_eq!(followed["workspace"]["machine_id"], mini.as_str());
+    assert!(!fixture.root.path().join("forbidden-effect").exists());
+}
+
+#[test]
+fn a_mid_merge_worktree_refuses_to_move() {
+    let fixture = preview_machines();
+    let repo = loopflow_test_support::TestRepo::new();
+    let worktree = repo
+        .create_named_worktree("merging")
+        .canonicalize()
+        .unwrap();
+    let conversation = "0199a213-81c0-7800-8aa1-bbab2a035a54";
+    let project = fixture
+        .root
+        .path()
+        .join("local/.claude/projects")
+        .join(claude_project(&worktree));
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        project.join(format!("{conversation}.jsonl")),
+        format!(
+            "{{\"type\":\"user\",\"sessionId\":\"{conversation}\",\"cwd\":\"{}\"}}\n",
+            worktree.display()
+        ),
+    )
+    .unwrap();
+    let admitted = fixture
+        .command(&["session", "connect", conversation, "--prepare", "--json"])
+        .current_dir(&worktree)
+        .output()
+        .unwrap();
+    assert_success(&admitted);
+    let session = serde_json::from_slice::<Value>(&admitted.stdout).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let head = git(&worktree, &["rev-parse", "HEAD"]);
+    fs::write(git_dir(&worktree).join("MERGE_HEAD"), format!("{head}\n")).unwrap();
+
+    let refused = fixture
+        .command(&["--machine", "mini", "resume", &session, "--prepare"])
+        .current_dir(&worktree)
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(stderr.contains("mid-merge"), "{stderr}");
+    assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), head);
+    let local =
+        loopflow::store::sqlite::SqliteStore::new(&fixture.root.path().join("local/loopflow.db"))
+            .unwrap();
+    assert!(local.session_moved_to(&session).unwrap().is_none());
+}
+
+fn git_dir(worktree: &Path) -> std::path::PathBuf {
+    std::path::PathBuf::from(git(worktree, &["rev-parse", "--absolute-git-dir"]))
+}

@@ -598,6 +598,25 @@ Assign a Task to a Session that has none; the Task never changes after
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
+## lf session send
+
+Hand a Session to another Machine: commit and push its branch, stop it here and print the move for `lf session receive` there
+
+| Argument | What it does |
+|---|---|
+| `<id>` | Session ID or provider conversation ID |
+| `--to` | The Machine it moves to, by label or id |
+| `--help / -h` | Print help |
+
+## lf session receive
+
+Admit a Session `lf session send` printed, read from stdin: check out its branch and place its conversation so it resumes here
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
 ## lf account
 
 Refresh account access and capacity, or manage logins and routing

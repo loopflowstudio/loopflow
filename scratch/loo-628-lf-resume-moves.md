@@ -307,6 +307,16 @@ second Task-to-Machine command beside `lf task move --machine`.
    paths; native transcript placement with the log fallback; `ssh::request`
    stdin; relay in the `--machine` branch; old-client message; connect-by-id
    forwarding; `lf machine use --session` through it.
+   Built 2026-10-26: `ops/human_session/moves.rs` (`send`/`receive`/`Move`,
+   fixture `move.json`, no Swift mirror since only lf reads it),
+   `lf/commands/session_move.rs` relay, `lf session send|receive`, the
+   `--machine … resume <id>` relay (also with `--prepare`), forwarding of
+   `lf resume <id>` on the source via `agent_sessions.moved_to_machine_id`,
+   the old client's "moved to" line, and `lf machine use --session` moving the
+   primary (`complete_primary_session` deleted). Remaining in this slice:
+   the `conversation.md` fallback when M's provider refuses the transcript;
+   `lf resume --task X` on S following a Task Session moved alone; the
+   account-move line on the old client; cloning when M lacks the repository.
 3. **Task move.** `lf task move --machine`, `Move.task` (ownership marker,
    Workflow position and history), delete `lf machine use --task`;
    docs/reference.
@@ -335,4 +345,4 @@ second Task-to-Machine command beside `lf task move --machine`.
   (verifies the Codex cross-account risk), then `lf task move` laptop → mini
   with a real Task and keep talking to it there.
 
-Check results: none yet.
+Check results: 2026-10-26 slice 2 — `machine_commands` (30, incl. resume_moves_a_session_to_another_machine, a_mid_merge_worktree_refuses_to_move), `moves::` unit, clippy, CLI reference: pass; slice 3 unbuilt.

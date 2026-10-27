@@ -1258,6 +1258,24 @@ pub enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Hand a Session to another Machine: commit and push its branch, stop it
+    /// here and print the move for `lf session receive` there
+    #[command(
+        after_help = "Everyday spelling: `lf --machine <machine> resume <session>` sends, receives and resumes in one step. Run send and receive by hand to retry a move whose receive failed:\n  lf session send <session> --to <machine> | lf --machine <machine> session receive"
+    )]
+    Send {
+        /// Session ID or provider conversation ID
+        id: String,
+        /// The Machine it moves to, by label or id
+        #[arg(long)]
+        to: String,
+    },
+    /// Admit a Session `lf session send` printed, read from stdin: check out its
+    /// branch and place its conversation so it resumes here
+    Receive {
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

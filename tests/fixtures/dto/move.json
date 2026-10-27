@@ -1,0 +1,22 @@
+{
+  "from_machine_id": "home_00000000000040008000000000000001",
+  "session": {
+    "id": "session_00000000000040008000000000000001",
+    "title": "Move demo",
+    "title_source": "human",
+    "provider": "claude",
+    "model": null,
+    "primary": { "kind": "wave", "wave_id": "00000000-0000-4000-8000-000000000002" }
+  },
+  "checkout": {
+    "repository_id": "repo_00000000000040008000000000000001",
+    "branch": "jack/move-demo",
+    "commit": "0123456789abcdef0123456789abcdef01234567"
+  },
+  "history": {
+    "agent_session_id": "0199a213-81c0-7800-8aa1-bbab2a035a53",
+    "files": [
+      { "path": "0199a213-81c0-7800-8aa1-bbab2a035a53.jsonl", "content": "e30K" }
+    ]
+  }
+}

@@ -172,6 +172,10 @@ fn spawn_session_command_with_env(
         exact_account_id,
         launch_lock,
     )?;
+    if let Some(moved) = moved_away(environment)? {
+        eprintln!("{moved}");
+        return Ok(());
+    }
     if outcome.status.success() || outcome.interrupted {
         Ok(())
     } else if agent_session.is_some() {
@@ -186,6 +190,28 @@ fn spawn_session_command_with_env(
             outcome.status
         ))
     }
+}
+
+/// Where this launch's conversation went, when another Machine took it.
+fn moved_away(environment: &BTreeMap<String, String>) -> Result<Option<String>> {
+    let Some(input) = environment.get(crate::session_record::CAPTURE_KEY_ENV) else {
+        return Ok(None);
+    };
+    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let Some(session) = store.session_for_artifact(input)? else {
+        return Ok(None);
+    };
+    let Some(machine) = store.session_moved_to(&session.id)? else {
+        return Ok(None);
+    };
+    let label = store
+        .machine_by_id(&machine)?
+        .and_then(|machine| machine.label)
+        .unwrap_or_else(|| machine.to_string());
+    Ok(Some(format!(
+        "This conversation moved to {label}: lf resume {}",
+        session.id
+    )))
 }
 
 #[derive(Debug)]

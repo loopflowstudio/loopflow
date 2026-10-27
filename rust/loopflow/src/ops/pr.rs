@@ -637,6 +637,25 @@ pub(crate) fn merge_needs_integration(state: Option<&str>, request: Option<&Merg
     })
 }
 
+/// Whether an open PR can merge only after main is merged into it: GitHub
+/// reports a conflict, requires an up-to-date head with no queue to provide
+/// one, or the queue evicted the PR for a conflict. Anything else, including a
+/// failed check, is repaired on top of the branch against the same base.
+pub(crate) fn pr_requires_resync(repo: &Path, number: u64) -> OpsResult<bool> {
+    let observation = observe_pr_merge(repo, number)?;
+    let state = observation.pr.merge_state.as_deref().unwrap_or_default();
+    if state == "dirty" || (state == "behind" && !observation.merge_queue_enabled) {
+        return Ok(true);
+    }
+    if observation.request.is_some() || !observation.merge_queue_enabled {
+        return Ok(false);
+    }
+    Ok(matches!(
+        merge_request_removal(repo, number, &[])?,
+        MergeRequestRemoval::Evicted { reason, .. } if reason.eq_ignore_ascii_case("merge_conflict")
+    ))
+}
+
 #[derive(Debug)]
 pub(crate) struct PrMergeObservation {
     pub pr: PrInfo,

@@ -12,7 +12,7 @@ leave people's judgment to demo/review. Neither blocks earlier Graph steps.
 
 For checkpoint PRs, `scratch-clear` reports deferred tests and `tests-result`
 and the matrix jobs skip. That is not a passing test result. The required merge
-queue always rejects scratch artifacts and runs full tests before merging.
+queue always rejects scratch artifacts and runs the Linux suite before merging.
 Missing scratch, classifier failures, and unexpected skipped candidate jobs
 still fail the aggregate. Restoring scratch on a later PR head defers its tests.
 
@@ -23,11 +23,24 @@ content, so repositories retaining it must define their own candidate policy.
 A new PR update cancels the previous CI run for that PR. Main and merge-group
 runs remain independent, except that a merge-queue entry's earlier runs are
 cancelled when GitHub rebuilds it (`cancel-superseded`) or when its PR leaves
-the queue (`merge-queue-cleanup.yml`). PRs and queue entries that touch only
-docs, the website, scratch, Wave memory or Python skip the macOS jobs
-(`scripts/macos_inputs.py`); anything the Swift tests can reach, including
-Rust, fixtures and scripts, runs them. A push to main whose exact tree the
-queue already proved builds the macOS tests only to warm their caches.
+the queue (`merge-queue-cleanup.yml`).
+
+The macOS jobs (`.github/workflows/macos.yml`) run once per PR, before the
+queue, and only where its changes reach them (`scripts/macos_inputs.py`):
+
+| Job | Runs for |
+|-----|----------|
+| `loopflow-ui-test` | `swift/` (app, `project.yml`, GhosttyKit patches), its build scripts |
+| `swift-test` | the above, `tests/fixtures/dto/`, the scripts and Python check it runs |
+| `macos-process-test` | Rust files containing `target_os = "macos"`, data clones, store copy, OS process identity, `lf install` |
+
+CI changes, the classifier, an unknown diff or a failed classifier run all
+three. A Rust-only PR reaches Swift only through the `lf --json` wire, which the
+DTO fixtures pin, so it runs none. The queue proves the Linux suite on top of
+main. After merge, `macos-main.yml` runs the jobs the batch since the
+`last-green` tag reaches: one run at a time, the waiting run testing the newest
+main. Green moves `last-green`; red bisects the batch by dispatching the same
+workflow on first-parent commits and opens an unarmed revert PR for the culprit.
 
 After changing `Cargo.lock`, including a release version bump, run
 `uv run python scripts/third_party.py refresh` and
@@ -643,10 +656,12 @@ Rust partitions wait for one shared build; the other suites run independently.
 | `e2e-smoke` | ubuntu-latest | both planning-reconnect proofs, then `tests/e2e/test_smoke.sh` |
 | `task-installation` | ubuntu-latest | `uv run python scripts/test_task_installation.py` |
 | `swift-test` | macos-26 | app build, headless model/view tests, boundary check |
-| `macos-process-test` | macos-15 | deleted-executable and exact process-authority regression |
+| `macos-process-test` | macos-15, macos-26 | deleted-executable and exact process-authority regression |
 | `loopflow-ui-test` | macos-26 | xcodegen + app/test-runner compile |
 
-Candidate and merge-group jobs must all pass for `tests-result` to pass. Both CI
+Candidate and merge-group jobs must all pass for `tests-result` to pass; a
+macOS job may skip only when the classifier says it is unreached or outside
+pull requests. Both CI
 and the local runner collect every Rust test failure with `--no-fail-fast`.
 Ordinary integration modules are registered in `rust/loopflow/tests/integration.rs`
 and linked once. Add new modules there; Cargo auto-discovery is disabled. Dedicated
@@ -999,9 +1014,9 @@ For Markdown changes under `docs/`, builtins or skills, and changes to README or
 AGENTS, also run `cargo test -p loopflow --test integration documented_commands::`. Its command
 scanner covers prose and headings as well as fenced examples; a focused runtime
 suite does not check those additions.
-`docs/lf-reference.md` renders the compiled command tree below its preamble;
-after a command or help-text change, rewrite it with
-`UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration cli_reference`.
+`docs/lf-reference.md` commits only its preamble; the website's `sync-docs`
+appends the command tree from `lf help --all --json`, so a command or help-text
+change needs no reference update.
 Keep README and docs/index openings identical and regenerate docs/architecture.html
 when its source changes. Retired Project surfaces also affect CLI fallback,
 builtin discovery, prompt goldens and storage settlement.

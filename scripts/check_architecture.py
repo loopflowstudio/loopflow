@@ -252,7 +252,8 @@ def _discover_executable_edges(root: Path) -> set[str]:
     source_root = root / "rust/loopflow/src"
     for path in sorted(source_root.rglob("*.rs")):
         relative = path.relative_to(root)
-        if "tests" in relative.parts or MIGRATIONS in relative.parents:
+        # `tests.rs` is an out-of-line `#[cfg(test)] mod tests;`.
+        if "tests" in relative.parts or path.name == "tests.rs" or MIGRATIONS in relative.parents:
             continue
         source = _production_rust(path.read_text())
         edges.update(f"process:{name}" for name in COMMAND_EDGE.findall(source))

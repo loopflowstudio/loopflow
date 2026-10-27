@@ -32,6 +32,8 @@ pub struct GraphNode {
     /// Literal skill name, operation, or XOR router.
     pub label: String,
     pub kind: GraphNodeKind,
+    // Retained Graph records predate the public field rename.
+    #[serde(alias = "human")]
     pub interactive: bool,
     /// Key of the earlier node this deciding occurrence can return to.
     pub returns_to: Option<u32>,
@@ -712,6 +714,27 @@ mod tests {
             returns,
             sources: Vec::new(),
         })
+    }
+
+    #[test]
+    fn retained_graph_nodes_preserve_review_stages_after_field_rename() {
+        let node: super::GraphNode = serde_json::from_str(
+            r#"{"key":0,"id":"review","label":"demo","kind":"skill","human":true,
+                "returns_to":null,"sources":["code"],"paths":[]}"#,
+        )
+        .unwrap();
+        assert!(node.interactive);
+        let current = serde_json::to_value(&node).unwrap();
+        assert_eq!(current["interactive"], true);
+        assert!(current.get("human").is_none());
+        assert_eq!(
+            serde_json::from_value::<super::GraphNode>(current).unwrap(),
+            node
+        );
+
+        let missing = r#"{"key":0,"id":null,"label":"demo","kind":"skill",
+            "returns_to":null,"sources":[],"paths":[]}"#;
+        assert!(serde_json::from_str::<super::GraphNode>(missing).is_err());
     }
 
     #[test]

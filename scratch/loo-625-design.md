@@ -127,6 +127,9 @@ tests, docs and skills moved.
   `questions.md` records, not a product block. Its one doc defect, `release/CRON_HOST.md`
   teaching `lf machine use`, now reads `lf set machine mini --wave infrastructure`
   (2e16d1c224); only immutable release notes still name the deleted forms.
+- Concept review 3 (after the CRON_HOST.md fix): nothing to change. Only immutable release
+  notes name the deleted forms; `lf set --here` is the hidden fan-out flag inherited from
+  `lf machine use`.
 - Concept review: one source vocabulary. `task_workflow_default` returns `SetupSource`;
   Task JSON, `lf wave status` and the missing-Workflow error say
   `task | personal | wave | repo | global | default`. Swift keeps `String?`.

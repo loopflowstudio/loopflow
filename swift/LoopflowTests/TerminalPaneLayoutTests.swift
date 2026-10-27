@@ -49,6 +49,7 @@ struct TerminalPaneLayoutTests {
         #expect(try layout.padding(.leading) == layout.padding(.bottom))
         #expect(try layout.padding(.trailing) == layout.padding(.bottom))
         let outer = try inspection.find(viewWithAccessibilityIdentifier: "work-workspace-\(workspace.key.id)")
+        #expect((try? outer.overlay()) == nil)
         let shape = try outer.clipShape(UnevenRoundedRectangle.self)
         let radius = shape.cornerRadii.bottomLeading
         #expect(shape.cornerRadii.topLeading == 0)

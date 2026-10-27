@@ -84,18 +84,13 @@ Add a test that fails without the fix when one is cheap. A failure stops the run
 
 ## 4. One release build
 
-Promote accepts only a build with published migration authority. Until
-LOO-633 gives hotfixes their own provenance, set both variables on the first
-build. Changing either one later forces a full rebuild.
+A plain release build is enough: promote accepts any draft-free build on the
+store's exact frontier and refuses one carrying a migration draft.
 
 ```bash
-LOOPFLOW_BUILD_PROVENANCE=release LOOPFLOW_MIGRATION_AUTHORITY=published \
-  cargo build --release -p loopflow --bin lf
-./target/release/lf --version   # <version>+<hotfix sha>
+cargo build --release -p loopflow --bin lf
+./target/release/lf --version   # lf <version>+<rev> (hotfix <rev> on <tag>)
 ```
-
-This build is recorded as `source_identity: release`, which it isn't. That's
-why step 1's empty migration diff is required.
 
 ## 5. Preview, then promote
 
@@ -161,8 +156,8 @@ whether the release must wait for it.
 
 ## Report
 
-- Base revision and hotfix commit, and that the build claims
-  `source_identity: release` with an empty migration diff.
+- Base revision and hotfix commit, the build's `hotfix <rev> on <tag>` label,
+  and the empty migration diff.
 - Clone measurement: statement, cold/warm before and after, query plan.
 - Focused tests: command and result, run before the promote.
 - Preview verdict, and the active revision after the promote.

@@ -24,3 +24,4 @@ Check: `cargo test -p loopflow --lib harness::claude` 41 pass (new steer test fa
 Check: `cargo test -p loopflow --lib format_prompt_default_components_has_headless_surface` pass (headless.md background-process line).
 Check (compress): reader result counter folded into one `try_update`; test output helper shared. `harness::claude` 41 pass; clippy clean.
 Check (sync onto #1702 decoder): `harness::claude` 44 pass x3 at load ~45 after raising the two background tests' hang guard 5s→30s (one 5s expiry under load); clippy clean.
+Check (gate, 2026-10-26, load ~15): fmt + `clippy --all-targets -p loopflow -D warnings` clean; `--lib harness::` 176 pass (304s); `--lib prompt::` 96 pass; `--test golden_prompt` pass. No code changes needed.

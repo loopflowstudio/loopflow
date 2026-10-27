@@ -2085,7 +2085,7 @@ fn finish_release_pr(
                 }
                 return Ok(commit);
             }
-            ReleasePrWait::NeedsIntegration(state) => {
+            ReleasePrWait::NeedsIntegration => {
                 let pair_path = minor_receipt_path(main_repo, target);
                 if pair_path.exists() {
                     let pair: MinorRelease = serde_json::from_slice(&fs::read(&pair_path)?)
@@ -2095,7 +2095,7 @@ fn finish_release_pr(
                     }
                 }
                 progress.status(&format!(
-                    "Release PR #{} is {state}; rebuilding on current main...",
+                    "Release PR #{} needs current main; rebuilding on it...",
                     prepared.pr_number
                 ));
                 fetch_release_branch(main_repo, &release_branch, &prepared.head_sha, lock)?;
@@ -3094,7 +3094,7 @@ fn current_release_pr(prs: Vec<GhReleasePr>) -> Option<GhReleasePr> {
 #[derive(Debug, PartialEq, Eq)]
 enum ReleasePrWait {
     Merged(String),
-    NeedsIntegration(String),
+    NeedsIntegration,
     /// The shared merge decision found a failure on this head for ci-fix.
     NeedsRepair(String),
 }
@@ -3145,9 +3145,7 @@ fn wait_for_pr_merge(
             || crate::ops::pr_landing::read_merge_request_removal(repo, repo_id.as_str(), number);
 
         if view.state == "open" && crate::ops::pr::pr_requires_resync(&observation, removal)? {
-            return Ok(ReleasePrWait::NeedsIntegration(
-                view.merge_state.clone().unwrap_or_else(|| "evicted".into()),
-            ));
+            return Ok(ReleasePrWait::NeedsIntegration);
         }
 
         let decided =

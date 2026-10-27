@@ -22,21 +22,36 @@ cd "$repo_root"
 
 step() { printf '\n== %s ==\n' "$1"; }
 
-step "placed Machine"
-local_machine="$(lf machine id)"
-placed_machine="$(lf wave status "$wave" --json | jq -er '.wave.machine.id')"
-if [ "$local_machine" != "$placed_machine" ]; then
-  printf 'Wave %s is not placed on this Machine\n' "$wave" >&2
+step "installed lf"
+# Promotion swaps the binary behind this entry gate; cron pins the gate.
+lf_bin="$HOME/.lf-machine/install/gates/1/lf"
+if [ ! -x "$lf_bin" ]; then
+  printf 'no installed lf at %s; run lf self install first\n' "$lf_bin" >&2
   exit 1
 fi
-printf 'Wave %s is placed on this Machine\n' "$wave"
+"$lf_bin" --version
+host_path="$(dirname "$lf_bin"):$PATH"
+
+step "placed Machine"
+local_machine="$("$lf_bin" machine id)"
+# A Wave with no Machine default runs on the Machine that reads it.
+placed_machine="$("$lf_bin" wave status "$wave" --json | jq -er '.wave | select(.) | .machine.id // ""')"
+if [ -z "$placed_machine" ]; then
+  printf 'Wave %s has no Machine default; it runs on this Machine\n' "$wave"
+elif [ "$placed_machine" != "$local_machine" ]; then
+  printf 'Wave %s is placed on Machine %s\n' "$wave" "$placed_machine" >&2
+  exit 1
+else
+  printf 'Wave %s is placed on this Machine\n' "$wave"
+fi
 
 lf_home="${LF_HOME:-$HOME/.lf}"
+# The checks below and both cron lines run in this one environment.
 minimal_env=(
   env -i
   "HOME=$HOME"
   "USER=${USER:-}"
-  "PATH=$PATH"
+  "PATH=$host_path"
   "LF_HOME=$lf_home"
   "TMPDIR=${TMPDIR:-/tmp}"
   "LANG=${LANG:-C}"
@@ -58,7 +73,7 @@ step "unattended tool path"
   exit "$missing"
 '
 step "host-local provider authority"
-auth_status="$("${minimal_env[@]}" lf account --json)"
+auth_status="$("${minimal_env[@]}" "$lf_bin" account --json)"
 printf '%s\n' "$auth_status"
 if ! jq -e 'any(.accounts[]; .scope == "managed" and .verification == "accepted")' >/dev/null <<<"$auth_status"; then
   printf 'no managed provider account verified live from the Machine store\n' >&2
@@ -70,7 +85,29 @@ step "configured publisher authority"
   uv run python scripts/publish_release.py check
 
 step "install release schedules"
-# Earlier lf scheduled these jobs as launchd agents; crontab replaces them.
+log_dir="$repo_root/.lf/logs"
+mkdir -p "$log_dir"
+cron_env="$(printf '%q ' "${minimal_env[@]}")"
+job() {
+  printf '%s cd %q && %s%q --wave %q --batch graph %s >> %q 2>&1 # loopflow:%s:%s\n' \
+    "$1" "$repo_root" "$cron_env" "$lf_bin" "$wave" "$2" "$log_dir/$2.log" "$wave" "$2"
+}
+{
+  crontab -l 2>/dev/null | grep -v "# loopflow:$wave:" || true
+  job "0 9 * * *" telemetry-daily
+  job "0 10 * * *" release-run
+} | crontab -
+installed="$(crontab -l | grep "# loopflow:$wave:")"
+printf '%s\n' "$installed"
+for name in telemetry-daily release-run; do
+  if ! grep -q "# loopflow:$wave:$name\$" <<<"$installed"; then
+    printf 'crontab is missing %s; launchd jobs left in place\n' "$name" >&2
+    exit 1
+  fi
+done
+
+# Earlier lf scheduled these jobs as launchd agents; remove them only now
+# that the crontab replacement is confirmed.
 for plist in "$HOME"/Library/LaunchAgents/loopflow.cron."$wave".*.plist; do
   [ -e "$plist" ] || continue
   label="$(basename "$plist" .plist)"
@@ -78,22 +115,9 @@ for plist in "$HOME"/Library/LaunchAgents/loopflow.cron."$wave".*.plist; do
   rm -f "$plist"
   printf 'removed launchd job %s\n' "$label"
 done
-log_dir="$repo_root/.lf/logs"
-mkdir -p "$log_dir"
-cron_env="HOME=$HOME PATH=$PATH LF_HOME=$lf_home TMPDIR=${TMPDIR:-/tmp} LANG=${LANG:-C}"
-job() {
-  printf '%s cd %q && env -i %s lf --wave %q --batch graph %s >> %q 2>&1 # loopflow:%s:%s\n' \
-    "$1" "$repo_root" "$cron_env" "$wave" "$2" "$log_dir/$2.log" "$wave" "$2"
-}
-{
-  crontab -l 2>/dev/null | grep -v "# loopflow:$wave:" || true
-  job "0 9 * * *" telemetry-daily
-  job "0 10 * * *" release-run
-} | crontab -
-crontab -l | grep "# loopflow:$wave:"
 
 step "configured-path telemetry run"
-if ! "${minimal_env[@]}" lf --wave "$wave" --batch graph telemetry-daily; then
+if ! "${minimal_env[@]}" "$lf_bin" --wave "$wave" --batch graph telemetry-daily; then
   printf '\nbootstrap installed the jobs, but the telemetry run is red; inspect the output above\n' >&2
   exit 1
 fi

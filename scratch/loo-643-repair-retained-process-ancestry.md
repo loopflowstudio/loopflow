@@ -211,3 +211,10 @@ the prevention row is named by its agent child (`parent_lf_process_id`) and as
 Gate (2026-10-27, through `78a68913cc`, host load ~150–310): `cargo fmt --all -- --check` ok; `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib` 2150 passed before the run hit its own 90-minute tool deadline (SIGTERM), and the 113 failed/unfinished tests rerun with `--exact` → 103 passed, 10 ignored, 0 failed (the 78 earlier failures, in untouched chapter/store/status/graph tests, left no panic output); `cargo test -p loopflow --test process_ownership_tests --test session_lifecycle_tests` → 12 + 29 passed. Full matrix stays with CI.
 
 LOO-647 (in flight) moves `retention::prune` into `top::run_prune`/`ProcessPruneReport`; Jack Heart sent its worker this repair's `would_repair`/`repaired`/`retained` contract so one prune path keeps both. Root owns the installed dry-run/repair/no-op/history acceptance.
+
+Kickoff recheck (2026-10-27, origin/main `e970aec679`, 11 commits ahead): the plan
+holds. #1729 (LOO-634) adds `lf monitor rollover` beside prune; the only merge
+conflict is the `MonitorCommand` enum in `monitor.rs` (keep both Rollover and the
+new Prune help), so the sync must regenerate `docs/lf-reference.md`. Rollover resumes
+through the ordinary Session path and attaches no Process itself, so prevention covers it.
+v0.14.19 (#1735) shipped without this change; the patch release follows landing.

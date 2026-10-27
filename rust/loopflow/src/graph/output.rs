@@ -20,9 +20,7 @@ impl GraphOutput {
 
     pub fn for_step(step: &ConcreteStep) -> Option<Self> {
         match step {
-            ConcreteStep::Skill(skill) if !skill.human && skill.returns.is_some() => {
-                Some(Self::Decision)
-            }
+            ConcreteStep::Skill(skill) if skill.returns.is_some() => Some(Self::Decision),
             ConcreteStep::Xor(branch) => {
                 let mut paths: Vec<_> = branch.paths.keys().cloned().collect();
                 paths.sort();

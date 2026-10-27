@@ -32,7 +32,7 @@ struct WaveStandupTests {
         row["section"] = section
         row["next_move"] = ["owner": "task", "reason": reason]
         row["runtime"] = owner.map { person -> Any in
-            ["work_id": "work-\(id)", "status": "ready", "reason": "Running", "updated_at": "2026-10-26T12:00:00Z",
+            ["work_id": "work-\(id)", "status": "moving", "reason": "Running", "updated_at": "2026-10-26T12:00:00Z",
              "provider": "claude", "completion_pending": NSNull(),
              "owner": ["person": person, "person_key": "\(person.lowercased().replacingOccurrences(of: " ", with: "."))@example.com",
                        "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]] as [String: Any]

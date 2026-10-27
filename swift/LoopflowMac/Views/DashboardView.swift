@@ -16,7 +16,7 @@ struct DashboardEditor: View {
             Text(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard").font(.headline)
             TextField("Name", text: $name)
             TextField("Query", text: $expression, axis: .vertical).font(.system(.body, design: .monospaced))
-            Text("For example: (wave:product state:open) or state:available")
+            Text("For example: (wave:product state:open), state:available or state:shipping")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Pin in sidebar", isOn: $pinned)
             if let error = model.dashboardError { Text(error).foregroundStyle(.red).textSelection(.enabled) }

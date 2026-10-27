@@ -354,7 +354,7 @@ mod tests {
         drop(store);
         let store = SqliteStore::open_ephemeral(&database).unwrap();
         for wave in waves {
-            assert!(store.select_wave_workflow(&wave, "invalid/review").is_err());
+            assert!(store.select_wave_workflow(&wave, "invalid:review").is_err());
             assert_eq!(
                 store.selected_wave_workflow(&wave).unwrap().as_deref(),
                 Some("review")

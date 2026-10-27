@@ -34,7 +34,7 @@ struct WorkNavigator: View {
     private var emptyListText: String {
         switch model.navigation.sidebarScope {
         case .repository: "No working Tasks in this list"
-        case .wave: "No open Tasks in this Wave"
+        case .wave: "No working Tasks in this Wave"
         case .dashboard(let id): model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard"
         }
     }
@@ -259,8 +259,9 @@ struct WorkNavigator: View {
     /// The preview line and metadata beneath a row's title.
     private func rowDetail(_ preview: (text: String, help: String, age: String?), slotHint: String?, found: (wave: WaveRoadmap?, task: RoadmapTask)?,
                            status: SessionProgramStatus, selected: Bool, hover: HoverFlag) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(preview.text).font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
+        let shipping = found?.task.shipping.map { "\($0.label) · \($0.reason)" }
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(shipping ?? preview.text).font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
                 .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
                 .help(preview.help).allowsHitTesting(false)
             if let task = found?.task {
@@ -417,12 +418,17 @@ struct WorkMachineControl: View {
 
     private func load() async {
         error = nil
-        do { machines = try await model.machines(for: target) } catch { self.error = error.localizedDescription }
+        // A newer load or a navigation cancels this one; that is not a failure to show.
+        do { machines = try await model.machines(for: target) }
+        catch is CancellationError {}
+        catch { self.error = error.localizedDescription }
     }
 
     private func use(_ id: String) async {
         error = nil
-        do { try await model.useMachine(id, for: target) } catch { self.error = error.localizedDescription }
+        do { try await model.useMachine(id, for: target) }
+        catch is CancellationError {}
+        catch { self.error = error.localizedDescription }
     }
 }
 

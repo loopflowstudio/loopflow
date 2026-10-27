@@ -3,7 +3,6 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
 
 use crate::work::project::ProjectId;
 use crate::work::task::TaskId;
@@ -32,18 +31,6 @@ pub struct ChildBodyHandoff {
 pub struct ChildExecutionContext {
     pub lf_bin: PathBuf,
     pub lf_home: PathBuf,
-}
-
-/// A recorded request to end Work, durable from the moment the Abandon
-/// command is queued rather than from the moment a runner consumes it.
-///
-/// The gap between those two moments is where a supervisor used to restart a
-/// Work item someone had already ended: the pending command carried the intent,
-/// but the Work row still read `Running`, and every launch path reads that Work.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AbandonIntent {
-    pub requested_at: OffsetDateTime,
-    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -68,10 +68,10 @@ struct WorkNavigationTests {
 
         model.select(.wave(id: wave))
         #expect(model.navigation.sidebarWaveID == wave)
-        #expect(model.sidebarTaskIDs == ["issue-now", "issue-review"])
+        #expect(model.sidebarTaskIDs == ["issue-now"])
         #expect(model.sidebarWaves.isEmpty)
         model.select(.task(id: "issue-review"))
-        #expect(model.sidebarTaskIDs == ["issue-now", "issue-review"])
+        #expect(model.sidebarTaskIDs == ["issue-now"])
         model.select(nil)
         #expect(model.selection == nil)
         #expect(model.sidebarTaskIDs == ["issue-now"])
@@ -110,6 +110,8 @@ struct WorkNavigationTests {
         for scope in ["repository", "wave-wave-1"] {
             _ = try crumbs.inspect().find(viewWithAccessibilityIdentifier: "work-jump-" + scope)
         }
+        // The jump bar is navigation; Auto-Ship lives in the Workflow bar below it.
+        #expect(throws: (any Error).self) { try crumbs.inspect().find(viewWithAccessibilityIdentifier: "task-ship") }
         #expect(throws: (any Error).self) { try crumbs.inspect().find(text: "This Mac") }
         #expect(throws: (any Error).self) { try crumbs.inspect().find(viewWithAccessibilityLabel: "Navigate Tasks, Waves and repositories") }
         #expect(model.jumpRows(.repository, filter: "").map(\.id) == [.wave("wave-1")])
@@ -123,13 +125,14 @@ struct WorkNavigationTests {
         #expect(model.navigation.palette == nil)
     }
 
-    @Test("The heading's started state is durable Task evidence, never Linear's planning state")
+    @Test("The heading reads the Task's lifecycle, never Linear's planning state")
     func headingAgreesWithWorkingTasks() throws {
-        let snapshot = try roadmap()
-        let review = try #require(snapshot.tasks.items.first { $0.id == "issue-review" })
-        #expect(review.task.state == "unstarted")
-        #expect(TaskHeading(task: review).state == "Started")
-        #expect(TaskHeading(task: try #require(snapshot.tasks.items.first { $0.id == "issue-now" })).state == "Unstarted")
+        let tasks = try roadmap().tasks.items
+        func state(_ id: String) throws -> String { TaskHeading(task: try #require(tasks.first { $0.id == id })).state }
+        #expect(tasks.first { $0.id == "issue-now" }?.task.state == "unstarted")
+        #expect(try state("issue-now") == "Shipping")
+        #expect(try state("issue-review") == "Unstarted")
+        #expect(try state("issue-later") == "Done")
     }
 
     @Test("Working Tasks opens as a Dashboard; a sidebar Task keeps it in the trail, as its tile does")
@@ -188,22 +191,19 @@ struct WorkNavigationTests {
             == .entered(from: .repository, work: .init(repository: "repo", kind: .task, id: "issue-now")))
     }
 
-    @Test("Inside a Wave view, ⌘N counts the Wave's rows and enters through the Wave on the Task's page")
+    @Test("Inside a Wave view, the sidebar and ⌘N count its started Tasks and enter through the Wave on the Task's page")
     func waveScopeSlotsCountTheWave() throws {
         let model = try dashboardModel()
         model.select(.wave(id: "wave-1"))
-        #expect(model.sidebarTaskIDs == ["issue-later", "issue-now"])
-        // One slot per page in this fixture, so the page is the Task's position.
-        model.selectSidebarTask(slot: 1)
+        #expect(model.sidebarTaskIDs == ["issue-now"])
+        #expect(model.boardTiles(.wave("wave-1")).map(\.work.id) == ["issue-later", "issue-now"])
+        // One slot per page in this fixture, so the page is the Task's tile position.
+        model.selectSidebarTask(slot: 0)
         #expect(model.navigation.destination == .entered(from: .wave("wave-1"), work: .task(id: "issue-now")))
         #expect(model.navigation.wavePages[.wave("wave-1")] == 1)
         #expect(model.navigation.sidebarScope == .wave("wave-1"))
-        model.selectSidebarTask(slot: 0)
-        #expect(model.navigation.destination == .entered(from: .wave("wave-1"), work: .task(id: "issue-later")))
-        #expect(model.navigation.wavePages[.wave("wave-1")] == 0)
-        model.selectSidebarTask(slot: 5)
-        #expect(model.selection == .task(id: "issue-later"))
-        model.goBack()
+        model.selectSidebarTask(slot: 1)
+        #expect(model.selection == .task(id: "issue-now"))
         model.goBack()
         #expect(model.navigation.destination == .work(.wave(id: "wave-1")))
         model.selectDashboard("review")
@@ -496,7 +496,7 @@ struct WorkNavigationTests {
         let projection = WorkProjection(roadmaps: try roadmap().waves, inventory: try roadmap().tasks.items, sessions: records)
         #expect(projection.waves[0].sessions.map(\.id) == ["wave", "project"])
         let completed = try #require(projection.waves[0].tasks.first)
-        #expect(completed.task.task.completed)
+        #expect(completed.task.task.isSuccessful)
         #expect(completed.sessions.map(\.id) == ["completed", "another"])
         #expect(projection.unmatchedSessions.map(\.id) == ["repo", "wrong-kind", "planning-id-is-not-work"])
         let missing = WorkProjection(roadmaps: [], inventory: [], sessions: records)

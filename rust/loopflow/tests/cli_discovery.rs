@@ -451,7 +451,7 @@ fn dual_kind_clients_share_selection_and_explicit_skill_steps_keep_review_metada
     assert!(resolve_definition(repo.path(), "solo", Some(DefinitionKind::Graph)).is_err());
     fs::write(
         repo.path().join(".lf/graphs/outer.yaml"),
-        "- paired\n- graph: paired\n- step:\n    name: paired\n    id: review\n    human: true\n",
+        "- paired\n- graph: paired\n- interactive:\n    name: paired\n    id: review\n",
     )
     .unwrap();
     let expanded = compile_graph(&load_graph("outer", repo.path()).unwrap(), repo.path()).unwrap();
@@ -459,7 +459,7 @@ fn dual_kind_clients_share_selection_and_explicit_skill_steps_keep_review_metada
     assert!(matches!(&expanded[0], ConcreteStep::Skill(step) if step.skill.name == "solo"));
     assert!(matches!(&expanded[1], ConcreteStep::Skill(step) if step.skill.name == "solo"));
     assert!(
-        matches!(&expanded[2], ConcreteStep::Skill(step) if step.skill.name == "paired" && step.human)
+        matches!(&expanded[2], ConcreteStep::Skill(step) if step.skill.name == "paired" && step.interactive)
     );
     fs::write(repo.path().join(".lf/graphs/paired.yaml"), "malformed: [").unwrap();
     assert!(resolve_definition(repo.path(), "paired", None)
@@ -929,21 +929,17 @@ fn graph_help_validates_expansion_and_review_boundaries_without_effects() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     let graph = repo.path().join(".lf/graphs/inspection.yaml");
-    fs::write(
-        &graph,
-        "- step:\n    name: solo\n    id: review\n    human: true\n",
-    )
-    .unwrap();
+    fs::write(&graph, "- interactive:\n    name: solo\n    id: review\n").unwrap();
     let output = success(run(
         repo.path(),
         home.path(),
         &["help", "graph", "inspection"],
     ));
-    assert!(String::from_utf8_lossy(&output).contains("Review steps: review"));
+    assert!(String::from_utf8_lossy(&output).contains("solo (interactive)"));
     for (definition, expected) in [
         ("- graph: absent-graph\n", "absent-graph"),
-        ("- step:\n    name: solo\n    human: true\n", "stable id"),
-        ("- step:\n    name: solo\n    id: review\n    human: true\n- step:\n    name: solo\n    id: review\n    human: true\n", "not unique"),
+        ("- step:\n    name: solo\n    human: true\n", "retired"),
+        ("- interactive:\n    name: solo\n    id: review\n- interactive:\n    name: solo\n    id: review\n", "not unique"),
     ] {
         fs::write(&graph, definition).unwrap();
         let output = run(repo.path(), home.path(), &["help", "graph", "inspection"]);
@@ -1285,6 +1281,12 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     conn.execute("UPDATE repository_plans SET repo=?1", [&path])
         .unwrap();
     conn.execute("UPDATE waves SET repo=?1", [&path]).unwrap();
+    // Resumed, FIX-1 joins FIX-2 in Working, so Working Tasks has two tiles to arrange.
+    conn.execute(
+        "UPDATE tasks SET paused=0 WHERE issue_identifier='FIX-1'",
+        [],
+    )
+    .unwrap();
     let counts = || -> (i64, i64, i64) {
         conn.query_row("SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM task_ownership), (SELECT count(*) FROM processes)", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap()
     };
@@ -1422,6 +1424,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     let defaults: loopflow::work::selection::ViewPlan =
         serde_json::from_slice(&defaults.stdout).unwrap();
     assert!(defaults.dashboard_id.is_none());
+    // Both Waves and the two idle Tasks; the unstarted one isn't Working.
     assert_eq!(defaults.contents.len(), 4);
     let plan = invoke(&["desktop", "view", "query:backlog", "--plan"]);
     let plan: loopflow::work::selection::ViewPlan = serde_json::from_slice(&plan.stdout).unwrap();

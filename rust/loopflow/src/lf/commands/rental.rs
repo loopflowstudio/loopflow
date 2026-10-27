@@ -1067,7 +1067,7 @@ pub fn settle(machine: &MachineId) {
     }
 }
 
-/// The scheduled Task check's give-back pass. Without `RUNPOD_API_KEY` it
+/// Lazy recovery's give-back pass. Without `RUNPOD_API_KEY` it
 /// reports only rentals already past their soft deadline, which then wait for
 /// `lf machine end` or their guardian.
 ///

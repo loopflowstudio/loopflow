@@ -180,16 +180,16 @@ mod tests {
         assert!(get_builtin_graph("task").is_none());
         let first = get_builtin_graph("task-design").expect("Task first graph");
         assert!(first.contains("- kickoff"));
-        // Review stages belong to the Task conversation, never to a builtin Graph.
+        // Stages belong to the Task graphs; the Graphs they compose run on their own.
         for graph in ["task-design", "pursue", "incident"] {
             assert!(!get_builtin_graph(graph)
                 .unwrap_or_else(|| panic!("{graph} is builtin"))
-                .contains("human:"));
+                .contains("interactive:"));
         }
         assert!(get_builtin_graph("pursue")
             .expect("Task loop graph")
             .contains("graph: refresh"));
-        assert!(get_builtin_graph("ship")
+        assert!(get_builtin_graph("deliver")
             .expect("Task final graph")
             .contains("- cmd: land --wait-and-fix"));
         assert!(get_builtin_graph("finish-delivery").is_none());

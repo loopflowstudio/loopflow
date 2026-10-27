@@ -150,9 +150,7 @@ pub(super) async fn connect(
             if remote_has(machine, provider, &login)? {
                 return Ok(());
             }
-            let renewed = crate::ops::linear::renewed_planning_token(provider)
-                .await
-                .map_err(|error| anyhow!("{error}"))?;
+            let renewed = crate::ops::linear::renewed_planning_token(provider).await?;
             if linear_login(&renewed.access_token).await? != login {
                 bail!("renewed Linear login belongs to a different account; discarded");
             }

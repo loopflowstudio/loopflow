@@ -60,6 +60,17 @@ fn prices_follow_each_providers_published_rates() {
     assert_eq!(Provider::Modal.usd_per_hour(&box4()), Ok(usd("0.475920")));
 }
 
+#[test]
+fn fly_reads_as_history_and_rents_nothing() {
+    assert_eq!(Provider::parse("fly"), Some(Provider::Fly));
+    assert!(Provider::Fly
+        .offer(&box4())
+        .unwrap_err()
+        .contains("no longer rents"));
+    assert!(Provider::Fly.missing_credentials().is_some());
+    assert!(<Provider as clap::ValueEnum>::from_str("fly", false).is_err());
+}
+
 fn gpu(name: &str) -> Hardware {
     Hardware {
         gpu: Some(name.into()),

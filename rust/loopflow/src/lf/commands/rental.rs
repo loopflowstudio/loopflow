@@ -11,7 +11,7 @@ use anyhow::{anyhow, Context};
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use crate::durable::{CapacityDefault, Machine, MachineId};
+use crate::durable::{CapacityDefault, Machine, MachineId, RepositoryId};
 use crate::lf::{OndemandCommand, PoolCommand};
 use crate::machine_records::CopyCounts;
 use crate::rental::sandbox::Sandboxes;
@@ -622,12 +622,14 @@ pub fn place(
             super::machine_credentials::require_unattended_logins(&accounts).await
         })?;
     }
+    // The Task's own repository, wherever this checkout was first recorded.
+    let (_, task) = runtime.block_on(crate::ops::task::resolve_saved_task(repo, None, issue))?;
     let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
     let label = machine
         .label
         .clone()
         .unwrap_or_else(|| machine.id.to_string());
-    if let Err(error) = prepare(&runtime, &label, repo, sqlite, batch) {
+    if let Err(error) = prepare(&runtime, &label, repo, &task.repository_id, batch) {
         // Nothing ran on it yet, so nothing is lost by giving it back now.
         let cleanup = Sandboxes::from_env(rental.provider)
             .and_then(|api| delete_sandbox(sqlite, &api, &rental));
@@ -650,19 +652,6 @@ fn git_config(repo: &std::path::Path, key: &str) -> Option<String> {
         .ok()?;
     let value = String::from_utf8(output.stdout).ok()?.trim().to_string();
     (output.status.success() && !value.is_empty()).then_some(value)
-}
-
-/// `owner/name` for a GitHub origin in any of its URL forms.
-fn github_repo(origin: &str) -> Option<String> {
-    let path = [
-        "git@github.com:",
-        "ssh://git@github.com/",
-        "https://github.com/",
-    ]
-    .iter()
-    .find_map(|prefix| origin.strip_prefix(prefix))?;
-    let slug = path.trim_end_matches('/').trim_end_matches(".git");
-    (slug.split('/').count() == 2).then(|| slug.to_string())
 }
 
 /// An unowned Task whose Wave or repository names a pool or on-demand goes
@@ -722,13 +711,14 @@ fn hand_off(
     Ok(())
 }
 
-/// Logins (Linear too when it holds the plan), then this repository cloned and bound to the same identity, so the
-/// forwarded run finds its plan there.
+/// Logins (Linear too when it holds the plan), then this repository cloned
+/// and bound to the Task's repository identity, so the forwarded run finds its
+/// plan there.
 fn prepare(
     runtime: &tokio::runtime::Runtime,
     label: &str,
     repo: &std::path::Path,
-    sqlite: &SqliteStore,
+    repository: &RepositoryId,
     batch: bool,
 ) -> anyhow::Result<()> {
     use crate::provider_auth::Provider as Login;
@@ -755,46 +745,7 @@ fn prepare(
             batch,
         ))?;
     }
-    let key = crate::repository::CanonicalRepo::discover(repo)?.to_string();
-    let id = sqlite
-        .repository_id(&key)?
-        .ok_or_else(|| anyhow!("{} has no repository identity yet", repo.display()))?;
-    let origin = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["remote", "get-url", "origin"])
-        .output()
-        .context("could not read the repository's origin")?;
-    let origin = String::from_utf8(origin.stdout)?.trim().to_string();
-    if origin.is_empty() {
-        return Err(anyhow!("{} has no origin to clone", repo.display()));
-    }
-    let directory = repo
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| anyhow!("{} has no directory name", repo.display()))?;
-    let q = super::ssh::sh_quote;
-    // gh clones `owner/name` over HTTPS with the GitHub login just connected;
-    // handed an SSH origin it would use SSH, which a fresh machine cannot verify.
-    let clone = match github_repo(&origin) {
-        Some(slug) => format!("gh repo clone {}", q(&slug)),
-        None => format!("git clone {}", q(&origin)),
-    };
-    // Claiming the Task there names its person by Git identity, as here.
-    let identity: String = ["user.name", "user.email"]
-        .iter()
-        .filter_map(|key| {
-            Some(format!(
-                "git config --global {key} {} && ",
-                q(&git_config(repo, key)?)
-            ))
-        })
-        .collect();
-    let script = format!(
-        "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf repository --bind {id}",
-        super::machine::REMOTE_PATH,
-        dir = q(directory),
-    );
+    let (origin, script) = checkout_script(repo, repository)?;
     let status = Command::new("ssh")
         .args(crate::machine_route::bounded_ssh_args(
             &machine.route,
@@ -810,6 +761,42 @@ fn prepare(
         ));
     }
     Ok(())
+}
+
+/// The origin, and the remote script that clones it and binds `repository`.
+fn checkout_script(
+    repo: &std::path::Path,
+    repository: &RepositoryId,
+) -> anyhow::Result<(String, String)> {
+    let origin = git_config(repo, "remote.origin.url")
+        .ok_or_else(|| anyhow!("{} has no origin to clone", repo.display()))?;
+    let directory = repo
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow!("{} has no directory name", repo.display()))?;
+    let q = super::ssh::sh_quote;
+    // gh clones `owner/name` over HTTPS with the GitHub login just connected;
+    // handed an SSH origin it would use SSH, which a fresh machine cannot verify.
+    let clone = match crate::git::worktrees::github_nwo(&origin) {
+        Some((owner, name)) => format!("gh repo clone {}", q(&format!("{owner}/{name}"))),
+        None => format!("git clone {}", q(&origin)),
+    };
+    // Claiming the Task there names its person by Git identity, as here.
+    let identity: String = ["user.name", "user.email"]
+        .iter()
+        .filter_map(|key| {
+            Some(format!(
+                "git config --global {key} {} && ",
+                q(&git_config(repo, key)?)
+            ))
+        })
+        .collect();
+    let script = format!(
+        "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf repository --bind {repository}",
+        super::machine::REMOTE_PATH,
+        dir = q(directory),
+    );
+    Ok((origin, script))
 }
 
 // ---------------------------------------------------------------------------
@@ -1191,7 +1178,7 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use super::{end_rental, github_repo, read_holdings, reconcile, refresh, Ended};
+    use super::{checkout_script, end_rental, read_holdings, reconcile, refresh, Ended};
     use crate::durable::MachineId;
     use crate::machine_records::CopyCounts;
     use crate::rental::sandbox::Sandboxes;
@@ -1332,18 +1319,44 @@ mod tests {
     }
 
     #[test]
-    fn a_github_origin_clones_by_owner_and_name() {
-        for origin in [
-            "git@github.com:loopflowstudio/loopflow.git",
-            "ssh://git@github.com/loopflowstudio/loopflow",
-            "https://github.com/loopflowstudio/loopflow.git",
-        ] {
-            assert_eq!(
-                github_repo(origin).as_deref(),
-                Some("loopflowstudio/loopflow")
-            );
-        }
-        assert_eq!(github_repo("git@gitlab.com:team/repo.git"), None);
+    fn a_worktree_checkout_binds_its_tasks_repository_on_a_fresh_home() {
+        let _env = crate::journal::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("loopflow");
+        let git = |cwd: &std::path::Path, args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(cwd)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+        std::fs::create_dir(&main).unwrap();
+        git(&main, &["init", "-q"]);
+        git(&main, &["config", "user.name", "Jack Heart"]);
+        git(&main, &["config", "user.email", "jack@example.com"]);
+        git(
+            &main,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:loopflowstudio/loopflow.git",
+            ],
+        );
+        git(&main, &["commit", "-q", "--allow-empty", "-m", "start"]);
+        let worktree = dir.path().join("loopflow.task");
+        git(
+            &main,
+            &["worktree", "add", "-q", worktree.to_str().unwrap()],
+        );
+        // No store records either checkout: the Task alone names the repository.
+        let repository = crate::durable::RepositoryId::new();
+        let (_, script) = checkout_script(&worktree, &repository).unwrap();
+        assert!(script.ends_with(&format!("lf repository --bind {repository}")));
+        assert!(script.contains("gh repo clone 'loopflowstudio/loopflow'"));
+        assert!(script.contains("git config --global user.email 'jack@example.com'"));
     }
 
     #[test]

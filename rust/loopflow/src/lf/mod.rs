@@ -2178,9 +2178,17 @@ pub enum OndemandCommand {
         vcpus: u32,
         #[arg(long)]
         memory_gb: u32,
-        /// Daytona only; Modal sizes disk itself
+        /// Modal and Fly size disk themselves
         #[arg(long, default_value_t = 10)]
         disk_gb: u32,
+        /// One GPU, on runpod (A40, A6000, L4, RTX4090, L40S, A100, H100),
+        /// aws (L4, A10G) or modal (T4, L4, A10G, L40S, A100, H100)
+        #[arg(long)]
+        gpu: Option<String>,
+        /// Interruptible capacity on aws or runpod, bid at the admitted price;
+        /// the provider may end it early, losing unpushed work
+        #[arg(long)]
+        spot: bool,
         /// Hard deadline for each machine it rents, at most 24
         #[arg(long, default_value_t = crate::rental::DEFAULT_HOURS)]
         hours: f64,

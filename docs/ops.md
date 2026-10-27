@@ -191,15 +191,23 @@ Group machines you own into a pool, and rent more when none is free:
 lf pool add lab && lf machine add jack@mini --pool lab
 lf account token claude jack@example.com          # once a year: Claude for rented machines
 lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-usd-per-hour 0.40
+lf ondemand add gpu --provider runpod --vcpus 8 --memory-gb 32 --gpu A40 --max 1 --max-usd-per-hour 1
 lf task run LOO-570 --pool lab --rent code --quote   # where it would run, the most it could cost
 lf task run LOO-570 --pool lab --rent code           # a free lab machine, else rent one
 lf machine use code infrastructure                   # the Wave's new Tasks rent from code
 lf machine end code-1                                # give a rented machine back now
 ```
 
-Renting from Daytona reads `DAYTONA_API_KEY` (`doppler run -- lf …`); Modal
-reads `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or `~/.modal.toml`. Its provider
-deletes a rented machine at its deadline. `lf machine use code infrastructure`
+Providers read their keys from the environment (`doppler run -- lf …`):
+Daytona `DAYTONA_API_KEY`; Modal `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or
+`~/.modal.toml`; RunPod `RUNPOD_API_KEY`; AWS `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY` and `AWS_REGION`; Fly `FLY_API_TOKEN` (and `FLY_ORG`,
+default `personal`). `--gpu` rents one GPU on RunPod, AWS or Modal, on a
+machine with at least `--vcpus` and `--memory-gb`. `--spot` rents
+interruptible capacity on AWS or RunPod, never charged above the admitted
+price; the provider may end it early, losing unpushed work. EC2 prices are
+us-east-1's, so AWS names the region it rents in and the region it priced. Its
+provider deletes a rented machine at its deadline. `lf machine use code infrastructure`
 (or `--repo`) sends a scope's unowned Tasks to `code` when they run. A machine
 goes back 15 minutes after its last Task finished; first its Sessions and
 Processes are copied home, so `lf session list` shows them "from code-1".

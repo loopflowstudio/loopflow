@@ -7,8 +7,10 @@
 //! ordinary Machine once reachable; Task execution never learns it is rented.
 //!
 //! Admission writes the Rental's identity before the provider is asked, so an
-//! unknown reply keeps it; the create is never resent. The provider itself
-//! deletes the sandbox at the hard deadline whatever else fails.
+//! unknown reply keeps it; the create is never resent. At the hard deadline
+//! the provider deletes the machine whatever else fails: its own lifetime
+//! (Daytona, Modal) or the guardian on the machine (`guardian.py`: RunPod,
+//! AWS, Fly).
 
 pub mod sandbox;
 
@@ -33,7 +35,7 @@ pub const DEFAULT_HOURS: f64 = 4.0;
 pub const SOFT_DEADLINE_SECONDS: i64 = 15 * 60;
 /// After its last Task finishes, a rental waits this long before going back.
 pub const GRACE_SECONDS: i64 = 15 * 60;
-/// The longest window either provider keeps a sandbox (Modal's limit).
+/// The longest window a rental lasts (Modal's limit for a sandbox).
 pub const MAX_HOURS: f64 = 24.0;
 /// An unconfirmed create absent under its name after this long is lost.
 pub const CREATE_SECONDS: i64 = 20 * 60;
@@ -123,6 +125,14 @@ impl Serialize for Usd {
     }
 }
 
+/// Read from exact decimal text, as the rental bridge reports a price.
+impl<'de> Deserialize<'de> for Usd {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        Self::parse(&text).map_err(serde::de::Error::custom)
+    }
+}
+
 impl std::str::FromStr for Usd {
     type Err = String;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
@@ -140,6 +150,9 @@ impl std::str::FromStr for Usd {
 pub enum Provider {
     Daytona,
     Modal,
+    Runpod,
+    Aws,
+    Fly,
 }
 
 impl Provider {
@@ -147,6 +160,9 @@ impl Provider {
         match self {
             Self::Daytona => "daytona",
             Self::Modal => "modal",
+            Self::Runpod => "runpod",
+            Self::Aws => "aws",
+            Self::Fly => "fly",
         }
     }
 
@@ -154,25 +170,29 @@ impl Provider {
         match value {
             "daytona" => Some(Self::Daytona),
             "modal" => Some(Self::Modal),
+            "runpod" => Some(Self::Runpod),
+            "aws" => Some(Self::Aws),
+            "fly" => Some(Self::Fly),
             _ => None,
         }
     }
 
-    /// The SDK the bridge runs with, pinned.
-    pub fn sdk(self) -> &'static str {
+    /// The SDK the bridge runs with, pinned; RunPod and Fly speak plain HTTP.
+    pub fn sdk(self) -> Option<&'static str> {
         match self {
-            Self::Daytona => "daytona==0.226.1",
-            Self::Modal => "modal==1.6.2",
+            Self::Daytona => Some("daytona==0.226.1"),
+            Self::Modal => Some("modal==1.6.2"),
+            Self::Aws => Some("boto3==1.40.55"),
+            Self::Runpod | Self::Fly => None,
         }
     }
 
     /// Why this lf process cannot reach the provider's account, if it cannot.
     pub fn missing_credentials(self) -> Option<String> {
         let set = |name: &str| std::env::var(name).is_ok_and(|value| !value.is_empty());
+        let doppler = |names: &str| format!("{names} not set; run with `doppler run -- lf …`");
         match self {
-            Self::Daytona if !set("DAYTONA_API_KEY") => Some(
-                "DAYTONA_API_KEY is not set; run with `doppler run -- lf …`".to_string(),
-            ),
+            Self::Daytona if !set("DAYTONA_API_KEY") => Some(doppler("DAYTONA_API_KEY is")),
             Self::Modal
                 if !set("MODAL_TOKEN_ID")
                     && !dirs::home_dir().is_some_and(|home| home.join(".modal.toml").is_file()) =>
@@ -182,26 +202,215 @@ impl Provider {
                         .to_string(),
                 )
             }
+            Self::Runpod if !set("RUNPOD_API_KEY") => Some(doppler("RUNPOD_API_KEY is")),
+            Self::Aws
+                if !set("AWS_ACCESS_KEY_ID")
+                    || !set("AWS_SECRET_ACCESS_KEY")
+                    || !(set("AWS_REGION") || set("AWS_DEFAULT_REGION")) =>
+            {
+                Some(doppler(
+                    "AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_REGION are not all",
+                ))
+            }
+            Self::Fly if !set("FLY_API_TOKEN") => Some(doppler("FLY_API_TOKEN is")),
             _ => None,
         }
     }
 
-    /// The published per-second rates, as one hourly price for this hardware.
-    /// Daytona: $0.0504/vCPU-h, $0.0162/GiB-h, $0.000108/GiB-h of disk past 5.
-    /// Modal sandboxes: $0.00003942/core-s (two vCPUs a core), $0.00000667/GiB-s.
-    pub fn usd_per_hour(self, hardware: &Hardware) -> Usd {
-        let (vcpu, gib, disk) = match self {
-            Self::Daytona => (
-                50_400,
-                16_200,
-                108 * i64::from(hardware.disk_gb.saturating_sub(5)),
-            ),
-            Self::Modal => (70_956, 24_012, 0),
+    /// What this provider rents for the hardware, at its published price.
+    /// Where it sells fixed shapes (RunPod CPU flavors, EC2 instance types),
+    /// the smallest one holding the hardware.
+    pub fn offer(self, hardware: &Hardware) -> Result<Offer, String> {
+        let vcpus = i64::from(hardware.vcpus);
+        let memory = i64::from(hardware.memory_gb);
+        let offer = |machine_type: Option<String>, micros: i64| Offer {
+            machine_type,
+            usd_per_hour: Usd::from_micros(micros),
         };
-        Usd::from_micros(
-            vcpu * i64::from(hardware.vcpus) + gib * i64::from(hardware.memory_gb) + disk,
-        )
+        let per_size = |vcpu: i64, gib: i64, extra: i64| vcpu * vcpus + gib * memory + extra;
+        let no_shape = || format!("{self} rents nothing with {hardware}");
+        if hardware.spot && !matches!(self, Self::Aws | Self::Runpod) {
+            return Err(format!(
+                "{self} sells no interruptible capacity; --spot works on aws and runpod"
+            ));
+        }
+        match (self, hardware.gpu.as_deref()) {
+            (Self::Daytona | Self::Fly, Some(_)) => Err(format!(
+                "{self} rents no GPUs; --gpu works on runpod, aws and modal"
+            )),
+            (Self::Daytona, None) => Ok(offer(
+                None,
+                per_size(
+                    50_400,
+                    16_200,
+                    108 * i64::from(hardware.disk_gb.saturating_sub(5)),
+                ),
+            )),
+            (Self::Modal, None) => Ok(offer(None, per_size(70_956, 24_012, 0))),
+            (Self::Modal, Some(gpu)) => {
+                let (name, usd) = find_gpu(self, MODAL_GPUS, gpu)?;
+                Ok(offer(
+                    Some(name.to_string()),
+                    per_size(70_956, 24_012, *usd),
+                ))
+            }
+            (Self::Fly, None) => Ok(offer(None, per_size(29_167, 8_333, FLY_IPV4_MICROS))),
+            (Self::Runpod, None) => RUNPOD_CPUS
+                .iter()
+                .find(|(_, gib_per_vcpu, _)| gib_per_vcpu * vcpus >= memory)
+                .map(|(flavor, _, usd)| offer(Some((*flavor).to_string()), usd * vcpus))
+                .ok_or_else(no_shape),
+            (Self::Runpod, Some(gpu)) => {
+                let (id, usd) = find_gpu(self, RUNPOD_GPUS, gpu)?;
+                Ok(offer(Some(id.to_string()), *usd))
+            }
+            (Self::Aws, None) => AWS_CPUS
+                .iter()
+                .find(|(_, gib_per_vcpu, _)| gib_per_vcpu * vcpus >= memory)
+                .and_then(|(family, gib_per_vcpu, usd)| {
+                    let (size_vcpus, size) = AWS_SIZES
+                        .iter()
+                        .find(|(size_vcpus, _)| *size_vcpus >= vcpus)?;
+                    (gib_per_vcpu * size_vcpus >= memory)
+                        .then(|| offer(Some(format!("{family}.{size}")), usd * size_vcpus))
+                })
+                .ok_or_else(no_shape),
+            (Self::Aws, Some(gpu)) => {
+                let (family, sizes) = find_gpu(self, AWS_GPUS, gpu)?;
+                sizes
+                    .iter()
+                    .find(|(size_vcpus, size_gib, _, _)| {
+                        *size_vcpus >= vcpus && *size_gib >= memory
+                    })
+                    .map(|(_, _, size, usd)| offer(Some(format!("{family}.{size}")), *usd))
+                    .ok_or_else(no_shape)
+            }
+        }
     }
+
+    pub fn usd_per_hour(self, hardware: &Hardware) -> Result<Usd, String> {
+        self.offer(hardware).map(|offer| offer.usd_per_hour)
+    }
+
+    /// Where it rents, set in the environment, and whose prices `offer` read
+    /// when they differ: EC2's table is us-east-1, other regions charge
+    /// otherwise and report no price. `None` where lf picks no region.
+    pub fn region(self) -> Option<String> {
+        let priced = "us-east-1";
+        match self {
+            Self::Aws => {
+                let region = ["AWS_REGION", "AWS_DEFAULT_REGION"]
+                    .iter()
+                    .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))?;
+                Some(if region == priced {
+                    region
+                } else {
+                    format!("{region}, priced as {priced}")
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
+/// What a provider rents for some hardware.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Offer {
+    /// The provider's own name for it: a RunPod CPU flavor or GPU type, an EC2
+    /// instance type, a Modal GPU. `None` where the hardware is the request.
+    pub machine_type: Option<String>,
+    pub usd_per_hour: Usd,
+}
+
+// Published prices in millionths of a dollar per hour, 2026-10-26. Daytona
+// bills $0.0504/vCPU-h, $0.0162/GiB-h and $0.000108/GiB-h of disk past 5; Modal
+// sandboxes $0.00003942/core-s (two vCPUs a core) and $0.00000667/GiB-s.
+// RunPod and EC2 reply with the price they charge; these admit before asking.
+
+/// `--gpu` name, Modal's name, its price on top of the sandbox's CPU and memory.
+const MODAL_GPUS: &[(&str, &str, i64)] = &[
+    ("T4", "T4", 590_000),
+    ("L4", "L4", 800_000),
+    ("A10G", "A10G", 1_100_000),
+    ("L40S", "L40S", 1_950_000),
+    ("A100", "A100-80GB", 2_500_000),
+    ("H100", "H100", 3_950_000),
+];
+
+/// Secure-cloud pods with one GPU: `--gpu` name, RunPod's id, price.
+const RUNPOD_GPUS: &[(&str, &str, i64)] = &[
+    ("A40", "NVIDIA A40", 590_000),
+    ("A6000", "NVIDIA RTX A6000", 590_000),
+    ("L4", "NVIDIA L4", 590_000),
+    ("RTX4090", "NVIDIA GeForce RTX 4090", 890_000),
+    ("L40S", "NVIDIA L40S", 1_090_000),
+    ("A100", "NVIDIA A100 80GB PCIe", 1_790_000),
+    ("H100", "NVIDIA H100 PCIe", 2_890_000),
+];
+
+/// RunPod CPU flavors: GiB per vCPU, an estimated price per vCPU (RunPod
+/// publishes none; the create reports what it charges).
+const RUNPOD_CPUS: &[(&str, i64, i64)] = &[
+    ("cpu3c", 2, 30_000),
+    ("cpu3g", 4, 40_000),
+    ("cpu3m", 8, 50_000),
+];
+
+/// EC2 families by GiB per vCPU, on-demand in us-east-1, per vCPU.
+const AWS_CPUS: &[(&str, i64, i64)] = &[("c7i", 2, 44_625), ("m7i", 4, 50_400), ("r7i", 8, 66_150)];
+
+/// EC2 sizes by vCPUs.
+const AWS_SIZES: &[(i64, &str)] = &[
+    (2, "large"),
+    (4, "xlarge"),
+    (8, "2xlarge"),
+    (16, "4xlarge"),
+    (32, "8xlarge"),
+    (48, "12xlarge"),
+    (64, "16xlarge"),
+];
+
+/// EC2 GPU families, one GPU each: vCPUs, GiB, size, on-demand price in us-east-1.
+type GpuSizes = &'static [(i64, i64, &'static str, i64)];
+const AWS_GPUS: &[(&str, &str, GpuSizes)] = &[
+    (
+        "L4",
+        "g6",
+        &[
+            (4, 16, "xlarge", 804_800),
+            (8, 32, "2xlarge", 977_600),
+            (16, 64, "4xlarge", 1_323_200),
+        ],
+    ),
+    (
+        "A10G",
+        "g5",
+        &[
+            (4, 16, "xlarge", 1_006_000),
+            (8, 32, "2xlarge", 1_212_000),
+            (16, 64, "4xlarge", 1_624_000),
+        ],
+    ),
+];
+
+/// Fly bills performance vCPUs at $21/month beside 2 GiB at $6/GiB-month, and
+/// $2/month for the app's dedicated IPv4.
+const FLY_IPV4_MICROS: i64 = 2_778;
+
+/// The provider's name for a `--gpu` name and what its table holds beside it.
+fn find_gpu<T>(
+    provider: Provider,
+    table: &'static [(&'static str, &'static str, T)],
+    gpu: &str,
+) -> Result<(&'static str, &'static T), String> {
+    table
+        .iter()
+        .find(|(name, _, _)| *name == gpu)
+        .map(|(_, id, rest)| (*id, rest))
+        .ok_or_else(|| {
+            let known: Vec<&str> = table.iter().map(|(name, _, _)| *name).collect();
+            format!("{provider} rents no {gpu}; it rents {}", known.join(", "))
+        })
 }
 
 impl fmt::Display for Provider {
@@ -216,11 +425,23 @@ pub struct Hardware {
     pub vcpus: u32,
     pub memory_gb: u32,
     pub disk_gb: u32,
+    /// One GPU, by its `--gpu` name; absent from hardware stored without one.
+    pub gpu: Option<String>,
+    /// Interruptible capacity (AWS spot, RunPod interruptible pods), bid at
+    /// the admitted price; the provider may end it before its deadline.
+    pub spot: bool,
 }
 
 impl fmt::Display for Hardware {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} vCPU {} GB", self.vcpus, self.memory_gb)
+        write!(f, "{} vCPU {} GB", self.vcpus, self.memory_gb)?;
+        if let Some(gpu) = &self.gpu {
+            write!(f, " + {gpu}")?;
+        }
+        if self.spot {
+            f.write_str(" spot")?;
+        }
+        Ok(())
     }
 }
 
@@ -250,7 +471,7 @@ pub struct OnDemand {
 }
 
 impl OnDemand {
-    pub fn usd_per_hour(&self) -> Usd {
+    pub fn usd_per_hour(&self) -> Result<Usd, String> {
         self.provider.usd_per_hour(&self.hardware)
     }
 }
@@ -385,6 +606,8 @@ pub enum Refusal {
         live: u32,
         max: u32,
     },
+    #[error("{ondemand}: {reason}")]
+    NotOffered { ondemand: String, reason: String },
     #[error("{ondemand}: {hardware} costs {seen}/h, above its {max}/h limit")]
     OverPrice {
         ondemand: String,
@@ -394,8 +617,8 @@ pub enum Refusal {
     },
 }
 
-/// The machine limit, then the price, then the cap. The window is at most
-/// `MAX_HOURS`.
+/// The machine limit, then what the provider offers and its price, then the
+/// cap. The window is at most `MAX_HOURS`.
 pub fn admit(
     ondemand: &OnDemand,
     live: u32,
@@ -410,7 +633,12 @@ pub fn admit(
             max: ondemand.max_machines,
         });
     }
-    let usd_per_hour = ondemand.usd_per_hour();
+    let usd_per_hour = ondemand
+        .usd_per_hour()
+        .map_err(|reason| Refusal::NotOffered {
+            ondemand: ondemand.name.clone(),
+            reason,
+        })?;
     if usd_per_hour > ondemand.max_usd_per_hour {
         return Err(Refusal::OverPrice {
             ondemand: ondemand.name.clone(),

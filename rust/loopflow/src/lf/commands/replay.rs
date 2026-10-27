@@ -5,7 +5,6 @@ use std::io::Write;
 
 use crate::agent::check_cli_available;
 use crate::agent::run_agent;
-use crate::agent::stream::StreamFormat;
 use crate::agent::AgentConfig;
 use crate::agent::ProcessConfig;
 use crate::session_record::{AttributionSource, CaptureHandle, SessionCaptureSpec};
@@ -97,7 +96,6 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     };
     let capture = CaptureHandle::begin_replay_at(home, spec, request, source.artifact_key)
         .map_err(|error| anyhow!("failed to publish replay capture before execution: {error}"))?;
-    capture.record_input("replay", &config.task_prompt);
     let artifact_key = capture.artifact_key();
     let context_file = if config.system_prompt.trim().is_empty() {
         None
@@ -111,7 +109,6 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     let process = ProcessConfig {
         auto: true,
         stream: true,
-        stream_format: StreamFormat::Human(false),
         capture: Some(capture.clone().into()),
         context_file: context_file.as_ref().map(|file| file.path().to_path_buf()),
         ..ProcessConfig::default()

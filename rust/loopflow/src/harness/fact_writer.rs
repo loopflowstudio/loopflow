@@ -1,6 +1,10 @@
 //! The one writer of what decoders establish: Session receipts, availability,
 //! the native conversation selection and account capacity.
 //!
+//! Each turn's `completed` receipt also carries what filled its context: the
+//! first and peak request the provider reported, the tool results returned
+//! into the main conversation, and compactions.
+//!
 //! Availability is display evidence and account effects are best effort, so
 //! their failures warn. A receipt failure is returned to the driver, which
 //! decides whether its stream can continue.
@@ -12,10 +16,13 @@ use anyhow::Result;
 use serde_json::json;
 
 use super::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
+use crate::chat::types::{ConversationEvent, ConversationItem};
 use crate::id::AgentSessionId;
 use crate::process::SessionAttachment;
 use crate::provider_account::ProviderAccountRoute;
-use crate::session::{SessionActivity, SessionEventKind, SessionPreview, SessionTurnOrigin};
+use crate::session::{
+    SessionActivity, SessionEventKind, SessionPreview, SessionTurnOrigin, TurnContext,
+};
 use crate::store::sqlite::SqliteStore;
 use crate::store::StoreResult;
 
@@ -32,6 +39,7 @@ pub(super) struct FactWriter {
     route: Option<ProviderAccountRoute>,
     requests: RequestOrigins,
     activity: SessionActivityTracker,
+    context: TurnContext,
 }
 
 impl std::fmt::Debug for FactWriter {
@@ -57,6 +65,7 @@ impl FactWriter {
             route,
             requests,
             activity: SessionActivityTracker::default(),
+            context: TurnContext::default(),
         }
     }
 
@@ -102,11 +111,18 @@ impl FactWriter {
     /// availability and the native conversation selection.
     pub(super) fn record(&mut self, decoded: &[Decoded]) -> StoreResult<()> {
         let mut signals = Vec::new();
-        for fact in decoded.iter().filter_map(Decoded::fact) {
-            match fact {
-                ProviderFact::Activity(signal) => signals.push(signal.clone()),
-                ProviderFact::SessionObserved(thread) => self.select_session(thread),
-                fact => self.record_fact(fact)?,
+        for decoded in decoded {
+            match decoded {
+                Decoded::Display(event) => self.context.hear(event),
+                Decoded::Fact(ProviderFact::Activity(signal)) => signals.push(signal.clone()),
+                Decoded::Fact(ProviderFact::SessionObserved(thread)) => self.select_session(thread),
+                &Decoded::Fact(ProviderFact::Request { input_tokens }) => {
+                    self.context.request(input_tokens)
+                }
+                &Decoded::Fact(ProviderFact::Compacted { pre_tokens }) => {
+                    self.context.compacted(pre_tokens)
+                }
+                Decoded::Fact(fact) => self.record_fact(fact)?,
             }
         }
         if !signals.is_empty() {
@@ -162,12 +178,23 @@ impl FactWriter {
             ProviderFact::Usage { turn, receipt } => {
                 event(turn, SessionEventKind::Usage, receipt)?;
             }
-            ProviderFact::TurnCompleted {
-                turn: Some(turn),
-                detail,
-                ..
-            } => {
-                event(turn, SessionEventKind::Completed, detail)?;
+            ProviderFact::TurnCompleted { turn, detail, .. } => {
+                // A replayed completion keeps its receipt and leaves the live
+                // turn's tally alone.
+                if let Some(turn) = turn {
+                    if self
+                        .store
+                        .session_turn_completed(&self.session, &turn.thread, &turn.turn)?
+                    {
+                        return Ok(());
+                    }
+                }
+                let context = std::mem::take(&mut self.context);
+                if let Some(turn) = turn {
+                    let mut detail = detail.clone();
+                    detail["context"] = json!(context);
+                    event(turn, SessionEventKind::Completed, &detail)?;
+                }
             }
             &ProviderFact::AvailabilityReading {
                 open_tools,
@@ -201,6 +228,39 @@ impl FactWriter {
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         self.activity
             .record_at(&self.store, &self.session, attachment, signals, now);
+    }
+}
+
+impl TurnContext {
+    fn request(&mut self, input_tokens: u64) {
+        self.first_request_tokens.get_or_insert(input_tokens);
+        self.peak_request_tokens = self.peak_request_tokens.max(Some(input_tokens));
+    }
+
+    fn compacted(&mut self, pre_tokens: Option<u64>) {
+        self.compactions += 1;
+        if let Some(pre_tokens) = pre_tokens {
+            *self.compaction_tokens.get_or_insert(0) += pre_tokens;
+        }
+    }
+
+    /// A completed command, edit or tool returned its result into the
+    /// conversation; an edit's result carries no output to count.
+    fn hear(&mut self, event: &ConversationEvent) {
+        let ConversationEvent::ItemCompleted { item, .. } = event else {
+            return;
+        };
+        let output = match item {
+            ConversationItem::Command { output, .. } | ConversationItem::Tool { output, .. } => {
+                output.as_deref()
+            }
+            ConversationItem::File { .. } => None,
+            ConversationItem::Message { .. } | ConversationItem::Thought { .. } => return,
+        };
+        self.tool_results += 1;
+        if let Some(output) = output {
+            self.tool_output_tokens += crate::prompt::count_tokens(output) as u64;
+        }
     }
 }
 
@@ -335,9 +395,10 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{FactWriter, SessionActivityTracker};
+    use crate::chat::types::Lifecycle;
     use crate::harness::claude_decode::ClaudeDecoder;
     use crate::harness::codex_decode::{turn_request, CodexDecoder};
-    use crate::harness::fact::{trace, Decoded, ProviderFact, Signal};
+    use crate::harness::fact::{trace, Decoded, ProviderFact, ProviderTurn, Signal};
     use crate::harness::opencode_decode::OpenCodeDecoder;
     use crate::id::LfProcessId;
     use crate::process::SessionAttachment;
@@ -652,6 +713,47 @@ mod tests {
         assert_eq!(activity.reading(17).unwrap().observed_at, 17);
     }
 
+    #[test]
+    fn cpu_samples_update_liveness_without_waking_session_readers() {
+        let mut session = Driven::new(false);
+        let revision = |session: &Driven| -> i64 {
+            rusqlite::Connection::open(session._home.path().join("facts.db"))
+                .unwrap()
+                .query_row(
+                    "SELECT revision FROM store_revisions WHERE domain='sessions'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        session
+            .store
+            .record_session_cpu("conversation", &session.attachment, START, None)
+            .unwrap();
+        assert_eq!(
+            session.store.session_liveness("conversation").unwrap(),
+            None,
+            "a Session that has not spoken has no reading to sample into"
+        );
+        session.hear(vec![Decoded::Fact(ProviderFact::Activity(Signal::Working))]);
+        let before = revision(&session);
+        for at in [START + 15, START + 30] {
+            session
+                .store
+                .record_session_cpu("conversation", &session.attachment, at, Some(START))
+                .unwrap();
+        }
+        assert_eq!(revision(&session), before);
+        assert_eq!(
+            session.store.session_liveness("conversation").unwrap(),
+            Some(crate::session::SessionLiveness {
+                observed_at: START + 1,
+                cpu_sampled_at: Some(START + 30),
+                cpu_quiet_since: Some(START),
+            })
+        );
+    }
+
     /// Session receipts other than capture bookkeeping.
     fn receipts(store: &SqliteStore) -> Vec<crate::session::SessionEvent> {
         store
@@ -717,7 +819,9 @@ mod tests {
         assert_eq!(events[1].payload["value"], value);
         assert_eq!(
             events[2].payload,
-            json!({"status":"completed","result_id":"result","errors":null,"subtype":"success"})
+            json!({"status":"completed","result_id":"result","errors":null,"subtype":"success",
+                "context":{"first_request_tokens":null,"peak_request_tokens":null,"tool_results":0,
+                    "tool_output_tokens":0,"compactions":0,"compaction_tokens":null}})
         );
         assert!(store
             .input_final_answer(next.input_key().unwrap())
@@ -731,6 +835,143 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(serde_json::from_str::<Value>(&answer).unwrap(), value);
+    }
+
+    /// The `context` each completed receipt retained, in order.
+    fn contexts(store: &SqliteStore) -> Vec<Value> {
+        receipts(store)
+            .into_iter()
+            .filter(|event| event.kind == SessionEventKind::Completed)
+            .map(|event| event.payload["context"].clone())
+            .collect()
+    }
+
+    /// Feed a Claude stream after Loopflow's request `request` was echoed.
+    fn claude_turn(writer: &mut FactWriter, lines: Vec<Value>) {
+        let mut decoder = ClaudeDecoder::default();
+        decoder.outbound("request");
+        let mut lines = lines;
+        lines.insert(
+            0,
+            json!({"type":"user","session_id":"thread","uuid":"request","message":{"content":"go"}}),
+        );
+        for mut line in lines {
+            if line["type"] == "result" {
+                line["session_id"] = json!("thread");
+            }
+            writer
+                .record(&decoder.decode(&line.to_string(), "turn").unwrap())
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_claude_turn_retains_its_tool_results() {
+        let (_home, store, attachment) = attached(false);
+        claude_turn(
+            &mut writer(&store, &attachment),
+            trace("claude_multi_tool.ndjson"),
+        );
+        // The Write result is an edit with no output to count.
+        let tokens = crate::prompt::count_tokens("command done");
+        assert_eq!(
+            contexts(&store),
+            [
+                json!({"first_request_tokens":null,"peak_request_tokens":null,
+                "tool_results":2,"tool_output_tokens":tokens,"compactions":0,"compaction_tokens":null})
+            ]
+        );
+    }
+
+    #[test]
+    fn a_claude_turn_counts_its_own_requests_not_its_subagents() {
+        let (_home, store, attachment) = attached(false);
+        let request = |id: &str, cached: u64, parent: Value, content: Value| {
+            json!({"type":"assistant","parent_tool_use_id":parent,"message":{"id":id,"content":content,
+                "usage":{"input_tokens":10,"cache_read_input_tokens":cached,"cache_creation_input_tokens":0}}})
+        };
+        let tool = |id: &str| json!([{"type":"tool_use","id":id,"name":"Read","input":{}}]);
+        let result = |parent: Value, id: &str, text: &str| {
+            json!({"type":"user","parent_tool_use_id":parent,"message":{"content":[
+                {"type":"tool_result","tool_use_id":id,"content":text}]}})
+        };
+        let main = Value::Null;
+        let sub = json!("toolu_main");
+        claude_turn(
+            &mut writer(&store, &attachment),
+            vec![
+                request("a", 990, main.clone(), tool("toolu_main")),
+                request("a", 990, main.clone(), tool("toolu_main")),
+                request("s", 90_000, sub.clone(), tool("toolu_sub")),
+                result(sub, "toolu_sub", "inside a subagent"),
+                result(main.clone(), "toolu_main", "tool said this"),
+                json!({"type":"system","subtype":"compact_boundary",
+                    "compact_metadata":{"trigger":"auto","pre_tokens":150000}}),
+                request("b", 4990, main, json!([])),
+                json!({"type":"result","subtype":"success","result":"done"}),
+            ],
+        );
+        let tokens = crate::prompt::count_tokens("tool said this");
+        assert_eq!(
+            contexts(&store),
+            [
+                json!({"first_request_tokens":1000,"peak_request_tokens":5000,
+                "tool_results":1,"tool_output_tokens":tokens,"compactions":1,"compaction_tokens":150000})
+            ]
+        );
+    }
+
+    #[test]
+    fn a_codex_turn_retains_its_request_peak() {
+        let (_home, store, attachment) = attached(false);
+        let mut writer = writer(&store, &attachment);
+        let mut decoder = CodexDecoder::default();
+        for rpc in trace("codex_normal_turn.jsonl") {
+            writer.record(&decoder.decode(&rpc, None)).unwrap();
+        }
+        assert_eq!(
+            contexts(&store),
+            [
+                json!({"first_request_tokens":16065,"peak_request_tokens":16065,
+                "tool_results":0,"tool_output_tokens":0,"compactions":0,"compaction_tokens":null})
+            ]
+        );
+    }
+
+    #[test]
+    fn a_codex_snapshot_replays_a_completed_turn_without_taking_the_live_tally() {
+        let (_home, store, attachment) = attached(false);
+        let mut live = writer(&store, &attachment);
+        let mut decoder = CodexDecoder::default();
+        for rpc in trace("codex_normal_turn.jsonl") {
+            live.record(&decoder.decode(&rpc, None)).unwrap();
+        }
+        let thread = "0197f00d-aaaa-7000-8000-000000000001";
+        let mut resumed = writer(&store, &attachment);
+        resumed
+            .record(&[ProviderFact::Request { input_tokens: 7 }.into()])
+            .unwrap();
+        let snapshot = json!({"id":9,"result":{"thread":{"id":thread,"turns":[
+            {"id":"0197f00d-bbbb-7000-8000-000000000002","status":"completed"}]}}});
+        resumed
+            .record(&CodexDecoder::default().decode(&snapshot, Some(&thread.into())))
+            .unwrap();
+        resumed
+            .record(&[ProviderFact::TurnCompleted {
+                turn: Some(ProviderTurn {
+                    thread: thread.into(),
+                    turn: "next".into(),
+                }),
+                status: Lifecycle::Completed,
+                detail: json!({}),
+            }
+            .into()])
+            .unwrap();
+        let first = |context: &Value| context["first_request_tokens"].clone();
+        assert_eq!(
+            contexts(&store).iter().map(first).collect::<Vec<_>>(),
+            [json!(16065), json!(7)]
+        );
     }
 
     /// A Codex client message: freeze a turn request's origin, then decode it.

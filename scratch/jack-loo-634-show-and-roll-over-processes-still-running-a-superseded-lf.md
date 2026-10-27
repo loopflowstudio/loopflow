@@ -105,8 +105,8 @@ Nothing to rename or merge.
   resolves to `NextStep` (listed under "Moving at their next step") unless it runs
   a Desktop helper ("update Desktop") or is below the store floor ("fails at its
   next step and `lf task run` retries its route"). Nothing is signalled. Session
-  owners keep the earlier rule, and re-checks before each stop reuse the same
-  `disposition`. JSON gains `next_step`.
+  owners keep the earlier rule, and re-checks before each stop reuse
+  `owner_disposition` (a classified owner is never a Graph runner). JSON gains `next_step`.
 - Proof `graph_live_across_switch_runs_next_step_on_selected_install`
   (`os_process/installation_tests.rs`, registered in
   `scripts/test_task_installation.py`): the prior install is a real lf copy (trailing
@@ -164,6 +164,7 @@ Nothing to rename or merge.
   reference pass. Docker proof: first wrapper design hung (above, fixed); reruns of
   the fixed test never reached it because OrbStack's VM crashed during compile and
   OrbStack.app then left /Applications. Deferred to CI `task-installation`.
+- 2026-10-27 compress (one `place` for every disposition): clippy and `--lib -- rollover` (4) pass.
 - Demo: rollover and the `ps` section reach the live store only once installed (a
   branch build re-execs the installed lf for ordinary commands; `lf doctor` doesn't).
 

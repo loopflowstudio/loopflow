@@ -76,6 +76,12 @@ impl BinaryInventory {
 }
 
 impl RunningBinary {
+    fn is_app_helper(&self) -> bool {
+        self.path
+            .as_deref()
+            .is_some_and(crate::installation::is_app_helper)
+    }
+
     /// `lf-d49c57c`, `Loopflow.app lf`, or the file name.
     pub fn name(&self) -> String {
         let Some(path) = &self.path else {
@@ -418,11 +424,7 @@ async fn owner_disposition(
 /// in Desktop's helper, which keeps itself; a runner below the store floor
 /// fails at its next step instead.
 fn graph_runner(binary: &RunningBinary) -> Disposition {
-    if binary
-        .path
-        .as_deref()
-        .is_some_and(crate::installation::is_app_helper)
-    {
+    if binary.is_app_helper() {
         return Disposition::Stays(
             "its steps follow Loopflow.app's bundled lf; update Desktop".into(),
         );
@@ -437,37 +439,29 @@ fn graph_runner(binary: &RunningBinary) -> Disposition {
 }
 
 impl RolloverReport {
-    /// File a non-moving disposition; a moving one returns its Sessions.
-    fn place(
-        &mut self,
-        binary: &RunningBinary,
-        process: &RunningLfProcess,
-        disposition: Disposition,
-    ) -> Option<Vec<String>> {
-        let listed = |reason: String| StayingProcess {
-            process: process.clone(),
-            binary: binary.describe(),
-            reason,
-        };
+    /// File `process` under its disposition.
+    fn place(&mut self, binary: String, process: &RunningLfProcess, disposition: Disposition) {
+        let process = process.clone();
         match disposition {
-            Disposition::Moves(sessions) => return Some(sessions),
-            Disposition::NextStep => self.next_step.push(listed(
-                "launches its next step on the selected lf; the runner exits with the Graph".into(),
-            )),
-            Disposition::Stays(reason) => self.stays.push(listed(reason)),
-        }
-        None
-    }
-}
-
-impl MovedOwner {
-    fn new(binary: &RunningBinary, process: &RunningLfProcess, session_ids: Vec<String>) -> Self {
-        Self {
-            process: process.clone(),
-            binary: binary.describe(),
-            sessions: Vec::new(),
-            session_ids,
-            error: None,
+            Disposition::Moves(session_ids) => self.moved.push(MovedOwner {
+                process,
+                binary,
+                sessions: Vec::new(),
+                session_ids,
+                error: None,
+            }),
+            Disposition::NextStep => self.next_step.push(StayingProcess {
+                process,
+                binary,
+                reason:
+                    "launches its next step on the selected lf; the runner exits with the Graph"
+                        .into(),
+            }),
+            Disposition::Stays(reason) => self.stays.push(StayingProcess {
+                process,
+                binary,
+                reason,
+            }),
         }
     }
 }
@@ -502,36 +496,30 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
         next_step: Vec::new(),
         stays: Vec::new(),
     };
-    let mut movable = Vec::new();
     for binary in inventory.superseded() {
         for process in &binary.processes {
             let disposition = disposition(&store, binary, process).await?;
-            if let Some(sessions) = report.place(binary, process, disposition) {
-                movable.push((binary, process, sessions));
-            }
+            report.place(binary.describe(), process, disposition);
         }
     }
     let (Some(selected), false) = (&inventory.selected, dry_run) else {
-        report.moved = movable
-            .into_iter()
-            .map(|(binary, process, session_ids)| MovedOwner::new(binary, process, session_ids))
-            .collect();
         return Ok(report);
     };
     // Earlier resumes take seconds each, so a person may have started a turn or
     // attached a terminal since classification; the owner may also have exited.
-    for (binary, process, _) in movable {
-        let still_running = crate::journal::process_evidence(&store.sqlite, &process.id)
+    for mut owner in std::mem::take(&mut report.moved) {
+        let still_running = crate::journal::process_evidence(&store.sqlite, &owner.process.id)
             == ProcessIdentityEvidence::Live;
         let now = if still_running {
-            disposition(&store, binary, process).await?
+            owner_disposition(&store, &owner.process).await?
         } else {
             Disposition::Stays("exited before rollover reached it".into())
         };
-        let Some(session_ids) = report.place(binary, process, now) else {
+        let Disposition::Moves(session_ids) = now else {
+            report.place(owner.binary, &owner.process, now);
             continue;
         };
-        let mut owner = MovedOwner::new(binary, process, session_ids);
+        owner.session_ids = session_ids;
         if let Err(error) = stop_owner(&store.sqlite, &owner.process) {
             owner.error = Some(format!("{error:#}"));
             report.moved.push(owner);
@@ -638,12 +626,7 @@ pub fn report_after_promote() {
         Ok(inventory) => {
             if let Some(summary) = superseded_summary(&inventory) {
                 println!("still running the previous lf: {summary}");
-                if inventory.superseded().any(|binary| {
-                    binary
-                        .path
-                        .as_deref()
-                        .is_some_and(crate::installation::is_app_helper)
-                }) {
+                if inventory.superseded().any(RunningBinary::is_app_helper) {
                     println!(
                         "Desktop keeps its bundled lf until Loopflow.app is updated; this promote did not change it"
                     );

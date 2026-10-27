@@ -71,4 +71,5 @@ v0.14.16 shrank the store but kept each run's full provider stream in `events.js
 ## Small changes
 
 - **Desktop: a Wave's sidebar lists only its started Tasks**, plus its subwaves, in plan order. ⌘1–9, ⌃⇥ and sidebar search now skip unstarted work. The Wave board still shows unstarted Tasks with **Start**, and an empty Wave reads "No working Tasks in this Wave". (#1703)
+- **Usage updates no longer scan `session_events` while holding the store's write lock.** A new index lets each usage update find its row directly, so other writers no longer wait while that scan runs. (#1713)
 - `scripts/check_cost.py` and `scripts/benchmarks/storage/replay_history.py` are deleted. `scripts/context_ablation.py` reads `lf history show --transcript --json`. (#1706)

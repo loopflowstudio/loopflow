@@ -5,8 +5,9 @@
 //! matching Claude Code's default transcript cleanup; there is no size budget.
 //! It never removes the database or its sidecars, account homes, the newest
 //! backup of each database, anything modified within the grace period, or
-//! anything a running process holds open. Every removal is appended to
-//! `logs/disk.log`.
+//! anything a running process holds open. A store copy's snapshot staging
+//! directory goes as soon as no snapshot holds the copies lock, since only a
+//! killed snapshot leaves one. Every removal is appended to `logs/disk.log`.
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File, OpenOptions};
@@ -119,10 +120,12 @@ fn allocated(path: &Path, seen: &mut HashSet<(u64, u64)>) -> u64 {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return 0;
     };
-    let mut bytes = if seen.insert((metadata.dev(), metadata.ino())) {
-        metadata.blocks() * 512
-    } else {
+    let mut bytes = if !seen.insert((metadata.dev(), metadata.ino())) {
         0
+    } else if metadata.is_file() {
+        private_bytes(path).unwrap_or(metadata.blocks() * 512)
+    } else {
+        metadata.blocks() * 512
     };
     if metadata.is_dir() {
         if let Ok(entries) = fs::read_dir(path) {
@@ -132,6 +135,46 @@ fn allocated(path: &Path, seen: &mut HashSet<(u64, u64)>) -> u64 {
         }
     }
     bytes
+}
+
+/// Bytes deleting the file at `path` frees now. An APFS clone shares its
+/// blocks with the original, so counting its allocated blocks would claim
+/// space a removal never returns.
+#[cfg(target_os = "macos")]
+fn private_bytes(path: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut request = libc::attrlist {
+        bitmapcount: libc::ATTR_BIT_MAP_COUNT,
+        reserved: 0,
+        commonattr: 0,
+        volattr: 0,
+        dirattr: 0,
+        fileattr: 0,
+        forkattr: libc::ATTR_CMNEXT_PRIVATESIZE,
+    };
+    // The reply is its u32 length followed by the off_t private size.
+    let mut reply = [0u8; 12];
+    // SAFETY: `path` is NUL-terminated, and `request` and `reply` outlive the
+    // call; getattrlist writes at most `reply.len()` bytes and keeps no pointer.
+    let status = unsafe {
+        libc::getattrlist(
+            path.as_ptr(),
+            std::ptr::addr_of_mut!(request).cast(),
+            reply.as_mut_ptr().cast(),
+            reply.len(),
+            libc::FSOPT_NOFOLLOW | libc::FSOPT_ATTR_CMN_EXTENDED,
+        )
+    };
+    if status != 0 || u32::from_ne_bytes(reply[..4].try_into().ok()?) < 12 {
+        return None;
+    }
+    u64::try_from(i64::from_ne_bytes(reply[4..].try_into().ok()?)).ok()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn private_bytes(_path: &Path) -> Option<u64> {
+    None
 }
 
 /// The newest file modification under `path`. A directory's own mtime only
@@ -286,9 +329,11 @@ fn rotatable_units(home: &Path) -> Vec<Unit> {
     log_files(&home.join("logs"), &mut units);
     log_files(&home.join("log"), &mut units);
 
+    // Staging directories go by ownership, not age: see `remove_abandoned_snapshots`.
     let selected_copy = crate::store::default_db_path();
+    let staging = crate::store::copy::abandoned_snapshots(&home.join("copies"));
     for copy in children(&home.join("copies")) {
-        if copy.is_dir() && !selected_copy.starts_with(&copy) {
+        if copy.is_dir() && !selected_copy.starts_with(&copy) && !staging.contains(&copy) {
             units.push(unit(Category::Copies, vec![copy]));
         }
     }
@@ -342,6 +387,7 @@ fn rotate(
     let mut removed = Vec::new();
     let mut errors = Vec::new();
     let mut log = (!dry_run).then(|| open_log(home)).transpose()?;
+    remove_abandoned_snapshots(home, dry_run, &mut log, &mut removed, &mut errors)?;
     for unit in units {
         if unit.modified > cutoff {
             continue;
@@ -388,6 +434,41 @@ fn rotate(
         removed.push(removal);
     }
     Ok((removed, errors))
+}
+
+/// Remove snapshot staging directories whose process died mid-snapshot,
+/// however recent: holding the copies lock proves no snapshot is filling one.
+fn remove_abandoned_snapshots(
+    home: &Path,
+    dry_run: bool,
+    log: &mut Option<File>,
+    removed: &mut Vec<Removal>,
+    errors: &mut Vec<String>,
+) -> Result<()> {
+    let copies = home.join("copies");
+    let Some(_idle) = crate::store::copy::idle_lock(&copies)? else {
+        return Ok(());
+    };
+    for path in crate::store::copy::abandoned_snapshots(&copies) {
+        let bytes = allocated_bytes(&path);
+        if !dry_run {
+            if let Err(error) = remove_paths(std::slice::from_ref(&path)) {
+                errors.push(format!("{}: {error:#}", path.display()));
+                continue;
+            }
+        }
+        let removal = Removal {
+            category: Category::Copies,
+            path,
+            bytes,
+            reason: "abandoned snapshot".to_owned(),
+        };
+        if let Some(log) = log.as_mut() {
+            log_removal(log, &removal);
+        }
+        removed.push(removal);
+    }
+    Ok(())
 }
 
 fn remove_paths(paths: &[PathBuf]) -> Result<()> {
@@ -678,5 +759,52 @@ mod tests {
         assert!(home
             .join("loopflow.db.backup-0.14.8-fedcba9876543210")
             .exists());
+    }
+
+    #[test]
+    fn a_killed_snapshot_staging_directory_goes_once_no_snapshot_holds_the_lock() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+        std::env::set_var("LF_HOME", home);
+        write(&home.join("loopflow.db"), 4096, 0);
+        write(&home.join("copies/.tmpAbC123/loopflow.db"), 400_000, 0);
+        write(&home.join("copies/0123456789abcdef/loopflow.db"), 4096, 0);
+
+        let report = rotate_home(home, Duration::from_secs(7 * 86400), false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(report.removed.len(), 1, "{report:#?}");
+        assert_eq!(report.removed[0].reason, "abandoned snapshot");
+        assert!(report.freed_bytes >= 400_000, "{report:#?}");
+        assert!(!home.join("copies/.tmpAbC123").exists());
+        assert!(home.join("copies/0123456789abcdef/loopflow.db").exists());
+
+        write(&home.join("copies/.tmpDeF456/loopflow.db"), 4096, 0);
+        let _snapshotting = crate::store::copy::idle_lock(&home.join("copies"))
+            .unwrap()
+            .unwrap();
+        let (mut removed, mut errors) = (Vec::new(), Vec::new());
+        super::remove_abandoned_snapshots(home, false, &mut None, &mut removed, &mut errors)
+            .unwrap();
+        assert!(removed.is_empty() && errors.is_empty());
+        assert!(home.join("copies/.tmpDeF456").exists());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_clone_measures_only_the_blocks_its_removal_frees() {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        let dir = tempfile::tempdir().unwrap();
+        let original = dir.path().join("original");
+        let clone = dir.path().join("clone");
+        write(&original, 4 << 20, 0);
+        let from = CString::new(original.as_os_str().as_bytes()).unwrap();
+        let to = CString::new(clone.as_os_str().as_bytes()).unwrap();
+        // SAFETY: both paths are NUL-terminated and outlive the call.
+        assert_eq!(unsafe { libc::clonefile(from.as_ptr(), to.as_ptr(), 0) }, 0);
+
+        assert!(super::allocated_bytes(&clone) < 1 << 20);
     }
 }

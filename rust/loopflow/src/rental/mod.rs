@@ -155,13 +155,7 @@ pub enum Provider {
     Modal,
     Runpod,
     Aws,
-    /// Retired 2026-10-27: its disk cannot hold a Rust build. 0.14.17's Fly
-    /// on-demands and rentals stay readable as history; nothing rents there.
-    #[value(skip)]
-    Fly,
 }
-
-const RETIRED: &str = "Fly no longer rents; `lf ondemand remove` forgets its on-demand";
 
 impl Provider {
     pub fn as_str(self) -> &'static str {
@@ -170,7 +164,6 @@ impl Provider {
             Self::Modal => "modal",
             Self::Runpod => "runpod",
             Self::Aws => "aws",
-            Self::Fly => "fly",
         }
     }
 
@@ -180,7 +173,6 @@ impl Provider {
             "modal" => Some(Self::Modal),
             "runpod" => Some(Self::Runpod),
             "aws" => Some(Self::Aws),
-            "fly" => Some(Self::Fly),
             _ => None,
         }
     }
@@ -191,7 +183,7 @@ impl Provider {
             Self::Daytona => Some("daytona==0.226.1"),
             Self::Modal => Some("modal==1.6.2"),
             Self::Aws => Some("boto3==1.40.55"),
-            Self::Runpod | Self::Fly => None,
+            Self::Runpod => None,
         }
     }
 
@@ -210,7 +202,6 @@ impl Provider {
                         .to_string(),
                 )
             }
-            Self::Fly => Some(RETIRED.to_string()),
             Self::Runpod if !set("RUNPOD_API_KEY") => Some(doppler("RUNPOD_API_KEY is")),
             Self::Aws
                 if !set("AWS_ACCESS_KEY_ID")
@@ -282,7 +273,6 @@ impl Provider {
                         .then(|| offer(Some(format!("{family}.{size}")), usd * size_vcpus))
                 })
                 .ok_or_else(no_shape),
-            (Self::Fly, _) => Err(RETIRED.to_string()),
             (Self::Aws, Some(gpu)) => {
                 let (family, sizes) = find_gpu(self, AWS_GPUS, gpu)?;
                 sizes

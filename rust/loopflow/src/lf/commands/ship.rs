@@ -14,8 +14,8 @@ use crate::graph::runner::SkillOutcome;
 use crate::graph::transitions::{GraphDecision, GraphVerdict};
 use crate::lf::Cli;
 use crate::ops::task::ship::{
-    blocked_backoff, ship_begin, ship_next, ship_progressed, ship_settle_merge, stand_in_message,
-    ShipMerge, ShipStart, ShipStep,
+    blocked_backoff, ship_begin, ship_deliver, ship_end, ship_next, ship_progressed,
+    ship_settle_merge, stand_in_message, ShipMerge, ShipStart, ShipStep,
 };
 use crate::ops::task::TaskProcessOptions;
 
@@ -25,19 +25,28 @@ pub fn run(
     issue: &str,
     graph: Option<&str>,
     reason: Option<&str>,
+    recover: bool,
 ) -> Result<()> {
-    let task = match ship_begin(issue, graph, reason)? {
+    let task = match ship_begin(issue, graph, reason, recover)? {
         ShipStart::Begun(task) => task,
-        ShipStart::AlreadyShipping { issue, process } => {
+        ShipStart::AlreadyShipping {
+            issue,
+            process,
+            route: None,
+        } => {
             println!("{issue} is already shipping (process {process})");
+            return Ok(());
+        }
+        ShipStart::AlreadyShipping {
+            issue,
+            process,
+            route: Some(route),
+        } => {
+            println!("{issue} is running {route} to its end (process {process}); it will not land its PR. After it arrives, `lf ship {issue}` hands it off.");
             return Ok(());
         }
         ShipStart::Deferred { issue } => {
             println!("{issue} is deferred; `lf task resume {issue}` before shipping it");
-            return Ok(());
-        }
-        ShipStart::AtEnd { issue } => {
-            println!("{issue} is already at its end");
             return Ok(());
         }
     };
@@ -60,6 +69,19 @@ pub fn run(
         }
         let (edge, note) = match ship_next(&issue)? {
             ShipStep::Edge(edge) => (edge, None),
+            ShipStep::Deliver(pr) => {
+                eprintln!("{issue}: at its end with {pr} unmerged; delivering it");
+                ship_deliver(&issue, &pr)?;
+                continue;
+            }
+            ShipStep::AtEnd => {
+                println!("{issue}: {}", ship_end(&issue)?);
+                return Ok(());
+            }
+            ShipStep::Ended(summary) => {
+                println!("{issue}: {summary}");
+                return Ok(());
+            }
             ShipStep::StandIn {
                 stage,
                 skill,
@@ -144,7 +166,14 @@ pub fn run(
         if let Some(edge) = runs {
             // This ship has already let its launcher go, or keeps it to the end.
             super::graph::run_task_edge_for(cli, &task, &edge, false)?;
-            crate::ops::task::workflow_arrive(&task)?;
+            // Arrival at `end` is kept when completion is refused: the next
+            // step delivers the PR or ends shipping with the reason.
+            if let Err(error) = crate::ops::task::workflow_arrive(&task) {
+                if !matches!(ship_next(&issue)?, ShipStep::Deliver(_) | ShipStep::AtEnd) {
+                    return Err(error.into());
+                }
+                eprintln!("{issue}: {error}");
+            }
             ship_progressed(&task.id)?;
         }
     }

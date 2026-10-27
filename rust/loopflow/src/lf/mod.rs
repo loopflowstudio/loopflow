@@ -422,7 +422,8 @@ pub enum Commands {
     /// Returns once the Task is shipping and runs on to its end (`-b` waits for
     /// it); `lf task status` follows it. A second `lf ship` while one runs exits 0.
     /// With no ISSUE, ships the checkout's Task, or a new one for its branch.
-    /// `--stop` withdraws the approval and takes back its merge request.
+    /// Shipping grants landing the Task's PR, even to an approval a route into
+    /// `end` began. `--stop` withdraws the approval and takes back its merge request.
     Ship {
         issue: Option<String>,
         /// Take up this graph in place of the Task's remaining steps
@@ -434,6 +435,9 @@ pub enum Commands {
         /// Stop Auto-Ship: end the ship process and disarm auto-merge it armed
         #[arg(long)]
         stop: bool,
+        /// Continue the existing approval with only the authority it has, as automatic restart does
+        #[arg(long, conflicts_with_all = ["stop", "graph"])]
+        recover: bool,
     },
     /// Inspect and continue Sessions
     Session {

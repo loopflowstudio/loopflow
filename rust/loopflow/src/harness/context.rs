@@ -1,5 +1,5 @@
 //! Stable provider hook declarations and separately saved launch context. No user files
-//! or hook trust decisions are replaced; Claude folder trust is granted only by
+//! or host hook trust decisions are replaced; Claude folder trust is granted only by
 //! `claude_trust`, for lf-created worktrees. Saved sources survive driver replacement.
 use std::path::{Path, PathBuf};
 
@@ -19,16 +19,29 @@ pub(crate) fn claude_args(context: &ContextDelivery) -> Result<Vec<String>> {
     Ok(vec!["--settings".into(), path.display().to_string()])
 }
 
-/// Stable declarations only. The provider owns review and persisted trust.
+/// Codex runs thread-configured hooks only when that configuration also trusts
+/// them, and its review screen lists only launch layers. Trust exactly these
+/// declarations for this thread; host entries and persisted decisions stay as found.
+/// Hash protocol: codex-rs/hooks/src/engine/discovery.rs (0.164.0).
 pub(crate) fn codex_config(
     context: &ContextDelivery,
     session_hooks: Option<&Value>,
 ) -> Result<Value> {
     // Thread configuration replaces the app-server's session-flags layer. Keep
-    // wrapper declarations at their original indices and preserve existing trust.
+    // wrapper declarations at their original indices so their trust IDs survive.
     let mut hooks = session_hooks.cloned().unwrap_or_else(|| json!({}));
     let additions = context.hook_settings()?;
-    for event in ["SessionStart", "Stop", "PostToolUse", "UserPromptSubmit"] {
+    let mut states = hooks
+        .get("state")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    for (event, event_name) in [
+        ("SessionStart", "session_start"),
+        ("Stop", "stop"),
+        ("PostToolUse", "post_tool_use"),
+        ("UserPromptSubmit", "user_prompt_submit"),
+    ] {
         let Some(groups) = additions[event].as_array() else {
             continue;
         };
@@ -37,9 +50,27 @@ pub(crate) fn codex_config(
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        combined.extend(groups.iter().cloned());
+        for group in groups {
+            let mut handler = group["hooks"][0].clone();
+            handler["async"] = json!(false);
+            let mut identity = json!({"event_name":event_name, "hooks":[handler]});
+            if let Some(matcher) = group.get("matcher") {
+                identity["matcher"] = matcher.clone();
+            }
+            identity.sort_all_objects();
+            let hash = hex::encode(Sha256::digest(serde_json::to_vec(&identity)?));
+            states.insert(
+                format!(
+                    "/<session-flags>/config.toml:{event_name}:{}:0",
+                    combined.len()
+                ),
+                json!({"trusted_hash":format!("sha256:{hash}")}),
+            );
+            combined.push(group.clone());
+        }
         hooks[event] = json!(combined);
     }
+    hooks["state"] = Value::Object(states);
     Ok(json!({"hooks":hooks}))
 }
 
@@ -122,7 +153,7 @@ mod tests {
     use crate::context_block::ContextDelivery;
 
     #[test]
-    fn hook_identity_is_shared_across_tasks_and_sessions_without_granting_trust() {
+    fn hook_identity_is_shared_across_tasks_and_sessions() {
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let home = tempfile::tempdir().unwrap();
@@ -143,8 +174,6 @@ mod tests {
             .collect();
         let first = super::codex_config(&contexts[0], None).unwrap();
         assert_eq!(first, super::codex_config(&contexts[1], None).unwrap());
-        assert!(first["hooks"]["state"].is_null());
-        assert!(!first.to_string().contains("trusted_hash"));
         assert_eq!(
             super::claude_args(&contexts[0]).unwrap(),
             super::claude_args(&contexts[1]).unwrap()
@@ -169,6 +198,60 @@ mod tests {
         let restored: ContextDelivery =
             serde_json::from_slice(&std::fs::read(&saved[0]).unwrap()).unwrap();
         assert_eq!(restored, contexts[0]);
+    }
+
+    #[test]
+    fn codex_trusts_only_loopflow_declarations_after_host_hooks() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let context = ContextDelivery {
+            repository: None,
+            repo: home.path().to_owned(),
+            home: home.path().to_owned(),
+            wave: None,
+            skill_file: None,
+            references: Vec::new(),
+        };
+        let host = serde_json::json!({
+            "SessionStart": [{"hooks": [{"type": "command", "command": "host-hook"}]}],
+            "state": {
+                "host-trust": {"trusted_hash": "unchanged"},
+                "/<session-flags>/config.toml:session_start:0:0": {"trusted_hash": "host"},
+            },
+        });
+        let hooks = &super::codex_config(&context, Some(&host)).unwrap()["hooks"];
+        assert_eq!(hooks["SessionStart"][0]["hooks"][0]["command"], "host-hook");
+        let state = hooks["state"].as_object().unwrap();
+        assert_eq!(state["host-trust"]["trusted_hash"], "unchanged");
+        assert_eq!(
+            state["/<session-flags>/config.toml:session_start:0:0"]["trusted_hash"],
+            "host"
+        );
+        let mut trusted: Vec<_> = state
+            .keys()
+            .filter(|key| *key != "host-trust")
+            .map(String::as_str)
+            .collect();
+        trusted.sort_unstable();
+        assert_eq!(
+            trusted,
+            [
+                "/<session-flags>/config.toml:post_tool_use:0:0",
+                "/<session-flags>/config.toml:session_start:0:0",
+                "/<session-flags>/config.toml:session_start:1:0",
+                "/<session-flags>/config.toml:session_start:2:0",
+                "/<session-flags>/config.toml:stop:0:0",
+                "/<session-flags>/config.toml:user_prompt_submit:0:0",
+            ]
+        );
+        // Each Loopflow entry trusts the exact declaration at its own index.
+        assert_ne!(
+            state["/<session-flags>/config.toml:session_start:1:0"],
+            state["/<session-flags>/config.toml:session_start:2:0"]
+        );
     }
 
     #[test]

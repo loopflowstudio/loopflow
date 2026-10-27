@@ -154,7 +154,7 @@ b4f19861) is built: `lf/commands/setting.rs`, `scope_settings` table in draft
 - Gate: full suites (incl. `machine_commands`, `two_people`, `auth_tests`, Swift
   `WorkCLISubscriptionTests`), clippy, DTO fixtures.
 
-Check (LF_* unset, after compress 2026-10-27): `--test integration wave_setup_tests` pass; `--lib -- setting config::` pass except `harness::{claude,context}` capture tests, which pass serially (concurrency flake, gate); clippy `--all-targets` clean. `config::workflow_setting` now validates the name for every reader. Gate owns the full suites.
+Check (LF_* unset, 2026-10-27, after restoring the `lf set` work from the stash `lf checkout update` left and merging main's Fly removal): `--test integration wave_setup_tests` and CLI-shape tests (`reference_matches_the_compiled_cli`, `wave_resolution_matrix`, `machine_commands`, `cli_discovery`, `documented_commands`) pass; `--lib -- setting config:: scope_defaults` pass with `harness::claude` capture passing serially (concurrency flake); fmt and clippy `--all-targets` clean. Gate owns the full suites.
 
 ## One verb: `lf set` (Jack Heart, 2026-10-27, accepted)
 

@@ -110,4 +110,4 @@ Remaining:
   Functions are not needed yet (Jack); `--gpu` stays `Sandbox.create(gpu=...)`.
 - No publication until LOO-527 has a PR to stack on.
 
-Check: `uv run pytest python/tests/test_rental_bridge.py` 13 passed; `cargo test -p loopflow --lib rental` 26 passed; clippy clean (2026-10-26).
+Check: `cargo test -p loopflow --lib rental` 26 passed, clippy clean after the `offer`/`find_gpu` compress (2026-10-26); bridge pytest unchanged (13 passed).

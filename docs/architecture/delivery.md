@@ -379,12 +379,9 @@ admission.
 The repository lock skips overlapping observations. Per-Task and per-PR claims
 still fence direct callers. Delivery observations have no elapsed-time cutoff;
 concurrent checks skip the landing while its current observation owns the lock.
-launchd calendar entries run each minute and coalesce sleep into a wake-time check.
 The detached transport owner starts a separate process group. Startup waits for
 its acknowledgement without an elapsed-time cutoff. No provider turn runs inside
 the tick.
 
-Desktop consumes the Rust automation projection: installed/enabled state,
-last successful and failed receipts, selection and blockers. A missing receipt
-is unknown coverage. Disabling removes the job and prevents its later admissions;
-it leaves running work and explicitly requested GitHub merges intact.
+Desktop consumes the Rust automation projection: per-Task CI repair holds and
+unsettled deliveries. Scheduling the check is the person's own crontab line.

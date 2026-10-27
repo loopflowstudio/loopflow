@@ -319,7 +319,7 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
     let repo = loopflow_test_support::TestRepo::new();
     let path = repo.path().canonicalize().unwrap();
     let identity = fixture
-        .command(&["repo", "identity"])
+        .command(&["config", "repository"])
         .current_dir(&path)
         .output()
         .unwrap();
@@ -329,7 +329,14 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
         .trim()
         .to_string();
     let set = fixture
-        .command(&["machine", "use", "mini", "--repo", "--session"])
+        .command(&[
+            "--repo",
+            path.to_str().unwrap(),
+            "machine",
+            "use",
+            "mini",
+            "--session",
+        ])
         .current_dir(&path)
         .output()
         .unwrap();
@@ -1678,7 +1685,7 @@ fn machine_use_copies_wave_and_repository_defaults_to_your_other_machines() {
     assert_success(&output);
     assert!(String::from_utf8_lossy(&output.stdout).starts_with("Wave owners:"));
     assert!(String::from_utf8_lossy(&output.stderr).contains("copied to mini"));
-    // Bare, outside a Task or Wave worktree, it sets the repository's default.
+    // A selected repository with no Wave sets the repository's default.
     let mut bare = repository.to_vec();
     bare.extend(["machine", "use", "mini"]);
     let output = fixture.run(&bare);

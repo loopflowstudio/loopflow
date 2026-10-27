@@ -1965,8 +1965,11 @@ mod tests {
 
             let scope = name.split_once('/').map(|(scope, _)| scope);
             let orchestrates = scope.is_some();
+            // LOOPFLOW.md hands a person's change off as a Task in every prompt;
+            // advancing existing Tasks is the orchestrating skills' procedure.
+            let procedures = prompt.replace(crate::builtins::LOOPFLOW_DOC.trim(), "");
             let advances_tasks =
-                prompt.contains("lf task run") || prompt.contains("lf task-operate");
+                procedures.contains("lf task run") || procedures.contains("lf task-operate");
             assert_eq!(advances_tasks, orchestrates, "{name}");
             assert_eq!(
                 prompt.contains("lf machine use"),

@@ -535,10 +535,12 @@ pub(crate) struct TaskRunSelection {
     pub take_up: Option<crate::workflow::CapturedGraph>,
 }
 
+/// The Workflow a Task takes up when it names none: its Wave's, then the
+/// repository's `workflow:`, then the builtin `code`.
 pub(crate) fn task_workflow_default(
     store: &Store,
     task: &Task,
-) -> OpsResult<Option<(String, &'static str)>> {
+) -> OpsResult<(String, &'static str)> {
     if let Some(wave) = &task.wave_id {
         if let Some(name) = store
             .sqlite
@@ -546,17 +548,20 @@ pub(crate) fn task_workflow_default(
             .map_err(task_error)?
         {
             crate::workflow::validate_workflow_name(&name).map_err(task_error)?;
-            return Ok(Some((name, "wave")));
+            return Ok((name, "wave"));
         }
     }
     let repo = repository_for_task(store, task)?;
     let name = crate::config::load_repo_config(&repo)
         .map_err(task_error)?
         .and_then(|c| c.workflow);
-    if let Some(name) = &name {
-        crate::workflow::validate_workflow_name(name).map_err(task_error)?;
+    match name {
+        Some(name) => {
+            crate::workflow::validate_workflow_name(&name).map_err(task_error)?;
+            Ok((name, "repository"))
+        }
+        None => Ok(("code".to_string(), "builtin")),
     }
-    Ok(name.map(|name| (name, "repository")))
 }
 
 pub(crate) fn select_task_run(
@@ -611,16 +616,7 @@ pub(crate) fn select_task_run(
         }
         (_, Some(named)) => Some(named),
         (_, None) => {
-            let selection = task_workflow_default(store, task)?;
-            let Some((name, source)) = selection else {
-                let available = crate::graph::available_graph_names(checkout)
-                    .map_err(task_error)?
-                    .join(", ");
-                return Err(task_error(format!(
-                    "No graph selected. Use `lf task run {} <graph>`. Available: {available}",
-                    task.identifier
-                )));
-            };
+            let (name, source) = task_workflow_default(store, task)?;
             Some(
                 crate::workflow::CapturedGraph::load(&name, &repository_for_task(store, task)?)
                     .map_err(task_error)?
@@ -2080,7 +2076,7 @@ fn _valid_task_url(value: &str) -> bool {
 
 fn _missing_task_pr_url(task: &Task) -> OpsError {
     task_error(format!(
-        "Task {} has no valid provider URL in the cached PM snapshot. Run `lf repo refresh` before publishing this Task PR",
+        "Task {} has no valid provider URL in the cached PM snapshot. Run `lf wave status --sync` before publishing this Task PR",
         task.identifier,
     ))
 }

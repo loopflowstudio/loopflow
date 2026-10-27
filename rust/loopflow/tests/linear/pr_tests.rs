@@ -960,7 +960,7 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
     );
 
     assert!(
-        matches!(result, Err(OpsError::Message(ref message)) if message.contains("no valid provider URL") && message.contains("lf repo refresh")),
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("no valid provider URL") && message.contains("lf wave status --sync")),
         "missing provider identity should be actionable: {result:?}"
     );
     assert!(!github_marker.exists(), "GitHub must not mutate");

@@ -99,7 +99,7 @@ def main() -> None:
         before = db.execute("SELECT id,trace_id,cwd FROM processes ORDER BY id").fetchall()
     invoke(candidate, "self", "install", "promote", "--cli-target", entry)
     for cwd in [repo, checkout]:
-        assert json.loads(invoke(entry, "repo", "identity", "--json", cwd=cwd)) == identity
+        assert json.loads(invoke(entry, "config", "repository", "--json", cwd=cwd)) == identity
         after = json.loads(invoke(entry, "task", "status", task["id"], "--json", cwd=cwd))
         assert after["task"]["id"] == task["id"]
         assert after["execution"]["worktree"] == str(checkout)
@@ -122,13 +122,13 @@ def main() -> None:
     assert all(after[row[0]] == row[1:] for row in before)
     moved = home / "renamed"
     repo.rename(moved)
-    assert json.loads(invoke(entry, "repo", "identity", "--json", cwd=moved)) == identity
+    assert json.loads(invoke(entry, "config", "repository", "--json", cwd=moved)) == identity
     after_move = json.loads(invoke(entry, "task", "status", task["id"], "--json", cwd=moved))
     assert after_move["execution"]["worktree"] == str(checkout)
     assert unpublished.read_text() == "retained edit\n"
     # Promotion retry and ordinary reads retain the same identity and checkout.
     invoke(candidate, "self", "install", "promote", "--cli-target", entry, cwd=home)
-    assert json.loads(invoke(entry, "repo", "identity", "--json", cwd=moved)) == identity
+    assert json.loads(invoke(entry, "config", "repository", "--json", cwd=moved)) == identity
     print("PASS: populated 0.14.3 promotion, Task/Session identity, history, edits, move and retry")
     print(
         "Native provider resume and macOS Desktop installation are separate acceptance boundaries."

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Install the release cron jobs on the Wave's placed Machine. Crons are personal:
-# this Machine installs them with `lf cron add`; they stay private until
-# `lf cron publish <name>` shows one to teammates.
+# Install the release jobs as ordinary crontab lines on the Wave's placed
+# Machine. Each line runs a plain lf command; cron itself owns the schedule.
 #
 # Run this from the placed Machine after promoting a release `lf`. The script
 # reconstructs the unattended environment from non-secret host-local paths;
@@ -71,55 +70,23 @@ step "configured publisher authority"
   uv run python scripts/publish_release.py check
 
 step "install release schedules"
-"${minimal_env[@]}" lf cron add telemetry-daily --schedule "0 0 9 * * *" \
-  -- --wave "$wave" --batch graph telemetry-daily
-"${minimal_env[@]}" lf cron add release-run --schedule "0 0 10 * * *" \
-  -- --wave "$wave" --batch graph release-run
+log_dir="$repo_root/.lf/logs"
+mkdir -p "$log_dir"
+cron_env="HOME=$HOME PATH=$PATH LF_HOME=$lf_home TMPDIR=${TMPDIR:-/tmp} LANG=${LANG:-C}"
+job() {
+  printf '%s cd %q && env -i %s lf --wave %q --batch graph %s >> %q 2>&1 # loopflow:%s:%s\n' \
+    "$1" "$repo_root" "$cron_env" "$wave" "$2" "$log_dir/$2.log" "$wave" "$2"
+}
+{
+  crontab -l 2>/dev/null | grep -v "# loopflow:$wave:" || true
+  job "0 9 * * *" telemetry-daily
+  job "0 10 * * *" release-run
+} | crontab -
+crontab -l | grep "# loopflow:$wave:"
 
-step "prove the release schedules are loaded here"
-cron_json="$("${minimal_env[@]}" lf cron list --wave "$wave" --json)"
-"${minimal_env[@]}" \
-  "CRON_LIST_JSON=$cron_json" \
-  "EXPECTED_MACHINE_ID=$local_machine" \
-  uv run python - "$wave" <<'PY'
-import json
-import os
-import sys
-
-wave = sys.argv[1]
-expected = [("release-run", "0 0 10 * * *"), ("telemetry-daily", "0 0 9 * * *")]
-installed = json.loads(os.environ["CRON_LIST_JSON"])["installed"]
-actual = [(entry["graph"], entry["schedule"]) for entry in installed]
-if sorted(actual) != expected:
-    raise SystemExit(f"cron drift: expected={expected!r} installed={sorted(actual)!r}")
-for entry in installed:
-    if entry["wave"] != wave:
-        raise SystemExit(f"wrong Wave in installed cron: {entry['graph']}")
-    if not entry["loaded"]:
-        raise SystemExit(f"cron is not loaded: {entry['graph']}")
-    if entry["machine_id"] != os.environ["EXPECTED_MACHINE_ID"]:
-        raise SystemExit(f"wrong Machine in installed cron: {entry['graph']}")
-print(f"{len(installed)}/{len(expected)} jobs loaded and exact")
-PY
-
-step "configured-path telemetry receipt"
-result=0
-if ! "${minimal_env[@]}" lf cron trigger \
-  --wave "$wave" --graph telemetry-daily --wait --timeout 15m; then
-  result=1
+step "configured-path telemetry run"
+if ! "${minimal_env[@]}" lf --wave "$wave" --batch graph telemetry-daily; then
+  printf '\nbootstrap installed the jobs, but the telemetry run is red; inspect the output above\n' >&2
+  exit 1
 fi
-
-step "configured-path release receipt"
-if ! "${minimal_env[@]}" lf cron trigger \
-  --wave "$wave" --graph release-run --wait --timeout 3h; then
-  result=1
-fi
-
-step "35-day durable receipt window"
-"${minimal_env[@]}" lf cron history --wave "$wave" --days 35
-
-if [ "$result" -ne 0 ]; then
-  printf '\nbootstrap installed the jobs, but a configured-path run is red; inspect the receipt and log above\n' >&2
-  exit "$result"
-fi
-printf '\nbootstrap complete: this Machine owns Wave %s cron receipts\n' "$wave"
+printf '\nbootstrap complete: this Machine runs Wave %s release jobs from crontab\n' "$wave"

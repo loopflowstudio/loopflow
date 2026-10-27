@@ -712,12 +712,7 @@ mod tests {
         name: &str,
     ) -> (String, LfProcessId, LfProcessId) {
         let session = store.test_session(name, &crate::session_record::new_artifact_key());
-        let ghost = LfProcessId::new();
-        sql.execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
-            [&ghost],
-        )
-        .unwrap();
+        let ghost = store.test_lf_process();
         let attachment = store
             .claim_session_attachment(&session.id, None, &ghost, true)
             .unwrap();
@@ -755,12 +750,7 @@ mod tests {
             .unwrap()
         };
         let before = events(&sql);
-        let resumer = LfProcessId::new();
-        sql.execute(
-            "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,?1,'lf',3)",
-            [&resumer],
-        )
-        .unwrap();
+        let resumer = store.test_lf_process();
 
         let stuck = store.session_attachment(&session).unwrap();
         assert!(store

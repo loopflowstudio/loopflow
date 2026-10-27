@@ -234,24 +234,11 @@ GitHub people shipped with item 6 below.
 
 ## Concept review (October 26, after the repository page and slice 4)
 
-Settled by accepted decisions; no design change: the repository page and Wave views
-are one view (`WorkNavigation.waveView`, one `boardTiles`/`boardPlan`, one
-`standupTasks` for board and capture); sidebar entry through the shown view; Done
-behind one input for LOO-604. Remaining implement work is unchanged (`focus -p N/…`
-turning the strip).
-
-**Product choice (answered below, "Decided October 26 — Dashboards"):** the repository page's strip and the
-Working Tasks Dashboard are now two views of one plan (`builtInPlan(.repository)`),
-and `WorkNavigation.Board` carries both `.workingTasks` and `.repository`. Because a
-plan owns one `slots`, giving the repository page its three-tile strip turned Working
-Tasks from golden seven into three per page, a change Jack did not ask for
-(questions #13). Question: *Now that the repository page shows the Working Tasks as
-its strip, should the Working Tasks Dashboard be deleted (one view, `.workingTasks`
-removed from `Board`, its picker entry and `lf desktop` destination gone), or kept as
-a full-window grid of the same Tasks, in which case strip geometry must belong to
-the Wave view rather than the plan (and Rust must report it from there)?* Evidence:
-`selections.rs` `plan_in` default slots; `WorkModel.boardPlan` maps both boards to
-one plan; `DashboardView.swift:37` still offers Working Tasks.
+The repository page and Wave views are one view (`WorkNavigation.waveView`, one
+`boardTiles`/`boardPlan`, one `standupTasks`). The repository strip and the Working Tasks
+Dashboard share `builtInPlan(.repository)`, so both page three across; Jack Heart kept the
+query system and removed Dashboard UI entry points (`scratch/questions.md`, "Decided
+October 26 — Dashboards"). Full question: git `3038a16c2c`, this file.
 
 ## Concept review (October 26, after items 1–7 and 12)
 
@@ -270,17 +257,7 @@ Done · Active · Backlog columns, `+N more`) describe the superseded first cut;
 the binding sections below supersede them. Realign rewrites them to the model above;
 no code depends on them.
 
-**Open product choice, defaulted (questions #17, reversible; needs Jack's look):**
-Jack's item 7 defines the strip as Tasks "being worked on (a live Session or Graph)".
-What was built is the Working rule (idle, active, moving), because Rust's `wave:` and
-repository expressions feed both the strip and the sidebar, and the sidebar is Working
-Tasks. So Autonomous (shipping) Tasks, which have a live Graph, appear on the board
-and not on the strip. Idle Tasks with no live Session appear on it. Question: *Should
-the strip also show Autonomous Tasks? That would make it a different set from the
-sidebar, with the strip's members coming from the board's Working + Autonomous rather
-than the sidebar's plan. Or should the strip stay the sidebar's Working Tasks?*
-Evidence: `work/selection.rs` the `wave:`/repository `in_scope` filter;
-`WaveStandup.started([.shipping])`.
+Strip membership (questions #17) closed October 27: Working only (Demo answers #1).
 
 Next implement work is unchanged: `focus -p N/…` turning the strip.
 
@@ -288,6 +265,7 @@ Next implement work is unchanged: `focus -p N/…` turning the strip.
 
 - Oct 26 (items 1–7, 12): `cargo test -p loopflow --lib -- desktop:: selection ops::people` 79 pass; `--test integration` dto/desktop/repo_people/reference/documented 48 pass; clippy clean; `scripts/test_desktop.sh --filter 'WaveStandupTests|DTOFixtureTests|DesktopPaneControlTests|WorkspacePanesTests|WorkNavigationTests|DesktopHeadlessTests|DashboardWorkspaceTests'` 156 pass. Part routing of `zoom`/`resize -p board` through the CLI has no live-Desktop test (gate/demo); `lf repo people` against GitHub ran by hand only.
 - Oct 26 compress (section vocabulary, `Person.github`): `scripts/test_desktop.sh --filter 'WaveStandupTests|DesktopPaneControlTests'` 35 pass.
+- Oct 27 kickoff: plan unchanged; steer 677bb5cf (no code for canceled/merged-upstream leftovers) verified in `WaveStandupBoard.swift`, no new state or filter remains. Remaining: `focus -p N/…` turning the strip; Done via `lf task list --done --since` after LOO-604.
 - Oct 27 demo answers (after removing the leftover override, rerun after merging main 54932fc255): `scripts/test_desktop.sh --filter 'WaveStandupTests|WorkModelTests|WorkObservationTransportTests|TerminalPaneLayoutTests' -Xswiftc -gnone` 49 pass; `xcodebuild build-for-testing -scheme LoopflowMac` (TESTING.md) TEST BUILD SUCCEEDED; 60 s startup limit under load and board fill are for demo (Jack Heart).
 
 ## Direction added October 26, 2026, after acceptance (binding; supersedes conflicts above)

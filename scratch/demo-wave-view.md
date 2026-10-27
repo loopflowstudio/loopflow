@@ -29,17 +29,6 @@ no draft migration backfills it (`drafts/ship_it.sql` does not mention it). This
 does not touch `interactive`. Any main-built lf reading a store with pre-#1652 Graph
 history hits it, so it will break planning for everyone at the next release unless fixed.
 
-## Status (superseded below)
-
-First attempt **not completed**: the populated board, people pictures, Done-days control, strip
-paging and tile entry could not be observed on live data. No human feedback yet.
-
-## Recommended next action
-
-1. Fix the #1652 regression in its own Task (backfill `interactive` in the draft
-   migration, or read old compiled graphs tolerantly), then rerun this demo on live data.
-2. Or demo now against an `lf-world` world built by the branch lf (no pre-#1652 rows).
-
 ## Fix and second capture — October 26, 2026 (Jack Heart: "fix it here then keep demoing")
 
 Fixed on this branch in 381df6246e: draft `drafts/graph_node_interactive.sql` renames

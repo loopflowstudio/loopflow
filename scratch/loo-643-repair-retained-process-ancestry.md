@@ -152,12 +152,13 @@ without the hint and prune leaves it alone.
 
 ## Coordination
 
-#1718 (LOO-615) edits `journal/mod.rs`, `processes.rs`, `doctor.rs` and
-`retention.rs`. It was still open on 2026-10-27 (realign); this branch carries no
-`FORGETTABLE` yet. Do not interrupt its landing. If it lands first,
-sync and keep its `FORGETTABLE` predicate and doctor test reshaping. Prevention
-must keep the attaching lf row referenced: an agent child names it, so
-`FORGETTABLE` already retains it.
+#1718 (LOO-615) merged to main on 2026-10-27 (`8bf860806c`). Syncing conflicts in
+`lf/commands/doctor.rs` and `store/sqlite.rs`; `journal/mod.rs` and `processes.rs`
+auto-merge. Keep #1718's `FORGETTABLE` predicate and its doctor test reshaping.
+Its predicate already retains what this change relies on (kickoff, 2026-10-27):
+the prevention row is named by its agent child (`parent_lf_process_id`) and as
+`attached_lf_process_id`, and the repairing prune Process is named by the repair's
+`session_events` fact. No `FORGETTABLE` edit is needed.
 
 ## Slices (one PR)
 
@@ -165,7 +166,7 @@ must keep the attaching lf row referenced: an agent child names it, so
 2. Done: `repair_unrecorded_ancestry` in `lf monitor prune` (`UNRECORDED_ANCESTRY`
    predicate in processes.rs).
 3. Done: doctor's remedy count reads `unrecorded_agent_ancestry`.
-4. Remaining: gate, PR, land, patch release (Jack's authorization), `lf install`, then
+4. Remaining: sync with main (#1718 conflicts above), gate, PR, land, patch release (Jack's authorization), `lf install`, then
    live `lf monitor prune` and readback.
 
 ## Done when

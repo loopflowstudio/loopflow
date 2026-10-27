@@ -3,7 +3,7 @@ use rusqlite::params;
 use super::{save_in, SqliteStore};
 use crate::durable::Author;
 use crate::id::LfProcessId;
-use crate::steer::{SteerAdapter, SteerContext};
+use crate::steer::{NativeBoundary, SteerAdapter, SteerContext};
 use crate::store::StoreError;
 
 fn rendered(text: &str) -> SteerContext {
@@ -12,6 +12,9 @@ fn rendered(text: &str) -> SteerContext {
         excerpts: Vec::new(),
     }
 }
+
+const ACTIVATE: NativeBoundary<'static> = NativeBoundary::Activate { source: "startup" };
+const CLEAR: NativeBoundary<'static> = NativeBoundary::Select { source: "clear" };
 
 fn fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
     let home = tempfile::tempdir().unwrap();
@@ -32,7 +35,7 @@ fn fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
         .unwrap();
     let adapter = store.reserve_steer_adapter("session", &claim).unwrap();
     store
-        .with_provider_context(&adapter, "native", true, || Ok(()))
+        .with_provider_context(&adapter, "native", ACTIVATE, || Ok(()))
         .unwrap();
     (home, store, adapter)
 }
@@ -493,4 +496,145 @@ fn correction_during_render_cancels_the_superseded_batch_before_write() {
             |_| Ok(()),
         )
         .unwrap();
+}
+
+fn selections(store: &SqliteStore) -> Vec<(Option<String>, String, String)> {
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .prepare(
+            "SELECT json_extract(payload,'$.provider_thread'),json_extract(payload,'$.next_provider_thread'),
+             json_extract(payload,'$.source') FROM session_events
+             WHERE json_extract(payload,'$.type')='agent_session_selected' ORDER BY seq",
+        )
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+}
+
+#[test]
+fn a_cleared_conversation_becomes_the_selection_and_receives_steers() {
+    let (_home, store, adapter) = fixture();
+    store
+        .save_session_steer("session", "Named author", "After clear")
+        .unwrap();
+    store
+        .with_provider_context(&adapter, "cleared", CLEAR, || Ok(()))
+        .unwrap();
+    assert_eq!(
+        store.session_thread("session").unwrap().unwrap().as_str(),
+        "cleared"
+    );
+    assert_eq!(
+        selections(&store).last().unwrap(),
+        &(Some("native".into()), "cleared".into(), "clear".into())
+    );
+    let stale = store.with_provider_context(&adapter, "native", NativeBoundary::Turn, || Ok(()));
+    assert!(
+        matches!(stale, Err(StoreError::InvalidAuthority(message)) if message.contains("native") && message.contains("cleared"))
+    );
+    let emitted = store
+        .with_provider_context(&adapter, "cleared", NativeBoundary::Turn, || {
+            store.emit_session_steers(
+                &adapter,
+                "cleared",
+                "UserPromptSubmit:one",
+                |_, _, _| Ok(rendered("payload")),
+                |_| Ok(()),
+            )
+        })
+        .unwrap();
+    assert!(emitted);
+    assert_eq!(
+        store.session_steers("session", 0, 32).unwrap().items[0].evidence,
+        "emitted"
+    );
+}
+
+#[test]
+fn a_cleared_conversation_is_what_reconnect_resumes_on_the_same_account() {
+    let (_home, store, adapter) = fixture();
+    let session = store.session("session").unwrap().unwrap();
+    let input = session.artifact_key.clone().unwrap();
+    let account = crate::store::ProviderAccountId::parse("work").unwrap();
+    store
+        .retain_session_observation(
+            &session,
+            &crate::session_record::provider_session_observation(
+                &session,
+                &input,
+                &"native".into(),
+                Some(account.clone()),
+            ),
+        )
+        .unwrap();
+    store
+        .with_provider_context(&adapter, "cleared", CLEAR, || Ok(()))
+        .unwrap();
+    let resumed = store.input_provider_session(&input).unwrap().unwrap();
+    assert_eq!(resumed.agent_session.as_str(), "cleared");
+    assert_eq!(resumed.account_id, Some(account));
+}
+
+#[test]
+fn a_replaced_agent_process_cannot_select_any_conversation() {
+    let (_home, store, stale) = fixture();
+    let claim = store.session_attachment("session").unwrap().unwrap();
+    let next = store
+        .replace_session_agent_process("session", &claim, None, || Ok(true))
+        .unwrap();
+    for thread in ["native", "foreign"] {
+        assert!(matches!(
+            store.with_provider_context(&stale, thread, CLEAR, || Ok(())),
+            Err(StoreError::InvalidAuthority(_))
+        ));
+    }
+    let current = store.reserve_steer_adapter("session", &next).unwrap();
+    store
+        .with_provider_context(&current, "next", CLEAR, || Ok(()))
+        .unwrap();
+}
+
+#[test]
+fn activation_never_moves_an_existing_selection() {
+    let (_home, store, adapter) = fixture();
+    let subagent = store.with_provider_context(
+        &adapter,
+        "subagent",
+        NativeBoundary::Activate {
+            source: "OpenCodeMessagesTransform",
+        },
+        || Ok(()),
+    );
+    assert!(matches!(subagent, Err(StoreError::InvalidAuthority(_))));
+    assert_eq!(
+        store.session_thread("session").unwrap().unwrap().as_str(),
+        "native"
+    );
+}
+
+#[test]
+fn dropping_the_adapter_thread_keeps_capabilities() {
+    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_before_current_draft(&conn, "drop_steer_adapter_thread");
+    conn.execute_batch(
+        "INSERT INTO processes(id,trace_id,started_at) VALUES('agent','fixture',1);
+         INSERT INTO steer_adapters(agent_process_id,capability,provider_thread,created_at,activated_at)
+         VALUES('agent','capability','native',1,2);",
+    )
+    .unwrap();
+    conn.execute_batch(&current_draft_sql("drop_steer_adapter_thread"))
+        .unwrap();
+    let kept: (String, i64) = conn
+        .query_row(
+            "SELECT capability,activated_at FROM steer_adapters WHERE agent_process_id='agent'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(kept, ("capability".into(), 2));
 }

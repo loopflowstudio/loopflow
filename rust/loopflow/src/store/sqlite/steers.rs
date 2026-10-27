@@ -6,7 +6,9 @@ use sha2::{Digest, Sha256};
 
 use super::SqliteStore;
 use crate::process::SessionAttachment;
-use crate::steer::{SessionSteerPage, SessionSteerStatus, Steer, SteerAdapter, SteerContext};
+use crate::steer::{
+    NativeBoundary, SessionSteerPage, SessionSteerStatus, Steer, SteerAdapter, SteerContext,
+};
 use crate::store::{StoreError, StoreResult};
 
 impl SqliteStore {
@@ -18,14 +20,9 @@ impl SqliteStore {
         self.with_session_attachment(session, expected, || {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.execute(
-                "INSERT INTO steer_adapters(agent_process_id,capability,provider_thread,created_at)
-                 SELECT ?2,?3,provider_thread,unixepoch() FROM agent_sessions WHERE id=?1
-                 ON CONFLICT DO NOTHING",
-                params![
-                    session,
-                    expected.agent_process_id,
-                    uuid::Uuid::new_v4().to_string()
-                ],
+                "INSERT INTO steer_adapters(agent_process_id,capability,created_at)
+                 VALUES(?1,?2,unixepoch()) ON CONFLICT DO NOTHING",
+                params![expected.agent_process_id, uuid::Uuid::new_v4().to_string()],
             )?;
             Ok(SteerAdapter {
                 session: session.into(),
@@ -39,22 +36,29 @@ impl SqliteStore {
         })
     }
 
-    /// Root startup activates native identity once. Other boundaries must match
-    /// that binding or identity already recorded by the owned native transport.
+    /// The Session's selected native conversation is the one record callbacks
+    /// follow. A provider start in the owned process selects; activation sets
+    /// only a missing selection; every other boundary must match it.
     pub(crate) fn with_provider_context<T>(
         &self,
         adapter: &SteerAdapter,
         thread: &str,
-        startup: bool,
+        boundary: NativeBoundary<'_>,
         write: impl FnOnce() -> StoreResult<T>,
     ) -> StoreResult<T> {
         let _fence = self.lock_session_dispatch(&adapter.session)?;
+        // A provider start that changes conversation also moves the resume
+        // reference, on the account it already names.
+        let resume = match boundary {
+            NativeBoundary::Select { .. } => self.resume_reference(&adapter.session)?,
+            _ => None,
+        };
         {
             let mut conn = self.conn.lock().expect("store mutex poisoned");
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            let binding: Option<(Option<String>, Option<String>)> = tx
+            let selected: Option<Option<String>> = tx
                 .query_row(
-                    "SELECT a.provider_thread,s.provider_thread FROM steer_adapters a
+                    "SELECT s.provider_thread FROM steer_adapters a
                  JOIN processes p ON p.id=a.agent_process_id
                  JOIN agent_sessions s ON s.agent_process_id=p.id
                  WHERE s.id=?1 AND p.id=?2 AND a.capability=?3 AND p.completed_at IS NULL",
@@ -63,28 +67,94 @@ impl SqliteStore {
                         adapter.agent_process_id,
                         adapter.capability
                     ],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| row.get(0),
                 )
                 .optional()?;
-            let (bound, observed) = binding.ok_or_else(|| {
+            let selected = selected.ok_or_else(|| {
                 StoreError::InvalidAuthority("Context adapter no longer owns this provider".into())
             })?;
-            if thread.is_empty()
-                || bound.as_deref().is_some_and(|value| value != thread)
-                || observed.as_deref().is_some_and(|value| value != thread)
-                || (bound.is_none() && observed.is_none() && !startup)
-            {
+            if thread.is_empty() {
                 return Err(StoreError::InvalidAuthority(
-                    "Context callback does not belong to the selected native conversation".into(),
+                    "Context callback names no native conversation".into(),
                 ));
             }
+            match (boundary, selected.as_deref()) {
+                (_, Some(current)) if current == thread => {}
+                (NativeBoundary::Select { source }, previous)
+                | (NativeBoundary::Activate { source }, previous @ None) => {
+                    tx.execute(
+                        "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload,captured_event)
+                         SELECT s.id,'observed',?2,p.attached_lf_process_id,unixepoch(),json_object('type','agent_session_selected',
+                            'agent_process_id',p.id,'provider_thread',?3,'next_provider_thread',?4,'source',?5),s.current_capture
+                         FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
+                        params![
+                            adapter.session,
+                            format!("agent-session:{}:selected:{}", adapter.agent_process_id, uuid::Uuid::new_v4()),
+                            previous,
+                            thread,
+                            source
+                        ],
+                    )?;
+                    tx.execute(
+                        "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
+                        params![adapter.session, thread],
+                    )?;
+                }
+                (_, Some(current)) => {
+                    return Err(StoreError::InvalidAuthority(format!(
+                        "Context callback names native conversation {thread}; this Session selects {current}"
+                    )));
+                }
+                (NativeBoundary::Turn, None) => {
+                    return Err(StoreError::InvalidAuthority(format!(
+                        "Context callback names native conversation {thread}; this Session selects none yet"
+                    )));
+                }
+            }
+            if let Some((session, input, reference)) =
+                resume.filter(|(_, _, reference)| reference.agent_session.as_str() != thread)
+            {
+                super::sessions::retain_history_in(
+                    &tx,
+                    &session,
+                    &[crate::session_record::provider_session_observation(
+                        &session,
+                        &input,
+                        &thread.into(),
+                        reference.account_id,
+                    )],
+                )?;
+            }
             tx.execute(
-                "UPDATE steer_adapters SET provider_thread=?2,activated_at=COALESCE(activated_at,unixepoch()) WHERE agent_process_id=?1",
-                params![adapter.agent_process_id, thread],
+                "UPDATE steer_adapters SET activated_at=COALESCE(activated_at,unixepoch()) WHERE agent_process_id=?1",
+                [&adapter.agent_process_id],
             )?;
             tx.commit()?;
         }
         write()
+    }
+
+    /// The Session's published resume reference with the input it belongs to.
+    /// A Session that never published one leaves publication to its launch.
+    fn resume_reference(
+        &self,
+        session: &str,
+    ) -> StoreResult<
+        Option<(
+            crate::session::LfSession,
+            String,
+            crate::session_record::ProviderSessionRef,
+        )>,
+    > {
+        let Some(session) = self.session(session)? else {
+            return Ok(None);
+        };
+        let Some(input) = session.artifact_key.clone() else {
+            return Ok(None);
+        };
+        Ok(self
+            .input_provider_session(&input)?
+            .map(|reference| (session, input, reference)))
     }
 }
 
@@ -427,7 +497,7 @@ impl SqliteStore {
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
             let claim: Option<String> = tx.query_row("SELECT p.attachment_token FROM agent_sessions s
                 JOIN processes p ON p.id=s.agent_process_id JOIN steer_adapters a ON a.agent_process_id=p.id
-                WHERE s.id=?1 AND p.id=?2 AND a.capability=?3 AND a.provider_thread=?4
+                WHERE s.id=?1 AND p.id=?2 AND a.capability=?3 AND s.provider_thread=?4
                 AND p.completed_at IS NULL",params![adapter.session,adapter.agent_process_id,adapter.capability,provider_thread],|r|r.get(0)).optional()?;
             let claim = claim.ok_or_else(|| {
                 StoreError::InvalidAuthority(

@@ -23,3 +23,11 @@
 - Assumption: a graph's inventory entry in Task reads names the Task being read
   and its Wave, not `task_of_process`'s longest-worktree owner; they differ only
   for a Graph run in a nested Task checkout.
+- Assumption (2026-10-26): a `--watch` frame wraps the `--json` result as
+  `{answers, revisions, unavailable, body}` instead of printing it bare, so a
+  client can tell which request a frame answers and see a failed reading.
+  Stdin requests are `{"id", "args"}`; `args` uses the flag names. No DTO
+  fixture yet; it comes with the Swift mirror when Desktop moves over.
+- Assumption: `lf task status --watch` exchanges planning with the tracker
+  only for its first reading, then rereads the store; a request for another
+  Task resolves it among registered Tasks only.

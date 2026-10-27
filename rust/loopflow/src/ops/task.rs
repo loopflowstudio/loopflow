@@ -3110,56 +3110,93 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
             } else {
                 None
             };
-        let mut result = TaskStatus {
-            sync: None,
-            task: None,
-            project: None,
-            observed_at: None,
-            planning_error: inspection
-                .as_ref()
-                .and_then(|read| read.refresh_error.clone()),
-            planning_stale: false,
-            planning_state: crate::store::PlanningState::Unavailable,
-            execution: None,
-            ownership: None,
+        let planning_error = inspection
+            .as_ref()
+            .and_then(|read| read.refresh_error.clone());
+        let mut result = match (task, inspection) {
+            (Some(task), _) => registered_task_status(&store, task).await?,
+            (None, inspection) => {
+                let mut result = TaskStatus {
+                    sync: None,
+                    task: None,
+                    project: None,
+                    observed_at: None,
+                    planning_error: None,
+                    planning_stale: false,
+                    planning_state: crate::store::PlanningState::Unavailable,
+                    execution: None,
+                    ownership: None,
+                };
+                if let Some(read) = inspection {
+                    // Foreign observations remain acquisition evidence, not owned Work.
+                    result.planning_state = read.observation.state;
+                    result.observed_at = read.observation.observed_at;
+                }
+                result
+            }
         };
-        if let Some(task) = task {
-            let acquisition = store
-                .sqlite
-                .task_acquisition(&task.id)
-                .map_err(task_error)?;
-            result.project = match &task.project_id {
-                Some(id) => store.get_project(id).await.map_err(task_error)?,
-                None => None,
-            };
-            result.sync = Some(
-                store
-                    .sqlite
-                    .task_planning_sync(&task.id)
-                    .map_err(task_error)?,
-            );
-            result.execution = Some(read_task_snapshot(&store, task.clone()).await?);
-            result.ownership = Some(store.sqlite.task_ownership(&task.id).map_err(task_error)?);
-            result.planning_state = acquisition.state;
-            result.observed_at = acquisition.observed_at;
-            result.task = Some(task);
-        } else if let Some(read) = inspection {
-            // Foreign observations remain acquisition evidence, not owned Work.
-            result.planning_state = read.observation.state;
-            result.observed_at = read.observation.observed_at;
+        if planning_error.is_some() {
+            result.planning_error = planning_error;
+            if result.planning_state == crate::store::PlanningState::Available {
+                result.planning_state = crate::store::PlanningState::Unavailable;
+            }
         }
-        if result.planning_error.is_some()
-            && result.planning_state == crate::store::PlanningState::Available
-        {
-            result.planning_state = crate::store::PlanningState::Unavailable;
-        }
-        result.planning_stale = result.planning_state != crate::store::PlanningState::Available
-            || result.observed_at.is_some_and(|at| {
-                time::OffsetDateTime::now_utc().unix_timestamp() - at
-                    >= super::linear::LINEAR_SOFT_STALE_SECS
-            });
+        result.planning_stale = planning_stale(&result);
         Ok(result)
     })
+}
+
+/// `lf task status <id> --watch`: what the store records for `selector` now,
+/// without the planning exchange the one-shot read starts first.
+pub async fn read_task_status(
+    store: &SharedStore,
+    repo: &Path,
+    selector: &str,
+) -> OpsResult<TaskStatus> {
+    let task = store
+        .sqlite
+        .resolve_task_id(selector, Some(&repo.to_string_lossy()))
+        .and_then(|id| id.map(|id| store.sqlite.task(&id)).transpose())
+        .map_err(task_error)?
+        .flatten()
+        .ok_or_else(|| task_error(format!("Task {selector} is not registered")))?;
+    registered_task_status(store, task).await
+}
+
+async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<TaskStatus> {
+    let acquisition = store
+        .sqlite
+        .task_acquisition(&task.id)
+        .map_err(task_error)?;
+    let mut result = TaskStatus {
+        sync: Some(
+            store
+                .sqlite
+                .task_planning_sync(&task.id)
+                .map_err(task_error)?,
+        ),
+        project: match &task.project_id {
+            Some(id) => store.get_project(id).await.map_err(task_error)?,
+            None => None,
+        },
+        observed_at: acquisition.observed_at,
+        planning_error: None,
+        planning_stale: false,
+        planning_state: acquisition.state,
+        execution: Some(read_task_snapshot(store, task.clone()).await?),
+        ownership: Some(store.sqlite.task_ownership(&task.id).map_err(task_error)?),
+        task: Some(task),
+    };
+    result.planning_stale = planning_stale(&result);
+    Ok(result)
+}
+
+fn planning_stale(status: &TaskStatus) -> bool {
+    status.planning_state != crate::store::PlanningState::Available
+        || status.observed_at.is_some_and(|at| {
+            time::OffsetDateTime::now_utc().unix_timestamp() - at
+                >= super::linear::LINEAR_SOFT_STALE_SECS
+        })
 }
 
 /// Sessions copied here from rented Machines this Task ran on.

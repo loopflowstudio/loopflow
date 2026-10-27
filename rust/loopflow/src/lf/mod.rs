@@ -1185,6 +1185,9 @@ pub enum SessionCommand {
         orphan: bool,
         #[arg(long)]
         search: Option<String>,
+        /// Print a JSON line now and each time the list changes, until stdin closes
+        #[arg(long)]
+        watch: bool,
     },
     /// Open the ongoing conversation of this scope, or an exact Session
     #[command(visible_alias = "resume")]
@@ -1397,6 +1400,9 @@ pub enum TaskCommand {
         /// Closed Tasks per page
         #[arg(long, requires = "done", default_value_t = 50)]
         limit: usize,
+        /// Print a JSON line now and each time the list changes, until stdin closes
+        #[arg(long, conflicts_with = "done")]
+        watch: bool,
     },
 
     /// Pause future Task execution without stopping live processes
@@ -1553,6 +1559,9 @@ pub enum TaskCommand {
         issue: Option<String>,
         #[arg(long)]
         json: bool,
+        /// Print a JSON line now and each time the status changes, until stdin closes
+        #[arg(long)]
+        watch: bool,
     },
     /// Show this Task's patch or list its changed files
     Diff {

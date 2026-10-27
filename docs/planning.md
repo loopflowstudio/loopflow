@@ -2,10 +2,18 @@
 
 ```bash
 lf task create --title "Fix the parser" --notes "Quoted input loses escapes"
-lf task list              # open Tasks
-lf task list --done       # closed ones, newest first, a page at a time
-lf capture-tasks          # talk it through; the session files the Tasks
+lf task list                           # open Tasks in this repository
+lf task list loo-60                    # identifier or title contains "loo-60"
+lf task list --wave infra --state active
+lf task list --done --wave infra --since 7d   # closed in the last week
+lf task list --watch                   # a JSON line each time the list changes
+lf capture-tasks                       # talk it through; the session files the Tasks
 ```
+
+`--watch` also works on `lf task status <id>` and `lf session list`. Each line is
+`{"answers", "revisions", "unavailable", "body"}`, where `body` is what `--json`
+prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to change what
+it reads; the next line answers `1`. It stops when stdin closes.
 
 Loopflow keeps the plan — Tasks, comments, status — on your machine and syncs it to
 one place per repository. That place serves two jobs:

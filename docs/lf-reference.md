@@ -542,6 +542,7 @@ List Sessions
 | `--task` | task |
 | `--orphan` | Only Sessions without a Task association Default: false. |
 | `--search` | search |
+| `--watch` | Print a JSON line now and each time the list changes, until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session connect
@@ -2060,6 +2061,7 @@ List the open Tasks in the selected repository
 | `--since` | Only Tasks closed since then: 7d, 24h, 30m or RFC3339 |
 | `--after` | Previous page's `next` Task; keep the same filters |
 | `--limit` | Closed Tasks per page Default: 50. |
+| `--watch` | Print a JSON line now and each time the list changes, until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task pause
@@ -2282,6 +2284,7 @@ Show durable Task facts and its recorded work
 |---|---|
 | `<issue>` | Task issue; defaults to the Task in this checkout |
 | `--json` | json Default: false. |
+| `--watch` | Print a JSON line now and each time the status changes, until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task diff

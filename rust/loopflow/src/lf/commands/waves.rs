@@ -790,6 +790,64 @@ pub fn list_tasks(repo: &Path, query: &TaskQuery<'_>, json: bool) -> Result<()> 
     })
 }
 
+/// What a `lf task list --watch` request can select instead; the flags of
+/// the same name.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskListArgs {
+    pub query: Option<String>,
+    pub wave: Option<String>,
+    pub project: Option<String>,
+    pub state: Option<String>,
+}
+
+/// `lf task list --watch`: `lf task list --json` now and each time it changes.
+pub fn watch_tasks(repo: &Path, args: TaskListArgs) -> Result<()> {
+    super::watch::run(
+        args,
+        super::watch::Watched::work(super::watch::PLANNING_CLOCK),
+        |store, args| {
+            let repo = repo.to_owned();
+            async move {
+                let Some(store) = store else {
+                    return Ok(Vec::new());
+                };
+                let query = TaskQuery {
+                    text: args.query.as_deref().unwrap_or_default(),
+                    wave: args.wave.as_deref(),
+                    project: args.project.as_deref(),
+                    state: args.state.as_deref(),
+                };
+                open_tasks(&store, &repo, &query).await
+            }
+        },
+    )
+}
+
+/// What a `lf task status --watch` request can select instead.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TaskStatusArgs {
+    issue: String,
+}
+
+/// `lf task status <issue> --watch`: `lf task status --json` now and each time
+/// it changes. Only the first reading exchanges planning with the tracker.
+pub fn watch_task_status(repo: &Path, issue: String) -> Result<()> {
+    super::watch::run(
+        TaskStatusArgs { issue },
+        super::watch::Watched::work(super::watch::ACTIVITY_CLOCK),
+        |store, args| {
+            let repo = repo.to_owned();
+            async move {
+                let store =
+                    store.ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
+                Ok(crate::ops::task::read_task_status(&store, &repo, &args.issue).await?)
+            }
+        },
+    )
+}
+
 /// The open Tasks `query` selects, read from the store's filter rather than
 /// from a whole plan, in plan order.
 async fn open_tasks(

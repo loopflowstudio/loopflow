@@ -44,22 +44,23 @@ to store queries.
 
 ## Direction
 
-`--watch` on `lf task list`, `lf session list`, `lf task status <id>` and the
-live-process read: NDJSON, one full frame when the result changes; stdin can
-change the query/scope; ends on stdin close or parent exit. One implementation
-reusing the reader machinery (revisions, rest, checkpoint). Order: Graph
-execution batched (done), `lf task list [query]` (done), `--watch`, then
-Desktop moves over and `lf monitor work` is deleted.
+Order: Graph execution batched (done), `lf task list [query]` (done),
+`--watch` (done for task list, session list, task status), then Desktop moves
+over and `lf monitor work` is deleted.
 
-Proposed usage (README draft, lands with `--watch`):
-
-```sh
-lf task list                         # open Tasks in this repository
-lf task list loo-60 --json           # identifier or title contains "loo-60"
-lf task list --wave infra --state active
-lf task list --done --wave infra --since 7d   # closed in the last week
-lf task list --watch --json          # a frame each time the list changes
-```
+`--watch` (`lf/commands/watch.rs`, one implementation): a frame
+`{answers, revisions, unavailable, body}` per line, `body` = the `--json`
+output, sent first and whenever its identity (reading-time fields stripped)
+changes. Wakes on the read's revision domains (all but usage) or its clock
+(task list 300 s, session list and task status 2 s); settles bursts; rests
+`BUSY_SHARE` × last cost; retries failures with backoff. Stdin
+`{"id": N, "args": {...}}` replaces the arguments (`args` absent = confirm);
+the next frame answers N even if unchanged — this is the monitor's scope +
+checkpoint in one. Ends on stdin close, parent exit or a failed write.
+`task status --watch` runs the one-shot status (with its planning exchange)
+once, then re-reads `read_task_status` read-only. The monitor imports the
+shared constants, `retry_due` and `strip_reading_time` until it is deleted.
+Usage is in `docs/planning.md`.
 
 ## Measured on Jack's store (10.3 GB, 762 Tasks, 6,248 Sessions, 944k Processes)
 
@@ -149,8 +150,10 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
 
 ## Remaining work
 
-1. `--watch` on `lf task list`, `lf session list`, `lf task status <id>` and
-   the live-process read, reusing the `work_watch.rs` reader machinery.
+1. `--watch` on the live-process read (`lf monitor top`); task list/session
+   list/task status are done. `lf task list --watch` does not yet follow
+   checkout Git changes (the monitor's `checkouts` watch); it rereads on its
+   300 s clock. Session list uses the 2 s clock, not `next_quiet_available`.
 2. Move Desktop onto those watches; Wave detail becomes `RoadmapTask` rows
    filtered by `--wave` (closed pages switch from `wave status` rows to
    `RoadmapTask` with it); delete `lf monitor work`, its parts and transport,
@@ -186,4 +189,6 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
 - `cargo test --lib -- local_planning wave_resolution_matrix task_execution graph_inventory task_work`: 58 passed, 1 failed — `store::tests::separate_task_worktree_tracks_and_collapses_its_parent_pr` needs a global Git `user.email` the test HOME lacks; untouched code, left to CI (which sets one).
 - `cargo clippy --all-targets -- -D warnings`: clean; `docs/lf-reference.md` regenerated.
 - Compress (one `ids_json` for batch-read ID arrays, one `repository_scope` for `lf task list` reads): clippy clean; `--test integration -- task_list_query planning_statements closed_task_pages lifecycle_world` 4 passed; `--lib -- planning_sync task_ownership graph_inventory task_work children` 38 passed, same 1 global-`user.email` failure (CI).
+- `--watch` (task list, session list, task status), clippy clean: `--test integration -- task_list_watch session_list_and_task_status_watch task_list_query` 3 passed; `reference_matches_the_compiled_cli` regenerated.
+- `--lib -- work_watch`: 29 passed, 2 failed, both monitor tests that predate this pass and still expect the old planning shape (`planning_failure_keeps_the_stored_workflow_readable` expects a hard planning error, now `tasks: Unavailable`; `offline_cli_completion_and_reopening_reach_desktop_without_refresh` expects a completed Task in planning). They go with the monitor (Remaining 2); keep their behaviour (a failed planning read leaves the Task read available; completion reaches the client) as `--watch` tests when Desktop moves over.
 - Live p99 A/B with an installed build: deferred to gate/demo.

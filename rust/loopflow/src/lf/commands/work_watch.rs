@@ -21,6 +21,9 @@ use sha2::{Digest, Sha256};
 
 use super::activity::WorkActivitySnapshot;
 use super::top::ActivitySnapshot;
+use super::watch::{
+    retry_due, strip_reading_time, ACTIVITY_CLOCK, BURST, BUSY_SHARE, CHECK, PLANNING_CLOCK, QUIET,
+};
 use super::waves::{RoadmapSnapshot, WaveDetailSnapshot, WaveSnapshot};
 use crate::durable::GraphProcessDetail;
 use crate::ops::human_session::SessionRecord;
@@ -30,29 +33,10 @@ use crate::store::sqlite::StoreRevisions;
 use crate::store::{SharedStore, StorageConfig};
 use crate::task_work::{TaskOverview, TaskWork};
 
-/// A burst is projected once it has been quiet this long…
-const QUIET: Duration = Duration::from_millis(100);
-/// …or this long after its first commit, so a steady writer cannot postpone it.
-const BURST: Duration = Duration::from_millis(250);
 const HEARTBEAT: Duration = Duration::from_secs(2);
-/// Revisions are read again on this clock in case a filesystem event was lost.
-const CHECK: Duration = Duration::from_secs(1);
-/// A part that keeps failing is read again after 1 s, 2 s, 4 s… up to this.
-const RETRY_CAP: Duration = Duration::from_secs(60);
-/// Git and filesystem facts in planning are not store commits. A watched
-/// checkout is asked about when it changes; this covers what no watch saw.
-const PLANNING_CLOCK: Duration = Duration::from_secs(300);
-/// Process liveness is observed, never committed.
-const ACTIVITY_CLOCK: Duration = Duration::from_secs(2);
 /// Agents record usage every few seconds. Token totals are read this often
 /// at most, however often they move.
 const USAGE_REST: Duration = Duration::from_secs(10);
-/// A part spends at most this share of the reader's time projecting: after a
-/// reading that took `d`, its next change- or clock-driven reading waits until
-/// `BUSY_SHARE × d` has passed since that reading began. On a store where a
-/// projection takes seconds, a busy writer no longer keeps the reader at a full
-/// core; scope changes, refreshes and confirmations still read at once.
-const BUSY_SHARE: u32 = 5;
 const MAX_FRAME: usize = 64 * 1024 * 1024;
 const MAX_REQUEST: usize = 16 * 1024;
 const WORK_ACTIVITY_WINDOW: i64 = 7 * 24 * 3600;
@@ -323,11 +307,7 @@ impl PartState {
     /// A failed reading is retried without a change, each time after twice
     /// the wait, so a part that cannot be read does not hold the one loop.
     fn retry_due(&self, read_on: Instant, now: Instant) -> bool {
-        self.failures > 0
-            && now - read_on
-                >= CHECK
-                    .saturating_mul(1 << (self.failures - 1).min(16))
-                    .min(RETRY_CAP)
+        retry_due(self.failures, read_on, now)
     }
 
     fn rest(&self) -> Duration {
@@ -405,23 +385,8 @@ fn encode(frame: &WorkFrame) -> Result<Vec<u8>> {
 
 /// Content identity, ignoring the fields that restate when it was read.
 fn fingerprint(unavailable: &Option<String>, content: &WorkContent) -> Result<[u8; 32]> {
-    fn strip(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::Object(fields) => {
-                fields.remove("generated_at");
-                fields.remove("evidence_age_secs");
-                // A Task condition restates when it was derived.
-                if let Some(serde_json::Value::Object(condition)) = fields.get_mut("condition") {
-                    condition.remove("observed_at");
-                }
-                fields.values_mut().for_each(strip);
-            }
-            serde_json::Value::Array(items) => items.iter_mut().for_each(strip),
-            _ => {}
-        }
-    }
     let mut value = serde_json::to_value(content)?;
-    strip(&mut value);
+    strip_reading_time(&mut value);
     match content {
         WorkContent::Activity(_) => {
             value

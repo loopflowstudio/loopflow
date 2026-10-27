@@ -1011,9 +1011,22 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             since,
             after,
             limit,
+            watch,
         } => {
-            use loopflow::lf::commands::waves::{list_closed_tasks, list_tasks, TaskQuery};
-            if *done {
+            use loopflow::lf::commands::waves::{
+                list_closed_tasks, list_tasks, watch_tasks, TaskListArgs, TaskQuery,
+            };
+            if *watch {
+                watch_tasks(
+                    repo,
+                    TaskListArgs {
+                        query: query.clone(),
+                        wave: wave.clone(),
+                        project: project.clone(),
+                        state: state.clone(),
+                    },
+                )
+            } else if *done {
                 list_closed_tasks(
                     repo,
                     wave.as_deref(),
@@ -1086,8 +1099,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        TaskCommand::Status { issue, json } => {
+        TaskCommand::Status { issue, json, watch } => {
             let status = loopflow::ops::task::task_status(repo, issue.as_deref())?;
+            if *watch {
+                let task = status
+                    .task
+                    .context("only a registered Task can be watched")?;
+                return loopflow::lf::commands::waves::watch_task_status(repo, task.identifier);
+            }
             if *json {
                 println!("{}", serde_json::to_string_pretty(&status)?);
             } else {

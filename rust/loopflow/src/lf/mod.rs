@@ -28,7 +28,7 @@ pub enum DiffContext {
 #[derive(Parser, Debug, Default)]
 #[command(name = "lf", bin_name = "lf", disable_help_subcommand = true)]
 #[command(about = "Open Loopflow or run its CLI")]
-#[command(version = crate::build_info::BUILD_VERSION)]
+#[command(version = crate::build_info::VERSION_LINE)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -2621,7 +2621,7 @@ mod tests {
         assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
         assert_eq!(
             error.to_string(),
-            format!("lf {}\n", crate::build_info::BUILD_VERSION)
+            format!("lf {}\n", crate::build_info::VERSION_LINE)
         );
     }
 

@@ -1556,10 +1556,16 @@ pub(super) fn retain_history_in(
                 )));
             };
             payload = serde_json::to_string(&merged)?;
+            // Replace in place: deleting a row makes SQLite probe every row's
+            // captured_event, which no index covers.
             conn.execute(
-                "DELETE FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
-                params![session.id, key],
+                "UPDATE session_events SET task_id=?3, wave_id=?4, observed_at=?5, payload=?6, captured_event=?7
+                 WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
+                params![session.id, key, observation.task_id.as_ref().map(TaskId::as_str),
+                    observation.wave_id.as_ref().map(crate::id::WaveId::as_str), observation.observed_at, payload, captured],
             )?;
+            changed = true;
+            continue;
         }
         conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
             VALUES(?1,'observed',?2,?3,?4,?5,?6,?7)",

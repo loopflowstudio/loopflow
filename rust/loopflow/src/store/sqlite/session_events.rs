@@ -486,7 +486,17 @@ fn record_event_in(
             &serde_json::from_str(&payload)?,
         );
         payload = serde_json::to_string(&merged)?;
-        tx.execute("DELETE FROM session_events WHERE seq=?1", [seq])?;
+        // Replace in place: deleting a row makes SQLite probe every row's
+        // captured_event, which no index covers.
+        tx.execute(
+            "UPDATE session_events SET payload=?2, observed_at=?3 WHERE seq=?1",
+            params![
+                seq,
+                payload,
+                time::OffsetDateTime::now_utc().unix_timestamp()
+            ],
+        )?;
+        return Ok(seq);
     }
     tx.execute(
         "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
@@ -1650,6 +1660,39 @@ mod tests {
         assert_eq!(keys.len(), 2);
         assert_eq!(keys[0], "");
         assert!(keys[1].starts_with(":after:"));
+    }
+
+    #[test]
+    fn a_later_usage_receipt_replaces_its_row_in_place() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        record_captured_start(&store, "conversation", "a");
+        let usage = |total: u64| {
+            let counts = json!({"inputTokens":total,"outputTokens":0});
+            store
+                .record_session_event(
+                    "conversation",
+                    &"thread".into(),
+                    "a",
+                    SessionEventKind::Usage,
+                    &json!({"total":counts,"last":counts}),
+                )
+                .unwrap()
+        };
+        let first = usage(10);
+        assert_eq!(usage(20), first);
+        let payload: String = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT payload FROM session_events WHERE seq=?1",
+                [first],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(payload.contains("20"));
     }
 
     #[test]

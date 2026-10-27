@@ -44,11 +44,11 @@ enum Credential {
         subject: String,
         credential: String,
     },
+    /// An access token the laptop just refreshed. Its refresh grant stays on the
+    /// laptop, so no machine needs a browser approval or can rotate the grant away.
     Linear {
         login: String,
         access_token: String,
-        refresh_token: String,
-        oauth_client_id: String,
         expires_at: Option<i64>,
     },
     /// One `opencode auth export` entry; `login` is its OpenCode account, or the
@@ -58,6 +58,12 @@ enum Credential {
         entry: serde_json::Value,
     },
 }
+
+/// How long a refreshed Linear access token lasts (observed 2026-10-27). A
+/// rental refreshed at prepare must not outlive it, or Linear stops working
+/// there; raising `rental::MAX_HOURS` past it needs another way to renew.
+const LINEAR_ACCESS_HOURS: f64 = 24.0;
+const _: () = assert!(crate::rental::MAX_HOURS <= LINEAR_ACCESS_HOURS);
 
 pub(super) async fn connect(
     machine: &Machine,
@@ -144,21 +150,14 @@ pub(super) async fn connect(
             if remote_has(machine, provider, &login)? {
                 return Ok(());
             }
-            require_foreground(batch)?;
-            let fresh = super::account::fresh_linear_login(&store, chrome_profile).await?;
-            if linear_login(&fresh.access_token).await? != login {
-                bail!("fresh Linear login belongs to a different account; discarded");
+            let renewed = crate::ops::linear::renewed_planning_token(provider).await?;
+            if linear_login(&renewed.access_token).await? != login {
+                bail!("renewed Linear login belongs to a different account; discarded");
             }
             Credential::Linear {
                 login,
-                access_token: fresh.access_token,
-                refresh_token: fresh
-                    .refresh_token
-                    .ok_or_else(|| anyhow!("Linear did not return a refresh token"))?,
-                oauth_client_id: fresh
-                    .oauth_client_id
-                    .ok_or_else(|| anyhow!("Linear did not return a client identity"))?,
-                expires_at: fresh.expires_at,
+                access_token: renewed.access_token,
+                expires_at: renewed.expires_at,
             }
         }
         Provider::OpenCodeZen => {
@@ -348,12 +347,14 @@ fn require_foreground(batch: bool) -> Result<()> {
 
 /// Claude's credentials file holding only the access token: nothing to
 /// refresh, so no machine can rotate another's login. `expiresAt` (ms) is a
-/// year from minting, so every send of one token is byte-identical.
+/// year from minting, so every send of one token is byte-identical. Claude
+/// Code reports "Not logged in" for a file without the inference scope.
 fn long_lived_credentials(token: &LongLivedToken) -> String {
     serde_json::json!({
         "claudeAiOauth": {
             "accessToken": token.token.expose_secret(),
             "expiresAt": token.expires_at() * 1000,
+            "scopes": ["user:inference"],
         }
     })
     .to_string()
@@ -648,8 +649,6 @@ async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
         Credential::Linear {
             login,
             access_token,
-            refresh_token,
-            oauth_client_id,
             expires_at,
         } => {
             let _lock = credential_lock("linear")?;
@@ -663,8 +662,8 @@ async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
                 .upsert_provider_token(&ProviderToken {
                     provider: "linear".into(),
                     access_token,
-                    refresh_token: Some(refresh_token),
-                    oauth_client_id: Some(oauth_client_id),
+                    refresh_token: None,
+                    oauth_client_id: None,
                     expires_at,
                     login: Some(login),
                     updated_at: time::OffsetDateTime::now_utc().unix_timestamp(),
@@ -1604,6 +1603,11 @@ esac
         assert!(crate::provider_account::identity::cached_identity(&accounts[0]).is_some());
         let path = accounts[0].home.as_ref().unwrap().join(".credentials.json");
         assert_eq!(fs::read_to_string(&path).unwrap(), credential);
+        let installed_json: serde_json::Value = serde_json::from_str(&credential).unwrap();
+        assert_eq!(
+            installed_json["claudeAiOauth"]["scopes"],
+            json!(["user:inference"])
+        );
         assert_eq!(
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
@@ -1712,7 +1716,7 @@ esac
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
-    async fn linear_retains_an_independent_encrypted_refresh_grant() {
+    async fn linear_installs_an_access_token_without_its_refresh_grant() {
         let _lock = crate::journal::test_env_lock();
         let root = tempfile::tempdir().unwrap();
         let _environment = Environment::isolate(root.path());
@@ -1720,30 +1724,27 @@ esac
             identity_server(json!({"data":{"viewer":{"id":"viewer-123"}}})).await;
         std::env::set_var("LF_TEST_MACHINE_LINEAR_URL", endpoint);
         let store = store(root.path()).await;
-        let grant = |refresh: &str| Credential::Linear {
+        let access = |token: &str| Credential::Linear {
             login: "viewer-123".into(),
-            access_token: "fresh-access".into(),
-            refresh_token: refresh.into(),
-            oauth_client_id: "fixture-client".into(),
+            access_token: token.into(),
             expires_at: Some(4102444800),
         };
-        install(&store, grant("target-refresh-chain"))
-            .await
-            .unwrap();
-        install(&store, grant("ignored-retry")).await.unwrap();
+        install(&store, access("first-access")).await.unwrap();
+        install(&store, access("ignored-retry")).await.unwrap();
         let token = store.get_provider_token("linear").await.unwrap().unwrap();
-        assert_eq!(token.refresh_token.as_deref(), Some("target-refresh-chain"));
-        assert_eq!(token.oauth_client_id.as_deref(), Some("fixture-client"));
+        assert_eq!(token.access_token, "first-access");
+        assert_eq!(token.refresh_token, None);
+        assert_eq!(token.expires_at, Some(4102444800));
         let db = rusqlite::Connection::open(root.path().join("loopflow.db")).unwrap();
-        let (refresh, encrypted): (String, bool) = db
+        let (stored, encrypted): (String, bool) = db
             .query_row(
-                "SELECT refresh_token, encrypted FROM provider_tokens WHERE provider='linear'",
+                "SELECT access_token, encrypted FROM provider_tokens WHERE provider='linear'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
         assert!(encrypted);
-        assert!(!refresh.contains("target-refresh-chain"));
+        assert!(!stored.contains("first-access"));
         assert!(installed(&store, Provider::Linear, "other-person")
             .await
             .is_err());

@@ -49,37 +49,41 @@ struct TerminalPaneLayoutTests {
         #expect(try layout.padding(.leading) == layout.padding(.bottom))
         #expect(try layout.padding(.trailing) == layout.padding(.bottom))
         let outer = try inspection.find(viewWithAccessibilityIdentifier: "work-workspace-\(workspace.key.id)")
-        let radius = try outer.clipShape(UnevenRoundedRectangle.self).cornerRadii.bottomLeading
+        #expect((try? outer.overlay()) == nil)
+        let shape = try outer.clipShape(UnevenRoundedRectangle.self)
+        let radius = shape.cornerRadii.bottomLeading
+        #expect(shape.cornerRadii.topLeading == 0)
+        #expect(shape.cornerRadii.topTrailing == 0)
+        #expect(shape.cornerRadii.bottomTrailing == radius)
         let multiplexer = try inspection.find(viewWithAccessibilityIdentifier: "sessions-multiplexer")
         let gap = try multiplexer.padding(.bottom)
         #expect(try multiplexer.padding(.trailing) == gap)
         #expect(radius - gap == PaneGeometry.cornerRadius)
-        let outerStroke = try outer.overlay().find(ViewType.Shape.self)
-        #expect(try outerStroke.strokeStyle().lineWidth == 1)
         let panes = outer.findAll(where: { (try? $0.accessibilityIdentifier())?.hasPrefix("session-pane-") == true })
         #expect(panes.count == 2)
         let bounds = CGRect(x: 0, y: 0, width: 500, height: 400)
-        let outerPath = try outerStroke.path(in: bounds).strokedPath(outerStroke.strokeStyle())
-        for pane in panes {
+        let outerPath = shape.path(in: bounds)
+        let innerPaths = try panes.map { pane in
             let innerStroke = try pane.overlay(0).find(ViewType.Shape.self)
             #expect(try innerStroke.strokeStyle().lineWidth == 1)
-            let innerPath = try innerStroke.path(in: bounds.insetBy(dx: gap, dy: gap)).strokedPath(innerStroke.strokeStyle())
-            // Sample the actual stroked SwiftUI paths at both lower corners,
-            // including their tangent points. Five points must remain clear.
-            for right in [false, true] {
-                let center = CGPoint(x: right ? bounds.maxX - radius : radius, y: bounds.maxY - radius)
-                for degrees in stride(from: 0, through: 90, by: 5) {
-                    let angle = Double(degrees) * .pi / 180
-                    let dx = cos(angle) * (right ? 1.0 : -1.0)
-                    let dy = sin(angle)
-                    func point(_ distance: Double) -> CGPoint {
-                        CGPoint(x: center.x + distance * dx, y: center.y + distance * dy)
-                    }
-                    let samples = Array(stride(from: 0.0, through: 16.0, by: 0.01))
+            return try innerStroke.path(in: bounds.insetBy(dx: gap, dy: gap)).strokedPath(innerStroke.strokeStyle())
+        }
+        let samples = Array(stride(from: 0.0, through: Double(radius * 2), by: 0.01))
+        // Sample both lower corners, including tangent points. Each pane outline
+        // must stay five points inside the workspace clip, allowing subpixel error.
+        for right in [false, true] {
+            let center = CGPoint(x: right ? bounds.maxX - radius : radius, y: bounds.maxY - radius)
+            for degrees in stride(from: 0, through: 90, by: 5) {
+                let angle = Double(degrees) * .pi / 180
+                let dx = cos(angle) * (right ? 1.0 : -1.0)
+                let dy = sin(angle)
+                func point(_ distance: Double) -> CGPoint {
+                    CGPoint(x: center.x + distance * dx, y: center.y + distance * dy)
+                }
+                let outerEdge = try #require(samples.last { outerPath.contains(point($0)) })
+                for innerPath in innerPaths {
                     let innerEdge = try #require(samples.last { innerPath.contains(point($0)) })
-                    let outerEdge = try #require(samples.first { outerPath.contains(point($0)) })
-                    // Path containment flattens curves; allow subpixel error.
-                    #expect(abs(outerEdge - innerEdge - 5) < 0.15)
+                    #expect(outerEdge - innerEdge >= 5 - 0.15)
                 }
             }
         }

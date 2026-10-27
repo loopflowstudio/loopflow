@@ -77,52 +77,1369 @@ Open Loopflow or run its CLI
 | `--help / -h` | Print help |
 | `--version / -V` | Print version |
 
-## lf clone
+## lf task
 
-Create and use an offline, isolated development data clone (macOS)
+Concrete work and Task lifecycle
 
 | Argument | What it does |
 |---|---|
 | `--help / -h` | Print help |
 
-## lf clone create
+## lf task list
 
-Snapshot a source Machine without copying credentials or live authority
+List every Task in the selected repository
 
 | Argument | What it does |
 |---|---|
-| `<directory>` | directory |
-| `--source` | source |
-| `--codex-home` | Explicit Codex history home; credentials and configuration are excluded |
-| `--claude-home` | Explicit Claude history home; credentials and configuration are excluded |
+| `--wave` | wave |
+| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf clone run
+## lf task defer
 
-Run lf (or a Desktop executable after --) inside the offline clone
+Defer future Task execution without stopping live processes
 
 | Argument | What it does |
 |---|---|
-| `<directory>` | directory |
-| `<command>` | command |
+| `<issue>` | issue |
 | `--help / -h` | Print help |
 
-## lf clone show
+## lf task resume
 
-Show the snapshot inventory and continuation limitations
+Resume a deferred Task without starting execution
 
 | Argument | What it does |
 |---|---|
-| `<directory>` | directory |
+| `<issue>` | issue |
 | `--help / -h` | Print help |
 
-## lf clone dispose
+## lf task sync
 
-Remove only this owned disposable directory (close its clients first)
+Synchronize a Task with its tracker; the change sent last wins
 
 | Argument | What it does |
 |---|---|
-| `<directory>` | directory |
+| `<issue>` | issue |
+| `--retry-creation` | Retry an uncertain issue creation with its saved ID; may recreate a deleted issue Default: false. |
+| `--retry-updates` | Retry uncertain saved field/state updates after observing current Linear values Default: false. |
+| `--help / -h` | Print help |
+
+## lf task workflow
+
+Inspect or reset this Task's captured Workflow
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf task workflow move
+
+Move Workflow position without running anything; `end` requests completion
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<stage>` | `start`, `end` or one of the graph's stages |
+| `--reason` | Why, kept in the Task's workflow history |
+| `--help / -h` | Print help |
+
+## lf task workflow show
+
+Show the Task's captured graph, position and history
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task workflow restart
+
+Move the captured Workflow to start without executing or reloading it
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--help / -h` | Print help |
+
+## lf task checkout
+
+Ensure tracked Task Work and its worktree without launching a Graph
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--name` | name |
+| `--stack-on` | Fork this Task's worktree from another Task's active PR |
+| `--directive` | directive |
+| `--design` | Hand off a child-specific design from the caller's checkout |
+| `--recover-from` | Restore a missing Task branch from a deliberately recovered commit; never reset existing work |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task run
+
+Place a Task's worktree, then start a Graph there like `lf --task ISSUE graph GRAPH`; returns once it runs (`-b` waits for its end)
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<graph>` | A route from the Task's stage, or a graph to take up; the Task's only route or its Wave or repository default when omitted |
+| `--name` | name |
+| `--stack-on` | Fork this Task's worktree from another Task's active PR |
+| `--directive` | directive |
+| `--reason` | Direction for this run, published to the Task |
+| `--pool` | Run on a free machine you own in this pool |
+| `--rent` | Rent a machine from this on-demand (after `--pool`, only when none is free) |
+| `--quote` | Print where it would run and the most it could cost; run nothing Default: false. |
+| `--help / -h` | Print help |
+
+## lf task complete
+
+Complete a Task without moving its Workflow
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--reason` | Why, kept in the Task's completion request |
+| `--help / -h` | Print help |
+
+## lf task reopen
+
+Reopen local planning without moving Workflow or replacing the PR
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--reason` | reason |
+| `--help / -h` | Print help |
+
+## lf task create
+
+Create a planning Task without allocating a checkout or starting work
+
+| Argument | What it does |
+|---|---|
+| `--no-wave` | Create without a Wave (the default) Default: false. |
+| `--wave` | Explicit Wave membership; omitted creates a standalone Task |
+| `--title` | Task title; omitted when stdin supplies the report and first line |
+| `--notes` | Description; defaults to a report read from stdin |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task claim
+
+Claim the Task for you on this Machine
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task unclaim
+
+Unclaim the Task; it is unowned again, with its history intact
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task location
+
+Read recorded execution location without preparing or transferring Work
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--peers` | Observe added Machines as well as this one Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task shell
+
+Open a shell in an existing Task checkout, without preparing work
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--checkout` | checkout |
+| `--help / -h` | Print help |
+
+## lf task watch-files
+
+Stream invalidations from an existing Task checkout (JSON lines)
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--checkout` | checkout |
+| `--request` | request |
+| `--help / -h` | Print help |
+
+## lf task status
+
+Show durable Task facts and its recorded work
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | Task issue; defaults to the Task in this checkout |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task diff
+
+Show this Task's patch or list its changed files
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<path>` | path |
+| `--files` | List changed paths and comparison revisions instead of a patch Default: false. |
+| `--base` | base Default: parent. |
+| `--draft` | Compare a UTF-8 draft read from stdin without writing the worktree Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task files
+
+List one directory in this Task's worktree
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<directory>` | directory Default: .. |
+| `--cursor` | cursor |
+| `--show-ignored` | show ignored Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task file
+
+Read one file from the Task checkout
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<path>` | path |
+| `--recoveries` | Inspect retained versions, including late writes; omitted for fast content reads Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task save
+
+Save UTF-8 stdin with an expected revision and retained recovery files
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<path>` | path |
+| `--revision` | revision |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task abandon
+
+Cancel the Task in Linear and locally, close its PRs and delete its branches
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | Issue ID or branch; defaults to the Task in this checkout |
+| `--force / -f` | force Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task sweep
+
+Preview open issues outside current chapters; apply safe cancellations explicitly
+
+| Argument | What it does |
+|---|---|
+| `--apply` | apply Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task delete
+
+Cancel unfinished placed work, clean up delivery, then trash the Linear issue
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--help / -h` | Print help |
+
+## lf task edit
+
+Edit a Task's title or notes, before or after placement
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--title` | title |
+| `--notes` | notes |
+| `--rank` | Zero-based position in the Project's Task order |
+| `--assignee` | Assignee identity; provider user ID in connected plans |
+| `--unassign` | unassign Default: false. |
+| `--wave / -w` | wave |
+| `--help / -h` | Print help |
+
+## lf task move
+
+Change Task membership while preserving its recorded work
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--wave / -w` | wave |
+| `--no-wave` | no wave Default: false. |
+| `--help / -h` | Print help |
+
+## lf task comment
+
+Read the thread or publish a comment; agent comments default to progress
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<message>` | message |
+| `--steer` | Save a steer even when commenting from an agent Session Default: false. |
+| `--wave / -w` | wave |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task interrupt
+
+Stop the Task's running Graph or Task run and its scheduled automation
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task wait
+
+Wait without polling an LM
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--until` | until Default: terminal. |
+| `--timeout` | timeout |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave
+
+Manage Wave identity and planning
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf wave show
+
+Read chapter plans and Tasks without starting work; an explicit Wave includes history
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--task` | Find an exact Task, including historical planning |
+| `--json` | json Default: false. |
+| `--all` | Read every repository on this Machine Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave workflow
+
+Select and inspect the Wave default Workflow
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf wave workflow source
+
+Print a graph from `.lf/graphs/` or the builtins
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf wave workflow list
+
+List graphs, including unavailable local files
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave workflow show
+
+Show the Wave's default Workflow
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave workflow set
+
+Select the graph future Tasks take up; captured Tasks stay unchanged. Graphs are committed `.lf/graphs/<name>.yaml` files or builtins
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `<wave>` | wave |
+| `--help / -h` | Print help |
+
+## lf wave edit-plan
+
+Edit the selected chapter's name or summary
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | Wave name or ID (default: the ambient Wave) |
+| `--project` | Exact retained Project ID, provider ID or unique name instead of current selection |
+| `--name` | name |
+| `--summary` | summary |
+| `--description` | Authored chapter prose |
+| `--help / -h` | Print help |
+
+## lf wave new-chapter
+
+Rotate this Wave, or every Wave with --all, to the named Project plan
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `<name>` | name |
+| `--all` | Advance every Wave in this repository Default: false. |
+| `--plan` | plan |
+| `--dry-run` | dry run Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave ensure
+
+Ensure the configured Project is active, or create one with a durable identity
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave bind-project
+
+Bind an existing Project UUID as this Wave's shared current selection
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `<project>` | project |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave list
+
+List authored Waves and retained planning identities without starting work
+
+| Argument | What it does |
+|---|---|
+| `--json` | Emit the wave snapshot as JSON (Loopflow's dashboard snapshot) Default: false. |
+| `--all` | List Waves from every repository on this machine, not just the current repository (worktrees collapse to their main checkout) Default: false. |
+| `--current` | Exclude abandoned and retired registrations from current navigation Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave status
+
+Show one Wave's current plan, Task details, and execution evidence
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | Wave name (default: the ambient wave) |
+| `--json` | Emit the status snapshot as JSON Default: false. |
+| `--sync` | Refresh planning from its provider (Git or Linear) before reading Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave rename
+
+Rename or relocate an authored Wave and its provider mapping
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--repo` | repo |
+| `--name` | name |
+| `--title` | Change the linked Initiative display title |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave update-plan
+
+Replace the current chapter's KRs and targets
+
+| Argument | What it does |
+|---|---|
+| `--wave / -w` | wave |
+| `--plan` | The complete plan as JSON |
+| `--help / -h` | Print help |
+
+## lf wave connect
+
+Connect a Wave to its Initiative and the repository's Team (Task prefix)
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | Wave name (auto-detected if omitted) |
+| `--all` | Recursively initialize every Wave under .lf/wave/ Default: false. |
+| `--team-key` | Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name |
+| `--team-name` | Repository Team display name. Defaults to the repository name |
+| `--help / -h` | Print help |
+
+## lf wave reteam
+
+Reconcile linked Waves to the repository's Linear Team
+
+| Argument | What it does |
+|---|---|
+| `--apply` | apply Default: false. |
+| `--help / -h` | Print help |
+
+## lf ship
+
+Ship the Task: run every remaining step to merge and completion, standing in at each stage
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--graph` | Take up this graph in place of the Task's remaining steps |
+| `--reason` | Why, kept in the Task's history |
+| `--stop` | Stop Auto-Ship: end the ship process and disarm auto-merge it armed Default: false. |
+| `--help / -h` | Print help (see more with '--help') |
+
+## lf session
+
+Inspect and continue Sessions
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf session serve
+
+Run the process a Session lives in while terminals come and go
+
+| Argument | What it does |
+|---|---|
+| `--terminal` | Relay the execution to an attached terminal Default: false. |
+| `<argv>` | The command this process executes |
+| `--help / -h` | Print help |
+
+## lf session attach
+
+Attach to the current execution without restarting or submitting input
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--observe` | observe Default: false. |
+| `--if-free` | Refuse to replace another viewer's input control Default: false. |
+| `--prepare` | Return an attach-only terminal command without acquiring control Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf session steer
+
+Save a steer for this Session, or without one for the current Wave's or repository's Sessions, without starting a turn
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `<message>` | message |
+| `--help / -h` | Print help |
+
+## lf session steers
+
+Inspect steer delivery or retry delivery
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--json` | json Default: false. |
+| `--retry` | retry |
+| `--after` | after Default: 0. |
+| `--limit` | limit Default: 32. |
+| `--source` | Read the complete steer |
+| `--help / -h` | Print help |
+
+## lf session observe-status
+
+Observe validated Program Status snapshots from an active local terminal
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--terminal` | The terminal marker in the current provider client receipt |
+| `--agent-process` | AgentProcess from the Session reading; omit when it reported none |
+| `--help / -h` | Print help |
+
+## lf session history
+
+Read this conversation's native start, usage and completion receipts
+
+| Argument | What it does |
+|---|---|
+| `<id>` | Session ID or provider conversation ID |
+| `--json` | json Default: false. |
+| `--after` | Continue after an observed event sequence Default: 0. |
+| `--limit` | limit Default: 100. |
+| `--help / -h` | Print help |
+
+## lf session list
+
+List Sessions
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--all` | Include Sessions from every repository on this machine Default: false. |
+| `--interactive` | Select interactive (true), headless (false), or both (all) Default: true. |
+| `--history` | Include completed conversations and historical reviews Default: false. |
+| `--available` | Only conversations available for your input Default: false. |
+| `--limit` | Maximum conversations; 0 reads the complete matching inventory Default: 100. |
+| `--offset` | offset Default: 0. |
+| `--page` | Return a bounded stable-ID page with a continuation cursor Default: false. |
+| `--after` | Previous page's next identity; keep the same filters |
+| `--task` | task |
+| `--orphan` | Only Sessions without a Task association Default: false. |
+| `--search` | search |
+| `--help / -h` | Print help |
+
+## lf session connect
+
+Open the ongoing conversation of this scope, or an exact Session
+
+| Argument | What it does |
+|---|---|
+| `<id>` | Session ID, Task identifier, or provider conversation ID |
+| `--task` | task |
+| `--wave` | wave |
+| `--fresh` | Create a fresh primary in this scope, keeping the previous client and history Default: false. |
+| `--message` | With `-b`: send the conversation its next turn |
+| `--prepare` | Return connection data without starting the provider Default: false. |
+| `--json` | json Default: false. |
+| `--takeover` | Stop Loopflow-owned clients before resuming here Default: false. |
+| `--try` | Ask the provider to resume even when another client is active Default: false. |
+| `--all` | Resume every conversation a restart or crash interrupted; never one someone left. Terminals attach when they open them Default: false. |
+| `--help / -h` | Print help |
+
+## lf session rename
+
+Rename a Session; a human name is never replaced by a suggestion
+
+| Argument | What it does |
+|---|---|
+| `<id>` | Session ID or provider conversation ID |
+| `<name>` | name |
+| `--suggest` | Propose an agent-generated name; keeps a human-assigned name Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf session bind
+
+Assign a Task to a Session that has none; the Task never changes after
+
+| Argument | What it does |
+|---|---|
+| `<id>` | Session ID or provider conversation ID |
+| `--task` | The Task, by its issue identifier (e.g. INF-123) or stable Task ID |
+| `--dry-run` | Resolve the exact target without assigning the Session Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf open
+
+Open Work's conversation in Desktop, this cmux/Herdr host or a terminal
+
+| Argument | What it does |
+|---|---|
+| `<url>` | Work address, such as loopflow://loopflow/task/LOO-507 |
+| `--host` | Presentation destination; auto opens in this Herdr/tmux/cmux host, then Desktop, then a terminal Default: auto. |
+| `--available` | Open every conversation available for you to work with Default: false. |
+| `--session` | Open this exact Session rather than its Work's primary conversation |
+| `--diff` | Show the Task's Changes browser beside its conversation (Desktop) Default: false. |
+| `--link` | Print the readable link without opening, preparing or creating anything Default: false. |
+| `--format` | Link text format; text uses a clickable span on a terminal |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf :
+
+Run an inline prompt
+
+| Argument | What it does |
+|---|---|
+| `<prompt>` | prompt |
+| `--help / -h` | Print help |
+
+## lf graph
+
+Run or inspect authored graphs
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf graph list
+
+List authored graphs, or Graphs that ran
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--processes` | List or show Graphs that ran, from their Processes, instead of reusable templates Default: false. |
+| `--all` | Include every repository and graphs with unknown repository evidence Default: false. |
+| `--limit` | Page size (default 100) |
+| `--after` | Previous page's next identity; retain the same filters |
+| `--search` | Literal name or identity containment |
+| `--state` | state |
+| `--for-task` | Retained Task ID or issue identifier, including completed Tasks |
+| `--for-wave` | Retained Wave ID or name |
+| `--taskless` | taskless Default: false. |
+| `--help / -h` | Print help |
+
+## lf graph show
+
+Inspect an authored graph, or one that ran
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--json` | json Default: false. |
+| `--processes` | processes Default: false. |
+| `--help / -h` | Print help |
+
+## lf graph customize
+
+Print the repository file that defines a Graph, creating it from the builtin when the repository has none
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf graph route
+
+Run the slice of the Task's graph its current route names; `lf task run` starts it
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf skill
+
+Run a skill explicitly
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf skill customize
+
+Print the repository file that defines a skill, creating it from the builtin when the repository has none
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf history
+
+Read durable Work history, recorded commands and provider usage
+
+| Argument | What it does |
+|---|---|
+| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start Default: 7d. |
+| `--limit` | Maximum rows after Work filters (1-200) Default: 50. |
+| `--wave` | Scope to one Wave by name |
+| `--project` | Scope to one Project by slug |
+| `--task` | Scope to one Task by Linear identifier |
+| `--json` | Emit the typed activity snapshot as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf history list
+
+List a bounded page of recorded commands, newest first
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--all` | Include all repositories Default: false. |
+| `--limit` | limit Default: 100. |
+| `--after` | Continue with the previous page's next object, encoded as JSON |
+| `--parent` | Direct children of an exact or unambiguous parent Process |
+| `--caller` | Commands issued by this Session |
+| `--search` | Literal command text, ignoring ASCII case |
+| `--outcome` | outcome |
+| `--task` | Recorded work for a Task, including completed Tasks |
+| `--wave` | Recorded work for a Wave |
+| `--help / -h` | Print help |
+
+## lf history show
+
+Inspect a process or Session by identity
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--json` | json Default: false. |
+| `--events` | Print a Session's retained raw input events Default: false. |
+| `--final` | Print a Session's last recorded provider conclusion Default: false. |
+| `--input` | Inspect an exact retained input belonging to this Session |
+| `--context` | Print only what the step's submitted input was made of, by source Default: false. |
+| `--instructions` | Explain recorded instruction inclusion and omission Default: false. |
+| `--transcript` | Print only the Session's conversation, as its providers kept it Default: false. |
+| `--help / -h` | Print help |
+
+## lf history retention
+
+Show how much Session history providers still keep, and what they remove next
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf history search
+
+Find text in the conversations of recent Sessions
+
+| Argument | What it does |
+|---|---|
+| `<text>` | text |
+| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start Default: 7d. |
+| `--wave` | Scope to one Wave by name |
+| `--project` | Scope to one Project by slug |
+| `--task` | Scope to one Task by Linear identifier |
+| `--limit` | limit Default: 50. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf history usage
+
+Show direct provider-authored usage from recorded Session inputs
+
+| Argument | What it does |
+|---|---|
+| `--json` | Emit Session usage evidence as JSON Default: false. |
+| `--days` | Observation window, in days (zero means all time) Default: 30. |
+| `--weekly` | Report context cost and turn time by week since 2026-09-30 Default: false. |
+| `--binds` | Compare Task and Wave usage under prospective and post-hoc bind attribution Default: false. |
+| `--parent` | Inputs issued by this Session or retained capture |
+| `--wave` | Limit to Session inputs attributed to one Wave |
+| `--project` | Limit to Session inputs attributed to one Project |
+| `--task` | Limit to Session inputs attributed to one Task |
+| `--context` | Break each step's submitted input down by source, flagged against budgets Default: false. |
+| `--help / -h` | Print help |
+
+## lf history replay
+
+Launch a new execution from an immutable captured provider request
+
+| Argument | What it does |
+|---|---|
+| `<run>` | Captured input identity or an unambiguous displayed prefix |
+| `--help / -h` | Print help |
+
+## lf history export
+
+Write this Machine's Sessions, Processes and captures as JSON lines, for the Machine that copies them before giving this one back
+
+| Argument | What it does |
+|---|---|
+| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start |
+| `--help / -h` | Print help |
+
+## lf desktop
+
+Select Work and control Loopflow Desktop panes
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf desktop view
+
+Show a Work selection, or derive a passive plan for external hosts
+
+| Argument | What it does |
+|---|---|
+| `<expression>` | wave/task/query/kind/state expression; omitted uses the repository default |
+| `--plan` | Print the derived plan as JSON without opening Desktop or starting a provider Default: false. |
+| `--json` | Print the opening receipt as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop query
+
+Create or edit a Dashboard query with revision checking; prints the Dashboard as JSON
+
+| Argument | What it does |
+|---|---|
+| `<container>` | Dashboard name or query:ID |
+| `<expression>` | Selection expression, as for `lf desktop view` |
+| `--revision` | Last observed revision; omit only when creating a new Dashboard |
+| `--help / -h` | Print help |
+
+## lf desktop pin
+
+Pin a Dashboard in repository discovery; prints the Dashboard as JSON
+
+| Argument | What it does |
+|---|---|
+| `<query>` | Dashboard name or query:ID |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop unpin
+
+Unpin a Dashboard without changing its membership or arrangement; prints the Dashboard as JSON
+
+| Argument | What it does |
+|---|---|
+| `<query>` | Dashboard name or query:ID |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop rename
+
+Rename a Dashboard or Task through its shared owner; prints the owner's record as JSON
+
+| Argument | What it does |
+|---|---|
+| `<target>` | query:ID or task:<durable-id> |
+| `<name>` | The new name, written to the shared owner so labels and crumbs follow |
+| `--revision` | The target's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop layout
+
+Read a Work's pane intent or a Dashboard's slots as JSON, or save a complete revision-checked record from stdin
+
+| Argument | What it does |
+|---|---|
+| `<work>` | repository, wave:<durable-id>, task:<durable-id> or query:ID |
+| `--save` | Replace the record from JSON on stdin instead of reading it (a Dashboard's: slots, null for the default) Default: false. |
+| `--revision` | A Dashboard's last read revision; a stale one writes nothing |
+| `--help / -h` | Print help |
+
+## lf desktop ls
+
+List the window's Tasks by position (as ⌘1–9 select them) and each Task's panes
+
+| Argument | What it does |
+|---|---|
+| `--window` | Desktop window: ID, position or ID suffix (default: this terminal's window) |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop state
+
+Read actual windows and panes without launching, focusing, or acquiring clients
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop actions
+
+List the verbs Desktop performs, with their arguments and default keys
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop events
+
+Stream window, pane and destination changes; the first change is every window
+
+| Argument | What it does |
+|---|---|
+| `--json` | One change per line as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop wait
+
+Wait for a shell tab's command to finish (exits with its status), else for the pane to appear
+
+| Argument | What it does |
+|---|---|
+| `--for` | Longest wait, e.g. 30s, 5m (default: no limit) |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop back
+
+Go back, as ⌘[ and the crumb chevron do
+
+| Argument | What it does |
+|---|---|
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop forward
+
+Go forward, as ⌘] does
+
+| Argument | What it does |
+|---|---|
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop goto
+
+Show the window's Nth Working Task, as ⌘N does
+
+| Argument | What it does |
+|---|---|
+| `<index>` | index |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop next
+
+Show the next Working Task, as ⌃⇥ does
+
+| Argument | What it does |
+|---|---|
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop previous
+
+Show the previous Working Task, as ⌃⇧⇥ does
+
+| Argument | What it does |
+|---|---|
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop working-tasks
+
+Show the Working Tasks Dashboard
+
+| Argument | What it does |
+|---|---|
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop enter
+
+Enter a member of the shown Dashboard as full Work, as a tile click does
+
+| Argument | What it does |
+|---|---|
+| `<tile>` | Tile on the shown Dashboard or Wave view, as `-p` names it: position, ID, label or ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop send
+
+Insert literal text at a terminal's cursor (stdin when omitted); never submits
+
+| Argument | What it does |
+|---|---|
+| `<text>` | Unicode text without control characters (use send-key for Enter/Tab) |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop send-key
+
+Send one key to a terminal, without following focus
+
+| Argument | What it does |
+|---|---|
+| `<key>` | key |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop capture
+
+Print a terminal's text, without following focus
+
+| Argument | What it does |
+|---|---|
+| `--region` | region Default: screen. |
+| `--trim` | Drop trailing spaces and blank lines Default: false. |
+| `--max-bytes` | max bytes Default: 65536. |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop run
+
+Add a shell tab at the Task's location and type LINE into it, as if typed; focus stays put
+
+| Argument | What it does |
+|---|---|
+| `<line>` | One shell line, e.g. 'cargo test -p loopflow'; omitted opens an empty shell |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop zoom
+
+Zoom a pane, or return it to the layout, without changing selection
+
+| Argument | What it does |
+|---|---|
+| `--on` | on Default: false. |
+| `--off` | off Default: false. |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop focus
+
+Focus a pane, or the pane in a direction, opening its retained workspace when needed
+
+| Argument | What it does |
+|---|---|
+| `--direction` | direction |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop hide
+
+Hide a pane without closing its Session or process; on a Dashboard, hide a tile from its shared record
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop show
+
+Show a hidden pane without selecting Work or acquiring a client; on a Dashboard, a hidden tile
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop close
+
+Close a shell or browser tab, as ⌘W does; a session pane hides
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop reopen
+
+Undo the Task's last close, as ⇧⌘T does
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop move
+
+Move a pane beside another pane of the same Task; on a Dashboard or Wave view, a tile into another's place
+
+| Argument | What it does |
+|---|---|
+| `--destination` | Pane to place it beside, or tile whose place it takes, as for -p |
+| `--axis` | Split axis for a pane; tiles take the destination's place |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop resize
+
+Resize the divider between two panes or Dashboard tiles; ratio is the addressed one's share
+
+| Argument | What it does |
+|---|---|
+| `--toward` | The other pane or tile, as for -p |
+| `--ratio` | ratio |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop files
+
+Show the Task's Files in the browser
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop graph-log
+
+Show the Task's Graph processes in the browser
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop browse
+
+Open an http(s) page in a browser tab
+
+| Argument | What it does |
+|---|---|
+| `<url>` | url |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop page-back
+
+Go back in a web page
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop page-forward
+
+Go forward in a web page
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop reload
+
+Reload a web page, as ⌘R does
+
+| Argument | What it does |
+|---|---|
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop switch
+
+Show another of the Task's conversations in its session pane
+
+| Argument | What it does |
+|---|---|
+| `<session>` | Session ID |
+| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf monitor
+
+Show waiting, blocked, active, and finished work with next actions
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--all` | all Default: false. |
+| `--help / -h` | Print help |
+
+## lf monitor active
+
+Observe active conversations and missing process evidence
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--watch` | Stream NDJSON until stdin closes Default: false. |
+| `--task` | task |
+| `--help / -h` | Print help |
+
+## lf monitor work
+
+Stream planning and activity for the selected Work, each part again only when it changes
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--watch` | Stream NDJSON until stdin closes Default: false. |
+| `--help / -h` | Print help |
+
+## lf monitor ps
+
+Print one parseable snapshot of live Loopflow call trees
+
+| Argument | What it does |
+|---|---|
+| `--json` | Emit the versioned activity snapshot as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf monitor top
+
+Refresh live Loopflow call trees on a terminal; print once when redirected
+
+| Argument | What it does |
+|---|---|
+| `--json` | Emit one versioned activity snapshot as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf monitor prune
+
+Reap registered orphan providers and remove dead process receipts
+
+| Argument | What it does |
+|---|---|
+| `--dry-run` | Show exact targets without changing process or receipt state Default: false. |
+| `--json` | Emit the versioned prune report as JSON Default: false. |
 | `--help / -h` | Print help |
 
 ## lf ops
@@ -835,360 +2152,6 @@ Replace a provider's ordered route
 | `--default` | default Default: false. |
 | `--help / -h` | Print help |
 
-## lf ship
-
-Ship the Task: run every remaining step to merge and completion, standing in at each stage
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--graph` | Take up this graph in place of the Task's remaining steps |
-| `--reason` | Why, kept in the Task's history |
-| `--stop` | Stop Auto-Ship: end the ship process and disarm auto-merge it armed Default: false. |
-| `--help / -h` | Print help (see more with '--help') |
-
-## lf scratch
-
-Manage working notes
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf scratch clear
-
-Remove scratch files added in this branch's diff, keeping existing files and edits
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf monitor
-
-Show waiting, blocked, active, and finished work with next actions
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--all` | all Default: false. |
-| `--help / -h` | Print help |
-
-## lf monitor active
-
-Observe active conversations and missing process evidence
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--watch` | Stream NDJSON until stdin closes Default: false. |
-| `--task` | task |
-| `--help / -h` | Print help |
-
-## lf monitor work
-
-Stream planning and activity for the selected Work, each part again only when it changes
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--watch` | Stream NDJSON until stdin closes Default: false. |
-| `--help / -h` | Print help |
-
-## lf monitor ps
-
-Print one parseable snapshot of live Loopflow call trees
-
-| Argument | What it does |
-|---|---|
-| `--json` | Emit the versioned activity snapshot as JSON Default: false. |
-| `--help / -h` | Print help |
-
-## lf monitor top
-
-Refresh live Loopflow call trees on a terminal; print once when redirected
-
-| Argument | What it does |
-|---|---|
-| `--json` | Emit one versioned activity snapshot as JSON Default: false. |
-| `--help / -h` | Print help |
-
-## lf monitor prune
-
-Reap registered orphan providers and remove dead process receipts
-
-| Argument | What it does |
-|---|---|
-| `--dry-run` | Show exact targets without changing process or receipt state Default: false. |
-| `--json` | Emit the versioned prune report as JSON Default: false. |
-| `--help / -h` | Print help |
-
-## lf disk
-
-Report Loopflow's disk footprint; `clean` and `rotate` reclaim it
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf disk clean
-
-Reclaim finished worktrees and build output, dead receipts, old backups, store copies, captures and logs
-
-| Argument | What it does |
-|---|---|
-| `--dry-run` | Show what would be removed without removing anything Default: false. |
-| `--json` | json Default: false. |
-| `--keep-days` | Keep captures and logs modified within this many days Default: 7. |
-| `--help / -h` | Print help |
-
-## lf :
-
-Run an inline prompt
-
-| Argument | What it does |
-|---|---|
-| `<prompt>` | prompt |
-| `--help / -h` | Print help |
-
-## lf session
-
-Inspect and continue Sessions
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf session serve
-
-Run the process a Session lives in while terminals come and go
-
-| Argument | What it does |
-|---|---|
-| `--terminal` | Relay the execution to an attached terminal Default: false. |
-| `<argv>` | The command this process executes |
-| `--help / -h` | Print help |
-
-## lf session attach
-
-Attach to the current execution without restarting or submitting input
-
-| Argument | What it does |
-|---|---|
-| `<id>` | id |
-| `--observe` | observe Default: false. |
-| `--if-free` | Refuse to replace another viewer's input control Default: false. |
-| `--prepare` | Return an attach-only terminal command without acquiring control Default: false. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf session steer
-
-Save a steer for this Session, or without one for the current Wave's or repository's Sessions, without starting a turn
-
-| Argument | What it does |
-|---|---|
-| `<id>` | id |
-| `<message>` | message |
-| `--help / -h` | Print help |
-
-## lf session steers
-
-Inspect steer delivery or retry delivery
-
-| Argument | What it does |
-|---|---|
-| `<id>` | id |
-| `--json` | json Default: false. |
-| `--retry` | retry |
-| `--after` | after Default: 0. |
-| `--limit` | limit Default: 32. |
-| `--source` | Read the complete steer |
-| `--help / -h` | Print help |
-
-## lf session observe-status
-
-Observe validated Program Status snapshots from an active local terminal
-
-| Argument | What it does |
-|---|---|
-| `<id>` | id |
-| `--terminal` | The terminal marker in the current provider client receipt |
-| `--agent-process` | AgentProcess from the Session reading; omit when it reported none |
-| `--help / -h` | Print help |
-
-## lf session history
-
-Read this conversation's native start, usage and completion receipts
-
-| Argument | What it does |
-|---|---|
-| `<id>` | Session ID or provider conversation ID |
-| `--json` | json Default: false. |
-| `--after` | Continue after an observed event sequence Default: 0. |
-| `--limit` | limit Default: 100. |
-| `--help / -h` | Print help |
-
-## lf session list
-
-List Sessions
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--all` | Include Sessions from every repository on this machine Default: false. |
-| `--interactive` | Select interactive (true), headless (false), or both (all) Default: true. |
-| `--history` | Include completed conversations and historical reviews Default: false. |
-| `--available` | Only conversations available for your input Default: false. |
-| `--limit` | Maximum conversations; 0 reads the complete matching inventory Default: 100. |
-| `--offset` | offset Default: 0. |
-| `--page` | Return a bounded stable-ID page with a continuation cursor Default: false. |
-| `--after` | Previous page's next identity; keep the same filters |
-| `--task` | task |
-| `--orphan` | Only Sessions without a Task association Default: false. |
-| `--search` | search |
-| `--help / -h` | Print help |
-
-## lf session connect
-
-Open the ongoing conversation of this scope, or an exact Session
-
-| Argument | What it does |
-|---|---|
-| `<id>` | Session ID, Task identifier, or provider conversation ID |
-| `--task` | task |
-| `--wave` | wave |
-| `--fresh` | Create a fresh primary in this scope, keeping the previous client and history Default: false. |
-| `--message` | With `-b`: send the conversation its next turn |
-| `--prepare` | Return connection data without starting the provider Default: false. |
-| `--json` | json Default: false. |
-| `--takeover` | Stop Loopflow-owned clients before resuming here Default: false. |
-| `--try` | Ask the provider to resume even when another client is active Default: false. |
-| `--all` | Resume every conversation a restart or crash interrupted; never one someone left. Terminals attach when they open them Default: false. |
-| `--help / -h` | Print help |
-
-## lf session rename
-
-Rename a Session; a human name is never replaced by a suggestion
-
-| Argument | What it does |
-|---|---|
-| `<id>` | Session ID or provider conversation ID |
-| `<name>` | name |
-| `--suggest` | Propose an agent-generated name; keeps a human-assigned name Default: false. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf session bind
-
-Assign a Task to a Session that has none; the Task never changes after
-
-| Argument | What it does |
-|---|---|
-| `<id>` | Session ID or provider conversation ID |
-| `--task` | The Task, by its issue identifier (e.g. INF-123) or stable Task ID |
-| `--dry-run` | Resolve the exact target without assigning the Session Default: false. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf self
-
-Manage the installed Loopflow release and exported skills
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf self doctor
-
-Diagnose installation, storage and Process integrity
-
-| Argument | What it does |
-|---|---|
-| `--planning` | Diagnose repository planning without changing it Default: false. |
-| `--json` | Emit the audit as JSON Default: false. |
-| `--help / -h` | Print help |
-
-## lf self install
-
-Install the latest published Loopflow release from any directory
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf self install schedule
-
-Install the latest Loopflow at login and weekly by default (macOS launchd)
-
-| Argument | What it does |
-|---|---|
-| `<frequency>` | Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time) Default: weekly. |
-| `--help / -h` | Print help |
-
-## lf self sync-skills
-
-Export skills and Graphs into native vendor Skills directories
-
-| Argument | What it does |
-|---|---|
-| `--yes / -y` | Confirm writes under ~/ without prompting Default: false. |
-| `--no-prune` | Keep stale loopflow-generated skills Default: false. |
-| `--repo` | Export repository definitions into this checkout instead of home Default: false. |
-| `--help / -h` | Print help |
-
-## lf portfolio
-
-Select repositories for the Machine-local portfolio
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf portfolio folder
-
-Discover immediate main checkouts in a folder (defaults to the saved folder)
-
-| Argument | What it does |
-|---|---|
-| `<path>` | path |
-| `--help / -h` | Print help |
-
-## lf portfolio manual
-
-Use only explicitly selected repositories
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf portfolio add
-
-Add repositories to the saved manual selection
-
-| Argument | What it does |
-|---|---|
-| `<paths>` | paths |
-| `--help / -h` | Print help |
-
-## lf portfolio remove
-
-Remove manual membership, preserving files and open workspaces
-
-| Argument | What it does |
-|---|---|
-| `<path>` | path |
-| `--help / -h` | Print help |
-
-## lf portfolio import
-
-Import previous Desktop membership only when no selection has been saved
-
-| Argument | What it does |
-|---|---|
-| `<paths>` | paths |
-| `--help / -h` | Print help |
-
 ## lf config
 
 Read Loopflow configuration
@@ -1245,999 +2208,50 @@ Show selection, retained imports and held records without contacting Git
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf open
+## lf self
 
-Open Work's conversation in Desktop, this cmux/Herdr host or a terminal
+Manage the installed Loopflow release and exported skills
 
 | Argument | What it does |
 |---|---|
-| `<url>` | Work address, such as loopflow://loopflow/task/LOO-507 |
-| `--host` | Presentation destination; auto opens in this Herdr/tmux/cmux host, then Desktop, then a terminal Default: auto. |
-| `--available` | Open every conversation available for you to work with Default: false. |
-| `--session` | Open this exact Session rather than its Work's primary conversation |
-| `--diff` | Show the Task's Changes browser beside its conversation (Desktop) Default: false. |
-| `--link` | Print the readable link without opening, preparing or creating anything Default: false. |
-| `--format` | Link text format; text uses a clickable span on a terminal |
-| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf desktop
+## lf self doctor
 
-Select Work and control Loopflow Desktop panes
+Diagnose installation, storage and Process integrity
 
 | Argument | What it does |
 |---|---|
+| `--planning` | Diagnose repository planning without changing it Default: false. |
+| `--json` | Emit the audit as JSON Default: false. |
 | `--help / -h` | Print help |
 
-## lf desktop view
+## lf self install
 
-Show a Work selection, or derive a passive plan for external hosts
+Install the latest published Loopflow release from any directory
 
 | Argument | What it does |
 |---|---|
-| `<expression>` | wave/task/query/kind/state expression; omitted uses the repository default |
-| `--plan` | Print the derived plan as JSON without opening Desktop or starting a provider Default: false. |
-| `--json` | Print the opening receipt as JSON Default: false. |
 | `--help / -h` | Print help |
 
-## lf desktop query
+## lf self install schedule
 
-Create or edit a Dashboard query with revision checking; prints the Dashboard as JSON
+Install the latest Loopflow at login and weekly by default (macOS launchd)
 
 | Argument | What it does |
 |---|---|
-| `<container>` | Dashboard name or query:ID |
-| `<expression>` | Selection expression, as for `lf desktop view` |
-| `--revision` | Last observed revision; omit only when creating a new Dashboard |
+| `<frequency>` | Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time) Default: weekly. |
 | `--help / -h` | Print help |
 
-## lf desktop pin
+## lf self sync-skills
 
-Pin a Dashboard in repository discovery; prints the Dashboard as JSON
+Export skills and Graphs into native vendor Skills directories
 
 | Argument | What it does |
 |---|---|
-| `<query>` | Dashboard name or query:ID |
-| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
-| `--help / -h` | Print help |
-
-## lf desktop unpin
-
-Unpin a Dashboard without changing its membership or arrangement; prints the Dashboard as JSON
-
-| Argument | What it does |
-|---|---|
-| `<query>` | Dashboard name or query:ID |
-| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
-| `--help / -h` | Print help |
-
-## lf desktop rename
-
-Rename a Dashboard or Task through its shared owner; prints the owner's record as JSON
-
-| Argument | What it does |
-|---|---|
-| `<target>` | query:ID or task:<durable-id> |
-| `<name>` | The new name, written to the shared owner so labels and crumbs follow |
-| `--revision` | The target's last read revision; a stale one writes nothing |
-| `--help / -h` | Print help |
-
-## lf desktop layout
-
-Read a Work's pane intent or a Dashboard's slots as JSON, or save a complete revision-checked record from stdin
-
-| Argument | What it does |
-|---|---|
-| `<work>` | repository, wave:<durable-id>, task:<durable-id> or query:ID |
-| `--save` | Replace the record from JSON on stdin instead of reading it (a Dashboard's: slots, null for the default) Default: false. |
-| `--revision` | A Dashboard's last read revision; a stale one writes nothing |
-| `--help / -h` | Print help |
-
-## lf desktop ls
-
-List the window's Tasks by position (as ⌘1–9 select them) and each Task's panes
-
-| Argument | What it does |
-|---|---|
-| `--window` | Desktop window: ID, position or ID suffix (default: this terminal's window) |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop state
-
-Read actual windows and panes without launching, focusing, or acquiring clients
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop actions
-
-List the verbs Desktop performs, with their arguments and default keys
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop events
-
-Stream window, pane and destination changes; the first change is every window
-
-| Argument | What it does |
-|---|---|
-| `--json` | One change per line as JSON Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop wait
-
-Wait for a shell tab's command to finish (exits with its status), else for the pane to appear
-
-| Argument | What it does |
-|---|---|
-| `--for` | Longest wait, e.g. 30s, 5m (default: no limit) |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop back
-
-Go back, as ⌘[ and the crumb chevron do
-
-| Argument | What it does |
-|---|---|
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop forward
-
-Go forward, as ⌘] does
-
-| Argument | What it does |
-|---|---|
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop goto
-
-Show the window's Nth Working Task, as ⌘N does
-
-| Argument | What it does |
-|---|---|
-| `<index>` | index |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop next
-
-Show the next Working Task, as ⌃⇥ does
-
-| Argument | What it does |
-|---|---|
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop previous
-
-Show the previous Working Task, as ⌃⇧⇥ does
-
-| Argument | What it does |
-|---|---|
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop working-tasks
-
-Show the Working Tasks Dashboard
-
-| Argument | What it does |
-|---|---|
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop enter
-
-Enter a member of the shown Dashboard as full Work, as a tile click does
-
-| Argument | What it does |
-|---|---|
-| `<tile>` | Tile on the shown Dashboard or Wave view, as `-p` names it: position, ID, label or ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop send
-
-Insert literal text at a terminal's cursor (stdin when omitted); never submits
-
-| Argument | What it does |
-|---|---|
-| `<text>` | Unicode text without control characters (use send-key for Enter/Tab) |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop send-key
-
-Send one key to a terminal, without following focus
-
-| Argument | What it does |
-|---|---|
-| `<key>` | key |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop capture
-
-Print a terminal's text, without following focus
-
-| Argument | What it does |
-|---|---|
-| `--region` | region Default: screen. |
-| `--trim` | Drop trailing spaces and blank lines Default: false. |
-| `--max-bytes` | max bytes Default: 65536. |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop run
-
-Add a shell tab at the Task's location and type LINE into it, as if typed; focus stays put
-
-| Argument | What it does |
-|---|---|
-| `<line>` | One shell line, e.g. 'cargo test -p loopflow'; omitted opens an empty shell |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop zoom
-
-Zoom a pane, or return it to the layout, without changing selection
-
-| Argument | What it does |
-|---|---|
-| `--on` | on Default: false. |
-| `--off` | off Default: false. |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop focus
-
-Focus a pane, or the pane in a direction, opening its retained workspace when needed
-
-| Argument | What it does |
-|---|---|
-| `--direction` | direction |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop hide
-
-Hide a pane without closing its Session or process; on a Dashboard, hide a tile from its shared record
-
-| Argument | What it does |
-|---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop show
-
-Show a hidden pane without selecting Work or acquiring a client; on a Dashboard, a hidden tile
-
-| Argument | What it does |
-|---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop close
-
-Close a shell or browser tab, as ⌘W does; a session pane hides
-
-| Argument | What it does |
-|---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop reopen
-
-Undo the Task's last close, as ⇧⌘T does
-
-| Argument | What it does |
-|---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop move
-
-Move a pane beside another pane of the same Task; on a Dashboard or Wave view, a tile into another's place
-
-| Argument | What it does |
-|---|---|
-| `--destination` | Pane to place it beside, or tile whose place it takes, as for -p |
-| `--axis` | Split axis for a pane; tiles take the destination's place |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop resize
-
-Resize the divider between two panes or Dashboard tiles; ratio is the addressed one's share
-
-| Argument | What it does |
-|---|---|
-| `--toward` | The other pane or tile, as for -p |
-| `--ratio` | ratio |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop files
-
-Show the Task's Files in the browser
-
-| Argument | What it does |
-|---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop graph-log
-
-Show the Task's Graph processes in the browser
-
-| Argument | What it does |
-|---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop browse
-
-Open an http(s) page in a browser tab
-
-| Argument | What it does |
-|---|---|
-| `<url>` | url |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop page-back
-
-Go back in a web page
-
-| Argument | What it does |
-|---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop page-forward
-
-Go forward in a web page
-
-| Argument | What it does |
-|---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop reload
-
-Reload a web page, as ⌘R does
-
-| Argument | What it does |
-|---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop switch
-
-Show another of the Task's conversations in its session pane
-
-| Argument | What it does |
-|---|---|
-| `<session>` | Session ID |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
-| `--window` | Desktop window: ID, position or ID suffix |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf discord
-
-Bridge new Discord messages to finite Wave Sessions
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf discord serve
-
-Poll a configured channel and post each Session's final answer
-
-| Argument | What it does |
-|---|---|
-| `<wave>` | wave |
-| `--help / -h` | Print help |
-
-## lf wave
-
-Manage Wave identity and planning
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf wave show
-
-Read chapter plans and Tasks without starting work; an explicit Wave includes history
-
-| Argument | What it does |
-|---|---|
-| `<wave>` | wave |
-| `--task` | Find an exact Task, including historical planning |
-| `--json` | json Default: false. |
-| `--all` | Read every repository on this Machine Default: false. |
-| `--help / -h` | Print help |
-
-## lf wave workflow
-
-Select and inspect the Wave default Workflow
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf wave workflow source
-
-Print a graph from `.lf/graphs/` or the builtins
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
-| `--help / -h` | Print help |
-
-## lf wave workflow list
-
-List graphs, including unavailable local files
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf wave workflow show
-
-Show the Wave's default Workflow
-
-| Argument | What it does |
-|---|---|
-| `<wave>` | wave |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf wave workflow set
-
-Select the graph future Tasks take up; captured Tasks stay unchanged. Graphs are committed `.lf/graphs/<name>.yaml` files or builtins
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
-| `<wave>` | wave |
-| `--help / -h` | Print help |
-
-## lf wave edit-plan
-
-Edit the selected chapter's name or summary
-
-| Argument | What it does |
-|---|---|
-| `<wave>` | Wave name or ID (default: the ambient Wave) |
-| `--project` | Exact retained Project ID, provider ID or unique name instead of current selection |
-| `--name` | name |
-| `--summary` | summary |
-| `--description` | Authored chapter prose |
-| `--help / -h` | Print help |
-
-## lf wave new-chapter
-
-Rotate this Wave, or every Wave with --all, to the named Project plan
-
-| Argument | What it does |
-|---|---|
-| `<wave>` | wave |
-| `<name>` | name |
-| `--all` | Advance every Wave in this repository Default: false. |
-| `--plan` | plan |
-| `--dry-run` | dry run Default: false. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf wave ensure
-
-Ensure the configured Project is active, or create one with a durable identity
-
-| Argument | What it does |
-|---|---|
-| `<wave>` | wave |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf wave bind-project
-
-Bind an existing Project UUID as this Wave's shared current selection
-
-| Argument | What it does |
-|---|---|
-| `<wave>` | wave |
-| `<project>` | project |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf wave list
-
-List authored Waves and retained planning identities without starting work
-
-| Argument | What it does |
-|---|---|
-| `--json` | Emit the wave snapshot as JSON (Loopflow's dashboard snapshot) Default: false. |
-| `--all` | List Waves from every repository on this machine, not just the current repository (worktrees collapse to their main checkout) Default: false. |
-| `--current` | Exclude abandoned and retired registrations from current navigation Default: false. |
-| `--help / -h` | Print help |
-
-## lf wave status
-
-Show one Wave's current plan, Task details, and execution evidence
-
-| Argument | What it does |
-|---|---|
-| `<wave>` | Wave name (default: the ambient wave) |
-| `--json` | Emit the status snapshot as JSON Default: false. |
-| `--sync` | Refresh planning from its provider (Git or Linear) before reading Default: false. |
-| `--help / -h` | Print help |
-
-## lf wave rename
-
-Rename or relocate an authored Wave and its provider mapping
-
-| Argument | What it does |
-|---|---|
-| `<wave>` | wave |
-| `--repo` | repo |
-| `--name` | name |
-| `--title` | Change the linked Initiative display title |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf wave update-plan
-
-Replace the current chapter's KRs and targets
-
-| Argument | What it does |
-|---|---|
-| `--wave / -w` | wave |
-| `--plan` | The complete plan as JSON |
-| `--help / -h` | Print help |
-
-## lf wave connect
-
-Connect a Wave to its Initiative and the repository's Team (Task prefix)
-
-| Argument | What it does |
-|---|---|
-| `<wave>` | Wave name (auto-detected if omitted) |
-| `--all` | Recursively initialize every Wave under .lf/wave/ Default: false. |
-| `--team-key` | Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name |
-| `--team-name` | Repository Team display name. Defaults to the repository name |
-| `--help / -h` | Print help |
-
-## lf wave reteam
-
-Reconcile linked Waves to the repository's Linear Team
-
-| Argument | What it does |
-|---|---|
-| `--apply` | apply Default: false. |
-| `--help / -h` | Print help |
-
-## lf task
-
-Concrete work and Task lifecycle
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf task list
-
-List every Task in the selected repository
-
-| Argument | What it does |
-|---|---|
-| `--wave` | wave |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task defer
-
-Defer future Task execution without stopping live processes
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--help / -h` | Print help |
-
-## lf task resume
-
-Resume a deferred Task without starting execution
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--help / -h` | Print help |
-
-## lf task sync
-
-Synchronize a Task with its tracker; the change sent last wins
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--retry-creation` | Retry an uncertain issue creation with its saved ID; may recreate a deleted issue Default: false. |
-| `--retry-updates` | Retry uncertain saved field/state updates after observing current Linear values Default: false. |
-| `--help / -h` | Print help |
-
-## lf task workflow
-
-Inspect or reset this Task's captured Workflow
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf task workflow move
-
-Move Workflow position without running anything; `end` requests completion
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `<stage>` | `start`, `end` or one of the graph's stages |
-| `--reason` | Why, kept in the Task's workflow history |
-| `--help / -h` | Print help |
-
-## lf task workflow show
-
-Show the Task's captured graph, position and history
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task workflow restart
-
-Move the captured Workflow to start without executing or reloading it
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--help / -h` | Print help |
-
-## lf task checkout
-
-Ensure tracked Task Work and its worktree without launching a Graph
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--name` | name |
-| `--stack-on` | Fork this Task's worktree from another Task's active PR |
-| `--directive` | directive |
-| `--design` | Hand off a child-specific design from the caller's checkout |
-| `--recover-from` | Restore a missing Task branch from a deliberately recovered commit; never reset existing work |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task run
-
-Place a Task's worktree, then start a Graph there like `lf --task ISSUE graph GRAPH`; returns once it runs (`-b` waits for its end)
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `<graph>` | A route from the Task's stage, or a graph to take up; the Task's only route or its Wave or repository default when omitted |
-| `--name` | name |
-| `--stack-on` | Fork this Task's worktree from another Task's active PR |
-| `--directive` | directive |
-| `--reason` | Direction for this run, published to the Task |
-| `--pool` | Run on a free machine you own in this pool |
-| `--rent` | Rent a machine from this on-demand (after `--pool`, only when none is free) |
-| `--quote` | Print where it would run and the most it could cost; run nothing Default: false. |
-| `--help / -h` | Print help |
-
-## lf task complete
-
-Complete a Task without moving its Workflow
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--reason` | Why, kept in the Task's completion request |
-| `--help / -h` | Print help |
-
-## lf task reopen
-
-Reopen local planning without moving Workflow or replacing the PR
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--reason` | reason |
-| `--help / -h` | Print help |
-
-## lf task create
-
-Create a planning Task without allocating a checkout or starting work
-
-| Argument | What it does |
-|---|---|
-| `--no-wave` | Create without a Wave (the default) Default: false. |
-| `--wave` | Explicit Wave membership; omitted creates a standalone Task |
-| `--title` | Task title; omitted when stdin supplies the report and first line |
-| `--notes` | Description; defaults to a report read from stdin |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task claim
-
-Claim the Task for you on this Machine
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task unclaim
-
-Unclaim the Task; it is unowned again, with its history intact
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task location
-
-Read recorded execution location without preparing or transferring Work
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--peers` | Observe added Machines as well as this one Default: false. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task shell
-
-Open a shell in an existing Task checkout, without preparing work
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--checkout` | checkout |
-| `--help / -h` | Print help |
-
-## lf task watch-files
-
-Stream invalidations from an existing Task checkout (JSON lines)
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--checkout` | checkout |
-| `--request` | request |
-| `--help / -h` | Print help |
-
-## lf task status
-
-Show durable Task facts and its recorded work
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | Task issue; defaults to the Task in this checkout |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task diff
-
-Show this Task's patch or list its changed files
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `<path>` | path |
-| `--files` | List changed paths and comparison revisions instead of a patch Default: false. |
-| `--base` | base Default: parent. |
-| `--draft` | Compare a UTF-8 draft read from stdin without writing the worktree Default: false. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task files
-
-List one directory in this Task's worktree
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `<directory>` | directory Default: .. |
-| `--cursor` | cursor |
-| `--show-ignored` | show ignored Default: false. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task file
-
-Read one file from the Task checkout
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `<path>` | path |
-| `--recoveries` | Inspect retained versions, including late writes; omitted for fast content reads Default: false. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task save
-
-Save UTF-8 stdin with an expected revision and retained recovery files
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `<path>` | path |
-| `--revision` | revision |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task abandon
-
-Cancel the Task in Linear and locally, close its PRs and delete its branches
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | Issue ID or branch; defaults to the Task in this checkout |
-| `--force / -f` | force Default: false. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task sweep
-
-Preview open issues outside current chapters; apply safe cancellations explicitly
-
-| Argument | What it does |
-|---|---|
-| `--apply` | apply Default: false. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task delete
-
-Cancel unfinished placed work, clean up delivery, then trash the Linear issue
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--help / -h` | Print help |
-
-## lf task edit
-
-Edit a Task's title or notes, before or after placement
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--title` | title |
-| `--notes` | notes |
-| `--rank` | Zero-based position in the Project's Task order |
-| `--assignee` | Assignee identity; provider user ID in connected plans |
-| `--unassign` | unassign Default: false. |
-| `--wave / -w` | wave |
-| `--help / -h` | Print help |
-
-## lf task move
-
-Change Task membership while preserving its recorded work
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--wave / -w` | wave |
-| `--no-wave` | no wave Default: false. |
-| `--help / -h` | Print help |
-
-## lf task comment
-
-Read the thread or publish a comment; agent comments default to progress
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `<message>` | message |
-| `--steer` | Save a steer even when commenting from an agent Session Default: false. |
-| `--wave / -w` | wave |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task interrupt
-
-Stop the Task's running Graph or Task run and its scheduled automation
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task wait
-
-Wait without polling an LM
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--until` | until Default: terminal. |
-| `--timeout` | timeout |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf context
-
-Show memory and scratch size targets, their sources, and current usage
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--wave` | Inspect a Wave's local authored context |
-| `--task` | Inspect a Task's checkout and Wave context |
+| `--yes / -y` | Confirm writes under ~/ without prompting Default: false. |
+| `--no-prune` | Keep stale loopflow-generated skills Default: false. |
+| `--repo` | Export repository definitions into this checkout instead of home Default: false. |
 | `--help / -h` | Print help |
 
 ## lf list
@@ -2261,180 +2275,166 @@ Explain a command, skill, or graph without launching it
 | `--json` | Describe installed command arguments and available result schemas Default: false. |
 | `--help / -h` | Print help |
 
-## lf history
+## lf context
 
-Read durable Work history, recorded commands and provider usage
-
-| Argument | What it does |
-|---|---|
-| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start Default: 7d. |
-| `--limit` | Maximum rows after Work filters (1-200) Default: 50. |
-| `--wave` | Scope to one Wave by name |
-| `--project` | Scope to one Project by slug |
-| `--task` | Scope to one Task by Linear identifier |
-| `--json` | Emit the typed activity snapshot as JSON Default: false. |
-| `--help / -h` | Print help |
-
-## lf history list
-
-List a bounded page of recorded commands, newest first
+Show memory and scratch size targets, their sources, and current usage
 
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--all` | Include all repositories Default: false. |
-| `--limit` | limit Default: 100. |
-| `--after` | Continue with the previous page's next object, encoded as JSON |
-| `--parent` | Direct children of an exact or unambiguous parent Process |
-| `--caller` | Commands issued by this Session |
-| `--search` | Literal command text, ignoring ASCII case |
-| `--outcome` | outcome |
-| `--task` | Recorded work for a Task, including completed Tasks |
-| `--wave` | Recorded work for a Wave |
+| `--wave` | Inspect a Wave's local authored context |
+| `--task` | Inspect a Task's checkout and Wave context |
 | `--help / -h` | Print help |
 
-## lf history show
+## lf clone
 
-Inspect a process or Session by identity
+Create and use an offline, isolated development data clone (macOS)
 
 | Argument | What it does |
 |---|---|
-| `<id>` | id |
+| `--help / -h` | Print help |
+
+## lf clone create
+
+Snapshot a source Machine without copying credentials or live authority
+
+| Argument | What it does |
+|---|---|
+| `<directory>` | directory |
+| `--source` | source |
+| `--codex-home` | Explicit Codex history home; credentials and configuration are excluded |
+| `--claude-home` | Explicit Claude history home; credentials and configuration are excluded |
+| `--help / -h` | Print help |
+
+## lf clone run
+
+Run lf (or a Desktop executable after --) inside the offline clone
+
+| Argument | What it does |
+|---|---|
+| `<directory>` | directory |
+| `<command>` | command |
+| `--help / -h` | Print help |
+
+## lf clone show
+
+Show the snapshot inventory and continuation limitations
+
+| Argument | What it does |
+|---|---|
+| `<directory>` | directory |
+| `--help / -h` | Print help |
+
+## lf clone dispose
+
+Remove only this owned disposable directory (close its clients first)
+
+| Argument | What it does |
+|---|---|
+| `<directory>` | directory |
+| `--help / -h` | Print help |
+
+## lf portfolio
+
+Select repositories for the Machine-local portfolio
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf portfolio folder
+
+Discover immediate main checkouts in a folder (defaults to the saved folder)
+
+| Argument | What it does |
+|---|---|
+| `<path>` | path |
+| `--help / -h` | Print help |
+
+## lf portfolio manual
+
+Use only explicitly selected repositories
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf portfolio add
+
+Add repositories to the saved manual selection
+
+| Argument | What it does |
+|---|---|
+| `<paths>` | paths |
+| `--help / -h` | Print help |
+
+## lf portfolio remove
+
+Remove manual membership, preserving files and open workspaces
+
+| Argument | What it does |
+|---|---|
+| `<path>` | path |
+| `--help / -h` | Print help |
+
+## lf portfolio import
+
+Import previous Desktop membership only when no selection has been saved
+
+| Argument | What it does |
+|---|---|
+| `<paths>` | paths |
+| `--help / -h` | Print help |
+
+## lf disk
+
+Report Loopflow's disk footprint; `clean` and `rotate` reclaim it
+
+| Argument | What it does |
+|---|---|
 | `--json` | json Default: false. |
-| `--events` | Print a Session's retained raw input events Default: false. |
-| `--final` | Print a Session's last recorded provider conclusion Default: false. |
-| `--input` | Inspect an exact retained input belonging to this Session |
-| `--context` | Print only what the step's submitted input was made of, by source Default: false. |
-| `--instructions` | Explain recorded instruction inclusion and omission Default: false. |
-| `--transcript` | Print only the Session's conversation, as its providers kept it Default: false. |
 | `--help / -h` | Print help |
 
-## lf history retention
+## lf disk clean
 
-Show how much Session history providers still keep, and what they remove next
+Reclaim finished worktrees and build output, dead receipts, old backups, store copies, captures and logs
 
 | Argument | What it does |
 |---|---|
+| `--dry-run` | Show what would be removed without removing anything Default: false. |
 | `--json` | json Default: false. |
+| `--keep-days` | Keep captures and logs modified within this many days Default: 7. |
 | `--help / -h` | Print help |
 
-## lf history search
+## lf scratch
 
-Find text in the conversations of recent Sessions
-
-| Argument | What it does |
-|---|---|
-| `<text>` | text |
-| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start Default: 7d. |
-| `--wave` | Scope to one Wave by name |
-| `--project` | Scope to one Project by slug |
-| `--task` | Scope to one Task by Linear identifier |
-| `--limit` | limit Default: 50. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf history usage
-
-Show direct provider-authored usage from recorded Session inputs
-
-| Argument | What it does |
-|---|---|
-| `--json` | Emit Session usage evidence as JSON Default: false. |
-| `--days` | Observation window, in days (zero means all time) Default: 30. |
-| `--weekly` | Report context cost and turn time by week since 2026-09-30 Default: false. |
-| `--binds` | Compare Task and Wave usage under prospective and post-hoc bind attribution Default: false. |
-| `--parent` | Inputs issued by this Session or retained capture |
-| `--wave` | Limit to Session inputs attributed to one Wave |
-| `--project` | Limit to Session inputs attributed to one Project |
-| `--task` | Limit to Session inputs attributed to one Task |
-| `--context` | Break each step's submitted input down by source, flagged against budgets Default: false. |
-| `--help / -h` | Print help |
-
-## lf history replay
-
-Launch a new execution from an immutable captured provider request
-
-| Argument | What it does |
-|---|---|
-| `<run>` | Captured input identity or an unambiguous displayed prefix |
-| `--help / -h` | Print help |
-
-## lf history export
-
-Write this Machine's Sessions, Processes and captures as JSON lines, for the Machine that copies them before giving this one back
-
-| Argument | What it does |
-|---|---|
-| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start |
-| `--help / -h` | Print help |
-
-## lf graph
-
-Run or inspect authored graphs
+Manage working notes
 
 | Argument | What it does |
 |---|---|
 | `--help / -h` | Print help |
 
-## lf graph list
+## lf scratch clear
 
-List authored graphs, or Graphs that ran
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--processes` | List or show Graphs that ran, from their Processes, instead of reusable templates Default: false. |
-| `--all` | Include every repository and graphs with unknown repository evidence Default: false. |
-| `--limit` | Page size (default 100) |
-| `--after` | Previous page's next identity; retain the same filters |
-| `--search` | Literal name or identity containment |
-| `--state` | state |
-| `--for-task` | Retained Task ID or issue identifier, including completed Tasks |
-| `--for-wave` | Retained Wave ID or name |
-| `--taskless` | taskless Default: false. |
-| `--help / -h` | Print help |
-
-## lf graph show
-
-Inspect an authored graph, or one that ran
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
-| `--json` | json Default: false. |
-| `--processes` | processes Default: false. |
-| `--help / -h` | Print help |
-
-## lf graph customize
-
-Print the repository file that defines a Graph, creating it from the builtin when the repository has none
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
-| `--help / -h` | Print help |
-
-## lf graph route
-
-Run the slice of the Task's graph its current route names; `lf task run` starts it
+Remove scratch files added in this branch's diff, keeping existing files and edits
 
 | Argument | What it does |
 |---|---|
 | `--help / -h` | Print help |
 
-## lf skill
+## lf discord
 
-Run a skill explicitly
+Bridge new Discord messages to finite Wave Sessions
 
 | Argument | What it does |
 |---|---|
 | `--help / -h` | Print help |
 
-## lf skill customize
+## lf discord serve
 
-Print the repository file that defines a skill, creating it from the builtin when the repository has none
+Poll a configured channel and post each Session's final answer
 
 | Argument | What it does |
 |---|---|
-| `<name>` | name |
+| `<wave>` | wave |
 | `--help / -h` | Print help |

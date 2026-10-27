@@ -429,16 +429,15 @@ pub enum ScratchCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Create and use an offline, isolated development data clone (macOS)
-    Clone {
+    /// Concrete work and Task lifecycle
+    Task {
         #[command(subcommand)]
-        cmd: crate::data_clone::CloneCommand,
+        cmd: TaskCommand,
     },
-    /// Software delivery and the environment work runs in: PRs, CI, releases,
-    /// commits, worktrees, Machines and provider accounts
-    Ops {
+    /// Manage Wave identity and planning
+    Wave {
         #[command(subcommand)]
-        cmd: OpsCommand,
+        cmd: WaveCommand,
     },
     /// Ship the Task: run every remaining step to merge and completion, standing in at each stage
     ///
@@ -458,12 +457,45 @@ pub enum Commands {
         #[arg(long)]
         stop: bool,
     },
-    /// Manage working notes
-    Scratch {
+    /// Inspect and continue Sessions
+    Session {
         #[command(subcommand)]
-        cmd: ScratchCommand,
+        cmd: SessionCommand,
     },
-
+    /// Open Work's conversation in Desktop, this cmux/Herdr host or a terminal
+    Open(commands::open::OpenArgs),
+    /// Run an inline prompt
+    #[command(name = ":")]
+    Inline {
+        #[arg(trailing_var_arg = true)]
+        prompt: Vec<String>,
+    },
+    /// Run or inspect authored graphs
+    Graph {
+        #[command(subcommand)]
+        cmd: GraphCommand,
+    },
+    /// Run a skill explicitly
+    Skill {
+        #[command(subcommand)]
+        cmd: SkillCommand,
+    },
+    /// Read durable Work history, recorded commands and provider usage
+    #[command(args_conflicts_with_subcommands = true)]
+    History {
+        #[command(flatten)]
+        feed: commands::history::HistoryFeed,
+        #[command(subcommand)]
+        cmd: Option<commands::history::HistoryCommand>,
+    },
+    /// Select Work and control Loopflow Desktop panes
+    #[command(
+        after_help = "Targets: root --task/--wave set the base view; -p names a part of it (shell:2, a tile 3 or LOO-519, LOO-519/shell:2); --window picks the window. Each part resolves by full ID, case-insensitive label, 1-based position, then ID suffix. Without them a command acts on the terminal it runs in. Scripts should pass the IDs receipts return; positions are for people.\n\nExit status: 0 success, 1 failure, 2 bad arguments, expression or verb arguments, 3 missing or ambiguous Task, window, pane or tab (nothing changed), 4 Desktop unreachable (not running, not macOS, or not answering its socket), 130 interrupted."
+    )]
+    Desktop {
+        #[command(subcommand)]
+        cmd: DesktopCommand,
+    },
     /// Show waiting, blocked, active, and finished work with next actions
     #[command(args_conflicts_with_subcommands = true)]
     Monitor {
@@ -474,6 +506,61 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: Option<commands::monitor::MonitorCommand>,
     },
+    /// Software delivery and the environment work runs in: PRs, CI, releases,
+    /// commits, worktrees, Machines and provider accounts
+    Ops {
+        #[command(subcommand)]
+        cmd: OpsCommand,
+    },
+    /// Read Loopflow configuration
+    Config {
+        #[command(subcommand)]
+        cmd: ConfigCommand,
+    },
+    /// Manage the installed Loopflow release and exported skills
+    #[command(name = "self")]
+    Self_ {
+        #[command(subcommand)]
+        cmd: SelfCommand,
+    },
+    /// Discover commands, skills, and graphs
+    List {
+        path: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Explain a command, skill, or graph without launching it
+    Help {
+        path: Vec<String>,
+        #[arg(long)]
+        all: bool,
+        /// Describe installed command arguments and available result schemas
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show memory and scratch size targets, their sources, and current usage
+    Context {
+        #[arg(long)]
+        json: bool,
+        /// Inspect a Wave's local authored context
+        #[arg(long, conflicts_with = "task")]
+        wave: Option<String>,
+        /// Inspect a Task's checkout and Wave context
+        #[arg(long)]
+        task: Option<String>,
+    },
+    /// Create and use an offline, isolated development data clone (macOS)
+    Clone {
+        #[command(subcommand)]
+        cmd: crate::data_clone::CloneCommand,
+    },
+    /// Select repositories for the Machine-local portfolio
+    Portfolio {
+        #[command(subcommand)]
+        cmd: Option<crate::portfolio::PortfolioCommand>,
+        #[arg(long, global = true, id = "portfolio_json")]
+        json: bool,
+    },
     /// Report Loopflow's disk footprint; `clean` and `rotate` reclaim it
     #[command(args_conflicts_with_subcommands = true)]
     Disk {
@@ -482,11 +569,15 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: Option<commands::disk::DiskCommand>,
     },
-    /// Run an inline prompt
-    #[command(name = ":")]
-    Inline {
-        #[arg(trailing_var_arg = true)]
-        prompt: Vec<String>,
+    /// Manage working notes
+    Scratch {
+        #[command(subcommand)]
+        cmd: ScratchCommand,
+    },
+    /// Bridge new Discord messages to finite Wave Sessions
+    Discord {
+        #[command(subcommand)]
+        cmd: DiscordCommand,
     },
     /// Internal provider turn-boundary hook: context at startup and compaction,
     /// steers at tool and prompt boundaries, Linear acquisition at turn end,
@@ -506,98 +597,6 @@ pub enum Commands {
         lifeline: Option<std::path::PathBuf>,
         #[arg(long, requires = "lifeline")]
         provider_pid: Option<u32>,
-    },
-    /// Inspect and continue Sessions
-    Session {
-        #[command(subcommand)]
-        cmd: SessionCommand,
-    },
-    /// Manage the installed Loopflow release and exported skills
-    #[command(name = "self")]
-    Self_ {
-        #[command(subcommand)]
-        cmd: SelfCommand,
-    },
-    /// Select repositories for the Machine-local portfolio
-    Portfolio {
-        #[command(subcommand)]
-        cmd: Option<crate::portfolio::PortfolioCommand>,
-        #[arg(long, global = true, id = "portfolio_json")]
-        json: bool,
-    },
-    /// Read Loopflow configuration
-    Config {
-        #[command(subcommand)]
-        cmd: ConfigCommand,
-    },
-    /// Open Work's conversation in Desktop, this cmux/Herdr host or a terminal
-    Open(commands::open::OpenArgs),
-    /// Select Work and control Loopflow Desktop panes
-    #[command(
-        after_help = "Targets: root --task/--wave set the base view; -p names a part of it (shell:2, a tile 3 or LOO-519, LOO-519/shell:2); --window picks the window. Each part resolves by full ID, case-insensitive label, 1-based position, then ID suffix. Without them a command acts on the terminal it runs in. Scripts should pass the IDs receipts return; positions are for people.\n\nExit status: 0 success, 1 failure, 2 bad arguments, expression or verb arguments, 3 missing or ambiguous Task, window, pane or tab (nothing changed), 4 Desktop unreachable (not running, not macOS, or not answering its socket), 130 interrupted."
-    )]
-    Desktop {
-        #[command(subcommand)]
-        cmd: DesktopCommand,
-    },
-    /// Bridge new Discord messages to finite Wave Sessions
-    Discord {
-        #[command(subcommand)]
-        cmd: DiscordCommand,
-    },
-    /// Manage Wave identity and planning
-    Wave {
-        #[command(subcommand)]
-        cmd: WaveCommand,
-    },
-    /// Concrete work and Task lifecycle
-    Task {
-        #[command(subcommand)]
-        cmd: TaskCommand,
-    },
-    /// Show memory and scratch size targets, their sources, and current usage
-    Context {
-        #[arg(long)]
-        json: bool,
-        /// Inspect a Wave's local authored context
-        #[arg(long, conflicts_with = "task")]
-        wave: Option<String>,
-        /// Inspect a Task's checkout and Wave context
-        #[arg(long)]
-        task: Option<String>,
-    },
-    /// Discover commands, skills, and graphs
-    List {
-        path: Vec<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Explain a command, skill, or graph without launching it
-    Help {
-        path: Vec<String>,
-        #[arg(long)]
-        all: bool,
-        /// Describe installed command arguments and available result schemas
-        #[arg(long)]
-        json: bool,
-    },
-    /// Read durable Work history, recorded commands and provider usage
-    #[command(args_conflicts_with_subcommands = true)]
-    History {
-        #[command(flatten)]
-        feed: commands::history::HistoryFeed,
-        #[command(subcommand)]
-        cmd: Option<commands::history::HistoryCommand>,
-    },
-    /// Run or inspect authored graphs
-    Graph {
-        #[command(subcommand)]
-        cmd: GraphCommand,
-    },
-    /// Run a skill explicitly
-    Skill {
-        #[command(subcommand)]
-        cmd: SkillCommand,
     },
     /// External: skill/graph name (when no subcommand matches)
     #[command(external_subcommand)]

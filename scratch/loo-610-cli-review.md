@@ -692,7 +692,7 @@ control, `history replay`) and the not-yet-reviewed roots `clone`,
 Checked the compiled root against the accepted direction ("organize the API by
 the product's pillars"; root shows core concepts and essential verbs).
 
-**Next implement direction: order root help by pillar.** `lf --help` lists
+**Built: root help ordered by pillar.** `lf --help` lists
 commands in `Commands` enum order (`lf/mod.rs:431`, rendered by
 `navigation.rs:430`), so a recruit's first screen reads `clone ops ship
 scratch monitor disk : session …` with `task` and `wave` near the end. Reorder
@@ -700,8 +700,8 @@ the enum (and so the generated reference) as: Work `task wave ship` · Sessions
 `session open :` · Orchestration `graph skill` · Telemetry `history` ·
 Surfaces `desktop monitor` · `ops` · `config self list help context` · then the
 not-yet-reviewed `clone portfolio disk scratch discord`. No names or paths
-change; regenerate `docs/lf-reference.md`; `documented_commands` and the
-reference test are the proof.
+change; `docs/lf-reference.md` regenerated. Check: `documented_commands` 4/4
+and `reference_matches_the_compiled_cli` pass; `lf --help` lists `task wave` first.
 
 Considered and left: `lf ship` → `lf task ship`. It is a Task verb, but main
 (#1652) chose the root deliberately, `lf ship` would still resolve by elision,

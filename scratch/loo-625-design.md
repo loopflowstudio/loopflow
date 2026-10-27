@@ -124,7 +124,9 @@ tests, docs and skills moved.
   `--wave` scopes it, no `--wave` is the repository, `--global` every repository, store
   only. `global` has two writers for `agent`/`skill_agents` (`~/.lf/config.yaml` and
   `lf set --global`, the store value above the file), both reported `global`; kept as
-  `questions.md` records, not a product block.
+  `questions.md` records, not a product block. Its one doc defect, `release/CRON_HOST.md`
+  teaching `lf machine use`, now reads `lf set machine mini --wave infrastructure`
+  (2e16d1c224); only immutable release notes still name the deleted forms.
 - Concept review: one source vocabulary. `task_workflow_default` returns `SetupSource`;
   Task JSON, `lf wave status` and the missing-Workflow error say
   `task | personal | wave | repo | global | default`. Swift keeps `String?`.

@@ -336,6 +336,9 @@ Realign (2026-10-26): v0.14.17 (main 8ad349a841, merged) added
 its index in the draft, and a shipped-Task case in `forget_tests`. The draft now
 builds on the 0.14.17 release batch. Any later column that references
 `processes` must join `FORGETTABLE` in the same change.
+Realign (2026-10-27): origin/main has nothing past base 66ad233139; every
+`processes` reference in the migrations (renamed `flow_lf_process_id` →
+`graph_lf_process_id` included) is in `FORGETTABLE`. Plan and code agree.
 
 Compress (2026-10-27): journal tests reuse `RunningParent`; clippy clean, `--lib journal` 30 ok.
 Check (2026-10-27, after merge of main): `--lib -- processes retention` 26 ok, `linear_on_demand_native_hooks_share_freshness_across_processes` hit its 5 s deadline at load 66 and passed alone.

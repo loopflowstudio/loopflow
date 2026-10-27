@@ -345,38 +345,34 @@ mod tests {
             .unwrap();
         let (started, starting) = std::sync::mpsc::channel();
         let (finished, finishing) = std::sync::mpsc::channel();
+        let resumer = store.test_lf_process();
         std::thread::scope(|scope| {
             let next = store
-                .resume_session_attachment(
-                    "resume",
-                    Some(&detached),
-                    &store.test_lf_process(),
-                    || {
-                        let store = &store;
-                        let expected = &detached;
-                        scope.spawn(move || {
-                            started.send(()).unwrap();
-                            let result = store.claim_session_attachment(
-                                "resume",
-                                Some(expected),
-                                &LfProcessId::new(),
-                                false,
-                            );
-                            finished.send(result).unwrap();
-                        });
-                        starting.recv().unwrap();
-                        assert!(matches!(
-                            finishing.recv_timeout(std::time::Duration::from_millis(100)),
-                            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-                        ));
-                        // Other SQLite reads/writes remain available during provider I/O.
-                        assert_eq!(
-                            store.session_attachment("resume").unwrap(),
-                            Some(detached.clone())
+                .resume_session_attachment("resume", Some(&detached), &resumer, || {
+                    let store = &store;
+                    let expected = &detached;
+                    scope.spawn(move || {
+                        started.send(()).unwrap();
+                        let result = store.claim_session_attachment(
+                            "resume",
+                            Some(expected),
+                            &LfProcessId::new(),
+                            false,
                         );
-                        Ok(true)
-                    },
-                )
+                        finished.send(result).unwrap();
+                    });
+                    starting.recv().unwrap();
+                    assert!(matches!(
+                        finishing.recv_timeout(std::time::Duration::from_millis(100)),
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                    ));
+                    // Other SQLite reads/writes remain available during provider I/O.
+                    assert_eq!(
+                        store.session_attachment("resume").unwrap(),
+                        Some(detached.clone())
+                    );
+                    Ok(true)
+                })
                 .unwrap();
             assert!(finishing
                 .recv_timeout(std::time::Duration::from_secs(5))

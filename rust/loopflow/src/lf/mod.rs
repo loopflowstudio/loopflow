@@ -1169,17 +1169,10 @@ pub enum SessionCommand {
         #[arg(long, requires = "prepare")]
         json: bool,
     },
-    /// Save a steer for this Session, or with --repo for the repository's Sessions,
-    /// without starting a turn
+    /// Save a steer for this Session, or without one for the current Wave's or
+    /// repository's Sessions, without starting a turn
     #[command(allow_missing_positional = true)]
-    Steer {
-        #[arg(required_unless_present = "repo_steer", conflicts_with = "repo_steer")]
-        id: Option<String>,
-        message: String,
-        /// Steer the current repository's Sessions
-        #[arg(long = "repo", id = "repo_steer")]
-        repo: bool,
-    },
+    Steer { id: Option<String>, message: String },
     /// Inspect steer delivery or retry delivery
     Steers {
         id: String,
@@ -1330,13 +1323,6 @@ pub enum WaveCommand {
         description: Option<String>,
     },
 
-    /// Save a steer for associated Sessions without starting a turn
-    Comment {
-        wave: String,
-        message: String,
-        #[arg(long, required = true)]
-        steer: bool,
-    },
     /// Rotate this Wave, or every Wave with --all, to the named Project plan
     #[command(allow_missing_positional = true)]
     NewChapter {

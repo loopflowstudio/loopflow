@@ -880,8 +880,8 @@ converges independently; there is no cross-system atomic switch.
 
 ```bash
 lf comment INF-123 "keep the public name" --steer
-lf wave comment infrastructure "preserve native history" --steer
-lf session steer --repo "retain source attribution"
+lf --wave infrastructure session steer "preserve native history"
+lf session steer "retain source attribution"
 lf session steer SESSION "inspect the last failure"
 lf session steers SESSION --json --limit 32
 lf session steers SESSION --after 42 --json

@@ -984,13 +984,12 @@ Attach to the current execution without restarting or submitting input
 
 ## lf session steer
 
-Save a steer for this Session, or with --repo for the repository's Sessions, without starting a turn
+Save a steer for this Session, or without one for the current Wave's or repository's Sessions, without starting a turn
 
 | Argument | What it does |
 |---|---|
 | `<id>` | id |
 | `<message>` | message |
-| `--repo` | Steer the current repository's Sessions Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session steers
@@ -1773,17 +1772,6 @@ Edit the selected chapter's name or summary
 | `--name` | name |
 | `--summary` | summary |
 | `--description` | Authored chapter prose |
-| `--help / -h` | Print help |
-
-## lf wave comment
-
-Save a steer for associated Sessions without starting a turn
-
-| Argument | What it does |
-|---|---|
-| `<wave>` | wave |
-| `<message>` | message |
-| `--steer` | steer Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave new-chapter

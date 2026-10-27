@@ -72,8 +72,8 @@ tool call), not a summary.
 
 ```bash
 lf steer <session> "use the existing retry helper"   # saved; delivered at its next boundary
-lf steer --repo "freeze merges until 3pm"            # every Session in this repository
-lf wave comment billing "invoices before refunds"    # every Session on the Wave
+lf steer "freeze merges until 3pm"                   # every Session in this repository
+lf --wave billing steer "invoices before refunds"    # every Session on the Wave
 lf session steers <session>                          # was it delivered?
 ```
 

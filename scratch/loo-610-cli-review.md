@@ -671,14 +671,14 @@ It edits `lf/mod.rs` (`OndemandCommand` args), `bin/lf.rs`, `machine*.rs`,
 the `ops machine ondemand` tree. The README's rental row names no provider until
 Daytona/Modal land; then it names them.
 
-## Concept review in the Graph: one steer verb (2026-10-26, next implement)
+## Concept review in the Graph: one steer verb (2026-10-26, built)
 
 Walk: Jack wants to redirect every Session working in a scope. Today the verb
 depends on the scope:
 
 ```
 lf session steer SESSION "…"            # one Session
-lf session steer --repo "…"             # this slice: the repository's Sessions
+lf session steer --repo "…"             # was: the repository's Sessions
 lf wave comment WAVE "…" --steer        # a Wave's Sessions; --steer is required
 lf task comment ISSUE "…" [--steer]     # publishes to the Task's thread
 ```
@@ -727,3 +727,6 @@ control, `history replay`) and the not-yet-reviewed roots `clone`,
 - Merge with main `e636ab6397` (#1652) and docs port (`964b288617`): no tests
   run since the merge; the generated reference shows `ship`, `ops ci` (no
   `watch`) and `task defer`. Gate owes integration, lib, clippy, Swift.
+- Steer verb built: `session_steers`, `global_commands` 45/45,
+  `documented_commands`, reference regenerated, clippy clean. Gate still owes
+  integration, lib and Swift.

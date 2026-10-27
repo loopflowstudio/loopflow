@@ -26,7 +26,7 @@ public enum WorkObservationError: Error, Sendable {
 }
 
 /// The Work whose activity is shown: `lf history`'s filters.
-public struct WorkActivityScope: Decodable, Equatable, Sendable {
+public struct WorkActivityScope: Equatable, Sendable {
     public let wave: String?
     public let project: String?
     public let task: String?
@@ -124,7 +124,7 @@ public struct WorkFrame: Sendable {
         public let waves: [WaveSnapshot]
     }
 
-    public struct PeerPlanning: Decodable, Sendable {
+    public struct PeerPlanning: Sendable {
         public let repo: String
         public let destinations: [PeerPlanningStatus]
     }
@@ -281,12 +281,13 @@ public struct WorkFrame: Sendable {
             let read = try envelope(RoadmapSnapshot.self)
             guard let roadmap = read.body else { return frame(read, .planning(nil)) }
             let waves = roadmap.waves.map(\.wave).sorted { ($0.repo, $0.name) < ($1.repo, $1.name) }
-            let rows = ((try body() as? [String: Any])?["waves"] as? [[String: Any]] ?? [])
+            let raw = try body()
+            let rows = ((raw as? [String: Any])?["waves"] as? [[String: Any]] ?? [])
                 .compactMap { $0["wave"] as? [String: Any] }
                 .sorted { ($0["repo"] as? String ?? "", $0["name"] as? String ?? "")
                     < ($1["repo"] as? String ?? "", $1["name"] as? String ?? "") }
             return frame(read, .planning(Planning(roadmap: roadmap, waves: waves)),
-                         wire: Wire(roadmap: text(try body()), waves: text(rows), sessionPage: nil))
+                         wire: Wire(roadmap: text(raw), waves: text(rows), sessionPage: nil))
         case .selections:
             let read = try envelope([WorkViewPlan].self)
             return frame(read, .selections(read.body))

@@ -36,14 +36,9 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
                 ..super::watch::Watched::every(super::watch::ACTIVITY_CLOCK)
             },
             |store, ()| {
-                let snapshot = match store {
-                    Some(store) => Ok(crate::session_record::active::snapshot(
-                        &home,
-                        &store.sqlite,
-                        task.clone(),
-                    )),
-                    None => Err(anyhow!("no Loopflow store exists on this Machine")),
-                };
+                let snapshot = super::watch::require_store(store).map(|store| {
+                    crate::session_record::active::snapshot(&home, &store.sqlite, task.clone())
+                });
                 async move { snapshot }
             },
         );

@@ -143,32 +143,32 @@ CPU: a descendant still held its stdin open, which was the only stop signal.
 
 ## Plan per read
 
-Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
+Scope: M machine, R repo, W wave, T task. Rows already on a `--watch` are done
+unless "Work needed" says otherwise.
 
-| Read | Answers | Desktop caller / cadence | Scope | Place in the API | Work needed |
-|---|---|---|---|---|---|
-| planning (`wave show --all`, `wave list --all --current`) | roadmap, current Waves, Dashboard plans | stream | M | `lf task list --watch` + Wave fields | open Tasks only, batched details and Graphs (done); `--watch` |
-| sessions (`session list --page`) | Session rows | stream (headless: false) | R | part | page or diff; drop 2 s blind clock once liveness is a signal |
-| task (`task status`) | TaskOverview, Graph processes, comments | stream | T | `lf task status <id> --watch` | 5k statements, 20 connections (Remaining 5) |
-| task_history | TaskWork diagnostics | stream, on request | T | deleted | duplicate of `task status`'s `task_work` |
-| wave (`wave status`) | Wave detail | stream | W | `lf task list --wave W --watch` + Wave fields | details batched (done); rows become `RoadmapTask` |
-| work_activity (`history`) | 7-day activity | stream | W/P/T | `lf history --since --watch` | Session records only (done); `--watch` |
-| activity (`monitor top --json`) | live call trees | stream | M | `lf monitor top --json --watch` (done) | shrinks with LOO-615 |
-| peer_planning (`planning status`) | sync receipts | stream | R | per-Task `task.sync` on rows; repo read on open | |
-| `wave status` ×N | Wave Projects | WavesView, every planning frame | W | deleted (this change) | |
-| `wave status` per Wave | historical Project lookup | `openHistoricalReference`, user action | W | stream `wave` or a Project lookup | check historical Projects are in roadmap |
-| `task comment` | comments | TaskCommentsView on appear | T | stream `task.comments` | delete |
-| `wave list --all --current` | Waves | before first frame; after createWave | M | stream `planning.waves` | delete once a checkpoint covers createWave |
-| `desktop view --plan` | ad-hoc view plan | every planning frame while a `.view` is open | R | `planning.selections` for ad-hoc expressions | add expression to scope |
-| `wave workflow list` | Workflow catalog | every frame whose planning revision moved | R | new part (catalog) | |
-| `graph list` | Graph catalog | palette, didBecomeActive | R | new part (catalog) | |
-| `portfolio`, `machine id`, `machine list` | Machines, repositories | didBecomeActive, appear | M | new part (machine) | |
-| `graph list/show --for-task` | Graph logs | non-window or remote Tasks | T | stream `task` for the window Task | remote keeps one-shot |
-| `task file/diff/changes`, `task location`, `repo identity` | checkout content | file events, user action | T | explicit reads (content, not state) | 379k + 165k Process rows: LOO-615 |
-| `usage`, `repo tokens`, `doctor` | telemetry | Telemetry view on open | M/R | explicit reads | |
-| `usage --task [--context]` | per-Task usage | expand | T | explicit; transcript parts → LOO-614 | |
+| Read | Desktop caller / cadence | Scope | Work needed |
+|---|---|---|---|
+| `wave show --all` | watch | M | Waves and Projects ride the plan |
+| `session list` | watch | R | page or diff (Remaining 2) |
+| `task status <id>` | watch | T | 5k statements, 20 connections (Remaining 3) |
+| `wave status <id>` | watch | W | becomes `task list --wave W` + Wave fields (Remaining 1) |
+| `history --since 7d` | watch | W/P/T | |
+| `monitor top` | watch | M | shrinks with LOO-615 |
+| `planning status` | watch | R | holds the repository's planning sync |
+| `desktop plans` | watch | R | |
+| `wave status` per Wave | `openHistoricalReference`, user action | W | check historical Projects are in the plan |
+| `task comment` | TaskCommentsView on appear | T | delete; comments arrive with `task status` |
+| `wave list --all --current` | before first frame; after createWave | M | delete once a checkpoint covers createWave |
+| `desktop view --plan` | each planning frame while a `.view` is open | R | ad-hoc expression in `desktop plans` args |
+| `wave workflow list`, `graph list` | frames whose planning moved; palette | R | catalog watch (Remaining 4) |
+| `portfolio`, `machine id/list` | didBecomeActive, appear | M | machine watch (Remaining 4) |
+| `graph list/show --for-task` | non-window or remote Tasks | T | remote keeps one-shot |
+| `task file/diff/changes`, `task location`, `repo identity` | file events, user action | T | explicit reads; Process rows → LOO-615 |
+| `usage`, `repo tokens`, `doctor`, `usage --task` | Telemetry, expand | M/R/T | explicit; transcripts → LOO-614 |
 
 ## Remaining work
+
+The 2026-10-26 pass's (a)–(d) are done except Wave detail (1); 2–4 follow it.
 
 1. Wave detail as `RoadmapTask` rows (`lf task list --wave W --watch`) plus the
    Wave's own fields; closed pages switch from `wave status` rows to
@@ -203,4 +203,5 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
 ## Check results
 
 - Earlier slices (open-Task scope, batching, `task list [query]`, `--watch` on task/session list, task status, monitor top): passed; detail in git history of this file (515ed2f3bf).
-- This pass: `cargo clippy --all-targets -- -D warnings` clean; `--lib -- watch:: lf::commands::watch planning_failure_keeps ordinary_task_comments_and_completion revisions program_status` passed; `--test integration -- watch_frames_carry composed_lifecycle task_status_ reference_matches_the_compiled_cli planning_foreground documented task_list_watch task_list_query world_recipes active_runs_watch` passed (reference regenerated); `scripts/test_desktop.sh --filter 'DTOFixtureTests|RegistryQueryTests|WorkObservationTransportTests|WorkModelTests|WorkSelectionTests|DesktopHeadlessTests|TaskHistoryFilterTests'` 130 passed, then `WorkObservationTransportTests` 9 passed with the checkpoint test. Linux-only `planning_reconnect` e2e (watch mode ported to `planning status --watch`): CI.
+- Pass b6772c9e3d (monitor deletion): clippy clean; watch lib/integration tests, reference, Desktop suites (130) passed; Linux `planning_reconnect` e2e: CI.
+- Compress: `cargo clippy --all-targets -- -D warnings` clean; `--test integration -- watch active_runs` 6 passed; `test_desktop.sh --filter 'DTOFixtureTests|WorkObservationTransportTests|WorkModelTests'` 89 passed.

@@ -104,6 +104,11 @@ impl Watched {
     }
 }
 
+/// The store a read needs, or why the watch has none to read.
+pub(crate) fn require_store(store: Option<SharedStore>) -> Result<SharedStore> {
+    store.ok_or_else(|| anyhow::anyhow!("no Loopflow store exists on this Machine"))
+}
+
 /// Whether a commit that moved revisions from `old` to `new` can change a result.
 fn changed(old: StoreRevisions, new: StoreRevisions) -> bool {
     StoreRevisions { usage: 0, ..old } != StoreRevisions { usage: 0, ..new }

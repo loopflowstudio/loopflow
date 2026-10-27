@@ -635,8 +635,7 @@ pub fn watch_status(wave: Option<String>) -> Result<()> {
         |store, ()| {
             let wave = wave.clone();
             async move {
-                let store =
-                    store.ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
+                let store = super::watch::require_store(store)?;
                 let wave = resolve_status_wave(&store, wave.as_deref()).await?;
                 wave_detail(&store, &wave).await
             }
@@ -865,8 +864,7 @@ pub fn watch_task_status(repo: &Path, issue: String) -> Result<()> {
         |store, args| {
             let repo = repo.to_owned();
             async move {
-                let store =
-                    store.ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
+                let store = super::watch::require_store(store)?;
                 Ok(crate::ops::task::read_task_status(&store, &repo, &args.issue).await?)
             }
         },

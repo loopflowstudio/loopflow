@@ -3,7 +3,9 @@
 Status: implementing; core rebuilt (watches, open-Task scope, batched details,
 live reads). Jack Heart (2026-10-27) asked to finish the design and publish the
 PR; Remaining 1–5 continue after it. Client API docs done (surfaces "Build
-your own view" is the watch list); next: publish the PR. Jack Heart requested the Task;
+your own view" is the watch list); published as PR #1719 (2026-10-27).
+`lf repo planning status --help` resolves but execution routes `repo` to
+`lf config repository` (navigation mismatch, from #1708; not this PR). Jack Heart requested the Task;
 his LOO-602 steer (same day) sets the data the API reads: a facts-only store
 (LOO-611 Session facts + one usage record per turn, LOO-612 ProviderFact,
 LOO-615 Process rows deleted at exit unless referenced). Transcript reads
@@ -43,6 +45,18 @@ to store queries.
   read, `lf task list --done --wave W --since <7d|RFC3339>`, bounded and
   indexed. Both branches touch TaskHistoryFilter(.swift/Tests) and
   DTOFixtureTests: keep one filter; whichever lands second rebases.
+
+- Jack Heart, 2026-10-27: Task reads (`lf task list`, `lf task status`,
+  Task rows in `wave show`/`wave status`) are about Tasks and say each fact
+  once: id, identifier, title, wave, project, one `state` (TaskState), one
+  reason, workflow (name, stage), pr, next command. Presentation (sections,
+  condition, controls, planning internals) belongs to `lf desktop …`, which
+  may combine reads. `lf task status` = that row plus Sessions, Graph
+  processes and comments, each once; null for missing values; RFC 3339 times.
+  `lf task list --state` takes TaskState labels.
+- Jack Heart, 2026-10-27: a watch frame is `{answers, unavailable, body}`;
+  `revisions`, `home` and `copy` leave it. Which build and store a client
+  reads comes from elsewhere (`lf --version`).
 
 ## Direction
 
@@ -201,6 +215,15 @@ unless "Work needed" says otherwise.
 | `usage`, `repo tokens`, `doctor`, `usage --task` | Telemetry, expand | M/R/T | explicit; transcripts → LOO-614 |
 
 ## Remaining work
+
+0. Minimal streamed JSON (Jack Heart, 2026-10-27), in slices:
+   a. frame `{answers, unavailable, body}`; `lf --version` names a preview
+      copy; Desktop takes Machine identity from `machine id`, the copy from
+      `--version`, and reloads the workflow catalog on planning frames.
+   b. `lf task list --state` takes TaskState labels.
+   c. One Task row (`TaskRow`) for Task reads; Desktop's rich shapes move to
+      `lf desktop plan|wave|done|task` unchanged, so Swift changes are argv.
+   d. `lf task status` = row + sessions + graph processes + comments.
 
 1. Sessions: incremental or paged rows instead of 5.7 MB per reading; a quiet
    Session turns Waiting on the 2 s clock (`next_quiet_available` is gone).

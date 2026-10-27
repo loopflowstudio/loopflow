@@ -76,9 +76,9 @@ and changes nothing.
   writes an entry whose comment marker `ingest_marker_in` already reads on other
   Machines. Carrying that marker in the move lets the target ingest it
   immediately instead of waiting on planning sync.
-- **`--machine` is pure transport today.** `lf --machine mini resume --task X`
-  forwards to mini, where the Task still routes to the laptop and fails
-  ("resolves to Machine … on the destination"). Nothing to keep compatible.
+- **`--machine` was pure transport.** Before this Task, `lf --machine mini resume --task X`
+  forwarded to mini, where the Task still routed to the laptop and failed.
+  Nothing to keep compatible; it now runs the Task move first.
 - **`lf session list` shows no account.** `SessionRecord` has `provider` and
   `workspace.machine_id` but no account; the account acceptance needs one field.
 - LOO-618 (takeover by default) has not landed: `--takeover` is still opt-in. A
@@ -409,4 +409,4 @@ second Task-to-Machine implementation beside `relay_task` (`lf --machine M resum
   (verifies the Codex cross-account risk), then `lf task move` laptop → mini
   with a real Task and keep talking to it there.
 
-Check results: 2026-10-27 — cargo fmt --check, `cargo clippy --all-targets -- -D warnings`, `--test integration machine_commands` (36 pass, incl. all nine move tests), `reference_matches_the_compiled_cli` (rerun after the resume help): pass. Demo (real logins, laptop → mini) remains.
+Check results: 2026-10-27 (after f7d82445ea) — cargo fmt --check, `cargo clippy --all-targets -- -D warnings`, `--test integration machine_commands` (37 pass, incl. resume_task_on_another_machine_moves_the_task_there): pass. Demo (real logins, laptop → mini) remains with the demo step.

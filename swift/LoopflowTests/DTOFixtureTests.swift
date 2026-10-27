@@ -880,7 +880,7 @@ struct DTOFixtureTests {
     func watchFramesDecode() throws {
         let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("watch_frames.json"))
             as? [[String: Any]])
-        let scope = WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1", wave: nil,
+        let scope = WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1",
                               activity: WorkActivityScope(wave: nil, project: nil, task: "LOO-1"))
         let lines = try entries.map { try JSONSerialization.data(withJSONObject: try #require($0["frame"])) }
         let parts = try entries.map { try #require(WorkPart(rawValue: $0["part"] as? String ?? "")) }
@@ -1027,7 +1027,7 @@ struct TaskLifecycleCapture {
         let line: [String: Any] = ["answers": NSNull(), "home": "/home", "copy": NSNull(), "revisions": NSNull(),
                                    "unavailable": NSNull(), "body": status]
         let frame = try WorkFrame.decode(
-            part: .task, scope: WorkScope(repo: nil, headless: false, task: "FIX-1", wave: nil, activity: nil),
+            part: .task, scope: WorkScope(repo: nil, headless: false, task: "FIX-1", activity: nil),
             sequence: 1, line: JSONSerialization.data(withJSONObject: line))
         guard case .task(let part?) = frame.content else {
             throw CocoaError(.coderReadCorrupt)

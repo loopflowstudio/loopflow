@@ -30,7 +30,7 @@ struct WorkSelectionTests {
             as? [[String: Any]])
         let entry = try #require(entries.first { $0["part"] as? String == "selections" })
         let frame = try WorkFrame.decode(
-            part: .selections, scope: WorkScope(repo: "/repo", headless: false, task: nil, wave: nil, activity: nil),
+            part: .selections, scope: WorkScope(repo: "/repo", headless: false, task: nil, activity: nil),
             sequence: 1, line: JSONSerialization.data(withJSONObject: try #require(entry["frame"])))
         guard case .selections(let plans?) = frame.content else {
             Issue.record("Missing Dashboard plans"); return

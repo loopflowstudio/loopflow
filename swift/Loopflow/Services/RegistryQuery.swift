@@ -712,6 +712,10 @@ public struct WaveRoadmap: Sendable, Hashable {
     public let tasks: WorkEvidence<RoadmapTask>
     public let unavailableTasks: [UnavailableTaskEvidence]
 
+    public var workMap: WaveWorkMap {
+        WaveWorkMap(objective: wave.goal, projects: projects, tasks: tasks)
+    }
+
     enum CodingKeys: String, CodingKey {
         case projectReadiness = "project_readiness"
         case wave, projects, workflow

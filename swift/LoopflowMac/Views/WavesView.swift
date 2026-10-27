@@ -130,7 +130,6 @@ struct WavesView: View {
         }
         .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
         .onChange(of: selectedWave?.id, initial: true) { _, _ in
-            model.detailWaveId = selectedWave.flatMap { $0.isRegistered ? $0.id : nil }
             if let wave = selectedWave, wave.isRegistered {
                 model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave))
             }
@@ -374,7 +373,7 @@ struct WavesView: View {
             WaveDetailPane(
                 wave: wave,
                 repoPath: waveRepoPath(for: wave),
-                streamed: model.waveDetail,
+                streamed: wave.isRegistered ? model.waveDetail(id: wave.id) : nil,
                 isProjectActivationPending: model.isProjectActivationPending(id: wave.id),
                 transportError: model.projectCommandErrors[wave.id],
                 onActivateProject: { model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave)) },

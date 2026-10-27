@@ -59,8 +59,8 @@ Desktop (`WorkWatches`, `swift/Loopflow/Services/WorkObservation.swift`) runs pe
 window: `wave show --all` (plan; Waves derived from it), `desktop plans`
 (Dashboard plans), `planning status` (receipts; holds the repository's planning
 sync), `session list`, `task status <id>` (overview, Graph processes, comments,
-recorded work), `wave status <id>`, `history --since 7d --limit 50 [filters]`,
-`monitor top`. A scope change restarts watches whose argv/cwd changed and
+recorded work), `history --since 7d --limit 50 [filters]`, `monitor top`. Wave
+detail is the selected Wave's `WaveRoadmap` from the planning watch. A scope change restarts watches whose argv/cwd changed and
 replays the others' last frame answering the new id. A checkpoint confirms each
 running watch (or only `replay` parts) and follows once each answered with a
 reading begun after the request. Any watch ending ends the observation and the
@@ -146,6 +146,13 @@ CPU: a descendant still held its stdin open, which was the only stop signal.
   `directive` key no reader emitted; both are deleted with the per-reading
   steers statement and `durable::render_steers`. `closed_task_page.json` was
   stale after main's Auto-Ship merge (`human`, `completed`, no `ship_control`).
+- Wave detail: Desktop's `lf wave status <id>` watch is deleted (`WorkPart.wave`,
+  `WorkScope.wave`, `WavePart`, `detailWaveId`). The pane reads the selected
+  Wave's `WaveRoadmap` from `wave show --all`, which already carries readiness,
+  metrics, Projects, unavailable Tasks and its open Task rows; the snapshot's
+  `history` was never rendered and Session history has its own watch. The
+  detail lost only the PR `empty` probe, which Desktop decoded but never read.
+  `lf wave status [--watch]` stays an ordinary CLI read.
 
 ## Plan per read
 
@@ -155,9 +162,8 @@ unless "Work needed" says otherwise.
 | Read | Desktop caller / cadence | Scope | Work needed |
 |---|---|---|---|
 | `wave show --all` | watch | M | Waves and Projects ride the plan |
-| `session list` | watch | R | page or diff (Remaining 2) |
-| `task status <id>` | watch | T | 5k statements, 20 connections (Remaining 3) |
-| `wave status <id>` | watch | W | becomes `task list --wave W` + Wave fields (Remaining 1) |
+| `session list` | watch | R | page or diff (Remaining 1) |
+| `task status <id>` | watch | T | 5k statements, 20 connections (Remaining 2) |
 | `history --since 7d` | watch | W/P/T | |
 | `monitor top` | watch | M | shrinks with LOO-615 |
 | `planning status` | watch | R | holds the repository's planning sync |
@@ -166,41 +172,34 @@ unless "Work needed" says otherwise.
 | `task comment` | TaskCommentsView on appear | T | delete; comments arrive with `task status` |
 | `wave list --all --current` | before first frame; after createWave | M | delete once a checkpoint covers createWave |
 | `desktop view --plan` | each planning frame while a `.view` is open | R | ad-hoc expression in `desktop plans` args |
-| `wave workflow list`, `graph list` | frames whose planning moved; palette | R | catalog watch (Remaining 4) |
-| `portfolio`, `machine id/list` | didBecomeActive, appear | M | machine watch (Remaining 4) |
+| `wave workflow list`, `graph list` | frames whose planning moved; palette | R | catalog watch (Remaining 3) |
+| `portfolio`, `machine id/list` | didBecomeActive, appear | M | machine watch (Remaining 3) |
 | `graph list/show --for-task` | non-window or remote Tasks | T | remote keeps one-shot |
 | `task file/diff/changes`, `task location`, `repo identity` | file events, user action | T | explicit reads; Process rows → LOO-615 |
 | `usage`, `repo tokens`, `doctor`, `usage --task` | Telemetry, expand | M/R/T | explicit; transcripts → LOO-614 |
 
 ## Remaining work
 
-The 2026-10-26 pass's (a)–(d) are done except Wave detail (1); 2–4 follow it.
-
-1. Wave detail as `lf task list --wave W --watch` plus the Wave's own fields.
-   Rows are already `RoadmapTask`; what remains is that `WaveDetailSnapshot`
-   also carries readiness, metrics, unavailable Tasks and Session history,
-   which need their own reads first. Desktop watches `lf wave status <id>`
-   meanwhile.
-2. Sessions: incremental or paged rows instead of 5.7 MB per reading; a quiet
+1. Sessions: incremental or paged rows instead of 5.7 MB per reading; a quiet
    Session turns Waiting on the 2 s clock (`next_quiet_available` is gone).
-3. `lf task status`: 5k statements / 20 connections for one Task, now with
+2. `lf task status`: 5k statements / 20 connections for one Task, now with
    overview, Graph processes and comments, on a 2 s clock; reuse
    `TaskDetailFacts` and `GraphExecutionFacts`.
-4. Delete remaining Desktop duplicates; catalog and machine reads
+3. Delete remaining Desktop duplicates; catalog and machine reads
    (`wave workflow list`, `graph list`, `portfolio`, `machine id/list`).
-5. Known differences from the monitor: usage alone no longer refreshes Wave
+4. Known differences from the monitor: usage alone no longer refreshes Wave
    detail token totals (next change or 300 s clock); a store that cannot derive
    Task state fails `lf task status` too, so the Task pane keeps its last
    reading marked unavailable (the monitor read only `task_overview`); a
    confirmation re-reads each watch (the monitor replayed unchanged parts).
-6. Live p99 A/B with an installed build: gate/demo.
+5. Live p99 A/B with an installed build: gate/demo.
 
 ## Delete — do not maintain
 
 - Done: `RegistryQuery.plan/waves(repoPath:)/userName/taskFiles/repositoryWaves`,
   WavesView per-Wave `lf wave status`, `lf monitor work` and `work_watch.rs`,
   `session_watch.rs`, task_history part, `work_frame.json`, `LocalWorkObservation`'s
-  single reader.
+  single reader, Desktop's `wave status` watch.
 - Next: `taskComments` read (comments arrive with `task status`), `allWaves`
   after createWave, no-stream-only reads (`roadmap`, `sessionPage`,
   `peerPlanningStatus`, `workActivity`) if the one-shot transport is not kept
@@ -211,3 +210,4 @@ The 2026-10-26 pass's (a)–(d) are done except Wave detail (1); 2–4 follow it
 - Earlier slices (open-Task scope, batching, `task list [query]`, `--watch` on task/session list, task status, monitor top): passed; detail in git history of this file (515ed2f3bf).
 - Pass b6772c9e3d (monitor deletion): clippy clean; watch lib/integration tests, reference, Desktop suites (130) passed; Linux `planning_reconnect` e2e: CI.
 - One Task row: clippy clean; `--test integration dto_fixtures` 43 passed; `test_desktop.sh --filter 'DTOFixtureTests|WaveLensTests|RegistryQueryTests|TaskHistoryFilterTests|WaveDetailReadingTests|MockWaveFixtureTests'` 103 passed; waves lib tests: gate.
+- Wave detail from planning (Swift only): `test_desktop.sh --filter 'WaveDetailReadingTests|MockWaveFixtureTests|DTOFixtureTests|WorkObservationTransportTests|DesktopPerformanceTests|RegistryQueryTests|WorkModelTests|WorkSelectionTests'` 128 passed; UI capture: gate.

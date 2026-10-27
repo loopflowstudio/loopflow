@@ -37,10 +37,7 @@ struct MockWaveFixtureTests {
 
     @Test("the loading detail state withholds the snapshot and keeps the loading affordance")
     func loadingDetailState() {
-        let outcome = MockWaveFixture.detailReading(
-            waveName: MockWaveFixture.detailWaveName,
-            state: .loading
-        )
+        let outcome = MockWaveFixture.detailReading(state: .loading)
         #expect(outcome.reading.snapshot == nil)
         #expect(outcome.reading.errorMessage == nil)
         #expect(outcome.awaitingFirstRead)  // loading affordance stays on screen
@@ -48,10 +45,7 @@ struct MockWaveFixtureTests {
 
     @Test("the error detail state discards volatile detail under a framed footer")
     func errorDetailState() {
-        let outcome = MockWaveFixture.detailReading(
-            waveName: MockWaveFixture.detailWaveName,
-            state: .error
-        )
+        let outcome = MockWaveFixture.detailReading(state: .error)
         #expect(outcome.reading.snapshot == nil)
         // The cached authored plan remains outside the reading; the failure is
         // framed as a quiet footer reason, never stale operational evidence.

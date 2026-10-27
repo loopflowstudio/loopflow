@@ -388,7 +388,7 @@ private final class ScriptedReader {
         sequence += 1
         let line: [String: Any] = ["answers": answers, "home": fixtureMachineId, "copy": NSNull(),
                                    "revisions": NSNull(), "unavailable": NSNull(), "body": body]
-        let scope = WorkScope(repo: repo, headless: false, task: task, wave: nil, activity: nil)
+        let scope = WorkScope(repo: repo, headless: false, task: task, activity: nil)
         guard let data = try? JSONSerialization.data(withJSONObject: line),
               let frame = try? WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: data) else { return }
         continuation?.yield(frame)

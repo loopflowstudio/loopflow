@@ -73,8 +73,7 @@ struct WorkObservationTransportTests {
         #expect(try await frames.next()?.answers == 1)
         // A scope that keeps the plan answers from its last reading and starts
         // the Task's and repository's watches.
-        reader.request(.scope(id: 2, WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1",
-                                               wave: nil, activity: nil)))
+        reader.request(.scope(id: 2, WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1", activity: nil)))
         #expect(try await frames.next()?.answers == 2)
         try await eventually { launched.arguments.contains { $0.starts(with: ["task", "status", "LOO-1"]) } }
         #expect(launched.arguments.filter { $0.starts(with: ["wave", "show"]) }.count == 1)

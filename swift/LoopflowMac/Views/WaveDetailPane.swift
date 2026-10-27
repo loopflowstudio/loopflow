@@ -3,7 +3,7 @@ import SwiftUI
 import Loopflow
 
 struct WaveDetailReading {
-    private(set) var snapshot: WaveDetailSnapshot?
+    private(set) var snapshot: WaveRoadmap?
     private(set) var errorMessage: String?
 
     func plan(cached: WavePlan) -> WavePlan {
@@ -11,7 +11,7 @@ struct WaveDetailReading {
         return WavePlan(objective: snapshot.workMap.objective, projects: snapshot.workMap.projects)
     }
 
-    mutating func update(_ snapshot: WaveDetailSnapshot) {
+    mutating func update(_ snapshot: WaveRoadmap) {
         self.snapshot = snapshot
         errorMessage = nil
     }
@@ -27,11 +27,11 @@ struct WaveDetailReading {
     }
 }
 
-/// The Wave's Project plan, Tasks and metrics, supplied by `lf wave status`.
+/// The Wave's Project plan, Tasks and metrics, from the window's planning reading.
 struct WaveDetailPane: View {
     let wave: WaveViewModel
     let repoPath: String
-    /// The window's streamed reading of this Wave, once one has arrived.
+    /// This Wave's share of the window's planning reading, once one has arrived.
     let streamed: StreamedWaveDetail?
     let isProjectActivationPending: Bool
     let transportError: String?
@@ -159,8 +159,8 @@ private struct WavePlanView: View {
         }
     }
 
-    /// Later readings arrive from the window's Work stream when a commit
-    /// changes this Wave; nothing here reads on a clock.
+    /// Later readings arrive with each planning frame; nothing here reads on
+    /// a clock.
     private func applyStreamed() {
         guard let streamed, streamed.wave == wave.id else { return }
         if let snapshot = streamed.snapshot {
@@ -315,10 +315,7 @@ private struct WavePlanView: View {
     }
 
     private func applyMockDetail() {
-        let outcome = MockWaveFixture.detailReading(
-            waveName: wave.name,
-            state: MockWaveFixture.detailState
-        )
+        let outcome = MockWaveFixture.detailReading(state: MockWaveFixture.detailState)
         reading = outcome.reading
         isAwaitingDetail = outcome.awaitingFirstRead
     }

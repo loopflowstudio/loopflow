@@ -44,15 +44,12 @@ public struct WorkScope: Equatable, Sendable {
     public let headless: Bool
     /// Task identifier whose work is shown.
     public let task: String?
-    /// Wave id whose detail is shown.
-    public let wave: String?
     public let activity: WorkActivityScope?
 
-    public init(repo: String?, headless: Bool, task: String?, wave: String?, activity: WorkActivityScope?) {
+    public init(repo: String?, headless: Bool, task: String?, activity: WorkActivityScope?) {
         self.repo = repo
         self.headless = headless
         self.task = task
-        self.wave = wave
         self.activity = activity
     }
 }
@@ -85,7 +82,7 @@ public struct StoreRevisions: Decodable, Equatable, Sendable {
 
 /// One watch a window runs, and the `lf` read behind it.
 public enum WorkPart: String, CaseIterable, Sendable {
-    case task, wave, sessions, planning, selections, activity
+    case task, sessions, planning, selections, activity
     case peerPlanning = "peer_planning"
     case workActivity = "work_activity"
 
@@ -103,8 +100,6 @@ public enum WorkPart: String, CaseIterable, Sendable {
             return scope.repo.map { (["session", "list"] + (scope.headless ? ["--interactive", "all"] : []), $0) }
         case .task:
             return scope.task.map { (["task", "status", $0], scope.repo) }
-        case .wave:
-            return scope.wave.map { (["wave", "status", $0], scope.repo) }
         case .workActivity:
             guard let activity = scope.activity else { return nil }
             var args = ["history", "--since", "7d", "--limit", "50"]
@@ -145,11 +140,6 @@ public struct WorkFrame: Sendable {
         public let diagnostics: TaskWork?
     }
 
-    public struct WavePart: Sendable {
-        public let wave: String
-        public let detail: WaveDetailSnapshot
-    }
-
     public struct WorkActivityPart: Sendable {
         public let scope: WorkActivityScope
         public let snapshot: WorkActivitySnapshot
@@ -162,7 +152,6 @@ public struct WorkFrame: Sendable {
         case peerPlanning(PeerPlanning?)
         case sessions(Sessions?)
         case task(TaskPart?)
-        case wave(WavePart?)
         case workActivity(WorkActivityPart?)
         case activity(ActivitySnapshot?)
         case checkpoint
@@ -174,7 +163,6 @@ public struct WorkFrame: Sendable {
             case .peerPlanning: WorkPart.peerPlanning.rawValue
             case .sessions: WorkPart.sessions.rawValue
             case .task: WorkPart.task.rawValue
-            case .wave: WorkPart.wave.rawValue
             case .workActivity: WorkPart.workActivity.rawValue
             case .activity: WorkPart.activity.rawValue
             case .checkpoint: "checkpoint"
@@ -311,9 +299,6 @@ public struct WorkFrame: Sendable {
             }
             return frame(read, .task(TaskPart(task: task, work: work, graphProcesses: status.graphProcesses,
                                               comments: comments, diagnostics: status.execution?.work)))
-        case .wave:
-            let read = try envelope(WaveDetailSnapshot.self)
-            return frame(read, .wave(zip(scope.wave, read.body).map { WavePart(wave: $0, detail: $1) }))
         case .workActivity:
             let read = try envelope(WorkActivitySnapshot.self)
             return frame(read, .workActivity(zip(scope.activity, read.body).map {
@@ -371,7 +356,7 @@ public final class WorkWatches: @unchecked Sendable {
     private let lock = NSLock()
     private let continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation
     private var running: [WorkPart: Running] = [:]
-    private var scope = WorkScope(repo: nil, headless: false, task: nil, wave: nil, activity: nil)
+    private var scope = WorkScope(repo: nil, headless: false, task: nil, activity: nil)
     private var sequence = 0
     private var generation = 0
     /// Checkpoints waiting on these parts' answers.

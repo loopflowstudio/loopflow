@@ -2,11 +2,12 @@ import Foundation
 import Loopflow
 import Observation
 
-/// One Wave's streamed detail. `sequence` moves with each new reading.
+/// One Wave's share of the planning reading. `sequence` moves with each
+/// planning frame; a nil `snapshot` says why the Wave has no live reading.
 struct StreamedWaveDetail: Sendable {
     let wave: String
     let sequence: Int
-    let snapshot: WaveDetailSnapshot?
+    let snapshot: WaveRoadmap?
     let reason: String?
 }
 
@@ -965,10 +966,6 @@ final class WorkModel {
     private var sessionsGeneration = 0
     @ObservationIgnored private var sessionsRefresh: (repo: String, generation: Int, task: Task<Void, Never>)?
     private var roadmapGeneration = 0
-    /// The Wave whose detail a view is showing, if any.
-    var detailWaveId: String?
-    /// The scoped Wave's `lf wave status` reading, as last streamed.
-    private(set) var waveDetail: StreamedWaveDetail?
     /// Moves with every planning frame, for views that derive from planning.
     private(set) var planningSequence = 0
     @ObservationIgnored private var workObservation: WorkObservation?
@@ -1106,6 +1103,15 @@ final class WorkModel {
         filterByRepo(roadmap.value?.waves ?? [], repo: { $0.wave.repo })
     }
 
+    /// One Wave's detail, from the planning reading the window already watches.
+    func waveDetail(id: String) -> StreamedWaveDetail? {
+        guard !roadmap.isLoading else { return nil }
+        let wave = roadmap.value?.waves.first { $0.wave.id == id }
+        let reason = roadmap.errorMessage ?? (wave == nil ? "This Wave is not in the current plan" : nil)
+        return StreamedWaveDetail(wave: id, sequence: planningSequence,
+                                  snapshot: reason == nil ? wave : nil, reason: reason)
+    }
+
     var visibleWaves: [WaveViewModel] {
         let registered = filterByRepo(waves.value ?? [], repo: { $0.repo })
         let registeredNames = Set(registered.map { waveIdentity(repo: $0.repo, name: $0.name) })
@@ -1215,7 +1221,6 @@ final class WorkModel {
             repo: repoPath,
             headless: false,
             task: shown?.task.task.identifier,
-            wave: detailWaveId,
             activity: activityScope(for: selection))
     }
 
@@ -1390,11 +1395,6 @@ final class WorkModel {
             if let work = body.diagnostics, taskDiagnostics[task.id] != .available(work) {
                 taskDiagnostics.values[task.id] = .available(work)
             }
-        case .wave(let body):
-            guard answers >= scopeFloor, let detailWaveId else { return }
-            guard body == nil || body?.wave == detailWaveId else { return }
-            waveDetail = StreamedWaveDetail(wave: detailWaveId, sequence: frame.sequence,
-                                           snapshot: body?.detail, reason: body == nil ? reason : nil)
         case .workActivity(let body):
             guard answers >= scopeFloor, let scope = activityScope(for: selection) else { return }
             guard let body else {
@@ -1472,7 +1472,6 @@ final class WorkModel {
         peerPlanningReadings = [:]
         peerPlanningGeneration &+= 1
         savedSessionRepos = []
-        waveDetail = nil
         taskWork = TaskReadings<TaskOverview>()
         taskDiagnostics = TaskReadings<TaskWork>()
         graphProcesses = [:]

@@ -34,3 +34,7 @@
   from separate reads. Every `lf task status --json` caller pays for them.
 - Assumption: Dashboard selections live in a new `lf desktop plans --json
   [--watch]` (the repository's default and saved plans).
+- Assumption (2026-10-26): Wave detail for a Wave outside the current plan
+  (abandoned or retired) shows its cached plan with "not in the current plan"
+  instead of a live `lf wave status` reading. Reversible: one-shot
+  `RegistryQuery.status` for those Waves on selection.

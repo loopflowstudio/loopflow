@@ -90,22 +90,17 @@ enum MockWaveFixture {
         try? JSONDecoder().decode(WaveDetailSnapshot.self, from: Data(detailJSON.utf8))
     }
 
-    /// The detail reading a `mock-waves` capture renders for `waveName` in the
-    /// given state, plus whether the pane still awaits its first live read (the
-    /// loading affordance stays on screen only while awaiting). Pure so the
-    /// screenshot states are covered without launching the app.
-    static func detailReading(
-        waveName: String,
-        state: DetailState
-    ) -> (reading: WaveDetailReading, awaitingFirstRead: Bool) {
-        let snapshot = waveName == detailWaveName ? selectedWaveDetail() : nil
+    /// The detail reading a `mock-waves` capture renders in the given state,
+    /// plus whether the pane still awaits its first live read (the loading
+    /// affordance stays on screen only while awaiting). Pure so the screenshot
+    /// states are covered without launching the app.
+    static func detailReading(state: DetailState) -> (reading: WaveDetailReading, awaitingFirstRead: Bool) {
         var reading = WaveDetailReading()
         switch state {
         case .loading:
             reading.clear()
             return (reading, true)
         case .error:
-            if let snapshot { reading.update(snapshot) }
             reading.recordFailure(refreshError)
             return (reading, false)
         }

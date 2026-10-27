@@ -11,3 +11,5 @@ CREATE INDEX waves_project_activation_process ON waves(project_activation_lf_pro
     WHERE project_activation_lf_process_id IS NOT NULL;
 CREATE INDEX ci_incidents_repair_process ON ci_incidents(repair_lf_process_id)
     WHERE repair_lf_process_id IS NOT NULL;
+CREATE INDEX tasks_ship_process ON tasks(ship_lf_process_id)
+    WHERE ship_lf_process_id IS NOT NULL;

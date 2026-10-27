@@ -39,6 +39,7 @@ pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM task_workflow_moves WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM waves WHERE project_activation_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM ci_incidents WHERE repair_lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE transport_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM relocated_task_processes WHERE process_id=p.id)";
 
@@ -2415,6 +2416,19 @@ mod forget_tests {
         let narrated = start(None, false);
         let holder = start(None, false);
         let running_child = start(Some(&holder.id), false);
+        let shipper = start(None, false);
+        let task = crate::durable::TaskId::new();
+        store
+            .create_task(&crate::work::task::NewTask {
+                repository_id: store.ensure_repository("/repo").unwrap(),
+                id: task.clone(),
+                project_id: None,
+                title: "Shipped Task".into(),
+                description: "Brief".into(),
+                due_date: None,
+            })
+            .unwrap();
+        store.ship_task(&task, &shipper.id, "proof").unwrap();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -2429,9 +2443,10 @@ mod forget_tests {
             )
             .unwrap();
         }
-        for process in [&human, &agent_issued, &step, &narrated, &holder] {
+        for process in [&human, &agent_issued, &step, &narrated, &holder, &shipper] {
             finish(process);
         }
+        assert!(kept(&shipper), "the Task names its ship process");
         assert!(!kept(&human));
         assert!(kept(&agent_issued));
         assert!(kept(&narrated));

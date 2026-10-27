@@ -81,6 +81,12 @@ impl SkillSource {
             agent: loopflow.then(|| field("agent")).flatten(),
             default_agent: loopflow.then(|| field("default_agent")).flatten(),
             action_style: field("action_style"),
+            docs: loopflow
+                .then(|| metadata.and_then(|map| map.get("docs")))
+                .flatten()
+                .map(skill_docs)
+                .transpose()?
+                .unwrap_or_default(),
             content: Some(body.to_string()),
         })
     }
@@ -92,6 +98,19 @@ impl SkillSource {
                 .expect("embedded catalog entry names a builtin")
                 .to_string()),
         }
+    }
+}
+
+/// `docs:` names one target or a list, each resolved like `--docs`.
+fn skill_docs(value: &Value) -> Result<Vec<String>, LoadError> {
+    let invalid = || LoadError::InvalidSkill("`docs` must be a path or a list of paths".into());
+    match value {
+        Value::String(doc) => Ok(vec![doc.clone()]),
+        Value::Sequence(docs) => docs
+            .iter()
+            .map(|doc| doc.as_str().map(str::to_string).ok_or_else(invalid))
+            .collect(),
+        _ => Err(invalid()),
     }
 }
 
@@ -470,6 +489,33 @@ mod tests {
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
         assert!(matches!(
             catalog.resolve("audit").unwrap().unwrap().load(),
+            Err(crate::error::LoadError::InvalidSkill(_))
+        ));
+    }
+
+    #[test]
+    fn docs_frontmatter_names_one_target_or_a_list() {
+        let repo = TempDir::new().unwrap();
+        write(
+            repo.path(),
+            ".lf/skills/one.md",
+            "---\ndocs: a.md\n---\nOne.",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/two.md",
+            "---\ndocs: [a.md, docs/]\n---\nTwo.",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/bad.md",
+            "---\ndocs: {a: b}\n---\nBad.",
+        );
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        assert_eq!(catalog.load_skill("one").unwrap().docs, ["a.md"]);
+        assert_eq!(catalog.load_skill("two").unwrap().docs, ["a.md", "docs/"]);
+        assert!(matches!(
+            catalog.load_skill("bad"),
             Err(crate::error::LoadError::InvalidSkill(_))
         ));
     }

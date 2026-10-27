@@ -12,7 +12,7 @@ release:
       - LOOPFLOW_REQUIRE_ORIGIN_MAIN=1 uv run python scripts/check_migrations.py
       prepare:
       # Release cuts belong here; local migration proof uses an isolated source
-      # snapshot. See TESTING.md for shared-checkout and Git-fixture limits.
+      # snapshot. See rust/loopflow/tests/README.md for shared-checkout and Git-fixture limits.
       - uv run python scripts/canonicalize_migrations.py {version} --release-cut
       - uv run python scripts/third_party.py refresh
       completion: github-release

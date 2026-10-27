@@ -45,6 +45,15 @@ name another for that occurrence. `-a` overrides them all, including nested
 Graphs and child `lf` commands. Without any, your configured `agent:` applies,
 then the Skill's `default_agent:`, then whichever harness is installed.
 
+```markdown
+---
+docs: [scripts/testing.md]
+---
+Run the affected suites once for this tree.
+```
+
+A repository Skill's `docs:` adds files to its context, resolved like `--docs`.
+
 ## Run a Graph anywhere
 
 ```bash

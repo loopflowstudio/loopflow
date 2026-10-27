@@ -31,8 +31,9 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import IO, Callable, Optional
 
@@ -225,19 +226,28 @@ def _architecture_commands(_changed: list[str]) -> list[Command]:
     ]
 
 
-def _rust_commands(_changed: list[str]) -> list[Command]:
-    if shutil.which("cargo-nextest"):
+def _rust_commands(_changed: list[str], tests: Optional[str] = None) -> list[Command]:
+    """Rust checks; `tests` narrows the test run to one nextest filter expression."""
+    macos = platform.system() == "Darwin"
+    if tests is not None or shutil.which("cargo-nextest"):
+        filters = [] if tests is None else [f"({tests})"]
+        if macos:
+            # Clone fixtures need their own sandbox; the full macOS run covers them.
+            filters.append("not test(data_clones::)")
+        scope = ["--all"] if tests is None else ["-p", "loopflow", "--no-tests", "fail"]
         test_argv = [
             "cargo",
             "nextest",
             "run",
-            "--all",
+            *scope,
             "--no-fail-fast",
             "--build-jobs",
             str(MAX_PARALLEL_JOBS),
             "--test-threads",
             str(MAX_PARALLEL_JOBS),
         ]
+        if filters:
+            test_argv.extend(["-E", " & ".join(filters)])
     else:
         test_argv = [
             "cargo",
@@ -250,11 +260,7 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
             "--test-threads",
             str(MAX_PARALLEL_JOBS),
         ]
-    macos = platform.system() == "Darwin"
-    if macos:
-        if "nextest" in test_argv:
-            test_argv.extend(["-E", "not test(data_clones::)"])
-        else:
+        if macos:
             test_argv.extend(["--skip", "data_clones::"])
     runner = ["uv", "run", "--no-sync", "python", str(REPO_ROOT / "scripts/test_network.py")]
     test_argv[1:1] = ["--config", 'target."cfg(all())".runner = ' + json.dumps(runner)]
@@ -265,20 +271,6 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
             "rust-test-inventory",
         ),
         Command(["cargo", "fmt", "--all", "--", "--check"], REPO_ROOT, "rustfmt"),
-        Command(
-            [
-                "cargo",
-                "clippy",
-                "--all-targets",
-                "--jobs",
-                str(MAX_PARALLEL_JOBS),
-                "--",
-                "-D",
-                "warnings",
-            ],
-            REPO_ROOT,
-            "clippy",
-        ),
         Command(
             [
                 "uv",
@@ -293,7 +285,7 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
             "rust",
         ),
     ]
-    if macos:
+    if macos and tests is None:
         # Clone fixtures install their own sandbox, which cannot nest with the
         # network runner's unsandboxed ps exception. Match macOS CI's boundary.
         selector = "data_clones::"
@@ -327,6 +319,24 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
                 "rust-clones",
             )
         )
+    # Clippy runs last: a test failure means another edit, and Cargo serializes
+    # every build in this target directory anyway.
+    commands.append(
+        Command(
+            [
+                "cargo",
+                "clippy",
+                "--all-targets",
+                "--jobs",
+                str(MAX_PARALLEL_JOBS),
+                "--",
+                "-D",
+                "warnings",
+            ],
+            REPO_ROOT,
+            "clippy",
+        )
+    )
     return commands
 
 
@@ -757,9 +767,13 @@ class Plan:
     commands: list[Command]
 
 
-def build_plan(changed: list[str], run_all: bool, forced: set[str]) -> list[Plan]:
+def build_plan(
+    changed: list[str], run_all: bool, forced: set[str], rust_tests: Optional[str] = None
+) -> list[Plan]:
     plans: list[Plan] = []
     for suite in SUITES:
+        if suite.build is _rust_commands and rust_tests is not None:
+            suite = replace(suite, build=partial(_rust_commands, tests=rust_tests))
         matched = suite.match(changed)
         if suite.name in forced:
             plans.append(Plan(suite, True, f"forced (--{suite.name})", suite.build(changed)))
@@ -1790,6 +1804,11 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         help="reuse a passing changed-mode run for the identical tree and plan",
     )
     parser.add_argument(
+        "--rust-filter",
+        metavar="EXPR",
+        help="run only the Rust tests matching this nextest filter expression",
+    )
+    parser.add_argument(
         "--base",
         metavar="REF",
         help="base ref to diff against (default: origin/main, then main)",
@@ -1810,6 +1829,11 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     forced = {suite.name for suite in SUITES if getattr(args, suite.name.replace("-", "_"))}
     if args.reuse_passing and (args.all or "ui-host" in forced):
         parser.error("--reuse-passing cannot be combined with --all or --ui-host")
+    if args.rust_filter is not None:
+        if args.all:
+            parser.error("--rust-filter cannot be combined with --all")
+        if not shutil.which("cargo-nextest"):
+            parser.error("--rust-filter needs cargo-nextest (cargo install cargo-nextest)")
     return args
 
 
@@ -1819,7 +1843,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     base = _resolve_base(args.base)
     changed = changed_files(base)
-    plans = build_plan(changed, args.all, forced)
+    plans = build_plan(changed, args.all, forced, args.rust_filter)
 
     if args.list_only:
         print(f"(base: {base})")

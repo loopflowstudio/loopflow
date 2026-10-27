@@ -1,9 +1,11 @@
-//! Daytona and Modal sandboxes, reduced to the facts renting needs.
+//! Rented machines on every provider, reduced to the facts renting needs.
 //!
-//! Each call runs the embedded `sandbox.py` under `uv` with the provider's
-//! pinned SDK. The account key stays with the SDK. A create is sent once and
-//! never retried; any failure leaves it unknown whether a sandbox exists, and
-//! its name finds it later.
+//! Each call runs the embedded `sandbox.py` under `uv`, with the provider's
+//! pinned SDK where it has one. The account key stays in the bridge. A create
+//! is sent once and never retried; any failure leaves it unknown whether a
+//! machine exists, and its name finds it later. Each create carries the
+//! embedded `guardian.py`, which holds the deadline on providers without a
+//! lifetime of their own.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -11,9 +13,13 @@ use std::process::{Command, Stdio};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Hardware, Provider};
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
+
+use super::{Hardware, Provider, Usd};
 
 const BRIDGE: &str = include_str!("sandbox.py");
+const GUARDIAN: &str = include_str!("guardian.py");
 
 /// Runs one bridge operation and returns its stdout; `Err` when it could not run.
 pub type Call = Box<dyn Fn(&str, Value) -> std::io::Result<Vec<u8>>>;
@@ -32,10 +38,13 @@ type Result<T> = std::result::Result<T, Unavailable>;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Sandbox {
     pub id: String,
-    /// Ended, deleted or failed; it costs nothing more.
+    /// Ended, deleted or failed; it runs nothing more, and deleting it frees
+    /// whatever remains (a Fly app's IPv4, an exited pod's disk).
     pub gone: bool,
     /// The SSH destination, reported only by create.
     pub route: Option<String>,
+    /// The price the provider charges, where it reports one (RunPod).
+    pub usd_per_hour: Option<Usd>,
 }
 
 /// One create, exactly as admitted.
@@ -44,8 +53,15 @@ pub struct CreateSandbox {
     /// Our identity, sent before any reply.
     pub name: String,
     pub hardware: Hardware,
+    /// The provider's own name for what to rent (`Offer::machine_type`).
+    pub machine_type: Option<String>,
     /// The provider deletes it this long after creation, whatever else fails.
     pub lifetime_minutes: u32,
+    /// The hard deadline and what the budget allows from `created_at`, for
+    /// the guardian, which only ever shortens the deadline.
+    pub deadline: OffsetDateTime,
+    pub created_at: OffsetDateTime,
+    pub cap_usd: Usd,
     /// Authorized for `lf` where the provider runs our own sshd.
     pub public_key: String,
 }
@@ -67,12 +83,12 @@ impl Sandboxes {
         if let Some(missing) = provider.missing_credentials() {
             return Err(anyhow::anyhow!(missing));
         }
-        let sdk = provider.sdk();
         Ok(Self::with_call(
             provider,
             Box::new(move |op, request| {
                 let mut child = Command::new("uv")
-                    .args(["run", "--quiet", "--no-project", "--with", sdk])
+                    .args(["run", "--quiet", "--no-project"])
+                    .args(provider.sdk().map(|sdk| ["--with", sdk]).into_iter().flatten())
                     .args(["python", "-c", BRIDGE, provider.as_str(), op])
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
@@ -129,6 +145,11 @@ impl Sandboxes {
 
     /// Ask for one sandbox, once, and wait until it has an SSH route.
     pub fn create(&self, request: &CreateSandbox) -> Result<Sandbox> {
+        let utc = |at: OffsetDateTime| {
+            at.to_offset(time::UtcOffset::UTC)
+                .format(&Rfc3339)
+                .expect("UTC formats")
+        };
         let sandbox = self
             .ask(
                 "create",
@@ -137,7 +158,13 @@ impl Sandboxes {
                     "vcpus": request.hardware.vcpus,
                     "memory_gb": request.hardware.memory_gb,
                     "disk_gb": request.hardware.disk_gb,
+                    "gpu": request.hardware.gpu,
+                    "type": request.machine_type,
                     "lifetime_minutes": request.lifetime_minutes,
+                    "deadline": utc(request.deadline),
+                    "created_at": utc(request.created_at),
+                    "max_usd": request.cap_usd.to_decimal(),
+                    "guardian": GUARDIAN,
                     "public_key": request.public_key.trim(),
                 }),
             )?
@@ -185,6 +212,16 @@ mod tests {
     }
 
     #[test]
+    fn a_reported_price_is_read_exactly() {
+        let pod =
+            replying(r#"{"id": "p1", "gone": false, "route": null, "usd_per_hour": "0.590000"}"#)
+                .get("p1")
+                .unwrap()
+                .unwrap();
+        assert_eq!(pod.usd_per_hour, Some(Usd::parse("0.59").unwrap()));
+    }
+
+    #[test]
     fn a_create_without_a_route_is_not_a_machine() {
         let created =
             replying(r#"{"id": "sb-1", "gone": false, "route": null}"#).create(&CreateSandbox {
@@ -193,8 +230,13 @@ mod tests {
                     vcpus: 4,
                     memory_gb: 8,
                     disk_gb: 10,
+                    gpu: None,
                 },
+                machine_type: None,
                 lifetime_minutes: 60,
+                deadline: OffsetDateTime::UNIX_EPOCH,
+                created_at: OffsetDateTime::UNIX_EPOCH,
+                cap_usd: Usd::ZERO,
                 public_key: "ssh-ed25519 AAAA".into(),
             });
         assert!(created.is_err());

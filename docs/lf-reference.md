@@ -1683,7 +1683,8 @@ Name what to rent and the most it may cost
 | `--provider` | provider |
 | `--vcpus` | vcpus |
 | `--memory-gb` | memory gb |
-| `--disk-gb` | Daytona only; Modal sizes disk itself Default: 10. |
+| `--disk-gb` | Modal and Fly size disk themselves Default: 10. |
+| `--gpu` | One GPU, on runpod (A40, A6000, L4, RTX4090, L40S, A100, H100), aws (L4, A10G) or modal (T4, L4, A10G, L40S, A100, H100) |
 | `--hours` | Hard deadline for each machine it rents, at most 24 Default: 4. |
 | `--max` | Machines rented at once |
 | `--max-usd-per-hour` | Above this hourly price nothing is rented |

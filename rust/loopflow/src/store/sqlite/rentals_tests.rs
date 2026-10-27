@@ -23,6 +23,7 @@ fn code(max: u32) -> OnDemand {
             vcpus: 4,
             memory_gb: 8,
             disk_gb: 10,
+            gpu: None,
         },
         max_machines: max,
         max_usd_per_hour: usd("0.40"),

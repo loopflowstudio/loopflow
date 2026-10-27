@@ -1395,15 +1395,19 @@ See [machine connections](architecture/machines.md) for repository paths and ver
 lf pool add lab && lf machine add jack@mini --pool lab        # machines you own
 lf account token claude jack@example.com                      # once a year: Claude for rented machines
 lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-usd-per-hour 0.40
+lf ondemand add gpu --provider runpod --vcpus 8 --memory-gb 32 --gpu A40 --max 1 --max-usd-per-hour 1
 lf task run LOO-570 --pool lab --rent code --quote            # where it would run, the most it could cost
 lf task run LOO-570 --pool lab --rent code                    # a free lab machine, else rent one
 lf machine use code infrastructure                            # the Wave's new Tasks rent from code
 lf machine end code-1                                         # give a rented machine back now
 ```
 
-Renting from Daytona reads `DAYTONA_API_KEY` (`doppler run -- lf …`); Modal
-reads `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or `~/.modal.toml`. Both run under
-`uv`. A rented machine gets GitHub forwarded and every Claude account with a
+Providers read their keys from the environment (`doppler run -- lf …`):
+Daytona `DAYTONA_API_KEY`; Modal `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or
+`~/.modal.toml`; RunPod `RUNPOD_API_KEY`; AWS `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY` and `AWS_REGION`; Fly `FLY_API_TOKEN` (and `FLY_ORG`,
+default `personal`). Each runs under `uv`. `--gpu` rents one GPU on RunPod, AWS
+or Modal. A rented machine gets GitHub forwarded and every Claude account with a
 stored long-lived token (`claude setup-token`, approved once in the account's
 Chrome profile; API keys are refused). Its provider deletes it at its deadline.
 `lf machine use code infrastructure` (or `--repo`) sends a scope's unowned

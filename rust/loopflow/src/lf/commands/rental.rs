@@ -22,8 +22,9 @@ use crate::rental::{
 use crate::store::sqlite::SqliteStore;
 use crate::store::Store;
 
-/// A created sandbox answers SSH within seconds; installing lf takes longer.
-const SSH_WAIT: Duration = Duration::from_secs(5 * 60);
+/// An image-built sandbox answers SSH within seconds; RunPod, AWS and Fly
+/// install the tools on stock Ubuntu first, which takes minutes.
+const SSH_WAIT: Duration = Duration::from_secs(20 * 60);
 
 fn open_store(runtime: &tokio::runtime::Runtime) -> anyhow::Result<Store> {
     runtime
@@ -174,6 +175,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             vcpus,
             memory_gb,
             disk_gb,
+            gpu,
             hours,
             max,
             max_usd_per_hour,
@@ -185,14 +187,15 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                     vcpus: *vcpus,
                     memory_gb: *memory_gb,
                     disk_gb: *disk_gb,
+                    gpu: gpu.clone(),
                 },
                 max_machines: *max,
                 max_usd_per_hour: *max_usd_per_hour,
                 hours: hours.min(rental::MAX_HOURS),
                 created_at: now(),
             };
+            let price = ondemand.usd_per_hour().map_err(|reason| anyhow!(reason))?;
             sqlite.add_ondemand(&ondemand)?;
-            let price = ondemand.usd_per_hour();
             println!(
                 "Added on-demand {name}: {} on {provider} at {price}/h; at most {max} at once, \
                  {}h each",
@@ -304,13 +307,13 @@ fn print_ondemand(listing: &OndemandListing) {
         .iter()
         .filter(|r| r.rental.state.is_live())
         .count();
+    let price = ondemand.usd_per_hour().map_or_else(
+        |reason| format!("unpriced ({reason})"),
+        |usd| usd.to_string(),
+    );
     println!(
-        "{} · {shape} · {live}/{} · {}/h ≤ {}/h · {}h",
-        ondemand.name,
-        ondemand.max_machines,
-        ondemand.usd_per_hour(),
-        ondemand.max_usd_per_hour,
-        ondemand.hours
+        "{} · {shape} · {live}/{} · {price}/h ≤ {}/h · {}h",
+        ondemand.name, ondemand.max_machines, ondemand.max_usd_per_hour, ondemand.hours
     );
     print_defaults(&listing.defaults);
     for entry in &listing.rentals {
@@ -371,11 +374,19 @@ pub(crate) fn rent(
         rental.usd_per_hour,
         clock(rental.deadline)
     );
+    let offer = ondemand
+        .provider
+        .offer(&rental.hardware)
+        .map_err(|reason| anyhow!(reason))?;
     let request = CreateSandbox {
         name: rental.provider_name.clone(),
         hardware: rental.hardware.clone(),
+        machine_type: offer.machine_type,
         lifetime_minutes: u32::try_from((rental.deadline - now()).whole_minutes().max(1))
             .unwrap_or(u32::MAX),
+        deadline: rental.deadline,
+        created_at: rental.created_at,
+        cap_usd: rental.cap_usd,
         public_key,
     };
     let sandbox = match api.create(&request) {
@@ -392,7 +403,10 @@ pub(crate) fn rent(
             ));
         }
     };
-    let rental = sqlite.confirm_rental(&rental.id, &sandbox.id, rental.usd_per_hour)?;
+    // A provider that reports what it charges overrides the published price;
+    // the guardian shortens the deadline by the same price.
+    let usd_per_hour = sandbox.usd_per_hour.unwrap_or(rental.usd_per_hour);
+    let rental = sqlite.confirm_rental(&rental.id, &sandbox.id, usd_per_hour)?;
     let route = sandbox.route.expect("a created sandbox has a route");
     let machine = match attach(runtime, sqlite, &rental, &route, linux_lf.as_deref()) {
         Ok(machine) => machine,
@@ -825,7 +839,12 @@ fn refresh(
     match api.get(id)? {
         Some(sandbox) if !sandbox.gone => {}
         // Its lifetime passed, or someone deleted it.
-        _ => {
+        ended => {
+            // What an ended machine leaves behind (a Fly app's IPv4, an exited
+            // pod's disk) still bills until it is deleted.
+            if ended.is_some() {
+                api.delete(id)?;
+            }
             sqlite.set_rental_cost(&rental.id, rental.cost_until(rental.deadline.min(now())))?;
             mark_ended(sqlite, rental)?;
             return Ok(None);
@@ -1126,6 +1145,7 @@ mod tests {
                     vcpus: 4,
                     memory_gb: 8,
                     disk_gb: 10,
+                    gpu: None,
                 },
                 max_machines: 1,
                 max_usd_per_hour: Usd::parse("0.40").unwrap(),

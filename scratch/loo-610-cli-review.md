@@ -1,8 +1,9 @@
 # LOO-610 — The lf CLI, top down
 
 Status: **decided slice implemented** (2026-10-26): items 1–7 and the
-Task-first README are on the branch, merged with main `d40f2757c1` (#1704), and `machine use`'s
-boolean `--repo` is deleted. Remaining: gate, publish.
+Task-first README are on the branch, merged with main `df6b79d5ea` (#1704,
+#1706, #1707), and `machine use`'s boolean `--repo` is deleted. Remaining:
+gate, publish.
 Deviations in `scratch/questions.md`. Sections 1–8 are the review as proposed;
 a later decision wins where they differ. Source: `docs/lf-reference.md` at
 main `1b137b8f2d`, LOO-601 (hidden `__` commands) and LOO-602's decisions.
@@ -357,10 +358,10 @@ Open:
 
 | Surface | Class | Owner |
 |---|---|---|
-| `history show --events` (verbatim provider stream) | **Wrong promise** — delete | LOO-613 |
+| `history show --events` (verbatim provider stream) | **Wrong promise** — deleted (#1706) | LOO-613 |
 | Unbounded transcript history in Loopflow's store | **Wrong promise** — providers retain; lf reads them | LOO-614 |
 | `disk rotate` / `disk_budget` covering provider homes lf can't rotate | **Wrong promise** — budget only what lf owns, or drop it (LOO-602 D6) | this Task (API) + LOO-602 D6 |
-| `history replay` of any run, forever | **Wrong promise** — replay holds while the capture exists; say so in help | this Task (help text) |
+| `history replay` of any run, forever | **Wrong promise** — help now says "while this Machine retains its capture" (built) | this Task |
 | `session list --limit 0` "complete matching inventory" | promise sound at facts-only scale | — |
 | `history usage` / `--context` reading two usage copies + raw stream | **Inefficient today** | LOO-611, LOO-612 |
 | A Process row per Desktop poll | **Inefficient today** | LOO-615 |
@@ -689,10 +690,10 @@ configuration). `ops ci --repo` (a GitHub owner/repo) and `self sync-skills
   966/2215 under machine load (its 9 failures passed in isolation).
 - Item 6: docs 5/5, website 72/72, every documented `lf` path resolved.
 - Merge with main `e636ab6397` (#1652) and docs port (`964b288617`); steer
-  verb (`session_steers`, `global_commands` 45/45, clippy clean); pillar order
-  (`documented_commands` 4/4, `reference_matches_the_compiled_cli` pass).
-  Gate owes integration, lib and Swift since the #1652 and #1704 merges.
-- #1704 (Daytona/Modal rentals) merged as `b18510b1cb` under `lf ops machine`; `cargo build --bin lf` ok; `lf help ondemand list|machine use|pool list|release status|ops tokens` resolve.
+  verb (`session_steers`, `global_commands` 45/45, clippy clean).
+  Gate owes integration, lib and Swift since the #1652, #1704 and #1707 merges.
+- #1704 merged as `b18510b1cb`, #1706/#1707 as `b5ea024fb7`, rentals under `lf ops machine`.
 - Compress after `auto`: dropped redundant auto checks (definition list,
   catalog lookup); `local_planning::{auto_workflow,wave_workflow_set,unconfigured}` 3/3.
 - Machine-use `--repo` cut + compress: `machine_commands` 29/29, clippy clean.
+- Realign after `b5ea024fb7`: `reference_matches_the_compiled_cli` and `documented_commands` 4/4 pass.

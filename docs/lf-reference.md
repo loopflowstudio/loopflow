@@ -949,7 +949,7 @@ Show direct provider-authored usage from recorded Session inputs
 
 ## lf history replay
 
-Launch a new execution from an immutable captured provider request
+Launch a new execution from a captured provider request, while this Machine retains its capture
 
 | Argument | What it does |
 |---|---|

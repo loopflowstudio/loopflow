@@ -1409,7 +1409,7 @@ mod tests {
     };
     use crate::git::is_clean;
     use crate::id::{LfProcessId, TraceId};
-    use loopflow_test_support::TestRepo;
+    use loopflow_test_support::{RunningParent, TestRepo};
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
 
@@ -1504,20 +1504,12 @@ mod tests {
         guard
     }
 
-    /// Export an unfinished Process row as the parent of the next Process, which
-    /// keeps that child's finished row readable.
+    /// Export a [`RunningParent`] as the parent of the next Process.
     fn adopt_by_running_parent(guard: &TestLedgerGuard) {
         super::open_ledger().unwrap();
-        let (parent, trace) = (LfProcessId::new(), TraceId::new());
-        rusqlite::Connection::open(guard.home().join("loopflow.db"))
-            .unwrap()
-            .execute(
-                "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,?2,'caller',1)",
-                rusqlite::params![parent, trace],
-            )
-            .unwrap();
-        std::env::set_var(super::LF_PROCESS_ID_ENV, parent.as_str());
-        std::env::set_var(super::LF_TRACE_ID_ENV, trace.as_str());
+        let parent = RunningParent::insert(&guard.home().join("loopflow.db"));
+        std::env::set_var(super::LF_PROCESS_ID_ENV, &parent.id);
+        std::env::set_var(super::LF_TRACE_ID_ENV, &parent.trace);
     }
 
     #[test]

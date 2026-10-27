@@ -48,8 +48,9 @@ pub(crate) struct GitOperationOwner {
     pub(crate) target_sha: Option<String>,
 }
 
-/// The history-rewrite fence, held only while Git's merge, abort or commit
-/// steps run. A sync that stops on conflicts or errors drops it, and so does
+/// The history-rewrite fence, held from the merge through publication, and
+/// while an abort or continue runs; fetching and planning happen before it is
+/// taken. A sync that stops on conflicts or errors drops it, and so does
 /// one handing its conflicts to a resolver; Git's merge state stays for
 /// whoever continues, and other writers are admitted meanwhile.
 #[derive(Debug)]
@@ -214,7 +215,7 @@ fn fence_agent_process(worktree: &Path) -> OpsResult<()> {
     Ok(())
 }
 
-fn refuse_intervention(worktree: &Path) -> OpsResult<()> {
+pub(crate) fn refuse_intervention(worktree: &Path) -> OpsResult<()> {
     if let Some(state) = intervention_state(worktree)? {
         return Err(OpsError::Message(format!(
             "refusing to sync: a {state} operation already exists; Loopflow did not start or abort it"
@@ -309,6 +310,7 @@ fn owner_label(owner: &GitOperationOwner) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
 
     use loopflow_test_support::TestRepo;
@@ -384,6 +386,55 @@ mod tests {
             "both"
         );
         assert!(!operation_path(repo).unwrap().exists());
+    }
+
+    #[test]
+    fn a_stalled_fetch_admits_other_agents() {
+        let fixture = conflicting_feature();
+        let repo = fixture.path().to_path_buf();
+        let gate = tempfile::tempdir().unwrap();
+        let started = gate.path().join("started");
+        let release = gate.path().join("release");
+        let upload_pack = gate.path().join("upload-pack");
+        std::fs::write(
+            &upload_pack,
+            format!(
+                "#!/bin/sh\ntouch '{}'\ni=0\nwhile [ ! -e '{}' ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done\nexec git upload-pack \"$@\"\n",
+                started.display(),
+                release.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&upload_pack, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let config = Command::new("git")
+            .args(["config", "remote.origin.uploadpack"])
+            .arg(&upload_pack)
+            .current_dir(&repo)
+            .status()
+            .unwrap();
+        assert!(config.success());
+
+        let sync = std::thread::spawn({
+            let repo = repo.clone();
+            move || {
+                let options = SyncOptions {
+                    onto: "origin/main".to_string(),
+                    push: false,
+                    fork_base: None,
+                };
+                sync_with_recovery(&repo, &options, &NullProgress)
+            }
+        });
+        while !started.exists() {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        assert!(fence_agent_process(&repo).is_ok());
+        std::fs::write(&release, "").unwrap();
+        assert!(matches!(
+            sync.join().unwrap(),
+            Err(OpsError::SyncConflict { .. })
+        ));
     }
 
     #[test]

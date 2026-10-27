@@ -2,8 +2,8 @@ use crate::support;
 
 use loopflow::ops::task::task_stack;
 use loopflow::ops::{
-    continue_sync_for_resolution, plan_sync, recover_sync, sync_with_recovery, NullProgress,
-    OpsError, SyncClass, SyncOptions, SyncRecovery, SyncStrategy,
+    continue_sync_for_resolution, plan_sync, recover_sync, sync_with_plan, sync_with_recovery,
+    NullProgress, OpsError, SyncClass, SyncOptions, SyncRecovery, SyncStrategy,
 };
 use loopflow::work::task::{GithubPr, PrPublication};
 use loopflow_test_support::TestRepo;
@@ -901,6 +901,33 @@ fn explicit_onto_is_the_only_alternate_base() {
 
     let plan = plan_sync(repo.path(), Some("alternate"), None).expect("plan sync");
     assert_eq!(plan.base_ref, "alternate");
+}
+
+#[test]
+fn a_commit_after_planning_is_never_reset_away() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_file("main.txt", "main");
+    repo.stage_all();
+    repo.commit("main work");
+    repo.push();
+    repo.create_branch("feature");
+    git(repo.path(), &["reset", "--hard", "HEAD^"]);
+    let plan = plan_sync(repo.path(), Some("origin/main"), None).expect("plan sync");
+    assert_eq!(plan.strategy, SyncStrategy::ResetToBase);
+
+    repo.create_file("late.txt", "late");
+    repo.stage_all();
+    repo.commit("landed while the fetch ran");
+    let head = git(repo.path(), &["rev-parse", "HEAD"]);
+
+    let options = SyncOptions {
+        onto: "origin/main".to_string(),
+        push: false,
+        fork_base: None,
+    };
+    assert!(sync_with_plan(repo.path(), &options, &plan, &NullProgress).is_err());
+    assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]), head);
 }
 
 #[test]

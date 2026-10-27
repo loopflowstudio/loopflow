@@ -8,8 +8,8 @@ use crate::git::{
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::git_operation::{
-    authorize_sync_control, begin_sync_operation, reclaim_sync_operation, GitOperationOwner,
-    SyncOperation,
+    authorize_sync_control, begin_sync_operation, reclaim_sync_operation, refuse_intervention,
+    GitOperationOwner, SyncOperation,
 };
 use crate::ops::progress::Progress;
 
@@ -39,6 +39,8 @@ pub enum SyncStrategy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncPlan {
     pub branch: String,
+    /// The commit the plan classified; the sync refuses if HEAD moved since.
+    pub head: String,
     pub base_ref: String,
     /// The recorded stack base shared by planning, integration and the PR range.
     pub fork_base: Option<String>,
@@ -78,6 +80,7 @@ pub fn plan_sync(
 ) -> OpsResult<SyncPlan> {
     let default_branch = get_default_branch(repo)?;
     let branch = current_branch(repo)?.unwrap_or_else(|| "HEAD".to_string());
+    let head = rev_parse(repo, "HEAD")?;
     let base_ref = if let Some(onto) = onto {
         onto.to_string()
     } else {
@@ -145,6 +148,7 @@ pub fn plan_sync(
 
     Ok(SyncPlan {
         branch,
+        head,
         base_ref,
         fork_base,
         class,
@@ -261,7 +265,9 @@ fn start_owned_sync(
     require_changes: bool,
     progress: &impl Progress,
 ) -> OpsResult<SyncVerification> {
-    let mut operation = begin_sync_operation(repo, &options.onto)?;
+    // Fetch and plan before taking the fence: a stalled network fetch must
+    // not keep other writers out of the checkout.
+    refuse_intervention(repo)?;
     let planned;
     let plan = match plan {
         Some(plan) => plan,
@@ -271,9 +277,10 @@ fn start_owned_sync(
             &planned
         }
     };
+    let mut operation = begin_sync_operation(repo, &options.onto)?;
     let target_sha = rev_parse(repo, &options.onto)?;
     operation.pin_target(target_sha.clone())?;
-    revalidate_start(repo, operation.owner())?;
+    revalidate_start(repo, operation.owner(), plan)?;
 
     let expected = SyncExpectation {
         strategy: plan.strategy.clone(),
@@ -459,7 +466,7 @@ fn fetch_target(repo: &Path, target: &str) -> OpsResult<()> {
     Ok(())
 }
 
-fn revalidate_start(repo: &Path, owner: &GitOperationOwner) -> OpsResult<()> {
+fn revalidate_start(repo: &Path, owner: &GitOperationOwner, plan: &SyncPlan) -> OpsResult<()> {
     if let Some(state) = intervention_state(repo)? {
         return Err(OpsError::Message(format!(
             "refusing to start the owned sync: a {state} operation appeared during preparation"
@@ -469,10 +476,10 @@ fn revalidate_start(repo: &Path, owner: &GitOperationOwner) -> OpsResult<()> {
         OpsError::Message("refusing to start the owned sync from detached HEAD".to_string())
     })?;
     let head = rev_parse(repo, "HEAD")?;
-    if branch != owner.branch || head != owner.head {
+    if branch != owner.branch || head != owner.head || head != plan.head {
         return Err(OpsError::Message(format!(
-            "refusing to start the owned sync: branch/HEAD changed during preparation (expected {} at {}, found {branch} at {head})",
-            owner.branch, owner.head
+            "refusing to start the owned sync: branch/HEAD changed during preparation (planned {} at {}, found {branch} at {head})",
+            owner.branch, plan.head
         )));
     }
     Ok(())

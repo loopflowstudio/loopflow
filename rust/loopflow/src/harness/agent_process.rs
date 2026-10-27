@@ -173,7 +173,12 @@ pub(crate) fn stop_native(
 /// Explicit Move stops the recorded provider under the same fence as takeover.
 /// A native provider shares the terminal's group, so signal only its exact PID.
 /// Headless providers retain the existing descendant/group stop policy.
-pub(crate) fn stop_session_agent(store: &SqliteStore, session: &str) -> Result<()> {
+/// `departure` says where the conversation goes, for the terminal it leaves.
+pub(crate) fn stop_session_agent(
+    store: &SqliteStore,
+    session: &str,
+    departure: crate::process::Departure,
+) -> Result<()> {
     let Some(attachment) = store.session_attachment(session)? else {
         return Ok(());
     };
@@ -200,56 +205,61 @@ pub(crate) fn stop_session_agent(store: &SqliteStore, session: &str) -> Result<(
         );
         return Ok(());
     }
-    store.finish_session_attachment(session, &attachment, "interrupted", || {
-        let stop = || -> Result<()> {
-            let (pid, birth) = agent
-                .process
-                .pid
-                .zip(agent.process.os_started_at)
-                .ok_or_else(|| {
-                    anyhow::anyhow!("AgentProcess identity is unknown; resume was not started")
-                })?;
+    let stop = || -> Result<()> {
+        let (pid, birth) = agent
+            .process
+            .pid
+            .zip(agent.process.os_started_at)
+            .ok_or_else(|| {
+                anyhow::anyhow!("AgentProcess identity is unknown; resume was not started")
+            })?;
+        match process_identity_evidence(pid, birth) {
+            ProcessIdentityEvidence::Dead => return Ok(()),
+            ProcessIdentityEvidence::Unknown => {
+                anyhow::bail!("AgentProcess liveness is unknown; resume was not started")
+            }
+            ProcessIdentityEvidence::Live => {}
+        }
+        if !agent.interactive {
+            return terminate_agent_process(pid, birth, agent.provider.as_deref());
+        }
+        for signal in [libc::SIGTERM, libc::SIGKILL] {
             match process_identity_evidence(pid, birth) {
                 ProcessIdentityEvidence::Dead => return Ok(()),
                 ProcessIdentityEvidence::Unknown => {
-                    anyhow::bail!("AgentProcess liveness is unknown; resume was not started")
+                    anyhow::bail!("AgentProcess identity became unknown")
                 }
                 ProcessIdentityEvidence::Live => {}
             }
-            if !agent.interactive {
-                return terminate_agent_process(pid, birth, agent.provider.as_deref());
-            }
-            for signal in [libc::SIGTERM, libc::SIGKILL] {
-                match process_identity_evidence(pid, birth) {
-                    ProcessIdentityEvidence::Dead => return Ok(()),
-                    ProcessIdentityEvidence::Unknown => {
-                        anyhow::bail!("AgentProcess identity became unknown")
-                    }
-                    ProcessIdentityEvidence::Live => {}
-                }
-                anyhow::ensure!(pid > 1, "invalid AgentProcess PID");
-                let pid = libc::pid_t::try_from(pid)?;
-                // SAFETY: a positive PID whose recorded birth was just checked;
-                // never target the shared foreground process group.
-                if unsafe { libc::kill(pid, signal) } != 0 {
-                    let error = std::io::Error::last_os_error();
-                    if error.raw_os_error() != Some(libc::ESRCH) {
-                        return Err(error.into());
-                    }
-                }
-                for _ in 0..20 {
-                    if process_identity_evidence(pid as u32, birth) == ProcessIdentityEvidence::Dead
-                    {
-                        return Ok(());
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+            anyhow::ensure!(pid > 1, "invalid AgentProcess PID");
+            let pid = libc::pid_t::try_from(pid)?;
+            // SAFETY: a positive PID whose recorded birth was just checked;
+            // never target the shared foreground process group.
+            if unsafe { libc::kill(pid, signal) } != 0 {
+                let error = std::io::Error::last_os_error();
+                if error.raw_os_error() != Some(libc::ESRCH) {
+                    return Err(error.into());
                 }
             }
-            anyhow::bail!("AgentProcess did not exit; resume was not started")
-        };
-        stop().map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
-        Ok(true)
-    })?;
+            for _ in 0..20 {
+                if process_identity_evidence(pid as u32, birth) == ProcessIdentityEvidence::Dead {
+                    return Ok(());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+        anyhow::bail!("AgentProcess did not exit; resume was not started")
+    };
+    store.finish_session_attachment(
+        session,
+        &attachment,
+        "interrupted",
+        Some(&departure),
+        || {
+            stop().map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
+            Ok(true)
+        },
+    )?;
     Ok(())
 }
 
@@ -602,7 +612,9 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
         {
             continue;
         }
-        match store.finish_session_attachment(session, &attachment, "interrupted", || Ok(false)) {
+        match store
+            .finish_session_attachment(session, &attachment, "interrupted", None, || Ok(false))
+        {
             Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
             Err(error) => report.errors.push(format!("Session {session}: {error}")),
         }
@@ -888,7 +900,8 @@ mod tests {
         )
         .unwrap();
         child.wait().unwrap();
-        super::stop_session_agent(&store, &session.id).unwrap();
+        super::stop_session_agent(&store, &session.id, crate::process::Departure::Terminal)
+            .unwrap();
         let process = store
             .process(&attachment.agent_process_id)
             .unwrap()
@@ -899,6 +912,65 @@ mod tests {
             store.session_attachment(&session.id).unwrap(),
             Some(attachment)
         );
+    }
+
+    #[test]
+    fn a_stop_records_where_the_conversation_went_for_the_attachment_it_ended() {
+        use crate::process::Departure;
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("db");
+        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let session = store.test_session("moved", &crate::session_record::new_artifact_key());
+        let sql = rusqlite::Connection::open(&database).unwrap();
+        sql.execute(
+            "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
+            [&session.id],
+        )
+        .unwrap();
+        let departures = [
+            Departure::Terminal,
+            Departure::Account {
+                account: crate::store::ProviderAccountId::parse("other").unwrap(),
+            },
+            Departure::Machine {
+                machine: crate::durable::MachineId::new(),
+                task: Some(crate::durable::TaskId::new()),
+            },
+        ];
+        for departure in departures {
+            let parent = LfProcessId::new();
+            sql.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+                [&parent],
+            )
+            .unwrap();
+            let current = store.session_attachment(&session.id).unwrap();
+            let attachment = store
+                .claim_session_attachment(&session.id, current.as_ref(), &parent, true)
+                .unwrap();
+            let mut command = Command::new("/bin/sleep");
+            command.env_clear().arg("60");
+            let mut child = super::spawn_native(
+                command,
+                &(store.clone(), session.id.to_string(), attachment.clone()),
+            )
+            .unwrap();
+            let stopped = super::stop_session_agent(&store, &session.id, departure.clone());
+            let _ = child.kill();
+            child.wait().unwrap();
+            stopped.unwrap();
+            assert_eq!(
+                store
+                    .attachment_departure(&session.id, &attachment)
+                    .unwrap(),
+                Some(departure)
+            );
+            let after = store.session_attachment(&session.id).unwrap().unwrap();
+            assert_eq!(
+                store.attachment_departure(&session.id, &after).unwrap(),
+                None
+            );
+        }
     }
 
     #[test]
@@ -926,7 +998,12 @@ mod tests {
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
         // Missing birth cannot become permission to signal or replace.
-        assert!(super::stop_session_agent(&store, &session.id).is_err());
+        assert!(super::stop_session_agent(
+            &store,
+            &session.id,
+            crate::process::Departure::Terminal
+        )
+        .is_err());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
             Some(attachment.clone())
@@ -971,7 +1048,8 @@ mod tests {
                 .as_deref(),
             Some("second-pane")
         );
-        let stopped = super::stop_session_agent(&store, &session.id);
+        let stopped =
+            super::stop_session_agent(&store, &session.id, crate::process::Departure::Terminal);
         // Always reap only this fixture's child, including when the assertion fails.
         let _ = child.kill();
         child.wait().unwrap();

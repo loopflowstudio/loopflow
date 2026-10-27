@@ -1524,7 +1524,7 @@ mod tests {
                 .claim_session_attachment(id, None, &process, true)
                 .unwrap();
             store
-                .finish_session_attachment(id, &attachment, "interrupted", || Ok(false))
+                .finish_session_attachment(id, &attachment, "interrupted", None, || Ok(false))
                 .unwrap();
             let saved = store.session(id).unwrap().unwrap();
             assert_eq!(saved.completed_at.is_some(), retired);
@@ -1613,7 +1613,7 @@ mod tests {
             .claim_session_attachment(&session.id, Some(&original), &second, true)
             .unwrap();
         assert!(store
-            .finish_session_attachment(&session.id, &original, "interrupted", || Ok(false))
+            .finish_session_attachment(&session.id, &original, "interrupted", None, || Ok(false))
             .is_err());
         assert!(store
             .session(&session.id)
@@ -1626,7 +1626,7 @@ mod tests {
             resumed
         );
         store
-            .finish_session_attachment(&session.id, &resumed, "completed", || Ok(false))
+            .finish_session_attachment(&session.id, &resumed, "completed", None, || Ok(false))
             .unwrap();
         assert!(store
             .session(&session.id)

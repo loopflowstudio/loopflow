@@ -1448,7 +1448,7 @@ pub struct SyncArgs {
     /// Print the planned sync strategy without mutating git
     #[arg(long, conflicts_with_all = ["manual", "continue_sync", "abort"])]
     pub plan: bool,
-    /// Keep the sync local and leave conflicts for this process to resolve
+    /// Keep the sync and uncommitted edits local; leave conflicts for this process to resolve
     #[arg(long, conflicts_with_all = ["plan", "continue_sync", "abort"])]
     pub manual: bool,
     /// Stage resolved conflict paths and continue the local sync

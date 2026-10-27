@@ -113,6 +113,12 @@ def _client(endpoint: str, home: Path, thread: str | None) -> None:
                 )
             if rpc.get("method") == "turn/started" and (home / "fail-after-submit").exists():
                 raise SystemExit(25)
+            if rpc.get("method") == "turn/started" and (home / "idle-terminal").exists():
+                # Like Codex, the one idle terminal ignores losing its server until signalled.
+                (home / "idle-terminal").unlink()
+                (home / "idling").write_text(str(os.getpid()))
+                time.sleep(75)
+                raise TimeoutError("idle terminal was not signalled")
             if rpc.get("method") == "item/commandExecution/requestApproval":
                 if (home / "wait-approval").exists():
                     (home / "pending-request.json").write_text(json.dumps(rpc))

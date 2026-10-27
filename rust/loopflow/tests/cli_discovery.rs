@@ -1164,9 +1164,21 @@ fn desktop_verbs_take_pane_paths_without_public_lifetime_tokens() {
     assert!(matches!(cli.command, Some(Commands::Desktop {
         cmd: DesktopCommand::Goto { index: 2, target }
     }) if target.json));
+    let cli = Cli::try_parse_from([
+        "lf",
+        "desktop",
+        "do",
+        "section",
+        "-p",
+        "board",
+        "section=done",
+    ])
+    .unwrap();
+    assert!(matches!(cli.command, Some(Commands::Desktop {
+        cmd: DesktopCommand::Do { action, args, target }
+    }) if action == "section" && args == ["section=done"] && target.pane.as_deref() == Some("board")));
     for removed in [
-        &["desktop", "do", "goto", "index=2"][..],
-        &["desktop", "text", "hello"],
+        &["desktop", "text", "hello"][..],
         &["desktop", "read", "--region", "screen"],
         &["desktop", "restore"],
         &["desktop", "zoom"],

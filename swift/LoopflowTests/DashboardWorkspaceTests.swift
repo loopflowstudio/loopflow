@@ -225,7 +225,7 @@ struct DashboardWorkspaceTests {
         #expect(model.navigation.dashboardID == nil)
         #expect(registry.selectedWork?.kind == .repository)
         #expect(registry.retained(member) === workspace)
-        #expect(model.paletteRows.contains { $0.id == .dashboard(id) })
+        #expect(!model.paletteRows.contains { $0.key == id })
     }
 
     @Test func refreshedPlansDoNotReplaceOrUnhideRetainedPrimaryPanes() throws {

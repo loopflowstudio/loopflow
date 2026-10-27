@@ -48,7 +48,7 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
         [],
     )
     .unwrap();
-    let parent = LfProcessId::new();
+    let parent = recorded_lf_process(&database);
     let attachment = store
         .claim_session_attachment("orphan", None, &parent, true)
         .unwrap();
@@ -204,10 +204,11 @@ fn task_checkout_blockers_are_rows_in_the_activity_list() {
     let placed = json(repo.path(), &["checkout", id, "--json"]);
     let worktree = Path::new(placed["worktree"].as_str().unwrap());
 
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let database = home.path().join("loopflow.db");
+    let store = SqliteStore::new(&database).unwrap();
     reserve_session(&store, "held", worktree);
     let attachment = store
-        .claim_session_attachment("held", None, &LfProcessId::new(), true)
+        .claim_session_attachment("held", None, &recorded_lf_process(&database), true)
         .unwrap();
     let agent = attachment.agent_process_id.as_str();
 
@@ -1168,6 +1169,19 @@ async fn actual_agent_process_children_follow_attachment_handoff_but_not_provide
     assert_eq!(direct_children, 1);
 }
 
+/// An attaching lf records its own row; fixtures attaching from outside one record it here.
+fn recorded_lf_process(database: &Path) -> LfProcessId {
+    let id = LfProcessId::new();
+    rusqlite::Connection::open(database)
+        .unwrap()
+        .execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,unixepoch())",
+            [&id],
+        )
+        .unwrap();
+    id
+}
+
 fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
     let run_id = uuid::Uuid::new_v4().simple().to_string();
     store
@@ -1412,7 +1426,7 @@ async fn monitor_does_not_treat_historical_feedback_as_live_readiness() {
         reserve_session(&store, id, home.path());
     }
     let finished = store
-        .claim_session_attachment("finished", None, &LfProcessId::new(), true)
+        .claim_session_attachment("finished", None, &recorded_lf_process(&database), true)
         .unwrap();
     let connection = rusqlite::Connection::open(&database).unwrap();
     connection

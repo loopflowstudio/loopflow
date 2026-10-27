@@ -757,6 +757,7 @@ fn dispatch_ops(cmd: &OpsCommand, cli: &Cli, args: &[String]) -> anyhow::Result<
             repo,
             json,
         } => loopflow::lf::commands::ci::run(since, wave.as_deref(), repo.as_deref(), *json),
+        OpsCommand::People { json } => loopflow::lf::commands::people::run(*json),
         OpsCommand::Tokens { json, days } => loopflow::lf::commands::tokens::run(*json, *days),
         OpsCommand::Machine { cmd } => loopflow::lf::commands::machine::run(cmd, cli.batch),
         OpsCommand::Pr { cmd } => in_repo_runtime(args, |_| {
@@ -2459,7 +2460,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         graph,
         reason,
         stop,
-        recover,
         ..
     }) = &cli.command
     {
@@ -2481,7 +2481,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             &issue,
             graph.as_deref(),
             reason.as_deref(),
-            *recover,
         );
     }
     if let Some(Commands::Session { cmd }) = &cli.command {

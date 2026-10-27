@@ -20,6 +20,7 @@ use crate::durable::{MachineId, OwnershipKind, RepositoryId, TaskId, TaskOwnersh
 use crate::harness::HarnessKind;
 use crate::id::{AgentSessionId, LfSessionId, WaveId};
 use crate::journal::ProcessIdentityEvidence;
+use crate::process::Departure;
 use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
 use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
@@ -116,7 +117,14 @@ pub(crate) async fn send(store: &SharedStore, id: &str, to: &MachineId) -> Resul
     })?;
     refuse_mid_operation(&root, name)?;
     let checkout = checkpoint(&store.sqlite, &root, name, to)?;
-    let (moved, history) = take(store, &session)?;
+    let (moved, history) = take(
+        store,
+        &session,
+        Departure::Machine {
+            machine: to.clone(),
+            task: None,
+        },
+    )?;
     store.sqlite.complete_moved_session(&session.id, to)?;
     Ok(Move {
         from_machine_id: store.sqlite.local_machine()?.id,
@@ -155,7 +163,16 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
     };
     let taken = conversation
         .as_ref()
-        .map(|session| take(store, session))
+        .map(|session| {
+            take(
+                store,
+                session,
+                Departure::Machine {
+                    machine: to.clone(),
+                    task: Some(task.id.clone()),
+                },
+            )
+        })
         .transpose()?;
     let handoff = hand_off(&store.sqlite, &task.id, to)?;
     if let Some(session) = &conversation {
@@ -178,8 +195,12 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
 }
 
 /// The Session as it leaves: its agent stopped, its transcript read.
-fn take(store: &SharedStore, session: &LfSession) -> Result<(MovedSession, Option<MovedHistory>)> {
-    crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
+fn take(
+    store: &SharedStore,
+    session: &LfSession,
+    departure: Departure,
+) -> Result<(MovedSession, Option<MovedHistory>)> {
+    crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id, departure)?;
     let history = history(&store.sqlite, session)?;
     let primary = match store.sqlite.session_primary_scope(&session.id)?.as_deref() {
         Some("repository") => Some(MovedPrimary::Repository),

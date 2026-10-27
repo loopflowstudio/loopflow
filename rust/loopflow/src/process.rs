@@ -134,6 +134,22 @@ impl SessionAttachment {
     }
 }
 
+/// Where a conversation went when a mover ended its attachment. Recorded with
+/// the stop itself, so the old terminal can say so as it closes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum Departure {
+    /// Another terminal on this Machine, on the same login.
+    Terminal,
+    Account {
+        account: crate::store::ProviderAccountId,
+    },
+    Machine {
+        machine: crate::durable::MachineId,
+        task: Option<TaskId>,
+    },
+}
+
 /// The provider OS process, including its current attachment. History survives
 /// release and replacement; attachment and parent are independent identities.
 #[derive(Debug, Clone, PartialEq, Eq)]

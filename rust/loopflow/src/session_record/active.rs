@@ -114,7 +114,6 @@ fn observe(store: &SqliteStore, result: &mut ActiveSessionsSnapshot) -> anyhow::
 mod tests {
     use super::{snapshot, DiscoveryState};
     use crate::durable::{TaskId, WorkRef};
-    use crate::id::LfProcessId;
     use crate::session::TitleSource;
     use crate::session_record::new_artifact_key;
     use crate::store::sqlite::SqliteStore;
@@ -157,7 +156,7 @@ mod tests {
         let session = store
             .replace_session_input(session.captured, session)
             .unwrap();
-        let parent = LfProcessId::new();
+        let parent = store.test_lf_process();
         let first = store
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();

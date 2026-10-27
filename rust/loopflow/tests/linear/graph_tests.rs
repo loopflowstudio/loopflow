@@ -813,6 +813,7 @@ fn graph_parsing_parity() {
                 agent: None,
                 default_agent: None,
                 action_style: None,
+                docs: Vec::new(),
                 content: None,
             }),
             id: None,

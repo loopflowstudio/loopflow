@@ -411,6 +411,14 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         .env(OWNER_ENV, id.as_str())
         .env(PARENT_ENV, std::process::id().to_string());
     let pair = terminal.then(terminal_pair).transpose()?;
+    // A native client that dies raw is returned to these modes.
+    let cooked = pair.as_ref().and_then(|(master, _)| {
+        // SAFETY: tcgetattr writes into a live termios; the descriptor is borrowed.
+        unsafe {
+            let mut termios = std::mem::zeroed::<libc::termios>();
+            (libc::tcgetattr(master.as_raw_fd(), &mut termios) == 0).then_some(termios)
+        }
+    });
     if let Some((_, slave)) = &pair {
         command
             .stdin(slave.try_clone()?)
@@ -510,7 +518,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             returning = Some(Response::Return {
                                 detach: detach.clone(),
                             });
-                            client = Some(native::NativeClient::new(exit, detach));
+                            client = Some(native::NativeClient::new(exit, detach, cooked));
                         }
                         Request::NativeEnded { key } if key == control_key => {
                             viewer.ending = true;

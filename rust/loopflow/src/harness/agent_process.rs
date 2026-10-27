@@ -173,7 +173,12 @@ pub(crate) fn stop_native(
 /// Explicit Move stops the recorded provider under the same fence as takeover.
 /// A native provider shares the terminal's group, so signal only its exact PID.
 /// Headless providers retain the existing descendant/group stop policy.
-pub(crate) fn stop_session_agent(store: &SqliteStore, session: &str) -> Result<()> {
+/// `departure` says where the conversation goes, for the terminal it leaves.
+pub(crate) fn stop_session_agent(
+    store: &SqliteStore,
+    session: &str,
+    departure: crate::process::Departure,
+) -> Result<()> {
     let Some(attachment) = store.session_attachment(session)? else {
         return Ok(());
     };
@@ -200,56 +205,61 @@ pub(crate) fn stop_session_agent(store: &SqliteStore, session: &str) -> Result<(
         );
         return Ok(());
     }
-    store.finish_session_attachment(session, &attachment, "interrupted", || {
-        let stop = || -> Result<()> {
-            let (pid, birth) = agent
-                .process
-                .pid
-                .zip(agent.process.os_started_at)
-                .ok_or_else(|| {
-                    anyhow::anyhow!("AgentProcess identity is unknown; resume was not started")
-                })?;
+    let stop = || -> Result<()> {
+        let (pid, birth) = agent
+            .process
+            .pid
+            .zip(agent.process.os_started_at)
+            .ok_or_else(|| {
+                anyhow::anyhow!("AgentProcess identity is unknown; resume was not started")
+            })?;
+        match process_identity_evidence(pid, birth) {
+            ProcessIdentityEvidence::Dead => return Ok(()),
+            ProcessIdentityEvidence::Unknown => {
+                anyhow::bail!("AgentProcess liveness is unknown; resume was not started")
+            }
+            ProcessIdentityEvidence::Live => {}
+        }
+        if !agent.interactive {
+            return terminate_agent_process(pid, birth, agent.provider.as_deref());
+        }
+        for signal in [libc::SIGTERM, libc::SIGKILL] {
             match process_identity_evidence(pid, birth) {
                 ProcessIdentityEvidence::Dead => return Ok(()),
                 ProcessIdentityEvidence::Unknown => {
-                    anyhow::bail!("AgentProcess liveness is unknown; resume was not started")
+                    anyhow::bail!("AgentProcess identity became unknown")
                 }
                 ProcessIdentityEvidence::Live => {}
             }
-            if !agent.interactive {
-                return terminate_agent_process(pid, birth, agent.provider.as_deref());
-            }
-            for signal in [libc::SIGTERM, libc::SIGKILL] {
-                match process_identity_evidence(pid, birth) {
-                    ProcessIdentityEvidence::Dead => return Ok(()),
-                    ProcessIdentityEvidence::Unknown => {
-                        anyhow::bail!("AgentProcess identity became unknown")
-                    }
-                    ProcessIdentityEvidence::Live => {}
-                }
-                anyhow::ensure!(pid > 1, "invalid AgentProcess PID");
-                let pid = libc::pid_t::try_from(pid)?;
-                // SAFETY: a positive PID whose recorded birth was just checked;
-                // never target the shared foreground process group.
-                if unsafe { libc::kill(pid, signal) } != 0 {
-                    let error = std::io::Error::last_os_error();
-                    if error.raw_os_error() != Some(libc::ESRCH) {
-                        return Err(error.into());
-                    }
-                }
-                for _ in 0..20 {
-                    if process_identity_evidence(pid as u32, birth) == ProcessIdentityEvidence::Dead
-                    {
-                        return Ok(());
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+            anyhow::ensure!(pid > 1, "invalid AgentProcess PID");
+            let pid = libc::pid_t::try_from(pid)?;
+            // SAFETY: a positive PID whose recorded birth was just checked;
+            // never target the shared foreground process group.
+            if unsafe { libc::kill(pid, signal) } != 0 {
+                let error = std::io::Error::last_os_error();
+                if error.raw_os_error() != Some(libc::ESRCH) {
+                    return Err(error.into());
                 }
             }
-            anyhow::bail!("AgentProcess did not exit; resume was not started")
-        };
-        stop().map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
-        Ok(true)
-    })?;
+            for _ in 0..20 {
+                if process_identity_evidence(pid as u32, birth) == ProcessIdentityEvidence::Dead {
+                    return Ok(());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+        anyhow::bail!("AgentProcess did not exit; resume was not started")
+    };
+    store.finish_session_attachment(
+        session,
+        &attachment,
+        "interrupted",
+        Some(&departure),
+        || {
+            stop().map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
+            Ok(true)
+        },
+    )?;
     Ok(())
 }
 
@@ -396,6 +406,57 @@ pub struct AgentProcessCleanup {
 pub fn reap_agent_processes(dry_run: bool) -> Result<AgentProcessReapReport> {
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
     Ok(reap_in(&store, dry_run)?)
+}
+
+/// `lf monitor prune`'s AgentProcess pass: reap orphans, then release ancestry
+/// it can prove was never recorded. Lazy recovery only reaps.
+pub fn prune_agent_processes(dry_run: bool) -> Result<AgentProcessReapReport> {
+    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let mut report = reap_in(&store, dry_run)?;
+    let repaired = repair_unrecorded_ancestry_in(
+        &store,
+        crate::journal::current_lf_process_id().as_ref(),
+        dry_run,
+    )?;
+    report.records.extend(repaired.records);
+    report.errors.extend(repaired.errors);
+    Ok(report)
+}
+
+fn repair_unrecorded_ancestry_in(
+    store: &SqliteStore,
+    repairer: Option<&LfProcessId>,
+    dry_run: bool,
+) -> StoreResult<AgentProcessReapReport> {
+    let mut report = AgentProcessReapReport::default();
+    for agent in store.unrecorded_agent_ancestry()? {
+        let mut record = AgentProcessCleanup {
+            id: agent.agent_process_id.clone(),
+            action: "would_repair".into(),
+            reason: format!(
+                "parent LfProcess {} was never recorded",
+                agent.parent_lf_process_id
+            ),
+        };
+        if !dry_run {
+            match store.release_unrecorded_ancestry(&agent, repairer) {
+                Ok(true) => record.action = "repaired".into(),
+                Ok(false) => {
+                    record.action = "retained".into();
+                    record.reason = "ancestry changed during repair".into();
+                }
+                Err(error) => {
+                    record.action = "retained".into();
+                    record.reason = error.to_string();
+                    report
+                        .errors
+                        .push(format!("AgentProcess {}: {error}", agent.agent_process_id));
+                }
+            }
+        }
+        report.records.push(record);
+    }
+    Ok(report)
 }
 
 fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapReport> {
@@ -551,7 +612,9 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
         {
             continue;
         }
-        match store.finish_session_attachment(session, &attachment, "interrupted", || Ok(false)) {
+        match store
+            .finish_session_attachment(session, &attachment, "interrupted", None, || Ok(false))
+        {
             Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
             Err(error) => report.errors.push(format!("Session {session}: {error}")),
         }
@@ -657,6 +720,162 @@ mod tests {
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
 
+    /// The live LOO-643 shape: an ended agent reserved under an lf whose
+    /// start receipt never landed, still attached to that unrecorded lf.
+    fn unrecorded_ancestry_fixture(
+        store: &SqliteStore,
+        sql: &rusqlite::Connection,
+        name: &str,
+    ) -> (String, LfProcessId, LfProcessId) {
+        let session = store.test_session(name, &crate::session_record::new_artifact_key());
+        let ghost = store.test_lf_process();
+        let attachment = store
+            .claim_session_attachment(&session.id, None, &ghost, true)
+            .unwrap();
+        sql.execute_batch(&format!(
+            "UPDATE processes SET trace_id=id,completed_at=2 WHERE id='{agent}';
+             DELETE FROM processes WHERE id='{ghost}';
+             UPDATE agent_sessions SET provider_thread='thread-1' WHERE id='{session}';",
+            agent = attachment.agent_process_id,
+            session = session.id,
+        ))
+        .unwrap();
+        (session.id.to_string(), ghost, attachment.agent_process_id)
+    }
+
+    fn lineage(store: &SqliteStore) -> crate::lf::commands::doctor::Check {
+        crate::lf::commands::doctor::check_lineage(
+            &store.processes_since(0).unwrap(),
+            store.unrecorded_agent_ancestry().unwrap().len(),
+        )
+    }
+
+    #[test]
+    fn prune_releases_unrecorded_ancestry_and_the_session_resumes() {
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("db");
+        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let sql = rusqlite::Connection::open(&database).unwrap();
+        let (session, ghost, agent) = unrecorded_ancestry_fixture(&store, &sql, "ladder");
+        let events = |sql: &rusqlite::Connection| -> i64 {
+            sql.query_row(
+                "SELECT count(*) FROM session_events WHERE session_id=?1",
+                [&session],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let before = events(&sql);
+        let resumer = store.test_lf_process();
+
+        let stuck = store.session_attachment(&session).unwrap();
+        assert!(store
+            .resume_session_attachment(&session, stuck.as_ref(), &resumer, || Ok(false))
+            .is_err());
+        let check = lineage(&store);
+        assert!(
+            check.detail.contains("`lf monitor prune` repairs"),
+            "{check:?}"
+        );
+
+        let preview = super::repair_unrecorded_ancestry_in(&store, None, true).unwrap();
+        assert_eq!(preview.records.len(), 1);
+        assert_eq!(preview.records[0].id, agent);
+        assert_eq!(preview.records[0].action, "would_repair");
+        assert!(preview.records[0].reason.contains(ghost.as_str()));
+        assert_eq!(events(&sql), before);
+
+        let applied = super::repair_unrecorded_ancestry_in(&store, Some(&resumer), false).unwrap();
+        assert_eq!(applied.records[0].action, "repaired");
+        assert!(applied.errors.is_empty());
+        let fact: serde_json::Value = sql
+            .query_row(
+                "SELECT payload FROM session_events WHERE session_id=?1
+                 AND json_extract(payload,'$.type')='agent_process_ancestry_repaired'",
+                [&session],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|payload| serde_json::from_str(&payload).unwrap())
+            .unwrap();
+        assert_eq!(fact["agent_process_id"], agent.as_str());
+        assert_eq!(fact["unrecorded_parent_lf_process_id"], ghost.as_str());
+        assert_eq!(fact["released_attached_lf_process_id"], ghost.as_str());
+        assert_eq!(events(&sql), before + 1);
+        assert!(lineage(&store).status == crate::lf::commands::doctor::Status::Ok);
+
+        let rerun = super::repair_unrecorded_ancestry_in(&store, Some(&resumer), false).unwrap();
+        assert!(rerun.records.is_empty());
+
+        // The Session resumes through the ordinary claim with native history intact.
+        assert_eq!(store.session_attachment(&session).unwrap(), None);
+        let resumed = store
+            .resume_session_attachment(&session, None, &resumer, || Ok(false))
+            .unwrap();
+        assert_ne!(resumed.agent_process_id, agent);
+        let thread: Option<String> = sql
+            .query_row(
+                "SELECT provider_thread FROM agent_sessions WHERE id=?1",
+                [&session],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(thread.as_deref(), Some("thread-1"));
+        assert!(lineage(&store).status == crate::lf::commands::doctor::Status::Ok);
+    }
+
+    #[test]
+    fn prune_leaves_pruned_parents_live_agents_and_recorded_owners_failing_doctor() {
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("db");
+        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let sql = rusqlite::Connection::open(&database).unwrap();
+        let (_, _, pruned) = unrecorded_ancestry_fixture(&store, &sql, "pruned");
+        let (_, _, live) = unrecorded_ancestry_fixture(&store, &sql, "live");
+        let (_, _, owned) = unrecorded_ancestry_fixture(&store, &sql, "owned");
+        sql.execute(
+            "UPDATE processes SET attached_lf_process_id=?2 WHERE id=?1",
+            [&owned, &store.test_lf_process()],
+        )
+        .unwrap();
+        sql.execute(
+            "UPDATE processes SET trace_id=?2 WHERE id=?1",
+            [&pruned, &LfProcessId::new()],
+        )
+        .unwrap();
+        sql.execute(
+            "UPDATE processes SET completed_at=NULL WHERE id=?1",
+            [&live],
+        )
+        .unwrap();
+        let report = super::repair_unrecorded_ancestry_in(&store, None, false).unwrap();
+        assert!(report.records.is_empty());
+        let check = lineage(&store);
+        assert!(check.status == crate::lf::commands::doctor::Status::Fail);
+        assert!(!check.detail.contains("lf monitor prune"), "{check:?}");
+    }
+
+    #[test]
+    fn attachment_records_its_lf_when_the_start_receipt_was_lost() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let home = ledger.home();
+        crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
+            let process = crate::journal::current_lf_process_id().unwrap();
+            let store = SqliteStore::new(&home.join("loopflow.db"))?;
+            rusqlite::Connection::open(home.join("loopflow.db"))?
+                .execute("DELETE FROM processes WHERE id=?1", [&process])?;
+            let session = store.test_session("lost", &crate::session_record::new_artifact_key());
+            let attachment = store.claim_session_attachment(&session.id, None, &process, true)?;
+            let parent = store.process(&process)?.unwrap();
+            let agent = store.process(&attachment.agent_process_id)?.unwrap();
+            assert_eq!(agent.trace_id, parent.trace_id);
+            assert!(parent.command.is_some());
+            assert!(lineage(&store).status == crate::lf::commands::doctor::Status::Ok);
+            Ok(())
+        })
+        .unwrap();
+    }
+
     #[test]
     fn tool_lifeline_refuses_the_providers_own_group() {
         let error =
@@ -671,7 +890,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("dead", &crate::session_record::new_artifact_key());
         let attachment = store
-            .claim_session_attachment(&session.id, None, &LfProcessId::new(), true)
+            .claim_session_attachment(&session.id, None, &store.test_lf_process(), true)
             .unwrap();
         let mut command = Command::new("/usr/bin/true");
         command.env_clear();
@@ -681,7 +900,8 @@ mod tests {
         )
         .unwrap();
         child.wait().unwrap();
-        super::stop_session_agent(&store, &session.id).unwrap();
+        super::stop_session_agent(&store, &session.id, crate::process::Departure::Terminal)
+            .unwrap();
         let process = store
             .process(&attachment.agent_process_id)
             .unwrap()
@@ -692,6 +912,65 @@ mod tests {
             store.session_attachment(&session.id).unwrap(),
             Some(attachment)
         );
+    }
+
+    #[test]
+    fn a_stop_records_where_the_conversation_went_for_the_attachment_it_ended() {
+        use crate::process::Departure;
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("db");
+        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let session = store.test_session("moved", &crate::session_record::new_artifact_key());
+        let sql = rusqlite::Connection::open(&database).unwrap();
+        sql.execute(
+            "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
+            [&session.id],
+        )
+        .unwrap();
+        let departures = [
+            Departure::Terminal,
+            Departure::Account {
+                account: crate::store::ProviderAccountId::parse("other").unwrap(),
+            },
+            Departure::Machine {
+                machine: crate::durable::MachineId::new(),
+                task: Some(crate::durable::TaskId::new()),
+            },
+        ];
+        for departure in departures {
+            let parent = LfProcessId::new();
+            sql.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+                [&parent],
+            )
+            .unwrap();
+            let current = store.session_attachment(&session.id).unwrap();
+            let attachment = store
+                .claim_session_attachment(&session.id, current.as_ref(), &parent, true)
+                .unwrap();
+            let mut command = Command::new("/bin/sleep");
+            command.env_clear().arg("60");
+            let mut child = super::spawn_native(
+                command,
+                &(store.clone(), session.id.to_string(), attachment.clone()),
+            )
+            .unwrap();
+            let stopped = super::stop_session_agent(&store, &session.id, departure.clone());
+            let _ = child.kill();
+            child.wait().unwrap();
+            stopped.unwrap();
+            assert_eq!(
+                store
+                    .attachment_departure(&session.id, &attachment)
+                    .unwrap(),
+                Some(departure)
+            );
+            let after = store.session_attachment(&session.id).unwrap().unwrap();
+            assert_eq!(
+                store.attachment_departure(&session.id, &after).unwrap(),
+                None
+            );
+        }
     }
 
     #[test]
@@ -719,7 +998,12 @@ mod tests {
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
         // Missing birth cannot become permission to signal or replace.
-        assert!(super::stop_session_agent(&store, &session.id).is_err());
+        assert!(super::stop_session_agent(
+            &store,
+            &session.id,
+            crate::process::Departure::Terminal
+        )
+        .is_err());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
             Some(attachment.clone())
@@ -764,7 +1048,8 @@ mod tests {
                 .as_deref(),
             Some("second-pane")
         );
-        let stopped = super::stop_session_agent(&store, &session.id);
+        let stopped =
+            super::stop_session_agent(&store, &session.id, crate::process::Departure::Terminal);
         // Always reap only this fixture's child, including when the assertion fails.
         let _ = child.kill();
         child.wait().unwrap();
@@ -922,7 +1207,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("cleanup", &crate::session_record::new_artifact_key());
-        let parent = LfProcessId::new();
+        let parent = store.test_lf_process();
         let first = store
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
@@ -977,7 +1262,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("takeover", &crate::session_record::new_artifact_key());
         let first = store
-            .claim_session_attachment(&session.id, None, &LfProcessId::new(), true)
+            .claim_session_attachment(&session.id, None, &store.test_lf_process(), true)
             .unwrap();
         let first_owner = (store.clone(), session.id.to_string(), first.clone());
         let mut command = Command::new("/bin/sleep");
@@ -1005,7 +1290,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("failed-wait", &crate::session_record::new_artifact_key());
         let attachment = store
-            .claim_session_attachment(&session.id, None, &LfProcessId::new(), true)
+            .claim_session_attachment(&session.id, None, &store.test_lf_process(), true)
             .unwrap();
         let owner = (store.clone(), session.id.to_string(), attachment.clone());
         let mut command = Command::new("/bin/sh");
@@ -1032,7 +1317,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("spawn", &crate::session_record::new_artifact_key());
-        let parent = LfProcessId::new();
+        let parent = store.test_lf_process();
         let first = store
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
@@ -1096,7 +1381,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("native", &crate::session_record::new_artifact_key());
-        let parent = LfProcessId::new();
+        let parent = store.test_lf_process();
         let first = store
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
@@ -1169,7 +1454,7 @@ mod tests {
             .unwrap();
         let pid = child.id();
         let start = crate::journal::process_started_at(pid).unwrap().unwrap();
-        let parent = LfProcessId::new();
+        let parent = store.test_lf_process();
         for name in ["first", "conflict"] {
             let session = store.test_session(name, &crate::session_record::new_artifact_key());
             rusqlite::Connection::open(home.path().join("db"))

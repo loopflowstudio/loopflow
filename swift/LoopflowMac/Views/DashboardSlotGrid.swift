@@ -120,10 +120,19 @@ struct DashboardSlotGrid<Tile: View>: View {
     let focused: WorkWorkspaceKey?
     let layout: DashboardSlotLayout
     var editing: DashboardSlotEditing?
+    /// A view that turns pages from elsewhere holds the page; otherwise the grid does.
+    var heldPage: Binding<Int>?
+    /// ⌘⌥←/→ turn pages; a view whose ⌘⌥ arrows move pane focus turns off.
+    var pagerKeys = true
     @ViewBuilder let tile: (WorkMemberRef) -> Tile
-    @State private var page = 0
+    @State private var localPage = 0
     @State private var forward = true
     @Environment(\.palette) private var palette
+
+    private var page: Int {
+        get { heldPage?.wrappedValue ?? localPage }
+        nonmutating set { if let heldPage { heldPage.wrappedValue = newValue } else { localPage = newValue } }
+    }
 
     var body: some View {
         let pages = layout.pages(members)
@@ -137,13 +146,13 @@ struct DashboardSlotGrid<Tile: View>: View {
                 HStack(spacing: 12) {
                     Button { turn(to: current - 1) } label: { Image(systemName: "chevron.left") }
                         .disabled(current == 0).help("Previous page")
-                        .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                        .keyboardShortcut(pagerKeys ? KeyboardShortcut(.leftArrow, modifiers: [.command, .option]) : nil)
                     Text("Page \(current + 1) of \(pages.count)").font(Typography.code(11))
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("dashboard-page")
                     Button { turn(to: current + 1) } label: { Image(systemName: "chevron.right") }
                         .disabled(current == pages.count - 1).help("Next page")
-                        .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                        .keyboardShortcut(pagerKeys ? KeyboardShortcut(.rightArrow, modifiers: [.command, .option]) : nil)
                 }.buttonStyle(.plain)
             }
         }

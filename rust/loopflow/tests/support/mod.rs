@@ -170,11 +170,18 @@ fi
 
 #[allow(dead_code)] // Shared synthetic account for provider-backed CLI proofs.
 pub fn register_codex_account(home: &Path) {
-    let account_home = home.join("accounts/codex/fixture");
+    register_codex_login(home, "fixture");
+}
+
+/// A connected synthetic Codex login `<name>@example.com`, account id `<name>`.
+#[allow(dead_code)]
+pub fn register_codex_login(home: &Path, name: &str) {
+    let account_home = home.join("accounts/codex").join(name);
     fs::create_dir_all(&account_home).unwrap();
-    let email = "fixture@example.com";
-    let claims = BASE64_URL_SAFE_NO_PAD
-        .encode(serde_json::json!({"email": email, "sub": "fixture"}).to_string());
+    let email = format!("{name}@example.com");
+    let email = email.as_str();
+    let claims =
+        BASE64_URL_SAFE_NO_PAD.encode(serde_json::json!({"email": email, "sub": name}).to_string());
     fs::write(
         account_home.join("auth.json"),
         serde_json::json!({"tokens": {
@@ -189,7 +196,7 @@ pub fn register_codex_account(home: &Path) {
     store
         .upsert_provider_account(&loopflow::store::ProviderAccount {
             provider: "codex".into(),
-            account_id: loopflow::store::ProviderAccountId::parse("fixture").unwrap(),
+            account_id: loopflow::store::ProviderAccountId::parse(name).unwrap(),
             home: Some(account_home),
             login_email: Some(loopflow::profile::EmailAddress::parse(email).unwrap()),
             observed_email: None,

@@ -145,11 +145,43 @@ struct WorkspacePanesTests {
         let activeView = try #require(active)
         #expect(activeView.isFocused)
         #expect(other.multiplexer.sessionPane?.sessionId == nil)
-        try activeView.inspect().find(viewWithAccessibilityIdentifier: "pane-close").button().tap()
+        try activeView.inspect().find(viewWithAccessibilityIdentifier: "pane-hide").button().tap()
         #expect(workspace.multiplexer.collapsedPaneIds.contains(pane.id))
         #expect(workspace.multiplexer.layout.pane(for: shell.id) == shell)
         #expect(sessions.sessions.first?.id == primary.id)
     }
 
+    @Test("Every Task pane hides on hover and the header's Show… restores it")
+    func hoverHideAndShow() throws {
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Rendering cannot open work") }
+        let model = WorkModel(query: query, repoPath: location.worktree)
+        let workspace = SessionsWorkspace(key: .init(repository: "repo", kind: .task, id: "task-a"),
+            title: "Task A", location: location, localMachineId: location.machineId)
+        let sessions = workspace.sessionStore(repoPath: location.worktree, query: query)
+        try workspace.toggleShell()
+        let store = workspace.multiplexer
+        let shell = try #require(store.shellPane)
+        let browser = try #require(store.browserPane)
+        // Tools start hidden; Show… lists them as `lf desktop state` does.
+        #expect(ShowHiddenMenu(workspace: workspace).items.map(\.title) == ["Browser"])
+        // An unfocused pane offers Hide on hover too.
+        let session = try #require(store.sessionPane)
+        #expect(store.focusedPaneId == shell.id)
+        workspace.stripHover(session.id).isHovered = true
+        let view = SessionPaneView(pane: session, isFocused: false, sessions: sessions, workspace: workspace,
+                                   model: model, onFocus: { _, _ in })
+        try view.inspect().find(viewWithAccessibilityIdentifier: "pane-hide").button().tap()
+        #expect(store.collapsedPaneIds == [session.id, browser.id])
+        let menu = ShowHiddenMenu(workspace: workspace)
+        #expect(menu.items.map(\.title) == ["Session", "Browser"])
+        try menu.inspect().find(viewWithAccessibilityIdentifier: "show-pane-\(session.id)").button().tap()
+        try ShowHiddenMenu(workspace: workspace).inspect()
+            .find(viewWithAccessibilityIdentifier: "show-pane-\(browser.id)").button().tap()
+        #expect(store.collapsedPaneIds.isEmpty)
+        // Nothing hidden: the header has no Show… menu.
+        #expect(throws: (any Error).self) {
+            try ShowHiddenMenu(workspace: workspace).inspect().find(viewWithAccessibilityIdentifier: "show-hidden-panes")
+        }
+    }
 }
 #endif

@@ -165,7 +165,6 @@ fn spawn_session_command_with_env(
 ) -> Result<()> {
     let _planning_sync =
         crate::ops::planning_sync::PlanningSync::start_for_directory(&command.cwd)?;
-    let pinned = pinned_account(environment, agent_session)?;
     let outcome = session_command_status_with_env(
         command,
         environment,
@@ -173,7 +172,7 @@ fn spawn_session_command_with_env(
         exact_account_id,
         launch_lock,
     )?;
-    if let Some(moved) = moved_away(environment, pinned)? {
+    if let Some(moved) = &outcome.moved {
         eprintln!("{moved}");
         return Ok(());
     }
@@ -193,92 +192,59 @@ fn spawn_session_command_with_env(
     }
 }
 
-/// The login a resumed conversation is pinned to as this launch starts.
-type Pin = (
-    Provider,
-    AgentSessionId,
-    Option<crate::store::ProviderAccountId>,
-);
-
-fn pinned_account(
-    environment: &BTreeMap<String, String>,
-    agent_session: Option<&AgentSessionId>,
-) -> Result<Option<Pin>> {
-    let (Some(input), Some(agent_session)) = (
-        environment.get(crate::session_record::CAPTURE_KEY_ENV),
-        agent_session,
-    ) else {
-        return Ok(None);
-    };
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
-    let provider = store
-        .session_for_artifact(input)?
-        .and_then(|session| session.provider)
-        .and_then(|provider| provider.parse::<Provider>().ok());
-    let Some(provider) = provider else {
-        return Ok(None);
-    };
-    let account = store.provider_session_account(provider, agent_session)?;
-    Ok(Some((provider, agent_session.clone(), account)))
+/// Where this launch's conversation went, when a mover ended its attachment.
+fn moved_away(
+    (store, session, attachment): &crate::harness::agent_process::AttachmentOwner,
+) -> Result<Option<String>> {
+    store
+        .attachment_departure(session, attachment)?
+        .map(|departure| departure_notice(store, session, departure))
+        .transpose()
 }
 
-/// Where this launch's conversation went, when another Machine or another
-/// login took it.
-fn moved_away(
-    environment: &BTreeMap<String, String>,
-    pinned: Option<Pin>,
-) -> Result<Option<String>> {
-    let Some(input) = environment.get(crate::session_record::CAPTURE_KEY_ENV) else {
-        return Ok(None);
-    };
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
-    let Some(session) = store.session_for_artifact(input)? else {
-        return Ok(None);
-    };
-    let Some(machine) = store.session_moved_to(&session.id)? else {
-        let Some((provider, agent_session, before)) = pinned else {
-            return Ok(None);
-        };
-        let Some(after) = store.provider_session_account(provider, &agent_session)? else {
-            return Ok(None);
-        };
-        if before.as_ref() == Some(&after) {
-            return Ok(None);
+fn departure_notice(
+    store: &SqliteStore,
+    session: &str,
+    departure: crate::process::Departure,
+) -> Result<String> {
+    use crate::process::Departure;
+    Ok(match departure {
+        Departure::Terminal => {
+            "This conversation moved to another terminal on this Machine.".into()
         }
-        let label = store
-            .get_provider_account(provider.as_str(), &after)?
-            .and_then(|account| account.login_email.map(|email| email.to_string()))
-            .unwrap_or_else(|| after.to_string());
-        return Ok(Some(format!(
-            "This conversation moved to account {label}: lf resume {}",
-            session.id
-        )));
-    };
-    let label = store
-        .machine_by_id(&machine)?
-        .map_or_else(|| machine.to_string(), |machine| machine.name());
-    // A Task that went with its conversation is resumed by its name.
-    for task in store.session_task_ids(&session.id)? {
-        let owner = store.task_ownership(&task)?.owner;
-        if owner.and_then(|owner| owner.machine.id) == Some(machine.clone()) {
-            if let Some(task) = store.task(&task)? {
-                return Ok(Some(format!(
+        Departure::Account { account } => {
+            let label = store
+                .session(session)?
+                .and_then(|session| session.provider)
+                .map(|provider| store.get_provider_account(&provider, &account))
+                .transpose()?
+                .flatten()
+                .and_then(|account| account.login_email.map(|email| email.to_string()))
+                .unwrap_or_else(|| account.to_string());
+            format!("This conversation moved to account {label}: lf resume {session}")
+        }
+        Departure::Machine { machine, task } => {
+            let label = store
+                .machine_by_id(&machine)?
+                .map_or_else(|| machine.to_string(), |machine| machine.name());
+            // A Task that went with its conversation is resumed by its name.
+            match task.map(|task| store.task(&task)).transpose()?.flatten() {
+                Some(task) => format!(
                     "This conversation moved to {label}: lf resume --task {}",
                     task.identifier
-                )));
+                ),
+                None => format!("This conversation moved to {label}: lf resume {session}"),
             }
         }
-    }
-    Ok(Some(format!(
-        "This conversation moved to {label}: lf resume {}",
-        session.id
-    )))
+    })
 }
 
 #[derive(Debug)]
 struct SessionCommandOutcome {
     status: std::process::ExitStatus,
     interrupted: bool,
+    /// Where the conversation went when a mover took it from this launch.
+    moved: Option<String>,
 }
 
 fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<()> {
@@ -608,12 +574,18 @@ fn run_native_session(
     let _native = native_return(&attachment);
     // The process record now owns the launch identity.
     drop(launch_lock);
-    let status = if let Some(title) = &mut title {
-        crate::os_process::wait_for_exit(&mut child, None, || title.refresh())
-            .map(|result| result.0)
-    } else {
-        child.wait()
-    };
+    let mut watch = owned
+        .is_none()
+        .then(|| ClientWatch::new(&attachment, child.id()));
+    let status = crate::os_process::wait_for_exit(&mut child, None, || {
+        if let Some(title) = &mut title {
+            title.refresh();
+        }
+        if let Some(watch) = &mut watch {
+            watch.tick();
+        }
+    })
+    .map(|result| result.0);
     let status = match status {
         Ok(status) => status,
         Err(error) => {
@@ -636,18 +608,100 @@ fn run_native_session(
     } else {
         false
     };
+    // A mover ended this attachment; the conversation's home is now its business.
+    let lost = attachment_lost(&attachment).unwrap_or_else(|error| {
+        tracing::warn!(%error, "cannot read this launch's Session attachment");
+        false
+    });
     // Record which home this conversation lives in, so reopening returns there.
-    if let (Some(route), Some(capture_dir)) = (&account_route, capture_dir.as_deref()) {
+    if let (Some(route), Some(capture_dir), false) = (&account_route, capture_dir.as_deref(), lost)
+    {
         if let Ok(Some(session)) = crate::session_record::read_provider_session(capture_dir) {
             if let Err(error) = route.pin_session_blocking(Some(session.agent_session)) {
                 tracing::warn!(%error, "failed to record the provider session's account home");
             }
         }
     }
+    let moved = if lost {
+        moved_away(&attachment).unwrap_or_else(|error| {
+            tracing::warn!(%error, "cannot read where this conversation moved");
+            None
+        })
+    } else {
+        None
+    };
     Ok(SessionCommandOutcome {
         status,
-        interrupted,
+        interrupted: interrupted || lost,
+        moved,
     })
+}
+
+/// Whether a mover ended this launch's attachment.
+fn attachment_lost(
+    (store, session, expected): &crate::harness::agent_process::AttachmentOwner,
+) -> crate::store::StoreResult<bool> {
+    Ok(store.session_attachment(session)?.as_ref() != Some(expected))
+}
+
+/// A relay client outlives the provider it connects to: Codex keeps
+/// reconnecting after a takeover. Once this launch's attachment is gone, end
+/// the exact client it spawned, and force it after two seconds.
+struct ClientWatch<'a> {
+    owner: &'a crate::harness::agent_process::AttachmentOwner,
+    pid: libc::pid_t,
+    checked: std::time::Instant,
+    lost: Option<std::time::Instant>,
+    killed: bool,
+}
+
+impl<'a> ClientWatch<'a> {
+    fn new(owner: &'a crate::harness::agent_process::AttachmentOwner, pid: u32) -> Self {
+        Self {
+            owner,
+            pid: libc::pid_t::try_from(pid).expect("a spawned child's PID fits pid_t"),
+            checked: std::time::Instant::now(),
+            lost: None,
+            killed: false,
+        }
+    }
+
+    /// Called only while the child is unreaped, so its PID is still ours.
+    fn tick(&mut self) {
+        let now = std::time::Instant::now();
+        match self.lost {
+            None if now.duration_since(self.checked) >= std::time::Duration::from_millis(500) => {
+                self.checked = now;
+                match attachment_lost(self.owner) {
+                    Ok(true) => {
+                        tracing::info!(
+                            session = %self.owner.1,
+                            "attachment ended elsewhere; closing its client"
+                        );
+                        self.lost = Some(now);
+                        self.signal(libc::SIGTERM);
+                    }
+                    Ok(false) => {}
+                    Err(error) => tracing::warn!(%error, "cannot check the client's attachment"),
+                }
+            }
+            Some(lost)
+                if !self.killed
+                    && now.duration_since(lost) >= std::time::Duration::from_secs(2) =>
+            {
+                self.killed = true;
+                self.signal(libc::SIGKILL);
+            }
+            _ => {}
+        }
+    }
+
+    fn signal(&self, signal: libc::c_int) {
+        // SAFETY: the PID is this launch's own unreaped child, never a group.
+        if self.pid > 1 && unsafe { libc::kill(self.pid, signal) } != 0 {
+            tracing::warn!(error = %std::io::Error::last_os_error(), "cannot signal the client");
+        }
+    }
 }
 
 pub(crate) fn run_native_agent(
@@ -822,6 +876,7 @@ fn run_opencode_native(
                 Ok(SessionCommandOutcome {
                     status,
                     interrupted: false,
+                    moved: None,
                 })
             })();
         // Release the worker on every terminal setup/exit path before joining it.
@@ -998,6 +1053,10 @@ async fn serve_codex_native(
             }
         }
     }
+    // A mover took the conversation; its new attachment owns recovery.
+    if attachment_lost(&owner)? {
+        return Ok(());
+    }
     connection.ensure_thread_resolved()?;
     if connection.submission()? == Some(NativeSubmission::InputDispatched) {
         bail!("Codex initial input was dispatched without acknowledgement; resume saved history before sending again");
@@ -1045,6 +1104,49 @@ mod tests {
     use crate::store::{CredentialType, ProviderAccountId, ProviderToken, StorageConfig};
     use std::ffi::OsString;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn a_machine_move_names_the_task_that_went_with_it() {
+        use crate::durable::{MachineId, TaskId};
+        use crate::process::Departure;
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let repo = home.path().canonicalize().unwrap();
+        let repo = repo.to_str().unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                repository_id: store.ensure_repository(repo).unwrap(),
+                due_date: None,
+                id: TaskId::new(),
+                project_id: Some(store.ensure_wave_project(repo, "inbox").unwrap().id),
+                title: "Move it".into(),
+                description: String::new(),
+            })
+            .unwrap();
+        let machine = MachineId::new();
+        let notice = |task| {
+            departure_notice(
+                &store,
+                "s1",
+                Departure::Machine {
+                    machine: machine.clone(),
+                    task,
+                },
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            notice(Some(task.id.clone())),
+            format!(
+                "This conversation moved to {machine}: lf resume --task {}",
+                task.identifier
+            )
+        );
+        assert_eq!(
+            notice(None),
+            format!("This conversation moved to {machine}: lf resume s1")
+        );
+    }
 
     struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
 
@@ -1304,6 +1406,7 @@ mod tests {
                     return crate::harness::agent_process::stop_session_agent(
                         &store,
                         agent.process.agent_session_id.as_deref().unwrap(),
+                        crate::process::Departure::Terminal,
                     );
                 }
                 assert!(
@@ -1403,7 +1506,7 @@ mod tests {
             let original = store.claim_session_attachment(
                 &session.id,
                 None,
-                &crate::id::LfProcessId::new(),
+                &store.test_lf_process(),
                 true,
             )?;
             let mut command = Command::new("/bin/sleep");

@@ -25,6 +25,7 @@ pub mod planning;
 pub mod profile;
 pub mod rental;
 pub mod replay;
+pub mod rollover;
 pub mod run;
 pub mod session;
 pub mod session_history;

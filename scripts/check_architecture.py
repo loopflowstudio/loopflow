@@ -47,7 +47,9 @@ SCAN_ROOTS = (
     Path("PROMPTS.md"),
     Path("RELEASE_NOTES.md"),
     Path("AGENTS.md"),
-    Path("TESTING.md"),
+    Path(".github/README.md"),
+    Path("rust/loopflow/tests/README.md"),
+    Path("tests/e2e/README.md"),
     Path("VISUAL_DESIGN.md"),
     Path("deploy"),
     Path("docs"),
@@ -254,6 +256,9 @@ def _discover_executable_edges(root: Path) -> set[str]:
         relative = path.relative_to(root)
         # `tests.rs` is an out-of-line `#[cfg(test)] mod tests;`.
         if "tests" in relative.parts or path.name == "tests.rs" or MIGRATIONS in relative.parents:
+            continue
+        # `#[cfg(test)] mod foo_tests;` sibling files are test-only.
+        if path.stem == "tests" or path.stem.endswith("_tests"):
             continue
         source = _production_rust(path.read_text())
         edges.update(f"process:{name}" for name in COMMAND_EDGE.findall(source))

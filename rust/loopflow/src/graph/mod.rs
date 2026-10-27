@@ -27,6 +27,9 @@ pub struct Skill {
     pub default_agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action_style: Option<String>,
+    /// Docs the skill includes, resolved like `--docs`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub docs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
 }
@@ -51,6 +54,7 @@ impl Skill {
             agent: None,
             default_agent: None,
             action_style: None,
+            docs: Vec::new(),
             content: None,
         }
     }

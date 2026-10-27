@@ -574,39 +574,6 @@ pub(crate) fn task_workflow_default(
     }
 }
 
-/// The graph a Task takes up before it moves: the one `named` when it differs
-/// from the Task's current graph; with neither, its Wave's default, then the
-/// repository's `workflow:`, then the builtin `code`. `None` keeps the current graph.
-pub(crate) fn task_graph_to_take_up(
-    store: &SharedStore,
-    task: &Task,
-    current: Option<&crate::ops::workflow::Workflow>,
-    named: Option<crate::workflow::CapturedGraph>,
-) -> OpsResult<Option<crate::workflow::CapturedGraph>> {
-    match (current, named) {
-        (Some(workflow), named)
-            if named
-                .as_ref()
-                .is_none_or(|named| named.name == workflow.definition.name) =>
-        {
-            Ok(None)
-        }
-        (_, Some(named)) => Ok(Some(named)),
-        (_, None) => {
-            let (name, source) = task_workflow_default(store, task)?;
-            crate::workflow::CapturedGraph::load(&name, &repository_for_task(store, task)?)
-                .map_err(task_error)?
-                .ok_or_else(|| {
-                    task_error(format!(
-                        "{source} {}",
-                        crate::workflow::missing_workflow(&name)
-                    ))
-                })
-                .map(Some)
-        }
-    }
-}
-
 pub(crate) fn select_task_run(
     store: &SharedStore,
     task: &Task,
@@ -649,7 +616,29 @@ pub(crate) fn select_task_run(
     };
     // Naming a graph names no edge of it.
     let requested = requested.filter(|_| named.is_none());
-    let take_up = task_graph_to_take_up(store, task, current.as_ref(), named)?;
+    let take_up = match (&current, named) {
+        (Some(workflow), named)
+            if named
+                .as_ref()
+                .is_none_or(|named| named.name == workflow.definition.name) =>
+        {
+            None
+        }
+        (_, Some(named)) => Some(named),
+        (_, None) => {
+            let (name, source) = task_workflow_default(store, task)?;
+            Some(
+                crate::workflow::CapturedGraph::load(&name, &repository_for_task(store, task)?)
+                    .map_err(task_error)?
+                    .ok_or_else(|| {
+                        task_error(format!(
+                            "{source} {}",
+                            crate::workflow::missing_workflow(&name)
+                        ))
+                    })?,
+            )
+        }
+    };
     // Validate the choice against the Workflow the Task will be on before
     // anything is written.
     let workflow = match &take_up {

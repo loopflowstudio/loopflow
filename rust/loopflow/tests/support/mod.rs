@@ -402,7 +402,6 @@ fn register_task_fixture(
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
     };
@@ -429,14 +428,12 @@ fn register_task_fixture(
         base_commit: base_commit.to_string(),
         parent_pr_id: None,
         agent: None,
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
         rank: 0,
         assignee: None,
         due_date: None,
         state: None,
-        completed: false,
         completed_at: None,
         observation: loopflow::work::task::Observation::NotRequired,
     };
@@ -626,7 +623,7 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
         &[ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(label),
             id: None,
-            human: false,
+            interactive: false,
             returns: None,
             sources: Vec::new(),
         })],

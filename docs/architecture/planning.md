@@ -39,7 +39,7 @@ Sync writes only changed fields; plan-only sends nothing. A missing default-bran
 ref or GOAL.md blocks mutation instead of clearing the provider summary.
 Creation preserves authored IDs and bytes and writes missing GOAL.md/MEMORY.md
 files. Reads never provision. Registry relocation changes addresses without moving authored files.
-Workflow definitions are repository files (`.lf/workflows/`) or builtins; a Wave
+A Wave's Workflow is a graph: committed `.lf/graphs/` files or builtins. A Wave
 records only the selected name, which travels with planning.
 Wave list, status and roadmap emit each Wave's `machine` from the reader's
 Machine-local Wave → Machine default (the Wave, then its parents), or
@@ -500,8 +500,8 @@ step processes, with no separate record or process.
 Every Graph naming a Task, or run in its checkout, is equally that Task's
 work; none is selected or privileged. Taskless and Task execution share the
 Graph runner. Each `task run` starts a fresh Graph as a child `lf graph`, and a fresh
-one again when that Graph process fails. Graphs hold autonomous
-steps only: launching one with a `human: true` step is rejected. Finishing
+one again when that Graph process fails. A Graph runs autonomous steps and stops at its first
+`interactive:` stage (`GraphOutcome::Staged`); a Task carries it on from there. Finishing
 retains history and chooses no successor; Graph completion alone does not
 complete Task Work.
 
@@ -698,12 +698,12 @@ and Graph membership never substitute for that authority.
 ## Author and discover executable targets
 
 `Target` is the shared executable value: Skill, Command, Graph, or Xor.
-A `Graph` contains `Step { target, id, human, repeat }`; Xor paths contain the same Steps.
+A `Graph` contains `Step { target, id, interactive, returns }`; Xor paths contain the same Steps.
 Loading resolves bare names and `graph:` names graph-first, including nested Graph
 bodies, and rejects recursive references. `step:` selects a Skill explicitly,
 retaining its name and options until compilation; Xor router names also load then.
 Loading a Graph alone does not capture all instruction bodies.
-There is no separate GraphRef node. Review IDs and repeat edges belong to the
+There is no separate GraphRef node. Occurrence IDs and return targets belong to the
 Step itself, not to a reusable Target.
 
 Compilation produces `ConcreteStep` plans containing every Skill body and Xor

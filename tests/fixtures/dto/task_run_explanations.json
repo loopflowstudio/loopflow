@@ -47,8 +47,9 @@
       "workflow": "feature",
       "take_up": true,
       "from": "start",
-      "to": "design",
-      "graph": "task-design"
+      "to": "review-design",
+      "name": "kickoff",
+      "runs": true
     },
     "impediments": [],
     "unavailable": [
@@ -102,9 +103,10 @@
       "kind": "edge",
       "workflow": "feature",
       "take_up": false,
-      "from": "design",
+      "from": "review-design",
       "to": "end",
-      "graph": null
+      "name": "end",
+      "runs": false
     },
     "impediments": [],
     "unavailable": [
@@ -155,8 +157,13 @@
       "planning_observed_at": null
     },
     "action": {
-      "kind": "graph",
-      "graph": "proof"
+      "kind": "edge",
+      "workflow": "proof",
+      "take_up": false,
+      "from": "start",
+      "to": "end",
+      "name": "proof",
+      "runs": true
     },
     "impediments": [
       "Task cancellation is pending"

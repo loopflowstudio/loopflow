@@ -108,7 +108,6 @@
           "name": "Surface nightly failures",
           "description": "Surface one focused failure.",
           "rank": 1,
-          "completed": false,
           "assignee": "user-1",
           "state": "unstarted",
           "completed_at": null,
@@ -194,7 +193,7 @@
         },
         "runtime": {
           "work_id": "ts_22222222222222222222222222222222",
-          "status": "ready",
+          "status": "unstarted",
           "completion_pending": null,
           "reason": "ready",
           "updated_at": "2026-07-13T19:00:00Z",
@@ -259,7 +258,7 @@
                 "id": "design",
                 "label": "task-design",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [
                   "feature"
@@ -271,7 +270,7 @@
                 "id": "implement",
                 "label": "implement",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [
                   "feature",
@@ -284,7 +283,7 @@
                 "id": null,
                 "label": "realign",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [
                   "feature",
@@ -297,7 +296,7 @@
                 "id": "decide",
                 "label": "loop-or-next",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": 1,
                 "sources": [
                   "feature",
@@ -310,7 +309,7 @@
                 "id": "demo",
                 "label": "demo",
                 "kind": "skill",
-                "human": true,
+                "interactive": true,
                 "returns_to": null,
                 "sources": [
                   "feature",
@@ -323,7 +322,7 @@
                 "id": "decide_delivery",
                 "label": "loop-or-next",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": 1,
                 "sources": [
                   "feature",
@@ -336,7 +335,7 @@
                 "id": null,
                 "label": "xor-route",
                 "kind": "xor",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [
                   "feature"
@@ -351,7 +350,7 @@
                         "id": "patch",
                         "label": "patch",
                         "kind": "skill",
-                        "human": false,
+                        "interactive": false,
                         "returns_to": null,
                         "sources": [],
                         "paths": []
@@ -370,7 +369,7 @@
                 "id": null,
                 "label": "pr land -c",
                 "kind": "op",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [
                   "feature",
@@ -548,6 +547,10 @@
         "run_control": {
           "unavailable": null
         },
+        "ship_control": {
+          "unavailable": null
+        },
+        "shipping": null,
         "pr": {
           "id": "pr_33333333333333333333333333333333",
           "sequence": 1,
@@ -585,7 +588,6 @@
           "name": "Classify publish failures",
           "description": "",
           "rank": 2,
-          "completed": false,
           "assignee": null,
           "state": "unstarted",
           "completed_at": null,
@@ -697,6 +699,10 @@
         "run_control": {
           "unavailable": null
         },
+        "ship_control": {
+          "unavailable": null
+        },
+        "shipping": null,
         "pr": null,
         "workflow_source": "task"
       }
@@ -708,7 +714,7 @@
       "work_id": "task_40fbeeaadfbca5367aa7391432ae84ff",
       "task_id": "linear-task-w2-127",
       "task_identifier": "W2-127",
-      "status": "ready",
+      "status": "unstarted",
       "owner": "wave",
       "reason": "Task's owning Project is absent from the current PM snapshot",
       "recovery": "lf task status task_40fbeeaadfbca5367aa7391432ae84ff --json"

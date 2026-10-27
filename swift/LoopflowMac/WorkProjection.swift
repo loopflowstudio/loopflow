@@ -198,7 +198,7 @@ final class WorkNavigation {
     enum SidebarFilter: String, CaseIterable {
         case working = "Working tasks"
         case available = "Available"
-        case running = "Running"
+        case busy = "Busy"
     }
     /// The Wave the sidebar lists; nil lists Working Tasks. Selecting a Task keeps it.
     var sidebarWaveID: String?
@@ -261,6 +261,8 @@ final class WorkNavigation {
     var binding: SessionBindingDraft?
     /// Graph drafts by planning Task id; they survive Task and Session navigation.
     var taskRunDrafts: [String: TaskRunDraft] = [:]
+    /// What the last Auto-Ship or Stop Auto-Ship on the window heading did.
+    var shipNotice: ShipNotice?
     var startingTaskSessions: Set<String> = []
     var taskSessionErrors: [String: String] = [:]
     /// Successful `task prepare` receipts, available before the next roadmap read.

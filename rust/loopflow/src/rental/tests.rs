@@ -351,3 +351,22 @@ fn unpushed_work_refuses_every_give_back_unless_forced() {
         GiveBack::End
     );
 }
+
+#[test]
+fn every_provider_and_state_name_parses_back() {
+    use clap::ValueEnum;
+    for p in Provider::value_variants() {
+        assert_eq!(Provider::parse(p.as_str()), Some(*p));
+    }
+    for s in [
+        RentalState::Requested,
+        RentalState::Unconfirmed,
+        RentalState::Booting,
+        RentalState::Running,
+        RentalState::Ending,
+        RentalState::Ended,
+        RentalState::Lost,
+    ] {
+        assert_eq!(RentalState::parse(s.as_str()), Some(s));
+    }
+}

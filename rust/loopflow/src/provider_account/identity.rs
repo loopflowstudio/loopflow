@@ -233,7 +233,7 @@ pub(crate) fn acquire_identity_install_lock(account_home: &Path) -> anyhow::Resu
 pub(crate) mod tests {
     use super::{check_account_identity, same_claude_grant, validate_identity};
     use crate::profile::EmailAddress;
-    use crate::provider_account::{new_account, order_accounts_by_strain};
+    use crate::provider_account::{new_account, order_accounts_by_capacity};
     use crate::provider_auth::{codex_identity_from_home, Provider};
     use crate::store::ProviderAccountId;
     use base64::prelude::*;
@@ -348,7 +348,7 @@ pub(crate) mod tests {
         plus.observed_plan = Some("plus".into());
         pro.observed_plan = Some("pro".into());
         let mut accounts = vec![plus.clone(), pro.clone()];
-        order_accounts_by_strain(&mut accounts, &[], 100);
+        order_accounts_by_capacity(&mut accounts, &[], 100);
         assert_eq!(accounts, vec![pro.clone(), plus.clone()]);
         let limit = crate::store::AccountLimitRow {
             provider: "codex".into(),
@@ -360,7 +360,7 @@ pub(crate) mod tests {
             observed_at: 99,
             source: "poll".into(),
         };
-        order_accounts_by_strain(&mut accounts, &[limit], 100);
+        order_accounts_by_capacity(&mut accounts, &[limit], 100);
         assert_eq!(accounts, vec![plus, pro]);
     }
 }

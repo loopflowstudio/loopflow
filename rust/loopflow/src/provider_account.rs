@@ -83,19 +83,46 @@ pub(crate) fn account_route_eligible(account: &ProviderAccount, now: i64) -> boo
         && account.cooldown_until.is_none_or(|until| until <= now)
 }
 
-/// Stable sort: strained accounts fall behind unstrained ones, and declared
-/// route order decides everything else.
-pub(crate) fn order_accounts_by_strain(
+/// Stable sort: strained accounts fall behind unstrained ones, then larger
+/// plans lead, then the account with the most weekly headroom; declared route
+/// order breaks the remaining ties.
+pub(crate) fn order_accounts_by_capacity(
     accounts: &mut [ProviderAccount],
     limits: &[AccountLimitRow],
     now: i64,
 ) {
-    accounts.sort_by_key(|account| {
-        (
-            is_strained(&account.provider, &account.account_id, limits, now),
-            plan_preference(account),
-        )
-    });
+    accounts.sort_by_key(|account| capacity_rank(account, limits, now));
+}
+
+fn capacity_rank(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    now: i64,
+) -> (bool, u8, u16) {
+    (
+        is_strained(&account.provider, &account.account_id, limits, now),
+        plan_preference(account),
+        weekly_used_percent(&account.provider, &account.account_id, limits, now),
+    )
+}
+
+/// The current weekly window's use. An account without that evidence sorts
+/// after every observed one rather than passing for idle.
+fn weekly_used_percent(
+    provider: &str,
+    account_id: &ProviderAccountId,
+    limits: &[AccountLimitRow],
+    now: i64,
+) -> u16 {
+    limits
+        .iter()
+        .find(|limit| {
+            limit.provider == provider
+                && limit.account_id == *account_id
+                && limit.window == "weekly"
+                && limit.resets_at.is_some_and(|reset| reset > now)
+        })
+        .map_or(u16::from(u8::MAX), |limit| u16::from(limit.used_percent))
 }
 
 fn plan_preference(account: &ProviderAccount) -> u8 {
@@ -182,7 +209,7 @@ enum AccountLogin {
 struct AccountCandidate {
     account: ProviderAccount,
     credential_available: bool,
-    strained: bool,
+    rank: (bool, u8, u16),
     home: PathBuf,
 }
 
@@ -861,32 +888,23 @@ pub(crate) async fn resolve_provider_account_exact(
     }))
 }
 
-/// Shared routing stays on the active account while it is eligible and
-/// unstrained, and otherwise moves to the next eligible account.
+/// Shared routing takes the eligible account with the most capacity. The
+/// active account wins ties, so a launch switches every running conversation
+/// only when another account is ahead.
 async fn select_shared_account(
     store: &SharedStore,
     provider: Provider,
     eligible: &[ProviderAccountId],
 ) -> Result<Option<crate::store::ProviderAccountSelection>, ProviderAccountError> {
     let native = activation::native_home(provider, None);
-    let active = activation::observe_active_account(store, provider, &native)
-        .await?
-        .filter(|account_id| eligible.contains(account_id));
-    if let Some(active) = &active {
-        let limits = store
-            .provider_account_limits(Some(provider.as_str()))
-            .await?;
-        if !is_strained(provider.as_str(), active, &limits, now_unix()) {
-            let kept = store
-                .select_provider_account(provider, std::slice::from_ref(active), None)
-                .await?;
-            if kept.is_some() {
-                return Ok(kept);
-            }
-        }
+    let active = activation::observe_active_account(store, provider, &native).await?;
+    let mut ordered = eligible.to_vec();
+    if let Some(index) = active.and_then(|active| ordered.iter().position(|id| *id == active)) {
+        let active = ordered.remove(index);
+        ordered.insert(0, active);
     }
     Ok(store
-        .select_provider_account(provider, eligible, None)
+        .select_provider_account(provider, &ordered, None)
         .await?)
 }
 
@@ -972,16 +990,24 @@ async fn resolve_selected_provider_account(
 }
 
 /// A shared launch stays on the active account where its own choice allows:
-/// among the accounts it named, or among all of them when it named none.
+/// among the accounts it named, or among all of them when it named none, as
+/// long as no other account there has more capacity.
 fn active_candidate(
     active: &ProviderAccountId,
     candidates: &[(AccountCandidate, bool)],
 ) -> Option<usize> {
     let named = candidates.iter().any(|(_, explicit)| *explicit);
+    let group = || {
+        candidates
+            .iter()
+            .filter(|(candidate, explicit)| *explicit == named && candidate.credential_available)
+    };
+    let best = group().map(|(candidate, _)| candidate.rank).min()?;
     candidates.iter().position(|(candidate, explicit)| {
         *explicit == named
             && candidate.credential_available
-            && !candidate.strained
+            && !candidate.rank.0
+            && (named || candidate.rank == best)
             && candidate.account.account_id == *active
     })
 }
@@ -1032,14 +1058,8 @@ async fn ordered_selected_candidates(
             candidates.push(AccountCandidate {
                 credential_available: account.credential_state == CredentialState::Connected
                     && identity_matches,
+                rank: capacity_rank(account, &limits, now),
                 account: account.clone(),
-                strained: active_account_strain(
-                    provider.as_str(),
-                    &account.account_id,
-                    &limits,
-                    now,
-                )
-                .is_some(),
                 home,
             });
         }
@@ -1117,12 +1137,7 @@ async fn ordered_selected_candidates(
         .iter()
         .take_while(|index| explicitly_preferred.contains(index))
         .count();
-    order[preferred_count..].sort_by_key(|index| {
-        (
-            candidates[*index].strained,
-            plan_preference(&candidates[*index].account),
-        )
-    });
+    order[preferred_count..].sort_by_key(|index| candidates[*index].rank);
     Ok(Some(
         order
             .into_iter()
@@ -1260,7 +1275,7 @@ pub(crate) async fn inspect_provider_route(
         )
         .cloned()
         .collect::<Vec<_>>();
-    order_accounts_by_strain(
+    order_accounts_by_capacity(
         &mut available,
         &store
             .provider_account_limits(Some(provider.as_str()))
@@ -2821,6 +2836,42 @@ mod account_first_tests {
             .unwrap();
         let switched = route.launch_as(&mut Command::new("codex")).await.unwrap();
 
+        assert!(switched.is_some());
+        assert_eq!(codex_login(&native), "second@example.com");
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn shared_launch_moves_to_the_account_with_more_weekly_headroom() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
+        for (account, used_percent) in [("first", 80), ("second", 30)] {
+            store
+                .upsert_provider_account_limits(
+                    "codex",
+                    &parse_account_id(account).unwrap(),
+                    &[crate::store::AccountLimitWindow {
+                        window: "weekly".to_string(),
+                        used_percent,
+                        resets_at: Some(now_unix() + 3600),
+                        plan: None,
+                    }],
+                    "poll",
+                )
+                .await
+                .unwrap();
+        }
+
+        // `first` is active, first in the route and under the strain line.
+        let route = resolve_provider_account(Provider::Codex, None)
+            .await
+            .unwrap()
+            .unwrap();
+        let switched = route.launch_as(&mut Command::new("codex")).await.unwrap();
+
+        assert_eq!(route.account_id().as_str(), "second");
         assert!(switched.is_some());
         assert_eq!(codex_login(&native), "second@example.com");
     }

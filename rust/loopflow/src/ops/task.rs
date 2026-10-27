@@ -501,13 +501,12 @@ pub enum TaskRunStart {
 /// Place the Task and fill what a run leaves unsaid: `agent` as the Task's
 /// agent, `reason` as a steer, and where the run begins. A Task keeps the
 /// graph it took up; naming another takes that one up, and a Task with none
-/// takes up its Wave's, its repository's, or `code`. `through` runs past
-/// interactive steps (`-b`, `-i`); otherwise the run stops at the next one.
+/// takes up its Wave's, its repository's, or `code`.
 pub fn task_place(
     repo: &Path,
     issue: &str,
     options: TaskProcessOptions,
-    through: bool,
+    mode: TaskRunMode,
 ) -> OpsResult<(Task, TaskRunStart)> {
     let TaskProcessOptions {
         graph,
@@ -527,20 +526,32 @@ pub fn task_place(
             .sqlite
             .require_task_launch(&task.id)
             .map_err(task_error)?;
-        let start = start_task_run(
-            &store,
-            &mut task,
-            graph.as_deref(),
-            from.as_deref(),
-            through,
-        )
-        .await?;
+        let start =
+            start_task_run(&store, &mut task, graph.as_deref(), from.as_deref(), mode).await?;
         select_task_agent(&store, &mut task, agent.as_deref()).await?;
         if let Some(reason) = reason {
             append_task_comment(&store, &task, reason, true)?;
         }
         Ok((task, start))
     })
+}
+
+/// How a Task run meets its interactive steps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskRunMode {
+    /// Stop before the next one; the Task waits there in its conversation.
+    Stop,
+    /// Run each with a person in this terminal (`-i`).
+    InPlace,
+    /// Stand in at each headless and hand the Task to Auto-Ship (`-b`, `lf ship`),
+    /// the only run that grants merge authority.
+    AutoShip,
+}
+
+impl TaskRunMode {
+    pub fn runs_through(self) -> bool {
+        self != Self::Stop
+    }
 }
 
 /// Where `lf task run` begins, chosen the same way for launch and
@@ -552,8 +563,6 @@ pub(crate) struct TaskRunSelection {
     pub take_up: bool,
     /// Where the run begins; `None` when nothing remains before `end`.
     pub start: Option<crate::task_graph::Place>,
-    /// Whether no interactive step lies ahead of the run, so it hands the Task off.
-    pub ships: bool,
 }
 
 /// The graph a Task with none takes up: its Wave's, its repository's, else `code`.
@@ -584,7 +593,6 @@ pub(crate) fn select_task_run(
     checkout: &Path,
     requested: Option<&str>,
     from: Option<&str>,
-    through: bool,
 ) -> OpsResult<TaskRunSelection> {
     use crate::task_graph::{CapturedGraph, END, START};
     let issue = &task.identifier;
@@ -657,14 +665,10 @@ pub(crate) fn select_task_run(
             graph.after(&place)
         }
     };
-    let ships = start
-        .as_ref()
-        .is_none_or(|place| through || graph.next_interactive(place).is_none());
     Ok(TaskRunSelection {
         graph,
         take_up,
         start,
-        ships,
     })
 }
 
@@ -676,14 +680,14 @@ async fn start_task_run(
     task: &mut Task,
     requested: Option<&str>,
     from: Option<&str>,
-    through: bool,
+    mode: TaskRunMode,
 ) -> OpsResult<TaskRunStart> {
+    let through = mode.runs_through();
     let TaskRunSelection {
         graph,
         take_up,
         start,
-        ships,
-    } = select_task_run(store, task, task.worktree()?, requested, from, through)?;
+    } = select_task_run(store, task, task.worktree()?, requested, from)?;
     let issue = task.identifier.clone();
     let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| task_error("a Task run requires a registered Process"))?;
@@ -719,7 +723,13 @@ async fn start_task_run(
     };
     if !store
         .sqlite
-        .start_task_graph_run(&task.id, &row, &start.cursor(), &process, ships)
+        .start_task_graph_run(
+            &task.id,
+            &row,
+            &start.cursor(),
+            &process,
+            mode == TaskRunMode::AutoShip,
+        )
         .map_err(task_error)?
     {
         return Err(task_error(format!(

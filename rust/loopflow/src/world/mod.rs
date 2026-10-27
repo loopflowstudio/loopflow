@@ -592,8 +592,7 @@ impl World {
             graph: captured,
             take_up,
             start,
-            ships,
-        } = crate::ops::task::select_task_run(&store, task, &checkout, graph, from, false)?;
+        } = crate::ops::task::select_task_run(&store, task, &checkout, graph, from)?;
         let Some(start) = start else {
             bail!("nothing remains of {requested}; complete the Task instead");
         };
@@ -629,7 +628,7 @@ impl World {
             .expect("the Task has a graph");
         if !store
             .sqlite
-            .start_task_graph_run(&task.id, &row, &start.cursor(), &run.id, ships)?
+            .start_task_graph_run(&task.id, &row, &start.cursor(), &run.id, false)?
         {
             bail!("Task {issue} moved while starting {requested}");
         }

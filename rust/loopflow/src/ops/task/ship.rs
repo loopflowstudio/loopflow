@@ -264,14 +264,7 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
                 graph: selected,
                 take_up,
                 ..
-            } = super::select_task_run(
-                &store,
-                &task,
-                task.worktree()?,
-                graph,
-                Some("start"),
-                true,
-            )?;
+            } = super::select_task_run(&store, &task, task.worktree()?, graph, Some("start"))?;
             if take_up {
                 store
                     .sqlite

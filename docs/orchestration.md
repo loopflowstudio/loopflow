@@ -143,9 +143,11 @@ advance or iterate. A run that stops or fails leaves the Task where that run
 began; the next `lf task run` starts it again. `--from` takes a step's id, its
 Skill, or the Graph it was composed from; starting from an interactive step only
 puts the Task there. After the last step the Task reaches `end`, which requests
-completion. Other Graphs in the Task's worktree never move it. There is no approve
-command: give feedback in the Task's conversation, which knows its step and how to
-go on. `lf ship --stop` withdraws Auto-Ship.
+completion. Only `lf ship` or `lf -b task run` hands the Task to Auto-Ship, which
+may merge; a plain run into `end` grants no merge authority. Other Graphs in the
+Task's worktree never move it. There is no approve command: give feedback in the
+Task's conversation, which knows its step and how to go on. `lf ship --stop`
+withdraws Auto-Ship.
 
 | Task state | When |
 |---|---|

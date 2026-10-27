@@ -148,8 +148,8 @@ fn lifecycle_world_reports_each_state() {
     assert_eq!(task("Abandoned attempt")["runtime"]["status"], "abandoned");
     let canceled = task("Canceled upstream");
     assert_eq!(canceled["task"]["state"], "canceled");
-    // Its `pursue` run, with no interactive step, ran into `end`, which approves it to
-    // ship; with that run finished and nothing restarting it, it reads idle.
+    // Its `pursue` run ran into `end`; with that run finished and nothing
+    // restarting it, it reads idle.
     assert_eq!(canceled["runtime"]["status"], "idle");
     // Started local work survives an upstream cancel until someone disposes of it.
     assert_eq!(canceled["condition"]["unresolved_execution"], true);

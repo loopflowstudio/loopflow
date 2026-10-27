@@ -2377,7 +2377,13 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 directive: directive.clone(),
                 branch: None,
             },
-            cli.batch || cli.interactive,
+            if cli.interactive {
+                loopflow::ops::task::TaskRunMode::InPlace
+            } else if cli.batch {
+                loopflow::ops::task::TaskRunMode::AutoShip
+            } else {
+                loopflow::ops::task::TaskRunMode::Stop
+            },
         )?;
         let step = match start {
             loopflow::ops::task::TaskRunStart::Run(step) => step,

@@ -160,7 +160,6 @@ async fn read_task_run(
         checkout,
         options.graph.as_deref(),
         options.from.as_deref(),
-        through,
     ) {
         Ok(choice) => choice,
         Err(error) => {

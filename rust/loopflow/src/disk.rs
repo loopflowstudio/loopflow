@@ -785,9 +785,10 @@ mod tests {
         assert!(home.join("copies/0123456789abcdef/loopflow.db").exists());
 
         write(&home.join("copies/.tmpDeF456/loopflow.db"), 4096, 0);
-        let _snapshotting = crate::store::copy::idle_lock(&home.join("copies"))
-            .unwrap()
-            .unwrap();
+        // Wait like a snapshot does: a sibling test's fork can briefly inherit
+        // the sweep's lock, which a try-lock here would mistake for a snapshot.
+        let snapshotting = File::create(home.join("copies/.lock")).unwrap();
+        fs2::FileExt::lock_exclusive(&snapshotting).unwrap();
         let mut sweep = super::Sweep {
             dry_run: false,
             log: None,

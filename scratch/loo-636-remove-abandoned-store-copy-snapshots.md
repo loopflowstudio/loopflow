@@ -83,3 +83,10 @@ the lock `create` already holds, so no new record or command. Considered and kep
 `create`'s own pre-snapshot clearing is unlogged (garbage by construction, and it buys the
 headroom before the next sweep is due); private-size measurement for all categories answers
 "what does clean free", the question `lf disk` exists for. No open product choice.
+
+Gate 2026-10-27: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` clean;
+`cargo test -p loopflow --lib -- disk:: store::copy` 9 pass ×6. Fixed one intermittent
+failure: the test's simulated snapshot try-locked right after a sweep, so a sibling test's
+fork inheriting that lock looked like a snapshot; it now waits like `create` does.
+troubleshooting.md and the architecture reference now name the abandoned-snapshot removal
+and private-byte sizing. Demo against a SIGKILLed snapshot remains.

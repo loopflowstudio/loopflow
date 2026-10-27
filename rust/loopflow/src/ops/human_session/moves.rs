@@ -145,7 +145,14 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
         .as_deref()
         .map(|root| checkpoint(&store.sqlite, root, name, to))
         .transpose()?;
-    let conversation = super::primary::task_conversation(store, &task.id).await?;
+    let conversation = match super::primary::task_conversation(store, &task.id).await? {
+        Some(session) => Some(session),
+        // Repeated after a failed receive: the conversation already left for `to`.
+        None => match store.sqlite.task_conversation_moved_to(&task.id)? {
+            Some((id, machine)) if machine == *to => session_by_id(store, &id).await?,
+            _ => None,
+        },
+    };
     let taken = conversation
         .as_ref()
         .map(|session| take(store, session))

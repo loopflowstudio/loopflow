@@ -262,11 +262,17 @@ impl ProviderAccountRoute {
     /// Bring conversation `agent_session` into this route's home and pin it
     /// here, so the provider resumes the same conversation under this account.
     /// Fails, rather than starting an empty conversation, when its transcript
-    /// is nowhere to be found.
+    /// is nowhere to be found. A conversation no route has run and whose
+    /// transcript is nowhere, such as one whose id lf assigns before its
+    /// first launch, is new: there is nothing to adopt.
     async fn adopt(&self, agent_session: &AgentSessionId) -> Result<(), ProviderAccountError> {
         let AccountLogin::Stored { store, .. } = &self.login else {
             return Ok(());
         };
+        let recorded = store
+            .provider_session_isolated(self.provider, agent_session)
+            .await?
+            .is_some();
         let harness = crate::harness::HarnessKind::parse(self.provider.as_str())
             .expect("account routes exist only for agent providers");
         let to = self.conversation_home();
@@ -284,6 +290,9 @@ impl ProviderAccountRoute {
             if copied.is_none()
                 && crate::transcript::transcript(harness, &to, agent_session.as_str()).is_none()
             {
+                if !recorded {
+                    return Ok(());
+                }
                 let place = match &from {
                     Some(from) => format!("missing from {}", from.display()),
                     None => "its account home was removed".to_string(),
@@ -1128,7 +1137,9 @@ async fn ordered_selected_candidates(
         }
     }
 
-    if let Some(account_id) = exact_account_id {
+    // A resume replays the login the conversation last ran on; one named for
+    // it replaces that login.
+    if let Some(account_id) = exact_account_id.filter(|_| !moving) {
         order.retain(|index| candidates[*index].account.account_id == *account_id);
     }
     if order.is_empty() {
@@ -3091,11 +3102,13 @@ mod account_first_tests {
             );
         };
 
+        // A resume replays the login it last ran on; naming another moves it.
         named("second@example.com");
-        let route = resolve_provider_account(Provider::Codex, Some(&conversation))
-            .await
-            .unwrap()
-            .unwrap();
+        let route =
+            resolve_provider_account_exact(Provider::Codex, Some(&conversation), Some(&first))
+                .await
+                .unwrap()
+                .unwrap();
         assert_eq!(route.account_id().as_str(), "second");
         assert!(!route.is_shared());
         assert!(temp.path().join("second").join(&rollout).is_file());
@@ -3148,7 +3161,7 @@ mod account_first_tests {
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
         let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
-        let (store, _native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
         set_isolation(true);
         let id = "0199a213-81c0-7800-8aa1-bbab2a035a55";
         let project = "projects/-Users-jack-src-loopflow";
@@ -3191,6 +3204,14 @@ mod account_first_tests {
         assert!(second_project
             .join(format!("{id}/subagents/agent.jsonl"))
             .is_file());
+
+        // A conversation whose id lf assigned before its first launch starts there.
+        let fresh: AgentSessionId = "0199a213-81c0-7800-8aa1-bbab2a035a56".into();
+        let route = resolve_provider_account(Provider::Claude, Some(&fresh))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(route.account_id().as_str(), "second");
         assert_eq!(
             store
                 .provider_session_account(Provider::Claude, &conversation)
@@ -3200,6 +3221,19 @@ mod account_first_tests {
                 .as_str(),
             "second"
         );
+
+        // One that arrived from another Machine sits in the native home, unrecorded here.
+        let received = "0199a213-81c0-7800-8aa1-bbab2a035a57";
+        fs::create_dir_all(native.join(project)).unwrap();
+        fs::write(
+            native.join(project).join(format!("{received}.jsonl")),
+            format!("{{\"type\":\"user\",\"sessionId\":\"{received}\"}}\n"),
+        )
+        .unwrap();
+        resolve_provider_account(Provider::Claude, Some(&received.into()))
+            .await
+            .unwrap();
+        assert!(second_project.join(format!("{received}.jsonl")).is_file());
     }
 
     #[allow(clippy::await_holding_lock)]

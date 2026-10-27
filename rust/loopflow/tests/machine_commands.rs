@@ -2321,6 +2321,31 @@ fn task_move_refuses_a_mid_merge_worktree() {
 }
 
 #[test]
+fn a_repeated_task_send_carries_the_conversation_that_already_left() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let (task, worktree) = placed_task(&plan, "resend-task");
+    let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a58");
+    let send = || {
+        let output = fixture
+            .command(&["session", "send", "--task", task.as_str(), "--to", "mini"])
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap();
+        assert_success(&output);
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+
+    // The first receive failed; sending again carries the same conversation.
+    assert_eq!(send()["session"]["id"], session.as_str());
+    let again = send();
+    assert_eq!(again["session"]["id"], session.as_str());
+    assert!(again["history"]["files"]
+        .as_array()
+        .is_some_and(|files| !files.is_empty()));
+}
+
+#[test]
 fn task_move_hands_nothing_off_when_mini_cannot_receive_it() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);

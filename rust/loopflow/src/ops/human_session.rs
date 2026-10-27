@@ -799,7 +799,18 @@ pub(crate) async fn open(
         },
         _ => false,
     };
-    if moving {
+    // An agent that already exited, whose identity was never recorded, has
+    // nothing to stop.
+    let running = || -> Result<bool> {
+        Ok(store
+            .sqlite
+            .session_attachment(&session.id)?
+            .is_some_and(|attachment| {
+                crate::journal::process_evidence(&store.sqlite, &attachment.agent_process_id)
+                    == crate::journal::ProcessIdentityEvidence::Live
+            }))
+    };
+    if moving && running()? {
         crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
     }
     if resume {

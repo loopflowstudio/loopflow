@@ -2,7 +2,7 @@
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.14.19 makes the store smaller, easier to diagnose, and less likely to stall your work. Finished Process rows that nothing references are now deleted instead of kept for a week. When the store reports `database is locked`, `lf.log` and `lf doctor` name the process and binary that held the write lock. Claude Sessions keep receiving steers and Task context after `/clear`. This release changes the store format: **lf < 0.14.19 can no longer open the store (raised by: drop_steer_adapter_thread)**. Upgrade every `lf` that shares `~/.lf` together, including the macOS app.
+v0.14.19 makes the store smaller and easier to diagnose, and it lets a conversation travel with its history. Finished Process rows that nothing references are now deleted instead of kept for a week. When the store reports `database is locked`, `lf.log` and `lf doctor` name the process and binary that held the write lock. Claude Sessions keep receiving steers and Task context after `/clear`. `lf resume` and `lf task move --machine` can now move a conversation or a Task to another login or Machine with its history intact. This release changes the store format: **lf < 0.14.19 can no longer open the store (raised by: drop_steer_adapter_thread)**. Upgrade every `lf` that shares `~/.lf` together, including the macOS app.
 
 ## A smaller store with readable lock contention
 
@@ -15,6 +15,17 @@ Routine commands used to leave a Process row behind for every run. On Jack Heart
 - **Slow writers report themselves.** A write transaction that holds the store lock for 3 s or more logs `held the store write lock held_seconds=… call_site=…`. The call site is the innermost `loopflow::` frame. (#1724)
 - **`lf doctor` adds a `contention` check.** It reads the last 24 hours of `lf.log` and groups `database is locked` failures and slow writes by binary, as `lf <version> (<rev>)`. For each binary it lists the pids, the longest hold and the call sites. Lines from older binaries appear as `unidentified (older lf)`. The check can warn but never fails. (#1724)
 - **The hourly store prune waits for the write lock** instead of failing whenever another writer holds it. (#1726)
+
+## Conversations move with their history
+
+Switching a conversation to another login used to start an empty one without saying so. Moving work to another Machine left its native history behind, and `lf machine use --task` completed the Task's Session instead of carrying it. Now the same conversation, or a whole Task, moves. (#1720)
+
+- **Another login:** `lf resume --account <email> -a claude` copies the native transcript into that login's home, pins the conversation there and resumes the same provider session. A named login that cannot launch fails instead of falling back to another account. A missing transcript fails and says where lf looked. `lf session list` shows each Session's account.
+- **Another Machine:** `lf --machine <m> resume <session>` commits and pushes the Session's branch, carries its transcript and opens the same Session id on the target. If the target has no checkout, it clones from the carried origin. Resuming the Session at the source follows it to where it went.
+- **A whole Task:** `lf task move <task> --machine <m>` stops the Task's Graph and its step Processes, commits and pushes the worktree, and hands off the Task with its Workflow record and primary Session. On the target, `lf task run` runs the stopped route again. `lf --machine <m> resume --task <task>` moves the Task and then resumes there. A worktree that is mid-merge or mid-rebase refuses to move.
+- **Nothing leaves until the target is ready.** Before any commit, push, stop or handoff, the target runs `lf session receive --check`. A Machine that is unreachable, or doesn't know the Task, refuses at that point.
+- **`lf machine use --session`** carries the Wave or repository conversation with its history instead of completing it and starting a fresh one.
+- **New plumbing:** `lf session send` and `lf session receive`. To retry a move whose receive failed, run `lf session send <session|--task <task>> --to <m> | lf --machine <m> session receive`.
 
 ## Claude Sessions survive `/clear`
 
@@ -38,18 +49,22 @@ Promoting a hotfix used to require `LOOPFLOW_BUILD_PROVENANCE=release LOOPFLOW_M
 
 ## Cleaner disks and one release scheduler
 
-A draft build killed while snapshotting the shared store left a full-size `.tmp…` directory in `~/.lf/copies`, and it stayed there for up to 30 days. On the release cron host, launchd agents from an older lf kept running `release-run` alongside the new crontab. They retried a stale v0.14.13 selection and failed every day. (#1727, #1711)
+A draft build killed while snapshotting the shared store left a full-size `.tmp…` directory in `~/.lf/copies`, and it stayed there for up to 30 days. The scheduled `release-run` had also stopped working: launchd agents from an older lf kept retrying a stale v0.14.13 selection, and the cron bootstrap refused the infrastructure Wave because it has no Machine default. (#1727, #1711, #1732)
 
 - **Abandoned snapshots are removed promptly.** The next snapshot clears them first. Hourly rotation and `lf disk clean` remove them whenever no snapshot holds the copies lock, whatever their age, and log each one to `~/.lf/logs/disk.log` as `abandoned snapshot`. If a snapshot is running, that step is skipped. (#1727)
 - **`lf disk` sizes count what a removal would free.** On macOS, an APFS clone reports only its private blocks. Other platforms still count allocated blocks. (#1727)
-- **`scripts/bootstrap-cron-host.sh` retires the old launchd agents.** After its preflight checks, it boots out and deletes every `~/Library/LaunchAgents/loopflow.cron.<wave>.*.plist` and prints `removed launchd job <label>`, then installs the crontab. On Linux or a fresh host, the step does nothing. `release/CRON_HOST.md` shows how to confirm which scheduler is live. (#1711)
+- **`scripts/bootstrap-cron-host.sh` accepts an unplaced Wave.** It prints `has no Machine default; it runs on this Machine` and continues. A Wave placed on another Machine still exits 1 before the crontab is touched, and the error names that Machine. (#1732)
+- **Cron runs the installed `lf`.** Every check and both cron lines call the entry gate `~/.lf-machine/install/gates/1/lf`, not whichever `lf` comes first on `PATH`, and the cron environment is quoted so paths with spaces survive. If no installed `lf` exists, the script tells you to run `lf self install`. (#1732)
+- **One schedule at a time.** The script writes the crontab, confirms both `# loopflow:<wave>:` lines, and only then boots out and deletes every `loopflow.cron.<wave>.*` launchd plist, printing `removed launchd job <label>`. If writing the crontab fails, launchd stays in place. On Linux or a fresh host, the launchd step does nothing. (#1711, #1732)
 
 ## Operational notes
 
-- **Store break:** lf < 0.14.19 can no longer open the store (raised by: drop_steer_adapter_thread). The release migration also carries the `forget_processes` changes, including indexes for the Process reference checks. Upgrade the CLI and the macOS app together. An older `lf` still on `PATH`, for example in a cron job or on another machine sharing the home, will refuse to open the store until you upgrade it.
+- **Store break:** lf < 0.14.19 can no longer open the store (raised by: drop_steer_adapter_thread). The release migrations also carry the `forget_processes` changes, including indexes for the Process reference checks, and the new `agent_sessions.moved_to_machine_id` column that records where a moved Session went. Upgrade the CLI and the macOS app together. An older `lf` still on `PATH`, for example in a cron job or on another machine sharing the home, will refuse to open the store until you upgrade it.
+- **CLI break:** `lf machine use --task` is removed. Scripts that used it need `lf task move <task> --machine <m>`. Bare `lf machine use` now applies to the worktree's Wave, else the repository; it no longer applies to the worktree's Task.
+- **Moves depend on the push.** A Session or Task move needs its branch to reach the remote; a failed push stops the move at the source.
 - **Expect a large first cleanup.** Retention cleanup after upgrading removes Process history that the old rules kept. The 10.5 GB → 287 MB figure above includes a VACUUM. The PR's measurements came from a clone with indexes applied by hand and pruning invoked directly, not from `lf disk clean`.
 - **Reading contention:** after upgrading, `lf doctor`'s `contention` line is the first place to look for `database is locked`. Lines written by lf before 0.14.19 have no `pid=… lf=…` suffix and are grouped as `unidentified (older lf)`. The check has known blind spots. A hold is reported only when it ends, so a writer that never commits goes unnamed, although the processes it blocks are still counted. Time between `BEGIN` and the first statement, and the WAL write at commit, are not measured.
-- **Release cron host:** rerun `scripts/bootstrap-cron-host.sh infrastructure` from main. Afterwards, `launchctl list | grep loopflow.cron` should print nothing and `crontab -l | grep loopflow:infrastructure` should show both jobs.
+- **Release cron host:** rerun `scripts/bootstrap-cron-host.sh infrastructure` from main. Afterwards, `launchctl list | grep loopflow.cron` should print nothing and `crontab -l | grep loopflow:infrastructure` should show the 09:00 `telemetry-daily` and 10:00 `release-run` lines, each calling the gate. If two Machines both bootstrap an unplaced Wave, both will schedule releases; pin it with `lf machine use <machine> infrastructure`.
 - **Hotfix label source:** until a release that includes the new promotion rule is tagged, the label's `on <tag>` part comes from `git describe` against the nearest `v*` tag. Promote does not check how far the source has drifted from that tag. The hotfix skill's empty-migration-diff step remains the review point for that.
 - **Abandoned-snapshot rule:** a `copies/.tmp*` directory counts as abandoned whenever nobody holds the copies lock. Anything that stages there must hold that lock.
 
@@ -57,5 +72,6 @@ A draft build killed while snapshotting the shared store left a full-size `.tmp�
 
 - cmux workspaces opened by `lf open` are now named `<Task title> · <identifier>`, without a stage suffix, and are renamed only when the Task title changes. Before renaming, lf reads the current name. A name you set by hand in cmux is kept, unless it happens to look like one of lf's own names. Taskless Sessions no longer rename their workspace. The tab and tmux window still follow the Session name and standing. (#1716)
 - The same title-first order now applies to Herdr labels, new tmux windows, `lf open` links and receipts, and the `lf task create` and Task status lines. Session names still lead with the identifier. (#1716)
+- `lf task move` gains `--json`, and `lf help resume` lists the login, Machine and Task moves. (#1720)
 - Provider hooks no longer inherit attribution as agent-issued commands. (#1718)
-- `docs/troubleshooting.md`, `docs/telemetry.md`, `docs/sessions.md` and `docs/architecture-reference.md` describe the contention check, process retention, snapshot cleanup, the workspace/tab split, steer ownership and the hotfix frontier rule.
+- `docs/troubleshooting.md`, `docs/telemetry.md`, `docs/sessions.md`, `docs/ops.md`, `docs/subscriptions.md`, `docs/architecture/machines.md` and `docs/architecture-reference.md` describe the contention check, process retention, snapshot cleanup, the workspace/tab split, steer ownership, the hotfix frontier rule and `lf task move --machine`.

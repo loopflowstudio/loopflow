@@ -239,7 +239,7 @@ mod tests {
         let subscriber = tracing_subscriber::fmt()
             .with_ansi(false)
             .with_writer(move || writer.clone())
-            .event_format(IdentifiedLines(tracing_subscriber::fmt::format()))
+            .event_format(IdentifiedLines)
             .finish();
         tracing::subscriber::with_default(subscriber, || slow_write_in_named_function(&store));
 

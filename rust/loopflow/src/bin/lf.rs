@@ -1386,9 +1386,7 @@ fn init_tracing(verbose: bool) {
         .with_env_filter(EnvFilter::new("warn"))
         .with_ansi(false)
         .with_writer(|| loopflow::diagnostic_log::DiagnosticLog)
-        .event_format(loopflow::diagnostic_log::IdentifiedLines(
-            tracing_subscriber::fmt::format(),
-        ))
+        .event_format(loopflow::diagnostic_log::IdentifiedLines)
         .init();
 }
 

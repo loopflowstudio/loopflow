@@ -50,13 +50,12 @@ impl Write for DiagnosticLog {
 /// Ends every diagnostic line with the process and binary that wrote it, so a
 /// lock failure from one of dozens of concurrent lf processes is attributable.
 #[derive(Debug)]
-pub struct IdentifiedLines<F>(pub F);
+pub struct IdentifiedLines;
 
-impl<S, N, F> FormatEvent<S, N> for IdentifiedLines<F>
+impl<S, N> FormatEvent<S, N> for IdentifiedLines
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
     N: for<'a> FormatFields<'a> + 'static,
-    F: FormatEvent<S, N>,
 {
     fn format_event(
         &self,
@@ -65,7 +64,7 @@ where
         event: &Event<'_>,
     ) -> std::fmt::Result {
         let mut line = String::new();
-        self.0.format_event(ctx, Writer::new(&mut line), event)?;
+        tracing_subscriber::fmt::format().format_event(ctx, Writer::new(&mut line), event)?;
         writeln!(
             writer,
             "{} pid={} lf={} rev={}",

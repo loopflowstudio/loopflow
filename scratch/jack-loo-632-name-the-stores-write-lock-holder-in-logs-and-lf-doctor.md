@@ -25,12 +25,11 @@ Evidence: `scratch/database-locked-5-whys.md` (Why 1).
 - The call site depends on the symbol table. Release keeps it (`strip` is the default
   `debuginfo`). Inlined helpers report their caller.
 
-## Concept review (2026-10-26)
+## Ownership
 
-Behaviour matches the Task's three outcomes; no open product choice. lf.log became its
-own concept: `crate::diagnostic_log` owns the path, the `DiagnosticLog` writer, the
-`IdentifiedLines` suffix (`pid= lf= rev=`), the `field` reader and the tail read.
-`store/contention.rs` keeps the write-hold hooks and `read_contention`. Done.
+`crate::diagnostic_log` owns lf.log: path, `DiagnosticLog` writer, the `IdentifiedLines`
+event format (`pid= lf= rev=`, wraps the default formatter), the `field` reader and the tail
+read. `store/contention.rs` keeps the write-hold hooks and `read_contention`.
 
 ## Remaining
 
@@ -42,7 +41,7 @@ own concept: `crate::diagnostic_log` owns the path, the `DiagnosticLog` writer, 
 
 ## Checks
 
-- `cargo test -p loopflow --lib -- contention doctor`, fmt, clippy `--all-targets -D warnings`: pass after the diagnostic_log move (2026-10-26). Full suites: gate.
+- `cargo test -p loopflow --lib -- contention doctor`, fmt, clippy `--all-targets -D warnings`: pass after compress (2026-10-26). Full suites: gate.
 
 ## Delete — do not maintain
 

@@ -1,3 +1,6 @@
+import json
+import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -207,8 +210,6 @@ def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
 
     bootstrap = (ROOT / "scripts/bootstrap-cron-host.sh").read_text()
     assert "--remote-native" not in bootstrap
-    assert 'local_machine="$(lf machine id)"' in bootstrap
-    assert 'placed_machine="$(lf wave status "$wave" --json' in bootstrap
     assert "--git-common-dir" in bootstrap
     assert 'job "0 9 * * *" telemetry-daily' in bootstrap
     assert 'job "0 10 * * *" release-run' in bootstrap
@@ -242,6 +243,113 @@ def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
         "DOPPLER_CONFIG",
     ):
         assert private_selector not in public_contract
+
+
+LOCAL_MACHINE = "home_local"
+HOST_TOOLS = ("uv", "gh", "cargo", "flyctl", "security", "swift", "xcrun", "claude")
+
+
+def _executable(path: Path, body: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\n" + body)
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def _cron_host(tmp_path: Path, wave_machine: dict | None) -> tuple[Path, dict]:
+    """A main checkout and HOME with an installed lf gate and fake host tools."""
+    root = tmp_path.resolve()
+    repo = root / "loopflow"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    (repo / "scripts").mkdir()
+    shutil.copy(ROOT / "scripts/bootstrap-cron-host.sh", repo / "scripts")
+
+    home = root / "home"
+    status = {"wave": {"name": "infrastructure", "machine": wave_machine}}
+    (home / "wave-status.json").parent.mkdir(parents=True)
+    (home / "wave-status.json").write_text(json.dumps(status))
+    _executable(
+        home / ".lf-machine/install/gates/1/lf",
+        f"""case "$1 $2" in
+  "machine id") echo {LOCAL_MACHINE} ;;
+  "wave status") cat "$HOME/wave-status.json" ;;
+  "account --json") echo '{{"accounts":[{{"scope":"managed","verification":"accepted"}}]}}' ;;
+  "--wave infrastructure") echo "$@" >> "$HOME/ran" ;;
+esac
+""",
+    )
+    # A development build earlier on PATH, in a directory with a space.
+    tools = root / "Loopflow Dev.app/bin"
+    _executable(tools / "lf", "exit 1\n")
+    for tool in HOST_TOOLS + ("loopflow-release-publisher", "launchctl"):
+        _executable(tools / tool, "exit 0\n")
+    _executable(
+        tools / "crontab",
+        # Like crontab, read the whole table before replacing it.
+        'if [ "$1" = -l ]; then cat "$HOME/crontab"; '
+        'else table="$(cat)"; printf "%s\\n" "$table" > "$HOME/crontab"; fi\n',
+    )
+    for tool in ("jq", "git"):
+        os.symlink(shutil.which(tool), tools / tool)
+    (home / "crontab").write_text("*/5 * * * * unrelated-job\n")
+
+    env = {
+        "HOME": str(home),
+        "PATH": f"{tools}:/usr/bin:/bin",
+        "LF_HOME": str(home / ".lf"),
+        "TMPDIR": str(root),
+    }
+    return repo, env
+
+
+def _bootstrap(repo: Path, env: dict) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["bash", "scripts/bootstrap-cron-host.sh", "infrastructure"],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_cron_bootstrap_installs_jobs_for_a_wave_running_on_its_local_default(tmp_path):
+    repo, env = _cron_host(tmp_path, wave_machine=None)
+
+    result = _bootstrap(repo, env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "no Machine default; it runs on this Machine" in result.stdout
+    home = Path(env["HOME"])
+    crontab = (home / "crontab").read_text().splitlines()
+    assert crontab[0] == "*/5 * * * * unrelated-job"
+    jobs = {line.split("# loopflow:infrastructure:")[1]: line for line in crontab[1:]}
+    assert jobs["telemetry-daily"].startswith("0 9 * * * ")
+    assert jobs["release-run"].startswith("0 10 * * * ")
+
+    # cron hands the line to sh; it runs the installed gate, not PATH's lf.
+    (home / "ran").unlink()
+    command = jobs["release-run"].split(" ", 5)[5]
+    subprocess.run(["/bin/sh", "-c", command], env={}, check=True)
+    assert (home / "ran").read_text() == "--wave infrastructure --batch graph release-run\n"
+
+
+def test_cron_bootstrap_accepts_a_wave_placed_on_this_machine(tmp_path):
+    repo, env = _cron_host(tmp_path, wave_machine={"id": LOCAL_MACHINE, "route": "local"})
+
+    result = _bootstrap(repo, env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "is placed on this Machine" in result.stdout
+
+
+def test_cron_bootstrap_leaves_the_crontab_alone_for_a_wave_placed_elsewhere(tmp_path):
+    repo, env = _cron_host(tmp_path, wave_machine={"id": "home_mini", "route": "mini"})
+
+    result = _bootstrap(repo, env)
+
+    assert result.returncode == 1
+    assert "placed on Machine home_mini" in result.stderr
+    assert (Path(env["HOME"]) / "crontab").read_text() == "*/5 * * * * unrelated-job\n"
 
 
 def test_release_installer_uses_the_promotion_boundary_to_activate_the_binary():

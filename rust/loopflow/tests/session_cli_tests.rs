@@ -66,12 +66,12 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     assert!(!help.contains("decline"));
     assert!(!help.contains("send-back"));
 
-    let removed = run(
-        home.path(),
-        &["history", "show", "historical-input", "--resume"],
-    );
-    assert!(!removed.status.success());
-    assert!(String::from_utf8_lossy(&removed.stderr).contains("unexpected argument '--resume'"));
+    for flag in ["--resume", "--events"] {
+        let removed = run(home.path(), &["history", "show", "historical-input", flag]);
+        assert_eq!(removed.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&removed.stderr)
+            .contains(&format!("unexpected argument '{flag}'")));
+    }
 
     for args in [
         &["session", "ready", "Feedback"][..],

@@ -2491,7 +2491,6 @@ Inspect a process or Session by identity
 |---|---|
 | `<id>` | id |
 | `--json` | json Default: false. |
-| `--events` | Print a Session's retained raw input events Default: false. |
 | `--final` | Print a Session's last recorded provider conclusion Default: false. |
 | `--input` | Inspect an exact retained input belonging to this Session |
 | `--context` | Print only what the step's submitted input was made of, by source Default: false. |

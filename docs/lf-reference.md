@@ -1043,6 +1043,27 @@ Print one Wave's Projects and Tasks as Desktop shows them
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
+## lf desktop sessions
+
+Print Sessions as Desktop's Session list shows them
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--all` | Include Sessions from every repository on this machine Default: false. |
+| `--interactive` | Select interactive (true), headless (false), or both (all) Default: true. |
+| `--history` | Include completed conversations and historical reviews Default: false. |
+| `--available` | Only conversations available for your input Default: false. |
+| `--limit` | Maximum conversations; 0 reads the complete matching inventory Default: 100. |
+| `--offset` | offset Default: 0. |
+| `--page` | Return a bounded stable-ID page with a continuation cursor Default: false. |
+| `--after` | Previous page's next identity; keep the same filters |
+| `--task` | task |
+| `--orphan` | Only Sessions without a Task association Default: false. |
+| `--search` | search |
+| `--watch` | Print a JSON line now and each time the list changes, until stdin closes Default: false. |
+| `--help / -h` | Print help |
+
 ## lf desktop task
 
 Print one Task as Desktop's Task pane shows it
@@ -2243,6 +2264,15 @@ Show selection, retained imports and held records without contacting Git
 |---|---|
 | `--json` | json Default: false. |
 | `--watch` | Keep the repository's planning exchanged, printing a JSON line now and each time the status changes, until stdin closes Default: false. |
+| `--help / -h` | Print help |
+
+## lf config planning journal
+
+Show each destination's retained changes, including losing values, without contacting Git
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf self

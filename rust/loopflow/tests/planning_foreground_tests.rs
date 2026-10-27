@@ -8,7 +8,9 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use loopflow::planning_git::{PlanningDestination, PlanningGit, PlanningPublication};
-use loopflow::store::{open_ephemeral_store, PeerPlanningStatus, StorageConfig, Store};
+use loopflow::store::{
+    open_ephemeral_store, PeerPlanningStatus, PlanningJournal, StorageConfig, Store,
+};
 use loopflow_test_support::TestRepo;
 use rusqlite::{params, Connection};
 use serde_json::json;
@@ -803,7 +805,7 @@ fn configure(repo: &Path, binding: &PlanningDestination) {
 }
 
 #[test]
-fn planning_status_reads_retained_journal_without_inventing_recovery_records() {
+fn planning_journal_reads_retained_changes_without_inventing_recovery_records() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let source = repo.path().canonicalize().unwrap();
@@ -825,13 +827,23 @@ fn planning_status_reads_retained_journal_without_inventing_recovery_records() {
         .iter()
         .find(|destination| destination.active)
         .unwrap();
+    let journals: Vec<PlanningJournal> = serde_json::from_str(&run(
+        &source,
+        home.path(),
+        &["planning", "journal", "--json"],
+    ))
+    .unwrap();
+    let journaled = journals
+        .iter()
+        .find(|journal| journal.destination == active.id)
+        .unwrap();
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let journal = store
         .export_peer_planning(source.to_str().unwrap(), &active.id)
         .unwrap();
-    assert_eq!(active.changes, journal.changes);
-    let (old_id, old) = active
+    assert_eq!(journaled.changes, journal.changes);
+    let (old_id, old) = journaled
         .changes
         .iter()
         .find(|(_, change)| {
@@ -840,9 +852,9 @@ fn planning_status_reads_retained_journal_without_inventing_recovery_records() {
                 && change.edit.change.value().unwrap() == "Same title"
         })
         .unwrap();
-    assert!(!active.candidates.contains(old_id));
+    assert!(!journaled.candidates.contains(old_id));
     assert_eq!(old.edit.change.value().unwrap(), "Same title");
-    let (current_id, current) = active
+    let (current_id, current) = journaled
         .changes
         .iter()
         .find(|(_, change)| {
@@ -851,9 +863,9 @@ fn planning_status_reads_retained_journal_without_inventing_recovery_records() {
                 && change.edit.change.value().unwrap() == "Later title"
         })
         .unwrap();
-    assert!(active.candidates.contains(current_id));
+    assert!(journaled.candidates.contains(current_id));
     assert!(current.parents.contains(old_id));
-    let text = run(&source, home.path(), &["planning", "status"]);
+    let text = run(&source, home.path(), &["planning", "journal"]);
     assert!(text.contains("retained alternative]: \"Same title\""));
     assert!(text.contains("candidate, not confirmed]: \"Later title\""));
     assert_eq!(
@@ -883,7 +895,20 @@ fn planning_status_reads_retained_journal_without_inventing_recovery_records() {
     assert_eq!(switched.iter().find(|d| d.active).unwrap().id, other.id());
     let retained = switched.iter().find(|d| d.id == active.id).unwrap();
     assert!(!retained.active);
-    assert_eq!(retained.changes, active.changes);
+    let switched_journals: Vec<PlanningJournal> = serde_json::from_str(&run(
+        &source,
+        home.path(),
+        &["planning", "journal", "--json"],
+    ))
+    .unwrap();
+    assert_eq!(
+        switched_journals
+            .iter()
+            .find(|journal| journal.destination == active.id)
+            .unwrap()
+            .changes,
+        journaled.changes
+    );
     assert_eq!(retained.publication_revision, active.publication_revision);
     match config {
         Some(bytes) => fs::write(&config_path, bytes).unwrap(),
@@ -1044,5 +1069,5 @@ fn personal_plan_moves_to_shared_default_with_identity() {
     assert!(personal
         .reference
         .starts_with("refs/loopflow/planning/users/"));
-    assert!(!personal.changes.is_empty());
+    assert!(personal.selected_records > 0);
 }

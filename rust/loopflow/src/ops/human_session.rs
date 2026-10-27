@@ -308,8 +308,8 @@ fn require_session_action(state: SessionState, action: SessionActionKind) -> Res
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionPage {
-    pub entries: Vec<SessionRecord>,
+pub struct SessionPage<T = SessionRecord> {
+    pub entries: Vec<T>,
     pub next: Option<String>,
 }
 

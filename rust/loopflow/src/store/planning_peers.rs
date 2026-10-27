@@ -28,6 +28,13 @@ pub struct PeerPlanningStatus {
     pub publication_error: Option<String>,
     pub pending_local: bool,
     pub conflicts: Vec<PeerProjectionConflict>,
+}
+
+/// `lf planning journal`: one destination's retained journal. It grows with
+/// every edit, so it is a one-shot read, not part of the status.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PlanningJournal {
+    pub destination: String,
     /// Retained journal entries, including losing values and rejected projections.
     pub changes: BTreeMap<String, PlanningMutation>,
     /// Ranked mutations, not evidence of successful projection or publication.
@@ -35,6 +42,19 @@ pub struct PeerPlanningStatus {
 }
 
 impl Store {
+    pub async fn peer_planning_journal(
+        &self,
+        repo: &str,
+        active: Option<&str>,
+    ) -> StoreResult<Vec<PlanningJournal>> {
+        let repo = repo.to_string();
+        let active = active.map(str::to_string);
+        run_sqlite(&self.sqlite, move |sqlite| {
+            sqlite.peer_planning_journal(&repo, active.as_deref())
+        })
+        .await
+    }
+
     pub async fn peer_planning_status(
         &self,
         repo: &str,

@@ -218,20 +218,16 @@ unless "Work needed" says otherwise.
 ## Remaining work
 
 0. Minimal streamed JSON (Jack Heart, 2026-10-27). Done: frame
-   `{answers, unavailable, body}`; `lf --version` adds `copy: <dir>` on a
-   draft build and Desktop reads it once per observation (Machine identity from
-   `machine id`; workflow catalog reloads on planning frames and checkpoints);
-   `--state` takes TaskState labels; `TaskRow` (`lf/commands/task_row.rs`) is
-   the row of `task list`, `task list --done`, `wave show`, `wave status`;
-   `lf task status` is `TaskDetail` (row, sessions, graph_processes,
-   comments). Desktop's shapes moved unchanged to `lf desktop plan|done|wave|
-   task` (`Shape::Desktop`), so Swift changed only argv. Left: the other
-   watches' bodies (`session list`, `history`, `ps`, `planning status`,
-   `desktop plans`) are not yet trimmed; rich `TaskStatus.task` still
-   serializes `created_at`/`updated_at` as arrays (Desktop-only now).
-   Desktop regression from the open-Task slice: completing the selected Task
-   drops it from planning and the pane keeps its retained, uncompleted row
-   (`WorkCLISubscriptionTests.taskLifecycleUpdatesOpenSidebar`).
+   `{answers, unavailable, body}`; `TaskRow` for Task reads, `TaskDetail` for
+   `lf task status`; `SessionRow` (`lf/commands/session.rs`) for `lf session
+   list` (id, title, provider, interactive, state, available, task, wave, cwd,
+   agent_process_id); Desktop's shapes under `lf desktop plan|done|wave|task|
+   sessions`. `history` is `{truncated, items}`; `ps` is `{nodes}`;
+   `ViewPlan` drops `observed_at`; `planning status` keeps receipts and
+   conflicts, and the journal (every change, growing with each edit) moved to
+   one-shot `lf planning journal`. Task and TaskSnapshot times are RFC 3339.
+   `lf desktop task` carries the Task's `row`, so a completed or canceled
+   Task's pane follows its own watch after it leaves the plan.
 1. Sessions: incremental or paged rows instead of 5.7 MB per reading; a quiet
    Session turns Waiting on the 2 s clock (`next_quiet_available` is gone).
 2. `lf task status`: flat in Graphs; measure what still grows on Jack's store
@@ -283,3 +279,4 @@ unless "Work needed" says otherwise.
 - Minimal streamed JSON (75faef7b22): integration world_recipes (7), watch lib (15), dto_fixtures, cli_reference (regenerated), planning_foreground, performance, global_commands (45), session_lifecycle (29), two_people, process_ownership (11) passed; `test_desktop.sh` 18 suites / 233 tests passed. machine_commands failed only under parallel load (passes alone). Not run: clippy and the lib linear suites (graph, local_planning, status, task_graph_launch, wave_*), stopped when the disk filled: gate.
 - Compress (`DesktopCommand::is_read` shared by preview and process recording; `TaskNames::read` takes an optional store): clippy --all-targets clean (also covers 75faef7b22's deferred clippy); integration `dto_fixtures world_recipes global_commands` 50 passed.
 - Realign after main sync (b3fb1ba128): `every_verb_names_a_registry_action` skips the branch's `lf desktop plans|plan|done|wave|task` reads; `cargo test -p loopflow --lib every_verb_names_a_registry_action` passed.
+- Minimal watch bodies + Task pane row (2026-10-27): clippy --all-targets clean; integration `dto_fixtures cli_reference session_cli_tests session_list_watch world_recipes work_open_tests performance_tests data_clones planning_foreground` passed (`available_lists_only…` and `cmux_opens…` failed only under the parallel run, pass alone); `session_lifecycle_tests` (30), `global_commands`, `process_ownership_tests` passed; lib `planning_peers planning_write commands::top|activity|desktop work::task` passed, `watch::a_store_created…` passes alone; `test_desktop.sh` 27 suites / 361 tests passed (incl. `taskLifecycleUpdatesOpenSidebar`; stand-ins still answering `wave show` from 75faef7b22 now answer `desktop plan`). Lib `linear/` suites and Linux `planning_reconnect`: gate.

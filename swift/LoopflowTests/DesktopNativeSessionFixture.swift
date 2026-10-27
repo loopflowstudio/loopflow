@@ -55,7 +55,7 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
 
     func records() async throws -> [SessionRecord] {
         let output = try await Task.detached {
-            try capture([cli, "session", "list", "--all", "--history", "--json"])
+            try capture([cli, "desktop", "sessions", "--all", "--history", "--json"])
         }.value
         return try JSONDecoder().decode([SessionRecord].self, from: Data(output.utf8))
     }
@@ -196,7 +196,7 @@ struct DesktopNativeSessionTests {
         let destination = try await query.taskDestination(issue: fixture.issue, repo: fixture.repo)
         #expect(destination.waves.flatMap { $0.tasks.items }.contains { $0.runtime?.workId == fixture.taskId })
         let copied = try await reads.read(binary: fixture.cli, home: snapshot,
-            args: ["session", "list", "--all", "--history", "--json"], cwd: copiedRepo).get()
+            args: ["desktop", "sessions", "--all", "--history", "--json"], cwd: copiedRepo).get()
         let copiedRecords = try JSONDecoder().decode([SessionRecord].self, from: Data(copied.utf8))
         let copiedRecord = try #require(copiedRecords.first)
         let activityJSON = try await reads.read(binary: fixture.cli, home: snapshot,
@@ -211,7 +211,7 @@ struct DesktopNativeSessionTests {
         // Closed copied conversations belong to explicit history, not the
         // current working set. The unfiltered transport retains them unchanged.
         let history = try await reads.read(binary: fixture.cli, home: snapshot,
-            args: ["session", "list", "--all", "--history", "--json"], cwd: copiedRepo, fixture: fixture).get()
+            args: ["desktop", "sessions", "--all", "--history", "--json"], cwd: copiedRepo, fixture: fixture).get()
         #expect(try JSONDecoder().decode([SessionRecord].self, from: Data(history.utf8)).count == copiedRecords.count + 1)
         let registry = SessionsWorkspaceRegistry(localMachineId: try await query.localMachineId())
         model.bindWorkspaces(registry, repository: "fixture-plan")
@@ -250,7 +250,7 @@ struct DesktopNativeSessionTests {
             #expect(try fixture.historyIsPreserved())
         }
         let after = try await reads.read(binary: fixture.cli, home: snapshot,
-            args: ["session", "list", "--all", "--history", "--json"], cwd: copiedRepo).get()
+            args: ["desktop", "sessions", "--all", "--history", "--json"], cwd: copiedRepo).get()
         #expect(try JSONDecoder().decode([SessionRecord].self, from: Data(after.utf8)) == copiedRecords)
         await reads.finish()
     }

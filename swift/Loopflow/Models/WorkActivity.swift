@@ -2,16 +2,8 @@ import Foundation
 
 /// One bounded, ordered window from `lf history`.
 public struct WorkActivitySnapshot: Decodable, Sendable, Hashable {
-    public let generatedAt: Int64
-    public let since: Int64
-    public let limit: Int
     public let truncated: Bool
     public let items: [WorkActivityEntry]
-
-    enum CodingKeys: String, CodingKey {
-        case since, limit, truncated, items
-        case generatedAt = "generated_at"
-    }
 }
 
 public struct WorkActivityEntry: Decodable, Sendable, Hashable, Identifiable {

@@ -66,8 +66,6 @@ pub struct ActivityNode {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActivitySnapshot {
-    pub schema_version: u32,
-    pub observed_at: i64,
     pub nodes: Vec<ActivityNode>,
 }
 
@@ -133,10 +131,7 @@ pub fn run_top() -> Result<()> {
 pub fn watch_ps() -> Result<()> {
     super::watch::run(
         (),
-        super::watch::Watched {
-            stamp: Some("observed_at"),
-            ..super::watch::Watched::every(super::watch::ACTIVITY_CLOCK)
-        },
+        super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
         |_, ()| async { load_snapshot() },
     )
 }
@@ -225,11 +220,7 @@ pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let path = crate::store::database_path_from_env()?;
     if !path.exists() {
-        return Ok(ActivitySnapshot {
-            schema_version: SCHEMA_VERSION,
-            observed_at: now,
-            nodes: Vec::new(),
-        });
+        return Ok(ActivitySnapshot { nodes: Vec::new() });
     }
     let store = SqliteStore::open_processes_read_only(&path)?;
     let records = store.unfinished_processes()?;
@@ -238,19 +229,15 @@ pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
         tracing::warn!(%error, "activity OS observation unavailable");
     }
     // Each unfinished row reads its own receipt, so cost follows live work, not history.
-    collect_activity(
-        records,
-        processes.as_deref().ok(),
-        |record| recorded_process_receipt(&store, record),
-        now,
-    )
+    collect_activity(records, processes.as_deref().ok(), |record| {
+        recorded_process_receipt(&store, record)
+    })
 }
 
 fn collect_activity(
     records: Vec<crate::process::LfProcess>,
     processes: Option<&[OsProcess]>,
     mut receipt: impl FnMut(&crate::process::LfProcess) -> std::io::Result<Option<ProcessReceipt>>,
-    now: i64,
 ) -> Result<ActivitySnapshot> {
     let mut nodes = Vec::new();
     for record in records {
@@ -283,11 +270,7 @@ fn collect_activity(
     }
     fold_activity_state(&mut nodes)?;
     nodes.sort_by(|left, right| left.id.cmp(&right.id));
-    Ok(ActivitySnapshot {
-        schema_version: SCHEMA_VERSION,
-        observed_at: now,
-        nodes,
-    })
+    Ok(ActivitySnapshot { nodes })
 }
 
 fn command_label(command: Option<&str>, kind: crate::process::ProcessKind) -> String {
@@ -439,6 +422,7 @@ fn print_snapshot(snapshot: &ActivitySnapshot, json: bool) -> Result<()> {
 }
 
 fn render_snapshot(snapshot: &ActivitySnapshot) -> String {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
     let mut output = String::new();
     output.push_str("LOOPFLOW ACTIVITY\n");
     output.push_str(&format!(
@@ -468,7 +452,7 @@ fn render_snapshot(snapshot: &ActivitySnapshot) -> String {
         let tree = RenderTree {
             index,
             children,
-            now: snapshot.observed_at,
+            now,
         };
         if let Some(roots) = tree.children.get(&None) {
             for root in roots {
@@ -882,7 +866,7 @@ mod tests {
             }]
         };
         let snapshot =
-            collect_activity(vec![record.clone()], Some(&os(100)), |_| Ok(None), 101).unwrap();
+            collect_activity(vec![record.clone()], Some(&os(100)), |_| Ok(None)).unwrap();
         assert_eq!(snapshot.nodes.len(), 1);
         assert_eq!(snapshot.nodes[0].kind, ActivityNodeKind::AgentProcess);
         assert_eq!(snapshot.nodes[0].id, format!("process:{id}"));
@@ -891,17 +875,13 @@ mod tests {
             Some(format!("process:{parent}"))
         );
         assert_eq!(snapshot.nodes[0].label, "codex app-server");
-        assert!(
-            collect_activity(vec![record], Some(&os(200)), |_| Ok(None), 201)
-                .unwrap()
-                .nodes
-                .is_empty()
-        );
-        assert!(
-            collect_activity(Vec::new(), Some(&os(100)), |_| Ok(None), 101)
-                .unwrap()
-                .nodes
-                .is_empty()
-        );
+        assert!(collect_activity(vec![record], Some(&os(200)), |_| Ok(None))
+            .unwrap()
+            .nodes
+            .is_empty());
+        assert!(collect_activity(Vec::new(), Some(&os(100)), |_| Ok(None))
+            .unwrap()
+            .nodes
+            .is_empty());
     }
 }

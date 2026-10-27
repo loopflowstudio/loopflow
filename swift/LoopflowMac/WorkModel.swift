@@ -134,12 +134,9 @@ final class WorkModel {
                   (old.savedRevision ?? 0) > (plan.savedRevision ?? 0) else { return plan }
             return old
         })
-        // A dictionary-subscript write notifies even when equal, and every frame
-        // carries a new observedAt that no view reads. The sidebar, Dashboards and
-        // title read these plans, so an unchanged frame must not republish them.
-        if case .available(let current) = selectionPlans, case .available(let fresh) = next,
-           current.count == fresh.count, zip(current, fresh).allSatisfy({ $0.matches($1) }) {
-        } else { selectionPlans = next }
+        // A write notifies even when equal. The sidebar, Dashboards and title
+        // read these plans, so an unchanged frame must not republish them.
+        if selectionPlans != next { selectionPlans = next }
         reconcileSelectionRepository()
         switch navigation.destination {
         case .dashboard, .workingTasks: if let plan = selectedViewPlan { presentView(plan) }
@@ -2754,13 +2751,3 @@ enum TaskOrderDrag {
     }
 }
 
-extension WorkViewPlan {
-    /// Equal apart from when it was observed. Name each displayed field here.
-    func matches(_ other: WorkViewPlan) -> Bool {
-        name == other.name && pinned == other.pinned && dashboardID == other.dashboardID
-            && repository == other.repository && selection == other.selection
-            && savedRevision == other.savedRevision && resolution == other.resolution
-            && arrangement == other.arrangement && projection == other.projection
-            && slots == other.slots && contents == other.contents
-    }
-}

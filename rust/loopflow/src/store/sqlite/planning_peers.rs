@@ -5,7 +5,9 @@ use super::{
 };
 use crate::planning_exchange::{PlanningMutation, PlanningSnapshot};
 use crate::planning_git::PlanningDestination;
-use crate::store::{PeerPlanningStatus, PeerProjectionConflict, StoreError, StoreResult};
+use crate::store::{
+    PeerPlanningStatus, PeerProjectionConflict, PlanningJournal, StoreError, StoreResult,
+};
 use crate::work::edit::WorkValue;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
@@ -393,7 +395,6 @@ impl SqliteStore {
                 })
                 .collect::<BTreeSet<_>>()
                 .len() as u64;
-            let candidates = snapshot.winners().map(|(id, _)| id.to_owned()).collect();
             let mut conflicts = conn.prepare(
                 "SELECT object_id,reason FROM planning_peer_conflicts WHERE repo=?1 AND active=1",
             )?;
@@ -418,11 +419,36 @@ impl SqliteStore {
                 publication_error,
                 pending_local,
                 conflicts,
-                changes: snapshot.changes,
-                candidates,
             });
         }
         Ok(result)
+    }
+    pub fn peer_planning_journal(
+        &self,
+        repo: &str,
+        active: Option<&str>,
+    ) -> StoreResult<Vec<PlanningJournal>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let destinations = conn
+            .prepare("SELECT id FROM planning_destinations WHERE repo=?1 ORDER BY id")?
+            .query_map([repo], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        destinations
+            .into_iter()
+            .map(|destination| {
+                let snapshot = export_in(
+                    &conn,
+                    repo,
+                    &destination,
+                    Some(destination.as_str()) == active,
+                )?;
+                Ok(PlanningJournal {
+                    candidates: snapshot.winners().map(|(id, _)| id.to_owned()).collect(),
+                    changes: snapshot.changes,
+                    destination,
+                })
+            })
+            .collect()
     }
 }
 
@@ -553,12 +579,21 @@ mod tests {
         assert_eq!(store.revisions().unwrap(), revision);
         assert!(statuses.iter().find(|s| s.id == second).unwrap().active);
         assert!(!statuses.iter().find(|s| s.id == first).unwrap().active);
+        let journals = store.peer_planning_journal("/repo", Some(&second)).unwrap();
         assert_eq!(
-            statuses.iter().find(|s| s.id == first).unwrap().changes,
+            journals
+                .iter()
+                .find(|j| j.destination == first)
+                .unwrap()
+                .changes,
             original.changes
         );
         assert_eq!(
-            statuses.iter().find(|s| s.id == second).unwrap().changes,
+            journals
+                .iter()
+                .find(|j| j.destination == second)
+                .unwrap()
+                .changes,
             current.changes
         );
         // Linear selection does not erase Git history or move later edits to old refs.

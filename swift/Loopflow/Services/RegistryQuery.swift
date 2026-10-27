@@ -453,7 +453,7 @@ public struct RegistryQuery: Sendable {
     /// One bounded page, ordered by stable Session identity.
     public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
                             cwd: String? = nil) async throws -> SessionPage {
-        var args = ["session", "list", "--json", "--page"]
+        var args = ["desktop", "sessions", "--json", "--page"]
         if includingHeadless { args += ["--interactive", "all"] }
         args += ["--limit", "100"]
         if let after { args += ["--after", after] }

@@ -89,7 +89,7 @@ impl Fixture {
     }
 
     fn sessions(&self) -> Vec<Value> {
-        serde_json::from_value(self.json(&["session", "list", "--all", "--json"])).unwrap()
+        serde_json::from_value(self.json(&["desktop", "sessions", "--all", "--json"])).unwrap()
     }
 
     fn launches(&self) -> Vec<String> {
@@ -450,7 +450,7 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
         "primary": primary,
         "reopened": again,
         "task_primary": task_primary,
-        "sessions": fixture.json(&["session", "list", "--history", "--all", "--json"]),
+        "sessions": fixture.json(&["desktop", "sessions", "--history", "--all", "--json"]),
         "roadmap": fixture.json(&["desktop", "plan", "--all", "--json"]),
     });
     assert_eq!(fixture.count("agent_sessions"), 3);
@@ -1146,7 +1146,7 @@ fn binding_leaves_ownership_and_prior_work_unchanged() {
         fixture.sessions().is_empty(),
         "binding preserves completion"
     );
-    let listed = fixture.json(&["session", "list", "--history", "--all", "--json"]);
+    let listed = fixture.json(&["desktop", "sessions", "--history", "--all", "--json"]);
     assert_eq!(listed.as_array().unwrap().len(), 1);
     assert_eq!(
         listed[0]["work"],
@@ -1510,7 +1510,9 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     assert_eq!(members("INF-124").len(), 3);
     // The listing marks it, so a reader finds it without choosing one.
     let marked: Vec<String> = fixture
-        .json(&["session", "list", "--all", "--task", "INF-124", "--json"])
+        .json(&[
+            "desktop", "sessions", "--all", "--task", "INF-124", "--json",
+        ])
         .as_array()
         .unwrap()
         .iter()

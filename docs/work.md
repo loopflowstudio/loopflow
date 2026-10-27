@@ -113,7 +113,7 @@ planning:
 
 Ref names are not access control; pick a remote whose readers should see the
 plan. When two people edit the same field, the later edit wins and the other
-value stays in `lf planning status`, ready to copy back.
+value stays in `lf planning journal`, ready to copy back.
 
 ### Linear, Asana or Notion
 

@@ -43,7 +43,7 @@ struct DesktopHeadlessTests {
         let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery { args, _ in
             if args.prefix(2) == ["desktop", "plan"] { return roadmap }
-            if args.first == "session" { return #"{"entries":[],"next":null}"# }
+            if args.prefix(2) == ["desktop", "sessions"] { return #"{"entries":[],"next":null}"# }
             if args.first == "planning" { return #"{"destinations":[]}"# }
             throw RegistryQueryError("Unexpected command: \(args)")
         }, repoPath: "/src/loopflow")
@@ -67,7 +67,7 @@ struct DesktopHeadlessTests {
             }
             if args.first == "roadmap" { return roadmap }
             if args.first == "wave" { return "[]" }
-            if args.first == "session" { return #"{"entries":[],"next":null}"# }
+            if args.prefix(2) == ["desktop", "sessions"] { return #"{"entries":[],"next":null}"# }
             throw RegistryQueryError("Unexpected command: \(args)")
         }, repoPath: "/src/loopflow")
         await model.refresh()

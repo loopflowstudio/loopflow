@@ -50,19 +50,7 @@ struct PeerPlanningView: View {
                 let conflict = destination.conflicts[index]
                 Text("Held \(conflict.target): \(conflict.reason)")
             }
-            ForEach(destination.changes.keys.sorted(), id: \.self) { id in
-                if let change = destination.changes[id] {
-                    DisclosureGroup("\(change.edit.target): \(change.edit.change.field)") {
-                        VStack(alignment: .leading, spacing: Spacing.xs) {
-                            Text(destination.candidates.contains(id) ? "Candidate, not confirmed" : "Retained alternative")
-                            Text(change.valueText)
-                            Text("Mutation: \(id)")
-                        }
-                    }
-                    .accessibilityIdentifier("peer-recovery-\(id)")
-                }
-            }
-            Text("Inspection changes nothing. Copy a retained value into an ordinary edit to save it again.")
+            Text("Inspection changes nothing. `lf planning journal` lists retained values; copy one into an ordinary edit to save it again.")
         }
         .accessibilityIdentifier("peer-planning-\(destination.id)")
     }

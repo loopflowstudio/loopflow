@@ -434,7 +434,7 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         ["desktop", "capture"] => Some(schema::<DesktopTextReading>()),
         ["desktop", "events"] => Some(schema::<DesktopChange>()),
         // Work reads print Desktop's presentation types, which carry no schema.
-        ["desktop", "wait" | "plan" | "done" | "wave" | "task"] => None,
+        ["desktop", "wait" | "plan" | "done" | "wave" | "sessions" | "task"] => None,
         // Saved-intent commands answered above; `rename` writes a shared owner's record.
         ["desktop", verb] if !READING_VERBS.contains(verb) && *verb != "rename" => {
             Some(schema::<DesktopVerbResult>())
@@ -600,11 +600,7 @@ fn plans(cli: &crate::lf::Cli, watch: bool) -> Result<()> {
     }
     super::watch::run(
         (),
-        super::watch::Watched {
-            // Each plan restates when it was read.
-            stamp: Some("observed_at"),
-            ..super::watch::Watched::every(super::watch::PLANNING_CLOCK)
-        },
+        super::watch::Watched::every(super::watch::PLANNING_CLOCK),
         |store, ()| {
             let result = store
                 .ok_or(crate::store::StoreError::NotFound)
@@ -895,6 +891,9 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
         }
         DesktopCommand::Wave { wave, .. } => {
             return super::waves::status(wave.as_deref(), true, Shape::Desktop);
+        }
+        DesktopCommand::Sessions { list } => {
+            return super::session::list_sessions(list, Shape::Desktop);
         }
         DesktopCommand::Task { issue, watch, .. } => return task_pane(issue, *watch),
         _ => {}
@@ -1260,6 +1259,7 @@ impl Verb {
             | DesktopCommand::Plan { .. }
             | DesktopCommand::Done { .. }
             | DesktopCommand::Wave { .. }
+            | DesktopCommand::Sessions { .. }
             | DesktopCommand::Task { .. }
             | DesktopCommand::Query { .. }
             | DesktopCommand::Pin { .. }
@@ -1442,6 +1442,7 @@ pub fn runs_without_desktop(command: &crate::lf::DesktopCommand) -> bool {
         | DesktopCommand::Plan { .. }
         | DesktopCommand::Done { .. }
         | DesktopCommand::Wave { .. }
+        | DesktopCommand::Sessions { .. }
         | DesktopCommand::Task { .. }
         | DesktopCommand::Query { .. }
         | DesktopCommand::Pin { .. }
@@ -3284,7 +3285,7 @@ mod tests {
         let cli = <crate::lf::Cli as clap::CommandFactory>::command();
         let desktop = cli.find_subcommand("desktop").unwrap();
         let saved = ["view", "query", "pin", "unpin", "rename", "layout"];
-        let work_reads = ["plans", "plan", "done", "wave", "task"];
+        let work_reads = ["plans", "plan", "done", "wave", "sessions", "task"];
         for verb in desktop.get_subcommands().map(clap::Command::get_name) {
             if saved.contains(&verb)
                 || work_reads.contains(&verb)

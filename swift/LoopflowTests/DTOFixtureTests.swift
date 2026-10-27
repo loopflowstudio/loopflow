@@ -530,7 +530,7 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("work_activity_snapshot.json")
         let snapshot = try JSONDecoder().decode(WorkActivitySnapshot.self, from: data)
 
-        #expect(snapshot.limit == 50)
+        #expect(snapshot.truncated == false)
         #expect(snapshot.items.map(\.subject) == ["W2-144", "W2-144", "product"])
         if case .inputCompletionRecorded(_, let captured, let status) = snapshot.items[0].fact {
             #expect(captured == 12)
@@ -847,7 +847,7 @@ struct DTOFixtureTests {
         #expect(decoded == session)
     }
 
-    @Test("Peer planning retains journal values and independent receipts")
+    @Test("Peer planning keeps independent receipts")
     func peerPlanningStatus() throws {
         let data = try loadFixtureData("peer_planning_status.json")
         let statuses = try JSONDecoder().decode([PeerPlanningStatus].self, from: data)
@@ -858,16 +858,7 @@ struct DTOFixtureTests {
         #expect(statuses[0].conflicts[0].target == "retained-task")
         #expect(statuses[1].pendingLocal == true)
         #expect(statuses[1].active)
-        #expect(statuses[1].changes["title-loser"]?.edit.change.value == .string("Retained title"))
-        #expect(!statuses[1].candidates.contains("title-loser"))
-        #expect(statuses[1].changes["title-head"]?.parents == ["title-loser"])
-        #expect(statuses[1].changes["comment-head"]?.clock == 4)
-        guard case .object(let content) = statuses[1].changes["comment-head"]?.edit.change.value else {
-            Issue.record("expected typed comment content")
-            return
-        }
-        #expect(content["author"] == .object(["kind": .string("person"), "name": .string("Maya")]))
-        for field in ["conflicts", "changes", "candidates", "pending_local"] {
+        for field in ["conflicts", "pending_local"] {
             var object = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])[1]
             object.removeValue(forKey: field)
             #expect(throws: (any Error).self) {

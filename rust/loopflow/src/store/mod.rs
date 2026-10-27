@@ -32,7 +32,7 @@ mod sessions;
 pub mod sqlite;
 mod token_crypto;
 
-pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict};
+pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};
 
 /// Availability of retained planning facts, independent of execution permission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

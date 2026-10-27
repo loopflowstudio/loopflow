@@ -165,7 +165,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
         String::from_utf8_lossy(&prepared.stderr)
     );
     let output = command(env!("CARGO_BIN_EXE_lf"))
-        .args(["session", "list", "--json", "--all"])
+        .args(["desktop", "sessions", "--json", "--all"])
         .output()
         .unwrap();
     assert!(
@@ -803,13 +803,16 @@ fn available_lists_only_conversations_ready_for_input() {
     let available: Vec<serde_json::Value> = serde_json::from_slice(&available.stdout).unwrap();
     assert_eq!(available.len(), 1);
     assert_eq!(available[0]["id"], asked.as_str());
-    assert_eq!(available[0]["availability"], "available");
+    assert_eq!(available[0]["available"], true);
     assert!(listed(home.path(), &working)["availability"].is_null());
     assert!(!list("--needs-me").status.success());
 }
 
 fn listed(home: &std::path::Path, id: &str) -> serde_json::Value {
-    let output = run(home, &["session", "list", "--all", "--history", "--json"]);
+    let output = run(
+        home,
+        &["desktop", "sessions", "--all", "--history", "--json"],
+    );
     assert!(output.status.success(), "{output:?}");
     let sessions: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
     sessions
@@ -1057,7 +1060,7 @@ exit 2
                 );
             }
             if first {
-                let listed = inspect(&["session", "list", "--all", "--json"]);
+                let listed = inspect(&["desktop", "sessions", "--all", "--json"]);
                 assert_eq!(listed.as_array().unwrap().len(), 1, "{listed}");
                 id = listed[0]["id"].as_str().unwrap().to_string();
                 assert_eq!(listed[0]["title"], title(name));
@@ -1756,7 +1759,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     let wait_for = |state: &str| {
         let until = Instant::now() + Duration::from_secs(10);
         loop {
-            let output = run(home.path(), &["session", "list", "--json", "--all"]);
+            let output = run(home.path(), &["desktop", "sessions", "--json", "--all"]);
             assert!(
                 output.status.success(),
                 "{}",
@@ -1825,7 +1828,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     );
     provider.0.kill().unwrap();
     provider.0.wait().unwrap();
-    let output = run(home.path(), &["session", "list", "--json", "--all"]);
+    let output = run(home.path(), &["desktop", "sessions", "--json", "--all"]);
     let items: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let ended = items
         .as_array()
@@ -1852,7 +1855,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     );
     assert!(!stale.status.success());
     assert!(String::from_utf8_lossy(&stale.stderr).contains("Session provider changed"));
-    let output = run(home.path(), &["session", "list", "--json", "--all"]);
+    let output = run(home.path(), &["desktop", "sessions", "--json", "--all"]);
     let items: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let item = items
         .as_array()

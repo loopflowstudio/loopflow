@@ -354,7 +354,7 @@ struct WorkModelTests {
             encoding: .utf8
         )
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
+            #expect(args == ["desktop", "sessions", "--json", "--page", "--limit", "100"])
             #expect(cwd == "/src/loopflow")
             return #"{"entries":\#(json),"next":null}"#
         }
@@ -379,7 +379,7 @@ struct WorkModelTests {
             encoding: .utf8
         )
         let query = RegistryQuery { args, _ in
-            #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
+            #expect(args == ["desktop", "sessions", "--json", "--page", "--limit", "100"])
             return #"{"entries":\#(json),"next":null}"#
         }
         let model = WorkModel(query: query, repoPath: "/src/first")
@@ -404,7 +404,7 @@ struct WorkModelTests {
         )
         let deferred = DeferredActivityResponse()
         let query = RegistryQuery { args, _ in
-            #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
+            #expect(args == ["desktop", "sessions", "--json", "--page", "--limit", "100"])
             return #"{"entries":\#(await deferred.response()),"next":null}"#
         }
         let model = WorkModel(query: query, repoPath: "/src/first")
@@ -1119,7 +1119,7 @@ private struct WorkTestFixture {
             case "desktop" where args.dropFirst().first == "plan": return roadmapJSON
             case "planning": return #"{"destinations":[]}"#
             case "wave" where args.dropFirst().first == "list": return wavesJSON
-            case "session": return #"{"entries":[],"next":null}"#
+            case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":[],"next":null}"#
             case "history":
                 await activityArguments.record(args)
                 return workActivityJSON
@@ -1199,7 +1199,7 @@ private struct WorkTestFixture {
     /// A live-process reading: a frame that confirms and changes no Work.
     func activityFrame(sequence: Int) throws -> WorkFrame {
         try frame("activity", sequence: sequence, answers: nil,
-                  body: #"{"schema_version":1,"observed_at":1,"nodes":[]}"#)
+                  body: #"{"nodes":[]}"#)
     }
 
     func sessionEntries(sourceFile: String = #filePath) throws -> (json: String, ids: [String]) {

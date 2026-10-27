@@ -448,7 +448,7 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, cwd in
             #expect(cwd == "/tmp/repo")
             switch args {
-            case ["session", "list", "--json", "--page", "--limit", "100"]:
+            case ["desktop", "sessions", "--json", "--page", "--limit", "100"]:
                 return #"{"entries":\#(sessionsJSON),"next":null}"#
             case ["session", "connect", session.id, "--prepare", "--json", "--try"],
                  ["session", "connect", "--task", "INF-123", "--prepare", "--json", "--try"]:
@@ -469,7 +469,7 @@ struct RegistryQueryTests {
 
     @Test("Activity requires Session and input identity instead of unrelated process fallbacks")
     func invocationActivityIsNotSessionHistory() async throws {
-        let json = #"{"generated_at":1784606400,"since":1784001600,"limit":50,"truncated":false,"items":[{"id":"event","recorded_at":1784606300,"summary":"Input completed","work":{"kind":"task","id":"task-1"},"subject":"LOO-1","fact":{"kind":"input_completion_recorded","graph_lf_process_id":"invocation-1","trace_id":"trace-1","lf_process_id":"process-1","status":"ok"}}]}"#
+        let json = #"{"truncated":false,"items":[{"id":"event","recorded_at":1784606300,"summary":"Input completed","work":{"kind":"task","id":"task-1"},"subject":"LOO-1","fact":{"kind":"input_completion_recorded","graph_lf_process_id":"invocation-1","trace_id":"trace-1","lf_process_id":"process-1","status":"ok"}}]}"#
         let query = RegistryQuery { _, _ in json }
         await #expect(throws: (any Error).self) { try await query.workActivity() }
     }

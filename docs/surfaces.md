@@ -114,9 +114,21 @@ Every Task read prints the same Task row, each fact once:
 `shipping`, `done` or `abandoned`; `next` is the command that moves the Task
 on, `null` while it moves by itself.
 
+A Session row:
+
+```json
+{"id": "session_…", "title": "Search transcripts", "provider": "claude", "interactive": true,
+ "state": "active", "available": true, "task": "task_…", "wave": "infra",
+ "cwd": "/src/loopflow.loo-12", "agent_process_id": "…"}
+```
+
+`state` is what its agent process shows (`active`, `detached`, `closed`,
+`unknown`); `available` says it is ready for your next turn. `lf connect <id>`
+opens it.
+
 Desktop's own presentation (sections, conditions, controls) is
-`lf desktop plan`, `lf desktop task`, `lf desktop wave` and `lf desktop done`,
-with the same `--watch`.
+`lf desktop plan`, `lf desktop task`, `lf desktop wave`, `lf desktop done` and
+`lf desktop sessions`, with the same `--watch`.
 
 `body` is what the same command prints with `--json` alone. Write
 `{"id": 1, "args": {"query": "parser"}}` to stdin to change what it reads; the

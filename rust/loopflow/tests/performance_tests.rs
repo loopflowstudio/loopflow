@@ -133,8 +133,14 @@ fn planning_statements_do_not_grow_with_its_tasks() {
     create(4);
     let (statements, plan) = planning_statements(home.path(), repo.path());
     assert_eq!(statements, fewer);
+    let plan: serde_json::Value = serde_json::from_str(&plan).unwrap();
     assert_eq!(
-        plan.matches(r#""execution":{"state":"blocked""#).count(),
+        plan["tasks"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|task| task["execution"]["state"] == "blocked")
+            .count(),
         3,
         "{plan}"
     );

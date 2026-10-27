@@ -48,7 +48,7 @@ def capture(repo: Path, output: Path) -> None:
     record("activity", "activity.json", ["history", "--since", "7d", "--limit", "50", "--json"])
     after, page = None, 0
     while True:
-        args = ["session", "list", "--json", "--page", "--limit", "100"]
+        args = ["desktop", "sessions", "--json", "--page", "--limit", "100"]
         if after:
             args += ["--after", after]
         after = json.loads(record("session", f"sessions-{page}.json", args))["next"]

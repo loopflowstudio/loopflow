@@ -97,7 +97,7 @@ public enum WorkPart: String, CaseIterable, Sendable {
         case .peerPlanning:
             return scope.repo.map { (["planning", "status"], $0) }
         case .sessions:
-            return scope.repo.map { (["session", "list"] + (scope.headless ? ["--interactive", "all"] : []), $0) }
+            return scope.repo.map { (["desktop", "sessions"] + (scope.headless ? ["--interactive", "all"] : []), $0) }
         case .task:
             return scope.task.map { (["desktop", "task", $0], scope.repo) }
         case .workActivity:

@@ -718,13 +718,13 @@ The repository-wide gate is `uv run python scripts/test.py --all`.
 ```bash
 lf desktop plan --all --json --watch       # the plan: Waves, Projects, open Tasks as Desktop shows them
 lf desktop task LOO-1 --json --watch       # the shown Task: work, Graphs, comments
-lf session list --json --watch             # the repository's Sessions
+lf desktop sessions --json --watch         # the repository's Sessions as Desktop lists them
 lf planning status --json --watch          # sync receipts; keeps planning exchanged
 ```
 
 A window runs `--watch` reads, one process per part, through
 `RegistryQuery.watchWork()`: the plan, the repository's Dashboard plans
-(`lf desktop plans`), Sessions and planning status, the shown Task's status, its
+(`lf desktop plans`), Sessions (`lf desktop sessions`) and planning status, the shown Task's status, its
 activity (`lf history`) and live call trees (`lf monitor ps`). Each watch is
 internally consistent; panes do not share one snapshot. Changing what the window
 shows restarts only the watches whose read changed; the rest answer from their last frame without reading again.

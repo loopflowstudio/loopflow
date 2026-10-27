@@ -58,3 +58,13 @@
 - Assumption (2026-10-27): the store/build a Desktop observation reads comes
   from one `lf --version` per observation (`copy:` line), not per frame;
   Machine identity stays with `lf machine id`.
+- Assumption (2026-10-27): `SessionRow.task` is the Task id (from the Session's
+  recorded Work), not its identifier, which would need another lookup per
+  reading; `wave` is the Wave name. Reversible in `SessionRow::of`.
+- Assumption (2026-10-27): Desktop's Git planning disclosure no longer lists
+  journal entries; it points to `lf planning journal`. Reversible: a one-shot
+  journal read when the disclosure opens.
+- Assumption (2026-10-27): with the Wave selected, no watch follows a closed
+  Task; an edit to it reaches Desktop when the Task is shown again
+  (`taskLifecycleUpdatesOpenSidebar` asserts after `goBack`).
+

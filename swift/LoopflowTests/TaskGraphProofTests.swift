@@ -217,7 +217,7 @@ struct TaskGraphTests {
                 return try await reader.ensure(issue: args[3])
             case ("session", "attach"):
                 return try await reader.ensure(issue: String(args[2].dropFirst("ensured-".count)))
-            case ("session", "list"): return try await reader.inventory()
+            case ("desktop", "sessions"): return try await reader.inventory()
             case ("desktop", "plan"): return roadmapJSON
             case ("machine", "id"): return #"{"id":"\#(fixtureMachineId)"}"#
             default: throw RegistryQueryError("The fixture has no \(args.prefix(2).joined(separator: " "))")
@@ -700,8 +700,8 @@ private actor GraphSource {
         case ("desktop", "plan"):
             return String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
         case ("wave", "list"): return "[]"
-        case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-        case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
+        case ("history", _): return #"{"truncated":false,"items":[]}"#
+        case ("desktop", "sessions"): return #"{"entries":\#(session),"next":null}"#
         case ("graph", "list"): return catalog
         case ("-b", "task") where args.dropFirst(2).first == "run":
             controls.append(args)

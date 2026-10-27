@@ -16,9 +16,7 @@ const MAX_LIMIT: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkActivitySnapshot {
-    pub generated_at: i64,
-    pub since: i64,
-    pub limit: usize,
+    /// More Session records exist in the window than `--limit` returned.
     pub truncated: bool,
     pub items: Vec<WorkActivityEntry>,
 }
@@ -78,11 +76,7 @@ pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
     if options.watch {
         return super::watch::run(
             window,
-            super::watch::Watched {
-                // A relative window's start moves with every reading.
-                stamp: Some("since"),
-                ..super::watch::Watched::every(super::watch::ACTIVITY_CLOCK)
-            },
+            super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
             |store, window| async move { read(store.as_ref().map(|store| &store.sqlite), &window) },
         );
     }
@@ -99,8 +93,7 @@ pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
 
 fn read(store: Option<&SqliteStore>, window: &HistoryWindow) -> Result<WorkActivitySnapshot> {
     let limit = window.limit;
-    let generated_at = OffsetDateTime::now_utc();
-    let since = parse_since(&window.since, generated_at)?.unix_timestamp();
+    let since = parse_since(&window.since, OffsetDateTime::now_utc())?.unix_timestamp();
     if limit == 0 || limit > MAX_LIMIT {
         return Err(anyhow!(
             "--limit must be between 1 and {MAX_LIMIT}; got {}",
@@ -113,11 +106,8 @@ fn read(store: Option<&SqliteStore>, window: &HistoryWindow) -> Result<WorkActiv
         task: window.task.as_deref(),
     };
     match store {
-        Some(store) => build_snapshot(store, generated_at.unix_timestamp(), since, limit, filter),
+        Some(store) => build_snapshot(store, since, limit, filter),
         None => Ok(WorkActivitySnapshot {
-            generated_at: generated_at.unix_timestamp(),
-            since,
-            limit,
             truncated: false,
             items: Vec::new(),
         }),
@@ -126,7 +116,6 @@ fn read(store: Option<&SqliteStore>, window: &HistoryWindow) -> Result<WorkActiv
 
 pub(crate) fn build_snapshot(
     store: &SqliteStore,
-    generated_at: i64,
     since: i64,
     limit: usize,
     filter: WorkFilter<'_>,
@@ -187,14 +176,7 @@ pub(crate) fn build_snapshot(
         }
     }
 
-    Ok(finalize_snapshot(
-        entries,
-        generated_at,
-        since,
-        limit,
-        &catalog,
-        filter,
-    ))
+    Ok(finalize_snapshot(entries, limit, &catalog, filter))
 }
 
 fn activity_entry(
@@ -252,8 +234,6 @@ fn input_entries(input: &SessionHistory, work: &WorkOwner, since: i64) -> Vec<Wo
 
 fn finalize_snapshot(
     mut entries: Vec<WorkActivityEntry>,
-    generated_at: i64,
-    since: i64,
     limit: usize,
     catalog: &WorkCatalog,
     filter: WorkFilter<'_>,
@@ -273,9 +253,6 @@ fn finalize_snapshot(
     let truncated = entries.len() > limit;
     entries.truncate(limit);
     WorkActivitySnapshot {
-        generated_at,
-        since,
-        limit,
         truncated,
         items: entries,
     }
@@ -321,7 +298,6 @@ mod tests {
         let fixture = include_str!("../../../../../tests/fixtures/dto/work_activity_snapshot.json");
         let snapshot = serde_json::from_str::<WorkActivitySnapshot>(fixture).unwrap();
 
-        assert_eq!(snapshot.limit, 50);
         assert_eq!(snapshot.items.len(), 3);
         assert!(matches!(
             snapshot.items[0].fact,
@@ -391,8 +367,6 @@ mod tests {
         ];
         let snapshot = finalize_snapshot(
             entries,
-            40,
-            0,
             1,
             &catalog,
             WorkFilter {
@@ -412,8 +386,6 @@ mod tests {
         let catalog = catalog(std::slice::from_ref(&owner));
         let snapshot = finalize_snapshot(
             vec![entry("a", 10, &owner), entry("b", 10, &owner)],
-            20,
-            0,
             50,
             &catalog,
             WorkFilter::default(),
@@ -434,8 +406,6 @@ mod tests {
         let catalog = catalog(std::slice::from_ref(&owner));
         let snapshot = finalize_snapshot(
             vec![entry("target", 10, &owner)],
-            20,
-            0,
             50,
             &catalog,
             WorkFilter {

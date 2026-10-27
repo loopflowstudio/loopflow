@@ -389,9 +389,9 @@ pub struct WaveRoadmap {
 /// Who a read prints for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shape {
-    /// Task reads: one `TaskRow` per Task.
+    /// Ordinary reads: one row per Task (`TaskRow`) or Session (`SessionRow`).
     Tasks,
-    /// `lf desktop`: Desktop's presentation of each Task.
+    /// `lf desktop`: Desktop's presentation of each record.
     Desktop,
 }
 
@@ -947,7 +947,7 @@ impl ClosedTaskPageSnapshot {
 
 /// `lf desktop task`: `lf task status`'s reading plus the Task's Desktop row,
 /// which keeps the pane current after the Task leaves the plan.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DesktopTaskPane {
     #[serde(flatten)]
     pub status: crate::ops::task::TaskStatus,

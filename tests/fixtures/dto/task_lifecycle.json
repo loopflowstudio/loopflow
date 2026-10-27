@@ -306,17 +306,7 @@
         "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
         "branch": "main",
         "completion_pending": null,
-        "created_at": [
-          2026,
-          300,
-          2,
-          10,
-          11,
-          0,
-          0,
-          0,
-          0
-        ],
+        "created_at": "2026-10-27T02:10:11Z",
         "execution": {
           "captured": null,
           "reason": "Graph delivery finished; nothing further is launched",
@@ -434,17 +424,7 @@
         "repository_id": "repo_4d337841563b447fa601afacb23d70d0",
         "status": "done",
         "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-        "updated_at": [
-          2026,
-          300,
-          2,
-          10,
-          16,
-          0,
-          0,
-          0,
-          0
-        ],
+        "updated_at": "2026-10-27T02:10:16Z",
         "wave": "product",
         "work": {
           "graph_processes": [
@@ -915,17 +895,7 @@
       "planning_stale": false,
       "planning_state": "available",
       "project": {
-        "created_at": [
-          2026,
-          300,
-          2,
-          10,
-          11,
-          0,
-          0,
-          0,
-          0
-        ],
+        "created_at": "2026-10-27T02:10:11Z",
         "description": "",
         "id": "proj_fcc14e46784e469787319842c5753ec9",
         "krs": [],
@@ -936,17 +906,7 @@
         "slug": "provider-destination",
         "status": "started",
         "summary": "",
-        "updated_at": [
-          2026,
-          300,
-          2,
-          10,
-          12,
-          0,
-          0,
-          0,
-          0
-        ],
+        "updated_at": "2026-10-27T02:10:12Z",
         "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
       },
       "sync": {
@@ -1007,17 +967,7 @@
         "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
         "branch": "main",
         "completed_at": "2026-10-27T02:10:16.197108Z",
-        "created_at": [
-          2026,
-          300,
-          2,
-          10,
-          11,
-          0,
-          0,
-          0,
-          0
-        ],
+        "created_at": "2026-10-27T02:10:11Z",
         "description": "",
         "due_date": null,
         "id": "task_001b5cc8a08c48059b44030d6f184432",
@@ -1036,17 +986,7 @@
         "revision": 6,
         "state": "completed",
         "title": "Deliver the command",
-        "updated_at": [
-          2026,
-          300,
-          2,
-          10,
-          16,
-          0,
-          0,
-          0,
-          0
-        ],
+        "updated_at": "2026-10-27T02:10:16Z",
         "wave_id": "a31ec302-4dae-4781-b312-81a018237c39",
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr"
@@ -1345,17 +1285,7 @@
         "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
         "branch": "main",
         "completion_pending": null,
-        "created_at": [
-          2026,
-          300,
-          2,
-          10,
-          11,
-          0,
-          0,
-          0,
-          0
-        ],
+        "created_at": "2026-10-27T02:10:11Z",
         "execution": {
           "captured": null,
           "reason": "Step Process 862896cc-1e8a-4ab9-b1e5-e2af1e161587 is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
@@ -1473,17 +1403,7 @@
         "repository_id": "repo_4d337841563b447fa601afacb23d70d0",
         "status": "done",
         "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-        "updated_at": [
-          2026,
-          300,
-          2,
-          10,
-          16,
-          0,
-          0,
-          0,
-          0
-        ],
+        "updated_at": "2026-10-27T02:10:16Z",
         "wave": "product",
         "work": {
           "graph_processes": [
@@ -1877,17 +1797,7 @@
       "planning_stale": false,
       "planning_state": "available",
       "project": {
-        "created_at": [
-          2026,
-          300,
-          2,
-          10,
-          11,
-          0,
-          0,
-          0,
-          0
-        ],
+        "created_at": "2026-10-27T02:10:11Z",
         "description": "",
         "id": "proj_fcc14e46784e469787319842c5753ec9",
         "krs": [],
@@ -1898,17 +1808,7 @@
         "slug": "provider-destination",
         "status": "started",
         "summary": "",
-        "updated_at": [
-          2026,
-          300,
-          2,
-          10,
-          12,
-          0,
-          0,
-          0,
-          0
-        ],
+        "updated_at": "2026-10-27T02:10:12Z",
         "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
       },
       "sync": {
@@ -1969,17 +1869,7 @@
         "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
         "branch": "main",
         "completed_at": "2026-10-27T02:10:16.197108Z",
-        "created_at": [
-          2026,
-          300,
-          2,
-          10,
-          11,
-          0,
-          0,
-          0,
-          0
-        ],
+        "created_at": "2026-10-27T02:10:11Z",
         "description": "",
         "due_date": null,
         "id": "task_001b5cc8a08c48059b44030d6f184432",
@@ -1998,17 +1888,7 @@
         "revision": 6,
         "state": "completed",
         "title": "Deliver the command",
-        "updated_at": [
-          2026,
-          300,
-          2,
-          10,
-          16,
-          0,
-          0,
-          0,
-          0
-        ],
+        "updated_at": "2026-10-27T02:10:16Z",
         "wave_id": "a31ec302-4dae-4781-b312-81a018237c39",
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr"
@@ -2277,17 +2157,7 @@
         "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
         "branch": "main",
         "completion_pending": null,
-        "created_at": [
-          2026,
-          300,
-          2,
-          10,
-          11,
-          0,
-          0,
-          0,
-          0
-        ],
+        "created_at": "2026-10-27T02:10:11Z",
         "execution": {
           "captured": null,
           "reason": "Step Process 862896cc-1e8a-4ab9-b1e5-e2af1e161587 is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
@@ -2407,17 +2277,7 @@
         "repository_id": "repo_4d337841563b447fa601afacb23d70d0",
         "status": "shipping",
         "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-        "updated_at": [
-          2026,
-          300,
-          2,
-          10,
-          15,
-          0,
-          0,
-          0,
-          0
-        ],
+        "updated_at": "2026-10-27T02:10:15Z",
         "wave": "product",
         "work": {
           "graph_processes": [
@@ -2790,17 +2650,7 @@
       "planning_stale": false,
       "planning_state": "available",
       "project": {
-        "created_at": [
-          2026,
-          300,
-          2,
-          10,
-          11,
-          0,
-          0,
-          0,
-          0
-        ],
+        "created_at": "2026-10-27T02:10:11Z",
         "description": "",
         "id": "proj_fcc14e46784e469787319842c5753ec9",
         "krs": [],
@@ -2811,17 +2661,7 @@
         "slug": "provider-destination",
         "status": "started",
         "summary": "",
-        "updated_at": [
-          2026,
-          300,
-          2,
-          10,
-          12,
-          0,
-          0,
-          0,
-          0
-        ],
+        "updated_at": "2026-10-27T02:10:12Z",
         "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
       },
       "sync": {
@@ -2858,17 +2698,7 @@
         "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
         "branch": "main",
         "completed_at": null,
-        "created_at": [
-          2026,
-          300,
-          2,
-          10,
-          11,
-          0,
-          0,
-          0,
-          0
-        ],
+        "created_at": "2026-10-27T02:10:11Z",
         "description": "",
         "due_date": null,
         "id": "task_001b5cc8a08c48059b44030d6f184432",
@@ -2885,17 +2715,7 @@
         "revision": 5,
         "state": "unstarted",
         "title": "Deliver the command",
-        "updated_at": [
-          2026,
-          300,
-          2,
-          10,
-          15,
-          0,
-          0,
-          0,
-          0
-        ],
+        "updated_at": "2026-10-27T02:10:15Z",
         "wave_id": "a31ec302-4dae-4781-b312-81a018237c39",
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr"

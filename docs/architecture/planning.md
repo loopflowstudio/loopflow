@@ -211,10 +211,11 @@ Comments retain identity and authorship. Incoming planning completion changes on
 the planning disposition: it neither advances a local Workflow nor authorizes cleanup.
 Session/Process records and checkout paths never enter the Git document.
 
-`PlanningSyncStatus` presents local Linear delivery evidence; `peer_planning` Work
-frames and `lf planning status` present Git acquisition/publication and retained
-alternatives directly from the retained mutation journal. Ranked candidate IDs are
-not applied or published evidence; rejected projections retain their failure reasons.
+`PlanningSyncStatus` presents local Linear delivery evidence; `lf planning status`
+presents Git acquisition/publication receipts and held projections. The retained
+mutation journal grows with every edit, so `lf planning journal` reads it on
+request: every change, losing values included, and the ranked candidate IDs, which
+are not applied or published evidence; rejected projections retain their failure reasons.
 Journal read failures fail the status read; Desktop keeps its last reading with the
 error, rather than inventing an empty plan. Foreground CLI, headless Session and Desktop connections own Git exchange
 for their lifetimes; Linear checks run at the boundaries described below. A short save attempts exchange before returning. No resident,

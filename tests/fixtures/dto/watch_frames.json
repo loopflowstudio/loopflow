@@ -26,7 +26,6 @@
         {
           "dashboard_id": "picked",
           "repository": "repo_11111111111111111111111111111111",
-          "observed_at": 1792108800,
           "saved_revision": 3,
           "selection": {
             "id": "root",
@@ -203,7 +202,7 @@
     }
   },
   {
-    "read": "lf session list --json --watch",
+    "read": "lf desktop sessions --json --watch",
     "part": "sessions",
     "frame": {
       "answers": 7,
@@ -227,9 +226,6 @@
       "answers": 7,
       "unavailable": null,
       "body": {
-        "generated_at": 1791220000,
-        "since": 1790615200,
-        "limit": 50,
         "truncated": false,
         "items": []
       }
@@ -242,8 +238,6 @@
       "answers": 7,
       "unavailable": null,
       "body": {
-        "schema_version": 1,
-        "observed_at": 1791220000,
         "nodes": []
       }
     }
@@ -276,7 +270,8 @@
           "pending_sync": [],
           "refresh_error": null,
           "conflicts": {}
-        }
+        },
+        "row": null
       }
     }
   },

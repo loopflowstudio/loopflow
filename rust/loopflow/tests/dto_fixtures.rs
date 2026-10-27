@@ -553,13 +553,13 @@ fn watch_frames_carry_each_reads_json_result() {
         match entry["part"].as_str().unwrap() {
             "planning" => read::<RoadmapSnapshot>(&body),
             "selections" => read::<Vec<loopflow::work::selection::ViewPlan>>(&body),
-            // Session rows are pinned by `sessions.json`; the watch carries them as listed.
+            // Desktop's Session rows are pinned by `sessions.json`; the watch carries them as listed.
             "sessions" => assert!(body
                 .as_array()
                 .unwrap()
                 .iter()
                 .all(|row| row["id"].is_string())),
-            "task" => read::<loopflow::ops::task::TaskStatus>(&body),
+            "task" => read::<loopflow::lf::commands::waves::DesktopTaskPane>(&body),
             "work_activity" => {
                 read::<loopflow::lf::commands::activity::WorkActivitySnapshot>(&body)
             }
@@ -903,7 +903,7 @@ fn session_steer_status_preserves_excerpt_evidence() {
 }
 
 #[test]
-fn peer_planning_status_keeps_journal_and_independent_receipts() {
+fn peer_planning_status_keeps_independent_receipts() {
     let value: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/peer_planning_status.json"
     ))
@@ -917,8 +917,24 @@ fn peer_planning_status_keeps_journal_and_independent_receipts() {
     );
     assert_eq!(statuses[0].conflicts.len(), 1);
     assert!(statuses[1].pending_local);
+    assert_eq!(serde_json::to_value(&statuses).unwrap(), value);
+    for field in ["conflicts", "pending_local"] {
+        let mut missing = value[1].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<loopflow::store::PeerPlanningStatus>(missing).is_err());
+    }
+}
+
+#[test]
+fn planning_journal_keeps_losing_values_and_its_winners() {
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/planning_journal.json"
+    ))
+    .unwrap();
+    let journals: Vec<loopflow::store::PlanningJournal> =
+        serde_json::from_value(value.clone()).unwrap();
     assert_eq!(
-        statuses[1].changes["comment-head"]
+        journals[1].changes["comment-head"]
             .edit
             .change
             .value()
@@ -926,33 +942,28 @@ fn peer_planning_status_keeps_journal_and_independent_receipts() {
         serde_json::json!({"kind": "person", "name": "Maya"})
     );
     assert_eq!(
-        statuses[1].changes["title-loser"]
+        journals[1].changes["title-loser"]
             .edit
             .change
             .value()
             .unwrap(),
         "Retained title"
     );
-    assert!(!statuses[1].candidates.contains("title-loser"));
-    assert!(statuses[1].changes["title-head"]
+    assert!(!journals[1].candidates.contains("title-loser"));
+    assert!(journals[1].changes["title-head"]
         .parents
         .contains("title-loser"));
-    for status in &statuses {
-        let journal = loopflow::planning_exchange::PlanningSnapshot {
-            changes: status.changes.clone(),
+    for journal in &journals {
+        let snapshot = loopflow::planning_exchange::PlanningSnapshot {
+            changes: journal.changes.clone(),
         };
-        journal.validate().unwrap();
+        snapshot.validate().unwrap();
         assert_eq!(
-            status.candidates,
-            journal.winners().map(|(id, _)| id.to_owned()).collect()
+            journal.candidates,
+            snapshot.winners().map(|(id, _)| id.to_owned()).collect()
         );
     }
-    assert_eq!(serde_json::to_value(&statuses).unwrap(), value);
-    for field in ["conflicts", "changes", "candidates", "pending_local"] {
-        let mut missing = value[1].clone();
-        missing.as_object_mut().unwrap().remove(field);
-        assert!(serde_json::from_value::<loopflow::store::PeerPlanningStatus>(missing).is_err());
-    }
+    assert_eq!(serde_json::to_value(&journals).unwrap(), value);
 }
 
 #[test]
@@ -1190,6 +1201,23 @@ fn closed_task_pages_round_trip_plan_rows_and_their_continuation() {
         serde_json::to_value(&page).unwrap(),
         serde_json::from_str::<serde_json::Value>(fixture).unwrap()
     );
+}
+
+#[test]
+fn session_rows_say_each_fact_once_and_require_every_field() {
+    use loopflow::lf::commands::session::SessionRow;
+    let fixture = include_str!("../../../tests/fixtures/dto/session_rows.json");
+    let value: serde_json::Value = serde_json::from_str(fixture).unwrap();
+    let rows: Vec<SessionRow> = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&rows).unwrap(), value);
+    for field in ["id", "title", "interactive", "state", "available", "cwd"] {
+        let mut missing = value[0].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<SessionRow>(missing).is_err(),
+            "{field}"
+        );
+    }
 }
 
 #[test]

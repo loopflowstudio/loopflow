@@ -615,7 +615,7 @@ def _prepare_native_fixture(output: Path, cli: Path) -> Path:
     }
     repo = world / "repo"
     records = json.loads(
-        _fixture_cli(cli, ["session", "list", "--all", "--history", "--json"], repo, environment)
+        _fixture_cli(cli, ["desktop", "sessions", "--all", "--history", "--json"], repo, environment)
     )
     if len(records) != 1 or len(records[0]["task_ids"]) != 1:
         raise RuntimeError("The one-task world did not hold exactly one Task-bound Session")

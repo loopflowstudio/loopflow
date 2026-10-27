@@ -91,6 +91,7 @@ async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
             println!("{key}");
         }
         PlanningCommand::Status { json, .. } => print_status(&store, &repo_key, *json).await?,
+        PlanningCommand::Journal { json } => print_journal(&store, &repo_key, *json).await?,
     }
     Ok(())
 }
@@ -219,13 +220,26 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
         for conflict in destination.conflicts {
             println!("  Held {}: {}", conflict.target, conflict.reason);
         }
-        for (id, change) in destination.changes {
+    }
+    println!("Import retention is not publication; `lf planning journal` lists retained values.");
+    Ok(())
+}
+
+async fn print_journal(store: &Store, repo: &str, json: bool) -> Result<()> {
+    let journals = crate::ops::planning_sync::peer_journal(store, repo).await?;
+    if json {
+        println!("{}", serde_json::to_string(&journals)?);
+        return Ok(());
+    }
+    for journal in journals {
+        println!("{}", journal.destination);
+        for (id, change) in journal.changes {
             println!(
                 "  {} {} [{}; {}]: {}",
                 change.edit.target,
                 change.edit.change.field(),
                 id,
-                if destination.candidates.contains(&id) {
+                if journal.candidates.contains(&id) {
                     "candidate, not confirmed"
                 } else {
                     "retained alternative"
@@ -234,6 +248,6 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
             );
         }
     }
-    println!("Copy a retained value into an ordinary edit to save it again. Import retention is not publication.");
+    println!("Copy a retained value into an ordinary edit to save it again.");
     Ok(())
 }

@@ -32,13 +32,5 @@ public struct ActivityNode: Codable, Sendable, Hashable, Identifiable {
 }
 
 public struct ActivitySnapshot: Codable, Sendable, Hashable {
-    public let schemaVersion: UInt32
-    public let observedAt: Int64
     public let nodes: [ActivityNode]
-
-    enum CodingKeys: String, CodingKey {
-        case nodes
-        case schemaVersion = "schema_version"
-        case observedAt = "observed_at"
-    }
 }

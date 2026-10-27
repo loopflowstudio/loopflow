@@ -720,6 +720,11 @@ pub enum DesktopCommand {
         #[arg(long, required = true)]
         json: bool,
     },
+    /// Print Sessions as Desktop's Session list shows them
+    Sessions {
+        #[command(flatten)]
+        list: SessionListArgs,
+    },
     /// Print one Task as Desktop's Task pane shows it
     Task {
         issue: String,
@@ -991,6 +996,7 @@ impl DesktopCommand {
                 | Self::Plan { .. }
                 | Self::Done { .. }
                 | Self::Wave { .. }
+                | Self::Sessions { .. }
                 | Self::Task { .. }
                 | Self::Layout { save: false, .. }
         )
@@ -1190,6 +1196,46 @@ impl SessionConnectionArgs {
     }
 }
 
+/// Which Sessions `lf session list` and `lf desktop sessions` read.
+#[derive(Args, Debug, Clone)]
+pub struct SessionListArgs {
+    #[arg(long)]
+    pub json: bool,
+    /// Include Sessions from every repository on this machine
+    #[arg(long)]
+    pub all: bool,
+    /// Select interactive (true), headless (false), or both (all)
+    #[arg(long, value_enum, default_value = "true")]
+    pub interactive: SessionMode,
+    /// Include completed conversations and historical reviews
+    #[arg(long)]
+    pub history: bool,
+    /// Only conversations available for your input
+    #[arg(long)]
+    pub available: bool,
+    /// Maximum conversations; 0 reads the complete matching inventory
+    #[arg(long, default_value_t = 100)]
+    pub limit: usize,
+    #[arg(long, default_value_t = 0)]
+    pub offset: usize,
+    /// Return a bounded stable-ID page with a continuation cursor
+    #[arg(long, requires = "json", conflicts_with = "offset")]
+    pub page: bool,
+    /// Previous page's next identity; keep the same filters
+    #[arg(long, requires = "page")]
+    pub after: Option<String>,
+    #[arg(long)]
+    pub task: Option<String>,
+    /// Only Sessions without a Task association
+    #[arg(long, conflicts_with = "task")]
+    pub orphan: bool,
+    #[arg(long)]
+    pub search: Option<String>,
+    /// Print a JSON line now and each time the list changes, until stdin closes
+    #[arg(long)]
+    pub watch: bool,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
     /// Run the process a Session lives in while terminals come and go
@@ -1257,43 +1303,7 @@ pub enum SessionCommand {
         limit: usize,
     },
     /// List Sessions
-    List {
-        #[arg(long)]
-        json: bool,
-        /// Include Sessions from every repository on this machine
-        #[arg(long)]
-        all: bool,
-        /// Select interactive (true), headless (false), or both (all)
-        #[arg(long, value_enum, default_value = "true")]
-        interactive: SessionMode,
-        /// Include completed conversations and historical reviews
-        #[arg(long)]
-        history: bool,
-        /// Only conversations available for your input
-        #[arg(long)]
-        available: bool,
-        /// Maximum conversations; 0 reads the complete matching inventory
-        #[arg(long, default_value_t = 100)]
-        limit: usize,
-        #[arg(long, default_value_t = 0)]
-        offset: usize,
-        /// Return a bounded stable-ID page with a continuation cursor
-        #[arg(long, requires = "json", conflicts_with = "offset")]
-        page: bool,
-        /// Previous page's next identity; keep the same filters
-        #[arg(long, requires = "page")]
-        after: Option<String>,
-        #[arg(long)]
-        task: Option<String>,
-        /// Only Sessions without a Task association
-        #[arg(long, conflicts_with = "task")]
-        orphan: bool,
-        #[arg(long)]
-        search: Option<String>,
-        /// Print a JSON line now and each time the list changes, until stdin closes
-        #[arg(long)]
-        watch: bool,
-    },
+    List(SessionListArgs),
     /// Open the ongoing conversation of this scope, or an exact Session
     #[command(visible_alias = "resume")]
     Connect {
@@ -2069,6 +2079,11 @@ pub enum PlanningCommand {
         #[arg(long, requires = "json")]
         watch: bool,
     },
+    /// Show each destination's retained changes, including losing values, without contacting Git
+    Journal {
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Manage the installed artifacts and exported skills.
@@ -2583,7 +2598,7 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Session {
-                cmd: SessionCommand::List { orphan: true, .. }
+                cmd: SessionCommand::List(SessionListArgs { orphan: true, .. })
             })
         ));
         assert!(

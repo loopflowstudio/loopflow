@@ -750,7 +750,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let sessions = run_lf(
             repo.path(),
             home.path(),
-            &["session", "list", "--all", "--json"],
+            &["desktop", "sessions", "--all", "--json"],
             None,
         );
         assert!(
@@ -1434,7 +1434,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
         serde_json::from_slice(&output.stdout).unwrap()
     };
     let session = |run_id: &str| -> serde_json::Value {
-        json(&["session", "list", "--all", "--json"])
+        json(&["desktop", "sessions", "--all", "--json"])
             .as_array()
             .unwrap()
             .iter()
@@ -1505,7 +1505,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     // A checkout no Task owns stays unbound and retires on exit.
     let unrelated = repo.create_named_worktree("unregistered");
     let unbound = launch(&unrelated, &["-i", "binding-work"]);
-    let history = json(&["session", "list", "--all", "--history", "--json"]);
+    let history = json(&["desktop", "sessions", "--all", "--history", "--json"]);
     let retired = history
         .as_array()
         .unwrap()

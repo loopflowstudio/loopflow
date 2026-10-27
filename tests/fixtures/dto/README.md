@@ -123,6 +123,10 @@ base recovery. Shell identity is independent of its tool pane; saved intent neve
 asserts a live native process. `view_plan.json` includes query discovery
 metadata, independent Dashboard identity and portable tile-face intent.
 
+`session_rows.json` pins `lf session list --json`: one row per Session, each
+fact once, every field required. Desktop reads `lf desktop sessions`
+(`sessions.json`).
+
 `closed_task_page.json` pins `lf task list --done --json`: one page of closed
 Tasks as `lf wave status` Task rows, most recently closed first, and the `next` Task to pass as
 `--after`. Open Tasks come from the plan; closed ones only from these pages.

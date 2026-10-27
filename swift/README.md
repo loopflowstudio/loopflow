@@ -767,7 +767,7 @@ uv run python scripts/test.py --swift
 Gate and CI build the app and inspect production views and controls without
 launching a window. Display/terminal integration is opt-in with
 `LOOPFLOW_NATIVE_TESTS=1`; use it for configured-host diagnostics or demo.
-See [TESTING.md](../TESTING.md) for the full commands and CLI prerequisite.
+See [Testing](#testing) for the full commands and CLI prerequisite.
 
 Wave opening and Retry call `WorkModel.activateProject` from both WorkSurface and
 Portfolio. The command outlives the opened view; it never refreshes a view directly.
@@ -920,6 +920,133 @@ supplies turn-qualified excerpts; providers without that evidence use the summar
 Repository and Wave navigation displays retained conversation entry without
 starting a provider. Waves group their full inventory as Owned and Unowned; rows read "Jack Heart on mini" or "Unowned".
 
+
+## Testing
+
+Desktop's `swift` suite builds the app through the test-target dependency and
+runs model and production-view tests through `scripts/test_desktop.sh`, which
+denies WindowServer connections even on a logged-in host. No Automation
+permission is needed. Only macOS's setuid `/bin/ps` leaves the sandbox so CLI
+process observation still works. `DesktopHeadlessTests` checks the four Work states and
+selection through the real button action. Gate and CI use this same suite.
+
+Window/Metal/PTY integration tests are optional display-session diagnostics:
+
+```bash
+LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --no-parallel
+uv run python scripts/test.py --ui-host  # optional XCUITest diagnostic
+```
+
+Headless runs report them as skipped, not passing, and they are never
+acceptance prerequisites for a headless Graph. See `release/UI_HOST_GATE.md`
+for optional hosted execution and cleanup.
+
+```bash
+cargo build -p loopflow --bin lf # Real CLI transport proofs
+scripts/test_desktop.sh -Xswiftc -gnone # Headless Swift tests
+swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by coverage
+swift test --package-path swift --filter SomeTestClass  # Filtered
+```
+
+Pass `--no-parallel` explicitly: main-actor observations share scheduling.
+`WorkCLISubscriptionTests` creates and starts Tasks with `target/debug/lf` in an
+isolated repository while the production Work reader is already open. It checks
+sidebar updates, completion/cancellation, Back and retained workspace identity.
+It launches no provider and proves no rendered native behavior.
+After integrating Session kind changes, run `scripts/test_desktop.sh --filter
+'TaskGraphTests|WorkspaceNavigationTests'` to compile Desktop consumers and exercise
+participation and navigation fixtures together.
+
+After upgrading GhosttyKit or its bundled shell integration, run
+`scripts/test_desktop.sh --filter GhosttyShellBlockTests` to check the actual
+shell output for prompt headers, command boundaries and exit status.
+
+`scripts/prove_wave_surface_states.sh` is an optional demo capture: it launches
+windows and therefore needs a display session. It is not in gate or CI.
+
+`scripts/test_desktop.sh` runs `swift test` under `scripts/swift_test_limit.py`,
+which reads the event stream and ends the whole run, naming the test, when one
+test function outlives 300 s. Swift Testing's `.timeLimit` only records an
+issue; a test blocked on a child process still holds the run.
+
+On a pull request the Swift tests get 5 minutes after the build (161 s on
+2026-10-22); the merge queue and main keep a 20-minute hang guard. A PR that makes
+the suite slower fails on its own PR: make the slow test fast or share its setup,
+and raise the budget only with a measured reason.
+
+Failed Swift CI runs write the unfinished and slowest tests to the job summary
+(`scripts/swift_test_report.py`) and retain a `swift-tests-<run>-<attempt>`
+artifact for seven days with the toolchain, output log, and Swift Testing event
+stream. Tests run in parallel, so the last test the log shows starting is not
+necessarily the stuck one. SwiftPM buffers console output, so silence alone does
+not establish that test execution never began.
+
+The Swift transport suite launches `target/debug/lf` against a temporary Machine.
+Build it before running the suite; an existing developer build can hide a missing
+prerequisite in a clean checkout. CI and `scripts/test.py --swift` include this
+build. `BuiltLf` owns finding and running it in a private Machine.
+
+Transport tests register `Process.terminationHandler` before launch and await
+its notification. Do not use `waitUntilExit()` after an async suspension: the
+test can resume on a different thread and hang in Foundation's run-loop wait
+even after the child exits. When a Swift run stops reporting progress, sample
+the test helper process before changing timeouts; cleanup can be the blocker.
+
+In asynchronous terminal tests, observe the surface after each wake-up before
+checking the deadline. A busy main actor can resume after the deadline even
+when the PTY produced its output in time; do not fail on a pre-sleep snapshot.
+
+For async model readers, keep generic values crossing actor boundaries
+`Sendable`. A newer local Swift compiler can accept code rejected by CI's
+toolchain; record `swift --version` with compile evidence when investigating
+concurrency diagnostics.
+Work stream fixtures must await the fields they consume: selection membership
+can arrive before planning supplies a Task's checkout.
+
+Keep native code compatible with CI's Xcode toolchain in both SwiftPM and Xcode
+builds. In particular, `isolated deinit` requires Swift 6.2; CI's Xcode 16.4
+cannot enable it even with an experimental feature flag. Put teardown that can
+run off-actor in a resource owner and exercise release from outside the main
+actor. A newer local compiler's pass does not establish older-toolchain support.
+Runtime `#available` checks do not make new SDK symbols compile on older Xcode.
+Gate macOS 26 toolbar APIs behind the matching compiler condition as well;
+CI's SwiftPM and Xcode builds verify the older-SDK path.
+Keep Mac-only view tests in whole-file platform-gated suites, then run
+`uv run python scripts/check_swift_multiplatform_boundaries.py`; a focused
+Swift test pass does not check source boundaries.
+
+SwiftPM links GhosttyKit; the Xcode project builds the terminal fallback.
+Keep tests that reference Ghostty-only types or helpers inside
+`#if canImport(GhosttyKit)`. Keep file-local helpers inside the enclosing
+whole-file platform gate. App code outside `#if GHOSTTY_ENABLED` compiles in
+the fallback too: a type it names must also live outside that block. When changing terminal code or its tests, gate both
+build configurations: run the headless Swift suite and
+`uv run python scripts/test.py --loopflow`. A SwiftPM pass alone does not prove
+the Xcode test target compiles.
+
+### Loopflow UI tests
+
+Two levels, split on purpose:
+
+**Compile check** (`loopflow` suite, in `--all` and CI). Compiles the macOS app
+and its signed test runners with the terminal fallback. Swift package tests
+exercise the shared suites with GhosttyKit:
+
+```bash
+cd swift
+xcodegen generate
+xcodebuild build-for-testing -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath .build/xcode-derived-data -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
+```
+
+CI caches this build only for identical tracked Swift inputs, Xcode, SDK and
+XcodeGen versions. Matching source timestamps preserve compilation across
+checkouts; changed inputs start fresh, including signed entitlement state.
+Only main saves caches. PRs and merge groups still run the compile command and
+build the current Rust control tools.
+
+**Optional hosted diagnostic** (`--ui-host`). Runs `LoopflowUITests` on a
+permissioned display host. It is excluded from `--all` and is never required
+for Task acceptance. See `release/UI_HOST_GATE.md`.
 
 ## Dashboards
 

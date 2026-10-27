@@ -12,7 +12,7 @@ This is the governing document of the loopflow codebase. Contributors and agents
 - A Task's work is every Session, Graph and Process in its checkout, plus explicit binds; no Graph is selected over another
 - Workflow = the graph a Task took up, with its stored position; its `interactive:` steps are stages (a person, in its conversation) and routes between them run slices of it; `lf task run` chooses a route, `lf task workflow move` sets a stage
 - Task completion, Workflow position and Process liveness are independent; reaching `end` requests completion, and a failed request retries without replaying the route
-- Task state = `unstarted · idle · active · moving · shipping · deferred · done · abandoned`, derived from checkout, stage, a running Graph and the Auto-Ship approval; Session state (`available · busy`) is a separate axis. Working Tasks are idle, active or moving. A route into `end` approves running it; only `lf ship` grants landing, and automatic restart (`lf ship --recover`) keeps the authority it found; `lf ship --stop` withdraws
+- Task state = `unstarted · idle · active · moving · shipping · deferred · done · abandoned`, derived from checkout, stage, a running Graph and the Auto-Ship approval; Session state (`available · busy`) is a separate axis. Working Tasks are idle, active or moving. `lf ship` or any route into `end` approves; `lf ship --stop` withdraws
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Unreviewed backlog stays in its Project until explicit disposition; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan
@@ -315,23 +315,24 @@ The full contract and current cutover status live in
 Use `uv` for Python package management. Never use pip directly.
 
 ```bash
-# Python
-uv sync                       # Install dependencies
-uv run pytest python/tests/   # Run Python tests
-uv run lf agent --help        # Run commands
-
-# Or activate the venv
-source .venv/bin/activate
-pytest python/tests/
-
-# Rust
-cargo build                   # Build all crates
-cargo test                    # Run all Rust tests
-cargo fmt                     # Format code
-cargo clippy --all-targets -- -D warnings # Lint (warnings = errors)
+uv run python scripts/test.py --list                     # suites this branch reaches
+cargo test -p loopflow --lib skills::catalog::           # one focused Rust module
+uv run pytest python/tests/test_gate_bounded.py          # one focused Python file
+uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::)'  # gate: affected suites once per tree
+cargo fmt                                                # format
+cargo clippy --all-targets -- -D warnings                # lint after tests (warnings = errors)
+uv sync                                                  # install Python dependencies
 ```
 
-See TESTING.md for the full test suite (Python, Swift, Rust, Loopflow UI). CI runs all.
+Run one cargo command at a time: concurrent builds wait on one target lock.
+CI runs the full matrix; locally, run it only to reproduce a CI failure.
+When accepted work needs a developer tool the Machine lacks, install it
+(Homebrew on macOS) and configure it at Machine level, then continue; a
+missing tool is never a reason to defer. Keep Machine-only tools out of
+repository config CI also reads: sccache runs through `~/.cargo/config.toml`.
+`scripts/testing.md` holds the shared command list, and module READMEs
+(`rust/loopflow/tests/`, `scripts/`, `swift/`, `website/`, `.github/`) own
+their boundary checks.
 
 # Code Organization
 

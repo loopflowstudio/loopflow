@@ -274,8 +274,7 @@ keys), slice 5 (docs/help), and View parts: `view_parts` on window inspection,
 page=N`, `do filter -p board days=N`. Inspection `view` reports the Wave plan on
 Wave views.
 
-Deviations (see `scratch/questions.md` #8–#11): people use the claim's name and
-initials (no GitHub avatars yet); board rows open their Task through the Wave;
+Deviations (see `scratch/questions.md` #8–#11): board rows open their Task through the Wave;
 `tiles` lists only `page`; the `.wave` case in `WorkSurfaceView` renders the board
 (still reached by tests and non-terminal paths), not deleted.
 
@@ -288,8 +287,8 @@ through a Wave or the repository page and the strip turns to the Task's page; th
 repository built-in plan carries `strip(3)` (questions #13).
 
 Remaining: `focus -p N/…` turning the strip; Done read from `lf task list --done
---since` once LOO-604 lands (`WaveStandup(closed:)` is the one input to swap);
-GitHub identity for people.
+--since` once LOO-604 lands (`WaveStandup(closed:)` is the one input to swap).
+GitHub people shipped with item 6 below.
 
 ## Concept review (October 26, after the repository page and slice 4)
 
@@ -299,7 +298,7 @@ are one view (`WorkNavigation.waveView`, one `boardTiles`/`boardPlan`, one
 behind one input for LOO-604. Remaining implement work is unchanged (`focus -p N/…`
 turning the strip).
 
-**Unresolved product choice (needs Jack):** the repository page's strip and the
+**Product choice (answered below, "Decided October 26 — Dashboards"):** the repository page's strip and the
 Working Tasks Dashboard are now two views of one plan (`builtInPlan(.repository)`),
 and `WorkNavigation.Board` carries both `.workingTasks` and `.repository`. Because a
 plan owns one `slots`, giving the repository page its three-tile strip turned Working

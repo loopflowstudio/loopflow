@@ -1,7 +1,7 @@
 # LOO-634: show and roll over processes on a superseded lf
 
-Status: draft, implemented in this branch (uncommitted, 2026-10-26); plan reviewed
-2026-10-27. Source: the Task definition and cbda52's `scratch/database-locked-5-whys.md`
+Status: implemented and committed on this branch, rebased onto origin/main
+66ad233139 (2026-10-27). Source: the Task definition and cbda52's `scratch/database-locked-5-whys.md`
 (Why 5). Jack asked for it to ship without stopping for review.
 
 ## Problem
@@ -58,7 +58,9 @@ busy turns).
   route replays effects; architecture forbids resuming a stopped Graph. Moving a Graph
   is therefore blocked on a product choice (see questions.md), not on code.
 - Classification and stop are separated by every earlier resume (seconds each), so
-  a person can start a turn or attach a terminal in between. See Remaining.
+  a person can start a turn or attach a terminal in between. Rollover re-checks the
+  pid's live evidence and the stay rules right before each stop and lists a changed
+  owner as staying (2026-10-27).
 
 ## Decisions
 
@@ -77,10 +79,7 @@ busy turns).
 
 ## Remaining
 
-- Re-check `owner_viewed`/`owner_waits_for_person` and the pid's live evidence
-  immediately before each `stop_owner`, moving the owner to `stays` if it changed.
-- Rebase onto origin/main; regenerate `docs/lf-reference.md`.
-- Commit (nothing is committed yet).
+- Demo against the live store after install (see Checks).
 
 ## Done when
 
@@ -97,7 +96,8 @@ busy turns).
   `cargo test -p loopflow --lib -- rollover executable_is_the_running_file restore`;
   `cargo test -p loopflow --test integration reference_matches_the_compiled_cli`;
   `cargo test -p loopflow --test doctor_tests` (all with `LF_*` unset, `< /dev/null`).
-- 2026-10-26: clippy and the focused lib tests pass; branch `lf doctor` here showed
+- 2026-10-27, after rebase: clippy, the focused lib tests (11) and the CLI
+  reference pass. 2026-10-26: branch `lf doctor` here showed
   `29 processes on Loopflow.app lf (0.14.16)` with floor 0.14.16 (correctly no flag).
 - Demo: rollover and the `ps` section reach the live store only once installed (a
   branch build re-execs the installed lf for ordinary commands; `lf doctor` doesn't).

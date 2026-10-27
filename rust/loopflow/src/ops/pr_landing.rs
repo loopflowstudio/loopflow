@@ -288,11 +288,6 @@ fn admit_ci_fix(
             return Ok(());
         }
         if let Some(task_id) = &landing.task_id {
-            store
-                .get_task(task_id)
-                .await
-                .map_err(repair_error)?
-                .ok_or_else(|| repair_error("landing Task is missing"))?;
             if store.sqlite.task_state(task_id).map_err(repair_error)?
                 == crate::durable::TaskState::Deferred
             {
